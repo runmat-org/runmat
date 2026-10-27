@@ -3,10 +3,7 @@
 use crate::*;
 
 mod descriptor;
-mod inference;
 mod newtonian;
-#[cfg(test)]
-mod tests;
 
 pub use descriptor::*;
 

@@ -13,6 +13,11 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
     let root = runmat_runtime::execution::RootedValueLease::for_values(request.operands().iter())
         .map_err(|error| Box::new(error.into_runtime_error()))?;
     let form = request.form();
+    let host_envelope = if owns_ordinary_host_output(context, &request) {
+        request.host_resource_bound(context)
+    } else {
+        None
+    };
     let compound = request
         .plan_compound(Some(context), auto.provider)
         .map_err(Box::new)?;
@@ -52,10 +57,8 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
             .iter()
             .any(runmat_runtime::dispatcher::value_contains_gpu)
     {
-        request.host_resource_bound(context).and_then(|envelope| {
-            let (resources, identity) =
-                super::super::host_readback::resources_for_envelope(&[], &envelope, managed)?;
-            Some((envelope, resources, identity))
+        host_envelope.as_ref().and_then(|envelope| {
+            super::super::host_readback::resources_for_envelope(&[], envelope, managed)
         })
     } else {
         None
@@ -92,7 +95,7 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
             .or_else(|| {
                 host_only
                     .as_ref()
-                    .map(|(_, resources, identity)| (resources, *identity))
+                    .map(|(resources, identity)| (resources, *identity))
             }),
         compound.as_ref(),
     )?
@@ -103,6 +106,28 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         .is_some_and(|observation| observation.provider_selected())
     {
         prepared.compound = compound;
+    }
+    // A selected provider may legitimately retain host operands (notably a
+    // scalar). That fallback is not a completed provider/private-host
+    // candidate, but finite execution still needs its canonical output owner.
+    // No selected GPU route, VM-owned slot, readback or alias is overridden.
+    let shared_fallback = prepared.observation.as_ref().is_none_or(|observation| {
+        !observation.provider_selected() && (!complete_host || !observation.host_selected())
+    });
+    if shared_fallback
+        && prepared.compound.is_none()
+        && !prepared
+            .args
+            .iter()
+            .any(runmat_runtime::dispatcher::value_contains_gpu)
+    {
+        if let Some(envelope) = host_envelope
+            .as_ref()
+            .filter(|_| prepared.host_numerical_output.is_none())
+        {
+            prepared.host_numerical_output = prepare_output(context, envelope)?;
+        }
+        return Ok(prepared);
     }
     let Some(observation) = prepared
         .observation
@@ -161,7 +186,7 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         let Some(envelope) = admission
             .as_ref()
             .map(|admission| &admission.envelope)
-            .or_else(|| host_only.as_ref().map(|(envelope, _, _)| envelope))
+            .or(host_envelope.as_ref())
         else {
             observation.preparation_failed();
             return Err(failed(
@@ -236,4 +261,107 @@ fn policy_error(context: &RuntimeContext, cause: HostAllocationError) -> Box<Run
         "selected host allocation policy changed",
         cause,
     ))
+}
+
+/// Ordinary adapter fallbacks have no placement observation to invent. Keep
+/// the canonical output in the existing execution guard, including cancellation.
+pub(super) fn prepare_unobserved_operands(
+    context: &RuntimeContext,
+    request: AdmittedBuiltinPreparation,
+) -> PreparationResult<PreparedBuiltinOperands> {
+    if !owns_ordinary_host_output(context, &request)
+        || matches!(
+            HostAllocationReceipt::policy(Some(context))
+                .map_err(|cause| ordinary_output_error(context, cause))?,
+            HostAllocationPolicy::Unbounded
+        )
+    {
+        // Preserve the common installed CPU adapter's original no-extra-root,
+        // no-observation/guard fast path when there is no finite output owner.
+        return request
+            .into_operands()
+            .with_unbounded_values(PreparedBuiltinOperands::passthrough)
+            .map_err(Box::new)?
+            .map_err(Box::new);
+    }
+    let (operands, guard) = prepare_passthrough(context, request)?.into_execution();
+    PreparedBuiltinOperands::new(operands, Some(Box::new(guard))).map_err(Box::new)
+}
+pub(super) fn prepare_passthrough(
+    context: &RuntimeContext,
+    request: AdmittedBuiltinPreparation,
+) -> PreparationResult<PreparedBuiltinCall> {
+    // The request's root forest must survive the raw Vec handoff until the
+    // fallible PreparedBuiltinOperands publisher installs its own roots.
+    let root = runmat_runtime::execution::RootedValueLease::for_values(request.operands().iter())
+        .map_err(|error| Box::new(error.into_runtime_error()))?;
+    let output = if owns_ordinary_host_output(context, &request) {
+        match HostAllocationReceipt::policy(Some(context))
+            .map_err(|cause| ordinary_output_error(context, cause))?
+        {
+            HostAllocationPolicy::Unbounded => None,
+            HostAllocationPolicy::Managed => request
+                .prepare_host_numerical_output(context)
+                .map_err(|cause| ordinary_output_error(context, cause))?,
+        }
+    } else {
+        None
+    };
+    let mut prepared = request
+        .into_operands()
+        .with_unbounded_values(PreparedBuiltinCall::unobserved)
+        .map_err(Box::new)?
+        .with_request_input_root(root);
+    prepared.host_numerical_output = output;
+    Ok(prepared)
+}
+fn prepare_output(
+    context: &RuntimeContext,
+    envelope: &runmat_runtime::context::preparation::AdmittedHostResources,
+) -> PreparationResult<Option<runmat_runtime::context::preparation::PreparedHostNumericalOutput>> {
+    runmat_runtime::context::preparation::PreparedHostNumericalOutput::prepare_admitted(
+        context, envelope,
+    )
+    .map_err(|cause| ordinary_output_error(context, cause))
+}
+fn ordinary_output_error(
+    context: &RuntimeContext,
+    cause: HostAllocationError,
+) -> Box<RuntimeError> {
+    Box::new(host_allocation_runtime_error(
+        Some(context),
+        "RunMat:Placement:HostNumericalOutput",
+        "ordinary admitted host numerical output preparation failed",
+        cause,
+    ))
+}
+fn owns_ordinary_host_output(
+    context: &RuntimeContext,
+    request: &AdmittedBuiltinPreparation,
+) -> bool {
+    if request
+        .operands()
+        .iter()
+        .any(runmat_runtime::dispatcher::value_contains_gpu)
+    {
+        return false;
+    }
+    if request
+        .sum_reduction()
+        .is_some_and(|sum| sum.axes.is_empty() && sum.input_class == sum.publication_class)
+    {
+        return false; // Admitted identity: the domain returns its existing owner.
+    }
+    let instruction = match request.form().operation {
+        Operation::ElementwiseBinary => {
+            Some(runmat_runtime::context::VmFusionHostInstruction::ElementwiseBinary)
+        }
+        Operation::Reduction(runmat_builtins::BuiltinPreparationReduction::Min) => {
+            Some(runmat_runtime::context::VmFusionHostInstruction::Reduction)
+        }
+        _ => None,
+    };
+    !instruction.is_some_and(|instruction|context.vm_fusion_host_route().is_some_and(|route|
+        route.allows_host_preparation(context,instruction)&&request.operands().iter().all(|value|
+            matches!(value,Value::Tensor(tensor)if tensor.numeric_dtype()==runmat_value::NumericDType::F32))))
 }

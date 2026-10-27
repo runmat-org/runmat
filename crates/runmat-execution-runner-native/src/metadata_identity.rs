@@ -10,6 +10,14 @@ pub(crate) fn json_digest(
     value: &impl Serialize,
     maximum_bytes: u64,
 ) -> NativeExecutionResult<Digest> {
+    json_identity(domain, value, maximum_bytes).map(|identity| identity.0)
+}
+
+pub(crate) fn json_identity(
+    domain: &[u8],
+    value: &impl Serialize,
+    maximum_bytes: u64,
+) -> NativeExecutionResult<(Digest, u64)> {
     struct Sink(Sha256);
     impl std::io::Write for Sink {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -22,6 +30,6 @@ pub(crate) fn json_digest(
     }
     let mut sink = Sink(Sha256::new());
     sink.0.update(domain);
-    runmat_canonical_codec::write_json_bounded(value, &mut sink, maximum_bytes)?;
-    Ok(Digest::from_bytes(sink.0.finalize().into()))
+    let length = runmat_canonical_codec::write_json_bounded(value, &mut sink, maximum_bytes)?;
+    Ok((Digest::from_bytes(sink.0.finalize().into()), length))
 }

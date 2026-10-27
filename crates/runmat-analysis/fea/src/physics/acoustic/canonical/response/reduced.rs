@@ -36,7 +36,7 @@ impl PreparedReduced {
             None => build_phase_reduction(
                 assembly.projection.nodes.len(),
                 &[],
-                &assembly.prescribed.canonical_values(),
+                assembly.prescribed.canonical_values(),
             )
             .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?,
         };

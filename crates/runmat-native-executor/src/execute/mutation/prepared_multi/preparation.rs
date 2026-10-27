@@ -121,9 +121,19 @@ pub(super) fn prepare(
                         absent_root,
                         root_creation,
                     })) => {
+                        let mut admission_error = None;
                         destination.visit_retained_values(&mut |value| {
-                            pending.retained.push(state.arena.insert(value.clone()));
+                            if admission_error.is_some() {
+                                return;
+                            }
+                            match state.arena.insert(value.clone(), Some(&state.runtime)) {
+                                Ok(reference) => pending.retained.push(reference),
+                                Err(error) => admission_error = Some(error),
+                            }
                         });
+                        if let Some(error) = admission_error {
+                            return Err(error);
+                        }
                         pending
                             .cardinalities
                             .push(DestinationCardinality::Sequence(destination.cardinality()));

@@ -3,7 +3,6 @@
 use crate::*;
 
 mod descriptor;
-mod inference;
 mod boundary_normal_tangent;
 mod cartesian;
 mod cylindrical;
@@ -11,8 +10,6 @@ mod element;
 mod global_frame;
 mod material;
 mod spherical;
-#[cfg(test)]
-mod tests;
 
 pub use descriptor::*;
 

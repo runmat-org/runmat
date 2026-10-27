@@ -44,9 +44,7 @@ pub(super) fn valid(
         }
         LiteralValue::Symbolic(text) => {
             return match role {
-                SymbolicScalarOperand::Variable => {
-                    runmat_types::symbolic::is_valid_symbolic_identifier(text.trim())
-                }
+                SymbolicScalarOperand::Variable => crate::is_valid_symbolic_identifier(text.trim()),
                 SymbolicScalarOperand::Direction
                 | SymbolicScalarOperand::Digits
                 | SymbolicScalarOperand::Precision => false,
@@ -58,7 +56,7 @@ pub(super) fn valid(
     if let Some(text) = text(literal) {
         return match role {
             SymbolicScalarOperand::Variable | SymbolicScalarOperand::VariableOrPoint => {
-                runmat_types::symbolic::is_valid_symbolic_identifier(text.trim())
+                crate::is_valid_symbolic_identifier(text.trim())
             }
             SymbolicScalarOperand::Direction => {
                 SymbolicLimitDirection::from_public_option(text).is_some()

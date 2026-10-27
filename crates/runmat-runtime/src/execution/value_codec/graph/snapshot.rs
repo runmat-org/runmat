@@ -16,6 +16,8 @@ use crate::execution::value_codec::encode::InlineSourceAuthority;
 use crate::execution::DeferredInvocation;
 
 mod activation;
+mod targets;
+pub use targets::prepare_callable_targets;
 mod value;
 
 pub(super) fn encode(
@@ -26,7 +28,8 @@ pub(super) fn encode(
     proofs: &HashMap<GraphBoundOwner, GraphCallableProof>,
     limits: ValueLimits,
 ) -> Result<PayloadGraph, ValueCodecError> {
-    let prepared = prepare_with_authority(values, runtime, limits)?;
+    let workspace = crate::execution::value_codec::ValidationWorkspaceOwner::capture(runtime);
+    let prepared = prepare_with_authority(values, runtime, limits, Some(&workspace))?;
     let units = prepared.single_unit_nodes();
     prepared.finish_with_authority(runtime, source_map, layouts, proofs, &units, 1)
 }
@@ -38,6 +41,7 @@ pub(super) fn encode_with_issuer(
     layouts: &HashMap<GraphBoundOwner, GraphLexicalLayout>,
     proofs: &HashMap<GraphBoundOwner, GraphCallableProof>,
     limits: ValueLimits,
+    workspace: Option<&crate::execution::value_codec::ValidationWorkspaceOwner>,
 ) -> Result<PayloadGraph, ValueCodecError> {
     issuer.ensure_live()?;
     if issuer.selected_unit_count() != 1 {
@@ -45,7 +49,7 @@ pub(super) fn encode_with_issuer(
             "multi-unit graph snapshot requires exact per-node bound authority",
         ));
     }
-    let prepared = prepare_with_authority(values, issuer, limits)?;
+    let prepared = prepare_with_authority(values, issuer, limits, workspace)?;
     let units = prepared.single_unit_nodes();
     prepared.finish(issuer, source_map, layouts, proofs, &units)
 }
@@ -54,9 +58,10 @@ pub(super) fn prepare<'a>(
     values: &'a [Value],
     issuer: &'a super::GraphSourceIssuer,
     limits: ValueLimits,
+    workspace: Option<&crate::execution::value_codec::ValidationWorkspaceOwner>,
 ) -> Result<PreparedPayloadGraph<'a>, ValueCodecError> {
     issuer.ensure_live()?;
-    prepare_with_authority(values, issuer, limits)
+    prepare_with_authority(values, issuer, limits, workspace)
 }
 
 /// Prepare the actual deferred invocation as one rooted graph. A typed bound
@@ -67,6 +72,7 @@ pub fn prepare_invocation<'a>(
     invocation: &'a DeferredInvocation,
     issuer: &'a super::GraphSourceIssuer,
     limits: ValueLimits,
+    workspace: Option<&crate::execution::value_codec::ValidationWorkspaceOwner>,
 ) -> Result<(PreparedPayloadGraph<'a>, GraphInvocationRoots), ValueCodecError> {
     enum Role {
         Callable,
@@ -76,24 +82,7 @@ pub fn prepare_invocation<'a>(
     issuer.ensure_live()?;
     let (inputs, role) = match invocation {
         DeferredInvocation::Callable(descriptor) => {
-            let target = match &descriptor.target {
-                CallableTarget::Bound(binding) => Input::BoundTarget(binding),
-                CallableTarget::BoundLexical { closure, .. } => Input::Borrowed(closure.as_value()),
-                CallableTarget::CapturedResolved { .. } => {
-                    return Err(ValueCodecError::unsupported(
-                        "$",
-                        "captured callable has no exact selected graph target authority",
-                    ));
-                }
-                CallableTarget::FevalForward(value) => Input::Borrowed(value),
-                CallableTarget::RetainedFevalForward(value) => Input::Borrowed(value.value()),
-                CallableTarget::Resolved { .. } => {
-                    return Err(ValueCodecError::unsupported(
-                        "$",
-                        "unbound resolved callable has no selected graph target authority",
-                    ));
-                }
-            };
+            let target = targets::selected_input(&descriptor.target)?;
             let mut inputs = Vec::with_capacity(descriptor.args.len() + 1);
             inputs.push(target);
             inputs.extend(descriptor.args.iter().map(Input::Borrowed));
@@ -124,7 +113,7 @@ pub fn prepare_invocation<'a>(
             ));
         }
     };
-    let prepared = prepare_inputs(inputs, issuer, limits)?;
+    let prepared = prepare_inputs(inputs, issuer, limits, workspace)?;
     let roots = match role {
         Role::ParallelRegion(region) => GraphInvocationRoots::ParallelRegion {
             region,
@@ -152,14 +141,21 @@ fn prepare_with_authority<'a>(
     values: &'a [Value],
     issuer: &'a dyn InlineSourceAuthority,
     limits: ValueLimits,
+    workspace: Option<&crate::execution::value_codec::ValidationWorkspaceOwner>,
 ) -> Result<PreparedPayloadGraph<'a>, ValueCodecError> {
-    prepare_inputs(values.iter().map(Input::Borrowed).collect(), issuer, limits)
+    prepare_inputs(
+        values.iter().map(Input::Borrowed).collect(),
+        issuer,
+        limits,
+        workspace,
+    )
 }
 
 fn prepare_inputs<'a>(
     inputs: Vec<Input<'a>>,
     issuer: &'a dyn InlineSourceAuthority,
     limits: ValueLimits,
+    workspace: Option<&crate::execution::value_codec::ValidationWorkspaceOwner>,
 ) -> Result<PreparedPayloadGraph<'a>, ValueCodecError> {
     let inputs_root = crate::execution::RootedValueLease::for_values(
         inputs.iter().filter_map(Input::rooted_value),
@@ -167,6 +163,7 @@ fn prepare_inputs<'a>(
     .map_err(|error| invalid(error.to_string()))?;
     let mut encoder = Encoder {
         issuer,
+        workspace: workspace.cloned(),
         limits,
         nodes: Vec::new(),
         activations: HashMap::new(),
@@ -432,6 +429,7 @@ impl PreparedPayloadGraph<'_> {
                 value: crate::execution::value_codec::encode::encode_inline_value_with_authority(
                     input.value(),
                     issuer,
+                    self.encoder.workspace.as_ref(),
                 )?,
             });
         }
@@ -723,6 +721,7 @@ struct PreparedSelectedObject {
 
 struct Encoder<'a> {
     issuer: &'a dyn InlineSourceAuthority,
+    workspace: Option<crate::execution::value_codec::ValidationWorkspaceOwner>,
     limits: ValueLimits,
     nodes: Vec<Option<GraphNode>>,
     activations: HashMap<GcHandle, GraphNodeRef>,

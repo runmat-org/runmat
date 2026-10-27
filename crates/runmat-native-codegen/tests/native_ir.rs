@@ -1063,6 +1063,7 @@ fn generic_native_retains_unused_super_call_without_closing_external_parent() {
     mir.functions.insert(constructor, metadata);
     mir.classes.push(runmat_types::ClassDeclaration {
         id: runmat_types::ClassId(0),
+        source: mir.functions[&constructor].source,
         name: runmat_types::QualifiedName(vec![runmat_types::SymbolName("UnusedCompanion".into())]),
         inheritance: runmat_types::InheritanceDeclaration {
             declared_super_class: Some("AbsentCompanionBase".into()),

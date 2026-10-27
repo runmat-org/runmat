@@ -157,6 +157,7 @@ enum Frame<'a> {
     Object {
         source: &'a ObjectInstance,
         native_index: usize,
+        native_handle_index: usize,
         property_index: usize,
         metadata_index: usize,
     },
@@ -185,6 +186,7 @@ impl<'a> Frame<'a> {
             Value::Object(source) => Some(Self::Object {
                 source,
                 native_index: 0,
+                native_handle_index: 0,
                 property_index: 0,
                 metadata_index: 0,
             }),
@@ -204,6 +206,7 @@ impl<'a> Frame<'a> {
             | Value::Symbolic(_)
             | Value::SymbolicArray(_)
             | Value::GpuTensor(_)
+            | Value::ScopedFunctionHandle(_)
             | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
@@ -245,9 +248,14 @@ impl<'a> Frame<'a> {
             Self::Object {
                 source,
                 native_index,
+                native_handle_index,
                 property_index,
                 metadata_index,
             } => {
+                if let Some(handle) = source.trace_native_handle_at(*native_handle_index) {
+                    *native_handle_index += 1;
+                    return Some(Step::Mark(handle));
+                }
                 if let Some(child) = source.trace_native_value_at(*native_index) {
                     *native_index += 1;
                     return Some(Step::Value(child));

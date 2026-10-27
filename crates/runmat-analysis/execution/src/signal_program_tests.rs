@@ -44,8 +44,14 @@ fn admitted() -> AdmittedSignalGenerator {
             source_digest: digest("loads.pulse source"),
         },
         executable_source_digest: digest("executable-source"),
+        compiled_binding: crate::named_callable::CompiledCallableBinding::fixture(
+            "loads.pulse",
+            "loads.pulse",
+            ProgramFunctionId(3),
+            digest("executable-source"),
+        ),
         function: ProgramFunctionId(3),
-        captures: Vec::new(),
+        frozen_inputs: crate::FrozenGeneratorInputs::DirectCaptures(Vec::new()),
         generator_identity: GeneratorIdentity::new(
             digest("callable"),
             digest("captures"),
@@ -240,11 +246,15 @@ fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
         prepare_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
     assert_eq!(prepared.chunks.len(), 1);
     assert_eq!(
-        prepared.chunks[0].request.callable.semantic_function(),
+        prepared.chunks[0]
+            .direct_request()
+            .unwrap()
+            .callable
+            .semantic_function(),
         Some(ProgramFunctionId(3))
     );
     assert_eq!(
-        prepared.chunks[0].request.arguments,
+        prepared.chunks[0].direct_request().unwrap().arguments,
         prepared.chunks[0].plan.arguments
     );
     assert_eq!(
@@ -448,6 +458,24 @@ fn task_identity_tracks_materialization_and_generator_while_callable_is_the_comp
         digest("sampling"),
     )
     .unwrap();
+    // A new qualified label/function is a new compiled binding, not a
+    // permissible rewrite of the baseline admission's immutable authority.
+    assert!(
+        prepare_generator_program(
+            &generator_change,
+            executable(&generator_change),
+            chunks(),
+            &[],
+        )
+        .is_err(),
+        "changing the callable must not reuse the baseline compiled binding"
+    );
+    generator_change.compiled_binding = crate::named_callable::CompiledCallableBinding::fixture(
+        "loads.alternate",
+        "loads.alternate",
+        ProgramFunctionId(4),
+        generator_change.executable_source_digest,
+    );
     let generator_program = prepare_generator_program(
         &generator_change,
         executable(&generator_change),

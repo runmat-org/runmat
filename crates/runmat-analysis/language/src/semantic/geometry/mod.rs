@@ -193,8 +193,10 @@ fn imported_source(
         );
         GeometrySourceFormat::Step
     });
-    Some(GeometryDefinitionSource::Imported(
-        ImportedGeometryDefinition {preview_extent_m: inspection.facts.preview_extent_m, 
+    Some(GeometryDefinitionSource::Imported(Box::new(
+        ImportedGeometryDefinition {
+            preview_extent_m: inspection.facts.preview_extent_m,
+            named_selections: inspection.facts.named_selections.clone(),
             // Authored units are authoritative over a different file declaration, which the
             // evidence keeps as provenance.
             unit_evidence: match units {
@@ -215,7 +217,7 @@ fn imported_source(
             exchange: inspection.facts.exchange.clone(),
             shared_interfaces: imported_interfaces(declaration, diagnostics),
         },
-    ))
+    )))
 }
 
 /// `interfaces = shared` joins touching bodies so their coincident faces become one shared face
@@ -253,6 +255,12 @@ fn check_authored_names(
         let GeometryRegionSelector::Name(name) = &region.selector else {
             continue;
         };
+        if let Some(metadata) = inspection.facts.named_selections.as_ref().filter(|metadata| metadata.regions.iter().any(|region| region.region_id == *name)) {
+            if let Err(reason) = metadata.selection(name, region.role) {
+                error(declaration, declaration.span, reason.to_string(), diagnostics);
+            }
+            continue;
+        }
         let role = match region.role {
             GeometryRegionRole::Face => "face",
             GeometryRegionRole::Solid | GeometryRegionRole::Cell => "solid",

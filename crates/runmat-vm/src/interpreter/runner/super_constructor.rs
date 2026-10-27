@@ -2,7 +2,7 @@
 
 use super::{mex, Bytecode, FunctionRegistry, ProcessDriverHandle, VmResult};
 
-pub(super) async fn invoke_selected_bound(
+pub(super) fn invoke_selected_bound(
     runtime: runmat_runtime::context::RuntimeContext,
     binding: runmat_value::BoundFunctionBinding,
     args: runmat_runtime::call::RootedFunctionArguments,
@@ -10,47 +10,138 @@ pub(super) async fn invoke_selected_bound(
     registry: FunctionRegistry,
     driver: Option<ProcessDriverHandle>,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> impl std::future::Future<Output = VmResult<runmat_runtime::execution::RootedValueSequence>> {
+    // Selection returns domain data, not a large concrete future. Execute only
+    // after its construction frame has retired, inside the admitted poll.
+    runmat_runtime::execution::after_result(
+        async move {
+            let (runtime, role) = select_bound(runtime, &binding, &registry)?;
+            Ok(SelectedBound {
+                runtime,
+                role,
+                invocation: BoundInvocation {
+                    binding,
+                    args,
+                    requested_outputs,
+                    registry,
+                    driver,
+                    lexical_environment,
+                },
+            })
+        },
+        execute_selected,
+    )
+}
+
+struct SelectedBound {
+    runtime: runmat_runtime::context::RuntimeContext,
+    role: SelectedRole,
+    invocation: BoundInvocation,
+}
+
+fn execute_selected(
+    selected: SelectedBound,
+) -> impl std::future::Future<Output = VmResult<runmat_runtime::execution::RootedValueSequence>> {
+    use futures::future::Either;
+    match selected.role {
+        SelectedRole::Semantic => {
+            Either::Left(invoke_semantic_bound(selected.runtime, selected.invocation))
+        }
+        SelectedRole::Constructor(constructor) => Either::Right(admit_constructor(
+            selected.runtime,
+            selected.invocation,
+            constructor,
+        )),
+    }
+}
+
+async fn invoke_semantic_bound(
+    runtime: runmat_runtime::context::RuntimeContext,
+    invocation: BoundInvocation,
 ) -> VmResult<runmat_runtime::execution::RootedValueSequence> {
+    let BoundInvocation {
+        binding,
+        args,
+        requested_outputs,
+        registry,
+        driver,
+        lexical_environment,
+    } = invocation;
+    let result = super::invoke_semantic_function_with_rooted_captures(
+        binding.function,
+        args,
+        requested_outputs,
+        registry,
+        runtime,
+        driver,
+        lexical_environment,
+    )
+    .await
+    .map(|(value, _)| value);
+    // The original selected binding remains a source lease through completion,
+    // including originating errors; selection never substitutes a later owner.
+    drop(binding);
+    result
+}
+
+enum SelectedRole {
+    Semantic,
+    Constructor(SelectedConstructor),
+}
+
+fn select_bound(
+    runtime: runmat_runtime::context::RuntimeContext,
+    binding: &runmat_value::BoundFunctionBinding,
+    registry: &FunctionRegistry,
+) -> VmResult<(runmat_runtime::context::RuntimeContext, SelectedRole)> {
     let function = runmat_hir::FunctionId(binding.function);
     let body = registry
         .get(function)
         .ok_or_else(|| mex("UnavailableBoundFunction", "selected bound body is absent"))?;
-    let (runtime, super_body) = consume_super_body(runtime, &binding, body)?;
+    let (runtime, super_body) = consume_super_body(runtime, binding, body)?;
+    // A compiled direct constructor can enter its retained parent without
+    // inherited receiver facts. Authenticate this entered local body's own
+    // product instead of comparing it to a later registered numeric callable.
+    // An existing Derived receiver product must stay the original owner.
+    let runtime = if super_body
+        && runtime.selected_object_class().is_none()
+        && matches!(
+            binding.authority,
+            runmat_value::BoundFunctionAuthority::Local { .. }
+        ) {
+        select_constructor(binding, body)?
+            .product
+            .invocation_runtime_with_binding(runtime, registry, binding)?
+    } else {
+        runtime
+    };
     if super_body
         || body
             .class_method_owner
             .as_ref()
             .is_none_or(|owner| owner.role != runmat_types::ClassMethodRole::Constructor)
     {
-        return super::invoke_semantic_function_with_rooted_captures(
-            binding.function,
-            args,
-            requested_outputs,
-            &registry,
-            runtime,
-            driver,
-            lexical_environment,
-        )
-        .await
-        .map(|(value, _)| value);
+        return Ok((runtime, SelectedRole::Semantic));
     }
-    let constructor = select_constructor(&binding, body)?;
-    invoke_constructor(
-        runtime,
-        ConstructorInvocation {
-            binding,
-            args,
-            requested_outputs,
-            registry,
-            driver,
-            lexical_environment,
-        },
-        constructor,
-    )
+
+    let constructor = select_constructor(binding, body)?;
+    Ok((runtime, SelectedRole::Constructor(constructor)))
+}
+
+async fn admit_constructor(
+    runtime: runmat_runtime::context::RuntimeContext,
+    invocation: BoundInvocation,
+    constructor: SelectedConstructor,
+) -> VmResult<runmat_runtime::execution::RootedValueSequence> {
+    let selected_runtime = runtime.clone();
+    // Keep effectful constructor admission on its original first-poll path.
+    runmat_runtime::execution::admit_executable_sequence_with(&runtime, move || {
+        invoke_constructor(selected_runtime, invocation, constructor)
+    })?
     .await
 }
 
-struct ConstructorInvocation {
+struct BoundInvocation {
     binding: runmat_value::BoundFunctionBinding,
     args: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
@@ -111,10 +202,10 @@ fn select_constructor(
 
 async fn invoke_constructor(
     runtime: runmat_runtime::context::RuntimeContext,
-    invocation: ConstructorInvocation,
+    invocation: BoundInvocation,
     constructor: SelectedConstructor,
 ) -> VmResult<runmat_runtime::execution::RootedValueSequence> {
-    let ConstructorInvocation {
+    let BoundInvocation {
         binding,
         args,
         requested_outputs,
@@ -127,7 +218,16 @@ async fn invoke_constructor(
         product,
         portable,
     } = constructor;
-    let runtime = product.invocation_runtime(runtime)?;
+    // A local constructor has the same exact leased receiver-facts owner as
+    // Core's bound service. Projection alone supplies defaults, not the proof
+    // that this executable is that constructor after registry republication.
+    // Portable selection retains its existing admitted Graph/projection route;
+    // never manufacture a local definition lease for that route.
+    let runtime = if portable {
+        product.invocation_runtime(runtime)?
+    } else {
+        product.invocation_runtime_with_binding(runtime, &registry, &binding)?
+    };
     let argument_count = args.supplied_count();
     let invocation_owner = owner.clone();
     let invoked_function = binding.function;
@@ -140,7 +240,7 @@ async fn invoke_constructor(
                 invoked_function,
                 args,
                 requested_outputs,
-                &registry,
+                registry,
                 selected,
                 driver,
                 lexical_environment,

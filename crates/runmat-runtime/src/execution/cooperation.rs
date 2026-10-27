@@ -12,8 +12,10 @@ use super::{ExecutionServiceError, RuntimeExecutionServices};
 
 #[path = "cooperation/cancellable_await.rs"]
 mod cancellable_await;
+pub(in crate::execution) use cancellable_await::run as await_original_cancellation;
 #[path = "cooperation/owned_blocking.rs"]
 mod owned_blocking;
+pub use owned_blocking::OwnedCpuPayload;
 
 #[cfg(test)]
 type CpuTurn = dyn Fn() -> RuntimeServiceFuture<Result<(), ExecutionServiceError>>;
@@ -50,6 +52,12 @@ pub struct CpuCooperationBudget {
 }
 
 impl CpuCooperationBudget {
+    /// Observe the original invocation generation, not a later replacement
+    /// in a live RuntimeContext token slot. Cloning grants no cancel authority.
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.cancellation.clone()
+    }
+
     /// Await an invocation-owned operation, dropping it when cancellation
     /// wins. This is an execution boundary, not a second scheduling policy.
     pub fn await_cancellable<'a, F: std::future::Future + 'a>(

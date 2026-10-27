@@ -42,6 +42,7 @@ pub fn link_selected_standalone(
         &inputs,
         admission,
         super::NativeProgramLinkIdentity::from_products(object, runtime),
+        object.manifest.runtime_binding_mode,
     )?;
     // Validate the actual staged physical bytes again at the handoff, not just
     // a previous path hash or a detached metadata success token.
@@ -59,10 +60,12 @@ fn plan(
     inputs: &SelectedLinkInputs<'_>,
     admission: &ExternalNativeLinkAdmission,
     identity: super::NativeProgramLinkIdentity,
+    binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
 ) -> AotResult<LinkPlan> {
     let manifest = selected.contents().manifest();
     let target = &manifest.target.target;
-    let canonical = super::canonical::selected_link_plan(selected, admission, identity.clone())?;
+    let canonical =
+        super::canonical::selected_link_plan(selected, admission, identity.clone(), binding_mode)?;
     let triple = canonical.target_triple.clone();
     let family = canonical.family;
     let macos = target.operating_system == NativeOperatingSystem::Macos;
@@ -154,6 +157,12 @@ fn plan(
         return Err(invalid(
             "trusted hosted locator set differs from exact reached native dependencies",
         ));
+    }
+    if canonical
+        .options
+        .contains(&super::SelectedLinkOption::RemoveUnusedSections)
+    {
+        tokens.push(super::section_gc::argument(family, target.operating_system).into());
     }
     match family {
         LinkerFamily::UnixCc => tokens.extend(["-o".into(), inputs.output.display().to_string()]),

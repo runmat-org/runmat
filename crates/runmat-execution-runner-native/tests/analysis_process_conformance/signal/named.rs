@@ -14,6 +14,7 @@ impl SignalFixture {
         let source = format!("function y = pulse(t)\narguments\n t (:,1) double\nend\nscale = [{}];\ny = reshape(t * scale, numel(t), {nodes}, {width});\nend\n",
             scale.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "));
         let compilation::CompiledSignalFixture {
+            session: _session,
             project_root,
             project,
             revision,

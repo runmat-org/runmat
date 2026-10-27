@@ -436,34 +436,53 @@ impl crate::context::RuntimeParallelService for Managed {
 fn factor_exact_budget_reuses_storage_and_refunds_on_denial_or_drop() {
     let (plan, _) = super::kernel::quote::<f64>(2).unwrap();
     let bytes = plan.scratch_peak_bytes() + plan.retained_output_bytes();
-    for limit in [bytes - 1, bytes] {
-        let ledger = crate::context::host_effect::ManagedHostEffectLedger::new(limit);
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
-            .with_service_ports(
-                crate::context::RuntimeServicePorts::default()
-                    .with_parallel(Rc::new(Managed(ledger.clone()))),
-            );
-        let matrix = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap());
-        let result = futures::executor::block_on(DenseFactor::<f64>::factor(&matrix, 2, &runtime));
-        if limit < bytes {
-            assert!(matches!(result, Err(DenseFactorError::Admission(_))));
-        } else {
-            let mut factor = result.unwrap();
-            let claimed = ledger.snapshot().live_claimed_bytes;
-            assert!(claimed > 0);
-            for (input, expected) in [([10.0, 19.0], [4.0, 5.0]), ([-2.0, -1.0], [2.0, -1.0])] {
-                let mut output = [0.0; 2];
-                futures::executor::block_on(factor.solve_into(&input, &mut output, &runtime))
-                    .unwrap();
-                for (actual, expected) in output.iter().zip(expected) {
-                    assert!((actual - expected).abs() < 1e-12);
+    for indexed in [false, true] {
+        for limit in [bytes - 1, bytes] {
+            let ledger = crate::context::host_effect::ManagedHostEffectLedger::new(limit);
+            let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+                .with_service_ports(
+                    // This is the numerical workspace quote, not a quote for
+                    // an independent hosted job/channel. Select the genuine
+                    // inline NeverYield path without expanding its byte grant.
+                    crate::context::RuntimeServicePorts::default()
+                        .without_blocking_cpu()
+                        .with_parallel(Rc::new(Managed(ledger.clone()))),
+                );
+            let matrix = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap());
+            let reads = std::cell::Cell::new(0);
+            let result = if indexed {
+                futures::executor::block_on(DenseFactor::<f64>::factor_indexed(
+                    2,
+                    Some(&runtime),
+                    async |index| {
+                        reads.set(reads.get() + 1);
+                        Ok([0.0, 1.0, 2.0, 3.0][index])
+                    },
+                ))
+            } else {
+                futures::executor::block_on(DenseFactor::<f64>::factor(&matrix, 2, &runtime))
+            };
+            assert_eq!(reads.get(), if indexed && limit == bytes { 4 } else { 0 });
+            if limit < bytes {
+                assert!(matches!(result, Err(DenseFactorError::Admission(_))));
+            } else {
+                let mut factor = result.unwrap();
+                let claimed = ledger.snapshot().live_claimed_bytes;
+                assert!(claimed > 0);
+                for (input, expected) in [([10.0, 19.0], [4.0, 5.0]), ([-2.0, -1.0], [2.0, -1.0])] {
+                    let mut output = [0.0; 2];
+                    futures::executor::block_on(factor.solve_into(&input, &mut output, &runtime))
+                        .unwrap();
+                    for (actual, expected) in output.iter().zip(expected) {
+                        assert!((actual - expected).abs() < 1e-12);
+                    }
+                    assert_eq!(ledger.snapshot().live_claimed_bytes, claimed);
                 }
-                assert_eq!(ledger.snapshot().live_claimed_bytes, claimed);
+                drop(factor);
             }
-            drop(factor);
+            assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
         }
-        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
-        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 }
 

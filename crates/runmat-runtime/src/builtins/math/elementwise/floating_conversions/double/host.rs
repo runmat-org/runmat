@@ -60,7 +60,13 @@ pub(super) fn convert(
         Value::Complex(real, imag) => Ok(Value::Complex(real, imag)),
         Value::ComplexTensor(value) => double_from_complex_tensor(value),
         Value::LogicalArray(value) => double_from_logical(value),
-        Value::CharArray(value) => double_from_char_array(value),
+        Value::CharArray(value) => tensor::character_numeric::to_double(runtime, &value)
+            .map(tensor::tensor_into_value)
+            .map_err(|error| {
+                error.into_runtime_error(|cause| {
+                    double_error_with_detail(&DOUBLE_ERROR_INTERNAL, cause)
+                })
+            }),
         Value::String(value) => Ok(Value::Num(parse_string_double(&value))),
         Value::StringArray(value) => double_from_string_array(value),
         Value::Symbolic(value) => value
@@ -74,7 +80,8 @@ pub(super) fn convert(
         Value::Object(value) => Err(conversion_error(value.class_name().display_name())),
         Value::HandleObject(value) => Err(conversion_error(value.class_name.display_name())),
         Value::Listener(_) => Err(conversion_error("event.listener")),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
@@ -96,8 +103,8 @@ use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 use runmat_builtins::DOUBLE_ERROR_INTERNAL;
 use runmat_value::{
-    CharArray, ComplexTensor, LogicalArray, NumericStorage, SparseTensor, StringArray,
-    SymbolicArray, Tensor, Value,
+    ComplexTensor, LogicalArray, NumericStorage, SparseTensor, StringArray, SymbolicArray, Tensor,
+    Value,
 };
 
 pub(super) fn parse_string_double(text: &str) -> f64 {
@@ -164,17 +171,6 @@ pub(super) fn double_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<V
     )
     .map(Value::SparseTensor)
     .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))
-}
-
-pub(super) fn double_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
-    let data: Vec<f64> = chars
-        .to_column_major()
-        .into_iter()
-        .map(|ch| f64::from(ch.raw()))
-        .collect();
-    let tensor = Tensor::new(data, chars.shape)
-        .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;
-    Ok(tensor::tensor_into_value(tensor))
 }
 
 pub(super) fn double_from_gathered(value: Value) -> BuiltinResult<Value> {

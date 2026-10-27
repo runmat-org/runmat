@@ -100,6 +100,12 @@ async fn invoke_unit(
             runmat_runtime::context::NonCapturingPortableHost,
         ));
     }
+    // Core derives invocation views from this same session state. Retain the
+    // original scheduler assignment/job across execution and result encoding;
+    // an initialized provider does not grant this CPU-only attempt a device.
+    let runtime = session.execution_runtime_context(request.recipe.program_revision.clone());
+    let _assignment = runtime.enter_execution_assignment(request.assignment.clone());
+    let _job = runtime.enter_execution_job(request.job_id);
     let mut control = runmat_core::InvocationControl::default();
     if let Some(cancellation) = cancellation {
         control = control.with_cancellation(

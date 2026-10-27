@@ -19,7 +19,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const BUILTIN_NAME: &str = "ttest2";
 const KSTEST_NAME: &str = "kstest";
-const MAX_SUPPORTED_DIM: usize = 1024;
 
 #[path = "hypothesis/ttest2_options.rs"]
 mod ttest2_options;
@@ -68,13 +67,19 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
 #[runtime_builtin(
     name = "ttest2",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::hypothesis"
 )]
 pub(crate) async fn ttest2_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     x: Value,
     y: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    crate::context::host_allocation::require_unbounded_workspace(runtime.as_ref(), BUILTIN_NAME,
+        "finite host-memory execution is unsupported; two-sample test materialization, lane and result workspaces have no complete resource bound")?;
+    let mut cooperation = super::inferential::Cooperation::new(runtime.as_ref());
+    cooperation.completed(0).await?;
     ensure_ttest2_sample_extension(&x, &y)?;
     let _control_sources = rest.fork();
     let options = Ttest2OptionPlan::admit(rest)?;
@@ -83,12 +88,14 @@ pub(crate) async fn ttest2_builtin(
             "ttest2: too many output arguments; maximum is 4",
         ));
     }
-    let x = gathered_tensor(x).await?;
-    let y = gathered_tensor(y).await?;
+    let x = gathered_tensor(x, runtime.as_ref()).await?;
+    let y = gathered_tensor(y, runtime.as_ref()).await?;
     ensure_exact_ttest2_integer_tensor(&x, "sample x")?;
     ensure_exact_ttest2_integer_tensor(&y, "sample y")?;
-    let options = options.resolve().await?;
+    let options = options.resolve(runtime.as_ref()).await?;
+    cooperation.completed(0).await?;
     let eval = evaluate(&x, &y, options)?;
+    cooperation.completed(0).await?;
     match crate::output_count::current_output_count() {
         Some(out_count) => outputs_for_count(out_count, eval),
         None => Ok(eval.h),

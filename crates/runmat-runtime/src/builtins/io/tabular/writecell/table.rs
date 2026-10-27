@@ -4,6 +4,7 @@ use super::*;
 pub(in crate::builtins::io::tabular) enum CellValue {
     Empty,
     Number(f64),
+    Single(f32),
     Integer(IntValue),
     Boolean(bool),
     Text(String),
@@ -133,6 +134,14 @@ pub(in crate::builtins::io::tabular) fn scalar_tensor_cell_value(
         let value = storage.value_at(0).expect("one-element integer storage");
         Ok(CellValue::Integer(value))
     } else {
-        Ok(CellValue::Number(tensor::tensor_value_f64(tensor, 0)))
+        Ok(
+            match tensor
+                .numeric_value_at(0)
+                .expect("one-element numeric storage")
+            {
+                runmat_value::NumericScalar::F32(value) => CellValue::Single(value),
+                value => CellValue::Number(value.materialize_f64()),
+            },
+        )
     }
 }

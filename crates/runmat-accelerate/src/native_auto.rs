@@ -50,7 +50,9 @@ mod host_route;
 mod state;
 mod original_work;
 pub use builtin_call::{install_preparation_service, AdmittedAcceleration};
-pub use host_route::{promote_binary_in_context, promote_builtin_binary_in_context};
+pub use host_route::{
+    promote_binary_in_context, promote_builtin_binary_in_context, promote_builtin_unary_in_context,
+};
 pub use state::AutoOffloadHandle;
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -1680,7 +1682,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_) => "FunctionHandle",
-        Value::BoundFunctionHandle(_) => "FunctionHandle",
+        Value::BoundFunctionHandle(_) | Value::ScopedFunctionHandle(_) => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::Complex(_, _) => "Complex",

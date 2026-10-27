@@ -1,6 +1,5 @@
-//! MATLAB-compatible `linprog` builtin for small and medium linear programs.
+//! Sparse conic linear programming with original-row multiplier certificates.
 
-use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
     BuiltinErrorDescriptor, BuiltinExtensionDescriptor, LINPROG_ERROR_INVALID_ARGUMENT,
     LINPROG_ERROR_INVALID_INPUT, LINPROG_GPU_INPUT_EXTENSION, LINPROG_INTEGER_AEQ_EXTENSION,
@@ -19,12 +18,20 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "linprog";
-const ALGORITHM: &str = "active-set vertex enumeration";
+const ALGORITHM: &str = "interior-point (Clarabel 0.11.1)";
 const TOL: f64 = 1.0e-8;
 
-mod combinations;
+mod certificates;
+pub(in crate::builtins::math::optim) mod compiled;
+mod matrix;
+mod model;
+mod options;
 mod solve;
+#[cfg(test)]
+mod backend_tests;
 use crate::builtins::math::optim::common::ScalarCooperation;
+use matrix::MatrixInput;
+use model::{LinearProgram, LinprogOutcome};
 use solve::solve_linprog;
 
 fn linprog_error_with_detail(
@@ -57,7 +64,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Host active-set LP solver. GPU-resident numeric inputs are gathered before solving.",
+    notes: "Host sparse interior-point LP solver. GPU-resident numeric inputs are gathered before solving.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::optim::linprog")]
@@ -81,15 +88,16 @@ async fn linprog_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    crate::output_count::validate_bounded_outputs(
+    crate::output_count::validate_bounded_outputs_in(
         &LINPROG_DESCRIPTOR,
         &LINPROG_ERROR_INVALID_ARGUMENT,
         NAME,
+        runtime.as_ref(),
     )?;
-    if !(3..=7).contains(&args.len()) {
+    if !(3..=8).contains(&args.len()) {
         return Err(linprog_error_with_detail(
             &LINPROG_ERROR_INVALID_ARGUMENT,
-            "expected f,A,b and optionally Aeq,beq,lb,ub",
+            "expected f,A,b and optionally Aeq,beq,lb,ub,options",
         ));
     }
     let mut args = args.into_iter();
@@ -112,6 +120,7 @@ async fn linprog_in_runtime(
     b: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    crate::context::host_allocation::require_unbounded_workspace(runtime, NAME, "finite host-memory execution is unsupported; this optimizer has no complete workspace and factorization bound")?;
     crate::output_count::validate_bounded_outputs(
         &LINPROG_DESCRIPTOR,
         &LINPROG_ERROR_INVALID_ARGUMENT,
@@ -120,7 +129,7 @@ async fn linprog_in_runtime(
     let mut cooperation =
         ScalarCooperation::for_builtin(runmat_builtins::LINPROG_CATALOG_ENTRY.identity, runtime);
     cooperation.completed(0).await?;
-    if rest.len() > 4 {
+    if rest.len() > 5 {
         return Err(linprog_error_with_detail(
             &LINPROG_ERROR_INVALID_ARGUMENT,
             "too many input arguments",
@@ -139,16 +148,18 @@ async fn linprog_in_runtime(
         [&f, &a, &b].into_iter().chain(rest.iter()),
     )?;
 
+    let mut controls = options::Controls::parse(rest.get(4), runtime, &mut cooperation).await?;
+
     use runmat_builtins::OptimNumericInput as Role;
     for (label, value, role) in [
         ("f", &f, Role::NonemptyVector),
-        ("A", &a, Role::OptionalMatrix),
+        ("A", &a, Role::OptionalSparseMatrix),
         ("b", &b, Role::OptionalVector),
     ] {
         preflight_numeric(label, value, role)?;
     }
     for ((label, role), value) in [
-        ("Aeq", Role::OptionalMatrix),
+        ("Aeq", Role::OptionalSparseMatrix),
         ("beq", Role::OptionalVector),
         ("lb", Role::OptionalVector),
         ("ub", Role::OptionalVector),
@@ -184,27 +195,19 @@ async fn linprog_in_runtime(
     }
     let n = f.len();
 
-    let (mut a_ineq, mut b_ineq) = parse_constraint_pair("A", a, "b", b, n).await?;
-    let (a_eq, b_eq) = parse_optional_equality(rest.first(), rest.get(1), n).await?;
+    let (a_ineq, b_ineq) = parse_constraint_pair("A", a, "b", b, n, &mut cooperation).await?;
+    let (a_eq, b_eq) =
+        parse_optional_equality(rest.first(), rest.get(1), n, &mut cooperation).await?;
     let (lb, ub) = parse_bounds(rest.get(2), rest.get(3), n).await?;
+    // Normalized numeric backing now owns the model; do not retain gathered
+    // original optional inputs throughout factorization and certificate work.
+    drop(rest);
 
     for i in 0..n {
-        if lb[i] > ub[i] + TOL {
+        if lb[i] > ub[i] || lb[i] == f64::INFINITY || ub[i] == f64::NEG_INFINITY {
             return Ok(finalize(LinprogOutcome::infeasible(
-                "No feasible point found: lower bound exceeds upper bound.",
+                "No finite feasible point exists within the supplied bounds.",
             )));
-        }
-        if lb[i].is_finite() {
-            let mut row = vec![0.0; n];
-            row[i] = -1.0;
-            a_ineq.push(row);
-            b_ineq.push(-lb[i]);
-        }
-        if ub[i].is_finite() {
-            let mut row = vec![0.0; n];
-            row[i] = 1.0;
-            a_ineq.push(row);
-            b_ineq.push(ub[i]);
         }
     }
 
@@ -214,8 +217,15 @@ async fn linprog_in_runtime(
         b_ineq,
         a_eq,
         b_eq,
+        lb,
+        ub,
     };
-    Ok(finalize(solve_linprog(&problem, &mut cooperation).await?))
+    let products = compiled::Products::for_output_count(
+        crate::output_count::current_output_count_in(cooperation.runtime()),
+    );
+    let outcome = solve_linprog(problem, &mut cooperation, &mut controls, products).await?;
+    controls.summary(&outcome, cooperation.runtime())?;
+    Ok(finalize(outcome))
 }
 
 fn preflight_numeric(
@@ -262,27 +272,16 @@ enum FiniteMode {
     Bounds,
 }
 
-#[derive(Clone)]
-struct MatrixInput {
-    rows: usize,
-    cols: usize,
-    data: Vec<f64>,
-}
-
-impl MatrixInput {
-    fn row(&self, row: usize) -> Vec<f64> {
-        (0..self.cols)
-            .map(|col| self.data[row + col * self.rows])
-            .collect()
-    }
-}
-
 async fn gather(value: Value) -> BuiltinResult<Value> {
     crate::dispatcher::gather_if_needed_async(&value)
         .await
         .map_err(|err| {
+            if crate::runtime_error::error_has_control_cancellation_origin(&err) {
+                return err;
+            }
             let mut error = linprog_error_with_detail(&LINPROG_ERROR_INVALID_INPUT, err.message());
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error.failure_origin = err.failure_origin;
             error.source = Some(Box::new(err));
             error
         })
@@ -290,6 +289,7 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
 
 fn is_empty_value(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if tensor::tensor_element_len(t) == 0)
+        || matches!(value, Value::SparseTensor(t) if t.rows == 0 || t.cols == 0)
 }
 
 async fn numeric_vector(
@@ -328,47 +328,12 @@ async fn numeric_vector(
     Ok(data)
 }
 
-async fn numeric_matrix(label: &str, value: Value) -> BuiltinResult<Option<MatrixInput>> {
-    let value = gather(value).await?;
-    if is_empty_value(&value) {
-        return Ok(None);
-    }
-    match value {
-        Value::Num(n) => {
-            validate_numbers(label, &[n], FiniteMode::Finite)?;
-            Ok(Some(MatrixInput {
-                rows: 1,
-                cols: 1,
-                data: vec![n],
-            }))
-        }
-        Value::Int(i) => {
-            let value = i.to_f64();
-            validate_numbers(label, &[value], FiniteMode::Finite)?;
-            Ok(Some(MatrixInput {
-                rows: 1,
-                cols: 1,
-                data: vec![value],
-            }))
-        }
-        Value::Tensor(t) => {
-            if t.shape().len() > 2 {
-                return Err(linprog_error_with_detail(
-                    &LINPROG_ERROR_INVALID_INPUT,
-                    format!("{label} must be a numeric matrix"),
-                ));
-            }
-            let rows = t.rows();
-            let cols = t.cols();
-            let data = tensor::tensor_into_values_f64(t);
-            validate_numbers(label, &data, FiniteMode::Finite)?;
-            Ok(Some(MatrixInput { rows, cols, data }))
-        }
-        other => Err(linprog_error_with_detail(
-            &LINPROG_ERROR_INVALID_INPUT,
-            format!("{label} must be a real numeric matrix, got {other:?}"),
-        )),
-    }
+async fn numeric_matrix(
+    label: &str,
+    value: Value,
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<Option<MatrixInput>> {
+    matrix::parse(label, value, cooperation).await
 }
 
 fn validate_numbers(label: &str, data: &[f64], finite_mode: FiniteMode) -> BuiltinResult<()> {
@@ -398,30 +363,30 @@ async fn parse_constraint_pair(
     rhs_label: &str,
     rhs: Value,
     n: usize,
-) -> BuiltinResult<(Vec<Vec<f64>>, Vec<f64>)> {
-    let matrix = numeric_matrix(matrix_label, matrix).await?;
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<(MatrixInput, Vec<f64>)> {
+    let matrix = numeric_matrix(matrix_label, matrix, cooperation).await?;
     let rhs = numeric_vector(rhs_label, rhs, FiniteMode::Finite).await?;
     match (matrix, rhs.is_empty()) {
-        (None, true) => Ok((Vec::new(), Vec::new())),
+        (None, true) => Ok((MatrixInput::zeros((0, n)), Vec::new())),
         (None, false) => Err(linprog_error_with_detail(
             &LINPROG_ERROR_INVALID_INPUT,
             format!("{matrix_label} cannot be empty when {rhs_label} is nonempty"),
         )),
         (Some(matrix), _) => {
-            if matrix.cols != n {
+            if matrix.n != n {
                 return Err(linprog_error_with_detail(
                     &LINPROG_ERROR_INVALID_INPUT,
                     format!("{matrix_label} must have one column per element of f"),
                 ));
             }
-            if rhs.len() != matrix.rows {
+            if rhs.len() != matrix.m {
                 return Err(linprog_error_with_detail(
                     &LINPROG_ERROR_INVALID_INPUT,
                     format!("{rhs_label} length must match rows of {matrix_label}"),
                 ));
             }
-            let rows = (0..matrix.rows).map(|row| matrix.row(row)).collect();
-            Ok((rows, rhs))
+            Ok((matrix, rhs))
         }
     }
 }
@@ -430,10 +395,11 @@ async fn parse_optional_equality(
     aeq: Option<&Value>,
     beq: Option<&Value>,
     n: usize,
-) -> BuiltinResult<(Vec<Vec<f64>>, Vec<f64>)> {
+    cooperation: &mut ScalarCooperation,
+) -> BuiltinResult<(MatrixInput, Vec<f64>)> {
     match (aeq, beq) {
-        (None, None) => Ok((Vec::new(), Vec::new())),
-        (Some(aeq), None) if is_empty_value(aeq) => Ok((Vec::new(), Vec::new())),
+        (None, None) => Ok((MatrixInput::zeros((0, n)), Vec::new())),
+        (Some(aeq), None) if is_empty_value(aeq) => Ok((MatrixInput::zeros((0, n)), Vec::new())),
         (Some(_), None) => Err(linprog_error_with_detail(
             &LINPROG_ERROR_INVALID_ARGUMENT,
             "Aeq requires a matching beq argument",
@@ -443,7 +409,7 @@ async fn parse_optional_equality(
             "beq requires a matching Aeq argument",
         )),
         (Some(aeq), Some(beq)) => {
-            parse_constraint_pair("Aeq", aeq.clone(), "beq", beq.clone(), n).await
+            parse_constraint_pair("Aeq", aeq.clone(), "beq", beq.clone(), n, cooperation).await
         }
     }
 }
@@ -483,299 +449,44 @@ fn normalize_bound(label: &str, values: Vec<f64>, n: usize) -> BuiltinResult<Vec
     }
 }
 
-struct LinearProgram {
-    f: Vec<f64>,
-    a_ineq: Vec<Vec<f64>>,
-    b_ineq: Vec<f64>,
-    a_eq: Vec<Vec<f64>>,
-    b_eq: Vec<f64>,
-}
-
-#[derive(Clone)]
-struct LinprogOutcome {
-    x: Option<Vec<f64>>,
-    fval: Option<f64>,
-    exitflag: i32,
-    iterations: usize,
-    constrviolation: f64,
-    message: String,
-}
-
-impl LinprogOutcome {
-    fn infeasible(message: &str) -> Self {
-        Self {
-            x: None,
-            fval: None,
-            exitflag: -2,
-            iterations: 0,
-            constrviolation: 0.0,
-            message: message.to_string(),
-        }
-    }
-
-    fn unbounded(iterations: usize) -> Self {
-        Self {
-            x: None,
-            fval: None,
-            exitflag: -3,
-            iterations,
-            constrviolation: 0.0,
-            message: "Problem is unbounded.".to_string(),
-        }
-    }
-}
-
-struct EqualityFace {
-    x0: Vec<f64>,
-    basis: Vec<Vec<f64>>,
-}
-
-fn equality_face(problem: &LinearProgram, n: usize) -> Option<EqualityFace> {
-    let x0 = if problem.a_eq.is_empty() {
-        vec![0.0; n]
-    } else {
-        pseudo_solve(&problem.a_eq, &problem.b_eq, n)?
-    };
-    Some(EqualityFace {
-        x0,
-        basis: nullspace_basis(&problem.a_eq, n),
-    })
-}
-
-fn reduce_to_equality_face(problem: &LinearProgram, face: &EqualityFace) -> LinearProgram {
-    LinearProgram {
-        f: face
-            .basis
-            .iter()
-            .map(|basis_vector| dot(&problem.f, basis_vector))
-            .collect(),
-        a_ineq: problem
-            .a_ineq
-            .iter()
-            .map(|row| {
-                face.basis
-                    .iter()
-                    .map(|basis_vector| dot(row, basis_vector))
-                    .collect()
-            })
-            .collect(),
-        b_ineq: problem
-            .a_ineq
-            .iter()
-            .zip(&problem.b_ineq)
-            .map(|(row, rhs)| rhs - dot(row, &face.x0))
-            .collect(),
-        a_eq: Vec::new(),
-        b_eq: Vec::new(),
-    }
-}
-
-fn lift_from_equality_face(face: &EqualityFace, y: &[f64]) -> Vec<f64> {
-    let mut x = face.x0.clone();
-    for (coeff, basis_vector) in y.iter().zip(&face.basis) {
-        for (x_j, basis_j) in x.iter_mut().zip(basis_vector) {
-            *x_j += coeff * basis_j;
-        }
-    }
-    x
-}
-
-fn candidate_nullspace_descent_directions(rows: &[Vec<f64>], f: &[f64], n: usize) -> Vec<Vec<f64>> {
-    let basis = nullspace_basis(rows, n);
-    if basis.is_empty() {
-        return Vec::new();
-    }
-    let mut directions = Vec::new();
-    let mut projected = vec![0.0; n];
-    for basis_vector in &basis {
-        let coeff = -dot(f, basis_vector);
-        for i in 0..n {
-            projected[i] += coeff * basis_vector[i];
-        }
-        directions.push(basis_vector.clone());
-        directions.push(basis_vector.iter().map(|v| -*v).collect());
-    }
-    if norm(&projected) > TOL {
-        directions.push(projected);
-    }
-    directions
-}
-
-fn is_recession_direction(problem: &LinearProgram, direction: &[f64]) -> bool {
-    norm(direction) > TOL
-        && problem
-            .a_eq
-            .iter()
-            .all(|row| dot(row, direction).abs() <= TOL)
-        && problem.a_ineq.iter().all(|row| dot(row, direction) <= TOL)
-}
-
-fn is_feasible(problem: &LinearProgram, x: &[f64]) -> bool {
-    constraint_violation(problem, x) <= 1.0e-7
-}
-
-fn constraint_violation(problem: &LinearProgram, x: &[f64]) -> f64 {
-    let eq = problem
-        .a_eq
-        .iter()
-        .zip(&problem.b_eq)
-        .map(|(row, rhs)| (dot(row, x) - rhs).abs())
-        .fold(0.0, f64::max);
-    let ineq = problem
-        .a_ineq
-        .iter()
-        .zip(&problem.b_ineq)
-        .map(|(row, rhs)| (dot(row, x) - rhs).max(0.0))
-        .fold(0.0, f64::max);
-    eq.max(ineq)
-}
-
-fn nullspace_basis(rows: &[Vec<f64>], n: usize) -> Vec<Vec<f64>> {
-    if n == 0 {
-        return Vec::new();
-    }
-    if rows.is_empty() {
-        return (0..n)
-            .map(|i| {
-                let mut basis = vec![0.0; n];
-                basis[i] = 1.0;
-                basis
-            })
-            .collect();
-    }
-
-    let (reduced, pivots) = rref(rows, n);
-    let free_cols = (0..n)
-        .filter(|col| !pivots.contains(col))
-        .collect::<Vec<_>>();
-    free_cols
-        .into_iter()
-        .filter_map(|free_col| {
-            let mut basis = vec![0.0; n];
-            basis[free_col] = 1.0;
-            for (row, pivot_col) in pivots.iter().enumerate() {
-                basis[*pivot_col] = -reduced[row][free_col];
-            }
-            let length = norm(&basis);
-            (length > TOL).then(|| basis.into_iter().map(|value| value / length).collect())
-        })
-        .collect()
-}
-
-fn rref(rows: &[Vec<f64>], n: usize) -> (Vec<Vec<f64>>, Vec<usize>) {
-    let mut matrix = rows.to_vec();
-    let mut pivots = Vec::new();
-    let mut pivot_row = 0usize;
-
-    for col in 0..n {
-        let Some(best_row) = (pivot_row..matrix.len()).max_by(|&a, &b| {
-            matrix[a][col]
-                .abs()
-                .partial_cmp(&matrix[b][col].abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        }) else {
-            break;
-        };
-        if matrix[best_row][col].abs() <= TOL {
-            continue;
-        }
-
-        matrix.swap(pivot_row, best_row);
-        let pivot = matrix[pivot_row][col];
-        for value in &mut matrix[pivot_row] {
-            *value /= pivot;
-        }
-
-        for row in 0..matrix.len() {
-            if row == pivot_row {
-                continue;
-            }
-            let factor = matrix[row][col];
-            if factor.abs() <= TOL {
-                continue;
-            }
-            for j in col..n {
-                matrix[row][j] -= factor * matrix[pivot_row][j];
-            }
-        }
-
-        pivots.push(col);
-        pivot_row += 1;
-        if pivot_row == matrix.len() {
-            break;
-        }
-    }
-
-    (matrix, pivots)
-}
-
-fn pseudo_solve(rows: &[Vec<f64>], rhs: &[f64], n: usize) -> Option<Vec<f64>> {
-    if rows.is_empty() {
-        return Some(vec![0.0; n]);
-    }
-    let matrix = dmatrix_from_rows(rows, n);
-    let rhs_vec = DVector::from_column_slice(rhs);
-    let svd = matrix.svd(true, true);
-    let u = svd.u.as_ref()?;
-    let v_t = svd.v_t.as_ref()?;
-    let mut x = vec![0.0; n];
-    for (i, sigma) in svd.singular_values.iter().enumerate() {
-        if *sigma <= TOL {
-            continue;
-        }
-        let coeff = (0..rows.len())
-            .map(|row| u[(row, i)] * rhs_vec[row])
-            .sum::<f64>()
-            / sigma;
-        for col in 0..n {
-            x[col] += v_t[(i, col)] * coeff;
-        }
-    }
-    let residual = rows
-        .iter()
-        .zip(rhs)
-        .map(|(row, target)| (dot(row, &x) - target).abs())
-        .fold(0.0, f64::max);
-    (residual <= 1.0e-7).then_some(x)
-}
-
-fn dmatrix_from_rows(rows: &[Vec<f64>], n: usize) -> DMatrix<f64> {
-    let data = rows
-        .iter()
-        .flat_map(|row| row.iter().copied())
-        .collect::<Vec<_>>();
-    DMatrix::from_row_slice(rows.len(), n, &data)
-}
-
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
-}
-
-fn norm(values: &[f64]) -> f64 {
-    dot(values, values).sqrt()
-}
-
 fn finalize(outcome: LinprogOutcome) -> Value {
-    let x = outcome
-        .x
-        .clone()
-        .map(vector_value)
-        .unwrap_or_else(empty_double);
+    let output = Value::Struct(build_output_struct(&outcome));
+    let requested = crate::output_count::current_output_count();
+    let lambda = if requested.is_some_and(|count| count >= 5) {
+        Some(match outcome.lambda {
+            Some(lambda) => lambda.into_value(),
+            None => empty_lambda(),
+        })
+    } else {
+        None
+    };
+    let x = outcome.x.map(vector_value).unwrap_or_else(empty_double);
     let fval = outcome.fval.map(Value::Num).unwrap_or_else(empty_double);
     let exitflag = Value::Num(outcome.exitflag as f64);
-    let output = Value::Struct(build_output_struct(&outcome));
 
-    match crate::output_count::current_output_count() {
+    match requested {
         None => x,
         Some(0) => Value::output_list(Vec::new()),
         Some(1) => crate::output_count::output_list_with_padding(1, vec![x]),
         Some(2) => crate::output_count::output_list_with_padding(2, vec![x, fval]),
         Some(3) => crate::output_count::output_list_with_padding(3, vec![x, fval, exitflag]),
+        Some(n) if n >= 5 => crate::output_count::output_list_with_padding(
+            n,
+            vec![x, fval, exitflag, output, lambda.expect("requested lambda")],
+        ),
         Some(n) if n >= 4 => {
             crate::output_count::output_list_with_padding(n, vec![x, fval, exitflag, output])
         }
         Some(_) => x,
     }
+}
+
+fn empty_lambda() -> Value {
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+    for name in ["ineqlin", "eqlin", "lower", "upper"] {
+        fields.insert(name, empty_double());
+    }
+    Value::Struct(fields.finish())
 }
 
 fn vector_value(values: Vec<f64>) -> Value {
@@ -794,6 +505,10 @@ fn build_output_struct(outcome: &LinprogOutcome) -> StructValue {
     fields.insert("iterations", Value::Num(outcome.iterations as f64));
     fields.insert("algorithm", Value::from(ALGORITHM));
     fields.insert("constrviolation", Value::Num(outcome.constrviolation));
+    fields.insert("primalfeasibility", Value::Num(outcome.primalfeasibility));
+    fields.insert("dualfeasibility", Value::Num(outcome.dualfeasibility));
+    fields.insert("dualitygap", Value::Num(outcome.dualitygap));
+    fields.insert("firstorderopt", Value::Num(outcome.firstorderopt));
     fields.insert("message", Value::from(outcome.message.clone()));
     fields.finish()
 }
@@ -838,7 +553,7 @@ mod tests {
             LINPROG_ERROR_INVALID_ARGUMENT.identifier
         );
         assert!(error.message().contains("Aeq requires a matching beq"));
-        let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
+        let _outputs = crate::output_count::push_output_count(Some(6)).expect("output-count scope");
         let error = block_on(linprog_builtin_registered(
             None,
             crate::builtins::common::test_support::builtin_arguments(Vec::new()),
@@ -851,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn active_candidate_observes_budget_cancellation_without_solver_replay() {
+    fn sparse_model_observes_budget_cancellation_without_solver_replay() {
         use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
         use runmat_execution::cancellation::CancellationSource;
         use runmat_execution::CancellationReason;
@@ -872,14 +587,21 @@ mod tests {
         );
         let problem = LinearProgram {
             f: vec![1.0],
-            a_ineq: vec![vec![-1.0]],
+            a_ineq: MatrixInput::from(&[[-1.0]]),
             b_ineq: vec![0.0],
-            a_eq: Vec::new(),
+            a_eq: MatrixInput::zeros((0, 1)),
             b_eq: Vec::new(),
+            lb: vec![f64::NEG_INFINITY],
+            ub: vec![f64::INFINITY],
         };
-        let error = block_on(solve_linprog(&problem, &mut cooperation))
-            .err()
-            .expect("cancellation at numerical boundary");
+        let error = block_on(solve_linprog(
+            problem,
+            &mut cooperation,
+            &mut options::Controls::default(),
+            compiled::Products::Primal,
+        ))
+        .err()
+        .expect("cancellation at numerical boundary");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
         assert!(error.source.is_some());
@@ -933,7 +655,7 @@ mod tests {
                 panic!("expected solution tensor");
             };
             assert_eq!(solution.shape(), &[1, 1]);
-            assert_eq!(solution.materialize_f64(), vec![0.0]);
+            assert!(solution.materialize_f64()[0].abs() < 1e-7);
         }
     }
 

@@ -310,7 +310,7 @@ pub(crate) fn statement_contract_with_facts(
     facts: &[Option<ValueFact>],
 ) -> (EffectSet, CapabilitySet) {
     let (mut effects, mut capabilities) = statement_phase_contract(statement, summaries, facts);
-    if let Some(value) = crate::analysis::statement_rvalue(&statement.kind) {
+    if let Some(value) = crate::statement_rvalue(&statement.kind) {
         let (nested_effects, nested_capabilities) =
             rvalue_contract_with_facts(value, summaries, facts);
         effects.0.extend(nested_effects.0);
@@ -346,7 +346,7 @@ pub(crate) fn statement_phase_contract(
             } else {
                 Default::default()
             }
-        } else if crate::analysis::statement_rvalue(&statement.kind).is_some() {
+        } else if crate::statement_rvalue(&statement.kind).is_some() {
             Default::default()
         } else {
             statement_contract(statement, summaries)

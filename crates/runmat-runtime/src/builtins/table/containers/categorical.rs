@@ -475,6 +475,7 @@ fn categorical_from_code_value(
 
 pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
+        Value::Num(value) => Ok(vec![categorical_numeric_label(NumericScalar::F64(*value))]),
         Value::String(text) => Ok(vec![normalize_category_label(text)]),
         Value::StringArray(array) => Ok(array
             .data()
@@ -815,7 +816,14 @@ fn sort_categorical_values(
         Some(NumericDType::U8 | NumericDType::U16 | NumericDType::U32 | NumericDType::U64) => {
             labels.sort_by_key(|label| label.parse::<u128>().unwrap_or_default());
         }
-        Some(NumericDType::F32 | NumericDType::F64) => {
+        Some(NumericDType::F32) => {
+            labels.sort_by(|left, right| {
+                let left = left.parse::<f32>().unwrap_or(f32::NAN);
+                let right = right.parse::<f32>().unwrap_or(f32::NAN);
+                left.total_cmp(&right)
+            });
+        }
+        Some(NumericDType::F64) => {
             labels.sort_by(|left, right| {
                 let left = left.parse::<f64>().unwrap_or(f64::NAN);
                 let right = right.parse::<f64>().unwrap_or(f64::NAN);
@@ -835,6 +843,14 @@ fn default_category_names(
         lookup
             .iter()
             .map(|label| {
+                if dtype == Some(runmat_value::NumericDType::F32) {
+                    // Lookup text round-trips the original single. Restore
+                    // that class before the unchanged five-digit name policy.
+                    return label
+                        .parse::<f32>()
+                        .map(|value| format_five_significant(f64::from(value)))
+                        .unwrap_or_else(|_| label.clone());
+                }
                 label
                     .parse::<f64>()
                     .map(format_five_significant)
@@ -877,14 +893,16 @@ fn categorical_numeric_label(value: NumericScalar) -> String {
             if value.is_nan() {
                 String::new()
             } else {
-                format_key_number(value)
+                // Private identity must round-trip, independently of the
+                // deliberately rounded public default category name.
+                value.to_string()
             }
         }
         NumericScalar::F32(value) => {
             if value.is_nan() {
                 String::new()
             } else {
-                format_key_number(f64::from(value))
+                value.to_string()
             }
         }
         value => value
@@ -1140,6 +1158,10 @@ fn categorical_logical_result(data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult
             .map_err(invalid_variable)
     }
 }
+
+#[cfg(test)]
+#[path = "categorical/numeric_identity_tests.rs"]
+mod numeric_identity_tests;
 
 #[cfg(test)]
 mod tests {

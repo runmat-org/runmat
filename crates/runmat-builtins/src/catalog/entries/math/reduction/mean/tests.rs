@@ -136,6 +136,24 @@ fn explicit_double_overrides_single_and_unknown_controls_remain_dynamic() {
             .class,
         NumericClass::Double
     );
+    let weighted = call(
+        numeric(NumericClass::Double),
+        vec![
+            LiteralValue::Number(1.0),
+            LiteralValue::String("Weights".into()),
+            LiteralValue::Vector(vec![
+                LiteralValue::Number(1.0),
+                LiteralValue::Number(3.0),
+                LiteralValue::Number(2.0),
+            ]),
+        ],
+        1,
+    );
+    assert_eq!(
+        weighted.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(2)])
+    );
+    assert!(weighted.diagnostics.is_empty());
     for controls in [
         vec![
             LiteralValue::String("all".into()),

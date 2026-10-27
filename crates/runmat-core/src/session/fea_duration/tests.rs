@@ -44,6 +44,18 @@ fn session() -> RunMatSession {
 
 #[test]
 fn no_number_for_missing_sparse_or_unstable_measurements() {
+    let mut untimed = session();
+    untimed.runtime_context = untimed.runtime_context.clone().with_service_ports(
+        untimed
+            .runtime_context
+            .service_ports()
+            .clone()
+            .without_timing(),
+    );
+    assert!(untimed
+        .fea_execution_timing_profile()
+        .for_revision(program(), [1; 32], FeaTimingRoute::NativeCheckedSource, 1)
+        .is_err());
     let session = session();
     let profile = session.fea_execution_timing_profile();
     let key = key(&profile, 1);

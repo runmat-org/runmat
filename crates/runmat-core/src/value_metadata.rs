@@ -29,7 +29,8 @@ pub fn matlab_class_name(value: &Value) -> String {
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
-        | Value::Closure(_) => "function_handle".to_string(),
+        | Value::Closure(_)
+        | Value::ScopedFunctionHandle(_) => "function_handle".to_string(),
         Value::HandleObject(handle) => handle.class_name.to_string(),
         Value::Listener(_) => "event.listener".to_string(),
         // Internal destructuring helper; shouldn't surface in user-facing values,
@@ -198,6 +199,7 @@ pub fn preview_numeric_values(
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::Future(_)

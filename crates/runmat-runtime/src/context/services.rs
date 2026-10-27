@@ -1859,6 +1859,13 @@ macro_rules! port_accessors {
 }
 
 impl RuntimeServicePorts {
+    /// Omit the physical owned-CPU service. NeverYield embeddings execute
+    /// supported kernels inline; cooperative native hosts require a CPU service.
+    pub fn without_blocking_cpu(mut self) -> Self {
+        self.blocking_cpu = None;
+        self
+    }
+
     pub fn with_blocking_cpu(
         mut self,
         service: Rc<dyn crate::execution::RuntimeBlockingCpuService>,

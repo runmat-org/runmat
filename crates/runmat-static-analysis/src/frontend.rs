@@ -25,6 +25,8 @@ pub enum ResolutionState {
 pub struct ResolutionEvidence {
     pub name: String,
     pub span: Span,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<runmat_types::ProgramSourceId>,
     pub state: ResolutionState,
     pub reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -430,6 +432,7 @@ fn call_resolution_diagnostics(
         if !matches!(call.callee, HirCallableRef::Unresolved(_)) {
             if let Some(definition) = catalog_definition(source_catalog, &name) {
                 evidence.push(ResolutionEvidence {
+                    source_id: call.source,
                     name,
                     span: call.span,
                     state: ResolutionState::Resolved,
@@ -447,6 +450,7 @@ fn call_resolution_diagnostics(
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             runtime_dependent = true;
             evidence.push(ResolutionEvidence {
+                source_id: call.source,
                 name,
                 span: call.span,
                 state: ResolutionState::RuntimeDependent,
@@ -476,6 +480,7 @@ fn call_resolution_diagnostics(
         if let Some(effect) = causal_effect {
             runtime_dependent = true;
             evidence.push(ResolutionEvidence {
+                source_id: call.source,
                 name: name.clone(),
                 span: call.span,
                 state: ResolutionState::RuntimeDependent,
@@ -515,6 +520,7 @@ fn call_resolution_diagnostics(
             );
         } else {
             evidence.push(ResolutionEvidence {
+                source_id: call.source,
                 name: name.clone(),
                 span: call.span,
                 state: ResolutionState::Unresolved,
@@ -557,6 +563,7 @@ fn call_resolution_diagnostics(
         {
             runtime_dependent = true;
             evidence.push(ResolutionEvidence {
+                source_id: handle.source,
                 name: name.clone(),
                 span: handle.span,
                 state: ResolutionState::RuntimeDependent,
@@ -582,6 +589,7 @@ fn call_resolution_diagnostics(
             );
         } else {
             evidence.push(ResolutionEvidence {
+                source_id: handle.source,
                 name: name.clone(),
                 span: handle.span,
                 state: ResolutionState::Unresolved,
@@ -828,6 +836,7 @@ mod tests {
         assert_eq!(
             analysis.resolution,
             vec![ResolutionEvidence {
+                source_id: Some(runmat_types::ProgramSourceId(0)),
                 name: "helper".into(),
                 span: analysis.resolution[0].span,
                 state: ResolutionState::Resolved,

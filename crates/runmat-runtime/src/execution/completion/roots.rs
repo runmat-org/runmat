@@ -181,6 +181,9 @@ impl RetainedValueRoots {
 }
 
 impl RootedValueHandles {
+    pub(crate) fn into_prepared_lease(self) -> PreparedRootLease {
+        self._roots
+    }
     pub(crate) fn from_prepared(_roots: PreparedRootLease) -> Self {
         Self { _roots }
     }
@@ -228,12 +231,26 @@ impl RootedValueHandles {
         values: impl Iterator<Item = &'a Value> + Clone,
         runtime: &RuntimeContext,
     ) -> Result<Self, RootedValueAdmissionError> {
+        Self::for_values_and_handles_iterator_in_context(values, std::iter::empty(), runtime)
+    }
+
+    /// Native model candidates retain their real direct GC edges before a
+    /// claimed native/object header exists. The same canonical planner and
+    /// trace workspace protect borrowed Values and handles as one root lease.
+    pub(crate) fn for_values_and_handles_iterator_in_context<'a>(
+        values: impl Iterator<Item = &'a Value> + Clone,
+        handles: impl Iterator<Item = runmat_gc::GcHandle> + Clone,
+        runtime: &RuntimeContext,
+    ) -> Result<Self, RootedValueAdmissionError> {
         let Some(scratch) = HostAllocationReceipt::dynamic_trace_scratch(runtime)? else {
-            return Self::for_traced(&ValuesIterator(values))
+            return Self::for_traced(&ValuesAndHandlesIterator(values, handles))
                 .map_err(RootedValueAdmissionError::Gc);
         };
         let mut workspace = ValueTraceWorkspace::admitted(&scratch);
         let mut trace = |tracer: &mut dyn Tracer| {
+            for handle in handles.clone() {
+                tracer.mark(handle);
+            }
             for value in values.clone() {
                 workspace.try_trace(value, tracer)?;
             }
@@ -290,6 +307,13 @@ impl RootedValueHandles {
         Self::for_traced(&ValuesIterator(values))
     }
 
+    pub(crate) fn for_values_and_handles_iterator_unbounded<'a>(
+        values: impl Iterator<Item = &'a Value> + Clone,
+        handles: impl Iterator<Item = runmat_gc::GcHandle> + Clone,
+    ) -> Result<Self, GcError> {
+        Self::for_traced(&ValuesAndHandlesIterator(values, handles))
+    }
+
     pub(crate) fn for_traced(value: &impl Trace) -> Result<Self, GcError> {
         let plan = PreparedRootPlan::for_traced(value).map_err(root_admission_error)?;
         let roots = plan
@@ -304,6 +328,20 @@ impl RootedValueHandles {
 }
 
 struct ValuesIterator<I>(I);
+
+struct ValuesAndHandlesIterator<I, H>(I, H);
+impl<'a, I, H> Trace for ValuesAndHandlesIterator<I, H>
+where
+    I: Iterator<Item = &'a Value> + Clone,
+    H: Iterator<Item = runmat_gc::GcHandle> + Clone,
+{
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for handle in self.1.clone() {
+            tracer.mark(handle);
+        }
+        ValuesIterator(self.0.clone()).trace(tracer);
+    }
+}
 
 impl<'a, I: Iterator<Item = &'a Value> + Clone> Trace for ValuesIterator<I> {
     fn trace(&self, tracer: &mut dyn Tracer) {

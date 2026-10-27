@@ -1,5 +1,6 @@
 use super::*;
 mod dependencies;
+mod surrogate;
 
 async fn run(
     session: &mut RunMatSession,

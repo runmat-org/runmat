@@ -1,5 +1,5 @@
 //! Project the canonical callback selector onto one executable's exact owners.
-use runmat_runtime::call::descriptor::{CallableTarget, FunctionNameResolver, RepeatableCallable};
+use runmat_runtime::call::descriptor::{CallableTarget, RepeatableCallable};
 use runmat_runtime::context::RuntimeContext;
 use runmat_runtime::execution::RootedValue;
 use runmat_runtime::RuntimeError;
@@ -16,7 +16,7 @@ pub(crate) fn select_owned(
     registry: &runmat_vm::FunctionRegistry,
     callback: RootedValue,
 ) -> Result<(RepeatableCallable, runmat_hir::FunctionId), RuntimeError> {
-    let selected = select(runtime, registry, callback.clone())?;
+    let selected = crate::callable_selection::select(runtime, registry, callback.clone())?;
     let function = owned_function(unit, registry, selected.selected_target()).ok_or_else(|| {
         runmat_runtime::runtime_error::semantic_error(
             "RunMat:UndefinedExecutableProcedure",
@@ -26,7 +26,7 @@ pub(crate) fn select_owned(
     let Some(callback) = normalization::normalize(runtime, registry, callback, function)? else {
         return Ok((selected, function));
     };
-    let normalized = select(runtime, registry, callback)?;
+    let normalized = crate::callable_selection::select(runtime, registry, callback)?;
     if owned_function(unit, registry, normalized.selected_target()) != Some(function) {
         return Err(runmat_runtime::runtime_error::semantic_error(
             "UnavailableBoundFunction",
@@ -34,28 +34,6 @@ pub(crate) fn select_owned(
         ));
     }
     Ok((normalized, function))
-}
-
-struct UnitResolver<'a>(&'a runmat_vm::FunctionRegistry);
-
-impl FunctionNameResolver for UnitResolver<'_> {
-    fn resolve_function(&self, name: &str) -> Option<runmat_types::FunctionId> {
-        self.0
-            .resolve_name(name)
-            .map(|id| runmat_types::FunctionId(id.0))
-    }
-
-    fn resolve_bound_function(&self, name: &str) -> Option<runmat_value::BoundFunctionBinding> {
-        self.0.exact_bound_binding(self.0.resolve_name(name)?)
-    }
-}
-
-pub(crate) fn select(
-    runtime: &RuntimeContext,
-    registry: &runmat_vm::FunctionRegistry,
-    callback: RootedValue,
-) -> Result<RepeatableCallable, RuntimeError> {
-    RepeatableCallable::select_rooted(Some(runtime), callback, &UnitResolver(registry))
 }
 
 /// Names select source callbacks only through the canonical resolver above.

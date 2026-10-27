@@ -15,8 +15,8 @@ use super::{CpuCooperationPolicy, ExecutionServiceError};
 #[path = "services/deferred_program.rs"]
 mod deferred_program;
 pub use deferred_program::{
-    DeferredGraphCapture, DeferredGraphProgram, DeferredGraphSnapshot, DeferredProgram,
-    GraphResultReceipt,
+    AdmittedCallableReentry, DeferredGraphCapture, DeferredGraphProgram, DeferredGraphSnapshot,
+    DeferredProgram, DeferredSelectedCodeCapture, GraphResultReceipt, RestoredCallableGraph,
 };
 
 static NEXT_SERVICE_NONCE: AtomicU64 = AtomicU64::new(1);
@@ -159,15 +159,24 @@ pub enum AwaitAction {
     Passthrough(Value),
     /// The host has started the operation but cannot complete it synchronously.
     ///
-    /// The VM yields once and polls `begin_await` again with this value. This
-    /// keeps browser workers non-blocking while native adapters may continue
-    /// to use an efficient blocking completion primitive.
+    /// The caller waits through `wait_pending` before polling `begin_await`
+    /// again. Adapters can await an actual completion event without keeping
+    /// an executor's microtask queue permanently runnable.
     Pending(Value),
     ExecuteFuture {
         handle: super::FutureExecutionHandle,
         call: Box<DeferredCall>,
     },
     Completed(super::RootedValueSequence),
+}
+
+/// Service-local result ownership. Handles alone cannot turn a public,
+/// refetchable Future into an internal numerical temporary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskRetention {
+    Refetchable,
+    CallbackBatch,
+    ReleasingCallbackBatch,
 }
 
 pub trait RuntimeExecutionServices {
@@ -223,6 +232,47 @@ pub trait RuntimeExecutionServices {
         } else {
             Err(ExecutionServiceError::ForeignScope)
         }
+    }
+    /// Atomic worker publication and task-change wake, not a serial pool.
+    fn supports_callback_batches(&self) -> bool {
+        false
+    }
+    fn submit_callback_batch(
+        &self,
+        _calls: Vec<DeferredCall>,
+        _pool: &PoolHandle,
+        _cancellation: runmat_execution::cancellation::CancellationToken,
+    ) -> Result<Vec<TaskHandle>, ExecutionServiceError> {
+        Err(ExecutionServiceError::Infrastructure(
+            "worker callback batches unavailable".into(),
+        ))
+    }
+    /// Release only internal batch handles; pending cancellation keeps its
+    /// exact receipt until verified physical retirement. Public Futures retain
+    /// their ordinary repeated-fetch semantics.
+    fn release_callback_batch(&self, _tasks: &[TaskHandle]) -> Result<(), ExecutionServiceError> {
+        Err(ExecutionServiceError::Infrastructure(
+            "worker callback retirement unavailable".into(),
+        ))
+    }
+    fn wait_task_change(
+        &self,
+        _task: &TaskHandle,
+    ) -> crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+        Box::pin(async {
+            Err(ExecutionServiceError::Infrastructure(
+                "worker task-change wake unavailable".into(),
+            ))
+        })
+    }
+    /// Wait for progress on the exact value returned by `AwaitAction::Pending`.
+    /// Event-backed adapters return a wake future. `None` preserves cooperative
+    /// polling for handles whose progress is driven by their caller.
+    fn wait_pending(
+        &self,
+        _value: &Value,
+    ) -> Option<crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>>> {
+        None
     }
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError>;
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError>;
@@ -337,6 +387,13 @@ struct ServiceState {
 pub struct RuntimeExecutionService {
     scope_id: ExecutionScopeId,
     state: Mutex<ServiceState>,
+    cpu_turn: Option<CpuTaskTurn>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CpuTaskTurn {
+    policy: CpuCooperationPolicy,
+    schedule: fn() -> crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>>,
 }
 
 impl RuntimeExecutionService {
@@ -344,6 +401,7 @@ impl RuntimeExecutionService {
         let nonce = NEXT_SERVICE_NONCE.fetch_add(1, Ordering::Relaxed);
         Self {
             scope_id: ExecutionScopeId::derive(&[&nonce.to_be_bytes()]),
+            cpu_turn: None,
             state: Mutex::new(ServiceState {
                 next_future: 0,
                 next_task: 0,
@@ -354,6 +412,20 @@ impl RuntimeExecutionService {
                 pool_open: false,
             }),
         }
+    }
+
+    /// Select a real host task-turn ingress without composing another pool or
+    /// scheduler. Ordinary serial execution retains its NeverYield default.
+    pub fn with_cpu_task_turn(
+        mut self,
+        policy: CpuCooperationPolicy,
+        turn: fn() -> crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>>,
+    ) -> Self {
+        self.cpu_turn = Some(CpuTaskTurn {
+            policy,
+            schedule: turn,
+        });
+        self
     }
 
     fn validate_scope(&self, scope_id: ExecutionScopeId) -> Result<(), ExecutionServiceError> {
@@ -385,6 +457,25 @@ impl Default for RuntimeExecutionService {
 }
 
 impl RuntimeExecutionServices for RuntimeExecutionService {
+    fn cpu_cooperation_policy(&self) -> CpuCooperationPolicy {
+        self.cpu_turn
+            .as_ref()
+            .map_or(CpuCooperationPolicy::NeverYield, |turn| turn.policy)
+    }
+
+    fn cooperate_cpu(
+        &self,
+    ) -> crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+        match self.cpu_turn {
+            Some(turn) => (turn.schedule)(),
+            None => Box::pin(async {
+                Err(ExecutionServiceError::Infrastructure(
+                    "CPU task-turn scheduling is unavailable in this execution adapter".into(),
+                ))
+            }),
+        }
+    }
+
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         let state = self.state.try_lock().ok()?;
         for future in state.futures.values() {

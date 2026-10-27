@@ -13,13 +13,18 @@ use crate::context::host_allocation::{
 use crate::context::RuntimeContext;
 use runmat_value::{ComplexElement, NumericDType, SparseTensor};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SparseOperatorError {
+    #[error("sparse operator requires a supported numeric class")]
     UnsupportedClass,
+    #[error("invalid sparse operator topology: {0}")]
     InvalidTopology(&'static str),
+    #[error("sparse operator dimensions do not match")]
     DimensionMismatch,
+    #[error("sparse operator extent overflows")]
     Overflow,
-    Admission(HostAllocationError),
+    #[error("sparse operator admission failed: {0}")]
+    Admission(#[source] HostAllocationError),
 }
 
 impl From<HostAllocationError> for SparseOperatorError {
@@ -39,7 +44,7 @@ pub struct CscOperator<'a, T> {
     values: &'a [T],
 }
 
-impl<T> CscOperator<'_, T> {
+impl<'a, T> CscOperator<'a, T> {
     pub fn rows(&self) -> usize {
         self.rows
     }
@@ -57,7 +62,7 @@ impl<T> CscOperator<'_, T> {
     }
 
     /// Borrow one validated column without copying CSC topology or values.
-    pub(in crate::builtins::math::linalg::ops) fn column(&self, column: usize) -> (&[usize], &[T]) {
+    pub(in crate::builtins::math) fn column(&self, column: usize) -> (&'a [usize], &'a [T]) {
         let range = self.col_ptrs[column]..self.col_ptrs[column + 1];
         (&self.row_indices[range.clone()], &self.values[range])
     }

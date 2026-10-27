@@ -33,6 +33,7 @@ fn validate_robust_weight(value: &Value) -> BuiltinResult<Value> {
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
                 | Value::BoundFunctionHandle(_)
+                | Value::ScopedFunctionHandle(_)
         )
     {
         return Ok(value.clone());

@@ -268,7 +268,7 @@ fn series_result_type(
 
 fn square_numeric_type(value: &FeaType) -> Option<FeaType> {
     match value {
-        FeaType::Quantity(dimension) => Some(FeaType::Quantity((dimension.power(2)?).into())),
+        FeaType::Quantity(dimension) => Some(FeaType::Quantity(dimension.power(2)?)),
         FeaType::Integer | FeaType::Real | FeaType::Complex => Some(value.clone()),
         FeaType::Vector { element, length } => Some(FeaType::Vector {
             element: Box::new(square_numeric_type(element)?),
@@ -394,9 +394,9 @@ fn scalar_dimension(value: &FeaType) -> Option<runmat_types::physical::DynamicDi
 
 fn scale_numeric_type(value: &FeaType, measure: crate::PhysicalDimension) -> Option<FeaType> {
     match value {
-        FeaType::Quantity(dimension) => Some(FeaType::Quantity(
-            (dimension.multiply(measure.into())?).into(),
-        )),
+        FeaType::Quantity(dimension) => {
+            Some(FeaType::Quantity(dimension.multiply(measure.into())?))
+        }
         FeaType::Integer | FeaType::Real | FeaType::Complex => {
             Some(FeaType::Quantity((measure).into()))
         }

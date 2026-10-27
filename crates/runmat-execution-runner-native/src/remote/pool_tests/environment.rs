@@ -77,9 +77,19 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
                 task: submission(scope_id, pool_id, task_id, artifact_id).request,
             };
             scheduling.task.environment = program.environment.clone();
+            let mut attempt_program = program.clone();
+            attempt_program.assignment = Some(runmat_execution::ProgramExecutionAssignment {
+                scope_id,
+                pool_id,
+                task_id,
+                attempt_id: scheduling.id,
+                worker_id: worker.id,
+                backend: runmat_execution::PoolBackend::Remote,
+                resources: scheduling.resource_assignment.clone(),
+            });
             if ordinal == 1 {
-                for substitution in 0..3 {
-                    let mut rejected_program = program.clone();
+                for substitution in 0..10 {
+                    let mut rejected_program = attempt_program.clone();
                     let mut rejected_scheduling = scheduling.clone();
                     match substitution {
                         0 => {
@@ -96,7 +106,37 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
                             rejected_scheduling.task.environment =
                                 rejected_program.environment.clone();
                         }
-                        _ => rejected_scheduling.task.resources.memory_bytes = 1,
+                        2 => rejected_scheduling.task.resources.memory_bytes = 1,
+                        3 => rejected_program.assignment = None,
+                        4 => rejected_program
+                            .arguments
+                            .push(ValuePayload::Inline(Box::new(InlineValue::String(
+                                "substituted".into(),
+                            )))),
+                        5 => {
+                            rejected_scheduling.task.callable.program =
+                                ProgramCallable::builtin("sin").unwrap()
+                        }
+                        6 => {
+                            rejected_scheduling.task.executable =
+                                runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                                    ArtifactId::derive(&[b"quic-environment-task"]),
+                                )
+                        }
+                        7 => rejected_scheduling.task.outputs.requested_outputs = 0,
+                        8 => {
+                            rejected_scheduling
+                                .task
+                                .host
+                                .capabilities
+                                .0
+                                .insert(runmat_types::CapabilityRequirement::NativeCode);
+                        }
+                        _ => {
+                            rejected_scheduling.task.host.permitted_trust_tiers = BTreeSet::from([
+                                runmat_execution::security::ExecutionTrustTier::HostedOrdinary,
+                            ])
+                        }
                     }
                     let rejected = RemoteAttempt {
                         scheduling: rejected_scheduling,
@@ -110,7 +150,7 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
             let report = channel
                 .execute(RemoteAttempt {
                     scheduling,
-                    program: super::super::RemoteAttemptProgram::Direct(Box::new(program.clone())),
+                    program: super::super::RemoteAttemptProgram::Direct(Box::new(attempt_program)),
                 })
                 .await
                 .unwrap();

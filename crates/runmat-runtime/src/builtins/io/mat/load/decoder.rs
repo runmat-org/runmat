@@ -158,7 +158,7 @@ pub(super) async fn read_mat_reader_cooperative<R: Read>(
         .collect()
 }
 
-pub(super) async fn read_mat_arrays_cooperative<R: Read>(
+pub(in crate::builtins::io::mat) async fn read_mat_arrays_cooperative<R: Read>(
     reader: &mut R,
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, MatArray)>> {

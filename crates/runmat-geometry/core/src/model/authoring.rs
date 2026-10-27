@@ -24,7 +24,7 @@ pub struct GeometryDefinition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum GeometryDefinitionSource {
-    Imported(ImportedGeometryDefinition),
+    Imported(Box<ImportedGeometryDefinition>),
     Constructed(GeometryFeatureGraph),
     Derived(DerivedGeometryDefinition),
     Generated(GeneratedGeometryDefinition),
@@ -37,6 +37,8 @@ pub struct ImportedGeometryDefinition {
     /// or part of the exact-kernel materialization wire contract.
     #[serde(skip)]
     pub preview_extent_m: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub named_selections: Option<super::GeometryNamedSelections>,
     pub logical_path: String,
     pub format: GeometrySourceFormat,
     pub authored_units: Option<LengthUnit>,
@@ -439,8 +441,17 @@ impl CadParameterDefinition {
 
 impl ImportedGeometryDefinition {
     fn validate(&self) -> Result<(), GeometryContractError> {
-        if self.preview_extent_m.is_some_and(|extent| extent.iter().any(|x| !x.is_finite() || *x <= 0.0)) {
-            return Err(GeometryContractError::invalid("geometry preview extent", "expected finite positive metres"));
+        if self
+            .preview_extent_m
+            .is_some_and(|extent| extent.iter().any(|x| !x.is_finite() || *x <= 0.0))
+        {
+            return Err(GeometryContractError::invalid(
+                "geometry preview extent",
+                "expected finite positive metres",
+            ));
+        }
+        if let Some(selections) = &self.named_selections {
+            selections.validate_source(self.content_digest)?;
         }
         token("geometry import path", &self.logical_path)?;
         if !self.format.is_exact() {
@@ -527,10 +538,12 @@ impl GeneratedGeometryDefinition {
 impl GeometryRegionSelector {
     pub(crate) fn validate(&self) -> Result<(), GeometryContractError> {
         match self {
-            Self::Name(value)
-            | Self::Tag(value)
-            | Self::GeneratedOutput(value) => token("region selector", value),
-            Self::PersistentId(value) => super::PersistentEntityId::validate_analysis_selection_id(value),
+            Self::Name(value) | Self::Tag(value) | Self::GeneratedOutput(value) => {
+                token("region selector", value)
+            }
+            Self::PersistentId(value) => {
+                super::PersistentEntityId::validate_analysis_selection_id(value)
+            }
             Self::FeatureResult(reference) | Self::BoundaryIntroducedBy(reference) => {
                 token("region feature", &reference.0)
             }

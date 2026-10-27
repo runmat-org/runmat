@@ -70,7 +70,8 @@ impl OutputContract {
 
 pub(super) fn validate(value: &Value) -> crate::BuiltinResult<()> {
     match value {
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

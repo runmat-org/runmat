@@ -5,6 +5,8 @@ mod command;
 mod driver_loop;
 mod event;
 mod reports;
+mod retirement;
+mod timers;
 mod scheduling;
 mod snapshot;
 mod state;

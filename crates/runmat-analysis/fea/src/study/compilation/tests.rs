@@ -213,7 +213,9 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
                 module_path: "project/main.fea".into(),
                 geometry_id: "part".into(),
             },
-            source: GeometryDefinitionSource::Imported(ImportedGeometryDefinition {preview_extent_m: None, 
+            source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
+                preview_extent_m: None,
+                named_selections: None,
                 unit_evidence: document.source.unit_evidence.clone(),
                 logical_path: "project/part.brep".into(),
                 format: document.source.format,
@@ -226,8 +228,7 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
                     ..Default::default()
                 },
                 exchange: None,
-                shared_interfaces: false,
-            }),
+                shared_interfaces: false,            })),
             bindings: Default::default(),
         },
         mesh: AuthoredMeshRef {

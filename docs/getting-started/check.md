@@ -113,6 +113,8 @@ runmat check main.m
 ```
 The result is clean. Source roots make cross-file definitions available during analysis; they are not instructions to execute every script under those roots. See [Projects](/docs/runtime/getting-started/projects) for packages, classes, dependencies, and entrypoints.
 
+Cross-file diagnostics preserve the location of each source. When known inputs reveal a type or matrix-size error in a straight-line helper, the diagnostic points to the caller and includes the helper's operation as a related location. Unknown inputs, recursive or conditional callees, and source units that cannot be safely combined retain partial type and shape coverage. Verbose and JSON output identify incomplete analysis; a clean check is not a guarantee about every execution path.
+
 ### Runtime path changes
 
 If your project has no configured source roots and `dynamic.m` adds the helper's directory at runtime:
@@ -260,6 +262,10 @@ Selected fields from the clean result (other fields omitted):
 Here, `types` and `shapes` are `partial`: RunMat checks the type and matrix-size rules it can establish, but coverage is not exhaustive. It can detect the matrix multiplication error shown above without establishing every type or array dimension. A `partial` status does not itself make the check fail.
 
 Each diagnostic includes its severity, code, message, and source location, with additional notes or help when available. Source locations include byte offsets and line/column coordinates. Keep stderr separate when parsing JSON.
+
+JSON diagnostic locations include `source_id` and `path`, including related locations in companion files. If source text is unavailable, the location retains its byte offsets and source identity, while its path and line/column coordinates are `null`.
+
+The `sources` array maps source IDs to paths without embedding file contents. Resolution records use the same source IDs. `analysis_incomplete_sources`, `call_context_budget_exhausted`, and `call_context_precision_withheld` describe source-composition or call-analysis limits.
 
 ### Preserve the exit status in CI
 

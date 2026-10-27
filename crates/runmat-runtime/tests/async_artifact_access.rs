@@ -75,6 +75,7 @@ fn fixture() -> AnalysisRunResult {
             quality_policy: "exploratory".into(),
             fallback_events: vec![],
             effective_memory_ceiling_bytes: None,
+            static_solve_path: None,
         },
     }
 }

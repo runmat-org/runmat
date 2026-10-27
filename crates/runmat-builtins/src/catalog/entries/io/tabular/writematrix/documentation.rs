@@ -10,6 +10,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["readmatrix", "writecell", "fprintf", "gpuArray", "gather", "csvread", "csvwrite", "dlmread", "dlmwrite"],
     sections: &[
         BuiltinDocumentationSection { heading: "Data and text format", paragraphs: &[
+            "Delimited numeric text uses general formatting with 15 significant digits for double storage and 7 for single storage. Logical fields use 1 or 0; typed integers retain exact decimal values.",
             "Accepts real numeric, logical, or string arrays up to two dimensions; trailing singleton dimensions are ignored. Heterogeneous data requires `writecell`. Sparse and complex inputs are rejected.",
             "Default delimiters are comma for `.csv`, tab for `.tsv`, whitespace for `.txt` and `.dat`, and comma for other extensions. `'Delimiter', value` overrides this choice.",
             "`'WriteMode'` accepts `'overwrite'` (default) or `'append'`. Overwrite truncates existing files; append writes new rows without extra delimiters.",

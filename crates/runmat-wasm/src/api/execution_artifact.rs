@@ -427,19 +427,61 @@ mod tests {
     use super::validate_interpreter_program_payload;
 
     #[wasm_bindgen_test]
-    fn browser_bundle_admission_matches_interpreter_revision_contract() {
-        let current = include_bytes!(
-            "../../../runmat-vm/tests/fixtures/interpreter-program-current.artifact"
+    async fn browser_bundle_admission_matches_interpreter_revision_contract() {
+        let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
+            runmat_filesystem::MemoryFsProvider::new(),
+        ));
+        runmat_runtime::builtins::wasm_registry::register_all();
+        let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+        let unit = session
+            .compile_executable_unit(
+                runmat_core::ExecutableSource::new(
+                    "browser-admission",
+                    "admissionProbe.m",
+                    "function y = admissionProbe(x); y = helper(x) + 1; end\nfunction y = helper(x); y = x * 2; end\n",
+                ),
+                None,
+            )
+            .await
+            .expect("compile the actual current interpreter producer");
+        let envelope = unit.portable_envelope().unwrap();
+        let registry: runmat_vm::FunctionRegistry = serde_json::from_slice(
+            &envelope
+                .component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
+                .expect("the compiled product retains its functions")
+                .bytes,
+        )
+        .unwrap();
+        assert!(registry.functions.len() >= 2);
+        let current = runmat_vm::encode_interpreter_program_v2(&registry)
+            .expect("encode the current interpreter producer");
+        let admission = validate_interpreter_program_payload(&current);
+        assert!(
+            admission.is_ok(),
+            "current program admission: {admission:?}"
         );
-        assert!(validate_interpreter_program_payload(current).is_ok());
 
-        let stale = include_bytes!(
-            "../../../runmat-vm/tests/fixtures/interpreter-program-registry-4.artifact"
-        );
-        let error = validate_interpreter_program_payload(stale).unwrap_err();
-        assert_eq!(
-            error.as_string().as_deref(),
-            Some("unsupported function registry schema revision: actual 4, expected 5")
-        );
+        // Preserve the historical bytes; both fixtures predate the current
+        // bytecode schema, which admission checks before the registry schema.
+        for historical in [
+            include_bytes!(
+                "../../../runmat-vm/tests/fixtures/interpreter-program-current.artifact"
+            )
+            .as_slice(),
+            include_bytes!(
+                "../../../runmat-vm/tests/fixtures/interpreter-program-registry-4.artifact"
+            )
+            .as_slice(),
+        ] {
+            assert_eq!(
+                validate_interpreter_program_payload(historical)
+                    .unwrap_err()
+                    .as_string(),
+                Some(format!(
+                    "unsupported bytecode schema revision: actual 7, expected {}",
+                    runmat_vm::BYTECODE_SCHEMA_VERSION
+                ))
+            );
+        }
     }
 }

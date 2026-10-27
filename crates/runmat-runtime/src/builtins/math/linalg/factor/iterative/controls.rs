@@ -74,7 +74,8 @@ pub(in crate::builtins::math::linalg::factor) fn coefficient_geometry(
 pub(in crate::builtins::math::linalg::factor) fn is_callable(value: &Value) -> bool {
     matches!(
         value,
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+            | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle(_)

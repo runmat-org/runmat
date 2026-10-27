@@ -1,8 +1,17 @@
 use super::*;
 
+mod character;
+mod logical;
+mod sparse;
+use character::character_numeric_products;
+use logical::borrowed_logical_sparse_products;
+use sparse::sparse_storage_products;
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn matrix_product_matches_expected() {
+    sparse_storage_products();
+    character_numeric_products();
     let a = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
     let b = Tensor::new(vec![7.0, 9.0, 11.0, 8.0, 10.0, 12.0], vec![3, 2]).unwrap();
     let result = mtimes_builtin(Value::Tensor(a), Value::Tensor(b)).expect("mtimes");
@@ -77,6 +86,7 @@ fn dot_product_returns_scalar() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn logical_matrix_product() {
+    borrowed_logical_sparse_products();
     let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
     let matrix = Tensor::new(vec![2.0, 3.0, 4.0, 5.0], vec![2, 2]).unwrap();
     let result =

@@ -61,9 +61,8 @@ pub(in crate::builtins::table) fn table_delimited_text(
         lines.push(
             values
                 .map(|value| {
-                    row_value(value, row).and_then(|cell| {
-                        cell_to_text(&cell).map(|text| escape_delimited_field(&text, delimiter))
-                    })
+                    delimited_row_text(value, row)
+                        .map(|text| escape_delimited_field(&text, delimiter))
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?
                 .join(delimiter),
@@ -126,6 +125,35 @@ fn table_utf16_error(context: &str, error: runmat_value::Utf16DecodeError) -> Ru
     )
 }
 
+// Text export must select precision from the original storage, before the
+// generic table2cell row projection widens a one-column single to a double.
+fn delimited_row_text(value: &Value, row: usize) -> BuiltinResult<String> {
+    if let Value::Tensor(tensor) = value {
+        if tensor.cols() == 1 {
+            return tensor
+                .numeric_value_at(row)
+                .map(crate::builtins::common::format::format_delimited_numeric)
+                .ok_or_else(|| invalid_index("table2cell: numeric row out of bounds"));
+        }
+    }
+    row_value(value, row).and_then(|cell| delimited_cell_text(&cell))
+}
+
+fn delimited_cell_text(value: &Value) -> BuiltinResult<String> {
+    use crate::builtins::common::format::format_delimited_numeric;
+    Ok(match value {
+        Value::Num(value) => format_delimited_numeric(runmat_value::NumericScalar::F64(*value)),
+        Value::Int(value) => value.decimal_string(),
+        Value::Bool(value) => if *value { "1" } else { "0" }.to_string(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => format_delimited_numeric(
+            tensor
+                .numeric_value_at(0)
+                .expect("one-element numeric storage"),
+        ),
+        _ => return cell_to_text(value),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +167,28 @@ mod tests {
             cell_to_text(&Value::Tensor(tensor)).unwrap(),
             "18446744073709551615"
         );
+    }
+
+    #[test]
+    fn delimited_rows_keep_single_precision_logical_encoding_and_exact_integers() {
+        let single = Value::Tensor(Tensor::from_f32(vec![1.2345679, 1e-8], vec![2, 1]).unwrap());
+        assert_eq!(delimited_row_text(&single, 0).unwrap(), "1.234568");
+        assert_eq!(delimited_row_text(&single, 1).unwrap(), "1e-08");
+        assert_eq!(delimited_cell_text(&Value::Bool(true)).unwrap(), "1");
+        assert_eq!(delimited_cell_text(&Value::Bool(false)).unwrap(), "0");
+        assert_eq!(
+            delimited_row_text(
+                &Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap()
+                ),
+                0,
+            )
+            .unwrap(),
+            "18446744073709551615",
+        );
+        // Export policy must not change generic key/table2cell semantics.
+        assert_eq!(cell_to_text(&Value::Bool(true)).unwrap(), "true");
+        assert!(matches!(row_value(&single, 0).unwrap(), Value::Num(_)));
     }
 
     #[test]

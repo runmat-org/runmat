@@ -906,6 +906,7 @@ fn value_kind(value: &Value) -> &'static str {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::ClassRef(_) => "callable",
         Value::MException(_) => "exception",
         Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => "execution-handle",

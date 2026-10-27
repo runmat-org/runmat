@@ -51,7 +51,7 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_) => "FunctionHandle",
-        Value::BoundFunctionHandle(_) => "FunctionHandle",
+        Value::BoundFunctionHandle(_) | Value::ScopedFunctionHandle(_) => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",

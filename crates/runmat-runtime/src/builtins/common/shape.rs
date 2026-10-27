@@ -118,6 +118,12 @@ pub fn stored_dimensions_borrowed(value: &Value) -> ValueDimensions<'_> {
 pub fn value_dimensions_borrowed(value: &Value) -> Result<ValueDimensions<'_>, RuntimeError> {
     match value {
         Value::Object(object) => {
+            if let Some(shape) = object.optimization_model_shape() {
+                return Ok(ValueDimensions::Stored(shape));
+            }
+            if let Some(shape) = object.optimization_variable_shape() {
+                return Ok(ValueDimensions::Stored(shape));
+            }
             match runmat_builtins::standard_class_array_shape(object.class_name()) {
                 Some(declaration) => object::dimensions(object, declaration),
                 None => Ok(ValueDimensions::Inline([1, 1])),

@@ -62,7 +62,7 @@ pub(super) async fn prepare_input_materializations(
             signal,
             compiled.revision,
             compiled.callable,
-            compiled.executable_source_digest,
+            compiled.compiled_binding,
             &compiled.function,
             &BTreeSet::new(),
         )
@@ -111,7 +111,7 @@ pub(super) async fn prepare_input_materializations(
             spectrum,
             compiled.revision,
             compiled.callable,
-            compiled.executable_source_digest,
+            compiled.compiled_binding,
             &compiled.function,
             &BTreeSet::new(),
         )
@@ -158,7 +158,7 @@ pub(super) async fn prepare_input_materializations(
             spectrum,
             compiled.revision,
             compiled.callable,
-            compiled.executable_source_digest,
+            compiled.compiled_binding,
             &compiled.function,
             &BTreeSet::new(),
         )

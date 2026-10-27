@@ -36,7 +36,8 @@ pub struct ExecutableIdentity {
 }
 
 impl ExecutableIdentity {
-    pub(crate) fn validate(&self) -> Result<(), ContractError> {
+    /// Validate the canonical identity fields without hashing executable payloads.
+    pub fn validate(&self) -> Result<(), ContractError> {
         validate_identity("executable.root_package", &self.root_package, 256)?;
         validate_identity("executable.entrypoint", &self.entrypoint, 512)?;
         self.validated_entrypoint()?;

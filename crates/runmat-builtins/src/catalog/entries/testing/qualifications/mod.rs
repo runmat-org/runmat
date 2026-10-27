@@ -194,7 +194,9 @@ const fn entry(
                 BuiltinAsyncBehavior::NeverSuspends => {
                     &[EffectKind::EnvironmentWrite, EffectKind::MayThrow]
                 }
-                BuiltinAsyncBehavior::MaySuspend | BuiltinAsyncBehavior::RequiresAsyncRuntime => &[
+                BuiltinAsyncBehavior::MaySuspend
+                | BuiltinAsyncBehavior::MaySuspendLocally
+                | BuiltinAsyncBehavior::RequiresAsyncRuntime => &[
                     EffectKind::EnvironmentWrite,
                     EffectKind::MaySuspend,
                     EffectKind::MayThrow,

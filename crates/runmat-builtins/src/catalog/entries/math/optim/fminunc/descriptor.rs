@@ -64,10 +64,10 @@ macro_rules! output_hessian {
     () => {
         BuiltinParamDescriptor {
             name: "hessian",
-            ty: BuiltinParamType::NumericArray,
+            ty: BuiltinParamType::Any,
             arity: BuiltinParamArity::Required,
             default: None,
-            description: "Final approximate Hessian matrix.",
+            description: "QN approximate Hessian ([] for L-BFGS), last constructed TR model or original Hinfo, or [] when no TR model was constructed.",
         }
     };
 }
@@ -229,7 +229,7 @@ const FMINUNC_INTEGER_INITIAL_INPUTS: [BuiltinIntegerInputCapability; 1] =
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Typed-integer initial guesses are independently gated and every element must convert exactly to binary64.",
     }];
-const FMINUNC_INTEGER_CALLBACK_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+const FMINUNC_INTEGER_CALLBACK_INPUTS: [BuiltinIntegerInputCapability; 4] = [
     BuiltinIntegerInputCapability {
         name: "objective result",
         classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
@@ -244,24 +244,61 @@ const FMINUNC_INTEGER_CALLBACK_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Typed-integer supplied gradients are gated independently and every element must convert exactly to binary64.",
     },
+    BuiltinIntegerInputCapability {
+        name: "Hessian result",
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer objective Hessians are independently gated and must convert exactly to binary64 before matrix-operator admission.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Hessian product result",
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer multiply outputs are independently gated and each value must convert exactly to binary64. Arbitrary Hinfo is not coerced or walked.",
+    },
+
 ];
-const FMINUNC_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+const FMINUNC_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 5] = [
     BuiltinIntegerInputCapability {
         name: "TolX",
         classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer TolX is independently gated and must convert exactly to a positive binary64 scalar.",
+        notes: "Typed-integer TolX is independently gated and must convert exactly to a nonnegative binary64 scalar.",
     },
     BuiltinIntegerInputCapability {
         name: "TolFun",
         classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer TolFun is independently gated and must convert exactly to a positive binary64 scalar.",
+        notes: "Typed-integer TolFun is independently gated and must convert exactly to a nonnegative binary64 scalar.",
     },
+    BuiltinIntegerInputCapability {
+        name: "OptimalityTolerance",
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer tolerances are gated and must convert exactly to a nonnegative finite double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "FunctionTolerance",
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The active TR function-change tolerance is gated and must convert exactly to a nonnegative finite double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "TolPCG",
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Active typed-integer PCG tolerances are gated and must convert exactly to a positive finite double.",
+    },
+
 ];
-const FMINUNC_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+const FMINUNC_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 4] = [
     BuiltinIntegerInputCapability {
         name: "MaxIter",
         classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
@@ -276,7 +313,23 @@ const FMINUNC_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "Typed-integer evaluation counts are independently gated and decoded exactly through the solver limit.",
     },
+    BuiltinIntegerInputCapability {
+        name: "MaxPCGIter",
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Active typed-integer PCG limits are gated and decoded exactly as positive structural counts.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "PrecondBandWidth",
+        classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "An active finite typed-integer bandwidth is gated and decoded exactly as a nonnegative structural count. Infinity is only the floating direct-solve spelling.",
+    },
+
 ];
+const FMINUNC_INTEGER_PATTERN_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {name:"HessPattern",classes:&crate::catalog::integer::ALL_INTEGER_CLASSES,availability:BuiltinIntegerInputAvailability::RunMatOnly,scalar_double:BuiltinIntegerScalarDoubleRule::NotApplicable,notes:"Active typed-integer structural patterns are extension-gated; zero/nonzero structure is read without requiring a lossy numeric derivative conversion."}];
 const FMINUNC_INTEGER_FLAG_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "SpecifyObjectiveGradient",
@@ -285,7 +338,7 @@ const FMINUNC_INTEGER_FLAG_INPUTS: [BuiltinIntegerInputCapability; 1] =
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "Typed-integer 0 or 1 is a RunMat-only spelling. Documented logical false or true remains accepted in strict compatibility mode.",
     }];
-pub const FMINUNC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+pub const FMINUNC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 6] = [
     BuiltinIntegerCapabilityDescriptor {
         form: "x = fminunc(fun, integer_x0, options)",
         inputs: &FMINUNC_INTEGER_INITIAL_INPUTS,
@@ -297,17 +350,17 @@ pub const FMINUNC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] 
         notes: "Documented x0 is double. Strict compatibility rejects typed integers; RunMat mode admits exact binary64 values and returns the ordinary double x, fval, gradient, and Hessian outputs plus diagnostics.",
     },
     BuiltinIntegerCapabilityDescriptor {
-        form: "fminunc callback returns integer objective or gradient",
+        form: "fminunc callback returns integer objective or derivative data",
         inputs: &FMINUNC_INTEGER_CALLBACK_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Strict compatibility rejects typed callback outputs before provider access. RunMat mode converts exact values to binary64; solver outputs retain their function-specific double and diagnostic classes.",
+        notes: "Strict compatibility rejects typed numeric callback outputs before provider access; opaque Hinfo is preserved as supplied. RunMat mode converts exact values to binary64; solver outputs retain their function-specific double and diagnostic classes.",
     },
     BuiltinIntegerCapabilityDescriptor {
-        form: "fminunc(..., options.TolX=integer, options.TolFun=integer)",
+        form: "fminunc(..., typed-integer step, optimality, function-change or PCG tolerance controls)",
         inputs: &FMINUNC_INTEGER_TOLERANCE_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
@@ -317,7 +370,7 @@ pub const FMINUNC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] 
         notes: "Typed-integer tolerance controls are RunMat-only and do not change output classes.",
     },
     BuiltinIntegerCapabilityDescriptor {
-        form: "fminunc(..., options.MaxIter=integer, options.MaxFunEvals=integer)",
+        form: "fminunc(..., typed-integer iteration, evaluation, PCG or finite-bandwidth controls)",
         inputs: &FMINUNC_INTEGER_COUNT_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
@@ -336,6 +389,7 @@ pub const FMINUNC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] 
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "Only typed-integer 0 or 1 uses this extension. Logical option values are documented and bypass the typed-integer extension gate.",
     },
+    BuiltinIntegerCapabilityDescriptor {form:"fminunc(..., typed-integer HessPattern)",inputs:&FMINUNC_INTEGER_PATTERN_INPUTS,computation_domain:BuiltinIntegerComputationDomain::Structural,output_class:BuiltinIntegerOutputClassRule::FunctionSpecific,overflow:BuiltinIntegerOverflowRule::Error,backend:BuiltinIntegerBackendRule::GatherFallback,overload:BuiltinIntegerOverloadKind::StructuralParameter,notes:"Only an active finite-difference pattern is consumed. Numeric values encode structural zero/nonzero positions, not Hessian coefficients; logical masks remain standard."},
 ];
 
 pub const FMINUNC_INPUT_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
@@ -360,14 +414,21 @@ pub const FMINUNC_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtens
     id: "fminunc-resident-fallback",
     mode: BuiltinExtensionMode::RunMatOnly,
     description:
-        "fminunc with provider-resident numeric input or callback output is a RunMat extension",
+        "fminunc with explicitly GPU-resident numeric input or callback output is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:FminuncResidentExtension"),
 };
-pub const FMINUNC_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+pub const FMINUNC_NUMERICAL_FAILURE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fminunc-numerical-failure-status",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fminunc exitflag -4 returns the last accepted point on numerical line-search or trust-region subproblem failure, without claiming a MATLAB exit status or a local minimum",
+    error_identifier: Some("RunMat:compatibility:FminuncNumericalFailureExtension"),
+};
+pub const FMINUNC_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
     FMINUNC_INPUT_NUMERIC_EXTENSION,
     FMINUNC_CALLBACK_NUMERIC_EXTENSION,
     FMINUNC_OPTION_EXTENSION,
     FMINUNC_RESIDENT_EXTENSION,
+    FMINUNC_NUMERICAL_FAILURE_EXTENSION,
 ];
 
 pub const FMINUNC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {

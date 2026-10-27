@@ -356,7 +356,8 @@ impl Request {
         })?;
         if matches!(
             a,
-            Value::FunctionHandle(_)
+            Value::ScopedFunctionHandle(_)
+                | Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
                 | Value::BoundFunctionHandle(_)

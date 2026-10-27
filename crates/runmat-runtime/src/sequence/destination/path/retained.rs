@@ -64,7 +64,7 @@ fn visit_components(components: &[ObjectIndexComponent], visitor: &mut impl FnMu
     for component in components {
         match component {
             ObjectIndexComponent::Value(value) => visitor(value),
-            ObjectIndexComponent::Colon => {}
+            ObjectIndexComponent::Colon | ObjectIndexComponent::End => {}
         }
     }
 }

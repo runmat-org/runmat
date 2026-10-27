@@ -41,8 +41,10 @@ impl From<TransientValueError> for ValueSequenceError {
     }
 }
 
+/// Physical parts of an execution sequence. Constructing these parts does not
+/// validate a sequence; admission remains in the `ValueSequence` constructors.
 #[derive(Debug, Clone, PartialEq)]
-enum ValueSequenceStorage {
+pub enum ValueSequenceStorage {
     Single(Value),
     CommaSeparated(OutputListStorage),
 }
@@ -139,6 +141,12 @@ impl ValueSequence {
 
     pub fn iter(&self) -> std::slice::Iter<'_, Value> {
         self.as_slice().iter()
+    }
+
+    /// Transfer the admitted carrier without allocating, cloning children, or
+    /// projecting a transient execution sequence into a language value.
+    pub fn into_storage(self) -> ValueSequenceStorage {
+        self.0
     }
 
     pub fn into_output_storage(self) -> OutputListStorage {

@@ -12,6 +12,8 @@ use local::completed_summary;
 pub(super) struct LocalRunSummary {
     #[serde(flatten)]
     assessment_summary: AssessmentSummary,
+    #[serde(flatten)]
+    solve_placement: SolvePlacementSummary,
     /// Signed global heat balance of the final thermal solve, in watts.
     #[serde(skip_serializing_if = "Option::is_none")]
     thermal_energy_balance: Option<ThermalEnergyBalanceSummary>,
@@ -39,6 +41,40 @@ pub(super) fn definition_run_ids(step_run_ids: &[String]) -> Vec<String> {
                 .map_or_else(|| id.clone(), |(definition, _)| definition.to_owned())
         })
         .collect()
+}
+
+/// Where the static solves ran and how: the effective memory ceiling the placement admitted and
+/// the solve path each static step selected under it. Provenance only, outside every identity.
+#[derive(Serialize, Default)]
+pub(super) struct SolvePlacementSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effective_memory_ceiling_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    static_solve_paths: std::collections::BTreeMap<
+        String,
+        runmat_analysis_fea::planning::resource::StaticSolvePath,
+    >,
+}
+
+impl SolvePlacementSummary {
+    fn of(numerical: &runmat_runtime::analysis::StructuralStudyNumericalResult) -> Self {
+        match numerical {
+            runmat_runtime::analysis::StructuralStudyNumericalResult::LinearSequence(sequence) => {
+                Self {
+                    effective_memory_ceiling_bytes: sequence.effective_memory_ceiling_bytes,
+                    static_solve_paths: sequence
+                        .steps
+                        .iter()
+                        .filter_map(|step| {
+                            step.static_solve_path
+                                .map(|path| (step.step_id.as_str().to_string(), path))
+                        })
+                        .collect(),
+                }
+            }
+            _ => Self::default(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -88,6 +124,7 @@ pub(super) fn local_summary(
 ) -> Result<LocalRunSummary> {
     Ok(LocalRunSummary {
         assessment_summary: publication.into(),
+        solve_placement: SolvePlacementSummary::of(completed.numerical()),
         thermal_energy_balance: None,
         root_id: root_id.into(),
         procedure: numerical_kind(completed.numerical()),

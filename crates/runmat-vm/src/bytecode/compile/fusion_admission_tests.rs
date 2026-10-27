@@ -26,7 +26,9 @@ fn catalog_call(name: &str) -> MirCall {
         bare_identifier: false,
         async_behavior: match semantics.async_behavior {
             BuiltinAsyncBehavior::NeverSuspends => AsyncBehaviorFact::NeverSuspends,
-            BuiltinAsyncBehavior::MaySuspend => AsyncBehaviorFact::MaySuspend,
+            BuiltinAsyncBehavior::MaySuspend | BuiltinAsyncBehavior::MaySuspendLocally => {
+                AsyncBehaviorFact::MaySuspend
+            }
             BuiltinAsyncBehavior::RequiresAsyncRuntime => AsyncBehaviorFact::RequiresAsyncRuntime,
         },
         effects: semantics.effects,

@@ -64,6 +64,9 @@ if ($target) {
   $targetDirectory = Join-Path $targetRoot (Join-Path $target $profileDirectory)
 }
 
+$previousMacosMinimum = [System.Environment]::GetEnvironmentVariable('MACOSX_DEPLOYMENT_TARGET', 'Process')
+$previousCmakeMinimum = [System.Environment]::GetEnvironmentVariable('CMAKE_OSX_DEPLOYMENT_TARGET', 'Process')
+$darwinPolicyNeeded = $false
 try {
   # This tool reads the deployment archive but must execute on the build host,
   # even when Cargo's environment selects a different deployment target.
@@ -73,24 +76,49 @@ try {
   $hostLine = $compilerMetadata | Where-Object { $_ -match '^host: (\S+)$' } | Select-Object -Last 1
   if (-not $hostLine) { throw 'Rust compiler did not report its build-host target' }
   $hostTarget = ([regex]::Match($hostLine, '^host: (\S+)$')).Groups[1].Value
+  $effectiveTarget = if ($target) { $target } else { $hostTarget }
+  $targetIsDarwin = $effectiveTarget.EndsWith('-apple-darwin')
+  $hostIsDarwin = $hostTarget.EndsWith('-apple-darwin')
+  $darwinPolicyNeeded = $targetIsDarwin -or $hostIsDarwin
+  if ($darwinPolicyNeeded) {
+    $macosMinimum = $previousMacosMinimum
+    $cmakeMinimum = $previousCmakeMinimum
+    if ($macosMinimum -and $cmakeMinimum -and
+        (($macosMinimum -replace '(\.0)+$', '') -ne ($cmakeMinimum -replace '(\.0)+$', ''))) {
+      throw 'conflicting MACOSX_DEPLOYMENT_TARGET and CMAKE_OSX_DEPLOYMENT_TARGET'
+    }
+    $deploymentMinimum = if ($macosMinimum) { $macosMinimum } elseif ($cmakeMinimum) { $cmakeMinimum } else { '11.0' }
+    if ($targetIsDarwin) {
+      [System.Environment]::SetEnvironmentVariable('MACOSX_DEPLOYMENT_TARGET', $deploymentMinimum, 'Process')
+      [System.Environment]::SetEnvironmentVariable('CMAKE_OSX_DEPLOYMENT_TARGET',
+        $(if ($cmakeMinimum) { $cmakeMinimum } else { $deploymentMinimum }), 'Process')
+    }
+  }
   $runtimeFeatureArgs = @()
   if ($runtimeNoDefault) { $runtimeFeatureArgs += '--no-default-features' }
-  $backendFeatures = @()
-  if ($runtimeWgpu) { $backendFeatures += 'wgpu' }
-  if ($runtimeCuda) { $backendFeatures += 'cuda' }
-  if ($backendFeatures.Count -gt 0) {
-    $runtimeFeatureArgs += @('--features', ($backendFeatures -join ','))
-  }
+  # The stock CLI keeps console/callable factories in CPU-only builds too.
+  # Custom embedding archives select their own factory symbols directly.
+  $runtimeFeatures = @('stock-hosted-factories')
+  if ($runtimeWgpu) { $runtimeFeatures += 'wgpu' }
+  if ($runtimeCuda) { $runtimeFeatures += 'cuda' }
+  $runtimeFeatureArgs += @('--features', ($runtimeFeatures -join ','))
   # This output becomes machine-readable input to the packer. Prevent an
   # ambient CARGO_TERM_COLOR setting from adding ANSI sequences to the
   # native-static-libs line, then restore the caller's preference.
   $previousCargoTermColor = $env:CARGO_TERM_COLOR
+  # This phase produces relocatable archive objects, not the finished CLI.
+  # Preserve their symbols throughout the dependency closure and restore the
+  # caller's stripping policy before packaging and the final executable build.
+  $runtimeStripVariable = "CARGO_PROFILE_$($profile.ToUpperInvariant().Replace('-', '_'))_STRIP"
+  $previousRuntimeStrip = [System.Environment]::GetEnvironmentVariable($runtimeStripVariable, 'Process')
   try {
     $env:CARGO_TERM_COLOR = 'never'
+    [System.Environment]::SetEnvironmentVariable($runtimeStripVariable, 'none', 'Process')
     $rustcOutput = & cargo rustc @lockedArgs -p runmat-aot-runtime --profile $profile @targetArgs @runtimeFeatureArgs --lib --crate-type staticlib -- --print native-static-libs 2>&1
     $rustcExitCode = $LASTEXITCODE
   } finally {
     $env:CARGO_TERM_COLOR = $previousCargoTermColor
+    [System.Environment]::SetEnvironmentVariable($runtimeStripVariable, $previousRuntimeStrip, 'Process')
   }
   $rustcOutput | ForEach-Object { Write-Host $_ }
   if ($rustcExitCode -ne 0) {
@@ -132,8 +160,29 @@ try {
   foreach ($token in $nativeTokens) {
     $packArgs += @("--native-link-token", $token)
   }
-  & cargo @packArgs
-  if ($LASTEXITCODE -ne 0) {
+  # Select the host-tool policy independently from the deployment policy.
+  if ($darwinPolicyNeeded) {
+    [System.Environment]::SetEnvironmentVariable('MACOSX_DEPLOYMENT_TARGET',
+      $(if ($hostIsDarwin) { $deploymentMinimum } else { $previousMacosMinimum }), 'Process')
+    [System.Environment]::SetEnvironmentVariable('CMAKE_OSX_DEPLOYMENT_TARGET',
+      $(if ($hostIsDarwin) {
+        if ($cmakeMinimum) { $cmakeMinimum } else { $deploymentMinimum }
+      } else { $previousCmakeMinimum }), 'Process')
+  }
+  try {
+    & cargo @packArgs
+    $packExitCode = $LASTEXITCODE
+  } finally {
+    if ($darwinPolicyNeeded) {
+      [System.Environment]::SetEnvironmentVariable('MACOSX_DEPLOYMENT_TARGET',
+        $(if ($targetIsDarwin) { $deploymentMinimum } else { $previousMacosMinimum }), 'Process')
+      [System.Environment]::SetEnvironmentVariable('CMAKE_OSX_DEPLOYMENT_TARGET',
+        $(if ($targetIsDarwin) {
+          if ($cmakeMinimum) { $cmakeMinimum } else { $deploymentMinimum }
+        } else { $previousCmakeMinimum }), 'Process')
+    }
+  }
+  if ($packExitCode -ne 0) {
     throw "failed to package the RunMat AOT runtime archive"
   }
 
@@ -161,6 +210,10 @@ try {
     $env:RUNMAT_AOT_RUNTIME_MANIFEST = $previousManifest
   }
 } finally {
+  if ($darwinPolicyNeeded) {
+    [System.Environment]::SetEnvironmentVariable('MACOSX_DEPLOYMENT_TARGET', $previousMacosMinimum, 'Process')
+    [System.Environment]::SetEnvironmentVariable('CMAKE_OSX_DEPLOYMENT_TARGET', $previousCmakeMinimum, 'Process')
+  }
   if (Test-Path -LiteralPath $buildRoot) {
     Remove-Item -LiteralPath $buildRoot -Recurse -Force
   }

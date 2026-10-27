@@ -11,26 +11,27 @@ pub(super) struct Target {
     pub(super) create_parent: bool,
 }
 
-pub(super) enum ResolveError {
-    Status(super::errors::Failure),
-    Compatibility(Box<crate::RuntimeError>),
-}
-
-pub(super) async fn resolve(filename: Option<&str>) -> Result<Target, ResolveError> {
+// Operational errors use the canonical outer channel without allocating a
+// second envelope. Domain failures remain savepath's status-return outcome.
+pub(super) async fn resolve(
+    filename: Option<&str>,
+) -> crate::BuiltinResult<Result<Target, super::errors::Failure>> {
     match filename {
         Some(filename) => explicit(filename).await,
-        None => default_target().await,
+        None => Ok(default_target()),
     }
 }
 
-async fn default_target() -> Result<Target, ResolveError> {
+fn default_target() -> Result<Target, super::errors::Failure> {
     let path = match runtime_env::var("RUNMAT_PATHDEF") {
         Ok(value) if value.trim().is_empty() => {
-            return Err(status("savepath: RUNMAT_PATHDEF is empty"));
+            return Err(cannot_resolve("savepath: RUNMAT_PATHDEF is empty"));
         }
-        Ok(value) => expand(&value).map_err(ResolveError::Status)?,
+        Ok(value) => expand(&value)?,
         Err(_) => home_directory()
-            .ok_or_else(|| status("savepath: unable to determine default pathdef location"))?
+            .ok_or_else(|| {
+                cannot_resolve("savepath: unable to determine default pathdef location")
+            })?
             .join(".runmat")
             .join(DEFAULT_FILENAME),
     };
@@ -40,20 +41,22 @@ async fn default_target() -> Result<Target, ResolveError> {
     })
 }
 
-async fn explicit(filename: &str) -> Result<Target, ResolveError> {
-    let mut path = expand(filename).map_err(ResolveError::Status)?;
+async fn explicit(filename: &str) -> crate::BuiltinResult<Result<Target, super::errors::Failure>> {
+    let mut path = match expand(filename) {
+        Ok(path) => path,
+        Err(failure) => return Ok(Err(failure)),
+    };
     if is_directory_target(&path, filename).await {
         crate::compatibility::ensure_builtin_extension_enabled(
             &runmat_builtins::SAVEPATH_DIRECTORY_TARGET_EXTENSION,
             super::errors::NAME,
-        )
-        .map_err(|error| ResolveError::Compatibility(Box::new(error)))?;
+        )?;
         path.push(DEFAULT_FILENAME);
     }
-    Ok(Target {
+    Ok(Ok(Target {
         create_parent: crate::compatibility::runmat_extensions_enabled(),
         path,
-    })
+    }))
 }
 
 fn expand(filename: &str) -> Result<PathBuf, super::errors::Failure> {
@@ -79,10 +82,6 @@ fn has_directory_suffix(path: &str) -> bool {
 
 fn cannot_resolve(message: impl Into<String>) -> super::errors::Failure {
     super::errors::Failure::new(&runmat_builtins::SAVEPATH_ERROR_CANNOT_RESOLVE, message)
-}
-
-fn status(message: impl Into<String>) -> ResolveError {
-    ResolveError::Status(cannot_resolve(message))
 }
 
 #[cfg(test)]

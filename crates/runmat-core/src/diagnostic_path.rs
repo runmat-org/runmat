@@ -105,6 +105,20 @@ fn is_windows_drive_root(path: &str) -> bool {
     bytes.len() == 3 && bytes[1] == b':' && bytes[2] == b'\\'
 }
 
+/// Absolute-path test for the host's own path grammar. Browser providers use
+/// rooted virtual paths, and `Path::is_absolute` is false for every path on
+/// wasm32-unknown-unknown because that target has no prefix grammar.
+pub(crate) fn host_path_is_absolute(path: &std::path::Path) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        runmat_filesystem::FsPathNamespace::VirtualRooted.is_absolute(path)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        path.is_absolute()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,19 +173,5 @@ mod tests {
             PathBuf::from(display_path_from_base(path, base)),
             PathBuf::from("main.m")
         );
-    }
-}
-
-/// Absolute-path test for the host's own path grammar. Browser providers use
-/// rooted virtual paths, and `Path::is_absolute` is false for every path on
-/// wasm32-unknown-unknown because that target has no prefix grammar.
-pub(crate) fn host_path_is_absolute(path: &std::path::Path) -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        runmat_filesystem::FsPathNamespace::VirtualRooted.is_absolute(path)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        path.is_absolute()
     }
 }

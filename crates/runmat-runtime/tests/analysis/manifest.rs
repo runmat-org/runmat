@@ -1905,3 +1905,22 @@ pub(super) fn default_options(solver_mesh_artifact_path: Option<String>) -> Anal
         solver_mesh_artifact_path,
     }
 }
+
+#[test]
+fn unit_mismatch_is_rejected_at_canonical_model_decode() {
+    // A typed canonical AnalysisModel cannot contain inch coordinates. Exercise
+    // the persisted input boundary instead of fabricating an invalid typed model.
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut wire = serde_json::to_value(&model).expect("encode canonical fixture");
+    assert_eq!(
+        wire["units"],
+        serde_json::to_value(LengthUnit::Meter).unwrap()
+    );
+    serde_json::from_value::<AnalysisModel>(wire.clone()).expect("decode canonical fixture");
+    wire["units"] = serde_json::to_value(LengthUnit::Inch).unwrap();
+    let error = serde_json::from_value::<AnalysisModel>(wire)
+        .expect_err("canonical fixture admission must reject inch coordinates");
+    assert!(error
+        .to_string()
+        .contains("canonical solver coordinates must be meters"));
+}

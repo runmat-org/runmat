@@ -9,11 +9,11 @@ pub use standard_substruct::parse_standard_substruct;
 mod path;
 pub use path::{ObjectSubscript, ObjectSubscriptOrigin, ObjectSubscriptPath};
 mod plan;
-pub(crate) use plan::plan_for_components_with_context;
 pub use plan::{
     plan_for_components, plan_for_components_in_context, plan_for_fixed_assignment,
     plan_for_fixed_assignment_in_context, plan_for_shape, plan_for_shape_in_context,
 };
+pub(crate) use plan::{plan_for_components_with_context, plan_for_virtual_components_with_context};
 mod admission;
 pub(crate) use admission::{allocation_error, array_in_context};
 pub use admission::{
@@ -74,6 +74,8 @@ impl ObjectIndexKind {
 pub enum ObjectIndexComponent {
     Value(Value),
     Colon,
+    /// Contextual syntax retained only until its actual receiver is known.
+    End,
 }
 
 impl From<Value> for ObjectIndexComponent {
@@ -92,10 +94,11 @@ impl ObjectIndexComponent {
         }
     }
 
-    pub fn protocol_value(&self) -> Value {
+    pub fn protocol_value(&self) -> Result<Value, crate::RuntimeError> {
         match self {
-            Self::Value(value) => value.clone(),
-            Self::Colon => Value::string(OBJECT_SELECTOR_COLON.to_string()),
+            Self::Value(value) => Ok(value.clone()),
+            Self::Colon => Ok(Value::string(OBJECT_SELECTOR_COLON.to_string())),
+            Self::End => Err(unresolved_end()),
         }
     }
     pub(crate) fn protocol_value_in_context(
@@ -104,9 +107,25 @@ impl ObjectIndexComponent {
     ) -> Result<Value, crate::RuntimeError> {
         match self {
             Self::Value(value) => Ok(value.clone()),
+            Self::End => Err(unresolved_end()),
             Self::Colon => crate::call::argument_text::copy_str(OBJECT_SELECTOR_COLON, context)
                 .map(Value::String),
         }
+    }
+}
+
+pub(crate) fn unresolved_end() -> crate::RuntimeError {
+    crate::runtime_error::semantic_error(
+        "UnresolvedObjectIndexEnd",
+        "contextual end requires its actual indexing receiver",
+    )
+}
+
+impl ObjectSubscriptPath {
+    pub(crate) fn has_deferred_end(&self) -> bool {
+        self.steps().iter().any(|step| matches!(step.selector(),
+            ObjectIndexSelector::IndexValues { components }
+                if components.iter().any(|component| matches!(component, ObjectIndexComponent::End))))
     }
 }
 

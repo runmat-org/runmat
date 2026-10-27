@@ -23,6 +23,11 @@ pub(super) fn admit(
     layout: &crate::VmAssemblyLayout,
     source_map: &runmat_execution::ExecutableSourceMapV2,
 ) -> Result<AdmittedEntrypoint, ExecutableUnitAdmissionError> {
+    mir.validate_class_sources(|source| source_map.contains_source(source))
+        .map_err(source_binding)?;
+    analysis
+        .validate_class_sources(mir)
+        .map_err(source_binding)?;
     let selected = envelope
         .manifest
         .identity
@@ -204,11 +209,9 @@ fn declaration_origin(
                     matches!(instruction, crate::Instr::RegisterClass { name, .. } if name == &class)
                 })
         });
-    if !mir
-        .classes
-        .iter()
-        .any(|declaration| declaration.name.display_name().as_deref() == Some(class.display_name()))
-        || !primary_registration
+    if !mir.classes.iter().any(|declaration| {
+        declaration.source == primary.source_id && class.matches_qualified_name(&declaration.name)
+    }) || !primary_registration
     {
         return Err(source_binding(
             "declaration-only executable lacks its primary admitted class",

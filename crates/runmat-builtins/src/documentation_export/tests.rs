@@ -66,6 +66,36 @@ fn unavailable_package_assets_are_not_a_silent_canonical_only_fallback() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn canonical_presentation_matches_empty_directory_projection_in_every_field() {
+    let empty_directory = std::env::temp_dir().join(format!(
+        "runmat-canonical-presentation-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos(),
+    ));
+    std::fs::create_dir(&empty_directory).expect("create isolated empty directory");
+    let directory_projection = export_presentation_from_directory(&empty_directory, false);
+    let canonical_projection = export_canonical_presentation();
+    std::fs::remove_dir(&empty_directory).expect("remove isolated empty directory");
+
+    let canonical_projection = canonical_projection.expect("complete canonical presentation");
+    assert_eq!(
+        canonical_projection,
+        directory_projection.expect("empty directory presentation"),
+        "canonical source choice must preserve every projected field and row",
+    );
+    assert_eq!(
+        canonical_projection["presentation"],
+        json!({"kind":"editor_prose", "executable_qualification":false}),
+    );
+    assert!(canonical_projection.get("preview").is_none());
+    // This compares source projections, not a package/publication rehearsal.
+}
+
 fn synthetic_legacy(names: &[&str]) -> BTreeMap<String, Value> {
     names
         .iter()

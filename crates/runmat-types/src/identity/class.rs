@@ -36,6 +36,31 @@ impl ClassIdentity {
         )
     }
 
+    /// Compare the existing qualified-name spelling projection without allocating
+    /// its joined display buffer. This mirrors from_qualified_name exactly.
+    pub fn matches_qualified_name(&self, name: &QualifiedName) -> bool {
+        if name.0.is_empty() {
+            return false;
+        }
+        let mut remaining = self.0.as_str();
+        for (index, part) in name.0.iter().enumerate() {
+            if part.0.is_empty() {
+                return false;
+            }
+            if index > 0 {
+                let Some(tail) = remaining.strip_prefix('.') else {
+                    return false;
+                };
+                remaining = tail;
+            }
+            let Some(tail) = remaining.strip_prefix(part.0.as_str()) else {
+                return false;
+            };
+            remaining = tail;
+        }
+        remaining.is_empty()
+    }
+
     pub fn qualified_name(&self) -> QualifiedName {
         QualifiedName(
             self.0
@@ -115,6 +140,13 @@ impl PartialEq<ClassIdentity> for StaticClassIdentity {
 impl fmt::Display for ClassIdentity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+// Borrow the canonical identity spelling for allocation-free registry queries.
+impl std::borrow::Borrow<str> for ClassIdentity {
+    fn borrow(&self) -> &str {
+        self.display_name()
     }
 }
 
@@ -246,6 +278,22 @@ pub mod standard {
     pub const LINEAR_MODEL: StaticClassIdentity = StaticClassIdentity::new("LinearModel");
     pub const OPTIMIZABLE_VARIABLE: StaticClassIdentity =
         StaticClassIdentity::new("optimizableVariable");
+    pub const OPTIMIZATION_EXPRESSION: StaticClassIdentity =
+        StaticClassIdentity::new("optim.problemdef.OptimizationExpression");
+    pub const OPTIMIZATION_CONSTRAINT: StaticClassIdentity =
+        StaticClassIdentity::new("optim.problemdef.OptimizationConstraint");
+    pub const OPTIMIZATION_EQUALITY: StaticClassIdentity =
+        StaticClassIdentity::new("optim.problemdef.OptimizationEquality");
+    pub const OPTIMIZATION_INEQUALITY: StaticClassIdentity =
+        StaticClassIdentity::new("optim.problemdef.OptimizationInequality");
+    pub const OPTIMIZATION_EXITFLAG: StaticClassIdentity =
+        StaticClassIdentity::new("optim.problemdef.OptimizationExitflag");
+    pub const OPTIMIZATION_PROBLEM: StaticClassIdentity =
+        StaticClassIdentity::new("optim.problemdef.OptimizationProblem");
+    pub const OPTIMIZATION_VARIABLE: StaticClassIdentity =
+        StaticClassIdentity::new("optim.problemdef.OptimizationVariable");
+    pub const INTEGER_CONSTRAINT: StaticClassIdentity =
+        StaticClassIdentity::new("IntegerConstraint");
     pub const BAYESIAN_OPTIMIZATION: StaticClassIdentity =
         StaticClassIdentity::new("BayesianOptimization");
     pub const CLASSIFICATION_TREE: StaticClassIdentity =
@@ -328,6 +376,14 @@ mod tests {
         let identity = ClassIdentity::from_qualified_name(&qualified).unwrap();
         assert_eq!(identity.display_name(), "package.Widget");
         assert_eq!(identity.qualified_name(), qualified);
+        assert!(identity.matches_qualified_name(&qualified));
+        assert!(identity
+            .matches_qualified_name(&QualifiedName(vec![SymbolName("package.Widget".into())])));
+        assert!(!identity.matches_qualified_name(&QualifiedName(vec![SymbolName(String::new())])));
+        assert!(!identity.matches_qualified_name(&QualifiedName(vec![
+            SymbolName("other".into()),
+            SymbolName("Widget".into())
+        ])));
     }
 
     #[test]

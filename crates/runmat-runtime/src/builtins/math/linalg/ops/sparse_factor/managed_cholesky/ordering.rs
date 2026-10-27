@@ -44,15 +44,14 @@ pub(super) async fn amd_order(
     let layout = requirement
         .layout()
         .map_err(|_| HostAllocationError::Overflow)?;
+    let runtime = work.required_runtime()?;
     let receipt = HostAllocationReceipt::admit(
-        Some(work.runtime),
+        Some(runtime),
         HostAllocationPlan::new(AlignedHostWorkspace::quoted_bytes(layout)?, 0)?,
     )?;
-    work.fence.checkpoint(work.runtime)?;
+    work.fence.checkpoint(runtime)?;
     let mut scratch = match receipt.as_ref() {
-        Some(receipt) => {
-            Scratch::Managed(AlignedHostWorkspace::new(layout, receipt, work.runtime)?)
-        }
+        Some(receipt) => Scratch::Managed(AlignedHostWorkspace::new(layout, receipt, runtime)?),
         None => Scratch::Unbounded(MemBuffer::new(requirement)),
     };
     work.flush().await?;
@@ -68,15 +67,15 @@ pub(super) async fn amd_order(
         )
         .map(|_| perm)
     };
-    let result = if work.runtime.service_ports().blocking_cpu().is_none()
-        && work.runtime.execution().cpu_cooperation_policy() == CpuCooperationPolicy::NeverYield
+    let result = if runtime.service_ports().blocking_cpu().is_none()
+        && runtime.execution().cpu_cooperation_policy() == CpuCooperationPolicy::NeverYield
     {
         job()
     } else {
-        work.cooperation
+        work.required_budget()?
             .run_owned_blocking_in_context(
-                work.runtime,
-                work.runtime
+                runtime,
+                runtime
                     .service_ports()
                     .blocking_cpu()
                     .map(|service| service.as_ref()),
@@ -88,7 +87,7 @@ pub(super) async fn amd_order(
             .await?
     };
     if let Some(receipt) = receipt {
-        receipt.checkpoint(work.runtime)?;
+        receipt.checkpoint(runtime)?;
     }
     work.flush().await?;
     result.map_err(ManagedSparseCholeskyError::Library)

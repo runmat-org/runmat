@@ -214,7 +214,8 @@ fn describe_value_kind(value: &Value) -> String {
         Value::Object(obj) => format!("{} object", obj.class_name()),
         Value::HandleObject(h) => format!("handle object ({})", h.class_name),
         Value::Listener(l) => format!("listener for {}", l.event_name),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

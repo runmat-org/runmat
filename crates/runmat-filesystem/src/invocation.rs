@@ -96,21 +96,21 @@ static RESOLVER: OnceLock<Resolver> = OnceLock::new();
 pub fn register_invocation_filesystem_resolver(
     resolver: fn() -> Option<InvocationFilesystemSelection>,
 ) -> io::Result<()> {
-    if let Some(current) = RESOLVER.get() {
-        if std::ptr::fn_addr_eq(*current, resolver) {
-            return Ok(());
-        }
-        return Err(io::Error::new(
+    install_resolver(&RESOLVER, resolver)
+}
+
+fn install_resolver(slot: &OnceLock<Resolver>, resolver: Resolver) -> io::Result<()> {
+    // Concurrent contexts can install the same owner. Compare against the
+    // winning registration rather than treating every losing set as a change.
+    let current = slot.get_or_init(|| resolver);
+    if std::ptr::fn_addr_eq(*current, resolver) {
+        Ok(())
+    } else {
+        Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             "a different invocation filesystem resolver is already installed",
-        ));
+        ))
     }
-    RESOLVER.set(resolver).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "invocation filesystem resolver changed during registration",
-        )
-    })
 }
 
 pub(crate) fn selected() -> Option<InvocationFilesystemSelection> {
@@ -139,6 +139,37 @@ pub(crate) fn denied_environment() -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_resolver_registration_is_idempotent_but_rejects_replacement() {
+        fn selected() -> Option<InvocationFilesystemSelection> {
+            None
+        }
+        fn denied() -> Option<InvocationFilesystemSelection> {
+            Some(InvocationFilesystemSelection::Denied {
+                directory: None,
+                environment_read: false,
+            })
+        }
+        let slot = OnceLock::new();
+        let start = std::sync::Barrier::new(8);
+        std::thread::scope(|threads| {
+            for _ in 0..8 {
+                threads.spawn(|| {
+                    start.wait();
+                    install_resolver(&slot, selected).unwrap();
+                });
+            }
+        });
+        assert_eq!(
+            install_resolver(&slot, denied).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert!(std::ptr::fn_addr_eq(
+            *slot.get().unwrap(),
+            selected as Resolver
+        ));
+    }
 
     #[test]
     fn cloned_invocation_shares_only_its_own_directory_and_checks_environment_issuers() {

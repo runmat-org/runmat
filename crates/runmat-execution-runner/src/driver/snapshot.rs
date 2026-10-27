@@ -12,6 +12,8 @@ use crate::task::{AttemptRecord, TaskGraph, TaskRecord};
 use super::{DriverConfig, DriverEvent};
 use crate::{RunnerError, RunnerResult};
 
+mod allocation;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DriverSnapshot {
     pub schema_version: u16,
@@ -78,6 +80,7 @@ impl DriverSnapshot {
         }
         let mut histories: BTreeMap<TaskId, Vec<&AttemptRecord>> = BTreeMap::new();
         for (attempt_id, attempt) in &self.attempts {
+            attempt.request.validate()?;
             if attempt.request.id != *attempt_id
                 || !self.tasks.contains_key(&attempt.request.task_id)
                 || !self
@@ -165,6 +168,7 @@ impl DriverSnapshot {
                 "ready task is missing from the ready queue".into(),
             ));
         }
+        self.validate_allocations()?;
         Ok(())
     }
 

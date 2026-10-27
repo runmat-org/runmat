@@ -3,11 +3,11 @@ use crate::sequence::SequenceResolutionContext;
 use crate::RuntimeError;
 
 #[derive(Clone, Debug)]
-pub struct SubscriptReadRequest {
+pub struct SubscriptReadRequest<A = super::super::ObjectAccessContext> {
     pub sequence_use: runmat_types::SequenceUse,
     pub sequence_context: SequenceResolutionContext,
     pub indexing_context: runmat_types::ObjectIndexingContext,
-    pub access: super::super::ObjectAccessContext,
+    pub access: A,
 }
 
 impl SubscriptReadRequest {
@@ -29,6 +29,12 @@ impl SubscriptReadRequest {
     }
 
     pub fn require_single(access: super::super::ObjectAccessContext) -> Self {
+        Self::single(access)
+    }
+}
+
+impl<A> SubscriptReadRequest<A> {
+    pub(super) fn single(access: A) -> Self {
         Self {
             sequence_use: runmat_types::SequenceUse::RequireSingle,
             sequence_context: SequenceResolutionContext::default(),
@@ -63,4 +69,10 @@ fn unavailable(context: &str) -> RuntimeError {
         "SequenceOutputContextUnavailable",
         format!("the {context} is unavailable for this subscript read"),
     )
+}
+
+impl<A: std::borrow::Borrow<super::super::ObjectAccessContext>> SubscriptReadRequest<A> {
+    pub(super) fn access(&self) -> &super::super::ObjectAccessContext {
+        self.access.borrow()
+    }
 }

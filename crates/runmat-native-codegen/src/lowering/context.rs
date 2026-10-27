@@ -131,7 +131,7 @@ impl<'a> FunctionLoweringContext<'a> {
 
     pub fn operation_contract(
         &self,
-        site: &runmat_mir::analysis::MirOperationSite,
+        site: &runmat_mir::MirOperationSite,
     ) -> NativeCodegenResult<super::operation::OperationRequirements> {
         let contract = self.analysis.operation_contract_at(site).ok_or_else(|| {
             NativeCodegenError::new(

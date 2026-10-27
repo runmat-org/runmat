@@ -33,10 +33,6 @@ pub struct ResourceAccountingSummary {
     pub artifact_bytes: u64,
 }
 
-fn overflow(field: &'static str) -> ContractError {
-    ContractError::invalid("resource accounting", field)
-}
-
 impl ResourceAccounting {
     /// Account a reserved interval without accelerator leases. Allocations that
     /// request accelerators must use [`Self::for_assigned_interval`].
@@ -87,25 +83,17 @@ impl ResourceAccounting {
         relay_bytes: u64,
     ) -> Result<Self, ContractError> {
         allocation.validate()?;
-        let cpu_core_millis = u64::from(allocation.cpu_millicores)
-            .checked_mul(wall_millis)
-            .ok_or_else(|| overflow("CPU time overflowed"))?
-            .div_ceil(1_000);
-        let memory_byte_millis = u128::from(allocation.memory_bytes)
-            .checked_mul(u128::from(wall_millis))
-            .ok_or_else(|| overflow("memory time overflowed"))?;
-        let retained_byte_millis = u128::from(artifact_bytes)
-            .checked_mul(u128::from(wall_millis))
-            .ok_or_else(|| overflow("artifact time overflowed"))?;
+        let scalar =
+            super::interval::scalar_interval_charges(&allocation, wall_millis, artifact_bytes)?;
         accelerator_millis.sort_by(|left, right| usage_key(left).cmp(&usage_key(right)));
         Ok(Self {
             allocation,
             usage: ResourceUsage {
-                cpu_core_millis,
-                memory_byte_millis,
+                cpu_core_millis: scalar.cpu_core_millis,
+                memory_byte_millis: scalar.memory_byte_millis,
                 accelerator_millis,
                 wall_millis,
-                retained_byte_millis,
+                retained_byte_millis: scalar.retained_byte_millis,
                 egress_bytes,
                 relay_bytes,
             },

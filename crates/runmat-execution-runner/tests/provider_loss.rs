@@ -7,7 +7,7 @@ use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{AttemptReport, DriverAction, DriverCommand};
 
 #[test]
-fn provider_loss_fences_before_retry_and_retains_each_original_terminal_history() {
+fn provider_loss_fences_and_retains_each_original_unresolved_history() {
     let mut f = common::fixture(1, 2);
     let first = common::submit(
         &mut f.driver,
@@ -48,32 +48,32 @@ fn provider_loss_fences_before_retry_and_retains_each_original_terminal_history(
         runmat_execution_runner::driver::DriverEventKind::WorkerLost { worker_id } if worker_id == first.worker_id));
     let first_evidence = f.driver.task_execution_evidence(first.task_id).unwrap();
     let second_evidence = f.driver.task_execution_evidence(second.task_id).unwrap();
-    assert_eq!(first_evidence.task.state, TaskState::Ready);
-    assert_eq!(second_evidence.task.state, TaskState::Ready);
+    assert_eq!(first_evidence.task.state, TaskState::Indeterminate);
+    assert_eq!(second_evidence.task.state, TaskState::Indeterminate);
     assert_eq!(
         first_evidence.attempts[0]
-            .terminal
+            .unverified_retirement
             .as_ref()
             .unwrap()
             .diagnostic
-            .as_deref(),
-        Some("original producer connection failed")
+            .as_str(),
+        "original producer connection failed"
     );
     assert_eq!(
         second_evidence.attempts[0]
-            .terminal
+            .unverified_retirement
             .as_ref()
             .unwrap()
             .diagnostic
-            .as_deref(),
-        Some("worker was lost")
+            .as_str(),
+        "worker was lost"
     );
     assert!(first_evidence.resource_aggregate(1).is_err());
     assert!(second_evidence.resource_aggregate(1).is_err());
     let snapshot = f.driver.snapshot();
     snapshot.validate().unwrap();
-    assert_eq!(snapshot.pools[&f.pool].active_attempts, 0);
-    assert_eq!(snapshot.pools[&f.pool].allocated, Default::default());
+    assert_eq!(snapshot.pools[&f.pool].active_attempts, 2);
+    assert_ne!(snapshot.pools[&f.pool].allocated, Default::default());
     let cold: runmat_execution_runner::DriverSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
     cold.validate().unwrap();

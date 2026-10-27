@@ -12,6 +12,11 @@ pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
 pub(crate) trait ProcessControl: Send + Sync {
     fn cancellation(&self) -> &AtomicBool;
+    /// Present only for an authenticated scheduler/user cancellation, not a
+    /// failed control channel. Existing non-Graph providers need no wire change.
+    fn cancellation_reason(&self) -> Option<runmat_execution::CancellationReason> {
+        None
+    }
     fn record_progress(&self, progress: crate::protocol::ProgramProgress);
     fn record_console(
         &self,
@@ -49,6 +54,7 @@ use runmat_process_host::{ChildProcess, HostCommand, ProcessExit};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 pub(crate) mod exchange;
+pub(crate) mod cancellation;
 
 #[derive(Default)]
 struct TransportMeters {

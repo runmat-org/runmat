@@ -67,12 +67,12 @@ fn analysis_completion_keeps_original_lost_attempt_without_invented_usage() {
     assert!(completed.evidence.resource_aggregate(1).is_err());
     assert_eq!(
         completed.evidence.attempts[0]
-            .terminal
+            .unverified_retirement
             .as_ref()
             .unwrap()
             .diagnostic
-            .as_deref(),
-        Some("original worker loss")
+            .as_str(),
+        "original worker loss"
     );
     assert!(
         matches!(completed.response, runmat_execution_artifact::ProgramExecutionResponse::Failure { message }

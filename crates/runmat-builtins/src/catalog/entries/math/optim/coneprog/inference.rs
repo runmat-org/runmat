@@ -59,7 +59,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     diagnostic.argument = Some(0);
                 }
                 if find(&["options"]).is_some_and(|fact| {
-                    !matches!(fact.kind, ValueKindFact::Struct(_) | ValueKindFact::Unknown)
+                    fact.shape.element_count() != Some(0)
+                        && !matches!(fact.kind, ValueKindFact::Struct(_) | ValueKindFact::Unknown)
                 }) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-CONE-OPTIONS",
@@ -76,11 +77,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             )),
         }
     } else {
-        let has_options = request.arguments.len() > 2
-            && request
-                .arguments
-                .last()
-                .is_some_and(|fact| matches!(fact.kind, ValueKindFact::Struct(_)));
+        let has_options = request.arguments.len() > 2 && request.arguments.len() % 2 == 1;
         let numeric_count = request
             .arguments
             .len()
@@ -96,27 +93,6 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 diagnostics.push(argument_error("RM-CATALOG-CONE-ARITY", "expected f, cone constraints, complete linear/equality/bound pairs and optional options", 0));
             }
         }
-        if let Some(ValueFact {
-            kind: ValueKindFact::Struct(options),
-            ..
-        }) = request
-            .arguments
-            .last()
-            .filter(|_| request.arguments.len() > 2)
-        {
-            if options.fields_complete
-                && !options
-                    .fields
-                    .keys()
-                    .any(|key| crate::OptimSolver::Coneprog.recognizes_options_field(key))
-            {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-CONE-OPTIONS",
-                    "positional options require recognized option fields",
-                    request.arguments.len() - 1,
-                ));
-            }
-        }
         let mut positional = request.clone();
         if has_options
             || (request.arguments.len() % 2 == 1
@@ -129,7 +105,39 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
         inspect_positional(&positional, &mut diagnostics);
     }
-    facts::finish(entry, request, facts::solver_outputs(true), diagnostics)
+    let mut outputs = facts::solver_outputs(false);
+    let mut fields = std::collections::BTreeMap::new();
+    for name in ["iterations", "constrviolation"] {
+        fields.insert(
+            name.into(),
+            facts::double(ShapeFact::Scalar, StorageFact::Scalar),
+        );
+    }
+    for name in ["primalfeasibility", "dualfeasibility", "dualitygap"] {
+        fields.insert(
+            name.into(),
+            facts::double(ShapeFact::Unknown, StorageFact::Unknown),
+        );
+    }
+    for name in ["algorithm", "linearsolver"] {
+        fields.insert(name.into(), ValueFact::unknown(DynamicReason::RuntimeValue));
+    }
+    fields.insert("message".into(), ValueFact::scalar(ValueKindFact::String));
+    outputs[3] = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(fields, true)));
+    // Optimum lambda is a struct of numeric columns; terminal failure is [].
+    // No unconditional structure/cell or column-shape proof spans both forms.
+    outputs.push(ValueFact::unknown(DynamicReason::RuntimeValue));
+    let mut result = facts::finish(entry, request, outputs, diagnostics);
+    if default_display(request) {
+        for effect in [
+            EffectKind::FilesystemWrite,
+            EffectKind::UserInterface,
+            EffectKind::HostCallback,
+        ] {
+            result.effects.0.remove(&effect);
+        }
+    }
+    result
 }
 
 fn inspect_positional(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnostic>) {
@@ -141,15 +149,10 @@ fn inspect_positional(request: &CallRequest, diagnostics: &mut Vec<InferenceDiag
     );
     if let Some(cones) = request.arguments.get(1) {
         let admitted = match cones.kind {
-            ValueKindFact::Struct(_) => {
-                matches!(cones.storage, StorageFact::Scalar | StorageFact::Unknown)
-                    && cones.shape.element_count().is_none_or(|count| count == 1)
-            }
+            ValueKindFact::Struct(_) => true,
             ValueKindFact::Cell(_) | ValueKindFact::OutputList(_) | ValueKindFact::Unknown => true,
             ValueKindFact::Numeric(numeric) => {
-                numeric.domain == NumericDomain::Real
-                    && cones.storage != StorageFact::Sparse
-                    && cones.shape.element_count() == Some(0)
+                numeric.domain == NumericDomain::Real && cones.shape.element_count() == Some(0)
             }
             _ => false,
         };
@@ -189,7 +192,7 @@ fn inspect_positional(request: &CallRequest, diagnostics: &mut Vec<InferenceDiag
         facts::numeric(
             request,
             index,
-            facts::OptimNumericInput::OptionalMatrix,
+            facts::OptimNumericInput::OptionalSparseMatrix,
             diagnostics,
         );
     }
@@ -210,17 +213,50 @@ fn inspect_cone_element(
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) {
     match &fact.kind {
-        ValueKindFact::Struct(descriptor)
-            if matches!(fact.storage, StorageFact::Scalar | StorageFact::Unknown)
-                && fact.shape.element_count().is_none_or(|count| count == 1) =>
-        {
-            super::super::secondordercone::inspect_descriptor(descriptor, objective, diagnostics);
+        ValueKindFact::Struct(descriptor) => {
+            if descriptor.elements_complete && !descriptor.elements.is_empty() {
+                for fields in &descriptor.elements {
+                    super::super::secondordercone::inspect_descriptor(
+                        &StructFact::scalar(fields.clone(), true),
+                        objective,
+                        diagnostics,
+                    );
+                }
+            } else {
+                super::super::secondordercone::inspect_descriptor(
+                    descriptor,
+                    objective,
+                    diagnostics,
+                );
+            }
         }
         ValueKindFact::Unknown => {}
         _ => diagnostics.push(argument_error(
             "RM-CATALOG-CONE-DESCRIPTOR",
-            "cone container entries must be scalar constructor descriptors",
+            "cone containers require constructor descriptors",
             1,
         )),
     }
+}
+fn default_display(request: &CallRequest) -> bool {
+    if request.arguments.len() == 1 {
+        let ValueKindFact::Struct(problem) = &request.arguments[0].kind else {
+            return false;
+        };
+        let option = problem
+            .fields
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("options"))
+            .map(|(_, value)| value);
+        return option.map_or(problem.fields_complete, quiet_options);
+    }
+    if request.arguments.len().is_multiple_of(2) {
+        return true;
+    }
+    request.arguments.last().is_some_and(quiet_options)
+}
+fn quiet_options(options: &ValueFact) -> bool {
+    options.shape.element_count() == Some(0)
+        || matches!(&options.kind,ValueKindFact::Struct(fields)
+        if fields.fields_complete && !fields.fields.keys().any(|name|crate::OptimOptionField::parse(name)==Some(crate::OptimOptionField::Display)))
 }

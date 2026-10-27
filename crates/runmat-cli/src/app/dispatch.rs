@@ -2,6 +2,7 @@ use anyhow::Result;
 use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
+use crate::commands::session::future::boxed_command;
 use crate::commands::{
     accel, batch, benchmark, check, compile, config, fea, gc, job, mesh, mex, native_interface,
     package, repl, script, test, version,
@@ -9,7 +10,10 @@ use crate::commands::{
 use crate::remote;
 
 pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
-    dispatch_with_graphics(cli, config, &runmat_core::SessionGraphicsHost::Unavailable).await
+    boxed_command(|| {
+        dispatch_with_graphics(cli, config, &runmat_core::SessionGraphicsHost::Unavailable)
+    })
+    .await
 }
 
 pub(crate) async fn dispatch_with_graphics(
@@ -34,27 +38,38 @@ pub(crate) async fn dispatch_with_graphics(
         }
     }
 
+    // A command's asynchronous state belongs to that command, not every caller's
+    // session-stack frame. Keep polling/drop on this lane; no task is spawned.
     match (command, script_path) {
-        (Some(command), None) => execute_command(command, cli, config, graphics).await,
+        (Some(command), None) => {
+            boxed_command(|| execute_command(command, cli, config, graphics)).await
+        }
         (None, Some(script_path)) => {
-            script::execute_script_with_graphics(
-                script::ScriptInvocation {
-                    script: script_path,
-                    args: vec![],
-                    emit_bytecode_path: emit_bytecode,
-                    fea_json: false,
-                    execution: crate::cli::ExecutionTargetArgs::default(),
-                },
-                cli,
-                config,
-                graphics,
-            )
+            boxed_command(|| {
+                script::execute_script_with_graphics(
+                    script::ScriptInvocation {
+                        script: script_path,
+                        args: vec![],
+                        emit_bytecode_path: emit_bytecode,
+                        fea_json: false,
+                        execution: crate::cli::ExecutionTargetArgs::default(),
+                    },
+                    cli,
+                    config,
+                    graphics,
+                )
+            })
             .await
         }
         (None, None) if !atty::is(atty::Stream::Stdin) => {
-            script::execute_stdin_script_with_graphics(emit_bytecode, cli, config, graphics).await
+            boxed_command(|| {
+                script::execute_stdin_script_with_graphics(emit_bytecode, cli, config, graphics)
+            })
+            .await
         }
-        (None, None) => repl::execute_repl_with_graphics(config, cli, graphics).await,
+        (None, None) => {
+            boxed_command(|| repl::execute_repl_with_graphics(config, cli, graphics)).await
+        }
         (Some(_), Some(_)) => {
             log::error!("Cannot specify both command and script file");
             std::process::exit(1);
@@ -68,11 +83,12 @@ async fn execute_command(
     config: &RunMatRuntimeConfig,
     graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<()> {
+    // Bound this dispatcher independently of the largest unrelated subcommand.
     match command {
         Commands::Repl { verbose } => {
             let mut repl_config = config.clone();
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
-            repl::execute_repl_with_graphics(&repl_config, cli, graphics).await
+            boxed_command(|| repl::execute_repl_with_graphics(&repl_config, cli, graphics)).await
         }
         Commands::Run {
             file,
@@ -80,18 +96,20 @@ async fn execute_command(
             json,
             args,
         } => {
-            script::execute_script_with_graphics(
-                script::ScriptInvocation {
-                    script: file,
-                    args,
-                    emit_bytecode_path: cli.emit_bytecode.clone(),
-                    fea_json: json,
-                    execution,
-                },
-                cli,
-                config,
-                graphics,
-            )
+            boxed_command(|| {
+                script::execute_script_with_graphics(
+                    script::ScriptInvocation {
+                        script: file,
+                        args,
+                        emit_bytecode_path: cli.emit_bytecode.clone(),
+                        fea_json: json,
+                        execution,
+                    },
+                    cli,
+                    config,
+                    graphics,
+                )
+            })
             .await
         }
         Commands::Mesh {
@@ -109,25 +127,27 @@ async fn execute_command(
             force,
             json,
         } => {
-            mesh::execute_with_target(
-                mesh::MeshCommand {
-                    source,
-                    source_units,
-                    output,
-                    evidence,
-                    target_size_m: target_size,
-                    maximum_deviation_m: deviation,
-                    element_order,
-                    maximum_elements: max_elements,
-                    deterministic_seed: seed,
-                    shared_interfaces,
-                    force,
-                    json,
-                },
-                execution,
-                cli,
-                config,
-            )
+            boxed_command(|| {
+                mesh::execute_with_target(
+                    mesh::MeshCommand {
+                        source,
+                        source_units,
+                        output,
+                        evidence,
+                        target_size_m: target_size,
+                        maximum_deviation_m: deviation,
+                        element_order,
+                        maximum_elements: max_elements,
+                        deterministic_seed: seed,
+                        shared_interfaces,
+                        force,
+                        json,
+                    },
+                    execution,
+                    cli,
+                    config,
+                )
+            })
             .await
         }
         Commands::Compile {
@@ -144,24 +164,26 @@ async fn execute_command(
             keep_temps,
             force,
         } => {
-            compile::execute(
-                compile::CompileRequest {
-                    file,
-                    output,
-                    optimization,
-                    policy,
-                    explain_link,
-                    link_plan_json,
-                    linker,
-                    selected_pack_manifest,
-                    selected_components,
-                    selected_host_admission,
-                    keep_temps,
-                    force,
-                },
-                cli,
-                config,
-            )
+            boxed_command(|| {
+                compile::execute(
+                    compile::CompileRequest {
+                        file,
+                        output,
+                        optimization,
+                        policy,
+                        explain_link,
+                        link_plan_json,
+                        linker,
+                        selected_pack_manifest,
+                        selected_components,
+                        selected_host_admission,
+                        keep_temps,
+                        force,
+                    },
+                    cli,
+                    config,
+                )
+            })
             .await
         }
         Commands::Mex(args) => mex::execute(args),
@@ -173,31 +195,45 @@ async fn execute_command(
             verbose,
             deny,
             search_paths,
-        } => check::execute_check(file, cli, config, json, verbose, deny, search_paths).await,
-        Commands::Fea { fea_command } => fea::execute_command(fea_command, cli, config).await,
+        } => {
+            boxed_command(|| {
+                check::execute_check(file, cli, config, json, verbose, deny, search_paths)
+            })
+            .await
+        }
+        Commands::Fea { fea_command } => {
+            boxed_command(|| fea::execute_command(fea_command, cli, config)).await
+        }
         Commands::Version { detailed } => {
             version::show_version(detailed);
             Ok(())
         }
-        Commands::Info { json } => version::show_system_info(config, json).await,
-        Commands::AccelInfo { json, reset } => accel::show_accel_info(json, reset).await,
+        Commands::Info { json } => boxed_command(|| version::show_system_info(config, json)).await,
+        Commands::AccelInfo { json, reset } => {
+            boxed_command(|| accel::show_accel_info(json, reset)).await
+        }
         #[cfg(feature = "wgpu")]
         Commands::AccelCalibrate {
             input,
             refresh,
             dry_run,
             json,
-        } => accel::execute_accel_calibrate(input, refresh, dry_run, json).await,
-        Commands::Gc { gc_command } => gc::execute_gc_command(gc_command).await,
+        } => boxed_command(|| accel::execute_accel_calibrate(input, refresh, dry_run, json)).await,
+        Commands::Gc { gc_command } => boxed_command(|| gc::execute_gc_command(gc_command)).await,
         Commands::Benchmark {
             file,
             iterations,
             jit,
             warmup,
             report,
-        } => benchmark::execute_benchmark(file, iterations, jit, warmup, report, cli, config).await,
+        } => {
+            boxed_command(|| {
+                benchmark::execute_benchmark(file, iterations, jit, warmup, report, cli, config)
+            })
+            .await
+        }
         Commands::Config { config_command } => {
-            config::execute_config_command(config_command, config).await
+            boxed_command(|| config::execute_config_command(config_command, config)).await
         }
         Commands::Login {
             server,
@@ -207,23 +243,44 @@ async fn execute_command(
             org,
             project,
         } => {
-            remote::execute_login_command(server, api_key, email, credential_store, org, project)
-                .await
+            boxed_command(|| {
+                remote::execute_login_command(
+                    server,
+                    api_key,
+                    email,
+                    credential_store,
+                    org,
+                    project,
+                )
+            })
+            .await
         }
-        Commands::Org { org_command } => remote::execute_org_command(org_command).await,
+        Commands::Org { org_command } => {
+            boxed_command(|| remote::execute_org_command(org_command)).await
+        }
         Commands::Project { project_command } => {
-            remote::execute_project_command(project_command).await
+            boxed_command(|| remote::execute_project_command(project_command)).await
         }
-        Commands::Fs { fs_command } => remote::execute_fs_command(fs_command).await,
-        Commands::Package { package_command } => package::execute(package_command, cli).await,
-        Commands::Test(args) => test::execute(*args, cli, config).await,
-        Commands::Batch { batch_command } => batch::execute(batch_command).await,
+        Commands::Fs { fs_command } => {
+            boxed_command(|| remote::execute_fs_command(fs_command)).await
+        }
+        Commands::Package { package_command } => {
+            boxed_command(|| package::execute(package_command, cli)).await
+        }
+        Commands::Test(args) => boxed_command(|| test::execute(*args, cli, config)).await,
+        Commands::Batch { batch_command } => boxed_command(|| batch::execute(batch_command)).await,
         Commands::Cluster { cluster_command } => {
-            remote::execute_cluster_command(cluster_command).await
+            boxed_command(|| remote::execute_cluster_command(cluster_command)).await
         }
-        Commands::Job { job_command } => job::execute(job_command, cli, config).await,
+        Commands::Job { job_command } => {
+            boxed_command(|| job::execute(job_command, cli, config)).await
+        }
         Commands::Remote { remote_command } => {
-            remote::execute_remote_command(remote_command, cli, config).await
+            boxed_command(|| remote::execute_remote_command(remote_command, cli, config)).await
         }
     }
 }
+
+#[cfg(test)]
+#[path = "dispatch/future_size_tests.rs"]
+mod future_size_tests;

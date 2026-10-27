@@ -1,3 +1,6 @@
+mod field_name;
+use field_name::parse_field_name;
+
 use super::{FieldPath, FieldStep, IndexComponent, IndexSelector, PathError, PathErrorKind};
 use crate::builtins::common::tensor;
 use runmat_value::{NumericScalar, Value};
@@ -176,24 +179,6 @@ pub(super) fn parse_float(value: f64) -> Result<usize, PathError> {
         ));
     }
     Ok(value as usize)
-}
-
-fn parse_field_name(value: Value) -> Result<String, PathError> {
-    match value {
-        Value::String(value) => Ok(value.to_string()),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
-        Value::CharArray(array) if array.rows == 1 => {
-            runmat_value::decode_utf16_code_units(array.data()).map_err(|source| PathError {
-                kind: PathErrorKind::FieldName,
-                detail: "field name is not valid UTF-16".into(),
-                source: Some(source),
-            })
-        }
-        _ => Err(error(
-            PathErrorKind::FieldName,
-            "field names must be scalar strings or character row vectors",
-        )),
-    }
 }
 
 fn error(kind: PathErrorKind, detail: impl Into<String>) -> PathError {

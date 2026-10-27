@@ -12,6 +12,9 @@ use runmat_runtime::execution::{
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
+#[path = "program_execution/callable_admission.rs"]
+pub mod callable_admission;
+
 #[path = "program_execution/dynamic_admission.rs"]
 pub mod dynamic_admission;
 
@@ -35,11 +38,12 @@ pub use crate::bytecode::program::retained_artifacts::{
 };
 pub use graph_materialization::materialize_deferred_graph_call;
 pub use graph_request::{
-    execute_graph_request, execute_graph_request_with_context,
-    execute_graph_request_with_context_recording,
+    compiled_graph_execution_capabilities, execute_graph_request,
+    execute_graph_request_with_context, execute_graph_request_with_context_recording,
     execute_graph_request_with_selected_foreign_ports_recording, execute_prepared_graph_request,
     prepare_graph_request_with_selected_foreign_ports_recording, GraphFailureSourceRecorder,
-    PreparedSelectedGraph, SelectedGraphCleanupContexts, SelectedGraphForeignPorts,
+    PreparedSelectedGraph, RestoredSelectedGraph, SelectedGraphCleanupContexts,
+    SelectedGraphForeignPorts,
 };
 pub use region_sources::encode_portable_region_sources_v1;
 pub use unit_admission::{

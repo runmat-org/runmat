@@ -60,7 +60,10 @@ fn rhs_statement_is_not_replayed_when_final_truth_suspends() {
     runmat_gc::gc_test_context(|| {
         let mut state = observed_state(&Rc::new(Probe::default()));
         let request = request(&mut state);
-        let initial = state.arena.insert(Value::Num(0.0));
+        let initial = state
+            .arena
+            .insert(Value::Num(0.0), Some(&state.runtime))
+            .unwrap();
         state.locals.push(initial);
         let left = MirOperand::Constant(MirConstant::Bool(true));
         let right = MirOperand::Local(MirLocalId(0));

@@ -202,7 +202,7 @@ impl<'a> CoreTestExecutor<'a> {
             .bind_runtime_sources(runtime)
             .map_err(uncaught)?;
         let bytecode = teardown.unit.runtime_bytecode(&runtime).map_err(uncaught)?;
-        let selected = crate::executable::callback::select(
+        let selected = crate::callable_selection::select(
             &runtime,
             &bytecode.function_registry,
             teardown.invocation.callback.clone(),

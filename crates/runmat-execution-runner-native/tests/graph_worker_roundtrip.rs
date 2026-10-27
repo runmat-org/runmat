@@ -33,6 +33,8 @@ fn main() {
 }
 
 async fn execute(session: &mut RunMatSession, name: &str, source: &str) {
+    let started = std::time::Instant::now();
+    eprintln!("native graph worker: starting {name}");
     let request = ExecutionRequest::for_source(
         SourceInput::Text {
             name: name.into(),
@@ -52,6 +54,10 @@ async fn execute(session: &mut RunMatSession, name: &str, source: &str) {
         "unexpected graph diagnostics: {:?}",
         outcome.diagnostics
     );
+    eprintln!(
+        "native graph worker: completed {name} in {:?}",
+        started.elapsed()
+    );
 }
 
 async fn roundtrip() {
@@ -62,7 +68,7 @@ async fn roundtrip() {
         .marker()
         .into()];
     config.store_root = temporary.path().join("native-session");
-    config.max_workers = 1;
+    config.max_workers = 2;
     let service = Rc::new(NativeExecutionService::new(config).expect("native worker service"));
     let mut session = RunMatSession::with_options(false, false).expect("session");
     session.install_execution_services(service.clone());
@@ -102,6 +108,9 @@ async fn roundtrip() {
     assert_eq!(variables.get("firstValue"), Some(&Value::Num(41.0)));
     assert_eq!(variables.get("secondValue"), Some(&Value::Num(42.0)));
     assert_eq!(variables.get("clientValue"), Some(&Value::Num(41.0)));
+
+    parallel_numerical_callbacks_use_real_selected_workers(&mut session).await;
+    parallel_pattern_callbacks_use_real_selected_workers(&mut session).await;
 
     retained_constructorless_class_uses_selected_worker_products(&mut session, temporary.path())
         .await;
@@ -219,4 +228,72 @@ async fn retained_constructorless_class_uses_selected_worker_products(
             returned.selected_provenance()[0].constructor()
         );
     }
+}
+
+async fn parallel_numerical_callbacks_use_real_selected_workers(session: &mut RunMatSession) {
+    execute(session,"parallel_differences.m",r#"pool=parpool(2);
+opts=optimoptions('fminunc','UseParallel','on','Display','off','MaxFunctionEvaluations',18);
+[pdx,pdf,pdflag,pdout,pdg]=fminunc(@parallelObjective,[0;0],opts);
+assert(pdflag==1);assert(pdout.funcCount>=6 && pdout.funcCount<=18);assert(mod(pdout.funcCount,3)==0);assert(all(size(pdx)==[2 1]));assert(all(abs(pdx-1)<1e-6));assert(pdf<1e-12);assert(all(abs(pdg)<1e-6));
+function f=parallelObjective(x)
+% Symmetric accepted/trial base points remain on the caller. Only an FD
+% coordinate perturbation is asymmetric and must carry a real worker task.
+if x(1)~=x(2)
+ assert(~isempty(getCurrentTask()));
+end
+f=(x(1)-1)^2+(x(2)-1)^2;
+end"#).await;
+}
+
+async fn parallel_pattern_callbacks_use_real_selected_workers(session: &mut RunMatSession) {
+    execute(
+        session,
+        "parallel_pattern_budget.m",
+        r#"
+opts=optimoptions('patternsearch','UseParallel','on','Display','off',...
+    'UseCompletePoll',false,'Cache','on','MaxFunctionEvaluations',3,'MaxIterations',1);
+[x,f,flag,out]=patternsearch(@workerPatternObjective,[0 0],[],[],[],[],[],[],[],opts);
+assert(out.funccount==3); assert(flag==0); assert(all(size(x)==[1 2]));
+assert(f==sum((x-1).^2));
+function f=workerPatternObjective(x)
+if any(x~=0); assert(~isempty(getCurrentTask())); end
+f=sum((x-1).^2);
+end
+"#,
+    )
+    .await;
+    execute(session, "parallel_pattern_nonlinear.m", r#"
+opts=optimoptions('patternsearch','UseParallel','on','Display','off',...
+    'MaxFunctionEvaluations',20,'MaxIterations',2);
+[x,f,flag,out]=patternsearch(@workerPatternObjective,[0 0],[],[],[],[],[],[],@workerPatternConstraint,opts);
+assert(out.funccount<=20); assert(out.constraintcallcount==out.funccount);
+assert(all(size(x)==[1 2])); assert(f==sum((x-1).^2)); assert(sum(x)<=2+1e-6);
+function [c,ceq]=workerPatternConstraint(x)
+if any(x~=0); assert(~isempty(getCurrentTask())); end
+c=sum(x)-2; ceq=[];
+end
+"#).await;
+    execute(
+        session,
+        "parallel_pattern_error.m",
+        r#"
+opts=optimoptions('patternsearch','UseParallel','on','Display','off',...
+    'MaxFunctionEvaluations',6,'MaxIterations',1);
+caught=false;
+try
+    patternsearch(@workerPatternFailure,[0 0],[],[],[],[],[],[],[],opts);
+catch original
+    caught=strcmp(original.identifier,'RunMat:Test:PatternWorker');
+end
+assert(caught);
+function f=workerPatternFailure(x)
+if any(x~=0)
+    assert(~isempty(getCurrentTask()));
+    error('RunMat:Test:PatternWorker','original worker callback failure');
+end
+f=sum((x-1).^2);
+end
+"#,
+    )
+    .await;
 }

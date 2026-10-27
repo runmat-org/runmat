@@ -176,7 +176,7 @@ impl ThermalOperatorAssembly {
         let mut rhs = physical
             .residual_w
             .canonical_values()
-            .into_iter()
+            .iter()
             .map(|power| -power)
             .collect::<Vec<_>>();
         let constrained = self

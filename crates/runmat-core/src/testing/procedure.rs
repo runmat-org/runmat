@@ -76,6 +76,7 @@ pub(crate) fn function_name(procedure: &ProcedureDescriptor) -> Result<String, S
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn method_name(procedure: &ProcedureDescriptor) -> Result<&str, String> {
     if procedure.kind != ProcedureKind::Method {
         return Err("test procedure is not a method".into());

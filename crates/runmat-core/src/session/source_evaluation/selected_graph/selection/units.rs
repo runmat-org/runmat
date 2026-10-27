@@ -68,6 +68,11 @@ impl SelectedGraphUnits {
     pub(in crate::session::source_evaluation::selected_graph) fn foreign_policies(
         &self,
     ) -> Vec<Option<runmat_execution::ForeignPolicyRef>> {
+        // Pure captures use the canonical empty policy vector. Ordered holes
+        // are meaningful only when another selected unit has an issued policy.
+        if self.units.iter().all(|unit| unit.interop_receipt.is_none()) {
+            return Vec::new();
+        }
         self.units
             .iter()
             .map(|unit| {

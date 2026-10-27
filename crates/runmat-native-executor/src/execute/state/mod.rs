@@ -121,7 +121,7 @@ pub(super) struct HostState {
     inherited_catch: Option<std::rc::Rc<runmat_value::MException>>,
     pub locals: Vec<NativeValueRef>,
     pub values: BTreeMap<NativeValueId, NativeValueRef>,
-    pub roots: Vec<NativeRoot>,
+    pub roots: roots::NativeRoots,
     pub last_error: Option<runmat_runtime::runtime_error::RuntimeErrorOwner>,
     pub host_failure: Option<NativeExecutorError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
@@ -209,6 +209,7 @@ mod continuation;
 mod control;
 #[path = "contextual_regions.rs"]
 mod expression_regions;
+mod roots;
 mod workspace;
 
 pub(crate) use expression_regions::EmbeddedOperationIdentity;

@@ -12,6 +12,9 @@ pub(super) fn clear_registered_axes(
     targets: &[usize],
 ) {
     let state = get_state_mut(reg, handle);
+    state
+        .optimization_plots
+        .retain(|(axes, _), _| !targets.contains(axes));
     let mut next = 0;
     let mapping: Vec<Option<usize>> = state
         .figure
@@ -51,11 +54,40 @@ pub(super) fn clear_registered_axes(
     });
     // Drop-only admission does not copy a retained payload. Only survivors
     // whose Figure layout is being remapped become writable.
+    remap_survivors(reg, handle, &mapping);
+}
+/// Remove the already-selected chart payload, preserving unrelated charts on
+/// the same axes. The caller retires its exact optimization slot first.
+pub(super) fn clear_registered_plot(
+    reg: &mut PlotRegistry,
+    handle: FigureHandle,
+    index: usize,
+) -> Result<(), String> {
+    let count = get_state_mut(reg, handle).figure.plot_axes_indices().len();
+    if index >= count {
+        return Err("selected optimization chart index was retired".into());
+    }
+    let mapping: Vec<Option<usize>> = (0..count)
+        .map(|old| {
+            if old == index {
+                None
+            } else {
+                Some(old - usize::from(old > index))
+            }
+        })
+        .collect();
+    get_state_mut(reg, handle).figure.remove_plot(index)?;
+    reg.plot_children
+        .retain(|_, child| child.figure_axes().0 != handle || child.plot_index() != Some(index));
+    remap_survivors(reg, handle, &mapping);
+    Ok(())
+}
+fn remap_survivors(reg: &mut PlotRegistry, handle: FigureHandle, mapping: &[Option<usize>]) {
     reg.plot_children.retain_mut_where(
         |child| {
             child.figure_axes().0 == handle && !matches!(child, PlotChildHandleState::ColorBar(_))
         },
-        |_, child| remap_indices(child, &mapping),
+        |_, child| remap_indices(child, mapping),
     );
 }
 

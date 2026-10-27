@@ -12,7 +12,7 @@ const INTEGER_COUNTS: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCa
     classes: &crate::catalog::integer::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Structural native integer counts use exact checked platform usize decoding. The existing solver uses at least one iteration/evaluation budget unit.",
+    notes: "Structural native integer counts use exact checked platform usize decoding. Zero iterations are honored. Zero function evaluations stop before the first callback and return an explicitly unevaluated supplied candidate with unknown numerical products.",
 }];
 const INTEGER_TOLERANCES: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability {
     name: "options.TolX or options.TolFun",

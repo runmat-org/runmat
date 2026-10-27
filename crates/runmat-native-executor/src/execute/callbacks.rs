@@ -106,10 +106,22 @@ unsafe extern "C" fn execute_site(
                 let error = runmat_runtime::runtime_error::RuntimeErrorOwner::new(
                     state.annotate_error(*error),
                 );
-                let exception = state.arena.insert(runmat_value::Value::MException(
-                    runmat_runtime::runtime_error::exception_from_error(error.clone()),
-                ));
-                state.last_error = Some(error);
+                state.last_error = Some(error.clone());
+                let exception = state
+                    .arena
+                    .insert(
+                        runmat_value::Value::MException(
+                            runmat_runtime::runtime_error::exception_from_error(error.clone()),
+                        ),
+                        Some(&state.runtime),
+                    )
+                    .map_err(|_| {
+                        // Failure to allocate an ABI error token must not replace
+                        // the source operation's already-established error.
+                        NativeExecutorError::from(
+                            runmat_runtime::RuntimeError::from_shared_original(error),
+                        )
+                    })?;
                 // SAFETY: callback outputs are checked and writable.
                 unsafe {
                     *exit = NativeExit::exception(NativeException {

@@ -169,7 +169,7 @@ fn restore_mat_array<'a>(
                     )?;
                     restored.push(
                         crate::builtins::introspection::object_serialization::reconcile_mat_object_product(
-                            object, &class, &product, data[0] != 0,
+                            object, &class, &product, data[0] != 0, runtime,
                         )?,
                     );
                 }

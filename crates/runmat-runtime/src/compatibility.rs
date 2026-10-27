@@ -73,7 +73,7 @@ pub fn ensure_builtin_extension_enabled(
     extension: &BuiltinExtensionDescriptor,
     context: &str,
 ) -> Result<(), RuntimeError> {
-    ensure_builtin_extension_enabled_with_policy(extension, context, runmat_extensions_enabled())
+    ensure_builtin_extension_enabled_in_optional_context(None, extension, context)
 }
 
 /// Admit a RunMat-only form against the explicit invocation policy, without
@@ -83,11 +83,20 @@ pub fn ensure_builtin_extension_enabled_in_context(
     extension: &BuiltinExtensionDescriptor,
     context: &str,
 ) -> Result<(), RuntimeError> {
-    ensure_builtin_extension_enabled_with_policy(
-        extension,
-        context,
-        runtime.runmat_extensions_enabled(),
-    )
+    ensure_builtin_extension_enabled_in_optional_context(Some(runtime), extension, context)
+}
+
+/// Explicit invocations own their policy; only contextless compatibility
+/// callers consult the selected session or bare-thread default.
+pub(crate) fn ensure_builtin_extension_enabled_in_optional_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    let enabled = runtime.map_or_else(runmat_extensions_enabled, |runtime| {
+        runtime.runmat_extensions_enabled()
+    });
+    ensure_builtin_extension_enabled_with_policy(extension, context, enabled)
 }
 
 fn ensure_builtin_extension_enabled_with_policy(

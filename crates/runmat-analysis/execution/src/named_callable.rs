@@ -12,6 +12,144 @@ use runmat_types::{CapabilityRequirement, ProgramFunctionId};
 use std::collections::BTreeSet;
 
 pub const ANALYSIS_CALLABLE_TARGET_PROFILE: &str = "portable-executable-unit-v4";
+
+/// Borrowed original source/compiled selection used by assessment preparation.
+#[derive(Clone, Copy)]
+pub struct NamedCallableSourceRef<'a> {
+    pub program_revision: &'a ProgramRevision,
+    pub callable: &'a BundleCallable,
+    pub compiled_binding: &'a CompiledCallableBinding,
+}
+
+/// Registry execution name selected by the original trusted compiler/admission
+/// owner. This is distinct from BundleCallable's package-qualified source label.
+/// Capture it before freezing admission, never from a later descriptor candidate.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledCallableBinding {
+    registry_name: String,
+    qualified_label: String,
+    function: ProgramFunctionId,
+    source_digest: Digest,
+}
+
+impl CompiledCallableBinding {
+    pub fn from_selected_identity(
+        identity: &runmat_execution::ExecutableIdentity,
+        qualified_label: &str,
+    ) -> AnalysisBridgeResult<Self> {
+        identity.program.validate()?;
+        identity.validate()?;
+        if identity.entrypoint_kind != ExecutableEntrypointKind::Function {
+            return Err(AnalysisBridgeError::Identity(
+                "compiled callable entrypoint kind is not function",
+            ));
+        }
+        if qualified_label.trim().is_empty() || qualified_label.chars().any(char::is_control) {
+            return Err(AnalysisBridgeError::Identity(
+                "compiled callable qualified label is empty or contains control characters",
+            ));
+        }
+        Ok(Self {
+            registry_name: identity.entrypoint.clone(),
+            qualified_label: qualified_label.to_owned(),
+            function: identity
+                .entrypoint_function
+                .expect("validated function entrypoint"),
+            source_digest: identity.source_digest,
+        })
+    }
+
+    pub(crate) fn function(&self) -> ProgramFunctionId {
+        self.function
+    }
+    pub(crate) fn source_digest(&self) -> Digest {
+        self.source_digest
+    }
+
+    pub(crate) fn validate_admission(
+        &self,
+        callable: &BundleCallable,
+        function: ProgramFunctionId,
+        source: Digest,
+    ) -> AnalysisBridgeResult<()> {
+        if self.qualified_label != callable.qualified_name {
+            return Err(AnalysisBridgeError::Identity(
+                "admitted callable qualified label differs from its original compiled binding",
+            ));
+        }
+        if self.function != function {
+            return Err(AnalysisBridgeError::Identity(
+                "compiled callable binding differs from admitted function facts",
+            ));
+        }
+        if self.source_digest != source {
+            return Err(AnalysisBridgeError::Identity(
+                "compiled callable binding differs from admitted executable source digest",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_candidate(
+        &self,
+        identity: &runmat_execution::ExecutableIdentity,
+        program_revision: &ProgramRevision,
+        callable: &BundleCallable,
+    ) -> AnalysisBridgeResult<()> {
+        if self.qualified_label != callable.qualified_name {
+            return Err(AnalysisBridgeError::Identity(
+                "admitted callable qualified label differs from its original compiled binding",
+            ));
+        }
+        for (matches, diagnostic) in [
+            (
+                &identity.program == program_revision,
+                "portable executable program differs from the admitted frozen callable",
+            ),
+            (
+                identity.root_package == callable.owner_identity,
+                "portable executable root package differs from the admitted frozen callable",
+            ),
+            (
+                identity.entrypoint == self.registry_name,
+                "portable executable registry entrypoint differs from the admitted frozen callable",
+            ),
+            (
+                identity.entrypoint_kind == ExecutableEntrypointKind::Function,
+                "portable executable entrypoint kind differs from the admitted frozen callable",
+            ),
+            (
+                identity.entrypoint_function == Some(self.function),
+                "portable executable function differs from the admitted frozen callable",
+            ),
+            (
+                identity.source_digest == self.source_digest,
+                "portable executable source digest differs from the admitted frozen callable",
+            ),
+        ] {
+            if !matches {
+                return Err(AnalysisBridgeError::Identity(diagnostic));
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture(
+        name: &str,
+        qualified_label: &str,
+        function: ProgramFunctionId,
+        source_digest: Digest,
+    ) -> Self {
+        Self {
+            registry_name: name.to_owned(),
+            qualified_label: qualified_label.to_owned(),
+            function,
+            source_digest,
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct NamedCallableExecutionContext {
     pub scope_id: runmat_execution::ExecutionScopeId,
@@ -40,6 +178,7 @@ impl AnalysisCallablePurpose {
 pub struct NamedCallableAdmissionRef<'a> {
     pub program_revision: &'a ProgramRevision,
     pub callable: &'a BundleCallable,
+    pub compiled_binding: &'a CompiledCallableBinding,
     pub executable_source_digest: Digest,
     pub function: ProgramFunctionId,
     pub required_capabilities: &'a BTreeSet<CapabilityRequirement>,
@@ -50,18 +189,17 @@ pub fn prepare_named_callable_descriptor(
     purpose: AnalysisCallablePurpose,
 ) -> AnalysisBridgeResult<ProgramExecutionDescriptor> {
     executable.validate()?;
+    admission.compiled_binding.validate_admission(
+        admission.callable,
+        admission.function,
+        admission.executable_source_digest,
+    )?;
     let identity = &executable.manifest.identity;
-    if &identity.program != admission.program_revision
-        || identity.root_package != admission.callable.owner_identity
-        || identity.entrypoint != admission.callable.qualified_name
-        || identity.entrypoint_kind != ExecutableEntrypointKind::Function
-        || identity.entrypoint_function != Some(admission.function)
-        || identity.source_digest != admission.executable_source_digest
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "portable executable differs from the admitted frozen callable",
-        ));
-    }
+    admission.compiled_binding.validate_candidate(
+        identity,
+        admission.program_revision,
+        admission.callable,
+    )?;
     if !admission
         .required_capabilities
         .is_subset(&executable.manifest.capabilities.0)

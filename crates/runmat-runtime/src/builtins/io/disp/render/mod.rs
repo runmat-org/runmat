@@ -134,7 +134,8 @@ pub(super) fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
                 dims_to_string(&canonical_dims(&cell.shape))
             )],
         },
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

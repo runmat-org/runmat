@@ -97,6 +97,8 @@ futures(2) = parfeval(pool, @calculate, 1, secondInput);
 
 For an array of futures, `fetchOutputs(futures, "UniformOutput", false)` returns cell arrays instead of concatenating compatible outputs. `cancel(future)` requests cooperative cancellation. Work already completed remains completed; active worker work is cancelled at the next supported cancellation boundary.
 
+In a browser, waiting for a scheduled future suspends the caller until the task reports completion. Interpreted loops yield at the browser adapter's work checkpoints so cancellation messages can reach an active worker. Cancelling the coordinating execution also requests cancellation of its child tasks; the worker's resources remain retained until its invocation reports retirement.
+
 ## Inspect Worker Context
 
 Code running on a scheduled worker can inspect its execution assignment:

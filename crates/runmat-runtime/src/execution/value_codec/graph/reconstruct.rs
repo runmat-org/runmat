@@ -629,10 +629,11 @@ impl<'a> Decoder<'a> {
                 if registered.kind != GraphRegisteredKind::ImmutableValueClass {
                     return Err(invalid("registered graph class has no runtime codec"));
                 }
-                let class = runmat_types::ClassIdentity::new(&registered.type_identity)
-                    .map_err(|error| invalid(error.to_string()))?;
-                let mut output =
-                    self.object_output(class.display_name(), &registered.fields, &[])?;
+                let codec = super::super::immutable_class::GraphValueClass::for_wire(
+                    &registered.type_identity,
+                    registered.schema_version,
+                )?;
+                let mut output = self.object_output(codec.class_name(), &registered.fields, &[])?;
                 for field in &registered.fields {
                     output.insert(
                         output.copy_text(&field.name, "$")?,
@@ -647,8 +648,12 @@ impl<'a> Decoder<'a> {
                     )?;
                 }
                 let object = output.finish("$")?;
-                crate::parallel::codistributor::validate_definition(&object)
-                    .map_err(|error| invalid(error.to_string()))?;
+                codec.validate(
+                    &object,
+                    Some(&super::super::ValidationWorkspaceOwner::capture(
+                        self.runtime,
+                    )),
+                )?;
                 Value::Object(object)
             }
             GraphNode::SelectedObject(selected) => {

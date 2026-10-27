@@ -20,6 +20,7 @@ pub struct ExecutableFunctionInterface {
     pub inputs: Vec<ExecutableFunctionParameter>,
     pub outputs: Vec<runmat_types::ValueFact>,
     pub effects: runmat_types::EffectSet,
+    pub cooperative_suspension: bool,
     pub capabilities: runmat_types::CapabilitySet,
 }
 
@@ -30,8 +31,8 @@ use compiled_owners::compiled_function_owners;
 mod draft;
 pub(crate) use draft::ExecutableUnitDraft;
 #[path = "unit/class_products.rs"]
-#[cfg(not(target_arch = "wasm32"))]
 mod class_products;
+pub(crate) use class_products::RuntimeConstructorAdmissions;
 #[path = "unit/code_cache.rs"]
 mod code_cache;
 #[path = "unit/function_identity.rs"]
@@ -222,7 +223,9 @@ impl ExecutableUnit {
             .project_current_source_ids(|source| Self::runtime_source_id(runtime, source))
             .map_err(|source| format!("function source {source:?} is absent"))?;
         self.attach_runtime_source_owner(&mut functions, runtime)?;
-        self.attach_runtime_class_products(&mut functions)?;
+        let constructors =
+            self.materialize_runtime_constructor_definitions(&mut functions, None)?;
+        self.attach_runtime_class_products(&mut functions, &constructors)?;
         Ok(functions)
     }
 
@@ -296,6 +299,7 @@ impl ExecutableUnit {
         &self.analysis
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn analysis_owner(&self) -> Arc<runmat_mir::analysis::AnalysisStore> {
         Arc::clone(&self.analysis)
     }
@@ -404,6 +408,7 @@ impl ExecutableUnit {
             inputs,
             outputs: analysis.outputs.clone(),
             effects: analysis.effects.clone(),
+            cooperative_suspension: analysis.cooperative_suspension,
             capabilities: analysis.capabilities.clone(),
         })
     }

@@ -209,13 +209,13 @@ impl HostState {
             global_bindings,
             workspace,
         } = preparation;
-        let mut arena = ValueArena::new()?;
+        let mut arena = ValueArena::new_in(&runtime)?;
         let selected_inputs = arguments.is_none();
         let mut argument_refs = arguments
             .unwrap_or_default()
             .into_iter()
-            .map(|value| arena.insert(value))
-            .collect::<Vec<_>>();
+            .map(|value| arena.insert(value, Some(&runtime)))
+            .collect::<NativeExecutorResult<Vec<_>>>()?;
         let mut locals = vec![NativeValueRef::NULL; function.local_count()];
         let capture_locals = function
             .closure_captures
@@ -246,7 +246,10 @@ impl HostState {
                                 "native lexical capture binding is missing".into(),
                             )
                         })?;
-                    (local.local, arena.insert(capture.value.clone()))
+                    (
+                        local.local,
+                        arena.insert(capture.value.clone(), Some(&runtime))?,
+                    )
                 }
                 NativeCaptureInput::Retained {
                     binding,
@@ -267,7 +270,10 @@ impl HostState {
                             "retained capture disagrees with the verified Native layout".into(),
                         ));
                     }
-                    (*local, arena.insert_capture_lease(value.clone()))
+                    (
+                        *local,
+                        arena.insert_capture_lease(value.clone(), Some(&runtime))?,
+                    )
                 }
             };
             let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
@@ -302,7 +308,7 @@ impl HostState {
                     .build(),
                 )
             })?;
-            *slot = arena.insert(receiver.clone());
+            *slot = arena.insert(receiver.clone(), Some(&runtime))?;
         }
         for (local, value) in function
             .abi
@@ -319,7 +325,7 @@ impl HostState {
                     local.0 as usize,
                     value,
                 )? {
-                    Some(value) => arena.insert(value),
+                    Some(value) => arena.insert(value, Some(&runtime))?,
                     None => NativeValueRef::NULL,
                 };
             }
@@ -330,7 +336,7 @@ impl HostState {
                 local.0 as usize,
                 runmat_value::Value::Cell(varargin),
             )? {
-                Some(value) => arena.insert(value),
+                Some(value) => arena.insert(value, Some(&runtime))?,
                 None => NativeValueRef::NULL,
             };
         }
@@ -342,17 +348,21 @@ impl HostState {
                 local.0 as usize,
                 runmat_value::Value::Cell(empty),
             )? {
-                Some(value) => arena.insert(value),
+                Some(value) => arena.insert(value, Some(&runtime))?,
                 None => NativeValueRef::NULL,
             };
         }
         if let Some(local) = function.abi.implicit_nargin {
-            locals[local.0 as usize] =
-                arena.insert(runmat_value::Value::Num(prepared.nargin as f64));
+            locals[local.0 as usize] = arena.insert(
+                runmat_value::Value::Num(prepared.nargin as f64),
+                Some(&runtime),
+            )?;
         }
         if let Some(local) = function.abi.implicit_nargout {
-            locals[local.0 as usize] =
-                arena.insert(runmat_value::Value::Num(requested_outputs as f64));
+            locals[local.0 as usize] = arena.insert(
+                runmat_value::Value::Num(requested_outputs as f64),
+                Some(&runtime),
+            )?;
         }
         for binding in &function.lexical_bindings {
             if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Transit
@@ -365,7 +375,7 @@ impl HostState {
         }
         for (slot, local) in locals.iter_mut().enumerate() {
             if let Some(value) = workspace.initial_value_lease(&runtime, slot)? {
-                *local = arena.insert_retained_lease(value);
+                *local = arena.insert_retained_lease(value, Some(&runtime))?;
                 // The canonical workspace already owns this binding. Seeding
                 // its native read reference is not another workspace write.
                 continue;
@@ -425,19 +435,19 @@ impl HostState {
                     NativeExecutorError::Host("native varargin local is out of bounds".into())
                 })?;
                 for index in 0..supplied_inputs - function.abi.fixed_inputs.len() {
-                    argument_refs.push(arena.insert_cell_element(parent, index)?);
+                    argument_refs.push(arena.insert_cell_element(parent, index, Some(&runtime))?);
                 }
             }
         }
-        let roots = locals
-            .iter()
-            .enumerate()
-            .map(|(slot, value)| NativeRoot {
+        let mut roots = roots::NativeRoots::default();
+        roots.reserve(&runtime, locals.len())?;
+        roots
+            .values
+            .extend(locals.iter().enumerate().map(|(slot, value)| NativeRoot {
                 value: *value,
                 kind: NativeRootKind::LOCAL,
                 slot: slot as u32,
-            })
-            .collect::<Vec<_>>();
+            }));
         let source = function.source.0;
         let mut state = Self {
             function,

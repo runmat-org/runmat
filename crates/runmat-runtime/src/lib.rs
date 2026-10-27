@@ -901,6 +901,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(
                     .unwrap_or(Value::CharArray(chars))
                 })
         }
+        Value::ScopedFunctionHandle(handle) => Value::ScopedFunctionHandle(handle),
         Value::FunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {

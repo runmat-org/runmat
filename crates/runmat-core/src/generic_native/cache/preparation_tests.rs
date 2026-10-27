@@ -133,15 +133,17 @@ fn retired_recipe_prices_without_retaining_code_and_stale_evidence_restores_expl
         profile: Some(profile.digest),
     };
     let chosen = cache
-        .resolve_or_schedule_with_placement(invocation, Some(&profile), &runtime)
+        .resolve_or_schedule_with_placement(invocation, Some(&profile), &runtime, false)
         .unwrap()
+        .published
         .unwrap();
     assert_eq!(chosen.tier, runmat_jit::entry::PublishedTier::Generic);
     assert_eq!(cache.compilation_count(), before);
     statistics.fresh.set(false);
     let chosen = cache
-        .resolve_or_schedule_with_placement(invocation, Some(&profile), &runtime)
+        .resolve_or_schedule_with_placement(invocation, Some(&profile), &runtime, false)
         .unwrap()
+        .published
         .unwrap();
     assert!(matches!(
         chosen.tier,

@@ -88,7 +88,10 @@ runtime_build=(cargo rustc -p runmat-aot-runtime --profile "$profile")
 if "$runtime_no_default"; then
   runtime_build+=(--no-default-features)
 fi
-runtime_features=()
+# This helper builds the stock CLI's runtime. CPU-only feature selection does
+# not remove its console/callable factories; custom embedding archives use
+# the runtime crate directly with their own qualified factory symbols.
+runtime_features=(stock-hosted-factories)
 if "$runtime_wgpu"; then runtime_features+=(wgpu); fi
 if "$runtime_cuda"; then runtime_features+=(cuda); fi
 if ((${#runtime_features[@]})); then
@@ -100,6 +103,38 @@ fi
 # a foreign executable for this phase.
 host_target="$("${RUSTC:-rustc}" -vV | sed -n 's/^host: //p')"
 [[ -n "$host_target" ]] || { echo "Rust compiler did not report its build-host target" >&2; exit 1; }
+# Rust defaults do not set the minimum for native C/CMake dependencies.
+# Keep the deployment minimum shared without changing the caller's environment.
+darwin_command=(env)
+effective_target="${target:-$host_target}"
+if [[ "$effective_target" == *-apple-darwin || "$host_target" == *-apple-darwin ]]; then
+  macos_minimum="${MACOSX_DEPLOYMENT_TARGET:-}"
+  cmake_minimum="${CMAKE_OSX_DEPLOYMENT_TARGET:-}"
+  normalized_macos="$macos_minimum"
+  normalized_cmake="$cmake_minimum"
+  while [[ "$normalized_macos" == *.0 ]]; do normalized_macos="${normalized_macos%.0}"; done
+  while [[ "$normalized_cmake" == *.0 ]]; do normalized_cmake="${normalized_cmake%.0}"; done
+  if [[ -n "$macos_minimum" && -n "$cmake_minimum" && "$normalized_macos" != "$normalized_cmake" ]]; then
+    echo "conflicting MACOSX_DEPLOYMENT_TARGET and CMAKE_OSX_DEPLOYMENT_TARGET" >&2
+    exit 2
+  fi
+  deployment_minimum="${macos_minimum:-${cmake_minimum:-11.0}}"
+  darwin_command=(
+    env
+    "MACOSX_DEPLOYMENT_TARGET=${macos_minimum:-$deployment_minimum}"
+    "CMAKE_OSX_DEPLOYMENT_TARGET=${cmake_minimum:-$deployment_minimum}"
+  )
+fi
+# Deployment and host-tool phases select the policy independently.
+# Non-Darwin phases retain only the caller's original environment.
+deployment_command=(env)
+if [[ "$effective_target" == *-apple-darwin ]]; then
+  deployment_command=("${darwin_command[@]}")
+fi
+pack_deployment_command=(env)
+if [[ "$host_target" == *-apple-darwin ]]; then
+  pack_deployment_command=("${darwin_command[@]}")
+fi
 pack_command=(cargo run --target "$host_target")
 for locked_argument in "${locked_args[@]-}"; do
   [[ -n "$locked_argument" ]] || continue
@@ -112,10 +147,15 @@ if [[ -n "$target" ]]; then
 fi
 runtime_build+=(--lib --crate-type staticlib -- --print native-static-libs)
 
+# The runtime is a relocatable archive, not the final executable. Preserve
+# symbols in every object in its dependency closure even when the caller
+# strips the finished CLI. Cargo normalizes custom profile names for env keys.
+runtime_strip_variable="CARGO_PROFILE_$(printf '%s' "$profile" | tr '[:lower:]-' '[:upper:]_')_STRIP"
+
 # The native link line is machine-readable input to the packer. Keep this
 # command's diagnostics unstyled even when the caller requests colored Cargo
 # output so parsing never depends on terminal escape sequences.
-CARGO_TERM_COLOR=never "${runtime_build[@]}" 2>&1 | tee "$rustc_log"
+"${deployment_command[@]}" "$runtime_strip_variable=none" CARGO_TERM_COLOR=never "${runtime_build[@]}" 2>&1 | tee "$rustc_log"
 
 # Static-library naming belongs to the deployment target, not the build host.
 archive_name_command=("${RUSTC:-rustc}" --crate-name runmat_aot_runtime --crate-type staticlib --print file-names)
@@ -144,7 +184,7 @@ for token in "${native_tokens[@]}"; do
   pack_args+=(--native-link-token "$token")
 done
 pack_command+=(-p runmat-aot --bin runmat-aot-pack --)
-"${pack_command[@]}" "${pack_args[@]}"
+"${pack_deployment_command[@]}" "${pack_command[@]}" "${pack_args[@]}"
 
 final_build=(cargo build -p runmat --profile "$profile")
 if [[ -n "$target" ]]; then
@@ -154,8 +194,9 @@ for build_argument in "${build_args[@]-}"; do
   [[ -n "$build_argument" ]] || continue
   final_build+=("$build_argument")
 done
-RUNMAT_AOT_RUNTIME_ARCHIVE="$build_root/runtime-archive.payload" \
-RUNMAT_AOT_RUNTIME_MANIFEST="$build_root/runtime-archive.json" \
+"${deployment_command[@]}" \
+  RUNMAT_AOT_RUNTIME_ARCHIVE="$build_root/runtime-archive.payload" \
+  RUNMAT_AOT_RUNTIME_MANIFEST="$build_root/runtime-archive.json" \
   "${final_build[@]}"
 
 notice_destination="$target_directory/THIRD_PARTY_NOTICES.txt"

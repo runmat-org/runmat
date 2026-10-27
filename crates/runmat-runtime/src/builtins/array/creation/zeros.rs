@@ -5,9 +5,8 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, IntegerElementType};
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_builtins::{
-    ZEROS_COLUMN_SIZE_VECTOR_EXTENSION, ZEROS_ERROR_CLASS_CONFLICT, ZEROS_ERROR_LIKE_DUPLICATE,
-    ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE, ZEROS_ERROR_UNRECOGNIZED_OPTION,
-    ZEROS_IMPLICIT_PROTOTYPE_EXTENSION, ZEROS_RESIDENT_SIZE_EXTENSION,
+    ZEROS_ERROR_CLASS_CONFLICT, ZEROS_ERROR_LIKE_DUPLICATE, ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE,
+    ZEROS_ERROR_UNRECOGNIZED_OPTION, ZEROS_IMPLICIT_PROTOTYPE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::{standard, ClassIdentity, NumericClass};
@@ -36,6 +35,11 @@ use runmat_value::NumericDType;
 
 #[path = "zeros/gpu.rs"]
 mod gpu;
+#[path = "zeros/dimensions.rs"]
+mod dimensions;
+#[path = "zeros/prototype.rs"]
+mod prototype;
+pub(in crate::builtins) use dimensions::parse_creation_dimensions;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -105,8 +109,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "zeros",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
+async fn zeros_dispatch(
+    runtime: Option<crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValueSequence> {
+    let selected = runtime.clone();
+    crate::context::RuntimeScopeFactory::new(runtime, move || async move {
+        use crate::builtin::CanonicalBuiltinOutput;
+        if let Some(index) = prototype::like_prototype(&rest)? {
+            prototype::invoke(selected.as_ref(), rest, index).await
+        } else {
+            zeros_builtin(rest).await?.into_rooted_sequence()
+        }
+    })
+    .construct()
+    .await
+}
+
 async fn zeros_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let parsed = ParsedZeros::parse(rest).await?;
     build_output(parsed).await
@@ -237,28 +259,12 @@ impl ParsedZeros {
                 }
             }
 
-            if matches!(arg, Value::GpuTensor(_)) {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &ZEROS_RESIDENT_SIZE_EXTENSION,
-                    "zeros",
-                )?;
-            }
-            if let Some(parsed_dims) = extract_constructor_dimensions(&arg, "zeros")
-                .await
-                .map_err(builtin_error)?
-            {
-                tracing::trace!("zeros: parsed dimension arguments {:?}", parsed_dims);
-                if parsed_dims.is_column_vector {
-                    crate::compatibility::ensure_builtin_extension_enabled(
-                        &ZEROS_COLUMN_SIZE_VECTOR_EXTENSION,
-                        "zeros",
-                    )?;
-                }
+            if let Some(parsed_dims) = dimensions::argument(&arg).await? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
-                    dims = parsed_dims.values;
+                    dims = parsed_dims;
                 } else {
-                    dims.extend(parsed_dims.values);
+                    dims.extend(parsed_dims);
                 }
                 idx += 1;
                 continue;
@@ -369,7 +375,8 @@ fn value_tag(value: &Value) -> &'static str {
         Value::ObjectArray(_) | Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::Listener(_) => "Listener",
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_) => "FunctionHandle",
@@ -444,6 +451,9 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
         Value::Int(value) => zeros_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
         Value::Num(_) => zeros_double(shape),
         Value::CharArray(_) | Value::Cell(_) => zeros_double(shape),
+        Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_) => Err(builtin_error(
+            "zeros: object creation requires a trailing 'like', prototype pair",
+        )),
         _ => zeros_double(shape),
     }
 }

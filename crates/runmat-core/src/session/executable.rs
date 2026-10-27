@@ -235,13 +235,7 @@ impl RunMatSession {
             } else {
                 None
             };
-        let ready_at_start = if route_admission.is_some() {
-            self.generic_native_cache
-                .ready_publications(unit, None, profile)?
-        } else {
-            Default::default()
-        };
-        let published = self
+        let scheduled = self
             .generic_native_cache
             .resolve_or_schedule_with_placement(
                 crate::generic_native::placement::ReadyInvocation {
@@ -253,7 +247,10 @@ impl RunMatSession {
                 },
                 profile,
                 runtime,
+                route_admission.is_some(),
             )?;
+        let published = scheduled.published;
+        let ready_at_start = scheduled.ready_at_start;
         let osr = if published
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
@@ -359,13 +356,7 @@ impl RunMatSession {
         } else {
             None
         };
-        let ready_at_start = if route_admission.is_some() {
-            self.generic_native_cache
-                .ready_publications(unit, None, profile.as_ref())?
-        } else {
-            Default::default()
-        };
-        let published = self
+        let scheduled = self
             .generic_native_cache
             .resolve_or_schedule_with_placement(
                 crate::generic_native::placement::ReadyInvocation {
@@ -377,7 +368,10 @@ impl RunMatSession {
                 },
                 profile.as_ref(),
                 runtime,
+                route_admission.is_some(),
             )?;
+        let published = scheduled.published;
+        let ready_at_start = scheduled.ready_at_start;
         let osr = if published
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
@@ -532,13 +526,7 @@ impl RunMatSession {
         } else {
             None
         };
-        let ready_at_start = if route_admission.is_some() {
-            self.generic_native_cache
-                .ready_publications(unit, Some(name), profile.as_ref())?
-        } else {
-            Default::default()
-        };
-        let published = self
+        let scheduled = self
             .generic_native_cache
             .resolve_or_schedule_with_placement(
                 crate::generic_native::placement::ReadyInvocation {
@@ -550,7 +538,10 @@ impl RunMatSession {
                 },
                 profile.as_ref(),
                 runtime,
+                route_admission.is_some(),
             )?;
+        let published = scheduled.published;
+        let ready_at_start = scheduled.ready_at_start;
         let osr = if published
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
@@ -957,7 +948,9 @@ impl RunMatSession {
             .var_names
             .iter()
             .find_map(|(slot, name)| (name == "ans").then_some(*slot));
-        let mut variables = vec![Value::Num(0.0); runtime_bytecode.var_count];
+        // The VM allocates its dense storage. Supplying placeholders here
+        // would declare every slot assigned before the script has run.
+        let mut variables = Vec::new();
         match runmat_vm::interpret_with_workspace_and_dynamic_admission_in_context(
             runtime_bytecode,
             &mut variables,

@@ -160,7 +160,7 @@ impl AcousticAssembly {
         let reduction = build_phase_reduction(
             self.projection.nodes.len(),
             &relations,
-            &self.prescribed.canonical_values(),
+            self.prescribed.canonical_values(),
         )
         .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?;
         // A prescribed representative fixes its entire phase component. Mark those nodes

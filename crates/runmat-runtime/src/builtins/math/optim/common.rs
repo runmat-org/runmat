@@ -1,52 +1,46 @@
+pub(in crate::builtins::math::optim) mod cubic_rbf;
+pub(in crate::builtins::math::optim) mod nelder_mead;
 use runmat_builtins::BuiltinExtensionDescriptor;
-use runmat_builtins::OptimSolver;
+use runmat_builtins::{OptimOptionField, OptimSolver};
 use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
+pub(crate) mod conic;
+pub(super) mod constrained_numeric;
+pub(in crate::builtins::math::optim) mod feasible_cone;
+pub(in crate::builtins::math::optim) mod model_dimensions;
+pub(in crate::builtins::math::optim) mod model_indexing;
+pub(in crate::builtins::math::optim) mod model_policy;
+pub(in crate::builtins::math::optim) mod model_storage;
 mod scalar_cooperation;
+pub(crate) mod trust_quadratic;
 pub(crate) use scalar_cooperation::ScalarCooperation;
 mod host_arrays;
 pub(crate) use host_arrays::{first_nonfinite, logical_values, tensor_values};
+pub(crate) mod affine_coordinate;
+pub(crate) mod anneal_options;
+pub(crate) mod callback_source;
+pub(crate) mod derivative_scaling;
+pub(crate) mod global_hybrid;
+pub(crate) mod global_time;
+pub(crate) mod output_callback;
+pub(crate) mod population;
+pub(crate) mod quasi_newton_controls;
+pub(crate) mod retained_control;
 mod scalar_options;
-pub(crate) use scalar_options::{prepare_solver_options, ScalarOptionFields};
+pub(crate) mod solver_timing;
+pub(crate) mod surrogate_options;
+pub(crate) mod swarm_options;
+pub(crate) use scalar_options::{
+    prepare_fmincon_options, prepare_modeled_fminunc_options, prepare_modeled_residual_options,
+    prepare_multiobjective_options, prepare_solver_options, switch_value, PreparedSolverOptions,
+    ScalarOptionFields,
+};
 
-/// Reuse the canonical input contract before provider work. Payload values,
-/// finite checks and authentic resident allocation admission remain runtime-owned.
-pub(crate) fn preflight_catalog_inputs<'a>(
-    entry: &'static runmat_builtins::BuiltinCatalogEntry,
-    error: &'static runmat_builtins::BuiltinErrorDescriptor,
-    values: impl IntoIterator<Item = &'a Value>,
-) -> BuiltinResult<()> {
-    let inference = runmat_builtins::infer_catalog_call(
-        entry,
-        &runmat_types::CallRequest {
-            arguments: values
-                .into_iter()
-                .map(crate::value_fact::value_fact)
-                .collect(),
-            literals: runmat_types::LiteralContext::default(),
-            outputs: runmat_types::OutputSelection::new(
-                runmat_types::RequestedOutputCount::Exactly(1),
-            ),
-        },
-    );
-    if let Some(diagnostic) = inference
-        .diagnostics
-        .into_iter()
-        .find(|diagnostic| diagnostic.severity == runmat_types::InferenceSeverity::Error)
-    {
-        let mut builder =
-            build_runtime_error(format!("{}: {}", entry.identity.name, diagnostic.message))
-                .with_builtin(entry.identity.name);
-        if let Some(identifier) = error.identifier {
-            builder = builder.with_identifier(identifier);
-        }
-        return Err(builder.build());
-    }
-    Ok(())
-}
+mod catalog_preflight;
+pub(crate) use catalog_preflight::{preflight_catalog_facts, preflight_catalog_inputs};
 
 pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -78,8 +72,62 @@ pub(crate) async fn call_function(
     handle: &Value,
     args: impl AsRef<[Value]>,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    let callback = canonicalize_callback_handle(handle)?;
-    crate::call_feval_async_with_outputs(callback, args.as_ref(), 1).await
+    call_function_in_context(None, handle, args, 1).await
+}
+
+/// Resolve under the original invocation synchronously, then dispatch through
+/// its explicit call port. No ambient entry guard survives an await.
+pub(crate) async fn call_function_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: &Value,
+    args: impl AsRef<[Value]>,
+    requested_outputs: usize,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let result =
+        call_function_sequence_in_context(runtime, handle, args, requested_outputs).await?;
+    if requested_outputs == 1 {
+        let _entry = runtime.map(crate::context::RuntimeContext::enter);
+        result.try_into_single().map_err(|mut error| {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })
+    } else {
+        crate::call::arguments::project_rooted_legacy_builtin_value_abi(result)
+    }
+}
+
+/// Canonical callback results preserve roots and comma-separated cardinality.
+/// Consumers decoding several values can retain the rooted stream rather than
+/// projecting it into the older multi-output Value carrier.
+pub(crate) async fn call_function_sequence_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: &Value,
+    args: impl AsRef<[Value]>,
+    requested_outputs: usize,
+) -> BuiltinResult<crate::execution::RootedValueSequence> {
+    let callback = {
+        let _entry = runtime.map(crate::context::RuntimeContext::enter);
+        canonicalize_callback_handle(handle)?
+    };
+    match runtime {
+        Some(runtime) => {
+            crate::call_feval_sequence_async_with_outputs_in_context(
+                runtime,
+                callback,
+                args.as_ref(),
+                requested_outputs,
+            )
+            .await
+        }
+        None => {
+            crate::call_feval_sequence_async_with_outputs(
+                callback,
+                args.as_ref(),
+                requested_outputs,
+            )
+            .await
+        }
+    }
 }
 
 pub(crate) async fn call_scalar_function(
@@ -87,8 +135,9 @@ pub(crate) async fn call_scalar_function(
     solver: OptimSolver,
     handle: &Value,
     x: f64,
+    cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<f64> {
-    call_scalar_function_with_precision(name, solver, handle, x, false).await
+    call_scalar_function_with_precision(name, solver, handle, x, false, cooperation).await
 }
 
 pub(crate) async fn call_scalar_function_with_precision(
@@ -97,8 +146,9 @@ pub(crate) async fn call_scalar_function_with_precision(
     handle: &Value,
     x: f64,
     single: bool,
+    cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<f64> {
-    call_scalar_function_with_precision_info(name, solver, handle, x, single)
+    call_scalar_function_with_precision_info(name, solver, handle, x, single, cooperation)
         .await
         .map(|(value, _)| value)
 }
@@ -109,6 +159,7 @@ pub(crate) async fn call_scalar_function_with_precision_info(
     handle: &Value,
     x: f64,
     single: bool,
+    cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<(f64, bool)> {
     let argument = if single {
         Value::Tensor(
@@ -118,7 +169,7 @@ pub(crate) async fn call_scalar_function_with_precision_info(
     } else {
         Value::Num(x)
     };
-    let value = call_function(handle, vec![argument]).await?;
+    let value = call_function_in_context(cooperation.runtime(), handle, [argument], 1).await?;
     let output_single = match value.value() {
         Value::Tensor(tensor) => tensor.numeric_dtype() == runmat_value::NumericDType::F32,
         Value::GpuTensor(handle) => {
@@ -133,22 +184,24 @@ pub(crate) async fn call_scalar_function_with_precision_info(
         .with_owned_async(|value| async move {
             let value = match solver {
                 OptimSolver::Fminbnd => {
-                    prepare_floating_value(
+                    prepare_floating_value_with_cooperation(
                         name,
                         value,
                         &runmat_builtins::FMINBND_CALLBACK_NUMERIC_EXTENSION,
                         &runmat_builtins::FMINBND_RESIDENT_EXTENSION,
                         "objective value",
+                        cooperation,
                     )
                     .await?
                 }
                 OptimSolver::Fzero => {
-                    prepare_floating_value(
+                    prepare_floating_value_with_cooperation(
                         name,
                         value,
                         &runmat_builtins::FZERO_CALLBACK_NUMERIC_EXTENSION,
                         &runmat_builtins::FZERO_RESIDENT_EXTENSION,
                         "function value",
+                        cooperation,
                     )
                     .await?
                 }
@@ -192,6 +245,33 @@ impl ScalarOperandGeometry {
 
 /// Checks host-visible operand facts before the first provider operation. It
 /// deliberately does not inspect resident numerical payloads.
+pub(crate) fn preflight_host_residency(
+    name: &str,
+    value: &Value,
+    explicit_extension: Option<&BuiltinExtensionDescriptor>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<()> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(());
+    };
+    use runmat_accelerate_api::GpuHandleProvenance;
+    let detail = match runmat_accelerate_api::handle_provenance(handle) {
+        Some(GpuHandleProvenance::Automatic) => return Ok(()),
+        Some(GpuHandleProvenance::Explicit) => {
+            if let Some(extension) = explicit_extension {
+                return crate::compatibility::ensure_builtin_extension_enabled_in_optional_context(
+                    runtime, extension, name,
+                );
+            }
+            "explicit GPU operands require an explicit gather before this host solver"
+        }
+        None => "device operands with unproven placement require an explicit gather",
+    };
+    let mut error = optim_error(name, format!("{name}: {detail}"));
+    error.gpu_gather_retry = GpuGatherRetry::Never;
+    Err(error)
+}
+
 pub(crate) fn preflight_scalar_operand(
     solver: OptimSolver,
     value: &Value,
@@ -199,13 +279,16 @@ pub(crate) fn preflight_scalar_operand(
     role: &str,
     numeric_extension: &BuiltinExtensionDescriptor,
     resident_extension: &BuiltinExtensionDescriptor,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<()> {
     let name = solver.name();
-    if matches!(value, Value::GpuTensor(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(resident_extension, name)?;
-    }
+    preflight_host_residency(name, value, Some(resident_extension), runtime)?;
     if is_typed_integer_value(value) || is_logical_value(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(numeric_extension, name)?;
+        crate::compatibility::ensure_builtin_extension_enabled_in_optional_context(
+            runtime,
+            numeric_extension,
+            name,
+        )?;
     }
     let invalid = |detail: &str| {
         build_runtime_error(format!("{name}: {role} {detail}"))
@@ -278,6 +361,7 @@ pub(crate) fn preflight_scalar_operand(
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn prepare_floating_value(
     name: &str,
     value: Value,
@@ -285,7 +369,14 @@ pub(crate) async fn prepare_floating_value(
     resident_extension: &BuiltinExtensionDescriptor,
     role: &str,
 ) -> BuiltinResult<Value> {
-    preflight_floating_value(name, &value, numeric_extension, resident_extension, role)?;
+    preflight_floating_value(
+        name,
+        &value,
+        numeric_extension,
+        resident_extension,
+        role,
+        None,
+    )?;
     gather_exact_floating_value(name, value, role).await
 }
 
@@ -297,7 +388,14 @@ pub(crate) async fn prepare_floating_value_with_cooperation(
     role: &str,
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<Value> {
-    preflight_floating_value(name, &value, numeric_extension, resident_extension, role)?;
+    preflight_floating_value(
+        name,
+        &value,
+        numeric_extension,
+        resident_extension,
+        role,
+        cooperation.runtime(),
+    )?;
     gather_exact_floating_value_with_cooperation(name, value, role, cooperation).await
 }
 
@@ -307,16 +405,20 @@ fn preflight_floating_value(
     numeric_extension: &BuiltinExtensionDescriptor,
     resident_extension: &BuiltinExtensionDescriptor,
     role: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<()> {
-    if matches!(value, Value::GpuTensor(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(resident_extension, name)?;
-    }
+    preflight_host_residency(name, value, Some(resident_extension), runtime)?;
     if is_typed_integer_value(value) || is_logical_value(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(numeric_extension, name)?;
+        crate::compatibility::ensure_builtin_extension_enabled_in_optional_context(
+            runtime,
+            numeric_extension,
+            name,
+        )?;
     }
     preflight_real_array(name, value, role, true)
 }
 
+#[cfg(test)]
 async fn gather_exact_floating_value(name: &str, value: Value, role: &str) -> BuiltinResult<Value> {
     let mut cooperation = ScalarCooperation::for_builtin(
         runmat_builtins::BuiltinCatalogIdentity { name: "optim" },
@@ -343,7 +445,7 @@ pub(crate) async fn gather_exact_floating_value_with_cooperation(
             .into_value()
             .map_err(|error| optim_error(name, format!("{name}: {error}")));
     }
-    crate::dispatcher::gather_if_needed_async(&value).await
+    crate::dispatcher::gather_if_needed_in_context_async(&value, cooperation.runtime()).await
 }
 
 pub(crate) async fn initial_guess_with_extensions(
@@ -359,6 +461,7 @@ pub(crate) async fn initial_guess_with_extensions(
         numeric_extension,
         resident_extension,
         "initial point",
+        cooperation.runtime(),
     )?;
     preflight_real_array(name, &value, "initial guess", false)?;
     let value =
@@ -375,7 +478,14 @@ pub(crate) async fn value_to_real_vector_with_extensions(
     role: &str,
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<Vec<f64>> {
-    preflight_floating_value(name, &value, numeric_extension, resident_extension, role)?;
+    preflight_floating_value(
+        name,
+        &value,
+        numeric_extension,
+        resident_extension,
+        role,
+        cooperation.runtime(),
+    )?;
     let value =
         gather_exact_floating_value_with_cooperation(name, value, role, cooperation).await?;
     value_to_real_vector_with_cooperation(name, value, cooperation).await
@@ -387,8 +497,16 @@ pub(crate) async fn value_to_scalar_with_extensions(
     numeric_extension: &BuiltinExtensionDescriptor,
     resident_extension: &BuiltinExtensionDescriptor,
     role: &str,
+    cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<f64> {
-    preflight_floating_value(name, &value, numeric_extension, resident_extension, role)?;
+    preflight_floating_value(
+        name,
+        &value,
+        numeric_extension,
+        resident_extension,
+        role,
+        cooperation.runtime(),
+    )?;
     if crate::value_fact::value_fact(&value)
         .shape
         .element_count()
@@ -396,25 +514,37 @@ pub(crate) async fn value_to_scalar_with_extensions(
     {
         return Err(optim_error(name, format!("{name}: {role} must be scalar")));
     }
-    let value = gather_exact_floating_value(name, value, role).await?;
+    let value =
+        gather_exact_floating_value_with_cooperation(name, value, role, cooperation).await?;
     value_to_scalar(name, value)
 }
 
-pub(crate) fn ensure_option_extensions(
-    name: &str,
+pub(crate) fn ensure_selected_option_extensions(
+    solver: OptimSolver,
     options: Option<&StructValue>,
     option_extension: &BuiltinExtensionDescriptor,
     resident_extension: &BuiltinExtensionDescriptor,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<()> {
     let Some(options) = options else {
         return Ok(());
     };
-    for value in options.fields.values() {
-        if matches!(value, Value::GpuTensor(_)) {
-            crate::compatibility::ensure_builtin_extension_enabled(resident_extension, name)?;
+    let name = solver.name();
+    let fields = ScalarOptionFields::from_struct(Some(options));
+    for field in OptimOptionField::ALL {
+        if !solver.accepts(field) {
+            continue;
         }
+        let Some(value) = fields.get(field) else {
+            continue;
+        };
+        preflight_host_residency(name, value, Some(resident_extension), runtime)?;
         if is_typed_integer_value(value) {
-            crate::compatibility::ensure_builtin_extension_enabled(option_extension, name)?;
+            crate::compatibility::ensure_builtin_extension_enabled_in_optional_context(
+                runtime,
+                option_extension,
+                name,
+            )?;
         }
     }
     Ok(())
@@ -485,7 +615,8 @@ pub(crate) async fn value_to_real_vector_with_cooperation(
     value: Value,
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<Vec<f64>> {
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    let value =
+        crate::dispatcher::gather_if_needed_in_context_async(&value, cooperation.runtime()).await?;
     match value {
         Value::Num(n) => Ok(vec![ensure_finite(name, n)?]),
         Value::Int(i) => Ok(vec![ensure_finite(name, i.to_f64())?]),
@@ -520,7 +651,8 @@ pub(crate) async fn initial_guess_with_cooperation(
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<InitialGuess> {
     preflight_real_array(name, &value, "initial guess", false)?;
-    let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    let value =
+        crate::dispatcher::gather_if_needed_in_context_async(&value, cooperation.runtime()).await?;
     match value {
         Value::Num(n) => Ok(InitialGuess {
             values: vec![ensure_finite(name, n)?],
@@ -616,23 +748,28 @@ pub(crate) fn lookup_option<'a>(options: &'a StructValue, name: &str) -> Option<
         .map(|(_, value)| value)
 }
 
-pub(crate) fn option_f64(
-    builtin: &str,
-    options: Option<&StructValue>,
-    field: &str,
-    default: f64,
-) -> BuiltinResult<f64> {
-    let Some(options) = options else {
-        return Ok(default);
-    };
-    option_f64_value(builtin, lookup_option(options, field), field, default)
-}
-
 pub(crate) fn preflight_option_scalar(
     builtin: &str,
     value: &Value,
     field: runmat_builtins::OptimOptionField,
 ) -> BuiltinResult<()> {
+    let invalid = || {
+        optim_error(
+            builtin,
+            format!(
+                "{builtin}: option {} must be a full real numeric scalar",
+                field.name()
+            ),
+        )
+    };
+    // Reject nonnumeric carriers before deriving recursive value facts or
+    // formatting captures/properties that are not part of this scalar role.
+    if !matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) | Value::GpuTensor(_)
+    ) {
+        return Err(invalid());
+    }
     let fact = crate::value_fact::value_fact(value);
     let numeric = matches!(fact.kind, runmat_types::ValueKindFact::Numeric(numeric)
         if numeric.domain == runmat_types::NumericDomain::Real)
@@ -641,13 +778,7 @@ pub(crate) fn preflight_option_scalar(
         || fact.storage == runmat_types::StorageFact::Sparse
         || fact.shape.element_count().is_some_and(|count| count != 1)
     {
-        return Err(optim_error(
-            builtin,
-            format!(
-                "{builtin}: option {} must be numeric scalar, got {value:?}",
-                field.name()
-            ),
-        ));
+        return Err(invalid());
     }
     Ok(())
 }
@@ -682,18 +813,6 @@ pub(crate) fn option_f64_value(
         }
     };
     ensure_finite(builtin, parsed)
-}
-
-pub(crate) fn option_usize(
-    builtin: &str,
-    options: Option<&StructValue>,
-    field: &str,
-    default: usize,
-) -> BuiltinResult<usize> {
-    let Some(options) = options else {
-        return Ok(default);
-    };
-    option_usize_value(builtin, lookup_option(options, field), field, default)
 }
 
 pub(crate) fn option_usize_value(
@@ -781,11 +900,13 @@ pub(crate) struct InitialGuess {
 #[cfg(test)]
 mod tests {
     use super::{
-        canonicalize_callback_handle, initial_guess, initial_guess_with_extensions, option_usize,
-        prepare_floating_value, value_to_real_vector, value_to_scalar, ScalarOptionFields,
+        call_function_in_context, canonicalize_callback_handle, initial_guess,
+        initial_guess_with_extensions, output_callback, prepare_floating_value,
+        value_to_real_vector, value_to_scalar, ScalarCooperation, ScalarOptionFields,
     };
+    use crate::build_runtime_error;
     use futures::executor::block_on;
-    use runmat_builtins::OptimOptionField;
+    use runmat_builtins::{OptimOptionField, OptimSolver};
     use runmat_value::{CharArray, Closure, IntegerStorage, StringArray, Tensor, Value};
     use std::sync::Arc;
 
@@ -885,7 +1006,7 @@ mod tests {
         ];
         assert_eq!(
             capability_sets.map(|capabilities| capabilities.len()),
-            [4, 5, 4, 4]
+            [4, 6, 4, 4]
         );
         for capabilities in capability_sets {
             assert!(capabilities.iter().any(|capability| {
@@ -935,7 +1056,13 @@ mod tests {
             crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
                 .is_none()
         );
-        let resident = Value::GpuTensor(allocation.handle.clone());
+        let resident = Value::GpuTensor(
+            allocation
+                .handle
+                .clone()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .unwrap(),
+        );
         let error = block_on(prepare_floating_value(
             "fminunc",
             resident,
@@ -948,7 +1075,63 @@ mod tests {
             error.identifier(),
             Some("RunMat:compatibility:FminuncResidentExtension")
         );
+        let automatic = Value::GpuTensor(
+            allocation
+                .handle
+                .clone()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .unwrap(),
+        );
+        super::preflight_host_residency("fminunc", &automatic, None, None).unwrap();
+        let unproven = Value::GpuTensor(allocation.handle.clone());
+        let error = super::preflight_host_residency("fminunc", &unproven, None, None).unwrap_err();
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
+        options.insert("CustomResident", unproven.clone());
+        options.insert("CustomInteger", Value::Int(runmat_value::IntValue::I16(7)));
+        options.insert("OutputFcn", unproven);
+        options.insert("MaxIter", Value::Num(7.0));
+        let options = options.finish();
+        super::ensure_selected_option_extensions(
+            OptimSolver::Fzero,
+            Some(&options),
+            &runmat_builtins::FZERO_OPTION_EXTENSION,
+            &runmat_builtins::FZERO_RESIDENT_EXTENSION,
+            None,
+        )
+        .expect("ignored fields do not acquire control admission requirements");
+        let mut options = runmat_value::UnboundedStructValueBuilder::from_structure(options);
+        options.insert("OutputFcn", Value::Int(runmat_value::IntValue::I16(7)));
+        let options = options.finish();
+        super::ensure_selected_option_extensions(
+            OptimSolver::Fzero,
+            Some(&options),
+            &runmat_builtins::FZERO_OPTION_EXTENSION,
+            &runmat_builtins::FZERO_RESIDENT_EXTENSION,
+            None,
+        )
+        .expect("an unconsumed callback field is not a numeric control");
+        let mut options = runmat_value::UnboundedStructValueBuilder::from_structure(options);
+        options.insert("MaxIter", Value::Int(runmat_value::IntValue::I16(7)));
+        let options = options.finish();
+        let error = super::ensure_selected_option_extensions(
+            OptimSolver::Fzero,
+            Some(&options),
+            &runmat_builtins::FZERO_OPTION_EXTENSION,
+            &runmat_builtins::FZERO_RESIDENT_EXTENSION,
+            None,
+        )
+        .expect_err("a consumed native integer control retains its extension gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FzeroOptionExtension")
+        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert_eq!(allocation.probe.retirements(), 0);
+        // Both derived fixture owners are still live until explicitly retired.
+        // Release them before asking the original handle to retire its lease.
+        drop(options);
+        drop(automatic);
         allocation.handle.release().unwrap();
         assert_eq!(allocation.probe.retirements(), 1);
     }
@@ -961,7 +1144,9 @@ mod tests {
         let options = options.finish();
 
         assert_eq!(
-            option_usize("optim_test", Some(&options), "MaxIter", 400).unwrap(),
+            ScalarOptionFields::from_struct(Some(&options))
+                .count("optim_test", OptimOptionField::MaxIter, 400)
+                .unwrap(),
             37
         );
     }
@@ -973,7 +1158,9 @@ mod tests {
         options.insert("MaxIter", Value::Tensor(max_iter));
         let options = options.finish();
 
-        assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
+        assert!(ScalarOptionFields::from_struct(Some(&options))
+            .count("optim_test", OptimOptionField::MaxIter, 400)
+            .is_err());
     }
 
     #[test]
@@ -984,7 +1171,11 @@ mod tests {
         options.insert("MaxIter", Value::Tensor(max_iter));
         let options = options.finish();
 
-        let parsed = option_usize("optim_test", Some(&options), "MaxIter", 400);
+        let parsed = ScalarOptionFields::from_struct(Some(&options)).count(
+            "optim_test",
+            OptimOptionField::MaxIter,
+            400,
+        );
         if let Ok(expected) = usize::try_from(wide) {
             assert_eq!(parsed.unwrap(), expected);
         } else {
@@ -1013,7 +1204,9 @@ mod tests {
         let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("MaxIter", Value::Num(3.5));
         let mut options = options.finish();
-        assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
+        assert!(ScalarOptionFields::from_struct(Some(&options))
+            .count("optim_test", OptimOptionField::MaxIter, 400)
+            .is_err());
 
         let boundary = if usize::BITS == 64 {
             usize::MAX as f64
@@ -1023,7 +1216,9 @@ mod tests {
         options
             .try_replace_unique("MaxIter", Value::Num(boundary))
             .expect("fresh unique options");
-        assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
+        assert!(ScalarOptionFields::from_struct(Some(&options))
+            .count("optim_test", OptimOptionField::MaxIter, 400)
+            .is_err());
     }
 
     #[test]
@@ -1270,4 +1465,179 @@ mod tests {
         let canonical = canonicalize_callback_handle(&raw).unwrap();
         assert_eq!(canonical, raw);
     }
+
+    #[test]
+    fn explicit_callback_owner_beats_foreign_ambient_for_objective_analytic_and_observer() {
+        use super::output_callback::{IterationValues, OutputState};
+        use std::rc::Rc;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let original = crate::user_functions::test_support::exact_fixture_runtime()
+            .with_cancellation_token(cancellation.token());
+        original.set_error_namespace("OriginalOptimization");
+        let foreign = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        foreign.set_error_namespace("ForeignOptimization");
+        let _original_bindings =
+            crate::user_functions::test_support::install_exact_named_forwarders(
+                &original,
+                &[("context_objective", 3301), ("context_observer", 3302)],
+            )
+            .unwrap();
+        let original_entry = original.enter();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = calls.clone();
+        let _original_invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(move |id, args, requested| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let values = if id == 3302 {
+                    assert_eq!(requested, 1);
+                    let Value::Struct(metadata) = &args[1] else {
+                        panic!("observer metadata")
+                    };
+                    assert_eq!(metadata.fields.len(), 10);
+                    vec![Value::Bool(false)]
+                } else {
+                    assert_eq!(id, 3301);
+                    if matches!(args.first(), Some(Value::Num(-1.0))) {
+                        Vec::new()
+                    } else {
+                        (0..requested)
+                            .map(|index| Value::Num(71.0 + index as f64))
+                            .collect()
+                    }
+                };
+                Box::pin(async move {
+                    // Compiled callbacks may return a one-element CSE even
+                    // for scalar objectives and logical observer results.
+                    let sequence = crate::sequence::ValueSequence::comma_separated(values)
+                        .map_err(crate::sequence::sequence_error_to_runtime)?;
+                    crate::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error())
+                })
+            }),
+        ))
+        .unwrap();
+        drop(original_entry);
+        let _foreign_bindings =
+            crate::user_functions::test_support::install_exact_named_forwarders(
+                &foreign,
+                &[("context_objective", 4401), ("context_observer", 4402)],
+            )
+            .unwrap();
+        let _foreign_entry = foreign.enter();
+        let foreign_calls = Arc::new(AtomicUsize::new(0));
+        let counted = foreign_calls.clone();
+        let _foreign_invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(move |_, _, _| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async {
+                    Err(build_runtime_error("foreign callback must not run").build())
+                })
+            }),
+        ))
+        .unwrap();
+        for requested in [1, 2] {
+            let result = futures::executor::block_on(call_function_in_context(
+                Some(&original),
+                &Value::FunctionHandle("context_objective".into()),
+                [Value::Num(0.0)],
+                requested,
+            ))
+            .unwrap();
+            if requested == 1 {
+                assert!(matches!(result.value(), Value::Num(71.0)));
+            } else {
+                let Value::OutputList(values) = result.value() else {
+                    panic!("analytic outputs")
+                };
+                assert!(matches!(values[0], Value::Num(71.0)));
+                assert!(matches!(values[1], Value::Num(72.0)));
+            }
+        }
+        let error = futures::executor::block_on(call_function_in_context(
+            Some(&original),
+            &Value::FunctionHandle("context_objective".into()),
+            [Value::Num(-1.0)],
+            1,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("OriginalOptimization:CommaSeparatedListRequiresSingleValue")
+        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let mut cooperation = ScalarCooperation::new(OptimSolver::Fminunc, Some(&original));
+        assert!(!futures::executor::block_on(output_callback::notify(
+            Some(&Value::FunctionHandle("context_observer".into())),
+            OutputState::Init,
+            IterationValues {
+                x: &[1.0],
+                shape: &[1, 1],
+                scalar: true,
+                iteration: 0,
+                func_count: 1,
+                fval: 71.0,
+                gradient: &[0.0],
+                first_order_optimality: 0.0,
+                step_size: 0.0,
+                search_direction: &[],
+                line_step_length: None,
+                directional_derivative: None
+            },
+            &mut cooperation
+        ))
+        .unwrap());
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+        assert_eq!(foreign_calls.load(Ordering::SeqCst), 0);
+        for allowed in [true, false] {
+            original.set_runmat_extensions_enabled(allowed);
+            foreign.set_runmat_extensions_enabled(!allowed);
+            let converted = block_on(super::value_to_scalar_with_extensions(
+                "fminunc",
+                Value::Int(runmat_value::IntValue::I16(73)),
+                &runmat_builtins::FMINUNC_CALLBACK_NUMERIC_EXTENSION,
+                &runmat_builtins::FMINUNC_RESIDENT_EXTENSION,
+                "objective value",
+                &mut cooperation,
+            ));
+            if allowed {
+                assert_eq!(converted.unwrap(), 73.0);
+            } else {
+                assert!(converted
+                    .unwrap_err()
+                    .identifier()
+                    .is_some_and(|id| id.starts_with("RunMat:compatibility:")));
+            }
+        }
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        let error = futures::executor::block_on(call_function_in_context(
+            Some(&original),
+            &Value::FunctionHandle("context_objective".into()),
+            [Value::Num(0.0)],
+            1,
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("OriginalOptimization:Cancelled"));
+        assert!(crate::runtime_error::error_has_control_cancellation_origin(
+            &error
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+        assert_eq!(foreign_calls.load(Ordering::SeqCst), 0);
+    }
 }
+
+pub(crate) mod multiobjective;
+
+pub(crate) mod semi_options;
+
+pub(crate) mod proof_rational;
+
+pub(crate) mod csc_rows;
+pub(crate) mod native_class_registration;
+pub(crate) mod solver_workspace;
+pub(crate) mod working_set;

@@ -43,7 +43,8 @@ impl DriverCheckpoint {
     /// throughout subsequent execution. No replacement authority may have advanced
     /// the fence. Detached providers may publish reports, but cannot mutate that
     /// journal. This preserves assigned attempts; replacement recovery must use
-    /// `restore` or `restore_at_fence`, which close them as lost.
+    /// `restore` or `restore_at_fence`, which retain unresolved original work
+    /// and its reservations until its owning backend proves retirement.
     pub fn continue_under_exclusive_ownership(self) -> RunnerResult<Driver> {
         self.validate()?;
         Driver::from_snapshot(self.snapshot)

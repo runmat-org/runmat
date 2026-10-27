@@ -4,7 +4,6 @@ use runmat_value::Value;
 #[derive(Clone, Copy)]
 pub enum AutoBinaryOp {
     Elementwise,
-    MatrixPower,
     MatMul,
 }
 
@@ -20,20 +19,14 @@ pub async fn accel_promote_binary(
     a: &Value,
     b: &Value,
 ) -> Result<(Value, Value), RuntimeError> {
-    use runmat_accelerate::{
-        promote_binary_in_context, promote_builtin_binary_in_context, BinaryOp,
-    };
+    use runmat_accelerate::{promote_builtin_binary_in_context, BinaryOp};
     let mapped = match op {
-        AutoBinaryOp::Elementwise | AutoBinaryOp::MatrixPower => BinaryOp::Elementwise,
+        AutoBinaryOp::Elementwise => BinaryOp::Elementwise,
         AutoBinaryOp::MatMul => BinaryOp::MatMul,
     };
-    let promotion = match op {
-        AutoBinaryOp::Elementwise => promote_builtin_binary_in_context(runtime, mapped, a, b).await,
-        AutoBinaryOp::MatrixPower | AutoBinaryOp::MatMul => {
-            promote_binary_in_context(runtime, mapped, a, b).await
-        }
-    };
-    promotion.map_err(promotion_error)
+    promote_builtin_binary_in_context(runtime, mapped, a, b)
+        .await
+        .map_err(promotion_error)
 }
 
 #[cfg(not(feature = "native-accel"))]
@@ -47,16 +40,26 @@ pub async fn accel_promote_binary(
 }
 
 #[cfg(feature = "native-accel")]
-pub async fn accel_promote_unary(op: AutoUnaryOp, value: &Value) -> Result<Value, RuntimeError> {
-    use runmat_accelerate::{promote_unary, UnaryOp};
+pub async fn accel_promote_unary(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    op: AutoUnaryOp,
+    value: &Value,
+) -> Result<Value, RuntimeError> {
+    use runmat_accelerate::{promote_builtin_unary_in_context, UnaryOp};
     let mapped = match op {
         AutoUnaryOp::Transpose => UnaryOp::Transpose,
     };
-    promote_unary(mapped, value).await.map_err(promotion_error)
+    promote_builtin_unary_in_context(runtime, mapped, value)
+        .await
+        .map_err(promotion_error)
 }
 
 #[cfg(not(feature = "native-accel"))]
-pub async fn accel_promote_unary(_op: AutoUnaryOp, value: &Value) -> Result<Value, RuntimeError> {
+pub async fn accel_promote_unary(
+    _runtime: &runmat_runtime::context::RuntimeContext,
+    _op: AutoUnaryOp,
+    value: &Value,
+) -> Result<Value, RuntimeError> {
     Ok(value.clone())
 }
 

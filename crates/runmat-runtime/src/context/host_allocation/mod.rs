@@ -17,6 +17,8 @@ mod session;
 mod temporary;
 mod text;
 mod trace_scratch;
+mod unbounded_workspace;
+pub use unbounded_workspace::require_unbounded_workspace;
 
 pub(crate) use aligned::AlignedHostWorkspace;
 pub(crate) use checkpoint::HostAllocationCheckpoint;

@@ -11,7 +11,7 @@ mod arguments;
 mod end;
 mod roots;
 mod selectors;
-use access::frame_access;
+pub(super) use access::{frame_access, frame_access_runtime};
 pub(super) use end::resolve_end;
 use selectors::materialize_selectors;
 

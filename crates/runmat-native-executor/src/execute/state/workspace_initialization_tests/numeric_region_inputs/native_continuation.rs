@@ -119,7 +119,10 @@ fn start_with_selection(
         })),
     );
     let mut state = omitted_input_state_with(runtime, None);
-    let input = state.arena.insert(Value::Num(7.0));
+    let input = state
+        .arena
+        .insert(Value::Num(7.0), Some(&state.runtime))
+        .unwrap();
     state.set_local(0, input).unwrap();
     // The manual seed publishes into the private canonical workspace. Finish
     // that setup before region capture, so completion reconciliation does not
@@ -430,7 +433,10 @@ fn native_pass_through_publication_uses_original_generation_not_refreshed_local(
         let mut plan = crate::region::placement_test_support::plan();
         let original = state.local_reference(0).unwrap();
         plan.outputs[0].source = crate::region::RegionOutputSource::Input(0);
-        let changed = state.arena.insert(Value::Num(99.0));
+        let changed = state
+            .arena
+            .insert(Value::Num(99.0), Some(&state.runtime))
+            .unwrap();
         state.set_local(0, changed).unwrap();
         state
             .publish_optimized_region_from_inputs(&plan, &[original], vec![Value::Num(42.0)])

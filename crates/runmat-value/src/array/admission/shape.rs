@@ -1,14 +1,14 @@
 use std::num::NonZeroUsize;
 
-pub(in crate::array) struct ShapeProgress {
+pub(crate) struct ShapeProgress {
     cursor: usize,
-    pub(in crate::array) elements: usize,
+    pub(crate) elements: usize,
     complete: bool,
     overflowed: bool,
 }
 
 impl ShapeProgress {
-    pub(in crate::array) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             cursor: 0,
             elements: 1,
@@ -17,7 +17,7 @@ impl ShapeProgress {
         }
     }
 
-    pub(super) fn advance(
+    pub(crate) fn advance(
         &mut self,
         shape: &[usize],
         maximum_work: NonZeroUsize,
@@ -28,7 +28,7 @@ impl ShapeProgress {
 
     /// Character geometry permits a later zero extent to make a virtual
     /// shape empty. Keep numeric admission's existing overflow policy intact.
-    pub(in crate::array) fn advance_zero_aware(
+    pub(crate) fn advance_zero_aware(
         &mut self,
         shape: &[usize],
         maximum_work: NonZeroUsize,
@@ -70,7 +70,7 @@ impl ShapeProgress {
         Ok(completed)
     }
 
-    pub(in crate::array) fn is_complete(&self) -> bool {
+    pub(crate) fn is_complete(&self) -> bool {
         self.complete
     }
 

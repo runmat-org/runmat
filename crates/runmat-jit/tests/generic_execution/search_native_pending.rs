@@ -169,7 +169,8 @@ fn quartet_builtin_fixture(case: SearchControlCase) -> runmat_native_codegen::Na
                     bare_identifier: false,
                     async_behavior: match semantics.async_behavior {
                         BuiltinAsyncBehavior::NeverSuspends => AsyncBehaviorFact::NeverSuspends,
-                        BuiltinAsyncBehavior::MaySuspend => AsyncBehaviorFact::MaySuspend,
+                        BuiltinAsyncBehavior::MaySuspend
+                        | BuiltinAsyncBehavior::MaySuspendLocally => AsyncBehaviorFact::MaySuspend,
                         BuiltinAsyncBehavior::RequiresAsyncRuntime => {
                             AsyncBehaviorFact::RequiresAsyncRuntime
                         }

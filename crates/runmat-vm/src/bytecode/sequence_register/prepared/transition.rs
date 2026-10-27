@@ -8,37 +8,13 @@ pub(super) fn apply(
     let mut outgoing = incoming;
     match instruction {
         Instr::BeginOutputAssignment { target_count } => {
-            if outgoing.is_some() {
-                return Err(format!(
-                    "prepared output-assignment state is overwritten at instruction {pc}"
-                ));
-            }
-            outgoing = Some(State {
-                expected: *target_count,
-                prepared: 0,
-                cardinality_loaded: false,
-                destination_live: false,
-                selector_components: None,
-                fixed_owner: None,
-            });
+            begin_output_assignment(&mut outgoing, *target_count, pc)?;
         }
         Instr::BeginFixedAssignment {
             source_statement,
             root_slot,
         } => {
-            if outgoing.is_some() {
-                return Err(format!(
-                    "fixed destination overwrites live prepared state at instruction {pc}"
-                ));
-            }
-            outgoing = Some(State {
-                expected: 1,
-                prepared: 0,
-                cardinality_loaded: false,
-                destination_live: false,
-                selector_components: None,
-                fixed_owner: Some((*source_statement, *root_slot)),
-            });
+            begin_fixed_assignment(&mut outgoing, *source_statement, *root_slot, pc)?;
         }
         Instr::PrepareFixedOutputTarget
         | Instr::PrepareDiscardOutputTarget
@@ -233,36 +209,13 @@ pub(super) fn apply(
         }
         Instr::LoadPreparedOutputCardinality => load_cardinality(&mut outgoing, pc)?,
         Instr::CommitPreparedOutputTargets { .. } => {
-            let state = outgoing.ok_or_else(|| {
-                format!("prepared outputs are committed at instruction {pc} without a plan")
-            })?;
-            if state.fixed_owner.is_some()
-                || !state.cardinality_loaded
-                || state.prepared != state.expected
-            {
-                return Err(format!(
-                    "incomplete output-assignment plan is committed at instruction {pc}"
-                ));
-            }
-            outgoing = None;
+            commit_output_assignment(&mut outgoing, pc)?;
         }
         Instr::CommitFixedAssignment {
             source_statement,
             root_slot,
         } => {
-            let state = outgoing.ok_or_else(|| {
-                format!("fixed destination consumed without preparation at instruction {pc}")
-            })?;
-            if state.fixed_owner != Some((*source_statement, *root_slot))
-                || !state.cardinality_loaded
-                || state.prepared != 1
-                || state.expected != 1
-                || state.destination_live
-                || state.selector_components.is_some()
-            {
-                return Err(format!("fixed destination consumer differs from its completed source occurrence at instruction {pc}"));
-            }
-            outgoing = None;
+            commit_fixed_assignment(&mut outgoing, *source_statement, *root_slot, pc)?;
         }
         _ => {}
     }

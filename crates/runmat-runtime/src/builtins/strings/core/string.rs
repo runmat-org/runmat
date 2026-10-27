@@ -684,7 +684,8 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         | Value::Distributed(_)
         | Value::Composite(_)
         | Value::Foreign(_) => Err(string_flow("string: unsupported format argument type")),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
@@ -748,7 +749,7 @@ async fn convert_to_string_array(
         Value::Struct(_) | Value::StructArray(_) => Err(string_flow(
             "string: structs are not supported for automatic conversion",
         )),
-        Value::FunctionHandle(_) | Value::ExternalFunctionHandle(_) | Value::MethodFunctionHandle(_) | Value::BoundFunctionHandle(_)
+        Value::ScopedFunctionHandle(_) | Value::FunctionHandle(_) | Value::ExternalFunctionHandle(_) | Value::MethodFunctionHandle(_) | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

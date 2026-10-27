@@ -5,7 +5,7 @@ use runmat_analysis_core::{
     CooperativePolicy, ExecutionResourceLimits, FanoutPolicy, InclusiveCountRange,
     OperatorPartitioner, ParallelismLimit, PartitionBalance, PlacementPreference, ResiliencePolicy,
 };
-use runmat_parser::fea::{FeaAssignmentRelation, FeaBinaryOperator};
+use runmat_fea_syntax::{FeaAssignmentRelation, FeaBinaryOperator};
 
 use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,

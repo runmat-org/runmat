@@ -245,10 +245,10 @@ impl Scratch {
 pub(super) fn scratch_bytes(req: StackReq) -> Result<u64, HostAllocationError> {
     AlignedHostWorkspace::quoted_bytes(req.layout().map_err(|_| HostAllocationError::Overflow)?)
 }
-pub(super) async fn run_owned<R: Send + 'static>(
+pub(super) async fn run_owned<R: crate::execution::OwnedCpuPayload>(
     runtime: &RuntimeContext,
     receipt: Option<&HostAllocationReceipt>,
-    body: impl FnOnce() -> R + Send + 'static,
+    body: impl FnOnce() -> R + crate::execution::OwnedCpuPayload,
 ) -> Result<R, DenseFactorError> {
     if let Some(r) = receipt {
         r.checkpoint(runtime)?;

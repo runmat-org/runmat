@@ -181,8 +181,8 @@ pub struct IndexPlanProperties {
 }
 
 #[derive(Debug, Clone)]
-pub struct IndexPlan {
-    pub indices: ExactArrayStorage<u32>,
+pub struct IndexPlan<I = u32> {
+    pub indices: ExactArrayStorage<I>,
     pub output_shape: SharedShape,
     pub selection_lengths: SharedShape,
     pub dims: usize,
@@ -264,6 +264,14 @@ fn derive_plan_properties(
     dims: usize,
     base_shape: &[usize],
 ) -> IndexPlanProperties {
+    derive_plan_properties_with(indices, dims, base_shape, |index| index as usize)
+}
+fn derive_plan_properties_with<I: Copy>(
+    indices: &[I],
+    dims: usize,
+    base_shape: &[usize],
+    position: impl Fn(I) -> usize,
+) -> IndexPlanProperties {
     let mut properties = IndexPlanProperties {
         full_row: None,
         full_column: None,
@@ -274,27 +282,27 @@ fn derive_plan_properties(
     let rows = base_shape.first().copied().unwrap_or(1);
     let cols = base_shape.get(1).copied().unwrap_or(1);
     if indices.len() == rows {
-        let first = indices[0] as usize;
+        let first = position(indices[0]);
         if first.is_multiple_of(rows) {
             let col = first / rows;
             if col < cols
                 && indices
                     .iter()
                     .enumerate()
-                    .all(|(r, &idx)| idx as usize == col * rows + r)
+                    .all(|(r, &idx)| position(idx) == col * rows + r)
             {
                 properties.full_column = Some(col);
             }
         }
     }
     if indices.len() == cols {
-        let first = indices[0] as usize;
+        let first = position(indices[0]);
         let row = first % rows;
         if row < rows
             && indices
                 .iter()
                 .enumerate()
-                .all(|(c, &idx)| idx as usize == row + c * rows)
+                .all(|(c, &idx)| position(idx) == row + c * rows)
         {
             properties.full_row = Some(row);
         }
@@ -505,6 +513,45 @@ fn build_index_plan_with_context(
     base_shape: &[usize],
     linear_shape: LinearShapePolicy,
 ) -> VmResult<IndexPlan> {
+    build_index_plan_with_sink(
+        context,
+        selectors,
+        dims,
+        base_shape,
+        linear_shape,
+        checked_u32_index,
+        |index| index as usize,
+    )
+}
+
+/// Virtual arrays retain only the addressed usize offsets. Source geometry
+/// and selector semantics are identical to physical-array planning.
+pub(crate) fn build_virtual_index_plan_with_context(
+    context: Option<&crate::context::RuntimeContext>,
+    selectors: &[SliceSelector],
+    dims: usize,
+    base_shape: &[usize],
+) -> VmResult<IndexPlan<usize>> {
+    build_index_plan_with_sink(
+        context,
+        selectors,
+        dims,
+        base_shape,
+        LinearShapePolicy::Read,
+        Ok,
+        |index| index,
+    )
+}
+
+fn build_index_plan_with_sink<I: Copy>(
+    context: Option<&crate::context::RuntimeContext>,
+    selectors: &[SliceSelector],
+    dims: usize,
+    base_shape: &[usize],
+    linear_shape: LinearShapePolicy,
+    store: impl FnMut(usize) -> VmResult<I>,
+    position: impl Fn(I) -> usize,
+) -> VmResult<IndexPlan<I>> {
     let owner = admission::Owner::new(context)?;
     let total_len = checked_total_len_from_shape(base_shape)?;
     let effective = effective_index_shape_in_context(context, base_shape, dims)?;
@@ -534,7 +581,7 @@ fn build_index_plan_with_context(
             }
         }
     }
-    let indices = enumerate_linear_indices(
+    let indices = enumerate_linear_indices_with_sink(
         context,
         dims,
         &lengths,
@@ -546,6 +593,7 @@ fn build_index_plan_with_context(
                 .map(|selector| selector_value(selector, position))
                 .ok_or_else(|| mex("MissingIndex", "An index selector is missing"))
         },
+        store,
     )?;
     let output_shape = if dims == 1 {
         match selectors.first() {
@@ -591,13 +639,15 @@ fn build_index_plan_with_context(
         Ok(base_shape[dimension])
     })?;
     owner.check()?;
-    Ok(IndexPlan::from_storage(
+    let properties = derive_plan_properties_with(&indices, dims, &base_shape, position);
+    Ok(IndexPlan {
         indices,
         output_shape,
-        lengths,
+        selection_lengths: lengths,
         dims,
         base_shape,
-    ))
+        properties,
+    })
 }
 
 fn enumerate_linear_indices(
@@ -606,8 +656,27 @@ fn enumerate_linear_indices(
     lengths: &[usize],
     shape: &[usize],
     total: usize,
-    mut selector: impl FnMut(usize, usize) -> VmResult<usize>,
+    selector: impl FnMut(usize, usize) -> VmResult<usize>,
 ) -> VmResult<ExactArrayStorage<u32>> {
+    enumerate_linear_indices_with_sink(
+        context,
+        dims,
+        lengths,
+        shape,
+        total,
+        selector,
+        checked_u32_index,
+    )
+}
+fn enumerate_linear_indices_with_sink<I>(
+    context: Option<&crate::context::RuntimeContext>,
+    dims: usize,
+    lengths: &[usize],
+    shape: &[usize],
+    total: usize,
+    mut selector: impl FnMut(usize, usize) -> VmResult<usize>,
+    mut store: impl FnMut(usize) -> VmResult<I>,
+) -> VmResult<ExactArrayStorage<I>> {
     if total != 0 {
         let mut stride = 1usize;
         for dimension in 0..dims.saturating_sub(1) {
@@ -638,7 +707,7 @@ fn enumerate_linear_indices(
                     .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
             }
         }
-        checked_u32_index(linear)
+        store(linear)
     })
 }
 
@@ -1800,6 +1869,24 @@ mod tests {
         let err = build_index_plan(&selectors, 1, &[u32::MAX as usize + 2, 1])
             .expect_err("linear index should exceed u32 plan storage");
         assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+        let wide = super::build_virtual_index_plan_with_context(
+            None,
+            &selectors,
+            1,
+            &[u32::MAX as usize + 2, 1],
+        )
+        .expect("virtual metadata uses actual usize indices");
+        assert_eq!(&*wide.indices, &[u32::MAX as usize + 1]);
+        assert_eq!(&*wide.output_shape, &[1, 1]);
+        let exact = (1usize << 53) + 3;
+        let wide = super::build_virtual_index_plan_with_context(
+            None,
+            &[SliceSelector::Scalar(exact)],
+            1,
+            &[exact, 1],
+        )
+        .expect("virtual offset never passes through binary64");
+        assert_eq!(&*wide.indices, &[exact - 1]);
     }
 
     #[test]

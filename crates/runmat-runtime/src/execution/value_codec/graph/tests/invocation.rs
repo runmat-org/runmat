@@ -32,7 +32,7 @@ fn typed_bound_target_uses_selected_proof_without_name_redispatch() {
             CallableCallKind::Feval,
         ));
         let (prepared, roots) =
-            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default())
+            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default(), None)
                 .expect("typed target is captured before admission");
         assert!(prepared.direct_bound_origins().contains(&origin(3)));
         let units = prepared
@@ -101,7 +101,7 @@ fn deferred_nested_closure_keeps_one_capture_and_its_selected_source() {
         assert_eq!(descriptor.args, [Value::Num(17.0)]);
         let invocation = DeferredInvocation::callable(descriptor);
         let (prepared, roots) =
-            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default())
+            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default(), None)
                 .unwrap();
         let units = prepared
             .bound_authorities()
@@ -165,7 +165,8 @@ fn deferred_nested_closure_keeps_one_capture_and_its_selected_source() {
             metadata: CallableMetadata::default(),
         });
         let (legacy_prepared, legacy_roots) =
-            prepare_deferred_invocation_graph(&legacy, &issuer, ValueLimits::default()).unwrap();
+            prepare_deferred_invocation_graph(&legacy, &issuer, ValueLimits::default(), None)
+                .unwrap();
         let legacy_units = legacy_prepared
             .bound_authorities()
             .iter()
@@ -209,10 +210,13 @@ fn deferred_nested_closure_keeps_one_capture_and_its_selected_source() {
             1,
             &NoNamedFunction,
         ));
-        assert!(
-            prepare_deferred_invocation_graph(&unresolved, &issuer, ValueLimits::default())
-                .is_err()
-        );
+        assert!(prepare_deferred_invocation_graph(
+            &unresolved,
+            &issuer,
+            ValueLimits::default(),
+            None
+        )
+        .is_err());
     });
 }
 
@@ -237,10 +241,13 @@ fn typed_bound_target_rejects_mismatched_local_definition_lease() {
             1,
             CallableCallKind::Feval,
         ));
-        assert!(
-            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default(),)
-                .is_err()
-        );
+        assert!(prepare_deferred_invocation_graph(
+            &invocation,
+            &issuer,
+            ValueLimits::default(),
+            None
+        )
+        .is_err());
     });
 }
 
@@ -259,7 +266,7 @@ fn prepared_bound_target_has_no_wire_node_before_exact_unit_selection() {
             CallableCallKind::Feval,
         ));
         let (prepared, _) =
-            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default())
+            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default(), None)
                 .unwrap();
         assert_eq!(prepared.bound_authorities().len(), 1);
         assert!(prepared
@@ -300,7 +307,7 @@ fn builtin_arguments_keep_a_nested_activation_as_graph_roots() {
         };
         assert!(deferred_invocation_requires_graph(&invocation));
         let (prepared, roots) =
-            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default())
+            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default(), None)
                 .unwrap();
         let units = prepared
             .bound_authorities()

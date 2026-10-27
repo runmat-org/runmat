@@ -13,13 +13,13 @@ use runmat_value::{BoundFunctionBinding, Value};
 
 use super::ValueCodecError;
 
-mod reconstruct;
-mod snapshot;
 mod issuer;
+mod reconstruct;
 mod route;
+mod snapshot;
 pub use issuer::{GraphSourceIssuer, GraphSourceUnitFacts};
 pub use route::deferred_invocation_requires_graph;
-pub use snapshot::{GraphFrameSourceRequirement, PreparedPayloadGraph};
+pub use snapshot::{prepare_callable_targets, GraphFrameSourceRequirement, PreparedPayloadGraph};
 #[cfg(test)]
 mod tests;
 
@@ -148,8 +148,11 @@ pub fn encode_payload_graph_with_issuer(
     layouts: &HashMap<GraphBoundOwner, GraphLexicalLayout>,
     proofs: &HashMap<GraphBoundOwner, GraphCallableProof>,
     limits: ValueLimits,
+    workspace: Option<&super::ValidationWorkspaceOwner>,
 ) -> Result<PayloadGraph, ValueCodecError> {
-    snapshot::encode_with_issuer(values, issuer, source_map, layouts, proofs, limits)
+    snapshot::encode_with_issuer(
+        values, issuer, source_map, layouts, proofs, limits, workspace,
+    )
 }
 
 /// Traverse and root a graph once, leaving leaves unencoded until the exact
@@ -158,8 +161,9 @@ pub fn prepare_payload_graph<'a>(
     values: &'a [Value],
     issuer: &'a GraphSourceIssuer,
     limits: ValueLimits,
+    workspace: Option<&super::ValidationWorkspaceOwner>,
 ) -> Result<PreparedPayloadGraph<'a>, ValueCodecError> {
-    snapshot::prepare(values, issuer, limits)
+    snapshot::prepare(values, issuer, limits, workspace)
 }
 
 /// Prepare one typed deferred call, preserving its selected callable target
@@ -168,8 +172,9 @@ pub fn prepare_deferred_invocation_graph<'a>(
     invocation: &'a crate::execution::DeferredInvocation,
     issuer: &'a GraphSourceIssuer,
     limits: ValueLimits,
+    workspace: Option<&super::ValidationWorkspaceOwner>,
 ) -> Result<(PreparedPayloadGraph<'a>, GraphInvocationRoots), ValueCodecError> {
-    snapshot::prepare_invocation(invocation, issuer, limits)
+    snapshot::prepare_invocation(invocation, issuer, limits, workspace)
 }
 
 /// Validate before allocating, reconstruct fresh local cells, then publish a

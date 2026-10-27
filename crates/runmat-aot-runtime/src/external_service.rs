@@ -1,6 +1,6 @@
 //! Optional host-owned ports from the exact target-built selected archive.
-//! Stock AOT defines none of these symbols. A qualified embedding archive
-//! must supply the matching factory and live owner for each reached kind.
+//! The stock factory feature supplies console and callable owners. A custom
+//! embedding supplies matching factories and live owners for its reached kinds.
 
 use runmat_execution::host::{
     native_host_callback_service_abi, native_hosted_dynamic_dispatch_abi, native_ui_service_abi,

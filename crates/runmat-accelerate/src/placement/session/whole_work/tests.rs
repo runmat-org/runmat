@@ -16,6 +16,90 @@ use std::sync::{
 use super::*;
 
 #[test]
+fn unobservable_native_source_does_not_starve_observable_host_routes() {
+    let mut source = candidate(ExecutionCandidateKind::OriginalNativeRegion);
+    source.execution_location = CandidateExecutionLocation::NativeSource;
+    source.preparation = CandidatePreparationState::Ready;
+    source.output_residency = CandidateOutputResidency::Unknown;
+    source.transactional_results = false;
+    let unknown = ResourceByteBound::Unavailable(
+        runmat_execution::ResourceBoundUnavailable::NoPeakMemoryBound,
+    );
+    source.resources = CandidateResourceDemand {
+        retained_bytes: unknown,
+        scratch_bytes: unknown,
+        ..Default::default()
+    };
+    let routes = |candidates| {
+        let mut routes = request(candidates);
+        routes.resources.memory_available_bytes = None;
+        routes.resources.providers.clear();
+        routes.require_transactional_results = false;
+        routes
+    };
+
+    // Its per-operation owners still provide a legal ordinary fallback, but
+    // there is no complete-call completion boundary from which to learn.
+    let fallback = PlacementSession::default()
+        .select_whole_work(routes(vec![source.clone()]))
+        .expect("ordinary native source remains legal");
+    assert_eq!(
+        fallback.decision.selected.kind,
+        ExecutionCandidateKind::OriginalNativeRegion
+    );
+    assert_ne!(fallback.decision.kind, WholeWorkDecisionKind::Exploratory);
+    assert!(fallback.probe.is_none());
+
+    // An observable unmeasured host still receives the normal real-call probe,
+    // even when the unobservable source fallback appears first.
+    let session = PlacementSession::default();
+    let host = candidate(ExecutionCandidateKind::SharedRuntime);
+    let selected = session
+        .select_whole_work(routes(vec![source.clone(), host]))
+        .expect("observable host can be probed");
+    assert_eq!(
+        selected.decision.selected.kind,
+        ExecutionCandidateKind::SharedRuntime
+    );
+    assert_eq!(selected.decision.kind, WholeWorkDecisionKind::Exploratory);
+    assert!(selected.probe.is_some());
+
+    let mut vectorized = candidate(ExecutionCandidateKind::VectorizedNativeCpu);
+    vectorized.cost = CandidateCostEvidence::Estimated(runmat_execution::ExecutionCostEstimate {
+        components: runmat_execution::ExecutionCostComponents {
+            execution_ns: 100,
+            ..Default::default()
+        },
+        scratch_bytes: Some(8),
+        confidence: runmat_execution::EstimateConfidence::Prior,
+        source: runmat_execution::EstimateSource::Compiler,
+    });
+    let session = PlacementSession::default();
+    for _ in 0..3 {
+        let selected = session
+            .select_whole_work(routes(vec![source.clone(), vectorized.clone()]))
+            .expect("existing priced route is not starved by an unobservable probe");
+        assert_eq!(
+            selected.decision.selected.kind,
+            ExecutionCandidateKind::VectorizedNativeCpu
+        );
+        assert_ne!(selected.decision.kind, WholeWorkDecisionKind::Exploratory);
+        RuntimePlacementService::observe_selected_whole_work(
+            &session,
+            &selected,
+            100,
+            WholeWorkObservationOutcome::Success,
+        )
+        .expect("real selected host completion retains its feedback right");
+    }
+    let feedback = session.profile_snapshot().feedback;
+    assert!(!feedback.is_empty());
+    assert!(feedback
+        .iter()
+        .all(|series| series.kind == ExecutionCandidateKind::VectorizedNativeCpu));
+}
+
+#[test]
 fn fixed_size_host_route_uses_the_same_placement_policy_without_candidate_vec() {
     let multi = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
     let single = WholeWorkPlacementRequestRef {

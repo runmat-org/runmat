@@ -66,6 +66,16 @@ enum ExactArrayStorageInner<T> {
 #[derive(Debug)]
 pub struct ExactArrayStorage<T>(ExactArrayStorageInner<T>);
 
+/// Physical owner identity for a traversal retaining that owner. It conveys
+/// no source, callable or allocation authority and must not outlive the owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SharedStorageIdentity(usize);
+impl SharedStorageIdentity {
+    pub(crate) fn of<T>(value: &T) -> Self {
+        Self(value as *const T as usize)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExactArrayMutationError {
     AdmittedStorage,
@@ -370,6 +380,16 @@ impl<T> ExactArrayStorage<T> {
             ExactArrayStorageInner::OwnedUnbounded(values) => values,
             ExactArrayStorageInner::SharedOrdinary { payload, len }
             | ExactArrayStorageInner::SharedExact { payload, len } => &payload.get().values[..*len],
+        }
+    }
+
+    pub fn shared_storage_identity(&self) -> Option<SharedStorageIdentity> {
+        match &self.0 {
+            ExactArrayStorageInner::SharedOrdinary { payload, .. }
+            | ExactArrayStorageInner::SharedExact { payload, .. } => {
+                Some(SharedStorageIdentity::of(payload.get()))
+            }
+            _ => None,
         }
     }
 

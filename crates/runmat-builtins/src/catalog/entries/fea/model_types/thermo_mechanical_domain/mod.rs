@@ -3,10 +3,7 @@
 use crate::*;
 
 mod descriptor;
-mod inference;
 mod at_reference_temperature;
-#[cfg(test)]
-mod tests;
 
 pub use descriptor::*;
 

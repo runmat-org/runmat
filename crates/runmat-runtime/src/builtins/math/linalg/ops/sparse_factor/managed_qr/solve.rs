@@ -34,10 +34,22 @@ impl<T: SparseQrScalar> SparseCompleteQr<T> {
         input: &[S],
         columns: usize,
         runtime: &RuntimeContext,
+        to_native: impl FnMut(S) -> T,
+        output: impl FnMut(usize, T) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        self.solve_optional_with_output(input, columns, false, Some(runtime), to_native, output)
+            .await
+    }
+    pub(in crate::builtins::math::linalg) async fn solve_optional_with_output<S: Copy>(
+        &self,
+        input: &[S],
+        columns: usize,
+        adjoint: bool,
+        runtime: Option<&RuntimeContext>,
         mut to_native: impl FnMut(S) -> T,
         output: impl FnMut(usize, T) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut work = Work::for_policy(runtime, self.fence.as_ref())?;
+        let mut work = Work::for_optional_policy(runtime, self.fence.as_ref())?;
         BorrowedCompleteQr {
             first: view(&self.first),
             completion: self.cod.as_ref().map(view),
@@ -45,7 +57,7 @@ impl<T: SparseQrScalar> SparseCompleteQr<T> {
         .solve(
             input,
             columns,
-            false,
+            adjoint,
             |_, value| Some(to_native(value)),
             output,
             &mut work,

@@ -238,12 +238,7 @@ mod tests {
             "sinc",
             &mut cooperation,
         ))
-        .expect_err("active cancellation stops logical conversion before mapping")
-        .into_runtime_error(
-            "sinc",
-            &runmat_builtins::SINC_ERROR_INVALID_INPUT,
-            &runmat_builtins::SINC_ERROR_INTERNAL,
-        );
+        .expect_err("active cancellation stops logical conversion before mapping");
         assert_eq!(turns.get(), 1);
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);

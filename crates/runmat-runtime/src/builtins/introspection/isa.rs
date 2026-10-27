@@ -4,7 +4,9 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{BuiltinErrorDescriptor, ISA_ERROR_TYPE_NAME_INVALID};
 use runmat_macros::runtime_builtin;
-use runmat_types::{ClassIdentity, IsaTypeDesignator};
+use runmat_types::ClassIdentity;
+mod designator;
+use designator::IsaTypeDesignator;
 use runmat_value::Value;
 
 #[runtime_builtin(
@@ -67,14 +69,7 @@ fn value_is_a(value: &Value, requested: &Option<IsaTypeDesignator>) -> bool {
         IsaTypeDesignator::String => matches!(value, Value::String(_) | Value::StringArray(_)),
         IsaTypeDesignator::Cell => matches!(value, Value::Cell(_)),
         IsaTypeDesignator::Struct => matches!(value, Value::Struct(_) | Value::StructArray(_)),
-        IsaTypeDesignator::FunctionHandle => matches!(
-            value,
-            Value::FunctionHandle(_)
-                | Value::ExternalFunctionHandle(_)
-                | Value::MethodFunctionHandle(_)
-                | Value::BoundFunctionHandle(_)
-                | Value::Closure(_)
-        ),
+        IsaTypeDesignator::FunctionHandle => value.is_function_handle(),
         IsaTypeDesignator::GpuArray => false,
         IsaTypeDesignator::Listener => matches!(value, Value::Listener(_)),
         IsaTypeDesignator::MetaClass => matches!(value, Value::ClassRef(_)),

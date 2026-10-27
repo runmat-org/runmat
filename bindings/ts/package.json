@@ -60,6 +60,10 @@
       "types": "./dist/builtins.d.ts",
       "import": "./dist/builtins.js"
     },
+    "./execution/program-terminal": {
+      "types": "./dist/execution/program-terminal.d.ts",
+      "import": "./dist/execution/program-terminal.js"
+    },
     "./fea-contracts": {
       "types": "./dist/fea-contracts.d.ts",
       "import": "./dist/fea-contracts.js"

@@ -128,6 +128,7 @@ impl ExecutionServiceError {
                 );
                 error.failure_origin =
                     crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation;
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 error
             }
             Self::WorkerLost(message) => crate::runtime_error::semantic_error_with_source(
@@ -602,6 +603,12 @@ mod tests {
         for (failure, identifier) in cases {
             let visible = failure.clone().into_runtime_error();
             assert_eq!(visible.identifier(), Some(identifier));
+            if matches!(&failure, ExecutionServiceError::Cancelled) {
+                assert_eq!(visible.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                assert!(crate::runtime_error::error_has_control_cancellation_origin(
+                    &visible
+                ));
+            }
             let cause = visible
                 .source
                 .as_deref()

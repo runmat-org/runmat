@@ -464,10 +464,23 @@ impl RootedValues {
             })?;
             Self::from_output_storage_in_context(storage, runtime)
         } else {
-            self.with_unbounded_values(|mut values| {
-                values.insert(0, prefix);
-                Self::in_context(values, runtime)
-            })?
+            // Published argument storage is intentionally shared, even under
+            // ordinary policy. The prefix needs a new slot collection, not
+            // destructive access to the original collection or payload copies.
+            let mut values = runmat_value::exact_capacity_vec(width).map_err(|source| {
+                host_allocation_runtime_error(
+                    Some(runtime),
+                    "RunMat:Call:Arguments",
+                    "prefixed argument allocation failed",
+                    source.into(),
+                )
+            })?;
+            let mut source = self.try_into_values()?;
+            values.push(prefix);
+            values.extend(source.by_ref());
+            let result = Self::in_context(values, runtime);
+            drop(source);
+            result
         }
     }
 
@@ -1288,6 +1301,24 @@ mod tests {
             Ok::<_, RuntimeError>(Value::Num(index as f64))
         })
         .unwrap();
+        let alias = values.fork();
+        let prefixed = values
+            .fork()
+            .prepend_in_context(Value::Num(9.0), &runtime)
+            .unwrap();
+        assert_eq!(
+            prefixed.values(),
+            &[Value::Num(9.0), Value::Num(0.0), Value::Num(1.0)]
+        );
+        assert_eq!(alias.values(), &[Value::Num(0.0), Value::Num(1.0)]);
+        let denied_runtime = context(&denied);
+        assert!(alias
+            .fork()
+            .prepend_in_context(Value::Num(9.0), &denied_runtime)
+            .is_err());
+        assert_eq!(denied.snapshot().live_reserved_bytes, 0);
+        drop(prefixed);
+        drop(alias);
         let pointer = values.values().as_ptr();
         values
             .with_owned_output_storage(|storage| assert_eq!(storage.as_slice().as_ptr(), pointer));

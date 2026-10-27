@@ -3,7 +3,7 @@ use crate::{
     FeaDiagnosticPhase, GeometryInspection, GeometryInspectionRequest, GeometryInspectionSource,
     LogicalSourcePath,
 };
-use runmat_parser::fea::{FeaDeclarationKind, FeaExpressionKind, FeaModuleItem, FeaStatementKind};
+use runmat_fea_syntax::{FeaDeclarationKind, FeaExpressionKind, FeaModuleItem, FeaStatementKind};
 use runmat_types::Span;
 use std::collections::BTreeMap;
 
@@ -92,7 +92,7 @@ pub fn inspect_geometry_declarations<H: GeometryInspectionSource + ?Sized>(
 }
 
 fn imported_geometry_source(
-    declaration: &runmat_parser::fea::FeaDeclaration,
+    declaration: &runmat_fea_syntax::FeaDeclaration,
 ) -> Option<(String, Option<runmat_geometry_core::LengthUnit>, Span)> {
     // Omitted `units` asks the host for the file's own declared length unit.
     let authored_units = declaration.body.statements.iter().any(|statement| {

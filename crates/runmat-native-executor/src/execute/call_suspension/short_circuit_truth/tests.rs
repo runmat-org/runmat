@@ -187,14 +187,23 @@ fn retained_expression_input_survives_source_replacement_and_abandonment_release
         let allocation =
             runmat_gc::gc_allocate_rooted(Value::String("retained selector".into())).unwrap();
         let handle = allocation.handle();
-        let original = state.arena.insert(Value::HandleObject(HandleRef {
-            class_name: "PreparedSelectorInput".into(),
-            target: handle,
-            valid: true,
-        }));
+        let original = state
+            .arena
+            .insert(
+                Value::HandleObject(HandleRef {
+                    class_name: "PreparedSelectorInput".into(),
+                    target: handle,
+                    valid: true,
+                }),
+                Some(&state.runtime),
+            )
+            .unwrap();
         state.retain_contextual_input(original).unwrap();
         state.arena.release(original).unwrap();
-        let _replacement = state.arena.insert(Value::String("replacement".into()));
+        let _replacement = state
+            .arena
+            .insert(Value::String("replacement".into()), Some(&state.runtime))
+            .unwrap();
         allocation.unroot().unwrap();
 
         runmat_gc::gc_collect_major().unwrap();
@@ -217,11 +226,17 @@ fn expression_site_retires_owned_region_results_but_preserves_borrowed_results()
         state.begin_contextual_site(request()).unwrap();
 
         let (owned_region, _, _) = state.enter_contextual_region().unwrap();
-        let owned = state.arena.insert(Value::Num(11.0));
+        let owned = state
+            .arena
+            .insert(Value::Num(11.0), Some(&state.runtime))
+            .unwrap();
         state.finish_owned_contextual_reference(owned_region, owned);
 
         let (borrowed_region, _, _) = state.enter_contextual_region().unwrap();
-        let borrowed = state.arena.insert(Value::Num(12.0));
+        let borrowed = state
+            .arena
+            .insert(Value::Num(12.0), Some(&state.runtime))
+            .unwrap();
         state.finish_contextual_region(borrowed_region, borrowed);
 
         state.finish_contextual_site().unwrap();

@@ -1778,6 +1778,7 @@ impl LoweringCtx {
             module: self.module,
             declaration: ClassDeclaration {
                 id: class_id,
+                source: self.assembly.modules[self.module.0].source_id,
                 name: qualified,
                 inheritance: InheritanceDeclaration {
                     declared_super_class: super_class.map(ToOwned::to_owned),
@@ -2259,11 +2260,11 @@ impl LoweringCtx {
             let Some((text, span)) = syms_argument_text(arg, allow_word_args) else {
                 continue;
             };
-            for token in runmat_types::symbolic_declaration_tokens(&text) {
+            for token in runmat_builtins::symbolic_declaration_tokens(&text) {
                 if saw_declared_symbol && is_syms_assumption_keyword(token) {
                     continue;
                 }
-                if let Ok(declaration) = runmat_types::parse_symbolic_declaration(token) {
+                if let Ok(declaration) = runmat_builtins::parse_symbolic_declaration(token) {
                     self.binding_for_write(&declaration.name, span);
                     for parameter in declaration.parameters {
                         self.binding_for_write(&parameter, span);

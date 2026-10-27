@@ -32,7 +32,7 @@ pub(in crate::builtins::io::mat) async fn write_mat_file(
         })
 }
 
-pub(super) async fn write_mat_bytes_cooperative(
+pub(in crate::builtins::io::mat) async fn write_mat_bytes_cooperative(
     vars: &[MatVar],
     owner: MatEncodingOwner,
     mut cooperation: Option<&mut MatCodecCooperation<'_>>,

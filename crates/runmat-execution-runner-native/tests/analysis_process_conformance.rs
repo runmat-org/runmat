@@ -656,28 +656,54 @@ fn assert_publication_semantics(
 }
 
 async fn run_durable_driver() {
-    let invocation = runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap();
-    let runmat_execution_runner_native::supervisor::BatchDriverInvocation::Program {
-        attempt,
-        submission,
-        lease,
-        ..
-    } = invocation
-    else {
-        panic!("analysis conformance driver received a script job")
+    use runmat_execution_runner_native::supervisor::{self, BatchDriverInvocation};
+
+    let is_success = |response: &ProgramExecutionResponse| {
+        matches!(
+            response,
+            ProgramExecutionResponse::Success { .. }
+                | ProgramExecutionResponse::ExternalizedSuccess { .. }
+                | ProgramExecutionResponse::GraphSuccess { .. }
+        )
     };
-    let execution = runmat_execution_runner_native::supervisor::execute_and_complete_program_batch(
-        *attempt,
-        *submission,
-        *lease,
-    )
-    .await
-    .unwrap();
-    let succeeded = matches!(
-        &execution.response,
-        ProgramExecutionResponse::Success { .. }
-            | ProgramExecutionResponse::ExternalizedSuccess { .. }
-    );
+    let invocation = runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap();
+    let succeeded = match invocation {
+        BatchDriverInvocation::Program {
+            attempt,
+            submission,
+            lease,
+            ..
+        } => is_success(
+            &supervisor::execute_and_complete_program_batch(*attempt, *submission, *lease)
+                .await
+                .unwrap()
+                .response,
+        ),
+        BatchDriverInvocation::GraphTask {
+            attempt,
+            submission,
+            lease,
+            ..
+        } => is_success(
+            &supervisor::execute_and_complete_graph_batch(*attempt, *submission, *lease)
+                .await
+                .unwrap()
+                .response,
+        ),
+        BatchDriverInvocation::Graph {
+            job_directory,
+            job_id,
+            submission,
+        } => {
+            let response = supervisor::execute_graph_batch(*submission, job_id).await;
+            let succeeded = is_success(&response);
+            supervisor::complete_batch_driver_with_response(&job_directory, response).unwrap();
+            succeeded
+        }
+        BatchDriverInvocation::Script { .. } => {
+            panic!("analysis conformance driver does not execute script jobs")
+        }
+    };
     if !succeeded {
         std::process::exit(1);
     }

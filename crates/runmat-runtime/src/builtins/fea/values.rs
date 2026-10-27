@@ -109,18 +109,18 @@ scalar_quantity_builtin!(
     0.0
 );
 scalar_quantity_builtin!(
-    frequency_builtin,
-    "fea.Frequency.hertz",
-    FREQUENCY_CLASS,
-    "hertz",
-    1.0,
-    0.0
-);
-scalar_quantity_builtin!(
     time_seconds_builtin,
     "fea.Time.seconds",
     TIME_CLASS,
     "seconds",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    frequency_builtin,
+    "fea.Frequency.hertz",
+    FREQUENCY_CLASS,
+    "hertz",
     1.0,
     0.0
 );

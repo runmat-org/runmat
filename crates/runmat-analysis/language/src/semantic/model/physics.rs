@@ -10,7 +10,7 @@ use runmat_analysis_core::{
     HeatFlux, HeatTransferCoefficient, PrescribedValue, Pressure, SpecificAcousticImpedance,
     Stiffness, SurfaceEmissivity, Temperature, ThermalContactResistance,
 };
-use runmat_parser::fea::FeaModelDefinitionKind;
+use runmat_fea_syntax::FeaModelDefinitionKind;
 
 pub(super) struct LoweredModelPhysics {
     pub boundaries: Vec<AuthoredBoundary>,

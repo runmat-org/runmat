@@ -45,7 +45,7 @@ pub(super) fn browser_inventory(
         memory_bytes: workers.saturating_mul(1024 * 1024 * 1024),
         scratch_bytes: workers.saturating_mul(256 * 1024 * 1024),
         accelerators,
-        capabilities: browser_capabilities(capabilities),
+        capabilities: browser_inventory_capabilities(capabilities),
     }
 }
 
@@ -58,7 +58,7 @@ pub(super) fn browser_worker_inventory(
         memory_bytes: 1024 * 1024 * 1024,
         scratch_bytes: 256 * 1024 * 1024,
         accelerators,
-        capabilities: browser_capabilities(capabilities),
+        capabilities: browser_inventory_capabilities(capabilities),
     }
 }
 
@@ -110,6 +110,18 @@ fn browser_capabilities(capabilities: BrowserExecutionCapabilities) -> BTreeSet<
     }
 }
 
+fn browser_inventory_capabilities(
+    capabilities: BrowserExecutionCapabilities,
+) -> BTreeSet<Capability> {
+    let mut available = browser_capabilities(capabilities);
+    if capabilities.selected_program_work {
+        // Qualified hosts use this exact versioned VM decoder. Never turn
+        // these available software schemas into ordinary Direct requirements.
+        available.extend(runmat_vm::compiled_graph_execution_capabilities());
+    }
+    available
+}
+
 pub(super) fn browser_request(
     capabilities: BrowserExecutionCapabilities,
     accelerators: Vec<AcceleratorRequest>,
@@ -129,4 +141,36 @@ pub(super) fn browser_request(
 
 pub(super) fn driver_error(error: runmat_execution_runner::RunnerError) -> ExecutionServiceError {
     ExecutionServiceError::Failed(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::model::BrowserWorkerTopology;
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn qualified_decoder_inventory_does_not_expand_ordinary_direct_requirements() {
+        let capabilities = BrowserExecutionCapabilities {
+            topology: BrowserWorkerTopology::Flat,
+            max_workers: 2,
+            owned_builtin_work: false,
+            selected_program_work: true,
+        };
+        let available = browser_worker_inventory(capabilities, Vec::new()).capabilities;
+        assert!(runmat_vm::compiled_graph_execution_capabilities().is_subset(&available));
+        let request = browser_request(capabilities, Vec::new());
+        assert_eq!(
+            request.required_capabilities,
+            BTreeSet::from([Capability::BrowserWorker])
+        );
+        let legacy = BrowserExecutionCapabilities {
+            selected_program_work: false,
+            ..capabilities
+        };
+        assert_eq!(
+            browser_worker_inventory(legacy, Vec::new()).capabilities,
+            BTreeSet::from([Capability::BrowserWorker])
+        );
+    }
 }

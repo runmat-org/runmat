@@ -48,7 +48,7 @@ fn wall_limit_records_original_attempt_and_never_relabels_it_from_a_later_report
     f.driver
         .handle(DriverCommand::BackendReport(BackendReport::for_request(
             &request,
-            AttemptReport::Cancelled,
+            AttemptReport::Retired,
         )))
         .unwrap();
     assert_eq!(
@@ -99,6 +99,14 @@ fn absolute_deadline_cancels_live_and_late_dependents_with_original_dependency_i
         snapshot.tasks[&request.task_id].cancellation.unwrap().cause,
         Cause::Deadline
     );
+    assert!(snapshot.tasks[&child_id].cancellation.is_none());
+    f.driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &request,
+            AttemptReport::Retired,
+        )))
+        .unwrap();
+    let snapshot = cold(&f.driver);
     assert_eq!(
         snapshot.tasks[&child_id].cancellation.unwrap().cause,
         Cause::Dependency {

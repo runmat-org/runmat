@@ -1,38 +1,38 @@
 use super::{
-    execute_brace_operation, execute_brace_operation_from_stack, paren_index_value, pop_index_base,
-    pop_index_values, BraceIndexOperation, BraceIndexOutcome, BraceOutcomeExpectation,
-    BraceStackRequest, RuntimeError,
+    execute_brace_operation, execute_brace_operation_from_stack, pop_index_base, pop_index_values,
+    BraceIndexOperation, BraceIndexOutcome, BraceOutcomeExpectation, BraceStackRequest,
+    RuntimeError,
 };
 use crate::interpreter::vars::InterpreterVars;
 
-pub(super) async fn dispatch(
+#[path = "scalar_read_and_cell/parentheses.rs"]
+mod parentheses;
+
+pub(super) fn dispatch<'a>(
+    instr: &'a crate::bytecode::Instr,
+    stack: &'a mut crate::interpreter::stack::InterpreterStack,
+    vars: &'a mut InterpreterVars,
+    function_registry: &'a crate::bytecode::FunctionRegistry,
+    _pc: usize,
+    runtime: &'a runmat_runtime::context::RuntimeContext,
+    sequence_register: &'a mut super::super::SequenceState,
+) -> impl std::future::Future<Output = Result<bool, RuntimeError>> + 'a {
+    match instr {
+        crate::bytecode::Instr::Index(num_indices) => futures::future::Either::Left(
+            parentheses::read(*num_indices, stack, function_registry, runtime),
+        ),
+        _ => futures::future::Either::Right(cell(instr, stack, vars, runtime, sequence_register)),
+    }
+}
+
+async fn cell(
     instr: &crate::bytecode::Instr,
     stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &mut InterpreterVars,
-    function_registry: &crate::bytecode::FunctionRegistry,
-    _pc: usize,
     runtime: &runmat_runtime::context::RuntimeContext,
     sequence_register: &mut super::super::SequenceState,
 ) -> Result<bool, RuntimeError> {
     match instr {
-        crate::bytecode::Instr::Index(num_indices) => {
-            let mut raw_indices = Vec::with_capacity(*num_indices);
-            for _ in 0..*num_indices {
-                raw_indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?);
-            }
-            raw_indices.reverse();
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            paren_index_value(runtime, base, raw_indices, 1, function_registry)
-                .await?
-                .with_owned(|value| stack.try_push(value))?;
-            Ok(true)
-        }
         crate::bytecode::Instr::IndexCell { num_indices } => {
             execute_brace_operation_from_stack(
                 stack,

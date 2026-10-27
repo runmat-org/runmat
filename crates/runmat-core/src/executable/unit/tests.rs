@@ -15,6 +15,46 @@ use runmat_vm::{
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+#[test]
+fn preferred_source_name_uses_only_registry_alias_of_selected_body() {
+    let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+    let mut unit = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new(
+            "registry-alias@1",
+            "pulse.m",
+            "function y=pulse(x)\ny=x+1;\nend\nfunction y=other(x)\ny=x+2;\nend\n",
+        ),
+        None,
+    ))
+    .unwrap();
+    let selected = unit.native_function_id("pulse").unwrap();
+    let other = unit.native_function_id("other").unwrap();
+    let registry = Rc::make_mut(&mut unit.functions);
+    registry.names.retain(|_, function| *function != selected);
+    registry.names.insert("loads.pulse".into(), selected);
+    registry.names.insert("zzz.pulse".into(), selected);
+    registry.names.insert("aaa.other".into(), other);
+    let super::super::portable_entrypoint::PortableEntrypoint::Callable {
+        name,
+        compiled_function,
+        ..
+    } = super::super::portable_entrypoint::resolve(&unit, Some("pulse")).unwrap()
+    else {
+        panic!("selected function")
+    };
+    assert_eq!(name, "loads.pulse");
+    assert_eq!(compiled_function, selected);
+    Rc::make_mut(&mut unit.functions)
+        .names
+        .retain(|_, function| *function != selected);
+    assert!(
+        super::super::portable_entrypoint::resolve(&unit, Some("pulse"))
+            .err()
+            .expect("unrelated aliases cannot select a body")
+            .contains("no exact admitted registry name")
+    );
+}
+
 fn body(function: FunctionId) -> MirBody {
     MirBody {
         function,

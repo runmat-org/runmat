@@ -1,10 +1,13 @@
 #![cfg(target_arch = "wasm32")]
 
-use runmat_execution::OutputContract;
+use runmat_execution::{
+    OutputContract, ProgramCallable, ProgramFunctionId, ProgramInvocationContext,
+};
 use runmat_execution_artifact::*;
 use runmat_value::Value;
 use serde::Serialize;
 use wasm_bindgen_test::wasm_bindgen_test;
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 async fn execute(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
     let request = request
@@ -19,6 +22,9 @@ async fn execute(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
 }
 
 async fn original(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExecutionRequest {
+    let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::MemoryFsProvider::new(),
+    ));
     runmat_runtime::builtins::wasm_registry::register_all();
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     let unit = session
@@ -29,15 +35,28 @@ async fn original(text: &str, selected: Option<&str>, outputs: u16) -> ProgramEx
         .await
         .unwrap();
     let envelope = unit.portable_envelope_for(selected).unwrap();
+    let function = envelope
+        .manifest
+        .identity
+        .entrypoint_function
+        .expect("selected function");
+    let accelerators = runmat_execution::resource::accelerator_requirements_for_capabilities(
+        &envelope.manifest.capabilities,
+    )
+    .unwrap();
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: envelope.manifest.identity.entrypoint_function.0.to_string(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: outputs,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("browser-original-test"),
+        interop: runmat_types::InteropManifest::empty(),
+        foreign_policy: None,
+        accelerators,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: vec![],
@@ -46,8 +65,11 @@ async fn original(text: &str, selected: Option<&str>, outputs: u16) -> ProgramEx
     ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
-        function: envelope.manifest.identity.entrypoint_function.0 as usize,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        callable: ProgramCallable::semantic(function, None),
+        context: ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         artifact: ProgramArtifact::materialize(
             &recipe,
             ExecutableForm::ExecutableUnitV4,
@@ -62,7 +84,7 @@ async fn original(text: &str, selected: Option<&str>, outputs: u16) -> ProgramEx
 
 fn values(response: ProgramExecutionResponse) -> Vec<Value> {
     let outputs = match response {
-        ProgramExecutionResponse::Success { value } => vec![value],
+        ProgramExecutionResponse::Success { outputs } => outputs,
         ProgramExecutionResponse::ExternalizedSuccess {
             outputs,
             result_objects,
@@ -92,7 +114,9 @@ async fn browser_original_capture_and_nonprimary_identity_preserve_all_output_or
             outputs,
         )
         .await;
-        assert_ne!(request.function, 0);
+        assert!(
+            matches!(&request.callable, ProgramCallable::Semantic { function, .. } if *function != ProgramFunctionId(0))
+        );
         request.arguments =
             vec![
                 runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(10.0))
@@ -116,10 +140,11 @@ async fn browser_script_requires_actual_ans_and_preserves_empty_outputs() {
         "unrelated = 999;",
         "if false; ans = 42; end; unrelated = 999;",
     ] {
-        assert!(matches!(
-            execute(original(text, None, 1).await).await,
-            ProgramExecutionResponse::Failure { .. }
-        ));
+        let response = execute(original(text, None, 1).await).await;
+        assert!(
+            matches!(response, ProgramExecutionResponse::Failure { .. }),
+            "script without an executed ans assignment: {text}: {response:?}"
+        );
         assert!(values(execute(original(text, None, 0).await).await).is_empty());
     }
 }

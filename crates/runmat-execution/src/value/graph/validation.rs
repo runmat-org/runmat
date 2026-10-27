@@ -417,25 +417,17 @@ pub(super) fn validate(
             _ => {}
         }
     }
-    if structural_nodes > limits.max_nodes
-        || bytes > limits.max_inline_bytes
-        || elements > limits.max_elements
-        || text > limits.max_text_bytes
-    {
-        return Err(invalid("graph metadata exceeds the shared value limits"));
-    }
+    let mut budget = super::super::ValueLimitBudget::new(limits);
+    budget.nodes(structural_nodes)?;
+    budget.bytes(bytes)?;
+    budget.elements(elements)?;
+    budget.text(text)?;
     let depths = graph_depths(graph, &edges, &graph.roots, limits.max_depth)?;
     let leaf_refs = leaves
         .iter()
         .map(|(index, value)| (*value, depths[*index]))
         .collect::<Vec<_>>();
-    let remaining = ValueLimits {
-        max_nodes: limits.max_nodes - structural_nodes,
-        max_inline_bytes: limits.max_inline_bytes - bytes,
-        max_elements: limits.max_elements - elements,
-        max_text_bytes: limits.max_text_bytes - text,
-        ..limits
-    };
+    let remaining = budget.remaining();
     super::super::validation::validate_graph_leaves(&leaf_refs, remaining, source_map)?;
     Ok(value_order)
 }

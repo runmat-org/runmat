@@ -30,54 +30,88 @@ impl Driver {
             return Ok(());
         }
         let attempt = self.snapshot.attempts[&report.attempt_id].clone();
-        let resources = report.unsuccessful_resources.clone();
+        let resources = report
+            .unsuccessful_resources
+            .clone()
+            .or_else(|| match &report.report {
+                AttemptReport::Succeeded { result } => result
+                    .resources()
+                    .filter(|resources| resources.validate_against(&attempt.request).is_ok())
+                    .cloned()
+                    .map(Box::new),
+                _ => None,
+            });
         let execution = report.execution.clone();
         let console = report.console.take();
-        let cancelling_graph = attempt.cancellation_requested_at.is_some()
-            && matches!(
-                &attempt.request.task.callable.program,
-                runmat_execution::ProgramCallable::GraphTarget { .. }
-            );
-        if matches!(&report.report, AttemptReport::GraphRetiredCancelled) && !cancelling_graph {
+        let cancelling = attempt.cancellation_requested_at.is_some();
+        let unresolved = attempt
+            .unverified_retirement
+            .as_ref()
+            .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none());
+        if (cancelling || unresolved)
+            && matches!(&report.report,
+            AttemptReport::Succeeded { result } if result.resources().is_some_and(|resources|
+                resources.validate_against(&attempt.request).is_err()
+                    || report.execution.as_ref().is_some_and(|execution|
+                        resources.resources.usage.wall_millis != execution.wall_millis)))
+        {
+            self.discard_backend_report(report,
+                "unresolved success accounting contradicts its original attempt or execution interval", actions);
+            return Ok(());
+        }
+        if unresolved && matches!(report.report, AttemptReport::Started) {
+            self.discard_backend_report(report, "unresolved attempt cannot restart", actions);
+            return Ok(());
+        }
+        if matches!(&report.report, AttemptReport::Retired) && !cancelling && !unresolved {
             self.discard_backend_report(
                 report,
-                "Graph retirement certificate lacks an active cancellation",
+                "retirement certificate lacks an active cancellation or uncertainty",
                 actions,
             );
             return Ok(());
         }
-        if cancelling_graph
+        if (cancelling || unresolved)
             && !matches!(
                 &report.report,
                 AttemptReport::Started
-                    | AttemptReport::GraphRetiredCancelled
+                    | AttemptReport::Retired
                     | AttemptReport::RetirementUnverified { .. }
             )
         {
-            // A generic Lost, Failed, Success, or Cancelled report does not
-            // certify Graph worker retirement. Fail closed without replay or
-            // masking uncertainty as ordinary cancellation.
+            // No operation outcome or transport loss proves cancellation
+            // retirement. Retain the original attempt and all its capacity.
             if let AttemptReport::Succeeded { result } = &report.report {
                 actions.push(DriverAction::GarbageCollectResults {
                     task_id: report.task_id,
                     objects: result.result_objects().to_vec(),
                 });
             }
-            self.finish_attempt(
+            let (diagnostic, failure, failure_kind) =
+                match std::mem::replace(&mut report.report, AttemptReport::Started) {
+                    AttemptReport::RuntimeFailed { failure } => {
+                        (failure.message.clone(), Some(Box::new(failure)), None)
+                    }
+                    AttemptReport::Failed { kind, message } => (message, None, Some(kind)),
+                    AttemptReport::Lost { message } => (message, None, None),
+                    _ => (
+                        "worker retirement was not certified after cancellation or uncertainty"
+                            .into(),
+                        None,
+                        None,
+                    ),
+                };
+            self.retain_unverified_attempt(
                 &attempt,
-                AttemptDisposition::Lost,
                 ProviderEvidence {
                     resources,
                     execution,
                     console,
                 },
-                Some("Graph worker retirement was not certified after cancellation".into()),
+                diagnostic,
+                failure,
+                failure_kind,
             )?;
-            self.emit(DriverEventKind::AttemptLost {
-                task_id: report.task_id,
-                attempt_id: report.attempt_id,
-            });
-            self.transition_task(report.task_id, TaskState::Indeterminate)?;
             return Ok(());
         }
         if let Some(contract) = &attempt.request.task.outputs.owned_work {
@@ -124,7 +158,13 @@ impl Driver {
                         &attempt,
                         AttemptFailureKind::Rejected,
                         ProviderEvidence {
-                            resources: None,
+                            resources: result
+                                .resources()
+                                .filter(|resources| {
+                                    resources.validate_against(&attempt.request).is_ok()
+                                })
+                                .cloned()
+                                .map(Box::new),
                             execution,
                             console,
                         },
@@ -207,45 +247,39 @@ impl Driver {
                 )?;
             }
             AttemptReport::Lost { message } => {
-                self.finish_attempt(
+                self.retain_unverified_attempt(
                     &attempt,
-                    AttemptDisposition::Lost,
                     ProviderEvidence {
                         resources,
                         execution,
                         console,
                     },
-                    Some(message),
+                    message,
+                    None,
+                    None,
                 )?;
-                self.emit(DriverEventKind::AttemptLost {
-                    task_id: report.task_id,
-                    attempt_id: report.attempt_id,
-                });
-                self.finish_unsuccessful(report.task_id, RetryCause::Lost)?;
             }
             AttemptReport::RetirementUnverified { message } => {
-                self.finish_attempt(
+                self.retain_unverified_attempt(
                     &attempt,
-                    AttemptDisposition::Lost,
                     ProviderEvidence {
                         resources,
                         execution,
                         console,
                     },
-                    Some(message),
+                    message,
+                    None,
+                    None,
                 )?;
-                self.emit(DriverEventKind::AttemptLost {
-                    task_id: report.task_id,
-                    attempt_id: report.attempt_id,
-                });
-                if !self.task_is_terminal(report.task_id)? {
-                    self.transition_task(report.task_id, TaskState::Indeterminate)?;
-                }
             }
-            AttemptReport::GraphRetiredCancelled => {
+            AttemptReport::Retired => {
                 self.finish_attempt(
                     &attempt,
-                    AttemptDisposition::Cancelled,
+                    if unresolved {
+                        AttemptDisposition::Lost
+                    } else {
+                        AttemptDisposition::Cancelled
+                    },
                     ProviderEvidence {
                         resources,
                         execution,
@@ -253,11 +287,17 @@ impl Driver {
                     },
                     None,
                 )?;
-                self.emit(DriverEventKind::AttemptCancelled {
-                    task_id: report.task_id,
-                    attempt_id: report.attempt_id,
-                });
-                self.transition_task(report.task_id, TaskState::Cancelled)?;
+                if unresolved {
+                    // Physical proof releases capacity, not an indeterminate
+                    // operation's result or permission to replay it.
+                    self.task_mut(report.task_id)?.active_attempt = None;
+                } else {
+                    self.emit(DriverEventKind::AttemptCancelled {
+                        task_id: report.task_id,
+                        attempt_id: report.attempt_id,
+                    });
+                    self.transition_task(report.task_id, TaskState::Cancelled)?;
+                }
             }
             AttemptReport::Cancelled => {
                 self.finish_attempt(
@@ -302,8 +342,13 @@ impl Driver {
         let Some(attempt) = self.snapshot.attempts.get(&report.attempt_id) else {
             return Some("unknown attempt");
         };
-        if report.driver_fence != self.snapshot.driver_fence
-            || report.driver_fence != attempt.request.driver_fence
+        let original_retirement = matches!(report.report, AttemptReport::Retired)
+            && attempt
+                .unverified_retirement
+                .as_ref()
+                .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none());
+        if report.driver_fence != attempt.request.driver_fence
+            || (report.driver_fence != self.snapshot.driver_fence && !original_retirement)
         {
             return Some("stale driver fence");
         }
@@ -314,6 +359,10 @@ impl Driver {
         }
         if attempt_state_is_terminal(attempt.state) {
             return Some("attempt is already terminal");
+        }
+        if matches!(&report.report, AttemptReport::RuntimeFailed { failure } if failure.validate().is_err())
+        {
+            return Some("invalid original runtime failure");
         }
         if let Some(console) = &report.console {
             if matches!(report.report, AttemptReport::Started)
@@ -415,6 +464,9 @@ impl Driver {
             .expect("attempt was validated");
         record.state = disposition.state();
         record.terminal = Some(terminal);
+        if let Some(uncertainty) = &mut record.unverified_retirement {
+            uncertainty.retired_at_driver_millis = Some(self.snapshot.now_millis);
+        }
         let pool = self.pool_mut(attempt.request.task.pool_id)?;
         let worker = pool
             .workers

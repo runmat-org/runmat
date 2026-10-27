@@ -843,7 +843,6 @@ impl NativeSurfaceRenderContext {
                     title: self.renderer.overlay_title().cloned(),
                     x_label: self.renderer.overlay_x_label().cloned(),
                     y_label: self.renderer.overlay_y_label().cloned(),
-                    show_sidebar: false,
                     ..Default::default()
                 };
                 let overlay_metrics = OverlayMetrics {

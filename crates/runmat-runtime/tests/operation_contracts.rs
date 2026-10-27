@@ -978,7 +978,21 @@ fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_validate_maps_frame_mismatch_code() {
+fn analysis_model_decode_rejects_noncanonical_units_and_validate_maps_frame_mismatch() {
+    let canonical = contract_linear_static_model();
+    let mut wire = serde_json::to_value(&canonical).expect("encode canonical model");
+    assert_eq!(
+        wire["units"],
+        serde_json::to_value(LengthUnit::Meter).unwrap()
+    );
+    serde_json::from_value::<AnalysisModel>(wire.clone()).expect("decode canonical model");
+    wire["units"] = serde_json::to_value(LengthUnit::Inch).unwrap();
+    let unit_err = serde_json::from_value::<AnalysisModel>(wire)
+        .expect_err("canonical model admission must reject inch coordinates");
+    assert!(unit_err
+        .to_string()
+        .contains("canonical solver coordinates must be meters"));
+
     let mut frame_mismatch = contract_linear_static_model();
     frame_mismatch.frame = CoordinateFrame::Cartesian(runmat_analysis_core::CartesianFrame {
         frame_id: "fixture_frame".to_string(),

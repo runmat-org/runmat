@@ -4,11 +4,11 @@ use super::{
 };
 use crate::builtins::math::optim::common::field_name;
 use crate::BuiltinResult;
-use runmat_builtins::OptimOptionField;
+use runmat_builtins::{OptimParameterLookup, OptimParameterName};
 use runmat_value::{StructValue, Value};
 
 pub(super) enum FieldName {
-    Known(OptimOptionField),
+    Known(OptimParameterName),
     Custom(String),
 }
 
@@ -22,13 +22,25 @@ impl FieldName {
 }
 
 pub(super) enum Step {
-    Copy(StructValue),
+    Copy(StructValue, bool),
     Pair(FieldName, Value),
 }
 
 pub(super) fn admit(args: crate::call::BuiltinArguments) -> BuiltinResult<Vec<Step>> {
     ensure_optimset_extensions(args.view())?;
-    let pair_start = usize::from(matches!(args.first(), Some(Value::Struct(_))));
+    let pair_start = usize::from(
+        matches!(args.first(), Some(Value::Struct(_)))
+            || matches!(args.first(),Some(Value::Tensor(value))if value.is_empty()),
+    );
+    if args.len() == 2 && pair_start == 1 && matches!(&args[1], Value::Struct(_)) {
+        let mut steps = Vec::new();
+        for (index, value) in args.into_iter().enumerate() {
+            if let Value::Struct(value) = value {
+                steps.push(Step::Copy(value, index == 1));
+            }
+        }
+        return Ok(steps);
+    }
     if !(args.len() - pair_start).is_multiple_of(2) {
         return Err(optimset_error_with_detail(
             &OPTIMSET_ERROR_INVALID_ARGUMENT,
@@ -40,7 +52,9 @@ pub(super) fn admit(args: crate::call::BuiltinArguments) -> BuiltinResult<Vec<St
     let mut pending_name = None;
     if let Some(first) = input.next() {
         if let Value::Struct(existing) = first {
-            steps.push(Step::Copy(existing));
+            steps.push(Step::Copy(existing, false));
+        } else if matches!(&first,Value::Tensor(value)if value.is_empty()) {
+            // Empty oldopts has no fields, but still consumes its position.
         } else {
             pending_name = Some(decode_name(&first)?);
         }
@@ -65,7 +79,19 @@ fn decode_name(value: &Value) -> BuiltinResult<FieldName> {
     let name = field_name(value).map_err(|error| {
         optimset_error_with_detail(&OPTIMSET_ERROR_INVALID_INPUT, error.message())
     })?;
-    Ok(OptimOptionField::parse(&name)
-        .map(FieldName::Known)
-        .unwrap_or(FieldName::Custom(name)))
+    match OptimParameterName::resolve(&name) {
+        OptimParameterLookup::Matched(field) => Ok(FieldName::Known(field)),
+        OptimParameterLookup::Ambiguous => Err(optimset_error_with_detail(
+            &OPTIMSET_ERROR_INVALID_INPUT,
+            "ambiguous legacy option abbreviation",
+        )),
+        OptimParameterLookup::Unknown => Ok(FieldName::Custom(name)),
+    }
+}
+
+pub(super) fn canonical_name(name: String) -> String {
+    match OptimParameterName::resolve(&name) {
+        OptimParameterLookup::Matched(known) if name != known.name() => known.name().to_owned(),
+        _ => name,
+    }
 }

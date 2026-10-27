@@ -29,6 +29,10 @@ use super::web::current_plot_theme_config;
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{BuiltinResult, RuntimeError};
 
+#[cfg(target_arch = "wasm32")]
+#[path = "state/invocation_retirement.rs"]
+mod invocation_retirement;
+
 #[path = "state/callbacks.rs"]
 pub(crate) mod callbacks;
 #[path = "state/mode_properties.rs"]
@@ -113,12 +117,12 @@ pub(crate) use property_mutation::{PropertyMutationError, PropertyMutationTarget
 #[path = "state/callback_payload.rs"]
 mod callback_payload;
 pub(crate) use callback_payload::{callback_payload_valid, callback_payload_valid_at_scene};
-#[path = "state/shared_figure.rs"]
-mod shared_figure;
-#[path = "state/scene_mutation.rs"]
-mod scene_mutation;
 #[path = "state/recent_figures.rs"]
 mod recent_figures;
+#[path = "state/scene_mutation.rs"]
+mod scene_mutation;
+#[path = "state/shared_figure.rs"]
+mod shared_figure;
 pub(crate) use recent_figures::FigureReceiptOwner;
 use scene_mutation::{
     existing_axes_state_mut, existing_state_mut, get_state_for_future_plot_style,
@@ -146,12 +150,12 @@ pub use colormap::{
     colormap_length_for_axes, current_colormap_length, figure_colormap_snapshot,
     set_colormap_for_axes_with_length, set_colormap_for_figure_with_length,
 };
+#[path = "state/axes_target.rs"]
+mod axes_target;
 #[path = "state/clear_axes.rs"]
 mod clear_axes;
 #[path = "state/plot_transaction.rs"]
 mod plot_transaction;
-#[path = "state/axes_target.rs"]
-mod axes_target;
 pub(crate) use axes_target::{
     resolve_axes_target, resolve_current_axes_for_figure, ResolvedAxesTarget,
 };
@@ -161,6 +165,13 @@ mod graphics_receiver;
 #[path = "state/plot_child_registry.rs"]
 mod plot_child_registry;
 use plot_child_registry::{PlotChildEntry, PlotChildRegistry};
+#[path = "state/optimization_progress.rs"]
+mod optimization_progress;
+pub(crate) use optimization_progress::{
+    update_constrained_metric, update_constrained_optimization_plot, update_genetic_plot,
+    update_milp_plot, update_optimization_plot, update_surrogate_plot, ConstrainedPlotSample,
+    GeneticPlotData, OptimizationPlotLayout, SurrogatePlotSample, SurrogatePlotStep,
+};
 #[path = "state/interaction_exclusivity.rs"]
 mod interaction_exclusivity;
 #[cfg(test)]
@@ -479,6 +490,8 @@ impl LineColorCycle {
 
 struct FigureState {
     figure: SharedFigure,
+    #[cfg(target_arch = "wasm32")]
+    invocation_owner: Option<std::rc::Rc<()>>,
     /// Runtime-only exact scene identity. Numeric `revision` is a cache hint,
     /// never host-event authority. Direct mutation sites still need migration
     /// before this lease can be exposed to a host consumer.
@@ -504,14 +517,29 @@ struct FigureState {
         mode_properties::ModePropertyValue,
     )>,
     waitbar: Option<WaitbarState>,
+    optimization_plots:
+        HashMap<(usize, optimization_progress::OptimizationSeries), GraphicsReceiverRef>,
     revision: u64,
 }
 
 impl FigureState {
     fn new(handle: FigureHandle) -> Self {
+        let state = Self::new_unowned(handle);
+        #[cfg(target_arch = "wasm32")]
+        let state = {
+            let mut state = state;
+            invocation_retirement::claim(&mut state, handle);
+            state
+        };
+        state
+    }
+
+    fn new_unowned(handle: FigureHandle) -> Self {
         let figure = default_figure("", "", "");
         Self {
             figure: figure.into(),
+            #[cfg(target_arch = "wasm32")]
+            invocation_owner: None,
             scene_lease: GraphicsSceneLease::candidate(handle.as_u32()),
             figure_receiver: issue_graphics_receiver(GraphicsReceiverKind::Figure {
                 figure: handle.as_u32(),
@@ -533,6 +561,7 @@ impl FigureState {
             pan_axes_modes: HashMap::new(),
             data_cursor_mode: DataCursorModeState::default(),
             mode_properties: Vec::new(),
+            optimization_plots: HashMap::new(),
             waitbar: None,
             revision: 0,
         }
@@ -4472,7 +4501,16 @@ pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
             .figures
             .get_mut(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        std::mem::replace(state, FigureState::new(handle))
+        let successor = FigureState::new_unowned(handle);
+        #[cfg(target_arch = "wasm32")]
+        let successor = {
+            let mut successor = successor;
+            // Clearing a figure preserves its existing lifecycle owner. It
+            // must not claim another session's figure for the active worker.
+            successor.invocation_owner = state.invocation_owner.take();
+            successor
+        };
+        std::mem::replace(state, successor)
     };
     purge_link_axes_for_figure(&mut reg, handle);
     purge_plot_children_for_figure(&mut reg, handle);
@@ -4489,8 +4527,18 @@ pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
 }
 
 pub fn close_figure(target: Option<FigureHandle>) -> Result<FigureHandle, FigureError> {
+    close_figure_selected(target, |_| true)
+}
+
+fn close_figure_selected(
+    target: Option<FigureHandle>,
+    accepts: impl FnOnce(&FigureState) -> bool,
+) -> Result<FigureHandle, FigureError> {
     let mut reg = registry();
     let handle = target.unwrap_or(reg.current);
+    if !reg.figures.get(&handle).is_some_and(accepts) {
+        return Err(FigureError::InvalidHandle(handle.as_u32()));
+    }
     let existed = reg.figures.remove(&handle);
     #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
     let retired_receiver = existed

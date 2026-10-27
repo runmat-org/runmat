@@ -18,27 +18,33 @@ use runmat_runtime::execution::value_codec::{
 use runmat_value::BoundFunctionAuthority;
 use runmat_value::BoundFunctionBinding;
 
+use crate::program_execution::unit_admission::RetainedExecutableUnit;
 use crate::program_execution::{
     admit_executable_unit, selected_graph_callable_facts_for_owner, RuntimeBoundExecutableUnit,
 };
+#[path = "selected/admission.rs"]
+mod admission;
+#[path = "selected/code.rs"]
+mod code;
+pub(super) use code::RetainedSelectedGraph;
 
 #[path = "selected/object_classes.rs"]
 mod object_classes;
+#[path = "selected/static_capture.rs"]
+mod static_capture;
 
 /// The wire order is the source and callable namespace. Each entry is bound
 /// separately; the general retained-unit staging transaction coalesces equal
 /// origins and is therefore not a valid V8 authority owner.
 pub(super) struct SelectedWorkerGraph {
-    pub(super) units: Vec<RuntimeBoundExecutableUnit>,
+    code: Rc<RetainedSelectedGraph>,
     pub(super) unit_runtimes: Vec<RuntimeContext>,
-    pub(super) _receipts: Vec<Option<std::rc::Rc<crate::SelectedUnitInteropReceipt>>>,
-    pub(super) issuer: GraphSourceIssuer,
-    pub(super) source_map: Arc<ExecutableSourceMapV2>,
-    pub(super) layouts: HashMap<GraphBoundOwner, GraphLexicalLayout>,
-    pub(super) proofs: HashMap<GraphBoundOwner, GraphCallableProof>,
-    pub(super) bindings: HashMap<GraphBoundOwner, BoundFunctionBinding>,
-    pub(super) class_products: HashMap<GraphBoundOwner, Rc<crate::SelectedClassProduct>>,
-    pub(super) object_classes: HashMap<GraphBoundOwner, Rc<runmat_value::SelectedObjectClassFacts>>,
+}
+impl std::ops::Deref for SelectedWorkerGraph {
+    type Target = RetainedSelectedGraph;
+    fn deref(&self) -> &Self::Target {
+        &self.code
+    }
 }
 
 fn selected_unit_runtime(
@@ -98,8 +104,8 @@ fn validate_selected_port_count(
     Ok(())
 }
 
-fn selected_bound_body<'a>(
-    unit: &'a RuntimeBoundExecutableUnit,
+pub(super) fn selected_bound_body<'a>(
+    registry: &'a crate::FunctionRegistry,
     binding: &BoundFunctionBinding,
 ) -> Result<&'a crate::FunctionBytecode, String> {
     let function = runmat_hir::FunctionId(binding.function);
@@ -107,10 +113,10 @@ fn selected_bound_body<'a>(
         .authority
         .local_lease(binding.function)
         .ok_or("selected graph binding has no exact local definition lease")?;
-    unit.registry()
+    registry
         .owned_view(function, &binding.authority)
         .ok_or("selected graph binding has no complete owned definition view")?;
-    unit.registry()
+    registry
         .get_owned(function, lease)
         .ok_or_else(|| "selected graph lease has no admitted body".into())
 }
@@ -120,6 +126,20 @@ fn selected_bound_body<'a>(
 mod foreign_tests;
 
 impl SelectedWorkerGraph {
+    pub(super) fn active_foreign_for_unit(
+        &self,
+        unit: GraphProgramUnitId,
+    ) -> Result<Option<&Rc<dyn RuntimeForeignService>>, String> {
+        self.unit_runtimes
+            .get(usize::from(unit.0))
+            .map(|runtime| runtime.service_ports().foreign())
+            .ok_or_else(|| "selected graph runtime unit is absent".into())
+    }
+
+    pub(super) fn into_code(self) -> Rc<RetainedSelectedGraph> {
+        self.code
+    }
+
     pub(super) fn runtime_for_unit(
         &self,
         unit: GraphProgramUnitId,
@@ -130,32 +150,41 @@ impl SelectedWorkerGraph {
             .ok_or_else(|| "graph selected runtime unit is absent".into())
     }
 
-    pub(super) fn owner_for_binding(
-        &self,
-        binding: &BoundFunctionBinding,
-    ) -> Result<GraphBoundOwner, String> {
-        let mut owners = self
-            .bindings
-            .iter()
-            .filter(|(_, selected)| *selected == binding)
-            .map(|(owner, _)| *owner);
-        let owner = owners
-            .next()
-            .ok_or("bound callback has no exact selected graph unit")?;
-        if owners.next().is_some() {
-            return Err("bound callback has ambiguous selected graph units".into());
-        }
-        self.unit(owner)?;
-        Ok(owner)
-    }
-
     pub(super) fn admit(
         admitted_request: &ArchiveAdmittedGraphExecutionRequest,
         bundles: Vec<AdmittedGraphUnitBundle>,
         runtime: &RuntimeContext,
         selected_foreign_ports: Option<&[Option<Rc<dyn RuntimeForeignService>>]>,
     ) -> Result<Self, String> {
-        let request = admitted_request.request();
+        Self::admit_selection(
+            admission::Admission::Worker(admitted_request),
+            bundles,
+            runtime,
+            selected_foreign_ports,
+        )
+    }
+
+    pub(super) fn admit_captured(
+        admitted: &runmat_execution_artifact::ArchiveAdmittedCapturedGraphCode,
+        bundles: Vec<AdmittedGraphUnitBundle>,
+        runtime: &RuntimeContext,
+        selected_foreign_ports: Option<&[Option<Rc<dyn RuntimeForeignService>>]>,
+    ) -> Result<Self, String> {
+        Self::admit_selection(
+            admission::Admission::Captured(admitted),
+            bundles,
+            runtime,
+            selected_foreign_ports,
+        )
+    }
+
+    fn admit_selection(
+        admission: admission::Admission<'_>,
+        bundles: Vec<AdmittedGraphUnitBundle>,
+        runtime: &RuntimeContext,
+        selected_foreign_ports: Option<&[Option<Rc<dyn RuntimeForeignService>>]>,
+    ) -> Result<Self, String> {
+        let request = admission.view();
         validate_selected_port_count(request.retained_units.len(), selected_foreign_ports)?;
         if bundles.len() != request.retained_units.len() + 1 {
             return Err("selected graph bundle count differs from V3 unit count".into());
@@ -163,25 +192,18 @@ impl SelectedWorkerGraph {
         let bundles = bundles
             .into_iter()
             .enumerate()
-            .map(|(position, ticket)| {
-                admitted_request
-                    .consume_bundle_for(position, ticket)
-                    .map_err(|error| error.to_string())
-            })
+            .map(|(position, ticket)| admission.consume_bundle(position, ticket))
             .collect::<Result<Vec<_>, _>>()?;
-        let expected_map = request
-            .selected_source_map()
-            .map_err(|error| error.to_string())?;
+        let expected_map = admission.source_map()?;
         let mut units = Vec::with_capacity(request.retained_units.len() + 1);
         let mut receipts = Vec::with_capacity(units.capacity());
         let mut facts = Vec::with_capacity(units.capacity());
         let mut body_digests = Vec::with_capacity(units.capacity());
         let mut revisions = Vec::<ProgramRevision>::with_capacity(units.capacity());
-        for (position, (bytes, bundle)) in
-            std::iter::once(request.artifact.executable_bytes.as_slice())
-                .chain(request.retained_units.iter().map(Vec::as_slice))
-                .zip(bundles)
-                .enumerate()
+        for (position, (bytes, bundle)) in std::iter::once(request.primary_unit)
+            .chain(request.retained_units.iter().map(Vec::as_slice))
+            .zip(bundles)
+            .enumerate()
         {
             let admitted = admit_executable_unit(bytes).map_err(|error| error.worker_message())?;
             body_digests.push(
@@ -228,7 +250,10 @@ impl SelectedWorkerGraph {
             facts.push(selected);
             revisions.push(revision);
         }
-        if revisions.first() != Some(&request.recipe.program_revision) {
+        if request
+            .primary_revision
+            .is_some_and(|revision| revisions.first() != Some(revision))
+        {
             return Err("primary graph V3 revision differs from its recipe".into());
         }
         let (issuer, source_map) =
@@ -251,6 +276,7 @@ impl SelectedWorkerGraph {
                 ))
             })
             .collect::<Result<Vec<_>, String>>()?;
+        static_capture::attach(&mut units, &receipts, request.static_dependencies)?;
         let mut layouts = HashMap::new();
         let mut proofs = HashMap::new();
         let mut bindings = HashMap::new();
@@ -302,7 +328,7 @@ impl SelectedWorkerGraph {
                 }
             }
         }
-        for edge in &request.static_dependencies {
+        for edge in request.static_dependencies {
             let target_index = usize::from(edge.target.unit.0);
             let target = units
                 .get(target_index)
@@ -310,7 +336,7 @@ impl SelectedWorkerGraph {
             let binding = bindings
                 .get(&edge.target)
                 .ok_or("selected static target has no exact admitted binding")?;
-            let body = selected_bound_body(target, binding)?;
+            let body = selected_bound_body(target.registry(), binding)?;
             if body.binding_origin != Some(edge.target.origin)
                 || !body.selected_source_owner.as_ref().is_some_and(|issued| {
                     target
@@ -369,7 +395,7 @@ impl SelectedWorkerGraph {
             })
             .collect::<Result<Vec<_>, String>>()?;
         let mut grouped = HashMap::<GraphBoundOwner, Vec<usize>>::new();
-        for edge in &request.class_dependencies {
+        for edge in request.class_dependencies {
             grouped
                 .entry(edge.caller)
                 .or_default()
@@ -377,7 +403,7 @@ impl SelectedWorkerGraph {
         }
         let mut class_method_units = HashMap::<GraphBoundOwner, Vec<usize>>::new();
         let mut class_method_targets = HashMap::new();
-        for edge in &request.class_method_dependencies {
+        for edge in request.class_method_dependencies {
             if edge.method.role != runmat_types::ClassMethodRole::Ordinary {
                 return Err("selected class method edge has a nonordinary role".into());
             }
@@ -393,7 +419,7 @@ impl SelectedWorkerGraph {
             let binding = bindings
                 .get(&edge.target)
                 .ok_or("selected class method has no admitted binding")?;
-            let body = selected_bound_body(unit, binding)?;
+            let body = selected_bound_body(unit.registry(), binding)?;
             if body.class_method_owner.as_ref() != Some(&edge.method)
                 || body.binding_origin != Some(edge.target.origin)
                 || body.selected_source_owner.as_ref().is_none_or(|issued| {
@@ -423,7 +449,7 @@ impl SelectedWorkerGraph {
             let caller_unit = units
                 .get(usize::from(caller.unit.0))
                 .ok_or("class dependency caller unit is absent")?;
-            let body = selected_bound_body(caller_unit, binding)?;
+            let body = selected_bound_body(caller_unit.registry(), binding)?;
             if body.binding_origin != Some(caller.origin) {
                 return Err("class dependency caller differs from its exact body".into());
             }
@@ -470,131 +496,69 @@ impl SelectedWorkerGraph {
             class_products.insert(caller, Rc::new(product));
         }
         let object_classes = object_classes::admit(
-            request,
+            request.graph,
             &units,
             &receipts,
             &bindings,
             &class_method_targets,
             &mut class_products,
         )?;
-        let required_schema = crate::selected_graph_execution_required_schema(
-            &request.roots,
-            &request.graph,
-            |owner| {
-                let binding = bindings
-                    .get(&owner)
-                    .ok_or("selected graph root has no exact binding")?;
-                let unit = units
-                    .get(usize::from(owner.unit.0))
-                    .ok_or("selected graph root unit is absent")?;
-                let body = selected_bound_body(unit, binding)?;
-                if body.binding_origin != Some(owner.origin) {
-                    return Err("selected graph root differs from admitted body".into());
-                }
-                Ok(crate::selected_graph_code_required_schema(
-                    &body.instructions,
-                ))
-            },
-            || {
-                let primary = units.first().ok_or("selected graph has no primary unit")?;
-                Ok(crate::selected_graph_code_required_schema(
-                    &primary.bytecode().instructions,
-                ))
-            },
-        )?;
+        let mut bound_schema = |owner: GraphBoundOwner| -> Result<runmat_execution::value::GraphRequiredSchema, String> {
+            let binding = bindings
+                .get(&owner)
+                .ok_or("selected graph root has no exact binding")?;
+            let unit = units
+                .get(usize::from(owner.unit.0))
+                .ok_or("selected graph root unit is absent")?;
+            let body = selected_bound_body(unit.registry(), binding)?;
+            if body.binding_origin != Some(owner.origin) {
+                return Err("selected graph root differs from admitted body".into());
+            }
+            Ok(crate::selected_graph_code_required_schema(
+                &body.instructions,
+            ))
+        };
+        let required_schema = match request.roots {
+            Some(roots) => crate::selected_graph_execution_required_schema(
+                roots,
+                request.graph,
+                &mut bound_schema,
+                || {
+                    let primary = units.first().ok_or("selected graph has no primary unit")?;
+                    Ok(crate::selected_graph_code_required_schema(
+                        &primary.bytecode().instructions,
+                    ))
+                },
+            )?,
+            None => crate::graph_schema::selected_callable_capture_required_schema(
+                request.graph,
+                &mut bound_schema,
+            )?,
+        };
         if runmat_execution::value::GraphRequiredSchema::from_version(request.schema_version)
             .is_none_or(|admitted| admitted < required_schema)
         {
             return Err("selected graph executable requires a newer schema".into());
         }
+        let units = units
+            .into_iter()
+            .map(RuntimeBoundExecutableUnit::into_retained_code)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
-            units,
+            code: Rc::new(RetainedSelectedGraph {
+                units,
+                _receipts: receipts,
+                issuer,
+                source_map: Arc::new(source_map),
+                layouts,
+                proofs,
+                bindings,
+                class_products,
+                object_classes,
+                static_bindings,
+                sealed_sites,
+            }),
             unit_runtimes,
-            _receipts: receipts,
-            issuer,
-            source_map: Arc::new(source_map),
-            layouts,
-            proofs,
-            bindings,
-            class_products,
-            object_classes,
         })
-    }
-
-    pub(super) fn unit(
-        &self,
-        owner: GraphBoundOwner,
-    ) -> Result<&RuntimeBoundExecutableUnit, String> {
-        let selected = self
-            .units
-            .get(usize::from(owner.unit.0))
-            .ok_or("graph bound owner selects an absent V3 unit")?;
-        let binding = self
-            .bindings
-            .get(&owner)
-            .ok_or("graph bound owner has no admitted definition")?;
-        let body = selected_bound_body(selected, binding)?;
-        if body.binding_origin != Some(owner.origin)
-            || !body.selected_source_owner.as_ref().is_some_and(|issued| {
-                selected
-                    .selected_source_owner()
-                    .is_some_and(|selected| issued.same_issuance(selected))
-            })
-        {
-            return Err("graph bound owner differs from selected V3 body/source".into());
-        }
-        Ok(selected)
-    }
-
-    pub(super) fn owner_for_authority(
-        &self,
-        origin: runmat_execution::FunctionBindingOrigin,
-        authority: &BoundFunctionAuthority,
-    ) -> Result<GraphBoundOwner, String> {
-        let session = self
-            .units
-            .first()
-            .and_then(RuntimeBoundExecutableUnit::selected_source_owner)
-            .ok_or("graph has no selected issuing session")?
-            .session_lease();
-        if authority.export_origin(&session) != Some(origin) {
-            return Err("returned callable differs from its issuing session/origin".into());
-        }
-        let mut found = None;
-        for (index, unit) in self.units.iter().enumerate() {
-            for body in unit.registry().selected_execution_bodies() {
-                if body.binding_origin != Some(origin) {
-                    continue;
-                }
-                let Some(selected_owner) = unit.selected_source_owner() else {
-                    continue;
-                };
-                if !body
-                    .selected_source_owner
-                    .as_ref()
-                    .is_some_and(|owner| owner.same_issuance(selected_owner))
-                {
-                    continue;
-                }
-                if let Some(lease) = authority.local_lease(body.function.0) {
-                    if !lease.matches(&body.definition_owner) {
-                        continue;
-                    }
-                } else if authority.local_definition().is_some() {
-                    continue;
-                }
-                let owner = GraphBoundOwner {
-                    unit: GraphProgramUnitId(
-                        u16::try_from(index)
-                            .map_err(|_| "graph unit index exceeds its ABI".to_string())?,
-                    ),
-                    origin,
-                };
-                if found.replace(owner).is_some() {
-                    return Err("returned callable has ambiguous selected V3 issuances".into());
-                }
-            }
-        }
-        found.ok_or_else(|| "returned callable has no exact selected V3 owner".into())
     }
 }

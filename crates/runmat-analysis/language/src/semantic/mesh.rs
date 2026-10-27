@@ -328,7 +328,7 @@ fn reject_unsupported_settings(
             );
             continue;
         };
-        if *relation != runmat_parser::fea::FeaAssignmentRelation::Equal {
+        if *relation != runmat_fea_syntax::FeaAssignmentRelation::Equal {
             diagnostic(
                 declaration,
                 statement.span,
@@ -657,8 +657,8 @@ fn scalar(value: &CheckedExpression) -> Option<f64> {
         CheckedExpressionKind::Unary { operator, operand } => {
             let scalar = scalar(operand)?;
             Some(match operator {
-                runmat_parser::fea::FeaUnaryOperator::Positive => scalar,
-                runmat_parser::fea::FeaUnaryOperator::Negative => -scalar,
+                runmat_fea_syntax::FeaUnaryOperator::Positive => scalar,
+                runmat_fea_syntax::FeaUnaryOperator::Negative => -scalar,
             })
         }
         _ => None,

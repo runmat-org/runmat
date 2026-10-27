@@ -13,7 +13,9 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::math::optim::common::{call_function, initial_guess_with_cooperation};
+use crate::builtins::math::optim::common::{
+    call_function_in_context, initial_guess_with_cooperation,
+};
 use crate::builtins::math::optim::least_squares::{
     solve_least_squares, LeastSquaresBounds, LeastSquaresEvaluator, LeastSquaresOptions,
     LeastSquaresResult, ResidualFuture,
@@ -415,11 +417,14 @@ impl LsqOptions {
             .max(1);
         Ok(Self {
             solver: LeastSquaresOptions {
+                criteria: None,
                 tol_x,
                 tol_fun,
                 max_iter,
                 max_fun_evals,
+                final_gradient: true,
                 final_jacobian: true,
+                scaling: crate::builtins::math::optim::common::derivative_scaling::DerivativeScaling::from_fields(NAME,&fields,true)?,
             },
             algorithm,
         })
@@ -444,7 +449,13 @@ impl LeastSquaresEvaluator for CurveFitEvaluator {
     fn residual<'a>(&'a mut self, x: &'a [f64]) -> ResidualFuture<'a> {
         Box::pin(async move {
             let arg = x_value(x, &self.x_shape, self.x_scalar)?;
-            let value = call_function(&self.function, vec![arg, self.xdata.clone()]).await?;
+            let value = call_function_in_context(
+                self.cooperation.runtime(),
+                &self.function,
+                [arg, self.xdata.clone()],
+                1,
+            )
+            .await?;
             let model = value
                 .with_owned_async(|value| {
                     real_array_checked(

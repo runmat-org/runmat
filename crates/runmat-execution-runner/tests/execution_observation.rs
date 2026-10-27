@@ -169,12 +169,40 @@ fn cumulative_retry_reservation_rounds_each_attempt_and_rejects_unrepresentable_
     assert_eq!(envelope.maximum_reserved_usage.wall_millis, 3);
     assert_eq!(envelope.maximum_reserved_usage.memory_byte_millis, 3072);
     assert_eq!(envelope.maximum_artifact_bytes, 15);
-    for invalid in 0..2 {
+    let accelerator = runmat_execution::resource::AcceleratorRequest::generic_compute(2).unwrap();
+    task.request.resources.accelerators = vec![accelerator.clone()];
+    let envelope = task.retry_resource_envelope().unwrap();
+    let projected = &envelope.maximum_reserved_usage.accelerator_millis;
+    assert_eq!(projected.len(), 1);
+    assert_eq!(projected[0].requirement, accelerator);
+    assert_eq!(projected[0].device_millis, 6);
+    assert_eq!(
+        serde_json::from_value::<runmat_execution_runner::task::RetryResourceEnvelope>(
+            serde_json::to_value(&envelope).unwrap()
+        )
+        .unwrap(),
+        envelope
+    );
+    // A reservation projection grants no assigned device or measured usage.
+    assert!(
+        runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            task.request.resources.clone(),
+            1,
+            0,
+            0,
+            0,
+        )
+        .is_err()
+    );
+    for invalid in 0..3 {
         let mut task = task.clone();
         if invalid == 0 {
             task.request.retry = RetryPolicy::TestPolicy { max_attempts: 0 };
-        } else {
+        } else if invalid == 1 {
             task.request.resources.max_wall_millis = u64::MAX;
+        } else {
+            task.request.resources.cpu_millicores = 1;
+            task.request.resources.max_wall_millis = u64::MAX / 2;
         }
         let before = fixture.driver.snapshot();
         assert!(fixture

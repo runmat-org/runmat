@@ -7,7 +7,8 @@ use crate::context::poll_projection::PollProjection;
 
 mod validation;
 pub(crate) use validation::{
-    validate_bounded_outputs, validate_fixed_form_outputs, validate_fixed_outputs,
+    validate_bounded_outputs, validate_bounded_outputs_in, validate_fixed_form_outputs,
+    validate_fixed_outputs,
 };
 
 runmat_thread_local! {
@@ -79,6 +80,19 @@ pub fn current_output_count() -> Option<usize> {
     }
 }
 
+/// Read the selected invocation, never a foreign ambient output projection.
+/// Explicitly absent context retains the ordinary legacy embedding behavior.
+pub fn current_output_count_in(runtime: Option<&crate::context::RuntimeContext>) -> Option<usize> {
+    match runtime {
+        Some(runtime) => runtime
+            .output_projection()
+            .borrow()
+            .current_requested()
+            .flatten(),
+        None => current_output_count(),
+    }
+}
+
 pub fn current_output_scope() -> InvocationOutputScope {
     if let Some(owner) =
         crate::context::legacy::active().map(|runtime| runtime.output_projection().clone())
@@ -128,7 +142,7 @@ mod tests {
         for (descriptor, maximum, error) in [
             (
                 &runmat_builtins::LINPROG_DESCRIPTOR,
-                4,
+                5,
                 &runmat_builtins::LINPROG_ERROR_INVALID_ARGUMENT,
             ),
             (
@@ -176,5 +190,58 @@ mod tests {
         assert_eq!(current_output_scope(), InvocationOutputScope::Requested(2));
         drop(second);
         assert_eq!(current_output_scope(), InvocationOutputScope::Unscoped);
+    }
+
+    #[test]
+    fn selected_builtin_output_projection_excludes_sibling_poll_scopes() {
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let selected = futures::executor::block_on(runtime.scope(async {
+            let _outer = push_output_count(Some(4)).unwrap();
+            let selected = runtime.clone().with_selected_builtin_output_projection();
+            assert_eq!(current_output_count_in(Some(&selected)), Some(4));
+            runtime
+                .scope(async {
+                    let _inner = push_output_count(Some(1)).unwrap();
+                    assert_eq!(current_output_count(), Some(1));
+                    assert_eq!(current_output_count_in(Some(&selected)), Some(4));
+                })
+                .await;
+            assert_eq!(current_output_count_in(Some(&selected)), Some(4));
+            selected
+        }));
+        assert_eq!(current_output_count_in(Some(&selected)), None);
+        assert_eq!(current_output_count_in(Some(&runtime)), None);
+    }
+
+    #[test]
+    fn selected_output_projection_never_inherits_a_foreign_ambient_request() {
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let foreign = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _selected = runtime.enter();
+        for count in [None, Some(0), Some(7), Some(8)] {
+            let _count = push_output_count(count).unwrap();
+            let _foreign = foreign.enter();
+            let _foreign_count = push_output_count(Some(1)).unwrap();
+            assert_eq!(current_output_count_in(Some(&runtime)), count);
+            assert_eq!(current_output_count_in(None), Some(1));
+            let checked = validate_bounded_outputs_in(
+                &runmat_builtins::FMINCON_DESCRIPTOR,
+                &runmat_builtins::FMINCON_ERROR_INVALID_ARGUMENT,
+                "fmincon",
+                Some(&runtime),
+            );
+            assert_eq!(checked.is_ok(), count.is_none_or(|count| count <= 7));
+        }
+        // Unscoped selected authority likewise must not consult the foreign one.
+        let _foreign = foreign.enter();
+        let _foreign_count = push_output_count(Some(6)).unwrap();
+        assert_eq!(current_output_count_in(Some(&runtime)), None);
+        assert_eq!(current_output_count_in(None), Some(6));
     }
 }

@@ -65,6 +65,7 @@ pub(super) fn value_to_json(
         Value::GpuTensor(_) => Err(jsonencode_error(&JSONENCODE_ERROR_UNEXPECTED_GPU)),
         Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

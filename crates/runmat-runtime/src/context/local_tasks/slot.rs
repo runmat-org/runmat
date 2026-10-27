@@ -29,17 +29,29 @@ impl Drop for TaskPollReset<'_> {
         if self.armed {
             let deferred = {
                 let mut slot = self.slot.inner.borrow_mut();
-                slot.polling = false;
                 slot.cancelled = true;
                 slot.wake = None;
                 slot.deferred.take()
             };
             drop(deferred);
+            self.slot.inner.borrow_mut().polling = false;
+            self.slot.outcome.finish(RuntimeLocalTaskOutcome::Cancelled);
+            self.slot.outcome.retire();
         }
     }
 }
 
 impl TaskSlot {
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn is_retired(&self) -> bool {
+        self.outcome.retired.get()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(super) async fn wait_for_retirement(&self) {
+        super::lease::wait_for_retirement(self.outcome.clone()).await;
+    }
+
     pub(super) fn new(
         future: RuntimeLocalTaskFuture,
         outcome: Rc<TaskState>,
@@ -58,19 +70,27 @@ impl TaskSlot {
     }
 
     pub(super) fn cancel(&self) {
-        let (future, wake, deferred) = {
+        let (future, wake, deferred, polling) = {
             let mut slot = self.inner.borrow_mut();
             slot.cancelled = true;
-            let (future, deferred) = if slot.polling {
+            let polling = slot.polling;
+            let (future, deferred) = if polling {
                 (None, None)
             } else {
+                // Destructors can reenter cancellation. Keep the slot active
+                // until both owned payloads have actually finished dropping.
+                slot.polling = true;
                 (slot.future.take(), slot.deferred.take())
             };
-            (future, slot.wake.take(), deferred)
+            (future, slot.wake.take(), deferred, polling)
         };
         self.outcome.finish(RuntimeLocalTaskOutcome::Cancelled);
         drop(future);
         drop(deferred);
+        if !polling {
+            self.inner.borrow_mut().polling = false;
+            self.outcome.retire();
+        }
         if let Some(wake) = wake {
             wake.wake();
         }
@@ -113,11 +133,9 @@ impl TaskSlot {
         drop(future);
         let (cancelled, deferred) = {
             let mut slot = self.inner.borrow_mut();
-            slot.polling = false;
             slot.wake = None;
             (slot.cancelled, slot.deferred.take())
         };
-        reset.armed = false;
         if let Some(deferred) = deferred {
             deferred.complete(if cancelled {
                 DeferredWorkTerminal::Missing
@@ -125,6 +143,9 @@ impl TaskSlot {
                 DeferredWorkTerminal::Completed
             });
         }
+        self.inner.borrow_mut().polling = false;
+        reset.armed = false;
+        self.outcome.retire();
         Poll::Ready(())
     }
 }
@@ -137,5 +158,7 @@ impl Drop for TaskSlot {
         };
         drop(future);
         drop(deferred);
+        self.outcome.finish(RuntimeLocalTaskOutcome::Cancelled);
+        self.outcome.retire();
     }
 }

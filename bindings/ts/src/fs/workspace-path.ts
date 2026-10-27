@@ -1,3 +1,5 @@
+import { invalidInput } from "./errors.js";
+
 export function canonicalIndexedDbPath(input: string): string {
   if (input.includes("\\") || input.includes("\0")) {
     throw invalidInput(`Invalid filesystem path: ${input}`);
@@ -40,20 +42,4 @@ export function immediateChildName(path: string, directory: string): string | nu
   const offset = directory === "/" ? 1 : directory.length + 1;
   const remainder = path.slice(offset);
   return remainder && !remainder.includes("/") ? remainder : null;
-}
-
-export function invalidInput(message: string): Error & { status: number } {
-  return withStatus(new Error(message), 400);
-}
-
-export function notFound(path: string): Error & { status: number } {
-  return withStatus(new Error(`Path not found: ${path}`), 404);
-}
-
-export function alreadyExists(path: string): Error & { status: number } {
-  return withStatus(new Error(`Path already exists: ${path}`), 409);
-}
-
-function withStatus(error: Error, status: number): Error & { status: number } {
-  return Object.assign(error, { status });
 }

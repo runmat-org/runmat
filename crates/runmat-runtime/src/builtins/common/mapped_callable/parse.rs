@@ -22,6 +22,7 @@ impl MappedCallable {
                 Self::parse_text(&value.data()[0])
             }
             Value::StringArray(_) => Err(CallableParseError::StringNameMustBeScalar),
+            Value::ScopedFunctionHandle(handle) => Ok(Self::Scoped(handle)),
             Value::FunctionHandle(name) => Self::parse_text(&name),
             Value::ExternalFunctionHandle(name) => {
                 Ok(Self::resolve_name(name.into_name_unbounded()))

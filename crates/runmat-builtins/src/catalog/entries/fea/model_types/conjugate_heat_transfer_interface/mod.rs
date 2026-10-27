@@ -3,12 +3,9 @@
 use crate::*;
 
 mod descriptor;
-mod inference;
 mod conductance;
 mod perfect;
 mod resistance;
-#[cfg(test)]
-mod tests;
 
 pub use descriptor::*;
 

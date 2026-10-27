@@ -53,6 +53,27 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
         "later name publication must not change the Graph's original static targets"
     );
     assert_eq!(unchanged.envelope(), original.envelope());
+    let portable_capture = {
+        let runmat_runtime::execution::DeferredProgram::SelectedGraph(program) =
+            &original.call.program
+        else {
+            panic!("original graph call must retain its real selected producer");
+        };
+        let runmat_runtime::execution::DeferredInvocation::Callable(mut descriptor) =
+            original.call.invocation.clone()
+        else {
+            panic!("original graph must have a callable target");
+        };
+        descriptor.args.clear();
+        let selected = [*descriptor];
+        program
+            .capture_callables(&selected, runmat_execution::value::ValueLimits::default())
+            .expect("actual selected producer captures the original callback graph")
+            .into_portable()
+    };
+    let portable_capture: runmat_execution::value::PortableSelectedCode =
+        serde_json::from_slice(&serde_json::to_vec(&portable_capture).unwrap()).unwrap();
+    assert!(portable_capture.selected_foreign_policies.is_empty());
     drop(producer);
     let envelope = original.envelope();
     assert_eq!(
@@ -124,6 +145,92 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
             .await
             .expect("original transitive product must execute without producer registry");
         assert_eq!(result.as_slice(), &[Value::Num(27.0)]);
+
+        // Restoring code issues current-session sources without retaining the
+        // admission call's cancellation generation. Later calls use B, not A.
+        let admitted = runmat_execution_artifact::CapturedGraphCode::new(portable_capture.clone())
+            .into_validated()
+            .unwrap();
+        let (admitted, bundles) = admitted.into_admitted_with_bundles();
+        let old = runmat_execution::cancellation::CancellationSource::new();
+        let admission_runtime = cold
+            .runtime_context
+            .clone()
+            .with_cancellation_token(old.token());
+        let (code, roots) = runmat_vm::RestoredSelectedGraph::admit_and_decode(
+            &admitted,
+            bundles,
+            &admission_runtime,
+            None,
+        )
+        .unwrap();
+        old.cancel(runmat_execution::CancellationReason::User);
+        let current = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = cold
+            .runtime_context
+            .clone()
+            .with_cancellation_token(current.token());
+        let callback = crate::callable_selection::select(
+            &runtime,
+            code.primary_registry(),
+            runmat_runtime::execution::RootedValue::in_context(roots.values()[0].clone(), &runtime)
+                .unwrap(),
+        )
+        .unwrap();
+        let receipt = code
+            .admit_callable(&runtime, callback.selected_descriptor())
+            .unwrap()
+            .unwrap();
+        let arguments =
+            runmat_runtime::execution::RootedValues::in_context(vec![Value::Num(5.0)], &runtime)
+                .unwrap();
+        let descriptor = callback
+            .selected_descriptor()
+            .clone()
+            .with_retained_arguments(arguments.into())
+            .unwrap();
+        // A previous caller port must not replace the restored code's own
+        // exact invoker while its returned child is actually polled.
+        let calls = Rc::new(std::cell::Cell::new(0usize));
+        let observed = Rc::clone(&calls);
+        let active = runtime.enter();
+        let previous = runmat_runtime::user_functions::install_local_bound_function_invoker(
+            Rc::new(move |current, _, _, _, _| {
+                observed.set(observed.get() + 1);
+                runmat_runtime::execution::admit_executable_sequence_with(&current, || async {
+                    Err(runmat_runtime::build_runtime_error(
+                        "wrong previous restored callback invoker",
+                    )
+                    .build())
+                })
+            }),
+        )
+        .unwrap();
+        let result = code
+            .invoke(runtime.clone(), receipt.clone(), descriptor)
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(result.as_slice(), &[Value::Num(27.0)]);
+        assert_eq!(
+            calls.get(),
+            0,
+            "restored invocation must use its retained exact code owner"
+        );
+        drop(previous);
+        drop(active);
+        let arguments =
+            runmat_runtime::execution::RootedValues::in_context(vec![Value::Num(5.0)], &runtime)
+                .unwrap();
+        let descriptor = callback
+            .selected_descriptor()
+            .clone()
+            .with_retained_arguments(arguments.into())
+            .unwrap();
+        let pending = code.invoke(runtime, receipt, descriptor).unwrap();
+        current.cancel(runmat_execution::CancellationReason::User);
+        let failure = pending.await.unwrap_err();
+        assert!(runmat_runtime::runtime_error::error_has_control_cancellation_origin(&failure));
     }
 }
 

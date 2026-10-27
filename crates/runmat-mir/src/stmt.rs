@@ -6,6 +6,8 @@ use runmat_types::{
 use serde::{Deserialize, Serialize};
 
 mod fixed_preparation;
+mod assignment_index_context;
+pub use assignment_index_context::{MirAssignmentIndexContextError, MirAssignmentIndexRole};
 pub use fixed_preparation::{
     MirFixedPreparation, MirFixedPreparationPhase, MirFixedPreparationState,
     MirFixedSelectorDestination,
@@ -319,7 +321,7 @@ pub struct MirPlaceMutation {
 /// contract; its selectors are never evaluated by the consumer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirPreparedAssignment {
-    pub source_statement: runmat_hir::StmtId,
+    pub source_statement: runmat_types::StmtId,
     pub mutation: MirPlaceMutation,
     pub steps: Vec<crate::MirExpressionStep>,
 }
@@ -338,6 +340,8 @@ impl MirPreparedAssignment {
 
     fn validate_contract(&self, phased: bool) -> Result<(), String> {
         use runmat_types::{IndexKind, PlaceMutationKind};
+        self.validate_index_contexts()
+            .map_err(|error| error.to_string())?;
         let place = &self.mutation.place;
         if !place.requires_prepared_assignment() {
             return Err(

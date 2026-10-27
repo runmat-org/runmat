@@ -10,6 +10,10 @@ use runmat_value::{Value, ValueSequence};
 #[path = "feval/roots_tests.rs"]
 mod roots_tests;
 
+#[cfg(test)]
+#[path = "feval/named_tests.rs"]
+mod named_tests;
+
 pub(crate) fn admit_inputs(
     target: &Value,
     arguments: &[Value],
@@ -121,21 +125,11 @@ fn invoke_selected<'a>(
     requested_outputs: usize,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> impl std::future::Future<Output = crate::BuiltinResult<RootedValueSequence>> + 'a {
-    struct DynamicResolver;
-    impl crate::call::descriptor::FunctionNameResolver for DynamicResolver {
-        fn resolve_function(&self, _: &str) -> Option<runmat_types::FunctionId> {
-            None
-        }
-    }
     let selected = runmat_value::validate_output_count(requested_outputs)
         .map_err(crate::sequence::sequence_error_to_runtime)
         .and(target)
         .and_then(|target| {
-            crate::call::descriptor::RepeatableCallable::select_rooted(
-                runtime,
-                target,
-                &DynamicResolver,
-            )
+            crate::call::descriptor::RepeatableCallable::select_deferred_rooted(runtime, target)
         })
         .map(|selected| selected.with_callsite(input_callsite));
     async move {

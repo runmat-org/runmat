@@ -3,11 +3,8 @@
 use crate::*;
 
 mod descriptor;
-mod inference;
 mod coulomb;
 mod frictionless;
-#[cfg(test)]
-mod tests;
 
 pub use descriptor::*;
 

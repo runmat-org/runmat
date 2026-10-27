@@ -2344,6 +2344,13 @@ impl Compiler {
             MirFixedPreparationPhase as Phase, MirFixedSelectorDestination as Destination,
         };
         phase
+            .assignment
+            .validate_index_contexts()
+            .map_err(|error| {
+                self.compile_error(error.to_string())
+                    .with_identifier(error.identifier())
+            })?;
+        phase
             .validate()
             .map_err(|message| self.compile_error(message))?;
         let preparation = &phase.assignment;

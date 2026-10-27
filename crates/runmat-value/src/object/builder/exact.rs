@@ -542,6 +542,14 @@ impl ExactObjectBuilder {
         let value = NativeObjectPayload::numeric_factor_exact(value, permit)?;
         Ok(self.try_set_native(value))
     }
+    pub fn try_set_optimization_native(
+        &mut self,
+        value: crate::optimization_model::PreparedOptimizationNative,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<bool, ExactHostNumericAllocationError> {
+        let native = NativeObjectPayload::optimization_native_exact(value, permit)?;
+        Ok(self.try_set_native(native))
+    }
     pub fn try_set_containers_map_payload(
         &mut self,
         value: super::super::ContainersMapStorage,

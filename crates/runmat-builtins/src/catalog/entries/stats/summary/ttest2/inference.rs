@@ -110,10 +110,10 @@ fn selected_dim(
                     ));
                     return None;
                 };
-                if dim == 0 || dim > 1024 {
+                if dim == 0 {
                     diagnostics.push(InferenceDiagnostic::error(
                         "DIMENSION",
-                        "ttest2 Dim is outside the supported range",
+                        "ttest2 Dim must be a positive integer",
                     ));
                     return None;
                 }
@@ -192,7 +192,12 @@ fn output_shapes(
         );
     }
     let dim = dim.unwrap_or_else(|| xs.iter().position(|v| *v != Some(1)).unwrap_or(0));
-    let rank = xs.len().max(ys.len()).max(dim + 1).max(2);
+    let rank = xs.len().max(ys.len()).max(2);
+    // A source-controlled literal cannot grow compiler metadata without
+    // bound. Runtime owns fallible padding beyond the known input rank.
+    if dim >= rank {
+        return (ShapeFact::Unknown, ShapeFact::Unknown);
+    }
     xs.resize(rank, Some(1));
     ys.resize(rank, Some(1));
     if xs

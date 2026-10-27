@@ -481,12 +481,23 @@ pub(in crate::session) fn install_bound_invoker(
                         selected,
                         arguments,
                         runtime,
-                        selected_product: _selected_product,
+                        selected_product,
                         _environment_roots,
                         dynamic_admission,
                     } = state;
-                    // The exact parent body already has the caller's rooted
-                    // Derived receiver and selected class projection.
+                    // Preserve inherited Derived facts. A compiled direct
+                    // constructor can lack them; only the entered local
+                    // parent's exact product may supply the missing proof.
+                    let runtime = if runtime.selected_object_class().is_none()
+                        && matches!(&binding.authority, runmat_value::BoundFunctionAuthority::Local { .. })
+                    {
+                        selected_product.as_ref().ok_or_else(|| {
+                            build_runtime_error("selected superclass body lacks its exact class product")
+                                .with_identifier("RunMat:ConstructorOwnerInvalid").build()
+                        })?.invocation_runtime_with_binding(runtime, &selected, &binding)?
+                    } else {
+                        runtime
+                    };
                     runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
                         binding.function,
                         arguments,

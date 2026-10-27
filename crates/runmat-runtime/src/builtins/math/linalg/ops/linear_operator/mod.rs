@@ -8,10 +8,13 @@ pub(in crate::builtins::math::linalg) use scalar_view::NativeScalarView;
 mod cooperative;
 mod converted;
 mod symmetry;
-pub(in crate::builtins::math::linalg) use converted::{ProductOrientation, SourceScalar};
-pub(in crate::builtins::math::linalg) use cooperative::{CooperativeOperatorError, OperatorWork};
+pub(crate) use converted::ProductOrientation;
+pub(in crate::builtins::math::linalg) use converted::SourceScalar;
+pub(crate) use cooperative::CooperativeOperatorError;
+pub(in crate::builtins::math::linalg) use cooperative::OperatorWork;
 pub(in crate::builtins::math::linalg) mod scalar;
 
+pub(in crate::builtins::math::linalg) use dense::validate_shape as matrix_dimensions;
 pub use dense::{DenseLinearOperator, DenseOperator};
 
 use super::sparse_operator::{CscOperator, SparseLinearOperator, SparseOperatorError};
@@ -57,7 +60,7 @@ pub enum LinearOperator<'a> {
 }
 
 impl<'a> LinearOperator<'a> {
-    pub(in crate::builtins::math::linalg) async fn borrow_cooperatively(
+    pub(crate) async fn borrow_cooperatively(
         value: &'a Value,
         context: &RuntimeContext,
     ) -> Result<Self, CooperativeOperatorError> {

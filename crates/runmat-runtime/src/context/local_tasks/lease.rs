@@ -12,20 +12,31 @@ pub enum RuntimeLocalTaskOutcome {
 
 pub(super) struct TaskState {
     pub(super) outcome: Cell<Option<RuntimeLocalTaskOutcome>>,
+    pub(super) retired: Cell<bool>,
     pub(super) waiters: RefCell<HashMap<u64, Waker>>,
     pub(super) next_waiter: Cell<u64>,
 }
 
 impl TaskState {
+    /// Published only after the future and its deferred-work owner are dropped.
+    pub(super) fn retire(&self) {
+        self.retired.set(true);
+        self.wake_waiters();
+    }
+
+    fn wake_waiters(&self) {
+        let waiters = std::mem::take(&mut *self.waiters.borrow_mut());
+        for waiter in waiters.into_values() {
+            waiter.wake();
+        }
+    }
+
     pub(super) fn finish(&self, outcome: RuntimeLocalTaskOutcome) {
         if self.outcome.get().is_some() {
             return;
         }
         self.outcome.set(Some(outcome));
-        let waiters = std::mem::take(&mut *self.waiters.borrow_mut());
-        for waiter in waiters.into_values() {
-            waiter.wake();
-        }
+        self.wake_waiters();
     }
 }
 
@@ -52,6 +63,7 @@ impl RuntimeLocalTaskLease {
         JoinWaiter {
             state: self.state.clone(),
             registration: None,
+            retirement: false,
         }
     }
 }
@@ -59,14 +71,27 @@ impl RuntimeLocalTaskLease {
 struct JoinWaiter {
     state: Rc<TaskState>,
     registration: Option<u64>,
+    retirement: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) async fn wait_for_retirement(state: Rc<TaskState>) {
+    JoinWaiter {
+        state,
+        registration: None,
+        retirement: true,
+    }
+    .await;
 }
 
 impl Future for JoinWaiter {
     type Output = RuntimeLocalTaskOutcome;
 
     fn poll(mut self: Pin<&mut Self>, context: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        if let Some(outcome) = self.state.outcome.get() {
-            return Poll::Ready(outcome);
+        if !self.retirement || self.state.retired.get() {
+            if let Some(outcome) = self.state.outcome.get() {
+                return Poll::Ready(outcome);
+            }
         }
         let id = match self.registration {
             Some(id) => id,

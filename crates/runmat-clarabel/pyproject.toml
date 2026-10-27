@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "clarabel"
+requires-python = ">=3.9"
+dynamic = ["version"]
+dependencies = [
+    "numpy",
+    "scipy",
+    "cffi",
+] 
+classifiers = [
+    "Programming Language :: Rust",
+]
+
+[tool.maturin]
+features = ["python"]

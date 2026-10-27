@@ -278,6 +278,7 @@ fn is_host_leaf(value: &Value) -> bool {
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::ClassRef(_)
         | Value::MException(_) => true,
         Value::Cell(_)

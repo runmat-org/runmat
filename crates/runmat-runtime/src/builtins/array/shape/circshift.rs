@@ -125,7 +125,8 @@ async fn circshift_builtin(
         Value::Cell(_) => Err(circshift_unsupported_input(
             "circshift: cell arrays are not yet supported",
         )),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
@@ -323,6 +324,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         )),
         Value::Cell(_)
         | Value::SparseTensor(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -422,6 +424,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         )),
         Value::Cell(_)
         | Value::SparseTensor(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

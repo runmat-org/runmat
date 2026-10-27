@@ -1,6 +1,6 @@
 use runmat_execution::identity::WorkerId;
 use runmat_execution::state::{AttemptState, TaskState};
-use runmat_execution::{PoolId, ProgramCallable, TaskId};
+use runmat_execution::{PoolId, TaskId};
 
 use crate::cancellation::CancellationEscalation;
 use crate::pool::{PoolRecord, WorkerRecord};
@@ -55,26 +55,29 @@ impl Driver {
         cause: crate::TaskCancellationCause,
         actions: &mut Vec<DriverAction>,
     ) -> RunnerResult<()> {
-        if self.task_is_terminal(task_id)? {
+        let retained = self
+            .task_record(task_id)?
+            .active_attempt
+            .and_then(|id| self.snapshot.attempts.get(&id))
+            .is_some_and(|attempt| {
+                attempt
+                    .unverified_retirement
+                    .as_ref()
+                    .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none())
+            });
+        if self.task_is_terminal(task_id)? && !retained {
             return Ok(());
         }
         let task = self.task_mut(task_id)?;
-        task.cancellation = Some(crate::TaskCancellation {
+        let original = *task.cancellation.get_or_insert(crate::TaskCancellation {
             cause,
             requested_at_driver_millis: now_millis,
         });
         let active = task.active_attempt;
-        let graph_attempt = active.is_some()
-            && matches!(
-                &task.submission.request.callable.program,
-                ProgramCallable::GraphTarget { .. }
-            );
         self.snapshot.ready.remove_task(task_id);
-        // A running Graph worker can still own foreign callbacks and children.
-        // Keep its attempt active until its report proves cleanup or records
-        // unverified retirement; queued Graph and ordinary tasks retain the
-        // existing immediate-cancellation behavior.
-        if !graph_attempt {
+        // Accepted work retains its attempt and reservation until its owning
+        // backend proves retirement, independent of callable representation.
+        if active.is_none() {
             self.transition_task(task_id, TaskState::Cancelled)?;
         }
         if let Some(attempt_id) = active {
@@ -84,12 +87,14 @@ impl Driver {
                 .get_mut(&attempt_id)
                 .ok_or(RunnerError::UnknownAttempt(attempt_id))?;
             let first_request = attempt.cancellation_requested_at.is_none();
-            attempt.cancellation_requested_at.get_or_insert(now_millis);
+            attempt
+                .cancellation_requested_at
+                .get_or_insert(original.requested_at_driver_millis);
             if first_request {
                 attempt.cancellation_escalation = Some(CancellationEscalation::Request);
             }
             let request = attempt.request.clone();
-            if first_request || !graph_attempt {
+            if first_request {
                 actions.push(DriverAction::Cancel(request));
             }
         }
@@ -170,29 +175,11 @@ impl Driver {
                     if current == Some(CancellationEscalation::Request) {
                         actions.push(DriverAction::Terminate(attempt.request.clone()));
                     }
-                    let graph_attempt = matches!(
-                        &attempt.request.task.callable.program,
-                        ProgramCallable::GraphTarget { .. }
-                    );
-                    if !graph_attempt {
-                        self.finish_attempt(
-                            &attempt,
-                            crate::task::AttemptDisposition::Cancelled,
-                            super::reports::ProviderEvidence::default(),
-                            None,
-                        )?;
-                    }
                     self.snapshot
                         .attempts
                         .get_mut(&attempt_id)
                         .expect("candidate attempt exists")
                         .cancellation_escalation = Some(CancellationEscalation::Fence);
-                    if !graph_attempt {
-                        self.emit(DriverEventKind::AttemptCancelled {
-                            task_id: attempt.request.task_id,
-                            attempt_id,
-                        });
-                    }
                 }
                 _ => {}
             }

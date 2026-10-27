@@ -355,7 +355,13 @@ async fn execute_parfor_tasks(
             "parallel worker execution has no selected V3 executable authority",
         )
     })?;
-    let program = runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone());
+    let program = runmat_runtime::execution::DeferredProgram::SelectedGraph(
+        selected.clone().with_validation_workspace(
+            runmat_runtime::execution::value_codec::ValidationWorkspaceOwner::capture(
+                &context.runtime,
+            ),
+        ),
+    );
     let mut tasks = SubmittedTaskGroup::with_capacity(&context.runtime, graph.chunks.len());
     for chunk in &graph.chunks {
         let values = iterations[chunk.start..chunk.start + chunk.len].to_vec();
@@ -482,7 +488,7 @@ async fn await_parallel_tasks(
                     Err(error) => return Err(error),
                 }
             }
-            TaskResultClaim::Pending => tasks::yield_execution(context).await?,
+            TaskResultClaim::Pending => tasks::yield_once(context).await?,
             TaskResultClaim::Exhausted => {
                 return Err(crate::interpreter::errors::mex(
                     "ParallelTaskState",

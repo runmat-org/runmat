@@ -83,7 +83,9 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
     let (document, topology, _) = runmat_geometry_fixtures::exact_tetrahedron();
     let host = TestHost::default().with_geometry_inspection(
         "project/part.step",
-        GeometryInspection {preview_extent_m: None, 
+        GeometryInspection {
+            preview_extent_m: None,
+            named_selections: None,
             unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
@@ -96,9 +98,19 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
             authored_names: Default::default(),
         },
     );
-    let source = SOURCE.replace("BODY_ID", &topology.solids[0].id.analysis_selection_id().unwrap())
-        .replace("SUPPORT_ID", &topology.faces[0].id.analysis_selection_id().unwrap())
-        .replace("LOAD_ID", &topology.faces[1].id.analysis_selection_id().unwrap());
+    let source = SOURCE
+        .replace(
+            "BODY_ID",
+            &topology.solids[0].id.analysis_selection_id().unwrap(),
+        )
+        .replace(
+            "SUPPORT_ID",
+            &topology.faces[0].id.analysis_selection_id().unwrap(),
+        )
+        .replace(
+            "LOAD_ID",
+            &topology.faces[1].id.analysis_selection_id().unwrap(),
+        );
     let program = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),

@@ -7,9 +7,15 @@ use std::sync::Arc;
 fn one_output_does_not_publish_unused_gradient_or_jacobian() {
     let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let result = LeastSquaresResult {
+        point_evidence: crate::builtins::math::optim::least_squares::PointEvidence::Evaluated,
+        gradient: None,
+        cg_iterations: 0,
+        jacobian_source:
+            crate::builtins::math::optim::least_squares::JacobianSource::FiniteDifference,
+        method: crate::builtins::math::optim::least_squares::Method::LevenbergMarquardt,
         x: vec![2.0],
         residual: vec![0.0],
-        jacobian: vec![],
+        jacobian: crate::builtins::math::optim::least_squares::PublishedJacobian::RowMajor(vec![]),
         residual_len: 1,
         variable_len: 1,
         resnorm: 0.0,
@@ -30,7 +36,6 @@ fn one_output_does_not_publish_unused_gradient_or_jacobian() {
         true,
         &[1, 1],
         &LeastSquaresBounds::unbounded(1),
-        DEFAULT_ALGORITHM,
         &mut cooperation,
     ))
     .unwrap();
@@ -90,37 +95,175 @@ fn lsqnonlin_bound_vector_reads_typed_integer_storage_exactly() {
 
 #[test]
 fn lsqnonlin_vector_residual_recovers_parameters() {
+    lm_small_residual_requires_stationarity();
+    // One original residual contract across FD, sparse CG and dense LM paths.
+    for (supplied, sparse, algorithm, subproblem) in [
+        (false, false, "trust-region-reflective", "factorization"),
+        (true, false, "trust-region-reflective", "cg"),
+        (true, true, "trust-region-reflective", "cg"),
+        (true, true, "levenberg-marquardt", "factorization"),
+    ] {
+        let (runtime, objective, _bound) = selected_residual(1, "residual");
+        let _entry = runtime.enter();
+        let _outputs = crate::output_count::push_output_count(Some(7)).unwrap();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = calls.clone();
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, args, requested_outputs| {
+                assert_eq!(function, 1);
+                assert_eq!(requested_outputs, if supplied { 2 } else { 1 });
+                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let Value::Tensor(t) = &args[0] else {
+                    panic!("original x shape");
+                };
+                assert_eq!(t.shape(), &[2, 1]);
+                let x = t.materialize_f64();
+                let residual = tensor(vec![x[0] - 2., x[1] - 3., x[0] + x[1] - 5.], vec![3, 1]);
+                Box::pin(async move {
+                    let mut outputs = vec![residual];
+                    if supplied {
+                        outputs.push(if sparse {
+                            Value::SparseTensor(
+                                runmat_value::SparseTensor::new_f32(
+                                    3,
+                                    2,
+                                    vec![0, 2, 4],
+                                    vec![0, 2, 1, 2],
+                                    vec![1., 1., 1., 1.],
+                                )
+                                .unwrap(),
+                            )
+                        } else {
+                            tensor(vec![1., 0., 1., 0., 1., 1.], vec![3, 2])
+                        });
+                    }
+                    crate::execution::RootedValueSequence::new(
+                        runmat_value::ValueSequence::comma_separated(outputs)
+                            .map_err(crate::sequence::sequence_error_to_runtime)?,
+                    )
+                    .map_err(|source| source.into_runtime_error())
+                })
+            },
+        )))
+        .expect("original call port");
+        let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+        fields.insert("SpecifyObjectiveGradient", Value::Bool(supplied));
+        fields.insert("Algorithm", Value::from(algorithm));
+        fields.insert("SubproblemAlgorithm", Value::from(subproblem));
+        fields.insert("PrecondBandWidth", Value::Num(0.));
+        if supplied {
+            fields.insert("TypicalX", Value::from("dormant"));
+            fields.insert("FiniteDifferenceStepSize", Value::Num(-1.));
+        }
+        if algorithm == "levenberg-marquardt" {
+            fields.insert("OptimalityTolerance", Value::from("dormant"));
+            fields.insert("MaxPCGIter", Value::from("dormant"));
+        }
+        let result = block_on(runtime.scope(lsqnonlin_builtin(
+            objective,
+            vec![
+                tensor(vec![0., 0.], vec![2, 1]),
+                tensor(vec![], vec![0, 0]),
+                tensor(vec![], vec![0, 0]),
+                Value::Struct(fields.finish()),
+            ],
+        )))
+        .expect("selected numerical method");
+        let Value::OutputList(outputs) = result else {
+            panic!("seven outputs");
+        };
+        let Value::Tensor(x) = &outputs[0] else {
+            panic!("original x carrier");
+        };
+        let Value::Struct(info) = &outputs[4] else {
+            panic!("method information");
+        };
+        assert_eq!(info.fields["algorithm"], Value::from(algorithm));
+        assert_eq!(x.shape(), &[2, 1]);
+        assert!((x.materialize_f64()[0] - 2.).abs() < 1e-5);
+        assert!((x.materialize_f64()[1] - 3.).abs() < 1e-5);
+        assert_eq!(
+            info.fields["funcCount"],
+            Value::Num(calls.load(std::sync::atomic::Ordering::SeqCst) as f64)
+        );
+        if supplied && sparse {
+            let Value::SparseTensor(j) = &outputs[6] else {
+                panic!("original sparse J");
+            };
+            assert!(j.as_f32_slice().is_some());
+            assert_eq!(&*j.col_ptrs, &[0, 2, 4]);
+            assert_eq!(&*j.row_indices, &[0, 2, 1, 2]);
+        } else {
+            let Value::Tensor(j) = &outputs[6] else {
+                panic!("dense J");
+            };
+            assert_eq!(j.shape(), &[3, 2]);
+        }
+    }
+}
+
+fn lm_small_residual_requires_stationarity() {
     let (runtime, objective, _bound) = selected_residual(1, "residual");
     let _entry = runtime.enter();
+    let _outputs = crate::output_count::push_output_count(Some(7)).unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-        |function, args, requested_outputs| {
-            assert_eq!(function, 1);
-            assert_eq!(requested_outputs, 1);
-            let x = match &args[0] {
-                Value::Tensor(t) => t.materialize_f64().clone(),
-                other => panic!("expected x tensor, got {other:?}"),
+        move |function, args, requested_outputs| {
+            assert_eq!((function, requested_outputs), (1, 2));
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let Value::Tensor(x) = &args[0] else {
+                panic!("original x");
             };
+            let x = x.materialize_f64();
+            let residual = tensor(vec![1e8 * (x[0] - 1.) + 1e-7, x[1]], vec![2, 1]);
             Box::pin(async move {
-                crate::user_functions::test_support::rooted_single_value_sequence(tensor(
-                    vec![x[0] - 2.0, x[1] - 3.0, x[0] + x[1] - 5.0],
-                    vec![3, 1],
-                ))
+                crate::execution::RootedValueSequence::new(
+                    runmat_value::ValueSequence::comma_separated(vec![
+                        residual,
+                        tensor(vec![1e8, 0., 0., 1.], vec![2, 2]),
+                    ])
+                    .map_err(crate::sequence::sequence_error_to_runtime)?,
+                )
+                .map_err(|source| source.into_runtime_error())
             })
         },
     )))
-    .expect("call-port scope");
+    .expect("original call port");
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+    fields.insert("SpecifyObjectiveGradient", Value::Bool(true));
+    fields.insert("Algorithm", Value::from("levenberg-marquardt"));
+    fields.insert("MaxIterations", Value::Num(1.));
+    fields.insert("MaxFunctionEvaluations", Value::Num(2.));
     let result = block_on(runtime.scope(lsqnonlin_builtin(
         objective,
-        vec![tensor(vec![0.0, 0.0], vec![2, 1])],
+        vec![
+            tensor(vec![0., 0.], vec![2, 1]),
+            tensor(vec![], vec![0, 0]),
+            tensor(vec![], vec![0, 0]),
+            Value::Struct(fields.finish()),
+        ],
     )))
-    .expect("lsqnonlin");
-    match result {
-        Value::Tensor(t) => {
-            assert_eq!(t.shape(), &[2, 1]);
-            assert!((t.materialize_f64()[0] - 2.0).abs() < 1.0e-5);
-            assert!((t.materialize_f64()[1] - 3.0).abs() < 1.0e-5);
-        }
-        other => panic!("unexpected value {other:?}"),
+    .expect("bounded supplied-J LM");
+    let Value::OutputList(outputs) = result else {
+        panic!("seven outputs");
+    };
+    let (Value::Tensor(x), Value::Tensor(residual), Value::Struct(info), Value::Tensor(j)) =
+        (&outputs[0], &outputs[2], &outputs[4], &outputs[6])
+    else {
+        panic!("original numerical outputs");
+    };
+    let x = x.materialize_f64();
+    let residual = residual.materialize_f64();
+    assert_eq!(residual, vec![1e8 * (x[0] - 1.) + 1e-7, x[1]]);
+    assert_eq!(j.materialize_f64(), vec![1e8, 0., 0., 1.]);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(info.fields["funcCount"], Value::Num(2.));
+    if outputs[3] == Value::Num(1.) {
+        let Value::Num(optimality) = info.fields["firstorderopt"] else {
+            panic!("actual optimality");
+        };
+        assert!(optimality.is_finite() && optimality <= 1e-10);
     }
 }
 
@@ -356,9 +499,20 @@ fn lsqnonlin_problem_struct_rejects_aineq_and_bineq() {
 #[test]
 fn lsqnonlin_default_max_fun_evals_matches_optimoptions() {
     let options = LsqOptions::from_struct(None, 7).expect("default options");
+    assert_eq!(options.method, Method::Reflective);
+    let mut controls = runmat_value::UnboundedStructValueBuilder::new();
+    controls.insert("Algorithm", Value::from("levenberg-marquardt"));
+    let controls = controls.finish();
+    assert_eq!(
+        LsqOptions::from_struct(Some(&controls), 7)
+            .unwrap()
+            .solver
+            .max_fun_evals,
+        2 * DEFAULT_MAX_FUN_EVALS_FACTOR * 7
+    );
     assert_eq!(
         options.solver.max_fun_evals,
-        DEFAULT_MAX_FUN_EVALS_FACTOR * DEFAULT_MAX_ITER
+        DEFAULT_MAX_FUN_EVALS_FACTOR * 7
     );
 }
 

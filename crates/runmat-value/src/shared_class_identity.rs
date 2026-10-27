@@ -38,6 +38,9 @@ impl SharedClassIdentityAdmissionError {
 }
 
 impl SharedClassIdentity {
+    pub fn shared_storage_identity(&self) -> crate::SharedStorageIdentity {
+        crate::SharedStorageIdentity::of(self.0.get())
+    }
     pub fn new(identity: ClassIdentity) -> Self {
         Self(ExactShared::new(SharedClassIdentityPayload {
             identity,

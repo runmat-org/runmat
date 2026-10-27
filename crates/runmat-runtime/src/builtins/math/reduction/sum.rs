@@ -87,6 +87,11 @@ mod preparation;
 
 #[path = "sum/omit.rs"]
 mod omit;
+#[path = "sum/geometry.rs"]
+mod geometry;
+pub(in crate::builtins::math) use geometry::{
+    reduction_geometry, reduction_geometry_for_axes, ReductionGeometry,
+};
 
 #[cfg(test)]
 #[path = "sum/omit_tests.rs"]

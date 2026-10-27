@@ -3,11 +3,8 @@
 use crate::*;
 
 mod descriptor;
-mod inference;
 mod rotation;
 mod translation;
-#[cfg(test)]
-mod tests;
 
 pub use descriptor::*;
 

@@ -499,7 +499,7 @@ fn verify_statement_operations(
                 .at_function(function)
             })?,
         };
-        let expected_values = runmat_mir::analysis::terminator_rvalues(&block.terminator.kind);
+        let expected_values = runmat_mir::terminator_rvalues(&block.terminator.kind);
         let actual_values = native_block
             .instructions
             .iter()

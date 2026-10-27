@@ -76,13 +76,13 @@ describe("builtins helpers", () => {
 
   it("loads the builtin examples catalog in one lazy step", async () => {
     const examples = await loadBuiltinExamplesCatalog();
-    const histExample = examples.find((example) => example.id === "hist:2");
+    const histExample = examples.find((example) => example.id === "hist:retained-2");
 
     expect(examples.length).toBeGreaterThan(100);
     expect(histExample).toMatchObject({
       builtinKey: "hist",
       exampleTitle: "Pass explicit bin centers",
-      suggestedPath: "/hist-2.m"
+      suggestedPath: "/hist-retained-2.m"
     });
   });
 });

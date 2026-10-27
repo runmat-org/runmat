@@ -18,16 +18,19 @@ use crate::analysis::inference::{
     infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal, statement_phase_contract,
 };
 use crate::analysis::workspace_effect::statement_exposes_current_workspace;
-use crate::analysis::{AssignmentFact, MirOperationContract, ProgramLocalFact, ProgramPointFacts};
+use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
+use crate::MirOperationContract;
 
 #[path = "flow/call_observations.rs"]
 mod call_observations;
 pub(crate) use call_observations::CallObservation;
+mod numerical_suspension;
 #[path = "flow/operation_contracts.rs"]
 mod operation_contracts;
 #[path = "flow/sequence.rs"]
 mod sequence;
 mod spmd;
+pub(crate) use numerical_suspension::NumericalSuspensionEvidence;
 
 const WIDEN_AFTER_UPDATE: usize = 4;
 const MAX_BLOCK_UPDATES: usize = 64;
@@ -41,6 +44,7 @@ pub(crate) struct BodyFlow {
     pub converged: bool,
     pub diagnostics: Vec<crate::MirDiagnostic>,
     pub calls: Vec<CallObservation>,
+    pub numerical_suspension: NumericalSuspensionEvidence,
 }
 
 pub(crate) fn analyze_body(
@@ -50,6 +54,45 @@ pub(crate) fn analyze_body(
     captures: &[ValueFact],
     constructor_instance: Option<MirLocalId>,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> BodyFlow {
+    analyze_body_impl(
+        body,
+        function,
+        parameters,
+        captures,
+        constructor_instance,
+        summaries,
+        false,
+    )
+}
+
+pub(super) fn analyze_body_with_suspension(
+    body: &MirBody,
+    function: ProgramFunctionId,
+    parameters: &[ValueFact],
+    captures: &[ValueFact],
+    constructor_instance: Option<MirLocalId>,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> BodyFlow {
+    analyze_body_impl(
+        body,
+        function,
+        parameters,
+        captures,
+        constructor_instance,
+        summaries,
+        true,
+    )
+}
+
+fn analyze_body_impl(
+    body: &MirBody,
+    function: ProgramFunctionId,
+    parameters: &[ValueFact],
+    captures: &[ValueFact],
+    constructor_instance: Option<MirLocalId>,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+    collect_suspension: bool,
 ) -> BodyFlow {
     if body.blocks.is_empty() {
         return BodyFlow {
@@ -61,6 +104,7 @@ pub(crate) fn analyze_body(
             converged: true,
             diagnostics: Vec::new(),
             calls: Vec::new(),
+            numerical_suspension: NumericalSuspensionEvidence::default(),
         };
     }
 
@@ -121,6 +165,7 @@ pub(crate) fn analyze_body(
     let mut return_facts = Vec::new();
     let mut diagnostics = Vec::new();
     let mut calls = Vec::new();
+    let mut numerical_suspension = NumericalSuspensionEvidence::default();
     let mut operation_contracts = Vec::new();
     for (block_index_value, block) in body.blocks.iter().enumerate() {
         let Some(mut state) = entries[block_index_value].clone() else {
@@ -146,6 +191,9 @@ pub(crate) fn analyze_body(
                 summaries,
             );
             call_observations::collect(statement, &state, summaries, &mut calls);
+            if collect_suspension {
+                numerical_suspension.statement(statement, &state, summaries);
+            }
             transfer_statement(
                 statement,
                 &mut state,
@@ -169,6 +217,21 @@ pub(crate) fn analyze_body(
             &state,
             summaries,
         );
+        if collect_suspension
+            && matches!(
+                block.terminator.kind,
+                MirTerminatorKind::Await { .. }
+                    | MirTerminatorKind::ParFor { .. }
+                    | MirTerminatorKind::Spmd { .. }
+            )
+        {
+            numerical_suspension.local = false;
+        }
+        if collect_suspension {
+            for value in crate::operation_contract::terminator_rvalues(&block.terminator.kind) {
+                numerical_suspension.value(&value, &state, block.terminator.span, summaries);
+            }
+        }
         if let MirTerminatorKind::Return(outputs) = &block.terminator.kind {
             return_facts.push(
                 outputs
@@ -197,6 +260,7 @@ pub(crate) fn analyze_body(
         converged,
         diagnostics,
         calls,
+        numerical_suspension,
     }
 }
 
@@ -467,7 +531,7 @@ fn edge_states(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> Vec<(BasicBlockId, FlowState)> {
     let mut contracted = state.clone();
-    for value in crate::analysis::terminator_rvalues(kind) {
+    for value in crate::terminator_rvalues(kind) {
         apply_rvalue_contract(&value, &mut contracted, summaries);
     }
     let (effects, capabilities) = operation_contracts::terminator(kind);

@@ -75,6 +75,14 @@ pub(super) async fn execute(
 ) -> NativeExecutionResult<BTreeMap<runmat_execution::Digest, RemoteInputMaterializationOutcome>> {
     let mut unique = BTreeMap::new();
     for prepared in materializations {
+        if prepared.program().chunks.iter().any(|chunk| {
+            matches!(
+                &chunk.request,
+                runmat_execution_artifact::WorkerProgramRequest::Graph(_)
+            )
+        }) {
+            return Err(NativeExecutionError::Configuration("remote composite input materialization has no selected Graph publisher authority; use the explicit admitted Graph invocation route".into()));
+        }
         crate::input_materialization::validate_materialization_mesh(&prepared, mesh)?;
         for object in prepared.input_objects() {
             pool.register_value_object(object.reference.clone(), object.bytes.clone())?;
@@ -107,7 +115,7 @@ pub(super) async fn execute(
                 scope_id: pool.scope_id(),
                 pool_id: pool.pool_id(),
                 host: crate::program_host::program_host(
-                    &chunk.request,
+                    chunk.direct_request().map_err(protocol)?,
                     super::pool_tasks::admitted_trust(),
                 )?,
                 resources: task_resources.clone(),
@@ -133,7 +141,10 @@ pub(super) async fn execute(
             }
             .map_err(protocol)?;
             task_metadata.push((*identity, chunk_index, submission.request.id));
-            tasks.push((chunk.request.clone(), submission));
+            tasks.push((
+                chunk.direct_request().map_err(protocol)?.clone(),
+                submission,
+            ));
         }
     }
     let completions = pool.submit_graph(tasks)?;

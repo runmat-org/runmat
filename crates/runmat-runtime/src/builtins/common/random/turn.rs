@@ -251,13 +251,17 @@ fn owner_and_gate(
     context: Option<&RuntimeContext>,
 ) -> (Option<RuntimeContext>, Arc<RandomTurnGate>) {
     let owner = context.cloned().or_else(crate::context::legacy::active);
-    let gate = owner.as_ref().map_or_else(fallback_gate, |runtime| {
+    let gate = gate_for_owner(owner.as_ref());
+    (owner, gate)
+}
+
+fn gate_for_owner(owner: Option<&RuntimeContext>) -> Arc<RandomTurnGate> {
+    owner.map_or_else(fallback_gate, |runtime| {
         runtime.parallel_random_scope().map_or_else(
             || Arc::clone(&runtime.state().random_turn),
             |scope| Arc::clone(&scope.gate),
         )
-    });
-    (owner, gate)
+    })
 }
 
 pub(crate) async fn acquire(
@@ -270,6 +274,30 @@ pub(crate) async fn acquire(
             .require_selected_local_effect(runmat_types::EffectKind::Randomness)?;
     }
     let (owner, gate) = owner_and_gate(context);
+    acquire_selected(owner, gate, label).await
+}
+
+/// Select only the explicit original owner, including context-free None.
+/// The legacy entry keeps its existing ambient-selection behavior.
+pub(crate) async fn acquire_original(
+    context: Option<&RuntimeContext>,
+    label: &str,
+) -> BuiltinResult<RandomTurn> {
+    if let Some(runtime) = context {
+        runtime
+            .service_ports()
+            .require_selected_local_effect(runmat_types::EffectKind::Randomness)?;
+    }
+    let owner = context.cloned();
+    let gate = gate_for_owner(owner.as_ref());
+    acquire_selected(owner, gate, label).await
+}
+
+async fn acquire_selected(
+    owner: Option<RuntimeContext>,
+    gate: Arc<RandomTurnGate>,
+    label: &str,
+) -> BuiltinResult<RandomTurn> {
     let generation = owner
         .as_ref()
         .map(RuntimeContext::host_effect_session_generation);
@@ -358,6 +386,28 @@ pub(crate) fn try_acquire(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_original_turn_selection_does_not_borrow_foreign_ambient_stream() {
+        let ambient = crate::user_functions::test_support::exact_fixture_runtime();
+        let original = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = ambient.enter();
+        futures::executor::block_on(async {
+            let strict = acquire_original(None, "rng").await.unwrap();
+            assert!(strict.owner().is_none());
+            drop(strict);
+            let strict = acquire_original(Some(&original), "rng").await.unwrap();
+            assert_eq!(
+                strict.owner().unwrap().local_identity(),
+                original.local_identity()
+            );
+            drop(strict);
+            let legacy = acquire(None, "rng").await.unwrap();
+            assert_eq!(
+                legacy.owner().unwrap().local_identity(),
+                ambient.local_identity()
+            );
+        });
+    }
 
     fn waiting_gate() -> (Arc<RandomTurnGate>, Arc<Waiter>) {
         let gate = Arc::new(RandomTurnGate::default());

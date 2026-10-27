@@ -10,7 +10,7 @@ use runmat_value::ComplexElement;
 pub(in crate::builtins::math::linalg) use work::OperatorWork;
 
 #[derive(Debug)]
-pub(in crate::builtins::math::linalg) enum CooperativeOperatorError {
+pub(crate) enum CooperativeOperatorError {
     Operator(LinearOperatorError),
     Execution(ExecutionServiceError),
 }
@@ -89,7 +89,7 @@ async fn apply<T: LinearOperatorScalar>(
 macro_rules! cooperative_product {
     ($scalar:ty) => {
         impl TypedLinearOperator<'_, $scalar> {
-            pub(in crate::builtins::math::linalg) async fn apply_cooperatively(
+            pub(crate) async fn apply_cooperatively(
                 &self,
                 input: &[$scalar],
                 output: &mut [$scalar],

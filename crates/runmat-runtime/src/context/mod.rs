@@ -155,6 +155,9 @@ pub use runtime::{
     RuntimeLanguageMode, RuntimeLanguagePolicy, SelectedGraphFunction,
     SelectedGraphFunctionResolver, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
+pub(crate) use scope::{
+    with_original_scope, LazyRuntimeScope, PreparedUnselectedScope, RuntimeScopeFactory,
+};
 pub use scope::{
     ContextFuture, DeferredRuntimeFuture, PreparedRuntimeFutureScope, PreparedRuntimeScope,
     RuntimeContextGuard,

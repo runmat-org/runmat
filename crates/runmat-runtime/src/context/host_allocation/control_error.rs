@@ -36,7 +36,7 @@ pub fn host_allocation_runtime_error(
     source: HostAllocationError,
 ) -> RuntimeError {
     let message = message.into();
-    match HostAllocationDisposition::from(source) {
+    let mut error = match HostAllocationDisposition::from(source) {
         HostAllocationDisposition::Cancelled => {
             let mut error = ExecutionServiceError::Cancelled.into_runtime_error();
             if let Some(runtime) = runtime {
@@ -50,7 +50,11 @@ pub fn host_allocation_runtime_error(
         HostAllocationDisposition::Ordinary(source) => {
             crate::runtime_error::semantic_error_with_source(ordinary_identifier, message, source)
         }
-    }
+    };
+    // Gathering cannot repair a revoked owner or grant additional host
+    // capacity. Replaying the operation could repeat effects already made.
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
 }
 
 #[cfg(test)]
@@ -85,6 +89,7 @@ mod tests {
                 ),
             ] {
                 assert_eq!(error.identifier(), Some("LeaseScope:Cancelled"));
+                assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
                 assert!(matches!(
                     error
                         .source()
@@ -117,6 +122,7 @@ mod tests {
                     error.identifier(),
                     Some("RunMat:parallel:InfrastructureFailure")
                 );
+                assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
                 assert!(matches!(
                     error
                         .source()
@@ -137,6 +143,7 @@ mod tests {
                 source,
             );
             assert_eq!(error.identifier(), Some("RunMat:Workspace:RetainedValue"));
+            assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
             assert_eq!(
                 error
                     .source()

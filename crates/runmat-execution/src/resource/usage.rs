@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{AcceleratorClass, AcceleratorDeviceId, AcceleratorProviderId};
 
-mod wide_counter;
+pub(super) mod wide_counter;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -217,6 +217,7 @@ pub(crate) fn resolve_cell_assignment_components_in_context(
     };
     let count = match component {
         ObjectIndexComponent::Colon => cell.data().len(),
+        ObjectIndexComponent::End => 1,
         ObjectIndexComponent::Value(value) => cell_assignment_index_count(value),
     };
     crate::context::host_allocation::initialize_host_array(
@@ -224,6 +225,7 @@ pub(crate) fn resolve_cell_assignment_components_in_context(
         count,
         |index| match component {
             ObjectIndexComponent::Colon => Ok(index + 1),
+            ObjectIndexComponent::End => Ok(cell.data().len()),
             ObjectIndexComponent::Value(value) => cell_assignment_index_at(value, index),
         },
     )

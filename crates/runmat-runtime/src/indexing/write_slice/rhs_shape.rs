@@ -4,7 +4,7 @@ use crate::RuntimeError;
 /// Only scalar replication or the original column-major order is permitted.
 /// Singleton-axis alignment needs no shape/coordinate allocation.
 #[derive(Clone, Copy, Debug)]
-pub(in crate::indexing) struct AssignmentRhsLayout {
+pub(crate) struct AssignmentRhsLayout {
     scalar: bool,
     count: usize,
 }
@@ -21,7 +21,7 @@ impl AssignmentRhsLayout {
             count,
         })
     }
-    pub(in crate::indexing) fn multidimensional(
+    pub(crate) fn multidimensional(
         source_shape: &[usize],
         source_len: usize,
         selection: &[usize],
@@ -36,7 +36,7 @@ impl AssignmentRhsLayout {
     pub(in crate::indexing) fn count(self) -> usize {
         self.count
     }
-    pub(in crate::indexing) fn source_index(self, ordinal: usize) -> usize {
+    pub(crate) fn source_index(self, ordinal: usize) -> usize {
         assert!(ordinal < self.count, "validated RHS output ordinal");
         if self.scalar {
             0

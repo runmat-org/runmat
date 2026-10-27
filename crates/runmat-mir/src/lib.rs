@@ -19,6 +19,7 @@ mod ids;
 mod indexing;
 mod lexical_environment;
 mod operand;
+mod operation_contract;
 mod place;
 mod remap;
 mod rvalue;
@@ -39,6 +40,7 @@ pub use ids::*;
 pub use indexing::*;
 pub use lexical_environment::*;
 pub use operand::*;
+pub use operation_contract::*;
 pub use place::*;
 pub use remap::{remap_closed_function_ids, remap_function_ids};
 pub use rvalue::*;
@@ -49,4 +51,5 @@ pub use terminator::*;
 /// Version 14 identifies admitted incoming-workspace locals separately from
 /// newly declared locals so their entry initialization survives serialization.
 /// Version 16 adds external deferred targets (`MirRvalue::ExternalFuture`).
-pub const MIR_SCHEMA_VERSION: u16 = 17;
+/// Version 18 retains original program-source ownership on class declarations.
+pub const MIR_SCHEMA_VERSION: u16 = 18;

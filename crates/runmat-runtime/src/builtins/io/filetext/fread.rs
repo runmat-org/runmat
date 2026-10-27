@@ -209,22 +209,7 @@ pub async fn evaluate_in_view(
             runtime,
             projection,
         )
-        .await
-        .map_err(|error| match error {
-            ReadFailure::Execution(source) => *source,
-            other => {
-                let detail = other.to_string();
-                let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
-                let mut builder =
-                    build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
-                        .with_builtin(BUILTIN_NAME)
-                        .with_source(other);
-                if let Some(identifier) = FREAD_ERROR_IO.identifier {
-                    builder = builder.with_identifier(identifier);
-                }
-                builder.build()
-            }
-        })?;
+        .await?;
         operation.check_authority(runtime).map_err(|source| {
             let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
                 .with_builtin(BUILTIN_NAME)

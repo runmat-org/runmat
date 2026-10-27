@@ -9,8 +9,8 @@ pub struct NativeSourceLocation {
     pub span: ProgramSpan,
 }
 
-pub type NativeSitePhase = runmat_mir::analysis::MirOperationPhase;
-pub type NativeMirSite = runmat_mir::analysis::MirOperationSite;
+pub type NativeSitePhase = runmat_mir::MirOperationPhase;
+pub type NativeMirSite = runmat_mir::MirOperationSite;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -222,7 +222,7 @@ impl HostState {
         let mut computed_references =
             [NativeValueRef::NULL; runmat_runtime::numeric_region::MAX_OUTPUTS];
         for (slot, value) in computed_references.iter_mut().zip(computed_outputs) {
-            *slot = self.arena.insert(value);
+            *slot = self.arena.insert(value, Some(&self.runtime))?;
         }
         for output in &plan.outputs {
             let reference = match output.source {

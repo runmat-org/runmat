@@ -20,7 +20,9 @@ use crate::commands::bytecode::{emit_bytecode_with_catalog, write_bytecode_outpu
 use crate::commands::fea::execute_fea_path;
 use crate::commands::package::install_project_for_source;
 use crate::commands::piped_input::PipedInput;
-use crate::commands::session::{create_session_with_graphics, drive_with_graphics_callbacks};
+use crate::commands::session::{
+    create_session_with_graphics, drive_with_graphics_callbacks, future::boxed_command,
+};
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_frontend_error, format_runtime_diagnostic};
 use crate::presentation;
@@ -91,7 +93,10 @@ pub(crate) async fn execute_script_with_graphics(
         execution,
     } = invocation;
     if script.as_path() == Path::new("-") {
-        return execute_stdin_script_with_graphics(emit_bytecode_path, cli, config, graphics).await;
+        return boxed_command(|| {
+            execute_stdin_script_with_graphics(emit_bytecode_path, cli, config, graphics)
+        })
+        .await;
     }
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
@@ -103,7 +108,7 @@ pub(crate) async fn execute_script_with_graphics(
         if !args.is_empty() {
             anyhow::bail!(".fea files do not accept positional script arguments");
         }
-        return execute_fea_path(script, cli, config, fea_json, execution).await;
+        return boxed_command(|| execute_fea_path(script, cli, config, fea_json, execution)).await;
     }
 
     if !matches!(execution.resolve()?, ExecutionTarget::Local) {
@@ -126,13 +131,15 @@ pub(crate) async fn execute_script_with_graphics(
     }
 
     let source_name = script.to_string_lossy().to_string();
-    execute_script_request(
-        script,
-        SourceInput::Path(source_name),
-        cli,
-        config,
-        graphics,
-    )
+    boxed_command(|| {
+        execute_script_request(
+            script,
+            SourceInput::Path(source_name),
+            cli,
+            config,
+            graphics,
+        )
+    })
     .await
 }
 
@@ -155,16 +162,18 @@ pub(crate) async fn execute_stdin_script_with_graphics(
         return write_bytecode_output(&path, &output);
     }
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
-    execute_script_request(
-        cwd.join("<stdin>"),
-        SourceInput::Text {
-            name: "<stdin>".to_owned(),
-            text: content,
-        },
-        cli,
-        config,
-        graphics,
-    )
+    boxed_command(|| {
+        execute_script_request(
+            cwd.join("<stdin>"),
+            SourceInput::Text {
+                name: "<stdin>".to_owned(),
+                text: content,
+            },
+            cli,
+            config,
+            graphics,
+        )
+    })
     .await
 }
 
@@ -212,16 +221,18 @@ pub(crate) async fn execute_script_contents(
     }
 
     let source_name = script.to_string_lossy().to_string();
-    execute_script_request(
-        script,
-        SourceInput::Text {
-            name: source_name,
-            text: content.clone(),
-        },
-        cli,
-        config,
-        &runmat_core::SessionGraphicsHost::Unavailable,
-    )
+    boxed_command(|| {
+        execute_script_request(
+            script,
+            SourceInput::Text {
+                name: source_name,
+                text: content.clone(),
+            },
+            cli,
+            config,
+            &runmat_core::SessionGraphicsHost::Unavailable,
+        )
+    })
     .await
 }
 
@@ -262,12 +273,13 @@ async fn execute_script_request(
     tokio::task::yield_now().await;
     let local_tasks = engine.local_task_driver();
     let callbacks = engine.graphics_callback_queue().cloned();
-    let response = local_tasks
-        .drive_until(drive_with_graphics_callbacks(
+    let response = boxed_command(|| {
+        local_tasks.drive_until(drive_with_graphics_callbacks(
             callbacks,
             engine.execute_request(request),
         ))
-        .await;
+    })
+    .await;
     signal_task.abort();
     let response = response.context("Local callback driver stopped during script execution")??;
     let source_context = response.source_context;
@@ -624,6 +636,10 @@ fn outcome_error_diagnostic(outcome: &ExecutionOutcome) -> Option<&RuntimeDiagno
         .iter()
         .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
 }
+
+#[cfg(test)]
+#[path = "script/future_size_tests.rs"]
+mod future_size_tests;
 
 #[cfg(test)]
 mod tests {

@@ -275,7 +275,7 @@ impl CanonicalSignalContent<'_> {
     fn validate(&self) -> AnalysisExecutionResult<()> {
         self.domain
             .axis_descriptor(None)
-            .map_err(|detail| AnalysisExecutionError::Invalid(detail))?;
+            .map_err(AnalysisExecutionError::Invalid)?;
         if self.knots.len() < 2 || self.evidence.sample_count != self.knots.len() {
             return Err(AnalysisExecutionError::Invalid(
                 "signal content sample metadata is incomplete or inconsistent".into(),

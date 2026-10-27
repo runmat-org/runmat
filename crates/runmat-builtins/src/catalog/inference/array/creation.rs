@@ -47,6 +47,25 @@ pub(super) fn infer_zeros(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
         .and_then(|index| request.arguments.get(index + 1))
         .cloned()
         .unwrap_or_else(default_double_scalar);
+    // A class creation method may return a different class, shape or storage
+    // than its prototype. Only that selected method's inference can establish
+    // those facts; copying the prototype would assert an unsupported result.
+    if like_index
+        .and_then(|index| request.arguments.get(index + 1))
+        .is_some_and(|prototype| {
+            matches!(
+                prototype.kind,
+                ValueKindFact::Object(_) | ValueKindFact::Unknown
+            )
+        })
+    {
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    }
     if gpu_output && element_class.is_none() && literals.len() >= 2 {
         let preceding = literals.len() - 2;
         if matches!(literals[preceding], LiteralValue::Unknown)

@@ -1,16 +1,2 @@
-use crate::fea_contract::catalog_entry::{self, ConstructorEntryDefinition};
-use crate::*;
-
-mod documentation;
-
-pub(super) const ENTRY: BuiltinCatalogEntry = catalog_entry::entry(ConstructorEntryDefinition {
-    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-    name: "fea.ElectroThermalDomain.atReferenceTemperature",
-    documentation: documentation::DOCUMENTATION,
-    descriptor: &super::FEA_ELECTRO_THERMAL_DOMAIN_AT_REFERENCE_TEMPERATURE_DESCRIPTOR,
-    inference: super::inference::at_reference_temperature,
-    integer_capabilities: &[],
-    integer_audit: Some(&super::FEA_ELECTRO_THERMAL_DOMAIN_INTEGER_AUDIT),
-    filesystem_read: false,
-    distributed: BuiltinDistributedPolicy::Unsupported,
-});
+//! The method references the existing single canonical constructor entry.
+pub(super) use crate::ELECTROTHERMAL_DOMAIN_CATALOG_ENTRY as ENTRY;

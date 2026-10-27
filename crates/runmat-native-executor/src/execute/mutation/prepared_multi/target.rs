@@ -90,7 +90,8 @@ impl PendingSequenceTarget {
         let root = flatten_root(base, &mut path)?;
         let (root_value, absent_root) = state.sequence_root(root.0, target.root_creation())?;
         let path = path.into_iter().cloned().collect();
-        let builder = SequenceDestinationBuilder::new(&root_value)?;
+        let builder = SequenceDestinationBuilder::new_in_context(&state.runtime, &root_value)?;
+        let builder = retain_method_frame(builder, state)?;
         let mut pending = Self {
             target: TargetEndpoint::Sequence(target.clone()),
             root,
@@ -132,16 +133,17 @@ impl PendingSequenceTarget {
             ));
         }
         let root_value = state.arena.get(original)?.clone();
+        let builder =
+            SequenceDestinationBuilder::from_owned_in_context(&state.runtime, root_value)?
+                .with_assignment_creation(creation);
+        let builder = retain_method_frame(builder, state)?;
         let mut pending = Self {
             target: TargetEndpoint::Fixed { mutation, creation },
             root,
             // Fixed paths borrow immutable source; only the coordinate is
             // invocation-owned, never a deep MIR clone.
             path: Vec::new(),
-            builder: Some(
-                SequenceDestinationBuilder::from_owned_in_context(&state.runtime, root_value)?
-                    .with_assignment_creation(creation),
-            ),
+            builder: Some(builder),
             index: 0,
             phase: Phase::MaterializePath,
             region: None,
@@ -312,7 +314,7 @@ impl PendingSequenceTarget {
         self.builder = Some(builder);
         self.fixed_end_receiver = Some(receiver);
         self.fixed_end_pending = false;
-        Ok(value.with_owned(|value| state.arena.insert(value)))
+        value.with_owned(|value| state.arena.insert(value, Some(&state.runtime)))
     }
 
     pub(in crate::execute::mutation) fn root_references(
@@ -348,7 +350,7 @@ impl PendingSequenceTarget {
                     runmat_runtime::execution::RootedValueLease::for_values_iterator_in_context(
                         components.iter().filter_map(|component| match component {
                             ObjectIndexComponent::Value(value) => Some(value),
-                            ObjectIndexComponent::Colon => None,
+                            ObjectIndexComponent::Colon | ObjectIndexComponent::End => None,
                         }),
                         &state.runtime,
                     )
@@ -387,14 +389,25 @@ impl PendingSequenceTarget {
             return Ok(());
         }
         if let Some(builder) = &self.builder {
+            let mut admission_error = None;
             builder.visit_retained_values(&mut |value| {
-                self.retained.push(state.arena.insert(value.clone()));
+                if admission_error.is_some() {
+                    return;
+                }
+                match state.arena.insert(value.clone(), Some(&state.runtime)) {
+                    Ok(reference) => self.retained.push(reference),
+                    Err(error) => admission_error = Some(error),
+                }
             });
+            if let Some(error) = admission_error {
+                return Err(error);
+            }
         }
         if let Some(components) = components {
             for component in components {
                 if let ObjectIndexComponent::Value(value) = component {
-                    self.retained.push(state.arena.insert(value.clone()));
+                    self.retained
+                        .push(state.arena.insert(value.clone(), Some(&state.runtime))?);
                 }
             }
         }
@@ -615,6 +628,22 @@ impl PendingSequenceTarget {
                 "sequence preparation phase reentered without its owner".into(),
             )),
         }
+    }
+}
+
+fn retain_method_frame(
+    builder: SequenceDestinationBuilder,
+    state: &HostState,
+) -> NativeExecutorResult<SequenceDestinationBuilder> {
+    if state.function.class_method_owner.is_some() {
+        builder
+            .with_method_frame_factory_in_context(&state.runtime, || {
+                crate::execute::subscript_path::frame_access_runtime(state)
+                    .map_err(|source| *source)
+            })
+            .map_err(Into::into)
+    } else {
+        Ok(builder)
     }
 }
 

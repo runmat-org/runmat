@@ -138,6 +138,8 @@ pub struct FunctionFacts {
     pub inputs: Vec<OperationParameter>,
     pub outputs: Vec<OperationTypePattern>,
     pub effects: EffectSet,
+    #[serde(default)]
+    pub cooperative_suspension: bool,
     pub capabilities: CapabilitySet,
 }
 
@@ -271,6 +273,8 @@ pub struct GeometryInspection {
     /// Advisory planning evidence only; not an exact meshing bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_extent_m: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub named_selections: Option<runmat_geometry_core::GeometryNamedSelections>,
     pub content_digest: SourceDigest,
     pub topology_digest: SourceDigest,
     pub capabilities: Vec<GeometryInspectionCapability>,

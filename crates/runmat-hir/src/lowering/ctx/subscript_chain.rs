@@ -23,7 +23,9 @@ impl LoweringCtx {
             .map(|step| usize::from(matches!(step, AstSubscriptStep::DottedInvoke(..))) + 1)
             .sum::<usize>();
         let contextual_end = steps.iter().any(AstSubscriptStep::contains_end);
-        if (component_count < 2 && !contextual_end) || self.is_proven_static_namespace_root(root)? {
+        if (component_count < 2 && !contextual_end)
+            || self.is_proven_static_namespace_root(root, &steps)?
+        {
             return Ok(None);
         }
         let last = steps.len() - 1;
@@ -176,18 +178,43 @@ impl LoweringCtx {
         Ok(self.unbound_qualified_member_base(base).is_some())
     }
 
-    fn is_proven_static_namespace_root(&self, root: &AstExpr) -> Result<bool, HirError> {
+    fn is_proven_static_namespace_root(
+        &self,
+        root: &AstExpr,
+        steps: &[AstSubscriptStep<'_>],
+    ) -> Result<bool, HirError> {
         let AstExpr::Ident(name, span) = root else {
             return Ok(false);
         };
         if self.lookup_binding(name).is_some() {
             return Ok(false);
         }
-        Ok(self.class_id_for_name(name).is_some()
+        if self.class_id_for_name(name).is_some()
             || self.external_class_declaration(name).is_some()
             || self
                 .resolve_imported_class_name_target(name, *span)?
-                .is_some())
+                .is_some()
+        {
+            return Ok(true);
+        }
+        // A package root is not a value binding. Recognize an actual class
+        // declaration along the static member prefix, not merely the first
+        // identifier, so pkg.Class.Property retains class-reference lowering.
+        // Calls, indexing and dynamic members end that namespace prefix.
+        let mut qualified = name.clone();
+        for step in steps {
+            let AstSubscriptStep::Member(member) = step else {
+                break;
+            };
+            qualified.push('.');
+            qualified.push_str(member);
+            if self.class_id_for_name(&qualified).is_some()
+                || self.external_class_declaration(&qualified).is_some()
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 

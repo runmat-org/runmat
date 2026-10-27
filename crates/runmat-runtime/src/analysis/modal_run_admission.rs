@@ -152,6 +152,7 @@ pub(super) fn analysis_admit_modal_run_with_id(
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
             effective_memory_ceiling_bytes: None,
+            static_solve_path: None,
         },
     };
 

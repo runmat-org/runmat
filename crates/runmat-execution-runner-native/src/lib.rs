@@ -57,6 +57,7 @@ mod checkpoint_evidence;
 mod config;
 pub use checkpoint_evidence::NativeCheckpointEvidence;
 mod driver;
+mod graph_submission;
 mod durable;
 mod error;
 mod exact_geometry_admission;
@@ -252,8 +253,8 @@ pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
     run_remote_worker_quic, run_remote_worker_quic_ready_v1, run_remote_worker_relay,
     QuicRemoteWorkerChannel, RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt,
-    RemoteMeshingWorkerQuicRequest, RemoteObjectReceipt, RemotePoolCheckpoint, RemotePoolDriver,
-    RemotePoolRestoreAuthority, RemoteSpmdGangCompletion, RemoteSpmdGangProgram,
+    RemoteGraphTransfer, RemoteMeshingWorkerQuicRequest, RemoteObjectReceipt, RemotePoolCheckpoint,
+    RemotePoolDriver, RemotePoolRestoreAuthority, RemoteSpmdGangCompletion, RemoteSpmdGangProgram,
     RemoteTaskCompletion, RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerChannelConfig,
     RemoteWorkerQuicRequest, RemoteWorkerRelayRequest,
 };

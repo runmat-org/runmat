@@ -178,7 +178,7 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
                 let missing = missing_default_indices(&document, &group, &names);
                 let unproved = defaults.unproved(&missing);
                 if !unproved.is_empty() {
-                    return Ok(BrowserPrepared::NeedsPreparation(unproved));
+                    return Ok(BrowserCheckedSource::NeedsPreparation(unproved));
                 }
                 let mut encoded = vec![None; names.len()];
                 for index in missing {
@@ -210,7 +210,7 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
         })
     })();
     let abort_without_write =
-        result.is_err() || matches!(&result, Ok(BrowserPrepared::NeedsPreparation(_)));
+        result.is_err() || matches!(&result, Ok(BrowserCheckedSource::NeedsPreparation(_)));
     state.prepared = Some(result);
     let transaction = state.transaction.clone();
     drop(state);
@@ -237,7 +237,7 @@ fn abort(weak: &Weak<RefCell<ActiveWrite>>) {
     let mut state = active.borrow_mut();
     state.terminal = true;
     let outcome = match state.prepared.take() {
-        Some(Ok(needs @ BrowserPrepared::NeedsPreparation(_))) => Ok(needs),
+        Some(Ok(needs @ BrowserCheckedSource::NeedsPreparation(_))) => Ok(needs),
         Some(Err(error)) => Err(error),
         _ => Err(transaction_error(&state.transaction)),
     };

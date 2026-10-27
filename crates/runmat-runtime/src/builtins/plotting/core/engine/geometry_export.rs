@@ -49,10 +49,7 @@ pub fn measure_geometry_scene_observation(
 ) -> BuiltinResult<serde_json::Value> {
     let scene = clone_geometry_scene(handle)
         .ok_or_else(|| engine_error(format!("geometry scene handle {handle} does not exist")))?;
-    Ok(
-        runmat_plot::geometry_observation::measure_scene(&scene, kind, region_ids)
-            .map_err(engine_error)?,
-    )
+    runmat_plot::geometry_observation::measure_scene(&scene, kind, region_ids).map_err(engine_error)
 }
 
 /// Render saved geometry with the same camera used by interactive playback.

@@ -462,6 +462,7 @@ impl IsolatedPythonClient {
                     )
                 })?;
                 for value in values {
+                    crate::foreign::reject_scoped_callback(&value)?;
                     if super::super::super::is_callable(&value) {
                         encoded.push(
                             self.encode_driver_value(value)
@@ -597,6 +598,8 @@ impl IsolatedPythonClient {
         &mut self,
         value: crate::call::RootedArgumentValue,
     ) -> Result<PythonWireValue, PythonWireError> {
+        crate::foreign::reject_scoped_callback(value.value())
+            .map_err(|error| wire_error("RunMat:Python:ValueEncode", error.to_string()))?;
         if super::super::super::is_callable(value.value()) {
             let id = self.next_callback_id;
             self.next_callback_id = self.next_callback_id.checked_add(1).ok_or_else(|| {

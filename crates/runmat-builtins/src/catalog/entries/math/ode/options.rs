@@ -7,9 +7,19 @@ pub enum OdeOptionField {
     InitialStep,
     MaxStep,
     MaxSteps,
+    Refine,
 }
 
 impl OdeOptionField {
+    pub const ALL: [Self; 6] = [
+        Self::RelTol,
+        Self::AbsTol,
+        Self::InitialStep,
+        Self::MaxStep,
+        Self::MaxSteps,
+        Self::Refine,
+    ];
+
     pub fn from_public_name(name: &str) -> Option<Self> {
         if name.eq_ignore_ascii_case("RelTol") {
             Some(Self::RelTol)
@@ -21,6 +31,8 @@ impl OdeOptionField {
             Some(Self::MaxStep)
         } else if name.eq_ignore_ascii_case("MaxSteps") {
             Some(Self::MaxSteps)
+        } else if name.eq_ignore_ascii_case("Refine") {
+            Some(Self::Refine)
         } else {
             None
         }
@@ -33,10 +45,11 @@ impl OdeOptionField {
             Self::InitialStep => "InitialStep",
             Self::MaxStep => "MaxStep",
             Self::MaxSteps => "MaxSteps",
+            Self::Refine => "Refine",
         }
     }
 
     pub const fn is_floating_control(self) -> bool {
-        !matches!(self, Self::MaxSteps)
+        !matches!(self, Self::MaxSteps | Self::Refine)
     }
 }

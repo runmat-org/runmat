@@ -530,7 +530,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! {
             async fn #body_ident(
                 input: crate::builtin::BuiltinContinuationInput,
-            ) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+            ) -> ::std::result::Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
                 let _argument_context = input.context.clone();
                 // A variadic body consumes its argument range. Keep the same
                 // original roots until its returned values have acquired the
@@ -543,7 +543,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 #body_after_arity
             }
 
-            fn #layout_ident() -> Result<u64, crate::context::host_allocation::HostAllocationError> {
+            fn #layout_ident() -> ::std::result::Result<u64, crate::context::host_allocation::HostAllocationError> {
                 crate::builtin::continuation_layout_for(#body_ident)
             }
         }

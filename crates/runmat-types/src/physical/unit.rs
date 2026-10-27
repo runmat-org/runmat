@@ -137,8 +137,8 @@ impl<K: QuantityMarker> Unit<K> {
         &self.definition
     }
     pub fn quantity(&self, value: f64) -> Result<Quantity<K>, UnitError> {
-        Ok(Quantity::try_new(self.definition.to_canonical(value)?)
-            .map_err(|_| UnitError::NonFiniteValue)?)
+        Quantity::try_new(self.definition.to_canonical(value)?)
+            .map_err(|_| UnitError::NonFiniteValue)
     }
     pub fn display_value(&self, value: Quantity<K>) -> Result<f64, UnitError> {
         self.definition.from_canonical(value.canonical_value())

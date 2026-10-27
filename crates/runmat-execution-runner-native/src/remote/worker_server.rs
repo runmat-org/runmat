@@ -1216,6 +1216,7 @@ async fn resolve_attempt(
         if state.draining
             || scheduling.driver_fence != driver_fence
             || scheduling.worker_id != worker.id
+            || scheduling.task.pool_id != worker.pool_id
         {
             return Err("attempt is outside live worker authority".into());
         }
@@ -1300,6 +1301,7 @@ async fn validate_and_reserve_attempt(
     if state.draining
         || attempt.scheduling.driver_fence != driver_fence
         || attempt.scheduling.worker_id != worker.id
+        || attempt.scheduling.task.pool_id != worker.pool_id
     {
         return Some("attempt is outside live worker authority".into());
     }
@@ -1316,13 +1318,19 @@ async fn validate_and_reserve_attempt(
     }
     match &attempt.program {
         WorkerProgramRequest::Direct(program) => {
+            if let Err(message) = super::direct_admission::validate(
+                program,
+                super::direct_admission::Admission::Worker {
+                    scheduling: &attempt.scheduling,
+                    worker,
+                },
+            ) {
+                return Some(message.into());
+            }
             let Some(bundle) = state.bundle.as_ref() else {
                 return Some("exact execution bundle is not installed".into());
             };
             if bundle.requires_materialization() != state.materialized_project.is_some()
-                || program.validate_for_portable_host().is_err()
-                || attempt.scheduling.task.environment != program.environment
-                || attempt.scheduling.task.console != program.console
                 || bundle.manifest.portable_environment != program.environment.entries()
                 || !bundle
                     .manifest
@@ -1339,49 +1347,13 @@ async fn validate_and_reserve_attempt(
             }
         }
         WorkerProgramRequest::Graph(graph) => {
-            if graph.validate().is_err() {
-                return Some("attempt graph or its selected archives are invalid".into());
-            }
-            let scheduling = &attempt.scheduling;
-            let expected = runmat_execution::ProgramExecutionAssignment {
-                scope_id: scheduling.scope_id,
-                pool_id: scheduling.task.pool_id,
-                task_id: scheduling.task_id,
-                attempt_id: scheduling.id,
-                worker_id: scheduling.worker_id,
-                backend: runmat_execution::PoolBackend::Remote,
-                resources: scheduling.resource_assignment.clone(),
-            };
-            let label = graph.scheduler_callable();
-            let trust = [
-                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
-                runmat_execution::security::ExecutionTrustTier::HostedOrdinary,
-                runmat_execution::security::ExecutionTrustTier::AttestedConfidential,
-            ]
-            .into_iter()
-            .collect();
-            let host = graph.execution_host_requirement(trust);
-            let demand = attempt
-                .graph_wire_bytes
-                .and_then(|bytes| graph.input_allocation_floor_bytes(bytes).ok());
-            if scheduling.validate().is_err()
-                || graph.assignment.as_ref() != Some(&expected)
-                || !scheduling.task.inputs.is_empty()
-                || scheduling.task.invocation_context != graph.context
-                || scheduling.task.outputs.requested_outputs != graph.requested_outputs
-                || label
-                    .as_ref()
-                    .ok()
-                    .map(|label| runmat_execution::task::Callable::for_program("remote-run", label))
-                    != Some(scheduling.task.callable.clone())
-                || host.ok() != Some(scheduling.task.host.clone())
-                || demand.is_none_or(|bytes| scheduling.task.resources.memory_bytes < bytes)
-                || graph
-                    .recipe
-                    .validate_resource_request(&scheduling.task.resources)
-                    .is_err()
-            {
-                return Some("graph attempt differs from selected scheduler authority".into());
+            if let Err(message) = graph_admission::validate(
+                &attempt.scheduling,
+                graph,
+                attempt.graph_wire_bytes,
+                worker,
+            ) {
+                return Some(message.into());
             }
         }
     }
@@ -1418,6 +1390,8 @@ fn reserve_attempt_capacity(
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
 }
+
+mod graph_admission;
 
 #[cfg(test)]
 mod tests;

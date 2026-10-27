@@ -4,8 +4,8 @@ use std::fmt;
 
 mod context;
 pub use context::{
-    get_display_format, select_display_format_owner, set_display_format, DisplayFormatOwner,
-    DisplayFormatSelectionGuard,
+    get_display_format, select_display_format_owner, select_optional_display_format_owner,
+    set_display_format, DisplayFormatOwner, DisplayFormatSelectionGuard,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -302,6 +302,7 @@ impl fmt::Display for Value {
                 write!(f, "@{name}")
             }
             Value::BoundFunctionHandle(handle) => write!(f, "@{}", handle.name),
+            Value::ScopedFunctionHandle(_) => write!(f, "@<invocation-scoped callable>"),
             Value::Closure(c) => write!(
                 f,
                 "<closure {} captures={}>",

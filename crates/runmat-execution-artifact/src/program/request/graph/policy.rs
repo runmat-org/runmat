@@ -1,10 +1,10 @@
 //! Policy-reference admission for exact ordered selected-unit archives.
 
-use super::GraphExecutionRequest;
+use super::selection::SelectedCode;
 use crate::{ArtifactError, ArtifactResult, ProgramBuildRecipe};
 
 pub(super) fn validate_refs(
-    request: &GraphExecutionRequest,
+    request: &SelectedCode<'_>,
     selected_count: usize,
 ) -> ArtifactResult<()> {
     let legacy_pure = request.selected_foreign_policies.is_empty();
@@ -31,23 +31,20 @@ pub(super) fn validate_refs(
     for policy in request.selected_foreign_policies.iter().flatten() {
         crate::foreign_policy_descriptor(*policy)?;
     }
-    let top_policy = request
-        .recipe
-        .foreign_policy
-        .as_ref()
-        .map(crate::foreign_policy_ref)
-        .transpose()?;
     let primary_ref = request.selected_foreign_policies.first().copied().flatten();
-    if top_policy != primary_ref {
-        return Err(ArtifactError::Identity(
-            "graph primary recipe differs from its issued policy ref".into(),
-        ));
+    if let Some(policy) = request.primary_policy {
+        let top_policy = policy.as_ref().map(crate::foreign_policy_ref).transpose()?;
+        if top_policy != primary_ref {
+            return Err(ArtifactError::Identity(
+                "graph primary recipe differs from its issued policy ref".into(),
+            ));
+        }
     }
     Ok(())
 }
 
 pub(super) fn validate_archive(
-    request: &GraphExecutionRequest,
+    request: &SelectedCode<'_>,
     index: usize,
     recipe: &ProgramBuildRecipe,
     expected_policy: runmat_execution::ForeignPolicyRef,
@@ -62,7 +59,11 @@ pub(super) fn validate_archive(
             "graph unit policy ref differs from its own archive recipe".into(),
         ));
     }
-    if index == 0 && recipe.foreign_policy != request.recipe.foreign_policy {
+    if index == 0
+        && request
+            .primary_policy
+            .is_some_and(|policy| recipe.foreign_policy != *policy)
+    {
         return Err(ArtifactError::Identity(
             "graph primary policy differs from its admitted archive recipe".into(),
         ));

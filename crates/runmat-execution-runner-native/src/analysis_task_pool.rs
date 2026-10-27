@@ -273,7 +273,7 @@ fn success_response(success: AttemptSuccess) -> ProgramExecutionResponse {
             result_objects,
             ..
         } => ProgramExecutionResponse::from_success_outputs(outputs, result_objects),
-        AttemptSuccess::Graph { graph } => ProgramExecutionResponse::GraphSuccess { graph },
+        AttemptSuccess::Graph { graph, .. } => ProgramExecutionResponse::GraphSuccess { graph },
         AttemptSuccess::Spmd { outputs } => ProgramExecutionResponse::SpmdSuccess { outputs },
     }
 }

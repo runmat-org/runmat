@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use runmat_config::runtime::RunMatRuntimeConfig;
-use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, LoweringContext, Span};
+use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, Span};
+use runmat_static_analysis::project::{ProjectAnalysis, ProjectSource};
+use runmat_types::ProgramSourceId;
 use serde::Serialize;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -268,7 +270,10 @@ async fn check_m_file(
     config: &RunMatRuntimeConfig,
     options: CheckOutputOptions,
 ) -> Result<()> {
-    let content = runmat_filesystem::read_to_string_async(&path)
+    let (source_provider, resolved_primary) = runmat_filesystem::capture_provider_path(&path)
+        .context("Failed to capture script filesystem authority")?;
+    let path_namespace = source_provider.path_namespace();
+    let content = read_project_source(source_provider.as_ref(), &resolved_primary)
         .await
         .with_context(|| format!("Failed to read script file: {}", path.display()))?;
     let cwd = runmat_filesystem::current_dir().context("Failed to read current directory")?;
@@ -297,7 +302,7 @@ async fn check_m_file(
     }
 
     for search_path in &options.search_paths {
-        let root = if search_path.is_absolute() {
+        let root = if path_namespace.is_absolute(search_path) {
             search_path.clone()
         } else {
             cwd.join(search_path)
@@ -315,30 +320,36 @@ async fn check_m_file(
         }
     }
 
-    let known_symbols = source_catalog
-        .as_ref()
-        .map(|catalog| &catalog.symbols)
-        .cloned()
-        .unwrap_or_default();
-    let lowering_context = LoweringContext::empty()
-        .with_runmat_extensions_enabled(
-            parser_compat(config.language.compat).allows_runmat_extensions(),
-        )
-        .with_known_project_symbols(&known_symbols);
-    let mut analysis = runmat_static_analysis::frontend::analyze_source_with_catalog(
-        &content,
+    let mut project = runmat_static_analysis::project::analyze_project_source(
+        ProjectSource {
+            path: resolved_primary,
+            text: content,
+        },
+        path_namespace,
         parser_compat(config.language.compat),
-        &lowering_context,
         source_catalog.as_ref(),
-    );
-    analysis.diagnostics.extend(catalog_diagnostics);
-    analysis.diagnostics.sort_by_key(|diagnostic| {
+        |definition| {
+            let provider = source_provider.clone();
+            async move {
+                read_project_source(provider.as_ref(), &definition.source_path)
+                    .await
+                    .map_err(|error| error.to_string())
+            }
+        },
+    )
+    .await
+    .with_context(|| format!("Failed to analyze project source: {}", path.display()))?;
+    project.analysis.diagnostics.extend(catalog_diagnostics);
+    project.analysis.diagnostics.sort_by_key(|diagnostic| {
         (
+            diagnostic.primary.source.unwrap_or(ProgramSourceId(0)),
             diagnostic.primary.span.start,
             diagnostic.primary.span.end,
             diagnostic.code.clone(),
         )
     });
+    let analysis = &project.analysis;
+    let sources = CheckSources::Project(&project, &path);
 
     let error_count = analysis
         .diagnostics
@@ -359,7 +370,7 @@ async fn check_m_file(
         let diagnostics = analysis
             .diagnostics
             .iter()
-            .map(|diagnostic| CheckDiagnostic::from_hir(diagnostic, &content))
+            .map(|diagnostic| CheckDiagnostic::from_hir(diagnostic, &sources))
             .collect::<Vec<_>>();
         let payload = json!({
             "schema_version": 1,
@@ -368,7 +379,11 @@ async fn check_m_file(
             "path": path,
             "project_revision": analysis.project_revision,
             "analysis": analysis.domains,
+            "analysis_incomplete_sources": project.incomplete_sources,
+            "call_context_budget_exhausted": project.call_context_budget_exhausted,
+            "call_context_precision_withheld": project.call_context_precision_withheld,
             "resolution": analysis.resolution,
+            "sources": project_source_paths(&project, &path),
             "diagnostics": diagnostics,
             "summary": {
                 "errors": error_count,
@@ -385,11 +400,23 @@ async fn check_m_file(
         for diagnostic in &analysis.diagnostics {
             println!(
                 "{}",
-                render_check_diagnostic_with_styles(diagnostic, &path, &content, &styles)
+                render_check_diagnostic_with_sources(diagnostic, &sources, &styles)
             );
         }
         if options.verbose {
             println!("analysis: {}", serde_json::to_string(&analysis.domains)?);
+            if project.call_context_budget_exhausted {
+                println!("analysis partial: call-context analysis budget exhausted");
+            }
+            if project.call_context_precision_withheld {
+                println!("analysis partial: unsupported call-context precision withheld");
+            }
+            for source in &project.incomplete_sources {
+                println!(
+                    "analysis partial: companion source not composed: {}",
+                    source.display()
+                );
+            }
         }
         let summary = format!(
             "checked {}: {} error(s), {} warning(s)",
@@ -411,6 +438,17 @@ async fn check_m_file(
     Ok(())
 }
 
+// Reading remains adapter-owned. Both primary and selected sources use the
+// original captured provider; analysis receives only its pure namespace grammar.
+async fn read_project_source(
+    provider: &dyn runmat_filesystem::FsProvider,
+    path: &Path,
+) -> std::io::Result<String> {
+    let bytes = provider.read(path).await?;
+    String::from_utf8(bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
 fn merge_source_catalog(
     destination: &mut Option<runmat_package::DiscoveredSourceSymbols>,
     mut additional: runmat_package::DiscoveredSourceSymbols,
@@ -425,6 +463,26 @@ fn merge_source_catalog(
     } else {
         *destination = Some(additional);
     }
+}
+
+// Project source IDs are positions in the shared owner's source table. Publish
+// only display paths, not source text, so resolution spans remain attributable
+// even when no diagnostic happens to refer to the same document.
+fn project_source_paths(
+    project: &ProjectAnalysis,
+    primary_display_path: &Path,
+) -> Vec<serde_json::Value> {
+    project
+        .sources
+        .iter()
+        .enumerate()
+        .map(|(source_id, source)| {
+            json!({
+                "source_id": source_id,
+                "path": if source_id == 0 { primary_display_path } else { source.path.as_path() },
+            })
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -442,12 +500,14 @@ struct CheckDiagnostic<'a> {
 
 #[derive(Serialize)]
 struct CheckDiagnosticSpan<'a> {
+    source_id: ProgramSourceId,
+    path: Option<&'a Path>,
     start: usize,
     end: usize,
-    line: usize,
-    column: usize,
-    end_line: usize,
-    end_column: usize,
+    line: Option<usize>,
+    column: Option<usize>,
+    end_line: Option<usize>,
+    end_column: Option<usize>,
     label: Option<&'a str>,
 }
 
@@ -459,7 +519,7 @@ struct CheckSuggestion<'a> {
 }
 
 impl<'a> CheckDiagnostic<'a> {
-    fn from_hir(diagnostic: &'a HirDiagnostic, source: &str) -> Self {
+    fn from_hir(diagnostic: &'a HirDiagnostic, sources: &CheckSources<'a>) -> Self {
         Self {
             code: &diagnostic.code,
             severity: diagnostic_severity_name(&diagnostic.severity),
@@ -468,12 +528,20 @@ impl<'a> CheckDiagnostic<'a> {
             primary: CheckDiagnosticSpan::from_hir(
                 diagnostic.primary.span,
                 diagnostic.primary.label.as_deref(),
-                source,
+                diagnostic.primary.source,
+                sources,
             ),
             secondary: diagnostic
                 .secondary
                 .iter()
-                .map(|span| CheckDiagnosticSpan::from_hir(span.span, span.label.as_deref(), source))
+                .map(|span| {
+                    CheckDiagnosticSpan::from_hir(
+                        span.span,
+                        span.label.as_deref(),
+                        span.source,
+                        sources,
+                    )
+                })
                 .collect(),
             notes: diagnostic
                 .notes
@@ -485,7 +553,12 @@ impl<'a> CheckDiagnostic<'a> {
                 .suggestions
                 .iter()
                 .map(|suggestion| CheckSuggestion {
-                    span: CheckDiagnosticSpan::from_hir(suggestion.span, None, source),
+                    span: CheckDiagnosticSpan::from_hir(
+                        suggestion.span,
+                        None,
+                        suggestion.source,
+                        sources,
+                    ),
                     replacement: &suggestion.replacement,
                     message: &suggestion.message,
                 })
@@ -495,17 +568,52 @@ impl<'a> CheckDiagnostic<'a> {
 }
 
 impl<'a> CheckDiagnosticSpan<'a> {
-    fn from_hir(span: Span, label: Option<&'a str>, source: &str) -> Self {
-        let (line, column) = source_position(source, span.start);
-        let (end_line, end_column) = source_position(source, span.end);
+    fn from_hir(
+        span: Span,
+        label: Option<&'a str>,
+        source: Option<ProgramSourceId>,
+        sources: &CheckSources<'a>,
+    ) -> Self {
+        let located = sources.source(source);
+        let start = located.map(|(_, text)| source_position(text, span.start));
+        let end = located.map(|(_, text)| source_position(text, span.end));
         Self {
+            source_id: source.unwrap_or(ProgramSourceId(0)),
+            path: located.map(|(path, _)| path),
             start: span.start,
             end: span.end,
-            line,
-            column,
-            end_line,
-            end_column,
+            line: start.map(|(line, _)| line),
+            column: start.map(|(_, column)| column),
+            end_line: end.map(|(line, _)| line),
+            end_column: end.map(|(_, column)| column),
             label,
+        }
+    }
+}
+
+enum CheckSources<'a> {
+    Project(&'a ProjectAnalysis, &'a Path),
+    #[cfg(test)]
+    Single(&'a Path, &'a str),
+}
+
+impl<'a> CheckSources<'a> {
+    fn source(&self, id: Option<ProgramSourceId>) -> Option<(&'a Path, &'a str)> {
+        match self {
+            Self::Project(project, primary_display_path) => project.source(id).map(|source| {
+                let path = if id.is_none_or(|id| id == ProgramSourceId(0)) {
+                    *primary_display_path
+                } else {
+                    source.path.as_path()
+                };
+                (path, source.text.as_str())
+            }),
+            #[cfg(test)]
+            Self::Single(path, text) if id.is_none_or(|id| id == ProgramSourceId(0)) => {
+                Some((path, text))
+            }
+            #[cfg(test)]
+            Self::Single(_, _) => None,
         }
     }
 }
@@ -547,31 +655,96 @@ fn render_check_diagnostic(diagnostic: &HirDiagnostic, path: &Path, source: &str
     render_check_diagnostic_with_styles(diagnostic, path, source, &StreamStyles::plain())
 }
 
+#[cfg(test)]
 fn render_check_diagnostic_with_styles(
     diagnostic: &HirDiagnostic,
     path: &Path,
     source: &str,
     styles: &StreamStyles,
 ) -> String {
-    let mut rendered = render_located(
-        &LocatedDiagnostic {
-            severity: &diagnostic.severity,
-            code: &diagnostic.code,
-            message: &diagnostic.message,
-            span: diagnostic.primary.span,
-            label: diagnostic.primary.label.as_deref(),
-        },
-        path,
-        source,
-        styles,
-    );
+    render_check_diagnostic_with_sources(diagnostic, &CheckSources::Single(path, source), styles)
+}
+
+fn render_check_diagnostic_with_sources(
+    diagnostic: &HirDiagnostic,
+    sources: &CheckSources<'_>,
+    styles: &StreamStyles,
+) -> String {
+    let (severity, severity_tone) = match diagnostic.severity {
+        HirDiagnosticSeverity::Error => ("error", Tone::Error),
+        HirDiagnosticSeverity::Warning => ("warning", Tone::Warning),
+        HirDiagnosticSeverity::Information => ("info", Tone::Info),
+        HirDiagnosticSeverity::Help => ("help", Tone::Help),
+    };
+    let mut rendered = if let Some((path, source)) = sources.source(diagnostic.primary.source) {
+        let (line, column, line_start, line_text) =
+            source_line(source, diagnostic.primary.span.start);
+        let primary_start = diagnostic.primary.span.start.min(source.len());
+        let primary_end = diagnostic
+            .primary
+            .span
+            .end
+            .min(source.len())
+            .max(primary_start);
+        let prefix_width = source[line_start..primary_start].chars().count();
+        let span_len = source[primary_start..primary_end]
+            .split('\n')
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .count()
+            .max(1)
+            .min(
+                line_text
+                    .chars()
+                    .count()
+                    .saturating_sub(prefix_width)
+                    .max(1),
+            );
+        let gutter = line.to_string().len();
+        let severity = styles.paint(severity_tone, severity);
+        let code = styles.identifier(&diagnostic.code);
+        let location = styles.path(format!("{}:{line}:{column}", path.display()));
+        let arrow = styles.muted("-->");
+        let separator = styles.muted("|");
+        let carets = styles.paint(severity_tone, "^".repeat(span_len));
+        format!(
+        "{severity}[{code}]: {}\n {arrow} {location}\n{:gutter$} {separator}\n{line:>gutter$} {separator} {line_text}\n{:gutter$} {separator} {}{carets}",
+        diagnostic.message,
+        "",
+        "",
+        " ".repeat(prefix_width),
+    )
+    } else {
+        format!(
+            "{}[{}]: {}\n {} <unavailable source {}>:bytes {}..{}",
+            styles.paint(severity_tone, severity),
+            styles.identifier(&diagnostic.code),
+            diagnostic.message,
+            styles.muted("-->"),
+            diagnostic.primary.source.unwrap_or(ProgramSourceId(0)).0,
+            diagnostic.primary.span.start,
+            diagnostic.primary.span.end,
+        )
+    };
+    if let Some(label) = &diagnostic.primary.label {
+        rendered.push(' ');
+        rendered.push_str(&styles.paint(severity_tone, label));
+    }
     for secondary in &diagnostic.secondary {
-        let (secondary_line, secondary_column, _, _) = source_line(source, secondary.span.start);
         let related = styles.info("related:");
-        let location = styles.path(format!(
-            "{}:{secondary_line}:{secondary_column}",
-            path.display()
-        ));
+        let location = match sources.source(secondary.source) {
+            Some((path, source)) => {
+                let (line, column) = source_position(source, secondary.span.start);
+                styles.path(format!("{}:{line}:{column}", path.display()))
+            }
+            None => styles.path(format!(
+                "<unavailable source {}>:bytes {}..{}",
+                secondary.source.unwrap_or(ProgramSourceId(0)).0,
+                secondary.span.start,
+                secondary.span.end,
+            )),
+        };
         rendered.push_str(&format!("\n  {} {related} {location}", styles.muted("=")));
         if let Some(label) = &secondary.label {
             rendered.push_str(&format!(": {label}"));
@@ -680,6 +853,10 @@ fn is_matlab_file(path: &Path) -> bool {
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
 }
+
+#[cfg(test)]
+#[path = "check/project_diagnostic_tests.rs"]
+mod project_diagnostic_tests;
 
 #[cfg(test)]
 mod script_check_tests {

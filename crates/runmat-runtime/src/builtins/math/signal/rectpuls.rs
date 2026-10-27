@@ -145,7 +145,7 @@ async fn rectpuls_in_runtime(
         |value| rectpuls_scalar(value, width),
         &mut cooperation,
     )
-    .await
+    .await?
     .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &RECTPULS_ERROR_INTERNAL))?;
     let Some(source) = gpu_source else {
         return Ok(tensor_into_value(output));
@@ -282,7 +282,7 @@ async fn rectpuls_input_tensor(
             Err(rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))
         }
         other => waveform_input_tensor(other, BUILTIN_NAME, cooperation)
-            .await
+            .await?
             .map_err(|error| {
                 error.into_runtime_error(
                     BUILTIN_NAME,

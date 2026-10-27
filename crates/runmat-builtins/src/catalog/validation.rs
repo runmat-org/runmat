@@ -88,6 +88,17 @@ pub fn validate_builtin_catalog_with_aliases(
             ));
         }
         let declares_suspension = entry.contract.effects.contains(&EffectKind::MaySuspend);
+        if entry.contract.async_behavior == BuiltinAsyncBehavior::MaySuspendLocally
+            && (entry.contract.purity != crate::BuiltinPurity::Pure
+                || !entry.contract.capabilities.is_empty()
+                || entry
+                    .contract
+                    .effects
+                    .iter()
+                    .any(|effect| !matches!(effect, EffectKind::MayThrow | EffectKind::MaySuspend)))
+        {
+            errors.push(error(Some(name), "local numerical suspension requires a pure, capability-free contract without external effects"));
+        }
         if matches!(
             entry.contract.async_behavior,
             BuiltinAsyncBehavior::NeverSuspends

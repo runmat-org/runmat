@@ -28,6 +28,7 @@ pub struct ObjectAccessContext {
     pub active_protocol: Option<ObjectProtocol>,
     pub active_method: Option<ActiveObjectMethodIdentity>,
     pub selected_active_owner: Option<runmat_types::ClassMethodOwner>,
+    pub selected_active_binding: Option<runmat_value::BoundFunctionBinding>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,22 +40,38 @@ pub struct ActiveObjectMethodIdentity {
 }
 
 impl ObjectAccessContext {
-    pub fn from_selected_method_frame(
+    fn selected_method_frame_is_admitted(
         owner: &runmat_types::ClassMethodOwner,
         facts: &runmat_value::SelectedObjectClassFacts,
-    ) -> Result<Self, crate::RuntimeError> {
-        let admitted = match owner.role {
+    ) -> bool {
+        match owner.role {
             runmat_types::ClassMethodRole::Ordinary => facts
                 .method(&owner.method)
                 .is_some_and(|method| &method.owner == owner),
             runmat_types::ClassMethodRole::Constructor => {
                 facts.ancestry().contains(&owner.declaring_class) && !owner.is_static
             }
-        };
-        if !admitted {
+        }
+    }
+
+    pub fn from_selected_method_frame(
+        owner: &runmat_types::ClassMethodOwner,
+        facts: &runmat_value::SelectedObjectClassFacts,
+    ) -> Result<Self, crate::RuntimeError> {
+        if !Self::selected_method_frame_is_admitted(owner, facts) {
             return Err(crate::runtime_error::semantic_error(
                 "ObjectMethodFrameIdentityMismatch",
                 "selected method frame differs from its receiver's class product",
+            ));
+        }
+        let selected_active_binding = match owner.role {
+            runmat_types::ClassMethodRole::Constructor => Some(facts.constructor().clone()),
+            runmat_types::ClassMethodRole::Ordinary => facts.method_binding(&owner.method),
+        };
+        if selected_active_binding.is_none() {
+            return Err(crate::runtime_error::semantic_error(
+                "ObjectMethodFrameIdentityMismatch",
+                "selected method frame has no admitted body",
             ));
         }
         Ok(Self {
@@ -65,6 +82,7 @@ impl ObjectAccessContext {
                 .flatten(),
             active_method: None,
             selected_active_owner: Some(owner.clone()),
+            selected_active_binding,
         })
     }
 
@@ -95,7 +113,7 @@ impl ObjectAccessContext {
                 ),
             ));
         }
-        let active_method = (!owner.is_static).then(|| ActiveObjectMethodIdentity {
+        let active_method = Some(ActiveObjectMethodIdentity {
             declaring_class: bound.declaring_class.clone(),
             method: bound.declaration.name.clone(),
             callable: bound.callable.clone(),
@@ -104,11 +122,12 @@ impl ObjectAccessContext {
         Ok(Self {
             caller_class: Some(owner.declaring_class.clone()),
             caller_method: Some(owner.method.clone()),
-            active_protocol: active_method
-                .as_ref()
-                .and_then(|_| ObjectProtocol::from_method(&owner.method)),
+            active_protocol: (!owner.is_static)
+                .then(|| ObjectProtocol::from_method(&owner.method))
+                .flatten(),
             active_method,
             selected_active_owner: None,
+            selected_active_binding: None,
         })
     }
 
@@ -135,6 +154,7 @@ impl ObjectAccessContext {
             caller_method,
             active_method,
             selected_active_owner: None,
+            selected_active_binding: None,
         }
     }
 }

@@ -19,7 +19,7 @@ pub(super) async fn gather_object_members(
     array: ObjectArray,
     field: Utf8Text,
     allow_init: bool,
-    caller: Option<&str>,
+    caller: super::MemberCaller<'_>,
 ) -> Result<RootedValueSequence, RuntimeError> {
     // Validate cardinality and admit the final slots before invoking a getter.
     runmat_value::validate_output_count(array.len())
@@ -58,7 +58,7 @@ pub(super) async fn gather_object_members(
                 let selected = match runtime {
                     Some(runtime) => {
                         crate::execution::admit_executable_sequence_with(runtime, || {
-                            super::read::read_member_sequence_text_with_context(
+                            super::read::read_member_sequence_text_with_caller(
                                 Some(runtime),
                                 value.clone(),
                                 field.clone(),
@@ -69,7 +69,7 @@ pub(super) async fn gather_object_members(
                         .await?
                     }
                     None => {
-                        Box::pin(super::read::read_member_sequence_text_with_context(
+                        Box::pin(super::read::read_member_sequence_text_with_caller(
                             None,
                             value.clone(),
                             field.clone(),

@@ -67,7 +67,7 @@ impl<T: Copy> ClaimedVec<T> {
         additional: usize,
         work: &mut Work<'_>,
     ) -> Result<(), SparseWorkError> {
-        work.fence.checkpoint(work.runtime)?;
+        work.fence.checkpoint_optional(work.runtime)?;
         let needed = self
             .len()
             .checked_add(additional)
@@ -84,18 +84,19 @@ impl<T: Copy> ClaimedVec<T> {
         let layout = Layout::array::<T>(next).map_err(|_| HostAllocationError::Overflow)?;
         let receipt = match &work.fence {
             Fence::Managed(_) => Some(admit(
-                work.runtime,
+                work.required_runtime()?,
                 0,
                 collection_block_retained_bytes(layout)?,
             )?),
             Fence::Unbounded => None,
         };
-        work.fence.checkpoint(work.runtime)?;
+        work.fence.checkpoint_optional(work.runtime)?;
         let mut replacement = match receipt.as_ref() {
             Some(receipt) => {
-                let mut values = AdmittedVec::new_in(receipt.collection_allocator(work.runtime)?);
+                let mut values =
+                    AdmittedVec::new_in(receipt.collection_allocator(work.required_runtime()?)?);
                 let result = values.try_reserve_exact(next);
-                receipt.checkpoint(work.runtime)?;
+                receipt.checkpoint(work.required_runtime()?)?;
                 result.map_err(|_| allocation_failed())?;
                 Storage::Managed(values)
             }
@@ -104,18 +105,18 @@ impl<T: Copy> ClaimedVec<T> {
                 values
                     .try_reserve_exact(next)
                     .map_err(|_| allocation_failed())?;
-                work.fence.checkpoint(work.runtime)?;
+                work.fence.checkpoint_optional(work.runtime)?;
                 Storage::Unbounded(values)
             }
         };
-        work.fence.checkpoint(work.runtime)?;
+        work.fence.checkpoint_optional(work.runtime)?;
         for &value in self.as_slice() {
             replacement.push(value);
             work.tick().await?;
         }
         work.flush().await?;
         if let Some(receipt) = &receipt {
-            receipt.checkpoint(work.runtime)?;
+            receipt.checkpoint(work.required_runtime()?)?;
         }
         self.values = Some(replacement);
         Ok(())

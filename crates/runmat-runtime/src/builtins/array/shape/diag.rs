@@ -88,7 +88,7 @@ struct ParsedDiagArgs {
 }
 
 impl ParsedDiagArgs {
-    async fn parse(args: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
+    async fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut offset: Option<isize> = None;
         let mut size_override: Option<(usize, usize)> = None;
         let mut vector_mode = false;
@@ -278,7 +278,7 @@ async fn diag_builtin(value: Value, rest: crate::call::BuiltinArguments) -> Buil
         BUILTIN_NAME,
     )?;
     ensure_diag_compatibility(&value, rest.view())?;
-    let parsed = ParsedDiagArgs::parse(rest).await?;
+    let parsed = ParsedDiagArgs::parse(rest.view()).await?;
     if let Value::GpuTensor(handle) = value {
         return diag_resident(handle, &parsed).await;
     }
@@ -287,6 +287,19 @@ async fn diag_builtin(value: Value, rest: crate::call::BuiltinArguments) -> Buil
 
 fn ensure_diag_compatibility(
     value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    let shape = match value {
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        _ => None,
+    };
+    ensure_diag_geometry_compatibility(shape, rest)
+}
+fn ensure_diag_geometry_compatibility(
+    shape: Option<&[usize]>,
     rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     let mut keywords = Vec::new();
@@ -352,13 +365,7 @@ fn ensure_diag_compatibility(
     if has_size_vector || (rest.len() > 1 && !like_only) {
         crate::compatibility::ensure_builtin_extension_enabled(&DIAG_SIZE_EXTENSION, BUILTIN_NAME)?;
     }
-    let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape()),
-        Value::LogicalArray(array) => Some(array.shape.as_slice()),
-        Value::GpuTensor(handle) => Some(handle.shape()),
-        _ => None,
-    };
+
     if shape.is_some_and(|shape| shape.len() > 2 && shape[2..].iter().all(|dim| *dim == 1)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DIAG_TRAILING_SINGLETON_EXTENSION,
@@ -528,10 +535,10 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
     };
 
     let result = if parsed.vector_mode {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         provider.reshape(&handle, &[len, 1])
     } else if is_vector {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         let (out_rows, out_cols) = vector_output_dims(len, parsed)?;
         if parsed.size_override.is_some() {
             provider.diag_from_vector_sized(&handle, parsed.offset, out_rows, out_cols)
@@ -769,7 +776,7 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
     validate_vector_mode(is_vector, args)?;
 
     if args.vector_mode {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         let data = vector_copy(array.data(), len);
         let out = CharArray::from_code_units(data, len, 1)
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
@@ -777,7 +784,7 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
     }
 
     if is_vector {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         let (out_rows, out_cols) = vector_output_dims(len, args)?;
         let data = diag_matrix_from_vector_row_major(
             array.data(),
@@ -818,12 +825,12 @@ fn evaluate_column_major_diag<T: Clone>(
     validate_vector_mode(is_vector, args)?;
 
     if args.vector_mode {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         return Ok((vector_copy(data, len), vec![len, 1]));
     }
 
     if is_vector {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         let (out_rows, out_cols) = vector_output_dims(len, args)?;
         let out =
             diag_matrix_from_vector_col_major(data, len, args.offset, out_rows, out_cols, zero)?;
@@ -1475,6 +1482,18 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
 }
 
+#[path = "diag/geometry.rs"]
+mod geometry;
+pub(in crate::builtins) use geometry::{diagonal_geometry, DiagonalGeometry};
+
+fn vector_length(rows: usize, columns: usize) -> usize {
+    if rows == 0 || columns == 0 {
+        0
+    } else {
+        rows.max(columns)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1537,6 +1556,15 @@ mod tests {
         };
         assert_eq!(tensor.shape(), &[3, 1]);
         assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0, 30.0]);
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap());
+        let Value::Tensor(out) = run_diag(empty.clone(), Vec::new()).unwrap() else {
+            panic!("empty diagonal matrix")
+        };
+        assert_eq!(out.shape(), &[0, 0]);
+        let Value::Tensor(out) = run_diag(empty, vec![Value::from("vector")]).unwrap() else {
+            panic!("empty vector mode")
+        };
+        assert_eq!(out.shape(), &[0, 1]);
     }
 
     #[test]

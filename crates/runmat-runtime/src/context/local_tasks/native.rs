@@ -94,6 +94,7 @@ impl SubmissionPort {
         };
         let state = Rc::new(TaskState {
             outcome: Cell::new(None),
+            retired: Cell::new(false),
             waiters: RefCell::new(HashMap::new()),
             next_waiter: Cell::new(0),
         });

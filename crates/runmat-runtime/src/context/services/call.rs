@@ -32,13 +32,15 @@ impl RuntimeCallRequest {
             CallableTarget::BoundLexical { .. }
                 | CallableTarget::CapturedResolved { .. }
                 | CallableTarget::RetainedFevalForward(_)
+                | CallableTarget::RetainedBuiltin(_)
         );
         let captured_matches = match &descriptor.target {
             CallableTarget::BoundLexical { closure, .. }
             | CallableTarget::CapturedResolved { closure, .. } => source_roots
                 .as_ref()
                 .map(|owner| closure.matches_callable_owner(owner)),
-            CallableTarget::RetainedFevalForward(value) => source_roots
+            CallableTarget::RetainedFevalForward(value)
+            | CallableTarget::RetainedBuiltin(value) => source_roots
                 .as_ref()
                 .map(|owner| value.matches_callable_owner(owner)),
             _ => None,

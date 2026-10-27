@@ -7,6 +7,88 @@ use super::ValueCodecError;
 
 pub type ImmutableValueClassValidator = fn(&ObjectInstance) -> Result<(), String>;
 
+/// Optional exact auxiliary numeric workspace for a registered schema. The
+/// caller owns admission; the validator receives only that admitted slice.
+#[derive(Clone, Copy)]
+pub struct ImmutableValueClassScratch {
+    pub len: fn(&ObjectInstance) -> Result<usize, String>,
+    pub validate: fn(&ObjectInstance, &mut [f64]) -> Result<(), String>,
+}
+
+/// Explicitly reviewed graph transport, not blanket permission for every
+/// class registered for inline persistence.
+pub(super) enum GraphValueClass {
+    Codistributor(runmat_types::ClassIdentity),
+    Registered(RegisteredImmutableValueClass),
+}
+impl GraphValueClass {
+    pub(super) fn for_class(
+        class: &runmat_types::ClassIdentity,
+    ) -> Result<Option<Self>, ValueCodecError> {
+        if crate::parallel::codistributor::is_supported_class(class) {
+            return Ok(Some(Self::Codistributor(class.clone())));
+        }
+        if class.is(runmat_types::standard::INTEGER_CONSTRAINT) {
+            crate::builtins::math::optim::integer_constraint::ensure_registered();
+            return schema_for_class(class.display_name())?
+                .map(Self::Registered)
+                .map(Some)
+                .ok_or_else(|| {
+                    ValueCodecError::invalid("$", "IntegerConstraint schema is unavailable")
+                });
+        }
+        Ok(None)
+    }
+    pub(super) fn for_wire(identity: &str, version: u32) -> Result<Self, ValueCodecError> {
+        crate::builtins::math::optim::integer_constraint::ensure_registered();
+        let class = if let Some(schema) = schema_for_type_identity(identity)? {
+            runmat_types::ClassIdentity::new(schema.class_name())
+        } else {
+            runmat_types::ClassIdentity::new(identity)
+        }
+        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+        let codec = Self::for_class(&class)?.ok_or_else(|| {
+            ValueCodecError::unsupported("$", "registered class has no reviewed graph transport")
+        })?;
+        if codec.type_identity() != identity || codec.schema_version() != version {
+            return Err(ValueCodecError::invalid(
+                "$",
+                "graph class schema identity/version mismatch",
+            ));
+        }
+        Ok(codec)
+    }
+    pub(super) fn class_name(&self) -> &str {
+        match self {
+            Self::Codistributor(class) => class.display_name(),
+            Self::Registered(schema) => schema.class_name(),
+        }
+    }
+    pub(super) fn type_identity(&self) -> &str {
+        match self {
+            Self::Codistributor(class) => class.display_name(),
+            Self::Registered(schema) => schema.type_identity(),
+        }
+    }
+    pub(super) fn schema_version(&self) -> u32 {
+        match self {
+            Self::Codistributor(_) => 1,
+            Self::Registered(schema) => schema.schema_version(),
+        }
+    }
+    pub(super) fn validate(
+        &self,
+        object: &ObjectInstance,
+        workspace: Option<&super::ValidationWorkspaceOwner>,
+    ) -> Result<(), ValueCodecError> {
+        match self {
+            Self::Codistributor(_) => crate::parallel::codistributor::validate_definition(object)
+                .map_err(|error| ValueCodecError::invalid("$", error.to_string())),
+            Self::Registered(schema) => schema.validate_object(object, "$", workspace),
+        }
+    }
+}
+
 /// Portable schema for an immutable RunMat value class.
 ///
 /// The object's `Value` properties are its sole authority. Registration only
@@ -30,6 +112,7 @@ pub(super) struct RegisteredImmutableValueClass {
     allowed_fields: BTreeSet<String>,
     required_fields: BTreeSet<String>,
     validate: ImmutableValueClassValidator,
+    scratch: Option<ImmutableValueClassScratch>,
 }
 
 impl RegisteredImmutableValueClass {
@@ -49,6 +132,7 @@ impl RegisteredImmutableValueClass {
         &self,
         object: &ObjectInstance,
         path: &str,
+        workspace: Option<&super::ValidationWorkspaceOwner>,
     ) -> Result<(), ValueCodecError> {
         if object.class_name().display_name() != self.class_name {
             return Err(ValueCodecError::invalid(
@@ -88,7 +172,26 @@ impl RegisteredImmutableValueClass {
                 ));
             }
         }
-        (self.validate)(object).map_err(|message| ValueCodecError::invalid(path, message))
+        (self.validate)(object).map_err(|message| ValueCodecError::invalid(path, message))?;
+        let Some(scratch) = self.scratch else {
+            return Ok(());
+        };
+        let len =
+            (scratch.len)(object).map_err(|message| ValueCodecError::invalid(path, message))?;
+        if len == 0 {
+            return (scratch.validate)(object, &mut [])
+                .map_err(|message| ValueCodecError::invalid(path, message));
+        }
+        let workspace = workspace.ok_or_else(|| {
+            ValueCodecError::allocation(
+                path,
+                crate::context::host_allocation::HostAllocationError::MissingManagedOwner,
+            )
+        })?;
+        workspace
+            .with_f64_scratch(len, |values| (scratch.validate)(object, values))
+            .map_err(|source| ValueCodecError::allocation(path, source))?
+            .map_err(|message| ValueCodecError::invalid(path, message))
     }
 }
 
@@ -112,7 +215,22 @@ fn registry() -> &'static RwLock<ImmutableValueClassRegistry> {
 pub fn register_immutable_value_class(
     schema: ImmutableValueClassSchema,
 ) -> Result<(), ValueCodecError> {
-    let registered = validate_schema(schema)?;
+    register(schema, None)
+}
+
+pub fn register_immutable_value_class_with_scratch(
+    schema: ImmutableValueClassSchema,
+    scratch: ImmutableValueClassScratch,
+) -> Result<(), ValueCodecError> {
+    register(schema, Some(scratch))
+}
+
+fn register(
+    schema: ImmutableValueClassSchema,
+    scratch: Option<ImmutableValueClassScratch>,
+) -> Result<(), ValueCodecError> {
+    let mut registered = validate_schema(schema)?;
+    registered.scratch = scratch;
     let mut registry = registry()
         .write()
         .map_err(|_| ValueCodecError::invalid("$registry", "value-class registry is poisoned"))?;
@@ -210,6 +328,7 @@ fn validate_schema(
         allowed_fields,
         required_fields,
         validate: schema.validate,
+        scratch: None,
     })
 }
 

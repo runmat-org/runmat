@@ -12,6 +12,7 @@ use std::sync::{
 pub(super) struct DurableControl {
     cancelled: AtomicBool,
     failure: Mutex<Option<String>>,
+    reason: Mutex<Option<runmat_execution::CancellationReason>>,
     progress: Mutex<Option<crate::protocol::ProgramProgress>>,
     console: Option<Mutex<super::console_journal::ConsoleJournal>>,
 }
@@ -26,9 +27,15 @@ impl DurableControl {
             ..Default::default()
         })
     }
-    pub(super) fn stop(&self, delivered: NativeExecutionResult<()>) {
-        if let Err(error) = delivered {
-            *self.failure.lock().expect("durable control poisoned") = Some(error.to_string());
+    pub(super) fn stop(
+        &self,
+        delivered: NativeExecutionResult<runmat_execution::CancellationReason>,
+    ) {
+        match delivered {
+            Ok(reason) => *self.reason.lock().expect("durable control poisoned") = Some(reason),
+            Err(error) => {
+                *self.failure.lock().expect("durable control poisoned") = Some(error.to_string())
+            }
         }
         self.cancelled.store(true, Ordering::Release);
     }
@@ -40,6 +47,9 @@ impl DurableControl {
     }
 }
 impl ProcessControl for DurableControl {
+    fn cancellation_reason(&self) -> Option<runmat_execution::CancellationReason> {
+        *self.reason.lock().expect("durable control poisoned")
+    }
     fn cancellation(&self) -> &AtomicBool {
         &self.cancelled
     }
@@ -78,15 +88,22 @@ impl ProcessControl for DurableControl {
     }
 }
 
-pub(super) async fn watch(path: &Path, original: &AttemptRequest) -> NativeExecutionResult<()> {
+pub(super) async fn watch(
+    path: &Path,
+    original: &AttemptRequest,
+) -> NativeExecutionResult<runmat_execution::CancellationReason> {
     loop {
-        if let Some(marker) = super::filesystem::read_optional_json::<AttemptRequest>(path)? {
-            if marker != *original {
+        if let Some(marker) = super::filesystem::read_optional_json::<
+            crate::process_provider::cancellation::CancellationCommand,
+        >(path)?
+        {
+            if marker.request != *original {
                 return Err(NativeExecutionError::Protocol(
                     "durable control differs from the full original assignment".into(),
                 ));
             }
-            return Ok(());
+            return crate::process_provider::cancellation::reason(original, marker.cause)
+                .map_err(NativeExecutionError::Protocol);
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }

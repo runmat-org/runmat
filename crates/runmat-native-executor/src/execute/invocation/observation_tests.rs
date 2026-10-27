@@ -63,7 +63,10 @@ fn terminal_result_outlives_the_native_arena() {
             target: handle,
             valid: true,
         });
-        let reference = state.arena.insert(value.clone());
+        let reference = state
+            .arena
+            .insert(value.clone(), Some(&state.runtime))
+            .unwrap();
         initial.unroot().expect("transfer root to native arena");
 
         let mut invocation = NativeInvocation::new(

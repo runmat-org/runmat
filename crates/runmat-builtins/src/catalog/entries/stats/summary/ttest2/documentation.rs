@@ -28,6 +28,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Samples and dimensions", paragraphs: &[
             "Single- and double-precision vectors, matrices, and N-D arrays are supported. Vectors are single samples and may have different lengths. Arrays are tested along their first nonsingleton dimension unless `\"Dim\"` selects another; all other dimensions must agree.",
+            "Dim is a positive, platform-representable integer. Dimensions beyond the input rank are singleton dimensions, subject to representable metadata geometry and successful allocation; there is no fixed 1024-dimension limit.",
             "NaNs are omitted separately from the two samples. If either sample has fewer than two valid observations, `h` is false and the numeric outputs are NaN.",
             "Native integer samples and integer `Alpha` or `Dim` controls are independently gated RunMat extensions. Statistical conversion to binary64 rejects values that cannot be represented exactly.",
         ] },
@@ -37,6 +38,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
         BuiltinDocumentationSection { heading: "Resident inputs", paragraphs: &[
             "GPU samples are gathered through their owning provider for host reductions and Student-t distribution calculations. Outputs are host values; this operation does not use a resident statistical kernel.",
+            "Sample and option transfers retain the original explicit execution context and typed cancellation. Existing integer compatibility gates and owning-provider resident-input forms are unchanged. Finite host-memory execution refuses before transfers or workspaces because the materialization, lane and result storage have no complete allocation certificate.",
         ] },
     ],
     examples: &[

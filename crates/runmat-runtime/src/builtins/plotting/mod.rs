@@ -36,6 +36,8 @@ mod test_support;
 pub mod web;
 #[path = "ops/addpoints.rs"]
 pub(crate) mod addpoints;
+#[path = "ops/optimplot.rs"]
+pub(crate) mod optimplot;
 #[path = "ops/ancestor.rs"]
 pub(crate) mod ancestor;
 #[path = "ops/animatedline.rs"]

@@ -15,10 +15,12 @@ fn imported_source_aliases_are_rejected() {
         region support : face { select id "face_000001"; expect exactly_one }
     }"#;
     let program = FeaCompiler::new(&TestHost::default().with_geometry("project/part.brep", 2))
-        .check(CheckRequest { modules: ModuleGraphRequest {
-            source_root: LogicalSourcePath::new("project").unwrap(),
-            root: source_module("project/main.fea", source, 1),
-        }});
+        .check(CheckRequest {
+            modules: ModuleGraphRequest {
+                source_root: LogicalSourcePath::new("project").unwrap(),
+                root: source_module("project/main.fea", source, 1),
+            },
+        });
     assert!(!program.is_valid());
     assert!(format!("{:?}", program.diagnostics).contains("canonical occurrence-qualified ID"));
 }
@@ -31,15 +33,20 @@ fn canonical_occurrence_selection_is_preserved_by_the_compiler() {
         file = "./part.brep"
         units = m
         region support : face { select persistent_id "CANONICAL"; expect exactly_one }
-    }"#.replace("CANONICAL", &id);
+    }"#
+    .replace("CANONICAL", &id);
     let program = FeaCompiler::new(&TestHost::default().with_geometry("project/part.brep", 2))
-        .check(CheckRequest { modules: ModuleGraphRequest {
-            source_root: LogicalSourcePath::new("project").unwrap(),
-            root: source_module("project/main.fea", &source, 1),
-        }});
+        .check(CheckRequest {
+            modules: ModuleGraphRequest {
+                source_root: LogicalSourcePath::new("project").unwrap(),
+                root: source_module("project/main.fea", &source, 1),
+            },
+        });
     assert!(program.is_valid(), "{:?}", program.diagnostics);
-    assert!(matches!(&program.geometries.values().next().unwrap().regions[0].selector,
-        runmat_geometry_core::GeometryRegionSelector::PersistentId(value) if value == &id));
+    assert!(
+        matches!(&program.geometries.values().next().unwrap().regions[0].selector,
+        runmat_geometry_core::GeometryRegionSelector::PersistentId(value) if value == &id)
+    );
 }
 
 #[test]
@@ -137,7 +144,9 @@ geometry bracket {
     file = "./part.step"
 }
 "#;
-    let inspection = GeometryInspection {preview_extent_m: None, 
+    let inspection = GeometryInspection {
+        preview_extent_m: None,
+        named_selections: None,
         unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::Declared {
             contexts: vec![runmat_geometry_core::physical::LengthUnitDeclaration {
                 context: "STEP fixture #1".into(),
@@ -177,6 +186,73 @@ geometry bracket {
 //   shared_infrastructure/mesh_independent/source_check; coverage: partial;
 //   boundary: Authored `units = m` over a STEP file declaring millimetres resolves to metres and reports a located units-override warning; the check stays valid.
 #[test]
+fn readable_inline_geometry_uses_asset_owned_named_selections() {
+    let entity = runmat_geometry_core::PersistentEntityId::new(runmat_geometry_core::PersistentEntityKind::Solid, "exact-bracket".into(), vec!["root".into()]);
+    let id = entity.analysis_selection_id().unwrap();
+    let metadata = runmat_geometry_core::GeometryNamedSelections {
+        schema_version: 1,
+        source_digest: runmat_geometry_core::GeometryDigest::from_bytes([3; 32]),
+        regions: vec![runmat_geometry_core::GeometryRegionDefinition {
+            region_id: "body".into(),
+            role: runmat_geometry_core::GeometryRegionRole::Solid,
+            selector: runmat_geometry_core::GeometryRegionSelector::PersistentId(id.clone()),
+            cardinality: runmat_geometry_core::GeometryRegionCardinality::ExactlyOne,
+        }],
+    };
+    let source = r#"geometry bracket { file = "./bracket.brep"; units = m
+        region body : solid { select name "body"; expect exactly_one }
+    }
+material steel { mass_density = 7850 kg/m^3 }
+model loaded_bracket { assign material.steel to geometry.bracket.region.body }
+"#;
+    let inspection = GeometryInspection {
+            authored_names: Default::default(),
+        preview_extent_m: None,
+        named_selections: Some(metadata),
+        content_digest: SourceDigest([3; 32]),
+        topology_digest: SourceDigest([4; 32]),
+        capabilities: vec![
+            GeometryInspectionCapability::Topology,
+            GeometryInspectionCapability::PersistentIds,
+        ],
+        exchange: None,
+        resolved_units: None,
+        unit_evidence: Default::default(),
+    };
+    let host = TestHost::default().with_geometry_inspection("project/bracket.brep", inspection);
+    let checked = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(checked.is_valid(), "{:?}", checked.diagnostics);
+    assert!(!source.contains("persistent-entity:"));
+    assert!(!source.contains("import geometry"));
+    let geometry = checked.geometries.values().next().unwrap();
+    assert_eq!(geometry.module_path, "project/main.fea");
+    let runmat_geometry_core::GeometryDefinitionSource::Imported(imported) = &geometry.source
+    else {
+        panic!("imported")
+    };
+    assert_eq!(
+        imported
+            .named_selections
+            .as_ref()
+            .unwrap()
+            .selection("body", runmat_geometry_core::GeometryRegionRole::Solid)
+            .unwrap(),
+        id
+    );
+    assert!(checked
+        .bound
+        .graph
+        .source_dependencies()
+        .unwrap()
+        .contains(&LogicalSourcePath::new("project/.runmat/geometry/bracket.brep.json").unwrap()));
+}
+
+#[test]
 fn authored_units_override_a_different_file_declaration_with_a_warning() {
     let source = r#"
 geometry channel {
@@ -185,6 +261,7 @@ geometry channel {
 }
 "#;
     let inspection = GeometryInspection {
+            named_selections: None,
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![

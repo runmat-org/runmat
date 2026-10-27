@@ -189,7 +189,7 @@ pub(super) enum NormOrder {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum TensorKind {
+pub(in crate::builtins::math) enum TensorKind {
     Vector,
     Matrix { rows: usize, cols: usize },
 }
@@ -383,7 +383,7 @@ fn norm_complex_tensor_impl(tensor: &ComplexTensor, order: NormOrder) -> Builtin
     }
 }
 
-fn classify_tensor(shape: &[usize]) -> BuiltinResult<TensorKind> {
+pub(in crate::builtins::math) fn classify_tensor(shape: &[usize]) -> BuiltinResult<TensorKind> {
     if shape.is_empty() {
         return Ok(TensorKind::Vector);
     }

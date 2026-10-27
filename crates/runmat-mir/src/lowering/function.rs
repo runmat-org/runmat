@@ -11,8 +11,20 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
         classes: hir
             .classes
             .iter()
-            .map(|class| class.declaration.clone())
-            .collect(),
+            .map(|class| {
+                let module = hir
+                    .modules
+                    .get(class.module.0)
+                    .filter(|module| module.id == class.module)
+                    .ok_or_else(|| HirError::new("class references a missing source module"))?;
+                if class.declaration.source != module.source_id {
+                    return Err(HirError::new(
+                        "class declaration source differs from its HIR module",
+                    ));
+                }
+                Ok(class.declaration.clone())
+            })
+            .collect::<Result<Vec<_>, HirError>>()?,
         class_property_defaults: super::class_defaults::project(hir),
         ..MirAssembly::default()
     };
@@ -105,6 +117,11 @@ fn class_method_owner(
         .iter()
         .find(|class| class.declaration.id == class_id)
         .ok_or_else(|| HirError::new("class method references a missing class declaration"))?;
+    if function.module != class.module {
+        return Err(HirError::new(
+            "class method source module differs from its declaration",
+        ));
+    }
     let method = class
         .declaration
         .methods

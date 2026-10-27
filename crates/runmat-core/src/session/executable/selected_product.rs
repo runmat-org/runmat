@@ -39,6 +39,15 @@ impl RunMatSession {
     ) -> Result<SelectedGraphPrimary, RunError> {
         let error = |message| runtime_error("RunMat:ExecutableSourceIdentity", message);
         let current = unit.compiled_current_body_ids().map_err(error)?;
+        // Source leases exist, but no selected executable/static capture has
+        // escaped. Retain the exact original-to-issued constructor relation
+        // until its immutable declaration product is published below.
+        let constructors = unit
+            .materialize_runtime_constructor_definitions(
+                &mut bytecode.function_registry,
+                Some(&mut bytecode.bound_functions),
+            )
+            .map_err(error)?;
         let targets = dependencies::original_static_targets(unit, &current, runtime, dependencies)?;
         let names = bytecode
             .function_registry
@@ -134,7 +143,7 @@ impl RunMatSession {
         )
         .map_err(error)?;
         selected
-            .with_current_product(bytecode, product)
+            .with_current_product(bytecode, product, &constructors)
             .map_err(error)
     }
 }

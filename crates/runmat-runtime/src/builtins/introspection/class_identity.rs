@@ -33,7 +33,8 @@ pub(crate) fn class_identity_for_value(value: &Value) -> ClassIdentity {
                 handle.physical().element_type().class_identity()
             }
         }
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

@@ -27,10 +27,17 @@ async fn run_process(
     let meters = TransportMeters::default();
     let mut termination = runmat_execution_runner::AttemptExecutionTermination::NotStarted;
     let mut console = None;
-    super::super::run_process(
-        driver,
+    let owner = super::super::owned::ProcessOwner {
+        config: &driver.config,
+        artifacts: &driver.artifacts,
+        objects: &driver.objects,
+        graph_quarantine: &driver.graph_quarantine,
+    };
+    let control = super::super::owned::LocalControl { driver, completion };
+    super::super::owned::run_process(
+        &owner,
         request,
-        completion,
+        &control,
         &meters,
         &mut termination,
         &mut console,
@@ -51,6 +58,7 @@ fn shell_driver(script: &str) -> (tempfile::TempDir, Arc<LocalDriver>) {
             max_stderr_bytes: 4096,
             local_cpu_capacity_millicores: None,
             local_memory_capacity_bytes: None,
+            authored_worker_memory_bytes: None,
             worker_memory_bytes: 1024 * 1024 * 1024,
             worker_scratch_bytes: 1024 * 1024 * 1024,
             worker_cpu_millicores: 1000,

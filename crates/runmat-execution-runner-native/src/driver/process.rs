@@ -18,6 +18,8 @@ use runmat_process_host::{
     ProcessRetirementLease, RetirementBoundChild,
 };
 use tokio::io::BufReader;
+pub(crate) mod owned;
+pub(crate) mod graph;
 
 use super::{
     LocalDriver, TaskCompletion, TransferFailure, TransferResult, NATIVE_ARTIFACT_STORE_ROOT_ENV,
@@ -33,7 +35,7 @@ use crate::protocol::{
 };
 
 /// Original evidence for one launched (or preflight-rejected) attempt.
-pub(super) struct LocalAttemptObservation {
+pub(crate) struct LocalAttemptObservation {
     pub result: TransferResult,
     pub execution: AttemptExecutionObservation,
     pub unsuccessful_resources: Option<Box<AttemptResourceAccounting>>,
@@ -41,11 +43,11 @@ pub(super) struct LocalAttemptObservation {
 }
 
 impl LocalAttemptObservation {
-    /// Build the scheduler report. A verified Graph cancellation is reported
-    /// as cleanup proof, never as an ordinary success or failure.
-    pub(super) fn report(&self, verified_graph_cancel: bool) -> AttemptReport {
-        if verified_graph_cancel {
-            return AttemptReport::GraphRetiredCancelled;
+    /// A cancellation result carries retirement proof only after the actual
+    /// process owner returned. Other original errors are reported separately.
+    pub(super) fn report(&self, verified_cancel: bool) -> AttemptReport {
+        if verified_cancel {
+            return AttemptReport::Retired;
         }
         match &self.result {
             Ok(success) => AttemptReport::Succeeded {
@@ -74,14 +76,14 @@ impl LocalAttemptObservation {
         }
     }
 
-    pub(super) fn into_backend_report(
+    pub(crate) fn into_backend_report(
         self,
         request: &AttemptRequest,
-        verified_graph_cancel: bool,
+        verified_cancel: bool,
     ) -> (TransferResult, runmat_execution_runner::port::BackendReport) {
         let mut report = runmat_execution_runner::port::BackendReport::for_request(
             request,
-            self.report(verified_graph_cancel),
+            self.report(verified_cancel),
         );
         report.execution = Some(Box::new(self.execution));
         report.unsuccessful_resources = self.unsuccessful_resources;
@@ -96,7 +98,7 @@ struct TransportMeters {
     received: IpcByteCounter,
 }
 
-pub(super) enum GraphProcessQuarantine {
+pub(crate) enum GraphProcessQuarantine {
     KnownChild {
         child: Box<RetirementBoundChild<GraphScratchLease>>,
         scratch_path: PathBuf,
@@ -117,7 +119,7 @@ pub(super) enum GraphProcessQuarantine {
     },
 }
 
-pub(super) struct GraphScratchLease(PrivateArtifactLease);
+pub(crate) struct GraphScratchLease(PrivateArtifactLease);
 
 impl ProcessRetirementLease for GraphScratchLease {
     fn persist_unverified(&mut self, process_id: Option<u32>, reason: &str) -> Result<(), String> {
@@ -172,7 +174,7 @@ impl AttemptChild {
 
 /// The driver owns and joins this final retry. A panic or runtime failure
 /// leaves the entry unverified and still owned for explicit persistence.
-pub(super) fn retry_unverified_quarantine(entries: &mut Vec<GraphProcessQuarantine>) {
+pub(crate) fn retry_unverified_quarantine(entries: &mut Vec<GraphProcessQuarantine>) {
     if entries.is_empty() {
         return;
     }
@@ -215,7 +217,7 @@ pub(super) fn retry_unverified_quarantine(entries: &mut Vec<GraphProcessQuaranti
 /// Final fail-closed state when bounded tree-retirement retries did not prove
 /// cleanup. Each exact private directory is recorded for operator recovery;
 /// the driver root must not be recursively removed in this state.
-pub(super) fn persist_unverified_quarantine(entries: &mut Vec<GraphProcessQuarantine>) -> bool {
+pub(crate) fn persist_unverified_quarantine(entries: &mut Vec<GraphProcessQuarantine>) -> bool {
     if entries.is_empty() {
         return true;
     }
@@ -275,6 +277,16 @@ pub(super) fn execute_attempt(
         &mut termination,
         &mut console,
     );
+    let result = if let Some(message) = completion.control_failure() {
+        match result {
+            Err(TransferFailure::RetirementUnverified(message)) => {
+                Err(TransferFailure::RetirementUnverified(message))
+            }
+            _ => Err(TransferFailure::Infrastructure(message)),
+        }
+    } else {
+        result
+    };
     observe(request, started, result, meters, termination, console)
 }
 
@@ -289,6 +301,11 @@ fn launch_attempt(
     request
         .validate()
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+    // This attempt has not touched artifacts or launched a child. Preserve
+    // its original cancellation instead of replacing it with staging failure.
+    if completion.is_cancelled() {
+        return Err(TransferFailure::Cancelled);
+    }
     let assignment = runmat_execution::ProgramExecutionAssignment {
         scope_id: request.scope_id,
         pool_id: request.task.pool_id,
@@ -299,26 +316,7 @@ fn launch_attempt(
         resources: request.resource_assignment.clone(),
     };
     let worker_request = if let Some(graph) = completion.graph_authority.as_ref() {
-        if request.task.program_artifact_id() != Some(graph.artifact_id)
-            || request.task.invocation_context != graph.context
-            || request.task.outputs.requested_outputs != graph.requested_outputs
-            || request.task.callable.program != graph.callable
-            || !request.task.inputs.is_empty()
-        {
-            return Err(TransferFailure::Infrastructure(
-                "Graph attempt differs from its admitted local submission".into(),
-            ));
-        }
-        WorkerLaunchRequest::StagedGraph(Box::new(StagedGraphWorkerLaunch {
-            staged_graph_v10: StagedGraphWorkerReference {
-                artifact_id: graph.artifact_id,
-                stored_digest: graph.stored_digest,
-                stored_length: graph.stored_length,
-                assignment,
-                context: graph.context.clone(),
-                requested_outputs: graph.requested_outputs,
-            },
-        }))
+        staged_graph_launch(request, graph, assignment)?
     } else {
         let artifact_id = request.task.program_artifact_id().ok_or_else(|| {
             TransferFailure::Infrastructure("native program attempt has no program artifact".into())
@@ -405,10 +403,17 @@ fn launch_attempt(
         }
         _ => None,
     };
-    let result = runtime.block_on(run_process(
-        driver,
+    let owner = owned::ProcessOwner {
+        config: &driver.config,
+        artifacts: &driver.artifacts,
+        objects: &driver.objects,
+        graph_quarantine: &driver.graph_quarantine,
+    };
+    let control = owned::LocalControl { driver, completion };
+    let result = runtime.block_on(owned::run_process(
+        &owner,
         worker_request,
-        completion,
+        &control,
         meters,
         termination,
         console,
@@ -419,423 +424,33 @@ fn launch_attempt(
     result
 }
 
-async fn run_process(
-    driver: &LocalDriver,
-    request: WorkerLaunchRequest,
-    completion: &TaskCompletion,
-    meters: &TransportMeters,
-    termination: &mut AttemptExecutionTermination,
-    console: &mut Option<runmat_execution::console::ConsoleTranscript>,
-) -> Result<WorkerResponse, TransferFailure> {
-    #[cfg(windows)]
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
-        let own_executable = std::env::current_exe()
-            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-        let builtin_worker = [runmat_process_host::HiddenMode::ExecutionWorker
-            .marker()
-            .to_string()];
-        if driver.config.executable != own_executable
-            || driver.config.worker_arguments.as_slice() != builtin_worker.as_slice()
-        {
-            return Err(TransferFailure::Infrastructure(
-                "Windows Graph containment requires RunMat's request-gated execution worker".into(),
-            ));
-        }
-    }
-    if !driver
-        .graph_quarantine
-        .lock()
-        .expect("Graph quarantine lock poisoned")
-        .is_empty()
+fn staged_graph_launch(
+    request: &AttemptRequest,
+    graph: &super::GraphAttemptAuthority,
+    assignment: runmat_execution::ProgramExecutionAssignment,
+) -> Result<WorkerLaunchRequest, TransferFailure> {
+    if request.task.program_artifact_id() != Some(graph.request_artifact_id)
+        || request.task.invocation_context != graph.context
+        || request.task.outputs.requested_outputs != graph.requested_outputs
+        || request.task.callable.program != graph.callable
+        || !request.task.inputs.is_empty()
     {
-        return Err(TransferFailure::RetirementUnverified(
-            "local worker has an unverified Graph process tree and refuses new work".into(),
-        ));
-    }
-    match &request {
-        WorkerLaunchRequest::Direct(request) => request
-            .validate()
-            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
-        WorkerLaunchRequest::Reserved(request) => request
-            .validate()
-            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
-        WorkerLaunchRequest::StagedGraph(_) => {}
-    }
-    let console_controls = match &request {
-        WorkerLaunchRequest::Reserved(request) => request.request().console,
-        WorkerLaunchRequest::Direct(_) | WorkerLaunchRequest::StagedGraph(_) => None,
-    };
-    let mut console_receiver = console_controls
-        .map(runmat_execution::console::ConsoleReceiver::new)
-        .transpose()
-        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    let mut console_receipt = None;
-    let payload = serde_json::to_vec(&request)
-        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    if payload.len() > driver.config.max_message_bytes as usize {
         return Err(TransferFailure::Infrastructure(
-            "worker request exceeds the native message bound".into(),
+            "Graph attempt differs from its admitted local submission".into(),
         ));
     }
-    if completion.is_cancelled() {
-        return Err(TransferFailure::Cancelled);
-    }
-    let graph_scratch = if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
-        Some(
-            PrivateArtifactLease::new_attempt_scratch_in(&driver.config.store_root)
-                .map_err(TransferFailure::Infrastructure)?,
-        )
-    } else {
-        None
-    };
-    let graph_scratch_path = graph_scratch
-        .as_ref()
-        .map(|scratch| scratch.path().to_path_buf());
-    let mut command = HostCommand::new(&driver.config.executable);
-    command.arguments = driver.config.worker_arguments.clone();
-    command.environment_policy = EnvironmentPolicy::Inherit;
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
-        command.environment_policy =
-            EnvironmentPolicy::InheritExcept(vec!["RUNMAT_EXECUTION_WORKER_REMOTE".into()]);
-    }
-    command.environment.insert(
-        NATIVE_OBJECT_STORE_ROOT_ENV.into(),
-        driver.objects.root().to_string_lossy().into_owned(),
-    );
-    command.environment.insert(
-        NATIVE_MESHING_SUBTASK_CACHE_ROOT_ENV.into(),
-        driver
-            .config
-            .meshing_subtask_cache_root
-            .clone()
-            .unwrap_or_else(|| driver.config.store_root.join("meshing-subtask-cache/v1"))
-            .to_string_lossy()
-            .into_owned(),
-    );
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
-        command.environment.insert(
-            NATIVE_ARTIFACT_STORE_ROOT_ENV.into(),
-            driver.artifacts.root().to_string_lossy().into_owned(),
-        );
-        command.environment.insert(
-            NATIVE_GRAPH_ATTEMPT_SCRATCH_ENV.into(),
-            graph_scratch
-                .as_ref()
-                .expect("staged Graph has private attempt scratch")
-                .path()
-                .to_string_lossy()
-                .into_owned(),
-        );
-    }
-    command.max_stderr_bytes = driver.config.max_stderr_bytes;
-    // Spawn can fail after creating a child (for example during containment).
-    // Until root exit is observed, even an error leaves launch unconfirmed.
-    *termination = AttemptExecutionTermination::Unconfirmed;
-    let child = match command.spawn().await {
-        Ok(child) => child,
-        Err(error) if graph_scratch.is_some() => {
-            let message =
-                format!("Graph worker spawn or process-tree containment is unverified: {error}");
-            driver
-                .graph_quarantine
-                .lock()
-                .expect("Graph quarantine lock poisoned")
-                .push(GraphProcessQuarantine::SpawnUnverified {
-                    scratch: GraphScratchLease(graph_scratch.expect("checked Graph scratch")),
-                    scratch_path: graph_scratch_path.expect("checked Graph scratch path"),
-                    reason: message.clone(),
-                });
-            return Err(TransferFailure::RetirementUnverified(message));
-        }
-        Err(error) => return Err(TransferFailure::Infrastructure(error.to_string())),
-    };
-    let mut child = match graph_scratch {
-        Some(scratch) => match RetirementBoundChild::new(child, GraphScratchLease(scratch)) {
-            Ok(bound) => AttemptChild::Graph(bound),
-            Err(rejected) => {
-                let (mut child, mut lease) = *rejected;
-                let _ = lease.persist_unverified(
-                    child.id(),
-                    "selected Graph worker joined another process group",
-                );
-                let _ = child.terminate_tree().await;
-                return Err(TransferFailure::RetirementUnverified(
-                    "selected Graph worker lacks independent process-tree containment".into(),
-                ));
-            }
+    Ok(WorkerLaunchRequest::StagedGraph(Box::new(
+        StagedGraphWorkerLaunch {
+            staged_graph_v10: StagedGraphWorkerReference {
+                artifact_id: graph.artifact_id,
+                stored_digest: graph.stored_digest,
+                stored_length: graph.stored_length,
+                assignment,
+                context: graph.context.clone(),
+                requested_outputs: graph.requested_outputs,
+            },
         },
-        None => AttemptChild::Direct(child),
-    };
-    let mut child_retired = false;
-    let mut child_preserved_reason = None;
-    let outcome = async {
-    if completion.is_cancelled() {
-        if !matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
-            let _ = child.terminate_tree().await;
-        }
-        return Err(TransferFailure::Cancelled);
-    }
-    let stderr = child.captured_stderr();
-    let stdio = child
-        .take_stdio()
-        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    let mut reader = BufReader::new(MeteredIo::new(stdio.stdout, meters.received.clone()));
-    let mut writer = MeteredIo::new(stdio.stdin, meters.sent.clone());
-    let limits = FrameLimits {
-        max_message_bytes: driver.config.max_message_bytes,
-    };
-    write_payload(&mut writer, &payload, limits)
-        .await
-        .map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
-    let mut last_progress_sequence = 0;
-    let mut graph_cancel_sent_at = None;
-    let response = loop {
-        let payload = tokio::select! {
-            response = read_payload(&mut reader, limits) => {
-                response.map_err(|error| worker_exchange_failure(error, &stderr.text()))?
-            }
-            _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                if completion.is_cancelled() {
-                    if let WorkerLaunchRequest::StagedGraph(staged) = &request {
-                        if let Some(sent_at) = graph_cancel_sent_at {
-                            if Instant::now().duration_since(sent_at) >= Duration::from_secs(5) {
-                                return Err(TransferFailure::Cancelled);
-                            }
-                        } else {
-                            let payload = serde_json::to_vec(&WorkerDriverMessage::CancelAttempt {
-                                attempt_id: staged.staged_graph_v10.assignment.attempt_id,
-                                reason: completion.cancellation_reason().unwrap_or(
-                                    runmat_execution::CancellationReason::User,
-                                ),
-                            })
-                            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-                            if !matches!(
-                                tokio::time::timeout(
-                                    Duration::from_secs(1),
-                                    write_payload(&mut writer, &payload, limits)
-                                )
-                                .await,
-                                Ok(Ok(()))
-                            ) {
-                                return Err(TransferFailure::Cancelled);
-                            }
-                            graph_cancel_sent_at = Some(Instant::now());
-                        }
-                    } else {
-                        let _ = child.terminate_tree().await;
-                        return Err(TransferFailure::Cancelled);
-                    }
-                }
-                continue;
-            }
-        };
-        if let Ok(message) = serde_json::from_slice::<WorkerProcessMessage>(&payload) {
-            match message {
-                WorkerProcessMessage::Progress { progress } => {
-                    progress
-                        .validate()
-                        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-                    if progress.sequence <= last_progress_sequence {
-                        return Err(TransferFailure::Infrastructure(
-                            "native worker progress is not strictly monotone".into(),
-                        ));
-                    }
-                    last_progress_sequence = progress.sequence;
-                    completion.record_progress(progress);
-                }
-                WorkerProcessMessage::CollectiveRequest { request } => {
-                    let context = request.context.clone();
-                    let id = request.id;
-                    let sequence = request.sequence;
-                    let result = match driver.collectives.execute(request, completion) {
-                        Ok(response) => CollectiveProcessResult::Completed { response },
-                        Err(message) => CollectiveProcessResult::Failed { message },
-                    };
-                    let payload = serde_json::to_vec(&WorkerDriverMessage::CollectiveCompletion {
-                        context,
-                        id,
-                        sequence,
-                        result,
-                    })
-                    .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-                    write_payload(&mut writer, &payload, limits)
-                        .await
-                        .map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
-                }
-                WorkerProcessMessage::Console { record } => {
-                    console_receiver
-                        .as_mut()
-                        .ok_or_else(|| {
-                            TransferFailure::Infrastructure(
-                                "worker emitted unrequested console evidence".into(),
-                            )
-                        })?
-                        .push(record)
-                        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-                }
-                WorkerProcessMessage::Completed {
-                    response,
-                    console: receipt,
-                } => {
-                    match (console_receiver.as_ref(), receipt.as_ref()) {
-                        (Some(receiver), Some(receipt)) => receiver
-                            .verify_receipt(receipt)
-                            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
-                        (None, None) => {}
-                        _ => {
-                            return Err(TransferFailure::Infrastructure(
-                                "worker console receipt differs from requested controls".into(),
-                            ))
-                        }
-                    }
-                    console_receipt = receipt;
-                    break response;
-                }
-                WorkerProcessMessage::InfrastructureFailure { message } => {
-                    // Do not reap the owned Graph leader before the outer
-                    // error path retires its group. A completion wait here
-                    // would release the PID while descendants remain.
-                    return Err(TransferFailure::Infrastructure(message));
-                }
-                WorkerProcessMessage::RetirementUnverified { message } => {
-                    return Err(TransferFailure::RetirementUnverified(message));
-                }
-            }
-        } else {
-            break serde_json::from_slice::<WorkerResponse>(&payload)
-                .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-        }
-    };
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
-        // This is a one-shot Graph child. Its control read may already have
-        // entered Tokio's blocking stdin path; close our only writer after
-        // the terminal frame so that read observes EOF before child wait.
-        // No cancellation or collective command is legal after completion.
-        drop(writer);
-        match tokio::time::timeout(Duration::from_secs(5), child.wait_and_retire_tree()).await {
-            Ok(Ok(exit)) => {
-                child_retired = true;
-                *termination = AttemptExecutionTermination::ProcessExited {
-                    code: exit.code,
-                    success: exit.success,
-                };
-            }
-            Ok(Err(error)) => {
-                let message = format!(
-                    "Graph worker replied, but its process tree could not be retired: {error}"
-                );
-                // RetirementBoundChild already persisted its exact lease and
-                // forbids a second numeric group signal after this error.
-                child_preserved_reason = Some(message.clone());
-                return Err(TransferFailure::RetirementUnverified(message));
-            }
-            Err(_) => {
-                return Err(if completion.is_cancelled() {
-                    TransferFailure::Cancelled
-                } else {
-                    TransferFailure::WorkerLost(
-                        "Graph worker did not retire after its response".into(),
-                    )
-                });
-            }
-        }
-    } else {
-        let exit = child.wait().await.map_err(|error| {
-            TransferFailure::WorkerLost(format!("worker exit was not observed: {error}"))
-        })?;
-        *termination = AttemptExecutionTermination::ProcessExited {
-            code: exit.code,
-            success: exit.success,
-        };
-        if !exit.success {
-            return Err(TransferFailure::Execution(format!(
-                "worker returned a response but exited unsuccessfully: {:?}",
-                exit.code
-            )));
-        }
-    }
-    match &request {
-        WorkerLaunchRequest::Direct(request) => match request.as_ref() {
-            WorkerRequest::Direct(request) => response.validate_against(request),
-            WorkerRequest::Graph(_) => {
-            return Err(TransferFailure::Infrastructure(
-                "Graph worker response has no staged authority".into(),
-            ));
-            }
-        },
-        WorkerLaunchRequest::Reserved(request) => response.validate_against(request.request()),
-        WorkerLaunchRequest::StagedGraph(_) => completion
-            .graph_authority
-            .as_ref()
-            .ok_or_else(|| {
-                TransferFailure::Infrastructure("Graph response lacks its typed authority".into())
-            })?
-            .response
-            .validate_response(&response),
-    }
-    .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    if graph_cancel_sent_at.is_some() || completion.is_cancelled() {
-        return Err(TransferFailure::Cancelled);
-    }
-    Ok(response)
-    }
-    .await;
-    *console = console_receiver
-        .map(|receiver| receiver.finish(console_receipt.as_ref()))
-        .transpose()
-        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) && !child_retired {
-        if let Some(reason) = child_preserved_reason {
-            let AttemptChild::Graph(child) = child else {
-                unreachable!("a staged Graph worker owns a retirement-bound child")
-            };
-            driver
-                .graph_quarantine
-                .lock()
-                .expect("Graph quarantine lock poisoned")
-                .push(GraphProcessQuarantine::KnownChild {
-                    child: Box::new(child),
-                    scratch_path: graph_scratch_path
-                        .expect("staged Graph has private attempt scratch"),
-                    reason,
-                    retired: false,
-                    retryable: false,
-                });
-            return outcome;
-        }
-        let mut retirement_error = None;
-        for _ in 0..2 {
-            match child.terminate_tree().await {
-                Ok(()) => {
-                    retirement_error = None;
-                    break;
-                }
-                Err(error) => retirement_error = Some(error),
-            }
-        }
-        if let Some(error) = retirement_error {
-            let message = format!(
-                "Graph worker process tree could not be retired after bounded retries: {error}"
-            );
-            let AttemptChild::Graph(child) = child else {
-                unreachable!("a staged Graph worker owns a retirement-bound child")
-            };
-            driver
-                .graph_quarantine
-                .lock()
-                .expect("Graph quarantine lock poisoned")
-                .push(GraphProcessQuarantine::KnownChild {
-                    child: Box::new(child),
-                    scratch_path: graph_scratch_path
-                        .expect("staged Graph has private attempt scratch"),
-                    reason: message.clone(),
-                    retired: false,
-                    retryable: true,
-                });
-            return Err(TransferFailure::RetirementUnverified(message));
-        }
-    }
-    outcome
+    )))
 }
 
 fn observe(
@@ -867,7 +482,9 @@ fn observe(
             result_objects,
         } => AttemptSuccess::new(request, outputs, result_objects, wall_millis, 0, 0)
             .map_err(accounting),
-        WorkerResponse::GraphSuccess { graph } => Ok(AttemptSuccess::Graph { graph }),
+        WorkerResponse::GraphSuccess { graph } => {
+            AttemptSuccess::new_graph(request, graph, wall_millis, 0, 0).map_err(accounting)
+        }
         WorkerResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
         WorkerResponse::Failure { message } => Err(TransferFailure::Execution(message)),
         WorkerResponse::RuntimeFailure { failure } => {

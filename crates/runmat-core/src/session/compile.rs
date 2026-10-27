@@ -1,5 +1,11 @@
 use super::*;
 use crate::fusion::FusionPlannerMetadata;
+pub(super) use runmat_static_analysis::project::composition::qualify_companion_classdefs;
+use runmat_static_analysis::project::composition::{
+    function_leaf_name, function_owner_scope_from_qualified_name, is_class_source_body,
+    is_function_source_body, project_symbol_aliases, qualify_companion_functions,
+    qualify_private_companion_functions,
+};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -91,28 +97,6 @@ fn path_to_source_name(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
-fn is_class_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
-    let has_classdef = stmts
-        .iter()
-        .any(|stmt| matches!(stmt, runmat_parser::Stmt::ClassDef { .. }));
-    if !has_classdef {
-        return false;
-    }
-    stmts.iter().all(|stmt| {
-        matches!(
-            stmt,
-            runmat_parser::Stmt::ClassDef { .. } | runmat_parser::Stmt::Function { .. }
-        )
-    })
-}
-
-fn is_function_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
-    !stmts.is_empty()
-        && stmts
-            .iter()
-            .all(|stmt| matches!(stmt, runmat_parser::Stmt::Function { .. }))
-}
-
 fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<String> {
     let relative = source_path.strip_prefix(root_dir).ok()?;
     let class_name = source_path.file_stem()?.to_str()?;
@@ -140,26 +124,6 @@ fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<S
     }
     package_segments.push(class_name.to_string());
     Some(package_segments.join("."))
-}
-
-pub(super) fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
-    for stmt in stmts {
-        if let runmat_parser::Stmt::ClassDef { name, .. } = stmt {
-            if !name.contains('.') {
-                *name = qualified_name.to_string();
-            }
-        }
-    }
-}
-
-fn qualify_companion_functions(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
-    for stmt in stmts {
-        if let runmat_parser::Stmt::Function { name, .. } = stmt {
-            if !name.contains('.') {
-                *name = qualified_name.to_string();
-            }
-        }
-    }
 }
 
 fn source_index_qualified_function_name(
@@ -233,46 +197,6 @@ fn private_source_visible_to(primary_source_path: &Path, source_path: &Path) -> 
     primary_source_path
         .parent()
         .is_some_and(|caller_dir| source_paths_equivalent(caller_dir, &private_parent))
-}
-
-fn function_owner_scope_from_qualified_name(qualified_name: &str) -> String {
-    qualified_name
-        .rsplit_once('.')
-        .map(|(owner, _)| owner.to_string())
-        .unwrap_or_default()
-}
-
-fn function_leaf_name(name: &str) -> &str {
-    name.rsplit_once('.').map(|(_, leaf)| leaf).unwrap_or(name)
-}
-
-fn synthetic_private_function_name(owner_scope: &str, leaf_name: &str) -> String {
-    if owner_scope.is_empty() {
-        format!("__private__.{leaf_name}")
-    } else {
-        format!("{owner_scope}.__private__.{leaf_name}")
-    }
-}
-
-fn qualify_private_companion_functions(
-    stmts: &mut [runmat_parser::Stmt],
-    owner_scope: &str,
-    primary_visible: bool,
-) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
-    for stmt in stmts {
-        if let runmat_parser::Stmt::Function { name, .. } = stmt {
-            let leaf = function_leaf_name(name).to_string();
-            let display_name = if primary_visible {
-                leaf.clone()
-            } else {
-                synthetic_private_function_name(owner_scope, &leaf)
-            };
-            *name = display_name.clone();
-            aliases.insert(leaf, display_name);
-        }
-    }
-    aliases
 }
 
 #[derive(Default)]
@@ -492,35 +416,6 @@ impl CompanionSourceDiscovery {
             self.statements.push(discovered);
         }
     }
-}
-
-fn project_symbol_aliases(
-    catalog: Option<&runmat_package::DiscoveredSourceSymbols>,
-) -> HashMap<String, String> {
-    let Some(catalog) = catalog else {
-        return HashMap::new();
-    };
-    catalog
-        .definitions
-        .iter()
-        .filter_map(|definition| {
-            let alias = definition.dependency_alias.as_deref()?;
-            let original = definition.name.strip_prefix(&format!("{alias}."))?;
-            let has_unique_bare_name = catalog.definitions.iter().any(|candidate| {
-                candidate.name == original
-                    && candidate.dependency_alias.as_deref() == Some(alias)
-                    && candidate.source_id == definition.source_id
-            });
-            Some((
-                definition.name.clone(),
-                if has_unique_bare_name {
-                    original.to_string()
-                } else {
-                    definition.name.clone()
-                },
-            ))
-        })
-        .collect()
 }
 
 fn dependency_composed_name(

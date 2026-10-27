@@ -67,6 +67,15 @@ impl MappedCallable {
     ) -> Result<RootedValue, CallableCallError> {
         let (arguments, closure_owner) = prepared.map_err(CallableCallError::Runtime)?;
         let result = match self {
+            Self::Scoped(handle) => crate::call::feval::invoke_retained(
+                context,
+                Value::ScopedFunctionHandle(handle.clone()),
+                arguments,
+                requested_outputs,
+                None,
+            )
+            .await
+            .map_err(CallableCallError::Runtime)?,
             Self::Closure(closure) => {
                 let owner = closure_owner.expect("selected closure owner");
                 crate::call::descriptor::invoke_selected_retained_closure(

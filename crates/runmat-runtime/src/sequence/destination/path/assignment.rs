@@ -88,7 +88,12 @@ impl PreparedSequenceDestination {
             kind,
             _retained_roots,
             _source_roots,
+            method_frame,
+            frame_control,
         } = self;
+        if method_frame.is_some() {
+            frame_control.check_owner(context)?;
+        }
         let _inputs = match context {
             Some(runtime) => RootedValueLease::for_values_iterator_in_context(
                 std::iter::once(&root).chain(values.iter()),
@@ -106,6 +111,7 @@ impl PreparedSequenceDestination {
                     endpoint,
                     values,
                     caller,
+                    method_frame.as_deref(),
                     _inputs,
                 )
                 .await
@@ -150,6 +156,7 @@ impl PreparedSequenceDestination {
                     },
                     values,
                     caller,
+                    method_frame.as_deref(),
                     _inputs,
                 )
                 .await

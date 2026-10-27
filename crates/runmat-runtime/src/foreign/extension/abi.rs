@@ -118,7 +118,8 @@ fn classify(value: &runmat_value::Value) -> RunMatValueKind {
         Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_) => {
             RunMatValueKind::Object
         }
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)

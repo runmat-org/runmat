@@ -63,10 +63,15 @@ material water { mass_density = 1000 kg/m^3; fluid { law = incompressible_newton
 model flow { assign material.water to geometry.part.region.volume }
 study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; analysis solve { fluid static {} } }
 "#;
-    let source = source.replace("VOLUME_ID", &topology.regions[0].id.analysis_selection_id().unwrap());
+    let source = source.replace(
+        "VOLUME_ID",
+        &topology.regions[0].id.analysis_selection_id().unwrap(),
+    );
     let host = TestHost::default().with_geometry_inspection(
         "project/part.step",
-        GeometryInspection {preview_extent_m: None, 
+        GeometryInspection {
+            preview_extent_m: None,
+            named_selections: None,
             unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),

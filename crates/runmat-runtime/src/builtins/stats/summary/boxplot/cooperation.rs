@@ -2,13 +2,13 @@
 
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{BuiltinResult, RuntimeError};
 
 use super::{internal_with_source, NAME};
 
 pub(super) struct BoxplotCooperation {
     budget: Option<CpuCooperationBudget>,
-    namespace: Option<String>,
+    runtime: Option<RuntimeContext>,
 }
 
 impl BoxplotCooperation {
@@ -17,7 +17,7 @@ impl BoxplotCooperation {
             budget: runtime.map(|runtime| {
                 CpuCooperationBudget::new(runtime.execution().clone(), runtime.cancellation())
             }),
-            namespace: runtime.map(RuntimeContext::error_namespace),
+            runtime: runtime.cloned(),
         }
     }
 
@@ -25,7 +25,7 @@ impl BoxplotCooperation {
     pub(super) fn with_budget(budget: CpuCooperationBudget) -> Self {
         Self {
             budget: Some(budget),
-            namespace: Some("RunMat".to_string()),
+            runtime: None,
         }
     }
 
@@ -44,11 +44,10 @@ impl BoxplotCooperation {
     pub(super) fn service_error(&self, error: ExecutionServiceError) -> RuntimeError {
         match error {
             ExecutionServiceError::Cancelled => {
-                let namespace = self.namespace.as_deref().unwrap_or("RunMat");
-                build_runtime_error("boxplot: execution was cancelled")
-                    .with_identifier(format!("{namespace}:Cancelled"))
-                    .with_builtin(NAME)
-                    .build()
+                let mut error = ExecutionServiceError::Cancelled
+                    .into_runtime_error_in_context(self.runtime.as_ref());
+                error.context = error.context.with_builtin(NAME);
+                error
             }
             other => internal_with_source(
                 "boxplot: execution service failed during preparation",
@@ -77,6 +76,7 @@ mod tests {
             Rc::new(crate::execution::RuntimeExecutionService::new()),
             original.token(),
         );
+        runtime.set_error_namespace("BoxplotInvocation");
         let mut cooperation = BoxplotCooperation::new(Some(&runtime));
         let replacement = CancellationSource::new();
         runtime.replace_cancellation_token(replacement.token());
@@ -86,9 +86,13 @@ mod tests {
         original.cancel(CancellationReason::User);
         let error = futures::executor::block_on(cooperation.completed(0))
             .expect_err("the invocation token remains authoritative");
-        assert!(error
-            .identifier()
-            .is_some_and(|identifier| identifier.ends_with(":Cancelled")));
+        assert_eq!(error.identifier(), Some("BoxplotInvocation:Cancelled"));
+        assert_eq!(error.context.builtin.as_deref(), Some(NAME));
+        assert!(crate::runtime_error::error_has_control_cancellation_origin(
+            &error
+        ));
+        assert!(std::error::Error::source(&error)
+            .is_some_and(|source| source.downcast_ref::<ExecutionServiceError>().is_some()));
     }
 
     #[test]
@@ -178,6 +182,11 @@ mod tests {
         ))
         .expect_err("cancelled expansion cannot publish geometry");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert!(crate::runtime_error::error_has_control_cancellation_origin(
+            &error
+        ));
+        assert!(std::error::Error::source(&error)
+            .is_some_and(|source| source.downcast_ref::<ExecutionServiceError>().is_some()));
 
         let source = CancellationSource::new();
         let budget = CpuCooperationBudget::with_test_turn(

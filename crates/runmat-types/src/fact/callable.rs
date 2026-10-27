@@ -1,5 +1,5 @@
 use super::ValueFact;
-use crate::{CallContract, CallableIdentity, CapabilitySet, DynamicReason};
+use crate::{CallContract, CallableIdentity, CapabilitySet, DynamicReason, EffectKind, EffectSet};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,9 +35,63 @@ impl CallableFact {
                 .then(|| Box::new(ValueFact::unknown(unresolved.clone()))),
             maximum_outputs: (self.outputs_complete && !self.variadic_outputs)
                 .then_some(self.outputs.len()),
-            effects: Default::default(),
+            effects: if self.identity.is_none() {
+                EffectSet(
+                    [
+                        EffectKind::HostCallback,
+                        EffectKind::MaySuspend,
+                        EffectKind::MayThrow,
+                        EffectKind::Unknown,
+                    ]
+                    .into_iter()
+                    .collect(),
+                )
+            } else {
+                Default::default()
+            },
             capabilities: self.capabilities.clone(),
             dynamic_reason: (!self.outputs_complete || self.variadic_outputs).then_some(unresolved),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unresolved_callable_contract_preserves_results_without_claiming_purity() {
+        let output = ValueFact::unknown(DynamicReason::RuntimeValue);
+        let mut callable = CallableFact {
+            identity: None,
+            capabilities: CapabilitySet::default(),
+            parameters: Vec::new(),
+            parameters_complete: false,
+            outputs: vec![output.clone()],
+            outputs_complete: true,
+            variadic_inputs: true,
+            variadic_outputs: false,
+            captures: Vec::new(),
+            captures_complete: false,
+        };
+        let contract = callable.call_contract(DynamicReason::UnresolvedCallable);
+        assert_eq!(contract.outputs, vec![output]);
+        assert_eq!(contract.maximum_outputs, Some(1));
+        assert!(contract.variadic_output.is_none());
+        assert!(!contract.effects.is_side_effect_free());
+        for effect in [
+            EffectKind::HostCallback,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+            EffectKind::Unknown,
+        ] {
+            assert!(contract.effects.0.contains(&effect));
+        }
+        callable.identity = Some(CallableIdentity::Builtin(crate::BuiltinId("sin".into())));
+        assert!(callable
+            .call_contract(DynamicReason::UnresolvedCallable)
+            .effects
+            .0
+            .is_empty());
     }
 }

@@ -74,6 +74,8 @@ fn dot_internal_error(message: impl Into<String>) -> RuntimeError {
 
 #[path = "dot/kernel_error.rs"]
 pub mod kernel_error;
+mod geometry;
+pub(in crate::builtins::math) use geometry::{dot_geometry, DotGeometry};
 use kernel_error::{DotKernelError, DotKernelResult};
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
@@ -363,26 +365,20 @@ fn real_tensor_to_complex(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
 }
 
 fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> DotKernelResult<Tensor> {
-    if dim.is_none()
-        && is_vector_shape(&canonical_shape_tensor(a))
-        && is_vector_shape(&canonical_shape_tensor(b))
-    {
+    let left_shape = canonical_shape_tensor(a);
+    let right_shape = canonical_shape_tensor(b);
+    if dim.is_none() && is_vector_shape(&left_shape) && is_vector_shape(&right_shape) {
         if tensor::tensor_element_len(a) != tensor::tensor_element_len(b) {
             return Err(DotKernelError::invalid_input());
         }
-        return dot_real_vectors(a, b);
+    } else {
+        ensure_same_size(a, b)?;
     }
-    ensure_same_size(a, b)?;
-
-    let shape = canonical_shape_tensor(a);
-    let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
-    let target_dim = dim.unwrap_or_else(|| default_dimension(&shape));
-    let dim_index = target_dim - 1;
-
-    if dim_index >= shape.len() {
+    let plan = DotGeometry::new(&left_shape, &right_shape, dim)?;
+    if plan.elementwise() {
         return elementwise_real_product(a, b);
     }
-
+    let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
     let floating_values = if exact_integer_operands {
         None
     } else {
@@ -391,55 +387,29 @@ fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> DotKernelResul
             tensor::tensor_values_f64_cow(b),
         ))
     };
-
-    let reduce_len = shape[dim_index];
-    let stride_before = dim_product(&shape[..dim_index]);
-    let stride_after = dim_product(&shape[dim_index + 1..]);
-    let mut output = vec![0.0f64; stride_before * stride_after];
-
-    for after in 0..stride_after {
-        for before in 0..stride_before {
-            let mut acc = 0.0;
-            for k in 0..reduce_len {
-                let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let prod = if exact_integer_operands {
-                    exact_integer_product_as_f64(a.numeric_value_at(idx), b.numeric_value_at(idx))
-                        .ok_or_else(|| DotKernelError::internal("dot: invalid integer storage"))?
-                } else {
-                    let (a_values, b_values) = floating_values
-                        .as_ref()
-                        .expect("floating dot values are materialized only for floating operands");
-                    a_values[idx] * b_values[idx]
-                };
-                acc += prod;
-            }
-            let out_idx = after * stride_before + before;
-            output[out_idx] = acc;
-        }
-    }
-
-    let mut out_shape = shape.clone();
-    out_shape[dim_index] = 1;
-    dot_real_output(output, out_shape, dot_real_output_dtype(a, b))
-}
-
-fn dot_real_vectors(a: &Tensor, b: &Tensor) -> DotKernelResult<Tensor> {
-    let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
-    let mut output = 0.0;
-    if exact_integer_operands {
-        for index in 0..tensor::tensor_element_len(a) {
-            output +=
+    let mut output = Vec::with_capacity(plan.outputs());
+    for row in 0..plan.outputs() {
+        let mut acc = 0.;
+        for axis in 0..plan.factor() {
+            let index = plan
+                .source(row, axis)
+                .ok_or_else(|| DotKernelError::internal("dot source geometry overflow"))?;
+            let product = if exact_integer_operands {
                 exact_integer_product_as_f64(a.numeric_value_at(index), b.numeric_value_at(index))
-                    .ok_or_else(|| DotKernelError::internal("dot: invalid integer storage"))?;
+                    .ok_or_else(|| DotKernelError::internal("dot: invalid integer storage"))?
+            } else {
+                let (left, right) = floating_values.as_ref().expect("floating dot operands");
+                left[index] * right[index]
+            };
+            acc += product;
         }
-    } else {
-        let a_values = tensor::tensor_values_f64_cow(a);
-        let b_values = tensor::tensor_values_f64_cow(b);
-        for index in 0..a_values.len() {
-            output += a_values[index] * b_values[index];
-        }
+        output.push(acc);
     }
-    dot_real_output(vec![output], vec![1, 1], dot_real_output_dtype(a, b))
+    dot_real_output(
+        output,
+        plan.output_shape().to_vec(),
+        dot_real_output_dtype(a, b),
+    )
 }
 
 fn dot_complex_tensor(

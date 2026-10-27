@@ -73,6 +73,8 @@ fn general_numeric_host_owners_confirm_single_double_intrinsics_and_calls() {
                 let runtime = selected
                     .clone()
                     .with_vm_fusion_host_route(Some(route.clone()));
+                let runtime = runtime.with_pinned_cancellation();
+                assert!(runtime.vm_fusion_host_route().is_some());
                 let value = Value::Tensor(if single {
                     Tensor::from_f32(vec![0.25, 0.5], vec![1, 2]).unwrap()
                 } else {

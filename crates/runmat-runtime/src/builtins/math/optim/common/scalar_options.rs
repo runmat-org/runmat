@@ -2,9 +2,15 @@
 
 use runmat_builtins::OptimOptionField;
 use runmat_value::{StructValue, Value};
+#[cfg(test)]
+#[path = "scalar_options/fields_tests.rs"]
+mod fields_tests;
 
 mod preparation;
-pub(crate) use preparation::prepare_solver_options;
+pub(crate) use preparation::{
+    prepare_fmincon_options, prepare_modeled_fminunc_options, prepare_modeled_residual_options,
+    prepare_multiobjective_options, prepare_solver_options, switch_value,
+};
 
 /// One prepared immutable generation and its original managed root ownership.
 pub(crate) struct PreparedSolverOptions(crate::execution::RootedValue);
@@ -22,60 +28,114 @@ impl PreparedSolverOptions {
 struct ScalarOptionBinding<'a> {
     name: &'a str,
     value: &'a Value,
+    order: usize,
 }
 
-#[derive(Default)]
 pub(crate) struct ScalarOptionFields<'a> {
-    tol_x: Option<ScalarOptionBinding<'a>>,
-    tol_fun: Option<ScalarOptionBinding<'a>>,
-    max_iter: Option<ScalarOptionBinding<'a>>,
-    max_fun_evals: Option<ScalarOptionBinding<'a>>,
-    display: Option<ScalarOptionBinding<'a>>,
-    algorithm: Option<ScalarOptionBinding<'a>>,
-    specify_gradient: Option<ScalarOptionBinding<'a>>,
+    bindings: [Option<ScalarOptionBinding<'a>>; OptimOptionField::ALL.len()],
+}
+impl Default for ScalarOptionFields<'_> {
+    fn default() -> Self {
+        Self {
+            bindings: std::array::from_fn(|_| None),
+        }
+    }
+}
+fn index(field: OptimOptionField) -> usize {
+    OptimOptionField::ALL
+        .iter()
+        .position(|&candidate| candidate == field)
+        .expect("every typed field belongs to ALL")
 }
 
 impl<'a> ScalarOptionFields<'a> {
+    pub(crate) fn switch(
+        &self,
+        builtin: &str,
+        field: OptimOptionField,
+    ) -> crate::BuiltinResult<bool> {
+        self.get(field)
+            .map(|value| preparation::switch_value(builtin, field.name(), value))
+            .transpose()
+            .map(|value| value.unwrap_or(false))
+    }
     pub(crate) fn from_struct(options: Option<&'a StructValue>) -> Self {
+        Self::from_decoded(options, OptimOptionField::parse)
+    }
+    pub(crate) fn from_struct_for_solver(
+        options: Option<&'a StructValue>,
+        solver: runmat_builtins::OptimSolver,
+    ) -> Self {
+        Self::from_decoded(options, |name| {
+            OptimOptionField::parse_for_solver(name, solver)
+        })
+    }
+    fn from_decoded(
+        options: Option<&'a StructValue>,
+        decode: impl Fn(&str) -> Option<OptimOptionField>,
+    ) -> Self {
         let mut fields = Self::default();
         if let Some(options) = options {
-            for (name, value) in &options.fields {
-                let binding = ScalarOptionBinding { name, value };
-                match OptimOptionField::parse(name) {
-                    Some(OptimOptionField::TolX) => fields.tol_x.get_or_insert(binding),
-                    Some(OptimOptionField::TolFun) => fields.tol_fun.get_or_insert(binding),
-                    Some(OptimOptionField::MaxIter) => fields.max_iter.get_or_insert(binding),
-                    Some(OptimOptionField::MaxFunEvals) => {
-                        fields.max_fun_evals.get_or_insert(binding)
-                    }
-                    Some(OptimOptionField::Display) => fields.display.get_or_insert(binding),
-                    Some(OptimOptionField::Algorithm) => fields.algorithm.get_or_insert(binding),
-                    Some(OptimOptionField::SpecifyObjectiveGradient) => {
-                        fields.specify_gradient.get_or_insert(binding)
-                    }
-                    _ => continue,
-                };
+            for (order, (name, value)) in options.fields.iter().enumerate() {
+                if matches!(value,Value::Tensor(value)if value.is_empty()) {
+                    continue;
+                }
+                if let Some(field) = decode(name) {
+                    fields.bindings[index(field)].get_or_insert(ScalarOptionBinding {
+                        name,
+                        value,
+                        order,
+                    });
+                }
             }
         }
         fields
     }
-
     pub(crate) fn get(&self, field: OptimOptionField) -> Option<&'a Value> {
         self.binding(field).map(|binding| binding.value)
     }
-
-    fn binding(&self, field: OptimOptionField) -> Option<ScalarOptionBinding<'a>> {
-        match field {
-            OptimOptionField::TolX => self.tol_x,
-            OptimOptionField::TolFun => self.tol_fun,
-            OptimOptionField::MaxIter => self.max_iter,
-            OptimOptionField::MaxFunEvals => self.max_fun_evals,
-            OptimOptionField::Display => self.display,
-            OptimOptionField::Algorithm => self.algorithm,
-            OptimOptionField::SpecifyObjectiveGradient => self.specify_gradient,
+    pub(crate) fn exact(&self, field: OptimOptionField) -> Option<&'a Value> {
+        self.binding_exact(field).map(|binding| binding.value)
+    }
+    fn binding_exact(&self, field: OptimOptionField) -> Option<ScalarOptionBinding<'a>> {
+        self.bindings[index(field)]
+    }
+    fn binding_for(
+        &self,
+        solver: runmat_builtins::OptimSolver,
+        field: OptimOptionField,
+    ) -> Option<ScalarOptionBinding<'a>> {
+        if matches!(
+            solver,
+            runmat_builtins::OptimSolver::Fminunc
+                | runmat_builtins::OptimSolver::Fmincon
+                | runmat_builtins::OptimSolver::Fseminf
+                | runmat_builtins::OptimSolver::Fminimax
+                | runmat_builtins::OptimSolver::Fgoalattain
+                | runmat_builtins::OptimSolver::Lsqnonlin
+        ) {
+            self.binding_exact(field)
+        } else {
+            self.binding(field)
         }
     }
-
+    fn binding(&self, field: OptimOptionField) -> Option<ScalarOptionBinding<'a>> {
+        if field == OptimOptionField::TolFun {
+            // Preserve the historical first-binding semantics for existing
+            // solver profiles. fminunc's algorithm-aware consumer uses exact
+            // semantic fields and checks conflicting legacy/modern controls.
+            [
+                OptimOptionField::TolFun,
+                OptimOptionField::OptimalityTolerance,
+                OptimOptionField::FunctionTolerance,
+            ]
+            .into_iter()
+            .filter_map(|field| self.binding_exact(field))
+            .min_by_key(|binding| binding.order)
+        } else {
+            self.binding_exact(field)
+        }
+    }
     pub(crate) fn real(
         &self,
         builtin: &str,

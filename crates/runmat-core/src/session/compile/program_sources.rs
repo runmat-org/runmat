@@ -118,6 +118,19 @@ impl ProgramSourceTable {
         {
             return Err("HIR primary source differs from the admitted source table".into());
         }
+        for class in &hir.classes {
+            let module_source = hir
+                .modules
+                .get(class.module.0)
+                .filter(|module| module.id == class.module)
+                .map(|module| module.source_id)
+                .ok_or("compiled class has no HIR source module")?;
+            if class.declaration.source != module_source
+                || !contains(Some(runmat_vm::BytecodeSourceRef::Program(module_source)))
+            {
+                return Err("class declaration has no admitted original program source".into());
+            }
+        }
         match (bytecode.active_function, bytecode.source_id) {
             (None, Some(source)) if hir.entrypoints.is_empty() => {
                 if source.program() != Some(primary) || !contains(Some(source)) {

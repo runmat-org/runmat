@@ -967,6 +967,51 @@ impl RuntimeContext {
             .push(Box::new(cleanup));
     }
 
+    /// A standalone worker invocation owns newly created, untransferred
+    /// resources. Ordinary interactive sessions do not select this policy.
+    #[cfg(target_arch = "wasm32")]
+    pub fn enable_worker_invocation_resources(&self) {
+        self.state.worker_invocation_resources.set(true);
+    }
+
+    /// Non-owning proof check for the fresh invocation's context and execution
+    /// roots. Evaluate after dropping every invocation-owned strong handle.
+    #[cfg(target_arch = "wasm32")]
+    pub fn worker_invocation_retirement_check(&self) -> impl Fn() -> bool {
+        let state = Rc::downgrade(&self.state);
+        let execution = Rc::downgrade(&self.execution);
+        move || state.strong_count() == 0 && execution.strong_count() == 0
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn collect_retired_worker_values() -> Result<(), crate::RuntimeError> {
+        runmat_gc::gc_collect_major().map(|_| ()).map_err(|error| {
+            crate::build_runtime_error("worker GC retirement failed")
+                .with_identifier("RunMat:RuntimeContext:WorkerGcRetirement")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .with_source(error)
+                .build()
+        })
+    }
+
+    /// Call only after foreground execution, cleanup callbacks and local child
+    /// frames have retired. The same registered owners also run on state drop.
+    #[cfg(target_arch = "wasm32")]
+    pub fn retire_worker_invocation_resources(&self) {
+        if !self.state.worker_invocation_resources.get() {
+            return;
+        }
+        loop {
+            let cleanups = std::mem::take(&mut *self.state.resource_cleanup.0.borrow_mut());
+            if cleanups.is_empty() {
+                break;
+            }
+            for cleanup in cleanups {
+                cleanup();
+            }
+        }
+    }
+
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.borrow().clone()
     }
@@ -1140,6 +1185,15 @@ impl RuntimeContext {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancellation.borrow().is_cancelled()
+    }
+
+    /// Retain this exact invocation generation for ongoing work. Unlike a
+    /// fresh invocation, all selected host/VM/native projections stay intact.
+    /// The independent slot cannot observe a caller's later lifecycle rebind.
+    pub(crate) fn with_pinned_cancellation(mut self) -> Self {
+        let cancellation = self.cancellation();
+        self.cancellation = Rc::new(RefCell::new(cancellation));
+        self
     }
 
     /// Bind a fresh invocation generation while retaining the session's
@@ -1479,6 +1533,14 @@ impl RuntimeContext {
     ) -> &super::poll_projection::PollProjection<super::output_projection::InvocationOutputProjection>
     {
         &self.output_projection
+    }
+
+    /// Retain the selected builtin's original output-count owner at dispatch.
+    /// Sharing this admitted projection adds no allocation and keeps later
+    /// sibling poll scopes from substituting their invocation controls.
+    pub(crate) fn with_selected_builtin_output_projection(mut self) -> Self {
+        self.output_projection = self.selected_output_projection();
+        self
     }
 
     pub(crate) fn call_projection(

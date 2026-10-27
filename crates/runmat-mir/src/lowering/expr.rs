@@ -1486,7 +1486,9 @@ fn call_fallback_policy(
 fn map_async_behavior(behavior: BuiltinAsyncBehavior) -> crate::AsyncBehaviorFact {
     match behavior {
         BuiltinAsyncBehavior::NeverSuspends => crate::AsyncBehaviorFact::NeverSuspends,
-        BuiltinAsyncBehavior::MaySuspend => crate::AsyncBehaviorFact::MaySuspend,
+        BuiltinAsyncBehavior::MaySuspend | BuiltinAsyncBehavior::MaySuspendLocally => {
+            crate::AsyncBehaviorFact::MaySuspend
+        }
         BuiltinAsyncBehavior::RequiresAsyncRuntime => {
             crate::AsyncBehaviorFact::RequiresAsyncRuntime
         }

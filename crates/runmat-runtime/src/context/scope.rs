@@ -10,24 +10,30 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-#[path = "scope/future_owner.rs"]
-mod future_owner;
 #[path = "scope/deferred_future.rs"]
 mod deferred_future;
+#[path = "scope/future_owner.rs"]
+mod future_owner;
 pub use deferred_future::DeferredRuntimeFuture;
+mod unselected;
+pub(crate) use unselected::PreparedUnselectedScope;
+mod inline;
+mod lazy;
+pub(crate) use inline::{with_original_scope, RuntimeScopeFactory};
+pub(crate) use lazy::LazyRuntimeScope;
 
 runmat_thread_local! {
-    static ACTIVE_CONTEXTS: RefCell<Vec<RuntimeContext>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE_CONTEXTS: RefCell<Vec<Option<RuntimeContext>>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(super) fn active_runtime_context() -> Option<RuntimeContext> {
-    ACTIVE_CONTEXTS.with(|contexts| contexts.borrow().last().cloned())
+    ACTIVE_CONTEXTS.with(|contexts| contexts.borrow().last().cloned().flatten())
 }
 
 /// Read poll-local owners without cloning the complete invocation context.
 /// The reader must not enter another runtime scope while the stack is borrowed.
 pub(super) fn with_active_runtime_context<T>(read: impl FnOnce(Option<&RuntimeContext>) -> T) -> T {
-    ACTIVE_CONTEXTS.with(|contexts| read(contexts.borrow().last()))
+    ACTIVE_CONTEXTS.with(|contexts| read(contexts.borrow().last().and_then(Option::as_ref)))
 }
 
 pub(super) fn execution_provider_authorization(
@@ -174,15 +180,27 @@ pub(super) fn execution_provider_authorization(
 
 #[must_use]
 pub struct RuntimeContextGuard {
-    state_identity: *const super::RuntimeContextState,
+    state_identity: Option<*const super::RuntimeContextState>,
     _display_format: runmat_value::DisplayFormatSelectionGuard,
     _command_profiling: runmat_execution::profiling::CommandProfilingSelectionGuard,
     _tape: crate::builtins::deep_learning::autodiff::TapePollGuard,
 }
 
 impl RuntimeContextGuard {
+    fn enter_unselected() -> Self {
+        let display = runmat_value::select_optional_display_format_owner(None);
+        let profiling = runmat_execution::profiling::select_command_profiling(None);
+        let tape = crate::builtins::deep_learning::autodiff::TapePollGuard::select(None);
+        ACTIVE_CONTEXTS.with(|contexts| contexts.borrow_mut().push(None));
+        Self {
+            state_identity: None,
+            _display_format: display,
+            _command_profiling: profiling,
+            _tape: tape,
+        }
+    }
     pub(crate) fn enter(context: RuntimeContext) -> Self {
-        let state_identity = context.state_identity();
+        let state_identity = Some(context.state_identity());
         let display_format =
             runmat_value::select_display_format_owner(context.display_format_owner());
         let command_profiling = runmat_execution::profiling::select_command_profiling(
@@ -191,7 +209,7 @@ impl RuntimeContextGuard {
         let tape = crate::builtins::deep_learning::autodiff::TapePollGuard::select(
             context.tape_poll_authority(),
         );
-        ACTIVE_CONTEXTS.with(|contexts| contexts.borrow_mut().push(context));
+        ACTIVE_CONTEXTS.with(|contexts| contexts.borrow_mut().push(Some(context)));
         Self {
             state_identity,
             _display_format: display_format,
@@ -205,9 +223,16 @@ impl Drop for RuntimeContextGuard {
     fn drop(&mut self) {
         ACTIVE_CONTEXTS.with(|contexts| {
             let popped = contexts.borrow_mut().pop();
+            debug_assert!(
+                popped.is_some(),
+                "runtime context guard must own a stack entry"
+            );
             debug_assert_eq!(
-                popped.as_ref().map(RuntimeContext::state_identity),
-                Some(self.state_identity),
+                popped
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .map(RuntimeContext::state_identity),
+                self.state_identity,
                 "runtime contexts must unwind in stack order"
             );
         });
@@ -218,7 +243,7 @@ impl Drop for RuntimeContextGuard {
 /// inner future is destroyed. It never keeps ambient state installed across a
 /// yield, so independently polled sessions cannot observe one another.
 pub struct ContextFuture<F> {
-    scope: PollFutureScope,
+    scope: Option<PollFutureScope>,
     future: Option<Pin<Box<F>>>,
 }
 
@@ -233,10 +258,10 @@ impl<F> ContextFuture<F> {
     pub(super) fn new(mut context: RuntimeContext, future: Pin<Box<F>>) -> Self {
         context.capture_poll_projections();
         Self {
-            scope: PollFutureScope {
+            scope: Some(PollFutureScope {
                 context,
                 _future_scratch: None,
-            },
+            }),
             future: Some(future),
         }
     }
@@ -250,6 +275,27 @@ pub struct PreparedRuntimeScope {
 }
 
 impl PreparedRuntimeScope {
+    /// Construct an unboxed result child under this already captured poll
+    /// authority. Its caller admits the complete child at the existing
+    /// continuation owner before invoking this factory; no second Box is made.
+    /// The explicit child context and every poll/drop share this snapshot.
+    pub fn construct_result_unboxed<F, O>(
+        self,
+        make_future: impl FnOnce(RuntimeContext) -> F,
+    ) -> impl Future<Output = Result<O, RuntimeError>>
+    where
+        F: Future<Output = Result<O, RuntimeError>>,
+    {
+        let future = {
+            let _guard = self.enter();
+            make_future(self.context.clone())
+        };
+        inline::ScopedFuture::from_prepared(self, future)
+    }
+
+    pub(crate) fn enter(&self) -> RuntimeContextGuard {
+        RuntimeContextGuard::enter(self.context.clone())
+    }
     /// Admit the concrete future owner before its factory is invoked.
     pub fn prepare_future<F: Future>(self) -> Result<PreparedRuntimeFutureScope<F>, RuntimeError> {
         let bytes = u64::try_from(std::mem::size_of::<F>()).map_err(|_| {
@@ -330,7 +376,7 @@ impl<F: Future> PreparedRuntimeFutureScope<F> {
         } = self;
         let future = preparation.try_construct(&scope, make_future)?;
         Ok(ContextFuture {
-            scope,
+            scope: Some(scope),
             future: Some(future),
         })
     }
@@ -350,31 +396,49 @@ impl FuturePreparation {
         if let Err(source) =
             checkpoint_unbounded_factory(&scope.context, &cancellation, receipt.is_none())
         {
-            future_owner::drop_value_in_context(
-                &scope.context,
-                make_future.take().expect("poll future factory"),
-            );
+            inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+                future_owner::drop_value_in_context(
+                    &scope.context,
+                    make_future.take().expect("poll future factory"),
+                )
+            });
             return Err(source);
         }
         let future = if let Some(receipt) = &receipt {
             if let Err(source) = receipt.checkpoint(&scope.context) {
-                future_owner::drop_value_in_context(
-                    &scope.context,
-                    make_future.take().expect("poll future factory"),
-                );
+                inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+                    future_owner::drop_value_in_context(
+                        &scope.context,
+                        make_future.take().expect("poll future factory"),
+                    )
+                });
                 return Err(scope_allocation_error(
                     &scope.context,
                     "poll future authority changed",
                     source,
                 ));
             }
-            let allocated = future_owner::try_pin_in_context(
-                &scope.context,
-                make_future.take().expect("poll future factory"),
-            );
+            if let Err(error) = inline::check_captured(&scope.context, Some(&cancellation)) {
+                inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+                    future_owner::drop_value_in_context(
+                        &scope.context,
+                        make_future.take().expect("poll future factory"),
+                    )
+                });
+                return Err(error);
+            }
+            let allocated =
+                inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+                    future_owner::try_pin_in_context(
+                        &scope.context,
+                        make_future.take().expect("poll future factory"),
+                    )
+                });
             if let Err(source) = receipt.checkpoint(&scope.context) {
                 if let Ok(future) = allocated {
-                    future_owner::drop_in_context(&scope.context, future);
+                    inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+                        future_owner::drop_in_context(&scope.context, future)
+                    });
                 }
                 return Err(scope_allocation_error(
                     &scope.context,
@@ -390,26 +454,38 @@ impl FuturePreparation {
                 )
             })?
         } else {
-            let future = future_owner::pin_in_context(
-                &scope.context,
-                make_future.take().expect("poll future factory"),
-            );
+            let future =
+                inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+                    future_owner::pin_in_context(
+                        &scope.context,
+                        make_future.take().expect("poll future factory"),
+                    )
+                });
             if let Err(source) = checkpoint_unbounded_factory(&scope.context, &cancellation, true) {
-                future_owner::drop_in_context(&scope.context, future);
+                inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+                    future_owner::drop_in_context(&scope.context, future)
+                });
                 return Err(source);
             }
             future
         };
+        if let Err(error) = inline::check_captured(&scope.context, Some(&cancellation)) {
+            inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+                future_owner::drop_in_context(&scope.context, future)
+            });
+            return Err(error);
+        }
         Ok(future)
     }
 
     fn drop_unconstructed<M>(self, scope: &mut PollFutureScope, make_future: M) {
         // Retire factory captures and admission state under the same selected
         // authority as construction, including cancellation-before-first-poll.
-        future_owner::drop_value_in_context(
-            &scope.context,
-            (make_future, self, scope._future_scratch.take()),
-        );
+        let cancellation = self.cancellation.clone();
+        let scratch = scope._future_scratch.take();
+        inline::with_captured_scope(Some(&scope.context), Some(&cancellation), || {
+            future_owner::drop_value_in_context(&scope.context, (make_future, self, scratch))
+        });
     }
 }
 
@@ -571,13 +647,19 @@ impl<F: Future> Future for ContextFuture<F> {
     type Output = F::Output;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().get_mut();
-        this.scope.poll(&mut this.future, cx)
+        match &this.scope {
+            Some(scope) => scope.poll(&mut this.future, cx),
+            None => unselected::poll(&mut this.future, cx),
+        }
     }
 }
 
 impl<F> Drop for ContextFuture<F> {
     fn drop(&mut self) {
-        self.scope.drop_future(&mut self.future);
+        match &self.scope {
+            Some(scope) => scope.drop_future(&mut self.future),
+            None => unselected::drop_future(&mut self.future),
+        }
     }
 }
 impl<F> Unpin for ContextFuture<F> {}
@@ -955,6 +1037,234 @@ mod tests {
         assert!(future.as_mut().poll(&mut cx).is_pending());
         drop(future);
         assert!(active_runtime_context().is_none());
+
+        // The admitted inline owner has the same construction, poll, and
+        // destruction semantics without a second future allocation. Explicit
+        // absence masks foreign runtime and profiling owners, including before
+        // the future has ever been polled.
+        struct InlineProbe {
+            expected: Option<runmat_execution::ExecutionScopeId>,
+            dropped: Rc<std::cell::Cell<usize>>,
+        }
+        impl InlineProbe {
+            fn check(&self) {
+                assert_eq!(
+                    active_runtime_context().map(|r| r.execution().scope_id()),
+                    self.expected
+                );
+                assert!(current_command_profiling().is_none());
+            }
+        }
+        impl Drop for InlineProbe {
+            fn drop(&mut self) {
+                self.check();
+                self.dropped.set(self.dropped.get() + 1);
+            }
+        }
+        let foreign_receipt = CommandProfilingRoot::new();
+        let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_command_profiling(foreign_receipt.receipt());
+        let _foreign = foreign.enter();
+        for selected in [Some(runtime.clone()), None] {
+            for poll in [false, true] {
+                let dropped = Rc::new(std::cell::Cell::new(0));
+                let probe = InlineProbe {
+                    expected: selected.as_ref().map(|r| r.execution().scope_id()),
+                    dropped: dropped.clone(),
+                };
+                let factory = RuntimeScopeFactory::new(selected.clone(), move || {
+                    probe.check();
+                    async move {
+                        probe.check();
+                        std::future::pending::<()>().await;
+                        drop(probe);
+                        Ok::<(), crate::RuntimeError>(())
+                    }
+                });
+                let mut future = Box::pin(factory.construct());
+                if poll {
+                    assert!(future.as_mut().poll(&mut cx).is_pending());
+                }
+                drop(future);
+                assert_eq!(dropped.get(), 1);
+                assert_eq!(
+                    active_runtime_context().unwrap().execution().scope_id(),
+                    foreign.execution().scope_id()
+                );
+                assert!(current_command_profiling().is_some());
+
+                let lazy_dropped = Rc::new(std::cell::Cell::new(0));
+                let lazy_probe = InlineProbe {
+                    expected: selected.as_ref().map(|r| r.execution().scope_id()),
+                    dropped: lazy_dropped.clone(),
+                };
+                let mut lazy = Box::pin(LazyRuntimeScope::new(selected.clone(), async move {
+                    lazy_probe.check();
+                    std::future::pending::<()>().await;
+                    drop(lazy_probe);
+                    Ok::<(), crate::RuntimeError>(())
+                }));
+                if poll {
+                    assert!(lazy.as_mut().poll(&mut cx).is_pending());
+                }
+                drop(lazy);
+                assert_eq!(lazy_dropped.get(), 1);
+                assert_eq!(
+                    active_runtime_context().unwrap().execution().scope_id(),
+                    foreign.execution().scope_id()
+                );
+                assert!(current_command_profiling().is_some());
+            }
+        }
+
+        // A synchronously captured projection uses the same inline drop owner,
+        // including an unpolled child and a genuinely pending child.
+        for poll in [false, true] {
+            let dropped = Rc::new(std::cell::Cell::new(0));
+            let probe = InlineProbe {
+                expected: Some(runtime.execution().scope_id()),
+                dropped: dropped.clone(),
+            };
+            let scope = runtime.prepare_poll_scope().unwrap();
+            let mut future = Box::pin(scope.construct_result_unboxed(move |captured| {
+                assert_eq!(Some(captured.execution().scope_id()), probe.expected);
+                probe.check();
+                async move {
+                    probe.check();
+                    std::future::pending::<()>().await;
+                    drop(probe);
+                    Ok::<(), crate::RuntimeError>(())
+                }
+            }));
+            if poll {
+                assert!(future.as_mut().poll(&mut cx).is_pending());
+            }
+            drop(future);
+            assert_eq!(dropped.get(), 1);
+            assert_eq!(
+                active_runtime_context().unwrap().execution().scope_id(),
+                foreign.execution().scope_id()
+            );
+            assert!(current_command_profiling().is_some());
+        }
+
+        // Construction does not snapshot the ambient request. The selected
+        // first-poll request survives its caller guard retiring between polls.
+        let factory = RuntimeScopeFactory::new(Some(runtime.clone()), || async {
+            assert_eq!(crate::output_count::current_output_count(), Some(3));
+            let mut yielded = false;
+            std::future::poll_fn(move |_| {
+                if yielded {
+                    Poll::Ready(())
+                } else {
+                    yielded = true;
+                    Poll::Pending
+                }
+            })
+            .await;
+            assert_eq!(crate::output_count::current_output_count(), Some(3));
+            Ok::<(), crate::RuntimeError>(())
+        });
+        let mut future = Box::pin(factory.construct());
+        {
+            let _selected = runtime.enter();
+            let _count = crate::output_count::push_output_count(Some(3)).unwrap();
+            assert!(future.as_mut().poll(&mut cx).is_pending());
+        }
+        assert!(matches!(future.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
+
+        // Pending cleanup pins its creation token without replacing routes or
+        // first-poll instruction projections. The caller's rebound slot is
+        // restored after each synchronous construction/destruction boundary.
+        struct TokenProbe {
+            token: runmat_execution::CancellationToken,
+            dropped: Rc<std::cell::Cell<usize>>,
+        }
+        impl Drop for TokenProbe {
+            fn drop(&mut self) {
+                let active = active_runtime_context().expect("original cleanup runtime");
+                assert!(active.cancellation().same_generation(&self.token));
+                self.dropped.set(self.dropped.get() + 1);
+            }
+        }
+        let original_token = runtime.cancellation();
+        let successor = runmat_execution::cancellation::CancellationSource::new();
+        for construct in [false, true] {
+            let dropped = Rc::new(std::cell::Cell::new(0));
+            let probe = TokenProbe {
+                token: original_token.clone(),
+                dropped: dropped.clone(),
+            };
+            let factory = RuntimeScopeFactory::new(Some(runtime.clone()), move || async move {
+                let _probe = probe;
+                std::future::pending::<Result<(), crate::RuntimeError>>().await
+            });
+            if construct {
+                let future = factory.construct();
+                let _rebound = runtime.scoped_cancellation_token(successor.token());
+                drop(future);
+                assert!(runtime.cancellation().same_generation(&successor.token()));
+            } else {
+                let _rebound = runtime.scoped_cancellation_token(successor.token());
+                drop(factory);
+                assert!(runtime.cancellation().same_generation(&successor.token()));
+            }
+            assert_eq!(dropped.get(), 1);
+        }
+        for poll in [false, true] {
+            let dropped = Rc::new(std::cell::Cell::new(0));
+            let entered = Rc::new(std::cell::Cell::new(false));
+            let probe = TokenProbe {
+                token: original_token.clone(),
+                dropped: dropped.clone(),
+            };
+            let child_entered = entered.clone();
+            let mut lazy = Box::pin(LazyRuntimeScope::new(Some(runtime.clone()), async move {
+                let _probe = probe;
+                child_entered.set(true);
+                std::future::pending::<Result<(), crate::RuntimeError>>().await
+            }));
+            let _rebound = runtime.scoped_cancellation_token(successor.token());
+            if poll {
+                assert!(matches!(lazy.as_mut().poll(&mut cx), Poll::Ready(Err(_))));
+            }
+            drop(lazy);
+            assert!(!entered.get());
+            assert_eq!(dropped.get(), 1);
+            assert!(runtime.cancellation().same_generation(&successor.token()));
+        }
+        // Rebound-before-construction is a terminal rejection, not a delayed
+        // retry after the mutable slot happens to return to the old token.
+        let invoked = Rc::new(std::cell::Cell::new(false));
+        let dropped = Rc::new(std::cell::Cell::new(0));
+        let probe = TokenProbe {
+            token: original_token.clone(),
+            dropped: dropped.clone(),
+        };
+        let made = invoked.clone();
+        let factory = RuntimeScopeFactory::new(Some(runtime.clone()), move || {
+            made.set(true);
+            async move {
+                drop(probe);
+                Ok::<(), crate::RuntimeError>(())
+            }
+        });
+        let mut rejected = {
+            let _rebound = runtime.scoped_cancellation_token(successor.token());
+            let future = Box::pin(factory.construct());
+            assert!(!invoked.get());
+            assert_eq!(dropped.get(), 1);
+            assert!(runtime.cancellation().same_generation(&successor.token()));
+            future
+        };
+        assert!(runtime.cancellation().same_generation(&original_token));
+        assert!(matches!(
+            rejected.as_mut().poll(&mut cx),
+            Poll::Ready(Err(_))
+        ));
+        assert!(!invoked.get());
+        drop(rejected);
+        assert_eq!(dropped.get(), 1);
     }
 
     #[test]

@@ -91,7 +91,9 @@ impl<'a> RuntimeBuiltinInvocation<'a> {
         };
         Ok(BuiltinContinuationInput {
             args,
-            context: self.context,
+            context: self
+                .context
+                .map(RuntimeContext::with_selected_builtin_output_projection),
             requested_outputs: self.requested_outputs,
             call_observation: self.call_observation,
         })

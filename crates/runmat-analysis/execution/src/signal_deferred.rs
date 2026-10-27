@@ -94,6 +94,9 @@ impl FrozenDeferredSignal {
                 "deferred inline result bound is outside the portable envelope",
             ));
         }
+        // Compare against the original frozen binding before recovering facts
+        // from the candidate envelope; never let re-admission replace it.
+        crate::prepare_generator_descriptor(&self.admitted, self.executable.clone())?;
         let rederived = crate::callable::executable::admit_named_signal_generator_from_executable(
             &self.authored,
             self.admitted.program_revision.clone(),
@@ -187,7 +190,7 @@ impl FrozenDeferredSignal {
         )?;
         if admitted.generator_identity != self.admitted.generator_identity
             || admitted.provenance != self.admitted.provenance
-            || admitted.captures != self.admitted.captures
+            || admitted.frozen_inputs != self.admitted.frozen_inputs
             || admitted.materialization_identity == self.admitted.materialization_identity
         {
             return Err(AnalysisBridgeError::Identity("mesh resolution changed frozen invocation or retained unresolved materialization identity"));

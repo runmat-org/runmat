@@ -72,6 +72,7 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 libc = "0.2"
 
 [dev-dependencies]
+runmat-gc = { workspace = true }
 runmat-logging = { workspace = true }
 rcgen = "0.14"
 runmat-geometry-fixtures = { workspace = true }

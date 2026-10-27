@@ -56,8 +56,14 @@ fn admitted(
                 source_digest: digest("spectra.m"),
             },
             executable_source_digest: digest("executable"),
+            compiled_binding: crate::named_callable::CompiledCallableBinding::fixture(
+                name,
+                name,
+                ProgramFunctionId(11),
+                digest("executable"),
+            ),
             function: ProgramFunctionId(11),
-            captures: Vec::new(),
+            frozen_inputs: crate::FrozenGeneratorInputs::DirectCaptures(Vec::new()),
             generator_identity,
             required_capabilities: BTreeSet::new(),
             provenance: GeneratorProvenance {

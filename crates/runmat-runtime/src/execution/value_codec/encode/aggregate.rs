@@ -32,6 +32,7 @@ pub(super) fn struct_array(
     path: &str,
     purpose: CodecPurpose,
     runtime: Option<&dyn super::InlineSourceAuthority>,
+    workspace: Option<&super::super::ValidationWorkspaceOwner>,
 ) -> Result<DurableStructArray, ValueCodecError> {
     let fields = value
         .field_names()
@@ -49,6 +50,7 @@ pub(super) fn struct_array(
                             &format!("{}[{index}]", field_path(path, name)),
                             purpose,
                             runtime,
+                            workspace,
                         )
                     })
                     .collect::<Result<_, _>>()?,
@@ -66,15 +68,20 @@ pub(super) fn object_array(
     path: &str,
     purpose: CodecPurpose,
     runtime: Option<&dyn super::InlineSourceAuthority>,
+    workspace: Option<&super::super::ValidationWorkspaceOwner>,
 ) -> Result<DurableObjectArray, ValueCodecError> {
     let elements = value
         .data()
         .iter()
         .enumerate()
         .map(|(index, item)| match item {
-            Value::Object(object) => {
-                plain_object(object, &index_path(path, index), purpose, runtime)
-            }
+            Value::Object(object) => plain_object(
+                object,
+                &index_path(path, index),
+                purpose,
+                runtime,
+                workspace,
+            ),
             _ => Err(ValueCodecError::unsupported(
                 &index_path(path, index),
                 "handle objects are not durable",
@@ -93,6 +100,7 @@ pub(super) fn plain_object(
     path: &str,
     purpose: CodecPurpose,
     runtime: Option<&dyn super::InlineSourceAuthority>,
+    workspace: Option<&super::super::ValidationWorkspaceOwner>,
 ) -> Result<DurablePlainObject, ValueCodecError> {
     let decomposition = match value.persistence_payload_kind() {
         ObjectPersistencePayloadKind::PlainValue | ObjectPersistencePayloadKind::NumericFactor
@@ -142,7 +150,7 @@ pub(super) fn plain_object(
         .map(|(name, item)| {
             Ok(StructField {
                 name: name.to_owned(),
-                value: encode(item, &field_path(path, name), purpose, runtime)?,
+                value: encode(item, &field_path(path, name), purpose, runtime, workspace)?,
             })
         })
         .collect::<Result<Vec<_>, ValueCodecError>>()?;

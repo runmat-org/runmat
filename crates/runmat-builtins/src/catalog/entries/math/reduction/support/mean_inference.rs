@@ -29,7 +29,7 @@ fn mean_literal_control(literal: &LiteralValue) -> Option<LiteralReductionContro
     Some(match MeanControl::from_literal(literal)? {
         MeanControl::All => LiteralReductionControl::All,
         MeanControl::Missing(_) => LiteralReductionControl::Missing,
-        MeanControl::Weights => LiteralReductionControl::RequiresRuntimeValue,
+        MeanControl::Weights => LiteralReductionControl::NumericWeights,
         MeanControl::Output(class) => LiteralReductionControl::Output(match class {
             MeanOutputClass::Default => LiteralReductionOutput::Default,
             MeanOutputClass::Double => LiteralReductionOutput::Double,

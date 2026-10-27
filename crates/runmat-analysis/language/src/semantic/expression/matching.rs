@@ -97,7 +97,7 @@ pub(crate) fn pattern_matches(pattern: &OperationTypePattern, value: &FeaType) -
     match pattern {
         OperationTypePattern::Any => true,
         OperationTypePattern::NumericScalar => value.is_numeric(),
-        OperationTypePattern::Quantity(dimension) => (*value).is_quantity((*dimension).into()),
+        OperationTypePattern::Quantity(dimension) => (*value).is_quantity(*dimension),
         OperationTypePattern::VectorQuantity { dimension, length } => matches!(
             value,
             FeaType::Vector {
@@ -184,7 +184,7 @@ pub(super) fn operation_output_type(
         }
         OperationQuantityRule::RequiredInput { input, dimension } => {
             if !argument_value(arguments, input)
-                .is_some_and(|value| (value.value_type).is_quantity(dimension.into()))
+                .is_some_and(|value| (value.value_type).is_quantity(dimension))
             {
                 diagnostics.push(FeaDiagnostic::error(
                     "fea.semantic.operation_quantity",
@@ -202,7 +202,7 @@ pub(super) fn operation_output_type(
             output: _,
             dimension,
         } => {
-            output = FeaType::Quantity(dimension.into());
+            output = FeaType::Quantity(dimension);
         }
         OperationQuantityRule::NotApplicable | OperationQuantityRule::CheckedByLowering => {}
     }
@@ -239,9 +239,9 @@ fn pattern_type(pattern: &OperationTypePattern) -> FeaType {
         | OperationTypePattern::PropertyValue
         | OperationTypePattern::Callable => FeaType::Unknown,
         OperationTypePattern::NumericScalar => FeaType::Real,
-        OperationTypePattern::Quantity(dimension) => FeaType::Quantity((*dimension).into()),
+        OperationTypePattern::Quantity(dimension) => FeaType::Quantity(*dimension),
         OperationTypePattern::VectorQuantity { dimension, length } => FeaType::Vector {
-            element: Box::new(FeaType::Quantity((*dimension).into())),
+            element: Box::new(FeaType::Quantity(*dimension)),
             length: *length,
         },
         OperationTypePattern::IntegerScalar | OperationTypePattern::Size => FeaType::Integer,

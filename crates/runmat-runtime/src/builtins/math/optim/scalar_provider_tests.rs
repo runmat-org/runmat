@@ -66,7 +66,7 @@ fn cancellation_after_first_bound_download_prevents_second_download_and_callback
         cancellation,
     }));
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let lower = provider
+    let mut lower = provider
         .owner
         .allocate_numeric(HostNumericTensorOwned {
             data: HostNumericDataOwned::F64(vec![0.0]),
@@ -74,13 +74,21 @@ fn cancellation_after_first_bound_download_prevents_second_download_and_callback
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    let upper = provider
+    lower.handle = lower
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    let mut upper = provider
         .owner
         .allocate_numeric(HostNumericTensorOwned {
             data: HostNumericDataOwned::F64(vec![1.0]),
             shape: vec![1, 1],
             storage: GpuTensorStorage::Real,
         })
+        .unwrap();
+    upper.handle = upper
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         .unwrap();
     let error = block_on(super::fminbnd::fminbnd_builtin_registered(
         Some(runtime),
@@ -91,6 +99,10 @@ fn cancellation_after_first_bound_download_prevents_second_download_and_callback
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(crate::runtime_error::error_has_control_cancellation_origin(
+        &error
+    ));
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     assert_eq!(lower.probe.retirements(), 0);
     assert_eq!(upper.probe.retirements(), 0);
@@ -136,13 +148,17 @@ fn canonical_nonlinear_family_preflights_outputs_and_preserves_failed_transfer_c
         downloads: AtomicUsize::new(0),
     }));
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let resident = provider
+    let mut resident = provider
         .owner
         .allocate_numeric(HostNumericTensorOwned {
             data: HostNumericDataOwned::F64(vec![3.0]),
             shape: vec![1, 1],
             storage: GpuTensorStorage::Real,
         })
+        .unwrap();
+    resident.handle = resident
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         .unwrap();
     let runtime = crate::user_functions::test_support::exact_fixture_runtime();
     // This explicit invocation owns its policy; the ambient thread guard
@@ -231,7 +247,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         downloads: AtomicUsize::new(0),
     }));
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let real = provider
+    let mut real = provider
         .owner
         .allocate_numeric(HostNumericTensorOwned {
             data: HostNumericDataOwned::F64(vec![0.0]),
@@ -239,7 +255,11 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    let complex = provider
+    real.handle = real
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    let mut complex = provider
         .owner
         .allocate_numeric(HostNumericTensorOwned {
             data: HostNumericDataOwned::F64(vec![0.0, 0.0]),
@@ -247,13 +267,21 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
             storage: GpuTensorStorage::ComplexInterleaved,
         })
         .unwrap();
-    let unavailable_upper = provider
+    complex.handle = complex
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    let mut unavailable_upper = provider
         .owner
         .allocate_numeric(HostNumericTensorOwned {
             data: HostNumericDataOwned::F64(vec![1.0]),
             shape: vec![1, 1],
             storage: GpuTensorStorage::Real,
         })
+        .unwrap();
+    unavailable_upper.handle = unavailable_upper
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         .unwrap();
     unavailable_upper.probe.mark_unavailable();
     let function = || Value::FunctionHandle("sin".into());
@@ -361,6 +389,66 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
     assert_eq!(bad_initial.identifier(), Some("RunMat:fzero:InvalidInput"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
+    for (field, expected) in [
+        ("TolX", "option TolX must be a real numeric scalar"),
+        ("Display", "option Display must be a string"),
+    ] {
+        let mut opaque = runmat_value::UnboundedStructValueBuilder::new();
+        opaque.insert("unselected_private_property", resident());
+        let mut settings = runmat_value::UnboundedStructValueBuilder::new();
+        settings.insert(field, Value::Struct(opaque.finish()));
+        let bad_control = block_on(super::fminbnd::fminbnd_builtin(
+            function(),
+            resident(),
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+                settings.finish(),
+            )]),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            bad_control.identifier(),
+            Some("RunMat:fminbnd:InvalidArgument")
+        );
+        assert!(bad_control.message().contains(expected));
+        assert!(!bad_control
+            .message()
+            .contains("unselected_private_property"));
+    }
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(real.probe.retirements(), 0);
+
+    let mut opaque = runmat_value::UnboundedStructValueBuilder::new();
+    opaque.insert("unselected_private_property", resident());
+    let options = Value::Cell(
+        runmat_value::CellArray::new(vec![Value::Struct(opaque.finish())], 1, 1).unwrap(),
+    );
+    let bad_options = [
+        block_on(super::fminbnd::fminbnd_builtin(
+            function(),
+            resident(),
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![options.clone()]),
+        ))
+        .unwrap_err(),
+        block_on(super::fzero::fzero_builtin(
+            function(),
+            resident(),
+            crate::builtins::common::test_support::builtin_arguments(vec![options]),
+        ))
+        .unwrap_err(),
+    ];
+    for (error, identifier) in bad_options.iter().zip([
+        "RunMat:fminbnd:InvalidArgument",
+        "RunMat:fzero:InvalidArgument",
+    ]) {
+        assert_eq!(error.identifier(), Some(identifier));
+        assert!(error.message().contains("options must be a struct"));
+        assert!(!error.message().contains("unselected_private_property"));
+    }
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(real.probe.retirements(), 0);
+
     let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let bad_outputs = block_on(super::fminbnd::fminbnd_builtin(
         function(),
@@ -375,6 +463,82 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
     );
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     drop(_outputs);
+
+    // A primary-double caller owns no numeric/single extension authority.
+    // Metadata-only refusal precedes provider lookup as well as transfer.
+    {
+        use super::common::constrained_numeric::{self as numeric, Geometry, Numeric, Policy};
+        let strict = Policy {
+            owner: runmat_builtins::FMINCON_CATALOG_ENTRY.identity,
+            invalid: Some(&runmat_builtins::FMINCON_ERROR_INVALID_ARGUMENT),
+            numeric: None,
+            single: None,
+            resident: None,
+            sparse: None,
+        };
+        let mut single = provider
+            .owner
+            .allocate_numeric(HostNumericTensorOwned {
+                data: HostNumericDataOwned::F32(vec![0.0]),
+                shape: vec![1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        single.handle = single
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
+        let mut opaque = runmat_value::UnboundedStructValueBuilder::new();
+        opaque.insert("resident", resident());
+        let _absent = ThreadProviderGuard::set(None);
+        for value in [
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Bool(false),
+            Value::GpuTensor(single.handle.clone()),
+            Value::Struct(opaque.finish()),
+        ] {
+            let error =
+                numeric::preflight(&value, "primary value", Geometry::Scalar, &strict, None)
+                    .unwrap_err();
+            assert_eq!(error.identifier(), strict.invalid.unwrap().identifier);
+        }
+        let extended = Policy {
+            invalid: None,
+            numeric: Some(&runmat_builtins::FMINCON_NUMERIC_EXTENSION),
+            single: Some(&runmat_builtins::FMINCON_SINGLE_EXTENSION),
+            resident: Some(&runmat_builtins::FMINCON_RESIDENT_EXTENSION),
+            ..strict
+        };
+        let error = numeric::preflight(
+            &Value::GpuTensor(single.handle.clone()),
+            "extended value",
+            Geometry::Scalar,
+            &extended,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD.identifier
+        );
+        let mut cooperation = super::common::ScalarCooperation::for_builtin(strict.owner, None);
+        assert!(numeric::preflight(
+            &Value::Num(f64::NAN),
+            "raw trial",
+            Geometry::Scalar,
+            &strict,
+            None
+        )
+        .unwrap());
+        assert!(
+            matches!(block_on(numeric::materialize_raw(Value::Num(f64::NAN),
+            "raw trial", &strict, &mut cooperation)).unwrap(),
+            Numeric::Real { values, .. } if values[0].is_nan())
+        );
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(single.probe.retirements(), 0);
+        single.handle.release().unwrap();
+    }
 
     let failed_transfer = block_on(super::fminbnd::fminbnd_builtin(
         function(),
