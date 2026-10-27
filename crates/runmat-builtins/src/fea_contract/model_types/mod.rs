@@ -9,5 +9,3 @@ pub mod classes;
 pub mod fixtures;
 pub mod inference;
 pub mod integer;
-#[cfg(test)]
-pub(crate) mod test_support;
