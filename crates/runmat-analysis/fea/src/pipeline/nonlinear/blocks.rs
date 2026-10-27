@@ -44,7 +44,7 @@ pub fn run_nonlinear_block(
         .execution_step
         .accuracy
         .resources
-        .maximum_resident_bytes;
+        .resident_byte_budget();
     let contact_inputs = match options.solver_mesh.as_ref() {
         Some(mesh) => super::contact::prepare_inputs(
             model,

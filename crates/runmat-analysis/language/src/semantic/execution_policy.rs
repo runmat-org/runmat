@@ -158,7 +158,7 @@ fn resource_limits(
             finite_u64(bytes).or_else(|| {
                 invalid(
                     declaration,
-                    "memory_per_worker must be a positive whole-byte bound",
+                    "memory_per_worker must be a positive whole-byte bound of at most 2^53 - 1 bytes",
                     diagnostics,
                 )
             })
@@ -390,9 +390,9 @@ fn positive_or_zero_u16(value: &CheckedExpression) -> Option<u16> {
     value.parse().ok()
 }
 
+/// A positive whole count within the shared FEA wire bound (2^53 - 1).
 fn finite_u64(value: f64) -> Option<u64> {
-    (value.is_finite() && value > 0.0 && value.fract() == 0.0 && value <= u64::MAX as f64)
-        .then_some(value as u64)
+    runmat_types::wire_integer::bounded_whole_f64(value).filter(|value| *value > 0)
 }
 
 fn validate_members(declaration: &CheckedFeaDeclaration, diagnostics: &mut Vec<FeaDiagnostic>) {

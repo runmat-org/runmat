@@ -349,7 +349,7 @@ pub(crate) fn convert(
     let memory = completed.workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes;
+        .resident_byte_budget();
     let prepared = prepare_nonlinear_solid_study_root(&completed).map_err(string)?;
     for object in &prepared.objects {
         store.write_verified(object).map_err(string)?;

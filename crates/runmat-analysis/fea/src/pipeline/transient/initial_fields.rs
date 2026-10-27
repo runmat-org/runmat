@@ -15,7 +15,7 @@ pub(super) fn validate(
     crate::planning::resource::require_initial_field_ceiling(
         fields,
         runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64),
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )?;
     crate::execution::validate_initial_field_declarations(model, step, fields)
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;

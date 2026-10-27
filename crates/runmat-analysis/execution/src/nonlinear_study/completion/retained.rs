@@ -9,7 +9,7 @@ pub(super) fn admit_pending<T: serde::Serialize>(
     let ceiling = study.preparation.product.workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes;
+        .resident_byte_budget();
     let profile = runmat_canonical_codec::profile_serialized(
         pending,
         runmat_canonical_codec::CanonicalLimits::new(

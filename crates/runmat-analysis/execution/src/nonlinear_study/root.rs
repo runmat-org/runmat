@@ -182,7 +182,7 @@ pub fn import_nonlinear_solid_study_root(
     let [step] = wire.preparation.workload.model.sequence.steps.as_slice() else {
         return Err(invalid("nonlinear root requires original standalone step"));
     };
-    if decode_bytes > step.accuracy.resources.maximum_resident_bytes {
+    if decode_bytes > step.accuracy.resources.resident_byte_budget() {
         return Err(limit(
             "nonlinear root decode exceeds original authored memory",
         ));
@@ -190,7 +190,7 @@ pub fn import_nonlinear_solid_study_root(
     let unavailable_bytes = step
         .accuracy
         .resources
-        .maximum_resident_bytes
+        .resident_byte_budget()
         .saturating_sub(maximum_resident_bytes);
     if wire.preparation.max_objects > limits.max_objects
         || wire.preparation.max_object_bytes > limits.max_object_bytes

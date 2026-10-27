@@ -23,7 +23,7 @@ pub fn build_fluid_state_publication_resource_plan(
         fluid_state_publication_workspace_bytes(workload, mesh, &bytes).map_err(|e| invalid(&e))?;
     let request_identity = Digest::sha256(request.canonical_bytes().map_err(|e| invalid(&e))?);
     let mut ceiling = workload.model.sequence.steps[0].accuracy.resources;
-    ceiling.maximum_resident_bytes = workload.resident_ceiling().map_err(|e| invalid(&e))?;
+    ceiling.maximum_resident_bytes = Some(workload.resident_ceiling().map_err(|e| invalid(&e))?);
     let mut worker = super::super::post_process::post_process_worker();
     worker.maximum_wall_milliseconds = ceiling.maximum_wall_time_milliseconds;
     let source_workspace = validation

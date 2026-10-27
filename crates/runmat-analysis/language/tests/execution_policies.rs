@@ -164,6 +164,38 @@ fn execution_policy_rejects_contradictions_and_invalid_limits() {
     }
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/execution_precedence @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: memory_per_worker is a positive whole byte count no larger than the shared FEA
+//   wire-integer bound 2^53 - 1; 2^53 and above, zero and fractional bytes are rejected.
+#[test]
+fn memory_per_worker_shares_the_wire_integer_bound() {
+    let policy_bytes = |bound: &str| {
+        let source = format!(
+            "{BASE}\nexecution bounded {{\nresources {{ memory_per_worker <= {bound} }}\n}}"
+        );
+        let program = check(&source);
+        program
+            .is_valid()
+            .then(|| {
+                program
+                    .execution_policies
+                    .values()
+                    .next()
+                    .unwrap()
+                    .resources
+                    .maximum_memory_bytes_per_worker
+            })
+            .flatten()
+    };
+    let max = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+    assert_eq!(policy_bytes("9007199254740991 B"), Some(max));
+    assert_eq!(policy_bytes("1 B"), Some(1));
+    for rejected in ["9007199254740992 B", "8388608 GiB", "0 B", "1.5 B", "-1 B"] {
+        assert_eq!(policy_bytes(rejected), None, "accepted {rejected}");
+    }
+}
+
 #[test]
 fn named_profiles_are_resolved_and_must_admit_the_authored_placement() {
     let source = format!(

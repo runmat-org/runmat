@@ -186,7 +186,7 @@ fn electrical_ceiling_rejection_precedes_numerical_matrix() {
     source.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
     assert!(
         prepare_electrical_static_inputs(&source, &mesh, policy, LocalExecutionPlan::serial(), 16 << 30)

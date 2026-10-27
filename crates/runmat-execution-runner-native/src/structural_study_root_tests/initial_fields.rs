@@ -168,6 +168,6 @@ pub(crate) fn verify_original_field_transport(fields: &[InitialFieldBinding]) {
     capped.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(super::super::initial_fields::prepare(&capped, fields, &access).is_err());
 }

@@ -78,6 +78,6 @@ pub(super) fn verify_source_selection(
     compiled.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(plan_structural_study_with_fields(&compiled, policy, fields).is_err());
 }

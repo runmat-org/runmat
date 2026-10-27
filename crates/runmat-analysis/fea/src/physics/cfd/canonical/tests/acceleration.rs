@@ -155,18 +155,18 @@ fn additional_acceleration_storage_and_work_cannot_escape_ceilings() {
         accelerated.linear_iterations_upper_bound,
         baseline.linear_iterations_upper_bound
     );
-    policy.maximum_resident_bytes = accelerated.resident_bytes_upper_bound - 1;
+    policy.maximum_resident_bytes = Some(accelerated.resident_bytes_upper_bound - 1);
     assert!(matches!(
         CanonicalFluidReservation::for_counts(&geometry, faces, policy),
         Err(CanonicalFluidError::Resource("resident bytes"))
     ));
-    policy.maximum_resident_bytes = accelerated.resident_bytes_upper_bound;
-    policy.maximum_operator_work = accelerated.operator_work_upper_bound - 1;
+    policy.maximum_resident_bytes = Some(accelerated.resident_bytes_upper_bound);
+    policy.maximum_operator_work = Some(accelerated.operator_work_upper_bound - 1);
     assert!(matches!(
         CanonicalFluidReservation::for_counts(&geometry, faces, policy),
         Err(CanonicalFluidError::Resource("operator work"))
     ));
-    policy.maximum_operator_work = accelerated.operator_work_upper_bound;
+    policy.maximum_operator_work = Some(accelerated.operator_work_upper_bound);
     assert_eq!(
         CanonicalFluidReservation::for_counts(&geometry, faces, policy).unwrap(),
         accelerated

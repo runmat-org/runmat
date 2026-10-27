@@ -104,7 +104,7 @@ fn cumulative_work_rejects_a_later_locally_admissible_block_and_cancellation() {
         .reservation()
         .unwrap()
         .operator_work_upper_bound;
-    workload.policy.maximum_operator_work = charge.checked_mul(3).unwrap();
+    workload.policy.maximum_operator_work = Some(charge.checked_mul(3).unwrap());
     let initial = workload.initial_checkpoint(&mesh).unwrap();
     let first = FluidTransientBlockWorkload {
         workload: workload.clone(),

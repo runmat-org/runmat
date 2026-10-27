@@ -37,6 +37,7 @@ pub enum Ap242CapabilityDisposition {
 pub struct Ap242CapabilityRecord {
     pub capability: Ap242Capability,
     pub disposition: Ap242CapabilityDisposition,
+    #[serde(with = "runmat_types::wire_integer::vec")]
     pub evidence_entity_ids: Vec<u64>,
     pub detail: String,
 }
@@ -66,7 +67,10 @@ impl Ap242CapabilityRecord {
 #[serde(deny_unknown_fields)]
 pub struct Ap242PersistentId {
     pub persistent_id: String,
+    #[serde(with = "runmat_types::wire_integer")]
     pub source_entity_id: u64,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub owner_entity_id: Option<u64>,
     pub role: Ap242PersistentIdRole,
 }

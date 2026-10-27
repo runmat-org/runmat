@@ -1,10 +1,12 @@
 // Runtime boundary checks derived from the generated canonical contracts.
 const ts = require('typescript');
+const { aliasGuard, aliasGuardHelpers } = require('./wire-integers.cjs');
 
 function renderGuards(body, roots) {
   const source = ts.createSourceFile('contracts.ts', body, ts.ScriptTarget.Latest, true);
   const declarations = new Map(source.statements.filter((s) => s.name).map((s) => [s.name.text, s]));
   const reachable = new Map();
+  const integers = new Set();
   const object = (members, value, parameters) => {
     const checks = members.map((member) => {
       if (!ts.isPropertySignature(member) || !member.type) throw new Error('Unsupported guard property');
@@ -47,6 +49,8 @@ function renderGuards(body, roots) {
     if (ts.isTypeReferenceNode(type)) {
       const name = type.typeName.getText(source);
       if (name === 'Uint8Array' && !type.typeArguments?.length) return `${value} instanceof Uint8Array`;
+      const integer = !type.typeArguments?.length && aliasGuard(name, value);
+      if (integer) { integers.add(name); return integer; }
       if (parameters.has(name)) return `${parameters.get(name)}(${value})`;
       const declaration = declarations.get(name);
       if ((declaration?.typeParameters?.length ?? 0) !== (type.typeArguments?.length ?? 0)) throw new Error(`Guard type arity mismatch: ${type.getText(source)}`);
@@ -61,6 +65,7 @@ function renderGuards(body, roots) {
     '// @generated from canonical FEA semantic contracts. Do not edit by hand.',
     `import type { ${roots.join(', ')} } from './fea-semantic-contracts.js';`,
     'function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }',
+    ...aliasGuardHelpers(integers),
     ...reachable.values(),
     ...roots.map((name) => `export function is${name}(value: unknown): value is ${name} { return check${name}(value); }`),
     '',

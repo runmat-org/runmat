@@ -47,7 +47,7 @@ pub(super) fn verify_original_sources(
     capped.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(plan_structural_study_with_fields(&capped, policy, &expected.initial_fields).is_err());
     let mut unselected = compiled.clone();
     unselected.model.initial_conditions.clear();

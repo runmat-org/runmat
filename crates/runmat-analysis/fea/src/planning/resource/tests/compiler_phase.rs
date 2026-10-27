@@ -15,7 +15,7 @@ pub(super) fn assert_carried_request_identity(
             .unwrap()
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .unwrap();
     let carried = build_structural_resource_plan_from_compilation(
@@ -72,7 +72,7 @@ pub(super) fn assert_carried_request_identity(
             .unwrap()
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .unwrap();
     assert_eq!(
@@ -108,12 +108,12 @@ fn original_compiler_phase_is_mandatory_and_governs_sequential_peak() {
             + plan.breakdown.resource_plan_decoded_resident_bytes.0
             + plan.breakdown.resource_plan_transport_closure_bytes.0
     );
-    planned.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
+    planned.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes);
     assert_eq!(
         build_resource_plan(planned.clone()).unwrap().request,
         plan.request
     );
-    planned.accuracy_ceiling.maximum_resident_bytes -= 1;
+    planned.accuracy_ceiling.maximum_resident_bytes = Some(planned.accuracy_ceiling.resident_byte_budget() - 1);
     assert!(matches!(
         build_resource_plan(planned),
         Err(ResourcePlanningError::AccuracyCeiling { .. })

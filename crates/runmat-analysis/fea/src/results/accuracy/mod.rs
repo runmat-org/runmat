@@ -616,7 +616,7 @@ fn validate_plan_boundary(plan: &AccuracyPlan) -> Result<(), AccuracyEvaluationE
     };
     let resources_are_valid = plan.resources.maximum_samples > 0
         && plan.resources.maximum_wall_time_milliseconds > 0
-        && plan.resources.maximum_resident_bytes > 0
+        && plan.resources.resident_limit() != Some(0)
         && match plan.exceeded_limit {
             AccuracyLimitAction::Refine => plan.resources.maximum_refinement_cycles > 0,
             AccuracyLimitAction::TightenSolver => plan.resources.maximum_solver_tightenings > 0,

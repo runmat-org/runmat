@@ -121,7 +121,7 @@ fn blocked_execution_rejects_resource_and_control_substitution() {
     model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let error = run_nonlinear_block(
         &model,
         ComputeBackend::Cpu,

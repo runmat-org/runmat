@@ -250,7 +250,7 @@ fn full_original_signal_payload_is_admitted_before_time_realization() {
         .collect();
     signal.evidence.sample_count = 4096;
     small.signals.push(PhysicalSignal::Velocity(signal));
-    small.policy.maximum_resident_bytes = base.resident_bytes_upper_bound;
+    small.policy.maximum_resident_bytes = Some(base.resident_bytes_upper_bound);
     assert!(matches!(
         CanonicalFluidProblem::prepare_at(small.input(), at(0.0)),
         Err(CanonicalFluidError::Resource(_))

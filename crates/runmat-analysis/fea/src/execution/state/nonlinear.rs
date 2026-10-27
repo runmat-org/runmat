@@ -119,7 +119,7 @@ impl CanonicalSemanticState {
             > workload.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes
+                .resident_byte_budget()
         {
             return Err(invalid(
                 "material history construction exceeds original authored ceiling",

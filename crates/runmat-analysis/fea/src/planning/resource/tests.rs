@@ -153,7 +153,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
             maximum_solver_tightenings: 1,
             maximum_samples: 4,
             maximum_wall_time_milliseconds: 10_000,
-            maximum_resident_bytes: 64 * 1024 * 1024,
+            maximum_resident_bytes: Some(64 * 1024 * 1024),
         },
     }
 }
@@ -1238,7 +1238,7 @@ fn result_artifacts_are_accounted_independently_from_recovery_retention() {
 #[test]
 fn accuracy_ceiling_is_enforced_before_inventory_admission() {
     let mut memory = input(PartitioningPolicy::Monolithic);
-    memory.accuracy_ceiling.maximum_resident_bytes = 1_000;
+    memory.accuracy_ceiling.maximum_resident_bytes = Some(1_000);
     assert!(matches!(
         admit_resource_plan(memory, &inventory(10_000, 10_000)),
         ResourceAdmission::Reject {

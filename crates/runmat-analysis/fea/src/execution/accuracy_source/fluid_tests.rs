@@ -44,7 +44,7 @@ fn original_fluid_closure_cannot_manufacture_mandatory_spatial_accuracy() {
     let source_bound = crate::planning::resource::preflight_fluid_accuracy_source(
         &w,
         &m,
-        w.policy.maximum_resident_bytes,
+        w.policy.resident_byte_budget(),
     )
     .unwrap();
     assert_eq!(

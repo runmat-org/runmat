@@ -23,7 +23,7 @@ pub(super) async fn run() {
         config.worker_memory_bytes = workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes;
+            .resident_byte_budget();
         config.worker_scratch_bytes = config.worker_memory_bytes;
         config.worker_cpu_millicores = 1000;
         config
@@ -44,7 +44,7 @@ pub(super) async fn run() {
         let memory = workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes;
+            .resident_byte_budget();
         let preparation = NonlinearSolidStudyPreparation {
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             product,

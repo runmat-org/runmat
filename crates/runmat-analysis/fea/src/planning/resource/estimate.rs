@@ -390,11 +390,11 @@ fn partition_facts(
 ) -> Result<PartitionFacts, ResourcePlanningError> {
     match partitioning {
         PartitioningPolicy::Monolithic => {
-            if total_memory > input.accuracy_ceiling.maximum_resident_bytes {
+            if total_memory > input.accuracy_ceiling.resident_byte_budget() {
                 return Err(ResourcePlanningError::AccuracyCeiling {
                     resource: "resident memory bytes",
                     required: total_memory,
-                    maximum: input.accuracy_ceiling.maximum_resident_bytes,
+                    maximum: input.accuracy_ceiling.resident_byte_budget(),
                 });
             }
             Ok(PartitionFacts {

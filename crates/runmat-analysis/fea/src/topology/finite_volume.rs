@@ -16,10 +16,20 @@ use super::AnalysisProjection;
 #[serde(deny_unknown_fields)]
 /// Each limit is `None` when unbounded: a cap is a count, never a sentinel value.
 pub struct FiniteVolumeProjectionPolicy {
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub max_cells: Option<usize>,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub max_face_incidences: Option<usize>,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub max_boundary_faces: Option<usize>,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub max_scratch_bytes: Option<usize>,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub max_traversal_operations: Option<usize>,
 }
 

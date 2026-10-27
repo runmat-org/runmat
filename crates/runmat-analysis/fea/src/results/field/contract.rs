@@ -86,7 +86,7 @@ pub enum RecoveredFieldDerivation {
 pub enum RecoveredFieldSample {
     Final,
     TimeSeconds(f64),
-    ModeIndex(usize),
+    ModeIndex(#[serde(with = "runmat_types::wire_integer")] usize),
     FrequencyHertz(f64),
     LoadFactor(f64),
     StudyParameterValue(f64),

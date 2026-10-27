@@ -163,7 +163,7 @@ fn select_static_solve_path(
         | SpdPreconditionerKind::Jacobi
         | SpdPreconditionerKind::Ilu0 => return Ok(StaticSolvePath::ProvingFactorization),
     }
-    let authored = input.step.accuracy.resources.maximum_resident_bytes;
+    let authored = input.step.accuracy.resources.resident_byte_budget();
     let ceiling = machine_memory_bytes.map_or(authored, |machine| machine.min(authored));
     match build_resource_plan(build_static_resource_input(
         input,
