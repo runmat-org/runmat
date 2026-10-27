@@ -134,6 +134,7 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
     }
     let touched = touched_chunk_coords(&ranges, &meta.chunk_shape, &meta.shape);
     let mut upload_batch = Vec::<(DataChunkDescriptor, Vec<u8>)>::new();
+    let revision = crate::data::create_array_revision(provider, root, array_name).await?;
 
     for coords in touched {
         crate::data::cooperate_data_work(budget, 0).await?;
@@ -215,7 +216,10 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
                 err,
             )
         })?;
-        let chunk_path = root.join(&entry.data_path);
+        entry.hash = sha256_hex(&chunk_bytes);
+        entry.object_id = format!("obj_{}", entry.hash);
+        let chunk_path = revision.join(format!("{}.json", entry.object_id));
+        entry.data_path = make_rel_data_path(root, &chunk_path)?;
         provider
             .write(&chunk_path, &chunk_bytes)
             .await
@@ -233,7 +237,6 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
         entry.shape = chunk_extent.clone();
         entry.bytes_raw = chunk_bytes.len() as u64;
         entry.bytes_stored = chunk_bytes.len() as u64;
-        entry.hash = sha256_hex(&chunk_bytes);
         if existed {
             chunk_index.chunks[entry_index] = entry.clone();
         } else {
@@ -266,14 +269,15 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
             err,
         )
     })?;
+    let next_index_path = revision.join("index.json");
     provider
-        .write(&index_path, &index_write)
+        .write(&next_index_path, &index_write)
         .await
         .map_err(|err| {
             crate::data::data_error_with_source(
                 format!(
                     "failed to write chunk index '{}': {err}",
-                    index_path.display()
+                    next_index_path.display()
                 ),
                 err,
             )
@@ -281,7 +285,7 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
 
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
         updated.shape = meta.shape.clone();
-        updated.chunk_index_path = Some(index_rel_path.clone());
+        updated.chunk_index_path = Some(make_rel_data_path(root, &next_index_path)?);
     }
     Ok(true)
 }

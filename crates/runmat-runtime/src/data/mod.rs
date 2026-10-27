@@ -21,6 +21,8 @@ use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt}
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod cooperation;
+mod publication;
+pub(crate) use publication::create_array_revision;
 pub(crate) use cooperation::cooperate_data_work;
 pub(crate) mod authority;
 
@@ -1034,16 +1036,7 @@ pub async fn write_array_payload_on(
     budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<(PathBuf, PathBuf)> {
     cooperate_data_work(budget, 0).await?;
-    let array_dir = arrays_root(root).join(array);
-    provider.create_dir_all(&array_dir).await.map_err(|err| {
-        data_error_with_source(
-            format!(
-                "failed to create array dir '{}': {err}",
-                array_dir.display()
-            ),
-            err,
-        )
-    })?;
+    let array_dir = create_array_revision(provider, root, array).await?;
     let payload_path = array_dir.join("data.f64.json");
     let bytes = serde_json::to_vec(payload).map_err(|err| {
         data_error_with_source(format!("failed to encode array payload json: {err}"), err)
@@ -1102,10 +1095,11 @@ pub async fn write_array_payload_on(
             },
         };
         let key = chunk_key(&coords);
-        let object_id = format!("obj_{}", key.replace('.', "_"));
         let chunk_bytes = serde_json::to_vec(&chunk_payload).map_err(|err| {
             data_error_with_source(format!("failed to encode chunk payload: {err}"), err)
         })?;
+        let hash = sha256_hex(&chunk_bytes);
+        let object_id = format!("obj_{hash}");
         let data_path = chunk_dir.join(format!("{object_id}.json"));
         provider
             .write(&data_path, &chunk_bytes)
@@ -1116,7 +1110,6 @@ pub async fn write_array_payload_on(
                     err,
                 )
             })?;
-        let hash = sha256_hex(&chunk_bytes);
         let rel_chunk_path = data_path
             .strip_prefix(root)
             .map_err(|err| {

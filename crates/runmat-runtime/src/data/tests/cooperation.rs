@@ -66,7 +66,29 @@ fn cancelled_chunk_write_never_publishes_index() {
     .expect_err("cancelled chunk must not publish index");
     assert_eq!(error.identifier.as_deref(), Some("RunMat:Cancelled"));
     assert_eq!(turns.get(), 7);
-    assert!(provider
-        .read_project_path("/data/cancelled.data/arrays/samples/chunks/index.json")
-        .is_err());
+    let revisions = futures::executor::block_on(runmat_filesystem::FsProvider::read_dir(
+        &provider,
+        Path::new("/data/cancelled.data/arrays/samples/revisions"),
+    ))
+    .unwrap();
+    for revision in revisions {
+        let entries = futures::executor::block_on(runmat_filesystem::FsProvider::read_dir(
+            &provider,
+            revision.path(),
+        ))
+        .unwrap();
+        for entry in entries {
+            assert_ne!(entry.file_name(), "index.json");
+            if entry.file_name() == "chunks" {
+                let chunks = futures::executor::block_on(runmat_filesystem::FsProvider::read_dir(
+                    &provider,
+                    entry.path(),
+                ))
+                .unwrap();
+                assert!(chunks
+                    .iter()
+                    .all(|chunk| chunk.file_name() != "index.json"));
+            }
+        }
+    }
 }
