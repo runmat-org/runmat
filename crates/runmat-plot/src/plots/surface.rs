@@ -1293,6 +1293,10 @@ impl SurfacePlot {
     }
 
     /// Generate complete render data for the graphics pipeline
+    #[tracing::instrument(
+        name = "plot.surface.render_data", skip_all,
+        fields(x_len = self.x_len, y_len = self.y_len, gpu_vertices = self.gpu_vertices.is_some())
+    )]
     pub fn render_data(&mut self) -> RenderData {
         log::debug!(
             target: "runmat_plot",

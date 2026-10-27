@@ -122,6 +122,7 @@ catalog! {
     TractionDisplacementStiffness, "pascals_per_meter", [-2, 1, -2, 0, 0, 0, 0, 0], false;
     Curvature, "per_meter", [-1, 0, 0, 0, 0, 0, 0, 0], false;
     TimeDerivativeRate, "per_second", [0, 0, -1, 0, 0, 0, 0, 0], false;
+    Vorticity, "per_second", [0, 0, -1, 0, 0, 0, 0, 0], false;
     Time, "seconds", [0, 0, 1, 0, 0, 0, 0, 0], false;
     Mass, "kilograms", [0, 1, 0, 0, 0, 0, 0, 0], false;
     Energy, "joules", [2, 1, -2, 0, 0, 0, 0, 0], false;
@@ -348,6 +349,10 @@ impl AdditiveQuantity for kind::ApparentPower {}
 
 pub type TimeDerivativeRate = Quantity<kind::TimeDerivativeRate>;
 impl AdditiveQuantity for kind::TimeDerivativeRate {}
+
+/// Curl of a velocity field (twice the local rotation rate), distinct from rigid angular velocity.
+pub type Vorticity = Quantity<kind::Vorticity>;
+impl AdditiveQuantity for kind::Vorticity {}
 
 pub type Curvature = Quantity<kind::Curvature>;
 impl AdditiveQuantity for kind::Curvature {}

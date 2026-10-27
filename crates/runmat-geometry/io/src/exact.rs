@@ -156,12 +156,12 @@ pub(crate) fn exact_import_units(
     Ok((evidence, CoordinateUnits::new(kernel_unit)))
 }
 
-#[cfg(any(
-    feature = "occt-native",
-    all(target_arch = "wasm32", feature = "occt-wasm-host")
-))]
 /// Length unit the exchange reader converts declared coordinates into: STEP and IGES read into
 /// millimetres; unitless BREP keeps its explicit source unit.
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub(crate) fn exchange_reader_unit(
     format: OcctCadFormat,
     kernel_units: runmat_geometry_core::physical::CoordinateUnits<

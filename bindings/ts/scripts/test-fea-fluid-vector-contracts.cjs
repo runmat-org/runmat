@@ -26,8 +26,10 @@ assert.equal(generated, emitted, "generated FEA contracts differ from their gene
 assert.match(generated, /"volume_flow_rate"/, "native oriented-face volume flux quantity is absent");
 const semanticPath = path.resolve(__dirname, "../src/generated/fea-semantic-contracts.ts");
 const assessmentGuardsPath = path.resolve(__dirname, "../src/generated/fea-assessment-guards.ts");
+const physicalUnitsPath = path.resolve(__dirname, "../src/generated/physical-unit-catalog.ts");
 let semanticEmitted;
 let assessmentGuardsEmitted;
+let physicalUnitsEmitted;
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "generate-fea-semantic-contracts.cjs"), "utf8"), {
   __dirname,
   require: (name) => name === "fs" ? {
@@ -36,6 +38,7 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "generate-fea-semantic-c
     writeFileSync: (file, contents) => {
       const output = path.resolve(file);
       if (output === semanticPath) semanticEmitted = contents;
+      else if (output === physicalUnitsPath) physicalUnitsEmitted = contents;
       else {
         assert.equal(output, assessmentGuardsPath, "unexpected semantic-generator output");
         assessmentGuardsEmitted = contents;
@@ -46,6 +49,8 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "generate-fea-semantic-c
 });
 const semantic = fs.readFileSync(semanticPath, "utf8");
 assert.equal(semantic, semanticEmitted, "authored semantic contracts differ from Rust-derived generator");
+assert.equal(fs.readFileSync(physicalUnitsPath, "utf8"), physicalUnitsEmitted,
+  "physical unit catalog differs from Rust-derived generator");
 assert.match(semantic, /"volume_flow_rate"/, "authored volume flux quantity is absent");
 if (assessmentGuardsEmitted !== undefined) {
   assert.equal(fs.readFileSync(assessmentGuardsPath, "utf8"), assessmentGuardsEmitted,

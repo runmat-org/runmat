@@ -28,7 +28,7 @@ pub struct NormalContactPoint {
 pub struct NormalContactContribution {
     pub signed_gap_m: f64,
     /// Nominal traction per reference area, not spatial pressure per deformed area.
-    pub nominal_pressure_pa: f64,
+    pub nominal_pressure_pa: runmat_types::physical::Pressure,
     pub elastic_energy_j: runmat_types::physical::Energy,
     pub query_internal_force_n: [f64; 3],
     primary_internal_force_n: [[f64; 3]; 6],
@@ -78,14 +78,18 @@ impl NormalContactPoint {
             .map(|i| (query_m[i] - point.position_m[i]) * point.unit_normal[i])
             .sum::<f64>();
         // Normal potential is history independent. Tangential output from the point law is not used.
-        let local = law.update(gap, [0.0; 2], &law.initial_state())?;
-        let traction = local.internal_traction_local_pa[2];
-        let stiffness = local.tangent_pa_per_m[2][2];
+        let local = law.update(
+            runmat_types::physical::Length::new(gap),
+            runmat_types::physical::Quantity::new([0.0; 2]),
+            &law.initial_state(),
+        )?;
+        let traction = local.internal_traction_local_pa.canonical_values()[2];
+        let stiffness = local.tangent_pa_per_m.canonical_values()[2][2];
         let response = NormalContactContribution {
             signed_gap_m: gap,
             nominal_pressure_pa: local.normal_pressure_pa,
             elastic_energy_j: runmat_types::physical::Energy::new(
-                reference_area_m2 * local.normal_elastic_energy_j_per_m2,
+                reference_area_m2 * local.normal_elastic_energy_j_per_m2.canonical_value(),
             ),
             query_internal_force_n: geometry
                 .gap_gradient_query

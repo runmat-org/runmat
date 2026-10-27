@@ -19,7 +19,9 @@ fn law() -> PenaltyContactLaw {
             friction: ContactFriction::Frictionless,
         },
         ContactPenaltyPolicy {
-            normal_stiffness_pa_per_m: 10000.,
+            normal_stiffness_pa_per_m: runmat_types::physical::TractionDisplacementStiffness::new(
+                10000.,
+            ),
             tangential_stiffness_pa_per_m: None,
         },
     )
@@ -50,7 +52,7 @@ fn original_normal_residual_has_closed_force_energy_and_moment_balance_on_both_o
         let operator =
             NormalContactPoint::derive(surface, q, [1. / 3.; 3], 0.2, policy(), &law()).unwrap();
         let response = operator.contribution();
-        near(response.nominal_pressure_pa, 100., 1e-10);
+        near(response.nominal_pressure_pa.canonical_value(), 100., 1e-10);
         near(response.elastic_energy_j.canonical_value(), 0.1, 1e-12);
         for k in 0..3 {
             near(response.query_internal_force_n[k], -20. * n[k], 1e-10);

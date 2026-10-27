@@ -153,11 +153,13 @@ pub enum ExactSurfaceDefinition {
         domains: [ParameterRange; 2],
     },
     Cone {
-        apex_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        apex_m: runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         x_axis: [f64; 3],
         y_axis: [f64; 3],
         axis: [f64; 3],
-        semi_angle_rad: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        semi_angle_rad: runmat_types::physical::Angle,
         domains: [ParameterRange; 2],
     },
     Sphere {

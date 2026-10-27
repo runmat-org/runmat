@@ -10,7 +10,9 @@ use crate::algebra::spmv;
 pub struct CanonicalFluidResidual {
     pub face_forces: super::flux_evidence::CanonicalFluidFaceForces,
     /// Cell vorticity ∇×u, 1/s, from the boundary-aware gradient of the viscous stress.
-    pub cell_vorticity_per_s: Vec<V>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub cell_vorticity_per_s:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Vorticity, Vec<V>>,
     /// Sorted exact authored boundary IDs, with original outward force/flow terms.
     pub boundary_balances: Vec<super::CanonicalFluidBoundaryBalance>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
@@ -263,7 +265,10 @@ pub(super) fn evaluate_with_time(
     let boundary_balances = p.boundary_balance_plan.evaluate(p, q, &face_forces)?;
     Ok(CanonicalFluidResidual {
         face_forces,
-        cell_vorticity_per_s,
+        cell_vorticity_per_s: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Vorticity,
+            _,
+        >::new(cell_vorticity_per_s),
         boundary_balances,
         cell_momentum_n:
             runmat_types::physical::Quantity::<runmat_types::physical::kind::Force, _>::new(
@@ -314,11 +319,15 @@ pub(super) fn describe_worst_cell(
     p: &CanonicalFluidProblem<'_>,
     residual: &CanonicalFluidResidual,
 ) -> (f64, String) {
-    let (cell, relative) = residual
-        .cell_momentum_relative
-        .iter()
-        .enumerate()
-        .fold((0, 0.0f64), |acc, (c, r)| if *r > acc.1 { (c, *r) } else { acc });
+    let (cell, relative) =
+        residual
+            .cell_momentum_relative
+            .iter()
+            .enumerate()
+            .fold(
+                (0, 0.0f64),
+                |acc, (c, r)| if *r > acc.1 { (c, *r) } else { acc },
+            );
     let Some(geometry) = p.topology.cells.get(cell) else {
         return (relative, "no cells".into());
     };
@@ -330,7 +339,9 @@ pub(super) fn describe_worst_cell(
         .filter(|(_, f)| f.owner == cell && f.neighbor.is_none())
         .map(|(i, _)| match &p.boundaries[i] {
             super::boundary::FaceBoundary::Interior => "interior",
-            super::boundary::FaceBoundary::Velocity { moving_wall: true, .. } => "moving_wall",
+            super::boundary::FaceBoundary::Velocity {
+                moving_wall: true, ..
+            } => "moving_wall",
             super::boundary::FaceBoundary::Velocity { .. } => "velocity",
             super::boundary::FaceBoundary::PressureOutlet { .. } => "outlet",
             super::boundary::FaceBoundary::Symmetry { .. } => "symmetry",

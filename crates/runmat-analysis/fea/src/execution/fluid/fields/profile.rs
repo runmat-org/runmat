@@ -8,9 +8,7 @@ use crate::{
         RecoveredFieldEntityCounts,
     },
 };
-use runmat_canonical_codec::{
-    profile_direct_materialization, SerializedCanonicalProfile,
-};
+use runmat_canonical_codec::{profile_direct_materialization, SerializedCanonicalProfile};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
@@ -74,8 +72,14 @@ impl Serialize for Fields<'_> {
                 Values::Velocity(original.velocity_m_per_s.canonical_values()),
                 Values::Scalar(original.pressure_pa.canonical_values()),
                 Values::Scalar(original.face_volume_flux_m3_per_s.canonical_values()),
-                Values::Velocity(&original.residual.cell_vorticity_per_s),
-                Values::Velocity(original.residual.face_forces.viscous_traction_n.canonical_values()),
+                Values::Velocity(original.residual.cell_vorticity_per_s.canonical_values()),
+                Values::Velocity(
+                    original
+                        .residual
+                        .face_forces
+                        .viscous_traction_n
+                        .canonical_values(),
+                ),
             ];
             if let Some(extra) = &self.extra {
                 values.push(match extra {
@@ -131,8 +135,19 @@ fn artifact_profile(
                 || original.pressure_pa.canonical_values().len() != counts[1]
                 || original.pressure_fluctuation_pa.canonical_values().len() != counts[1]
                 || original.face_volume_flux_m3_per_s.canonical_values().len() != counts[2]
-                || original.residual.cell_vorticity_per_s.len() != counts[3]
-                || original.residual.face_forces.viscous_traction_n.canonical_values().len() != counts[4]
+                || original
+                    .residual
+                    .cell_vorticity_per_s
+                    .canonical_values()
+                    .len()
+                    != counts[3]
+                || original
+                    .residual
+                    .face_forces
+                    .viscous_traction_n
+                    .canonical_values()
+                    .len()
+                    != counts[4]
         })
     {
         return Err(invalid("fluid native profile original cardinality"));
@@ -222,7 +237,10 @@ pub(super) fn requested_bytes(
     )?;
     // Placement on the canonical mesh: stored orders and, for a fluid subset, the
     // complete mesh face derivation.
-    required = add(required, super::VolumeMeshLayout::requested_bytes(&source.source, &source.topology)?)?;
+    required = add(
+        required,
+        super::VolumeMeshLayout::requested_bytes(&source.source, &source.topology)?,
+    )?;
     // The field-layout owner profiles its counted validation and one face identity codec;
     // no numerical projection or unrelated tree-index estimator is substituted here.
     required = add(
@@ -358,7 +376,10 @@ mod tests {
             outer_iterations: 1,
             linear_iterations: 0,
             residual: CanonicalFluidResidual {
-                cell_vorticity_per_s: vec![[0.0; 3]; 2],
+                cell_vorticity_per_s: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Vorticity,
+                    _,
+                >::new(vec![[0.0; 3]; 2]),
                 boundary_balances: vec![],
                 face_forces: CanonicalFluidFaceForces {
                     advective_momentum_n: runmat_types::physical::Quantity::<
@@ -435,6 +456,7 @@ mod tests {
             original
                 .residual
                 .cell_vorticity_per_s
+                .canonical_values()
                 .iter()
                 .flatten()
                 .copied()
@@ -478,15 +500,14 @@ mod tests {
             fields,
         )
         .unwrap();
-        let projected =
-            artifact_profile(
-                &definitions,
-                &counts,
-                &[(RecoveredFieldSample::Final, &original)],
-                None,
-                entity_counts,
-            )
-            .unwrap();
+        let projected = artifact_profile(
+            &definitions,
+            &counts,
+            &[(RecoveredFieldSample::Final, &original)],
+            None,
+            entity_counts,
+        )
+        .unwrap();
         assert_eq!(
             projected,
             profile_direct_materialization(&artifact, LIMITS).unwrap()

@@ -1271,6 +1271,7 @@ impl RunMatSession {
         ))
     }
 
+    #[tracing::instrument(name = "runtime.compile", skip_all, fields(input_len = input.len()))]
     fn compile_input_with_portable_source(
         &mut self,
         input: &str,
@@ -1486,6 +1487,7 @@ impl RunMatSession {
                     .expect("canonical frontend returned no bytecode without an error"),
             )
         };
+        let sources_span = info_span!("runtime.compile.bind_sources").entered();
         crate::ExecutableUnit::retain_vm_layout(&mut bytecode, &lowering.assembly, &mir).map_err(
             |error| {
                 RunError::Runtime(
@@ -1525,7 +1527,10 @@ impl RunMatSession {
         // Full source/catalog/companion assembly is complete. The following
         // session publication only renames compiler coordinates; retain this
         // analysis's original revision-level function/point identities.
-        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        drop(sources_span);
+        let analysis = info_span!("runtime.compile.mir_analysis")
+            .in_scope(|| runmat_mir::analysis::analyze_assembly(&mir));
+        let _registry_span = info_span!("runtime.compile.publish_registry").entered();
         let (
             function_registry_after_success,
             next_semantic_function_id_after_success,

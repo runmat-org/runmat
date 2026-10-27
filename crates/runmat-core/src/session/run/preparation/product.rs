@@ -12,16 +12,23 @@ pub(in crate::session::run) struct PreparedInteractiveProduct {
 }
 
 impl RunMatSession {
+    #[tracing::instrument(
+        name = "runtime.prepare_product", skip_all,
+        fields(input_len = input.len(), inherited_functions = self.function_registry.functions.len())
+    )]
     pub(in crate::session::run) fn prepare_interactive_product(
         &mut self,
         input: &str,
     ) -> std::result::Result<PreparedInteractiveProduct, RunError> {
+        let source_span = tracing::info_span!("runtime.prepare_product.source").entered();
         let source = self.canonical_interactive_source(input)?;
         // This is the exact bound-function table supplied to HIR lowering.
         // A later merged/current registry can reuse the same numeric ID for
         // a different body and cannot select an External static target.
         let inherited_registry = self.function_registry.clone();
+        drop(source_span);
         let mut prepared = self.compile_input(input)?;
+        let identity_span = tracing::info_span!("runtime.prepare_product.identity").entered();
         let revision = crate::ExecutableRevision::derive(
             &source,
             self.runtime_context.program_revision().cloned(),
@@ -55,6 +62,7 @@ impl RunMatSession {
             mut current_function_ids,
             mut next_semantic_function_id_after_success,
         } = prepared;
+        drop(identity_span);
         let mut draft = crate::executable::ExecutableUnitDraft::prepare(
             source.clone(),
             revision,
@@ -118,6 +126,7 @@ impl RunMatSession {
         };
         #[cfg(target_arch = "wasm32")]
         let selected_foreign_basis = None;
+        let reuse_span = tracing::info_span!("runtime.prepare_product.reuse").entered();
         let reuse = crate::session::semantic_definition::unchanged_product_remap(
             draft.bytecode(),
             &current_function_ids,
@@ -167,6 +176,9 @@ impl RunMatSession {
             .difference(&excluded_reused_ids)
             .copied()
             .collect::<HashSet<_>>();
+        drop(reuse_span);
+        let dependencies_span =
+            tracing::info_span!("runtime.prepare_product.dependencies").entered();
         // Keep one immutable code owner while an accepted deferred task is
         // outstanding; canonical V3 bytes remain lazy until graph use.
         let interactive_unit = self
@@ -207,6 +219,8 @@ impl RunMatSession {
                     )
                 })?,
         );
+        drop(dependencies_span);
+        let binding_span = tracing::info_span!("runtime.prepare_product.bind_sources").entered();
         let execution_runtime = interactive_unit
             .bind_runtime_sources(
                 self.runtime_context
@@ -238,6 +252,8 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
+        drop(binding_span);
+        let registry_span = tracing::info_span!("runtime.prepare_product.registry").entered();
         let mut active_registry = bytecode.function_registry();
         let mut publication_projection = function_registry_after_success.clone();
         for function in &provisional_reused_ids {
@@ -293,6 +309,8 @@ impl RunMatSession {
             &mut function_registry_after_success,
             &selected_declaration_products,
         )?;
+        drop(registry_span);
+        let artifacts_span = tracing::info_span!("runtime.prepare_product.artifacts").entered();
         // Only this compilation's definitions need a new artifact. Inherited
         // session definitions already retain their own indexed envelopes.
         let has_current_artifact_origin = selected_current_function_ids.iter().any(|function| {
@@ -400,6 +418,7 @@ impl RunMatSession {
             })
             .collect::<HashSet<_>>();
         let mut selected_static_targets = Some(selected_static_imports.targets);
+        let graph_span = tracing::info_span!("runtime.prepare_product.admit_artifacts").entered();
         let selected_graph = if declaration_class.is_none()
             && (callable_artifact.is_some() || !interactive_unit.bytecode().instructions.is_empty())
         {
@@ -574,6 +593,9 @@ impl RunMatSession {
             Ok(None)
         }
         .map_err(|error| RunError::Runtime(build_runtime_error(error.to_string()).build()))?;
+        drop(graph_span);
+        drop(artifacts_span);
+        let _publication_span = tracing::info_span!("runtime.prepare_product.publish").entered();
         let source_registry_publication = self
             .source_evaluator
             .publish_for_execution(active_registry, callable_artifact)

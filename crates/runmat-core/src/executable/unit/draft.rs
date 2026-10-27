@@ -19,6 +19,10 @@ pub(crate) struct ExecutableUnitDraft {
 }
 
 impl ExecutableUnitDraft {
+    #[tracing::instrument(
+        name = "runtime.executable.prepare_draft", skip_all,
+        fields(instructions = bytecode.instructions.len(), functions = bytecode.function_registry.functions.len())
+    )]
     pub(crate) fn prepare(
         source: ExecutableSource,
         revision: ExecutableRevision,
@@ -103,6 +107,7 @@ impl ExecutableUnitDraft {
         })
     }
 
+    #[tracing::instrument(name = "runtime.executable.seal", skip_all)]
     pub(crate) fn seal(self) -> ExecutableUnit {
         let layout = self
             .bytecode

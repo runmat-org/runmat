@@ -116,12 +116,12 @@ fn deformable_penalty_and_coulomb_equilibrium_match_closed_affine_body_reference
                 let contact = increment.state.contact_configuration().unwrap();
                 assert_eq!(contact.ordinal(), ordinal as u64 + 1);
                 for point in contact.point_history() {
-                    near(point.point().gap_m(), 0.0001 - d, 1e-12);
+                    near(point.point().gap_m().canonical_value(), 0.0001 - d, 1e-12);
                 }
                 let original_work = contact
                     .point_history()
                     .iter()
-                    .map(|p| p.point().frictional_work_j_per_m2())
+                    .map(|p| p.point().frictional_work_j_per_m2().canonical_value())
                     .sum::<f64>()
                     / contact.point_history().len() as f64
                     * 0.02;

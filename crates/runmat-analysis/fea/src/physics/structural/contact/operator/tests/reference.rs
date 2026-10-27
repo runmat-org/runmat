@@ -15,7 +15,7 @@ fn disjoint_canonical_bodies_under_prescribed_compression_match_closed_penalty_f
         assert!(initial
             .point_history()
             .iter()
-            .all(|p| p.point().gap_m() > 0.));
+            .all(|p| p.point().gap_m().canonical_value() > 0.));
         let current = f.moved(0.06, 0.);
         let trial = operator.assemble_trial(&initial, 0, &current).unwrap();
         assert_eq!(initial.ordinal(), 0);
@@ -133,11 +133,11 @@ fn original_global_coulomb_history_retains_stick_slip_work_and_no_rigid_motion_d
             0.0102,
             1e-10,
         );
-        assert!(slip
-            .configuration
-            .point_history()
-            .iter()
-            .all(|p| p.point().accumulated_sliding_distance_m() > 0.));
+        assert!(slip.configuration.point_history().iter().all(|p| p
+            .point()
+            .accumulated_sliding_distance_m()
+            .canonical_value()
+            > 0.));
         let rigid: Vec<_> = slip
             .configuration
             .positions_m()
@@ -159,13 +159,13 @@ fn original_global_coulomb_history_retains_stick_slip_work_and_no_rigid_motion_d
             .zip(rotated.configuration.point_history())
         {
             near(
-                a.point().accumulated_sliding_distance_m(),
-                b.point().accumulated_sliding_distance_m(),
+                a.point().accumulated_sliding_distance_m().canonical_value(),
+                b.point().accumulated_sliding_distance_m().canonical_value(),
                 1e-12,
             );
             near(
-                a.point().frictional_work_j_per_m2(),
-                b.point().frictional_work_j_per_m2(),
+                a.point().frictional_work_j_per_m2().canonical_value(),
+                b.point().frictional_work_j_per_m2().canonical_value(),
                 1e-12,
             );
         }

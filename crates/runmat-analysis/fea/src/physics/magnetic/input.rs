@@ -75,17 +75,13 @@ pub fn validate_canonical_input<'a>(
             "standalone magnetic step or unsupported lifecycle/coupling/boundary".into(),
         ));
     }
-    if model
-        .excitations
-        .iter()
-        .any(|action| {
-            !matches!(
-                action,
-                ExcitationAction::MagneticVolumeCurrentDensity(_)
-                    | ExcitationAction::MagneticVectorPotential(_)
-            )
-        })
-    {
+    if model.excitations.iter().any(|action| {
+        !matches!(
+            action,
+            ExcitationAction::MagneticVolumeCurrentDensity(_)
+                | ExcitationAction::MagneticVectorPotential(_)
+        )
+    }) {
         return Err(MagnetostaticError::Unsupported(
             "magnetostatics takes magnetic_volume_current_density and magnetic_vector_potential loads".into(),
         ));
@@ -98,7 +94,7 @@ pub(crate) struct CompiledMagneticInput {
     /// Exterior faces with tangential A = 0, sorted; every other exterior face is insulated.
     pub grounded_faces: Vec<StableDigest>,
     /// Grounded faces held at a nonzero tangential vector potential (Wb/m), sorted by face.
-    pub prescribed_potential: Vec<(StableDigest, [f64; 3])>,
+    pub prescribed_potential: Vec<super::PrescribedVectorPotential>,
     pub volumes: Vec<MagneticVolumeData>,
 }
 
@@ -252,7 +248,10 @@ pub(crate) fn compile_canonical_input(
                     ));
                 }
                 ground_faces.insert(face.stable_identity);
-                prescribed_potential.push((face.stable_identity, value.real));
+                prescribed_potential.push((
+                    face.stable_identity,
+                    runmat_types::physical::Quantity::new(value.real),
+                ));
                 matched += 1;
             }
             if matched == 0 {
@@ -304,7 +303,8 @@ pub(crate) fn compile_canonical_input(
             };
             if selected {
                 matched += 1;
-                volume.current_density_a_per_m2 = volume.current_density_a_per_m2
+                volume.current_density_a_per_m2 = volume
+                    .current_density_a_per_m2
                     .try_map_canonical_storage(|mut components| {
                         for (component, contribution) in components.iter_mut().zip(value.real) {
                             *component += contribution;

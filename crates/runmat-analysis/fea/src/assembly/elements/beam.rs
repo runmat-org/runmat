@@ -32,13 +32,14 @@ pub struct BeamSection {
 pub struct BeamMaterial {
     #[serde(with = "runmat_types::physical::canonical_scalar")]
     pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
-    pub shear_modulus_pa: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub shear_modulus_pa: runmat_types::physical::ShearModulus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BeamElementGeometry {
-    pub node_i_m: [f64; 3],
-    pub node_j_m: [f64; 3],
+    pub node_i_m: runmat_types::physical::Position,
+    pub node_j_m: runmat_types::physical::Position,
     pub reference_axis: [f64; 3],
 }
 
@@ -79,7 +80,7 @@ impl BeamSection {
 impl BeamMaterial {
     pub fn validate(self) -> Result<(), BeamElementError> {
         if positive_finite(self.youngs_modulus_pa.canonical_value())
-            && positive_finite(self.shear_modulus_pa)
+            && positive_finite(self.shear_modulus_pa.canonical_value())
         {
             Ok(())
         } else {
@@ -90,7 +91,10 @@ impl BeamMaterial {
 
 impl BeamElementGeometry {
     pub fn local_frame(self) -> Result<BeamLocalFrame, BeamElementError> {
-        let axis = sub(self.node_j_m, self.node_i_m);
+        let axis = sub(
+            self.node_j_m.canonical_value(),
+            self.node_i_m.canonical_value(),
+        );
         let length_m = norm(axis);
         if !positive_finite(length_m) {
             return Err(BeamElementError::DegenerateLength);
@@ -130,7 +134,8 @@ pub fn local_stiffness_matrix(
     let l2 = l * l;
     let l3 = l2 * l;
     let ea_l = material.youngs_modulus_pa.canonical_value() * section.area_m2.canonical_value() / l;
-    let gj_l = material.shear_modulus_pa * section.torsion_j_m4.canonical_value() / l;
+    let gj_l =
+        material.shear_modulus_pa.canonical_value() * section.torsion_j_m4.canonical_value() / l;
     let eiy = material.youngs_modulus_pa.canonical_value() * section.iy_m4.canonical_value();
     let eiz = material.youngs_modulus_pa.canonical_value() * section.iz_m4.canonical_value();
 
@@ -284,15 +289,15 @@ mod tests {
     fn material() -> BeamMaterial {
         BeamMaterial {
             youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
-            shear_modulus_pa: 79.3e9,
+            shear_modulus_pa: runmat_types::physical::ShearModulus::new(79.3e9),
         }
     }
 
     #[test]
     fn beam_local_frame_is_orthonormal() {
         let frame = BeamElementGeometry {
-            node_i_m: [0.0, 0.0, 0.0],
-            node_j_m: [2.0, 0.0, 0.0],
+            node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+            node_j_m: runmat_types::physical::Position::new([2.0, 0.0, 0.0]),
             reference_axis: [0.0, 0.0, 1.0],
         }
         .local_frame()
@@ -314,7 +319,9 @@ mod tests {
         let ea_l = material().youngs_modulus_pa.canonical_value()
             * section().area_m2.canonical_value()
             / l;
-        let gj_l = material().shear_modulus_pa * section().torsion_j_m4.canonical_value() / l;
+        let gj_l = material().shear_modulus_pa.canonical_value()
+            * section().torsion_j_m4.canonical_value()
+            / l;
         let eiy =
             material().youngs_modulus_pa.canonical_value() * section().iy_m4.canonical_value();
         let eiz =
@@ -349,8 +356,8 @@ mod tests {
     #[test]
     fn beam_transformation_is_block_orthonormal() {
         let frame = BeamElementGeometry {
-            node_i_m: [0.0, 0.0, 0.0],
-            node_j_m: [1.0, 1.0, 0.0],
+            node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+            node_j_m: runmat_types::physical::Position::new([1.0, 1.0, 0.0]),
             reference_axis: [0.0, 0.0, 1.0],
         }
         .local_frame()
@@ -373,8 +380,8 @@ mod tests {
             section(),
             material(),
             BeamElementGeometry {
-                node_i_m: [0.0, 0.0, 0.0],
-                node_j_m: [1.0, 1.0, 0.25],
+                node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+                node_j_m: runmat_types::physical::Position::new([1.0, 1.0, 0.25]),
                 reference_axis: [0.0, 0.0, 1.0],
             },
         )
@@ -391,8 +398,8 @@ mod tests {
     fn beam_frame_rejects_degenerate_inputs() {
         assert_eq!(
             BeamElementGeometry {
-                node_i_m: [0.0, 0.0, 0.0],
-                node_j_m: [0.0, 0.0, 0.0],
+                node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+                node_j_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
                 reference_axis: [0.0, 1.0, 0.0],
             }
             .local_frame()
@@ -401,8 +408,8 @@ mod tests {
         );
         assert_eq!(
             BeamElementGeometry {
-                node_i_m: [0.0, 0.0, 0.0],
-                node_j_m: [1.0, 0.0, 0.0],
+                node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+                node_j_m: runmat_types::physical::Position::new([1.0, 0.0, 0.0]),
                 reference_axis: [2.0, 0.0, 0.0],
             }
             .local_frame()

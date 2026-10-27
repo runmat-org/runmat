@@ -300,7 +300,6 @@ pub fn execute_prepared_fea_study(json: String, memory_bytes: f64) -> Result<Str
         ));
     }
     runmat_runtime::builtins::wasm_registry::register_all();
-    crate::api::init::ensure_internal_builtins();
     let study: PreparedSerialFeaStudy =
         serde_json::from_str(&json).map_err(|e| js_error(&e.to_string()))?;
     let _progress = runmat_analysis_fea::replace_fea_progress_context(
@@ -323,8 +322,9 @@ pub fn execute_prepared_fea_study(json: String, memory_bytes: f64) -> Result<Str
     resources
         .capabilities
         .insert(runmat_execution::resource::Capability::BrowserWorker);
-    let inventory =
-        crate::runtime::execution::browser_analysis_host_inventory().map_err(|e| js_error(&e))?;
+    let inventory = crate::runtime::execution::controlled::inventory()
+        .map_err(|e| js_error(&e))?
+        .host;
     let mut host =
         SerialAnalysisHost::new(inventory, resources, Digest::sha256(b"owned-browser-fea"))
             .map_err(|e| js_error(&e.to_string()))?;

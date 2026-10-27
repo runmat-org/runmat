@@ -116,7 +116,7 @@ Selectors are resolved at exact realization and then projected onto the solver m
 - a face name written on the STEP face (`ADVANCED_FACE('Fixed end', ...)`);
 - a solid name written on the STEP solid (`MANIFOLD_SOLID_BREP('Coil', ...)`), or else the name of the part (product) that holds the solid. A `cell` region selects by its solid's name.
 
-`runmat fea check` rejects a `select name` that the file does not carry and lists the names it does carry for that role. The `face_000001`-style aliases stay available for files without names; prefer names, because they say which face the study loads or fixes.
+`runmat fea check` rejects a `select name` that the file does not carry and lists the names it does carry for that role. A file without names (such as a native BREP) selects entities by their canonical `persistent-entity:sha256:` ID from geometry inspection. Source aliases such as `face_000001` are rejected.
 
 ## Multi-Body Geometry And Shared Interfaces
 
@@ -139,7 +139,7 @@ With `interfaces = shared`, every solid of every placed part enters one General 
 
 - Bodies may touch but must not interpenetrate. Import fails, naming the bodies, when a solid would be split by another.
 - Each solid keeps its own name, or its part's name. A shared face carries the names authored on every face it replaced, the name from the smaller solid first, so `select name` finds it by the part's face name ("Coil terminal in") or by the surrounding body's name for that face if one was written.
-- `face_000001`-style aliases number the faces of the joined geometry.
+- Geometry inspection reports a canonical `persistent-entity:sha256:` ID for every face of the joined geometry.
 - A single STEP part whose solids already share faces (a General Fuse result written as one body) imports with those shared faces either way.
 - A solid with several cavities (an air box around a gear and a coil) imports as one solid with one void shell per cavity.
 

@@ -128,6 +128,32 @@ cargo test -p runmat-vm --test fusion_gpu
 
 The JIT and Core tiering tests check bounded warmup, publication and cache reuse, exact-profile specialization, loop feedback and OSR, transactional interactive execution, and steady-state compilation counts. Residency tests check that GPU values remain on device across representative operation chains.
 
+## Interactive Preparation and Plot Timing
+
+For interactive script latency, use the runtime's existing `tracing` stream in addition
+to the command-boundary benchmark. `runtime.prepare_product` contains source capture,
+`runtime.compile` (including parse, lowering, source binding, MIR analysis and registry
+publication), draft construction, dependency binding, runtime source binding, registry
+projection and artifact admission/publication. `runtime.prepare_workspace` separates
+workspace setup and variable materialization from interpretation. These spans use
+`skip_all`; source text, paths, tensor contents and workspace values are not recorded.
+`runtime.environment` separates linked runtime and builtin catalog fingerprinting;
+browser catalog identity must account for registrations submitted after startup.
+
+For animated plots, `plot.surface.render_data` measures surface preparation and
+`plot.present` measures web presentation. `runtime.pause.present` identifies rendering
+before and after a pause; `runtime.pause.wait` records the requested delay and follows
+the cancellable wait using `tracing::Instrument`. Synchronous span guards never cross
+an await. Async spans are entered on each poll: their active intervals are not the
+elapsed timer delay. Compare the first/last timestamps and intervening idle intervals,
+and do not add parent and child durations together.
+
+Browser integrations can collect these through the SDK's existing
+`subscribeTraceEvents`/`unsubscribeTraceEvents` API, or inspect forwarded local events
+with `otell search 'runtime.prepare_product|runtime.compile|runtime.prepare_workspace|runtime.pause|plot.present|plot.surface.render_data' --service runmat-runtime`.
+Compare the same script, precision, project/session state, renderer attachment and
+logging level; a fresh in-memory session is a control, not an equivalent app benchmark.
+
 ## Direct-call Overhead
 
 The direct-call microbenchmark compares scalar `strcmp` and scalar/array `numel` calls with and without a placement session:

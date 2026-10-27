@@ -50,3 +50,7 @@ impl std::error::Error for VariableError {
 }
 
 pub(crate) type VariableResult<T> = Result<T, VariableError>;
+
+#[cfg(test)]
+#[path = "error/tests.rs"]
+mod tests;

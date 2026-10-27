@@ -158,11 +158,11 @@ pub(super) fn validate_surface(
                 semi_angle_rad,
                 domains,
             } => {
-                finite_vector("cone apex", apex_m)?;
+                finite_vector("cone apex", apex_m.canonical_values())?;
                 orthonormal_triple("cone frame", x_axis, y_axis, axis)?;
                 if !semi_angle_rad.is_finite()
-                    || *semi_angle_rad <= 0.0
-                    || *semi_angle_rad >= std::f64::consts::FRAC_PI_2
+                    || semi_angle_rad.canonical_value() <= 0.0
+                    || semi_angle_rad.canonical_value() >= std::f64::consts::FRAC_PI_2
                 {
                     return Err(invalid(
                         "cone semi-angle",

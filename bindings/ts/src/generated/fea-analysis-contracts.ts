@@ -33,6 +33,8 @@ export type FeaPreconditionerMode = "auto" | "jacobi" | "amg" | "ilu";
 
 export type FeaQualityPolicy = "strict" | "balanced" | "exploratory";
 
+export type FeaPressureVelocityCoupling = "coupled" | "segregated";
+
 export type FeaProgressPhase = "geometry_load" | "region_resolution" | "mesh_prep" | "model_assembly" | "solve" | "postprocess" | "artifact_persistence" | "complete";
 
 export type FeaProgressStatus = "started" | "advanced" | "completed" | "failed" | "cancelled";
@@ -105,7 +107,7 @@ export type FeaInitialStateConflictPolicy = "reject" | "replace_initial_conditio
 export interface FeaStateInput { input_id: string; required_kind: FeaStateKind; source: FeaStateSource; use_as: FeaStateUse; conflict: FeaInitialStateConflictPolicy; }
 export interface FeaStateOutput { state_id: string; kind: FeaStateKind; completeness: "complete" | "checkpoint" | "partial"; persistence: "canonical" | "until_dependents_complete" | "checkpoint_only"; }
 export type FeaRestartPolicy = "fresh" | { continue_from_completed_state: { producer_step: string; state_id: string } } | { resume_checkpoint: { checkpoint_id: string; required_state_digest: string } };
-export type FeaObservationQuantity = "displacement" | "rotation" | "velocity" | "acceleration" | "strain" | "stress" | "von_mises_stress" | "reaction_force" | "reaction_moment" | "strain_energy" | "beam_axial_force" | "beam_shear_force" | "beam_torsion_moment" | "beam_bending_moment" | "beam_bending_stress" | "beam_torsion_stress" | "shell_membrane_force" | "shell_bending_moment" | "shell_transverse_shear" | "shell_von_mises" | "temperature" | "temperature_gradient" | "heat_flux" | "heat_rate" | "thermal_energy_storage_rate_density" | "electric_potential" | "electric_field" | "electric_displacement" | "electric_energy_density" | "joule_power_density" | "electric_current" | "electric_current_density" | "electric_charge" | "electric_edge_circulation" | "magnetic_edge_circulation" | "magnetic_vector_potential" | "magnetic_flux_density" | "magnetic_field_intensity" | "acoustic_pressure" | "acoustic_particle_velocity" | "sound_pressure_level" | "fluid_pressure" | "fluid_velocity" | "vorticity" | "mass_flow_rate" | "volume_flow_rate" | "wall_shear_stress" | "modal_frequency" | "modal_participation" | "eigenvalue" | "residual" | "balance" | "constraint_violation" | "contact_gap" | "contact_pressure";
+export type FeaObservationQuantity = "displacement" | "rotation" | "velocity" | "acceleration" | "strain" | "stress" | "von_mises_stress" | "reaction_force" | "reaction_moment" | "strain_energy" | "beam_axial_force" | "beam_shear_force" | "beam_torsion_moment" | "beam_bending_moment" | "beam_bending_stress" | "beam_torsion_stress" | "shell_membrane_force" | "shell_bending_moment" | "shell_transverse_shear" | "shell_von_mises" | "temperature" | "temperature_gradient" | "heat_flux" | "heat_rate" | "thermal_energy_storage_rate_density" | "electric_potential" | "electric_field" | "electric_displacement" | "electric_energy_density" | "joule_power_density" | "electric_current" | "electric_current_density" | "electric_charge" | "electric_edge_circulation" | "magnetic_edge_circulation" | "magnetic_vector_potential" | "magnetic_flux_density" | "magnetic_field_intensity" | "acoustic_pressure" | "acoustic_particle_velocity" | "acoustic_intensity" | "sound_pressure_level" | "fluid_pressure" | "fluid_velocity" | "vorticity" | "mass_flow_rate" | "volume_flow_rate" | "wall_shear_stress" | "modal_frequency" | "modal_participation" | "eigenvalue" | "residual" | "balance" | "constraint_violation" | "contact_gap" | "contact_pressure";
 export type FeaSamplingPolicy = "final" | "every_accepted_increment" | { time_seconds: number[] } | { time_interval_seconds: { start: number; end: number; interval: number } } | { frequency_hertz: number[] } | { frequency_interval_hertz: { start: number; end: number; interval: number } } | { load_factors: number[] } | { load_factor_interval: { start: number; end: number; interval: number } } | { mode_indices: number[] } | { event: "first_yield" | "contact_status_change" | "peak_response" | "convergence_failure" | "accuracy_criterion_crossing" } | { adaptive: { minimum_interval: number; maximum_samples: number; relative_change: number } };
 export type FeaRetentionPolicy = "canonical" | "until_dependents_complete" | { latest_samples: { count: number } } | { explicit_samples: { maximum_count: number } };
 export interface FeaObservationSpec {
@@ -377,6 +379,7 @@ export interface FeaIncompressibleFlowOptions {
 }
 
 export interface FeaCanonicalFluidPolicy {
+  pressure_velocity_coupling: FeaPressureVelocityCoupling;
   fixed_point_acceleration: FeaAndersonOnePolicy | null;
   maximum_outer_iterations: number;
   maximum_nonorthogonal_iterations: number;
@@ -396,11 +399,11 @@ export interface FeaAndersonOnePolicy {
 }
 
 export interface FeaFiniteVolumeProjectionPolicy {
-  max_cells: number;
-  max_face_incidences: number;
-  max_boundary_faces: number;
-  max_scratch_bytes: number;
-  max_traversal_operations: number;
+  max_cells: number | null;
+  max_face_incidences: number | null;
+  max_boundary_faces: number | null;
+  max_scratch_bytes: number | null;
+  max_traversal_operations: number | null;
 }
 
 export interface FeaConjugateHeatTransferOptions {

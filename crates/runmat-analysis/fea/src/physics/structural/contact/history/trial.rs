@@ -48,7 +48,7 @@ impl ContactPointTrial {
         let b = self.kinematics.first(d)?;
         let traction_increment: [f64; 3] = std::array::from_fn(|i| {
             (0..3)
-                .map(|j| self.local.tangent_pa_per_m[i][j] * b[j])
+                .map(|j| self.local.tangent_pa_per_m.canonical_values()[i][j] * b[j])
                 .sum()
         });
         let mut force = [0.0; 21];
@@ -64,7 +64,7 @@ impl ContactPointTrial {
                 * (0..3)
                     .map(|i| {
                         gradient[i] * traction_increment[i]
-                            + self.local.internal_traction_local_pa[i] * h[i]
+                            + self.local.internal_traction_local_pa.canonical_values()[i] * h[i]
                     })
                     .sum::<f64>();
         }
@@ -116,13 +116,15 @@ impl ContactPointBinding<'_> {
             .evaluate(accepted.primary_barycentric)?;
         let relative = std::array::from_fn(|i| configuration.query[i] - old_material.position_m[i]);
         let increment = configuration.frame.objective_tangential_increment(
-            relative,
+            runmat_types::physical::Quantity::new(relative),
             &accepted.frame,
-            accepted.relative_material_vector_m,
+            runmat_types::physical::Quantity::new(accepted.relative_material_vector_m),
         )?;
-        let local = self
-            .law
-            .update(configuration.gap, increment, &accepted.point)?;
+        let local = self.law.update(
+            runmat_types::physical::Length::new(configuration.gap),
+            increment,
+            &accepted.point,
+        )?;
         let history = ContactMaterialPointHistory {
             schema: 1,
             scope: self.scope,
@@ -157,7 +159,7 @@ impl ContactPointBinding<'_> {
             let gradient = kinematics.first(d)?;
             *out = self.reference.area_weight_m2
                 * (0..3)
-                    .map(|i| gradient[i] * local.internal_traction_local_pa[i])
+                    .map(|i| gradient[i] * local.internal_traction_local_pa.canonical_values()[i])
                     .sum::<f64>();
         }
         if crate::is_fea_cancelled() {

@@ -4,7 +4,7 @@ const TENSOR_COMPONENT_COUNT: usize = 6;
 
 pub(super) fn recover_stress(strain: &[f64], material: StructuralMaterialSummary) -> Vec<f64> {
     let lambda = material.lame_lambda_pa.max(0.0);
-    let mu = material.shear_modulus_pa.max(0.0);
+    let mu = material.shear_modulus_pa.canonical_value().max(0.0);
     let mut stress = vec![0.0; strain.len()];
     for (element_index, strain_tensor) in strain.chunks_exact(TENSOR_COMPONENT_COUNT).enumerate() {
         let trace = strain_tensor[0] + strain_tensor[1] + strain_tensor[2];

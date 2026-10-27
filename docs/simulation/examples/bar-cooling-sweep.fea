@@ -1,13 +1,13 @@
 geometry bar {
-    file = "./geometry/cantilever.step"
+    file = "./geometry/bar.step"
     units = mm
-    region body : solid { select id "solid_000001"; expect exactly_one }
-    region heated_end : face { select id "face_000001"; expect exactly_one }
-    region tip : face { select id "face_000002"; expect exactly_one }
-    region side_a : face { select id "face_000003"; expect exactly_one }
-    region side_b : face { select id "face_000004"; expect exactly_one }
-    region side_c : face { select id "face_000005"; expect exactly_one }
-    region side_d : face { select id "face_000006"; expect exactly_one }
+    region body : solid { select name "Bar"; expect exactly_one }
+    region heated_end : face { select name "End A"; expect exactly_one }
+    region tip : face { select name "End B"; expect exactly_one }
+    region side_a : face { select name "Side A"; expect exactly_one }
+    region side_b : face { select name "Side B"; expect exactly_one }
+    region side_c : face { select name "Side C"; expect exactly_one }
+    region side_d : face { select name "Side D"; expect exactly_one }
 }
 
 mesh bar on geometry.bar {

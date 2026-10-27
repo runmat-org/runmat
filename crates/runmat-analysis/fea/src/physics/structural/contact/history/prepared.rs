@@ -110,7 +110,7 @@ impl<'a> ContactPreparedPoint<'a> {
     pub(crate) fn normal_pressure_pa(
         &self,
         original: &ContactPointState,
-    ) -> Result<f64, ContactHistoryError> {
+    ) -> Result<runmat_types::physical::Pressure, ContactHistoryError> {
         self.law.validate_state(original)?;
         Ok(self.law.normal_pressure_at_gap(original.gap_m())?)
     }

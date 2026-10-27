@@ -22,7 +22,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{Event, IdbObjectStore, IdbRequest, IdbTransaction, IdbTransactionMode};
 
-pub(super) enum BrowserPrepared {
+pub(super) enum BrowserCheckedSource {
     Completed {
         values: Vec<ValuePayload>,
         user_path: Option<UserPathSnapshot>,
@@ -84,7 +84,7 @@ pub(super) async fn mutate(
     mutation: BrowserMutation,
     gate: OwnedMutexGuard<()>,
     profiling: Option<&CommandProfilingReceipt>,
-) -> Result<BrowserPrepared, BrowserPreferenceError> {
+) -> Result<BrowserCheckedSource, BrowserPreferenceError> {
     let transaction = database
         .transaction_with_str_and_mode(DOCUMENT_STORE, IdbTransactionMode::Readwrite)
         .map_err(browser_error)?;
@@ -178,7 +178,7 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
                 let missing = missing_default_indices(&document, &group, &names);
                 let unproved = defaults.unproved(&missing);
                 if !unproved.is_empty() {
-                    return Ok(BrowserPrepared::NeedsPreparation(unproved));
+                    return Ok(BrowserCheckedSource::NeedsPreparation(unproved));
                 }
                 let mut encoded = vec![None; names.len()];
                 for index in missing {
@@ -204,13 +204,13 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
                 .put_with_key(&bytes.into(), &JsValue::from_str(DOCUMENT_KEY))
                 .map_err(browser_error)?;
         }
-        Ok(BrowserPrepared::Completed {
+        Ok(BrowserCheckedSource::Completed {
             values: prepared.values,
             user_path: prepared.user_path,
         })
     })();
     let abort_without_write =
-        result.is_err() || matches!(&result, Ok(BrowserPrepared::NeedsPreparation(_)));
+        result.is_err() || matches!(&result, Ok(BrowserCheckedSource::NeedsPreparation(_)));
     state.prepared = Some(result);
     let transaction = state.transaction.clone();
     drop(state);
@@ -237,7 +237,7 @@ fn abort(weak: &Weak<RefCell<ActiveWrite>>) {
     let mut state = active.borrow_mut();
     state.terminal = true;
     let outcome = match state.prepared.take() {
-        Some(Ok(needs @ BrowserPrepared::NeedsPreparation(_))) => Ok(needs),
+        Some(Ok(needs @ BrowserCheckedSource::NeedsPreparation(_))) => Ok(needs),
         Some(Err(error)) => Err(error),
         _ => Err(transaction_error(&state.transaction)),
     };
@@ -252,8 +252,8 @@ struct ActiveWrite {
     store: IdbObjectStore,
     request: IdbRequest,
     mutation: Option<BrowserMutation>,
-    prepared: Option<Result<BrowserPrepared, BrowserPreferenceError>>,
-    completion_sender: Option<oneshot::Sender<Result<BrowserPrepared, BrowserPreferenceError>>>,
+    prepared: Option<Result<BrowserCheckedSource, BrowserPreferenceError>>,
+    completion_sender: Option<oneshot::Sender<Result<BrowserCheckedSource, BrowserPreferenceError>>>,
     on_get: Option<Closure<dyn FnMut(Event)>>,
     on_complete: Option<Closure<dyn FnMut(Event)>>,
     on_abort: Option<Closure<dyn FnMut(Event)>>,

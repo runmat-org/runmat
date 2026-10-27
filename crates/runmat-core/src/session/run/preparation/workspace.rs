@@ -25,6 +25,7 @@ pub(in crate::session::run) struct PreparedInteractiveWorkspace {
 }
 
 impl RunMatSession {
+    #[tracing::instrument(name = "runtime.prepare_workspace", skip_all)]
     pub(in crate::session::run) fn prepare_interactive_workspace(
         &mut self,
         product: PreparedInteractiveProduct,
@@ -195,14 +196,16 @@ impl RunMatSession {
         let fusion_snapshot: Option<FusionPlanSnapshot> = None;
 
         // Prepare variable array with existing values before execution
-        let variable_array = self
-            .prepare_variable_array_for_execution(
-                &bytecode,
-                &execution_vars,
-                &workspace_projection,
-                debug_trace,
-            )
-            .map_err(RunError::Runtime)?;
+        let variable_array =
+            tracing::info_span!("runtime.prepare_workspace.variables").in_scope(|| {
+                self.prepare_variable_array_for_execution(
+                    &bytecode,
+                    &execution_vars,
+                    &workspace_projection,
+                    debug_trace,
+                )
+                .map_err(RunError::Runtime)
+            })?;
 
         if self.verbose {
             debug!("Variable array after preparation: {:?}", variable_array);

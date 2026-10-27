@@ -179,7 +179,8 @@ impl MaxwellHarmonicSolverResult {
             || !close(ohmic, r.ohmic_power_w.canonical_value())
             || !close(
                 2.0 * r.angular_frequency_rad_per_s.canonical_value()
-                    * (r.magnetic_energy_j.canonical_value() - r.electric_energy_j.canonical_value()),
+                    * (r.magnetic_energy_j.canonical_value()
+                        - r.electric_energy_j.canonical_value()),
                 r.reactive_power_var.canonical_value(),
             )
         {
@@ -268,7 +269,12 @@ impl MaxwellHarmonicSolverResult {
     pub fn element_loss_density_w_per_m3(
         &self,
         mesh: &SolverMeshArtifact,
-    ) -> AnalysisExecutionResult<Vec<f64>> {
+    ) -> AnalysisExecutionResult<
+        runmat_types::physical::Quantity<
+            runmat_types::physical::kind::HeatGenerationDensity,
+            Vec<f64>,
+        >,
+    > {
         let laws: BTreeMap<_, _> = self
             .data
             .input
@@ -299,7 +305,8 @@ impl MaxwellHarmonicSolverResult {
                     .map(|(power, volume)| power / volume)
                     .ok_or_else(|| invalid("Maxwell loss is missing a mesh element"))
             })
-            .collect()
+            .collect::<AnalysisExecutionResult<Vec<f64>>>()
+            .map(runmat_types::physical::Quantity::new)
     }
     pub fn source_workload(&self) -> AnalysisWorkloadIdentity {
         self.data.source_workload

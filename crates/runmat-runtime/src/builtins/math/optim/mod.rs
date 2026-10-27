@@ -37,6 +37,6 @@ pub(crate) mod quadrature;
 #[cfg(test)]
 mod scalar_provider_tests;
 pub mod simulannealbnd;
-mod surrogateopt;
+pub(crate) mod surrogateopt;
 #[cfg(test)]
 pub(crate) mod type_resolvers;

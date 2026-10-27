@@ -426,6 +426,10 @@ impl Camera {
         let ProjectionType::Perspective { fov, .. } = self.projection else {
             return false;
         };
+        // The view-projection matrix scales data coordinates before applying the
+        // camera. Fit in that same space, including the target and clip planes.
+        let min_bounds = min_bounds * self.axis_scale;
+        let max_bounds = max_bounds * self.axis_scale;
         if !min_bounds.is_finite()
             || !max_bounds.is_finite()
             || min_bounds.cmpgt(max_bounds).any()
@@ -1043,6 +1047,42 @@ mod tests {
                             );
                         }
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn figure_fit_is_invariant_to_data_units_with_normalized_axes() {
+        let min = Vec3::new(-8.0, 2.0, -0.5);
+        let max = Vec3::new(12.0, 7.0, 2.5);
+        for viewport in [(1200, 400), (200, 700)] {
+            let mut reference: Option<Vec<Vec3>> = None;
+            for units in [0.001_f32, 1.0, 1000.0] {
+                let mut camera = Camera::new();
+                camera.axis_scale = Vec3::new(1.0 / 20.0, 1.0 / 5.0, 1.0 / 3.0) / units;
+                camera.set_view_angles_deg(45.0, 30.0);
+                assert!(camera.fit_figure_perspective_bounds(min * units, max * units, viewport));
+                let matrix = camera.view_proj_matrix();
+                let mut corners = Vec::new();
+                for x in [min.x, max.x] {
+                    for y in [min.y, max.y] {
+                        for z in [min.z, max.z] {
+                            let clip = matrix * (Vec3::new(x, y, z) * units).extend(1.0);
+                            let ndc = clip.truncate() / clip.w;
+                            assert!(clip.w > 0.0 && ndc.x.abs() < 1.0 && ndc.y.abs() < 1.0);
+                            assert!((0.0..=1.0).contains(&ndc.z));
+                            corners.push(ndc);
+                        }
+                    }
+                }
+                assert!(corners.iter().any(|p| p.x.abs().max(p.y.abs()) > 0.7));
+                if let Some(expected) = &reference {
+                    for (actual, expected) in corners.iter().zip(expected) {
+                        assert!((*actual - *expected).length() < 1.0e-4);
+                    }
+                } else {
+                    reference = Some(corners);
                 }
             }
         }

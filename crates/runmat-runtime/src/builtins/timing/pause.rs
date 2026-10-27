@@ -108,7 +108,9 @@ async fn perform_wait(runtime: &RuntimeContext, wait: PauseWait) -> Result<(), R
         // In RunMat Web/WASM this is an explicit flush boundary for plotting.
         let handle = plotting::current_figure_handle();
         // Present before the wait.
-        let _ = plotting::render_current_scene(handle.as_u32());
+        tracing::info_span!("runtime.pause.present", phase = "before_wait").in_scope(|| {
+            let _ = plotting::render_current_scene(handle.as_u32());
+        });
     }
 
     match wait {
@@ -132,18 +134,23 @@ async fn perform_wait(runtime: &RuntimeContext, wait: PauseWait) -> Result<(), R
                     &PAUSE_ERROR_INVALID_ARG,
                 ));
             }
-            runtime
-                .cpu_cooperation()
-                .await_cancellable(runtime.service_ports().timing()?.sleep(duration))
-                .await
-                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)??;
+            tracing::Instrument::instrument(
+                runtime
+                    .cpu_cooperation()
+                    .await_cancellable(runtime.service_ports().timing()?.sleep(duration)),
+                tracing::info_span!("runtime.pause.wait", requested_seconds = seconds),
+            )
+            .await
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)??;
             #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
             {
                 // Present again after the wait to ensure the compositor sees the most recent frame.
                 // Some browser/driver combinations appear to delay presentation unless we yield across
                 // a timer boundary.
                 let handle = plotting::current_figure_handle();
-                let _ = plotting::render_current_scene(handle.as_u32());
+                tracing::info_span!("runtime.pause.present", phase = "after_wait").in_scope(|| {
+                    let _ = plotting::render_current_scene(handle.as_u32());
+                });
             }
             Ok(())
         }

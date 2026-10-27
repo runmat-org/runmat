@@ -613,7 +613,8 @@ pub struct StructuralMaterialSummary {
     #[serde(default)]
     pub density_kg_per_m3: runmat_types::physical::MassDensity,
     pub lame_lambda_pa: f64,
-    pub shear_modulus_pa: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub shear_modulus_pa: runmat_types::physical::ShearModulus,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -792,7 +793,7 @@ pub(super) fn assemble_linear_system_impl(
         poisson_ratio: runmat_types::physical::PoissonRatio::new(avg_poisson_ratio),
         density_kg_per_m3: runmat_types::physical::MassDensity::new(avg_density_kg_per_m3),
         lame_lambda_pa,
-        shear_modulus_pa,
+        shear_modulus_pa: runmat_types::physical::ShearModulus::new(shear_modulus_pa),
     };
     let stiffness_base = (avg_youngs_modulus / 2.0e3).max(1.0e5);
 
@@ -1882,7 +1883,9 @@ mod tests {
                 constraint_id: "fixed_root".to_string(),
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
-                    target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region_id))),
+                    target: runmat_analysis_core::RegionTarget::authored(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(region_id)),
+                    ),
                 },
             },
         )
@@ -2030,7 +2033,7 @@ mod tests {
             ],
             elements: vec![runmat_analysis_core::StructuralElement {
                 element_id: "beam_1".to_string(),
-                region_id: "span".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_edge("span"),
                 kind: runmat_analysis_core::StructuralElementKind::Beam(
                     runmat_analysis_core::BeamElementModel {
                         node_ids: [1, 2],
@@ -2075,7 +2078,9 @@ mod tests {
         model
             .material_assignments
             .push(runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span")),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(
+                    runmat_meshing_core::fixtures::fixture_edge("span"),
+                ),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2430,7 +2435,9 @@ mod tests {
             runmat_types::physical::YoungsModulus::new(20.0e9);
         soft_model.materials = vec![hard.clone(), soft.clone()];
         soft_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-            target: runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("soft_region")),
+            target: runmat_analysis_core::PropertyRegionTarget::solid(
+                runmat_meshing_core::fixtures::fixture_region("soft_region"),
+            ),
             expected_material_id: "mat_hard".to_string(),
             assigned_material_id: "mat_soft".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2440,7 +2447,9 @@ mod tests {
 
         let mut hard_model = soft_model.clone();
         hard_model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-            target: runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("soft_region")),
+            target: runmat_analysis_core::PropertyRegionTarget::solid(
+                runmat_meshing_core::fixtures::fixture_region("soft_region"),
+            ),
             expected_material_id: "mat_hard".to_string(),
             assigned_material_id: "mat_hard".to_string(),
             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -2909,20 +2918,24 @@ mod tests {
         model.materials.push(second_material);
         model.material_assignments = vec![
             runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span_first")),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(
+                    runmat_meshing_core::fixtures::fixture_edge("span_first"),
+                ),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
             },
             runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("span_second")),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(
+                    runmat_meshing_core::fixtures::fixture_edge("span_second"),
+                ),
                 expected_material_id: "mat_second".into(),
                 assigned_material_id: "mat_second".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
             },
         ];
         let structural = model.structural.as_mut().expect("beam topology");
-        structural.elements[0].region_id = "span_first".into();
+        structural.elements[0].region_id = runmat_meshing_core::fixtures::fixture_edge("span_first");
         structural.nodes.push(runmat_analysis_core::StructuralNode {
             node_id: 3,
             coordinates_m: runmat_types::physical::Quantity::<
@@ -2933,7 +2946,7 @@ mod tests {
         });
         let mut second_element = structural.elements[0].clone();
         second_element.element_id = "beam_2".into();
-        second_element.region_id = "span_second".into();
+        second_element.region_id = runmat_meshing_core::fixtures::fixture_edge("span_second");
         let StructuralElementKind::Beam(beam) = &mut second_element.kind else {
             unreachable!("fixture element is a beam")
         };
@@ -3462,7 +3475,9 @@ mod tests {
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::DistributingCoupling(
                     runmat_analysis_core::ReferencePointCoupling {
-                        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
+                        target: runmat_analysis_core::RegionTarget::boundary(
+                            runmat_meshing_core::fixtures::fixture_face("tip"),
+                        ),
                         reference_point: runmat_analysis_core::ReferencePoint {
                             reference_point_id: "tip".into(),
                             position: runmat_analysis_core::Position::new([0.0, 0.0, 0.0]),
@@ -4201,7 +4216,9 @@ mod tests {
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
                     runmat_analysis_core::PrescribedStructuralDofs {
-                        target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("root")),
+                        target: runmat_analysis_core::RegionTarget::authored(
+                            runmat_meshing_core::fixtures::fixture_face("root"),
+                        ),
                         translations: vec![runmat_analysis_core::TranslationDofValue {
                             dof: runmat_analysis_core::StructuralTranslationDof::Ux,
                             value: runmat_analysis_core::PrescribedValue::Signal(
@@ -4368,7 +4385,9 @@ mod tests {
         model
             .material_assignments
             .push(runmat_analysis_core::MaterialAssignment {
-                target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span_2")),
+                target: runmat_analysis_core::PropertyRegionTarget::beam(
+                    runmat_meshing_core::fixtures::fixture_edge("beam_span_2"),
+                ),
                 expected_material_id: "mat_steel".into(),
                 assigned_material_id: "mat_steel".into(),
                 confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -4396,7 +4415,7 @@ mod tests {
             .elements
             .push(runmat_analysis_core::StructuralElement {
                 element_id: "beam_2".into(),
-                region_id: "beam_span_2".into(),
+                region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span_2"),
                 kind: StructuralElementKind::Beam(runmat_analysis_core::BeamElementModel {
                     node_ids: [3, 4],
                     section_id: "rect".into(),

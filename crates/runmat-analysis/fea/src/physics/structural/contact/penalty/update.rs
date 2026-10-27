@@ -1,16 +1,22 @@
+use super::state::RawPointState;
 use super::*;
 pub(super) fn evaluate(
     law: &PenaltyContactLaw,
     gap: f64,
     increment: [f64; 2],
-    committed: &ContactPointState,
+    committed_state: &ContactPointState,
 ) -> Result<ContactPointResponse, ContactPointError> {
-    let mut response = ContactPointResponse {
+    let committed = RawPointState::of(committed_state);
+    let tangential_stiffness = law
+        .policy
+        .tangential_stiffness_pa_per_m
+        .map(|k| k.canonical_value());
+    let mut response = RawResponse {
         mode: ContactPointMode::Open,
         normal_pressure_pa: 0.0,
         internal_traction_local_pa: [0.0; 3],
         tangent_pa_per_m: [[0.0; 3]; 3],
-        trial_state: committed.clone(),
+        trial_state: committed,
         normal_elastic_energy_j_per_m2: 0.0,
         tangential_elastic_energy_j_per_m2: 0.0,
         frictional_dissipation_increment_j_per_m2: 0.0,
@@ -20,15 +26,15 @@ pub(super) fn evaluate(
     response.trial_state.gap_m = gap;
     response.trial_state.tangential_traction_pa = [0.0; 2];
     if gap >= 0.0 {
-        if let Some(k) = law.policy.tangential_stiffness_pa_per_m {
+        if let Some(k) = tangential_stiffness {
             let magnitude =
                 committed.tangential_traction_pa[0].hypot(committed.tangential_traction_pa[1]);
             response.separation_release_energy_j_per_m2 = 0.5 * magnitude * (magnitude / k);
         }
         return finish(law, response);
     }
-    let kn = law.policy.normal_stiffness_pa_per_m;
-    let pressure = law.normal_pressure_at_gap(gap)?;
+    let kn = law.policy.normal_stiffness_pa_per_m.canonical_value();
+    let pressure = law.normal_pressure_at_canonical_gap(gap)?;
     response.normal_pressure_pa = pressure;
     response.internal_traction_local_pa[2] = -pressure;
     response.tangent_pa_per_m[2][2] = kn;
@@ -37,10 +43,7 @@ pub(super) fn evaluate(
         response.mode = ContactPointMode::FrictionlessActive;
         return finish(law, response);
     };
-    let kt = law
-        .policy
-        .tangential_stiffness_pa_per_m
-        .ok_or(ContactPointError::InvalidPolicy)?;
+    let kt = tangential_stiffness.ok_or(ContactPointError::InvalidPolicy)?;
     let trial =
         std::array::from_fn::<_, 2, _>(|i| committed.tangential_traction_pa[i] + kt * increment[i]);
     let magnitude = trial[0].hypot(trial[1]);
@@ -93,9 +96,22 @@ pub(super) fn evaluate(
     response.tangential_elastic_energy_j_per_m2 = 0.5 * magnitude * (magnitude / kt);
     finish(law, response)
 }
+/// Canonical SI response of the private penalty/Coulomb kernel before typed publication.
+struct RawResponse {
+    mode: ContactPointMode,
+    normal_pressure_pa: f64,
+    internal_traction_local_pa: [f64; 3],
+    tangent_pa_per_m: [[f64; 3]; 3],
+    trial_state: RawPointState,
+    normal_elastic_energy_j_per_m2: f64,
+    tangential_elastic_energy_j_per_m2: f64,
+    frictional_dissipation_increment_j_per_m2: f64,
+    tangential_algorithmic_dissipation_increment_j_per_m2: f64,
+    separation_release_energy_j_per_m2: f64,
+}
 fn finish(
     law: &PenaltyContactLaw,
-    response: ContactPointResponse,
+    response: RawResponse,
 ) -> Result<ContactPointResponse, ContactPointError> {
     if crate::is_fea_cancelled() {
         return Err(ContactPointError::Cancelled);
@@ -118,7 +134,24 @@ fn finish(
     {
         return Err(ContactPointError::NonFiniteResponse);
     }
-    law.validate_state(&response.trial_state)
+    let trial_state = response.trial_state.into_state(law.identity);
+    law.validate_state(&trial_state)
         .map_err(|_| ContactPointError::NonFiniteResponse)?;
-    Ok(response)
+    let energy = runmat_types::physical::SurfaceEnergyDensity::new;
+    Ok(ContactPointResponse {
+        mode: response.mode,
+        normal_pressure_pa: Pressure::new(response.normal_pressure_pa),
+        internal_traction_local_pa: Quantity::new(response.internal_traction_local_pa),
+        tangent_pa_per_m: Quantity::new(response.tangent_pa_per_m),
+        trial_state,
+        normal_elastic_energy_j_per_m2: energy(response.normal_elastic_energy_j_per_m2),
+        tangential_elastic_energy_j_per_m2: energy(response.tangential_elastic_energy_j_per_m2),
+        frictional_dissipation_increment_j_per_m2: energy(
+            response.frictional_dissipation_increment_j_per_m2,
+        ),
+        tangential_algorithmic_dissipation_increment_j_per_m2: energy(
+            response.tangential_algorithmic_dissipation_increment_j_per_m2,
+        ),
+        separation_release_energy_j_per_m2: energy(response.separation_release_energy_j_per_m2),
+    })
 }

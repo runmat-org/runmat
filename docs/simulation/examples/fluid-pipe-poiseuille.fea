@@ -4,9 +4,9 @@ geometry pipe {
     file = "./geometry/pipe.step"
     units = m
     region fluid : cell { select result; expect exactly_one }
-    region wall : face { select id "face_000001"; expect exactly_one }
-    region outlet : face { select id "face_000002"; expect exactly_one }
-    region inlet : face { select id "face_000003"; expect exactly_one }
+    region wall : face { select name "Wall"; expect exactly_one }
+    region outlet : face { select name "Outlet"; expect exactly_one }
+    region inlet : face { select name "Inlet"; expect exactly_one }
 }
 
 mesh pipe on geometry.pipe {
