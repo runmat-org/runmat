@@ -239,6 +239,7 @@ impl<'ctx, 'hir> TargetBuilder<'ctx, 'hir> {
             });
         }
         Ok(MirIndexing {
+            argument_spans: super::expr::index_argument_spans(indexing),
             kind: indexing.kind,
             plan: super::expr::classify_mir_index_plan(indexing),
             components,

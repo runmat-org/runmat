@@ -189,10 +189,13 @@ fn original_environment_and_cancellation_are_enforced_before_execution() {
 }
 
 #[test]
-fn complete_units_reject_partial_vm_execution_and_succeed_through_session_owner() {
+fn complete_units_execute_through_owned_vm_and_session_hosts() {
     let original = request("ans = 42;", None, 1);
-    let rejected = block_on(runmat_vm::execute_program_request(original.clone()));
-    assert!(matches!(rejected, ProgramExecutionResponse::Failure { .. }));
+    // The VM entry owns workspace, lifecycle and local-task supervision; it
+    // is not the former bare-context partial embedding.
+    let executed = block_on(runmat_vm::execute_program_request(original.clone()));
+    executed.validate_against(&original).unwrap();
+    assert_eq!(values(executed), vec![Value::Num(42.0)]);
     assert_eq!(values(invoke(&original)), vec![Value::Num(42.0)]);
 }
 

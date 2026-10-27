@@ -9,6 +9,7 @@ pub(crate) mod managed;
 mod selected_execution;
 mod selection;
 
+#[inline(always)]
 pub(super) fn execute<'a, F, Fut>(
     context: Option<&'a RuntimeContext>,
     identity: BuiltinCatalogIdentity,
@@ -27,6 +28,7 @@ where
 
 /// The exact instruction-scoped context is borrowed by selection and execution;
 /// no preparation context or allocation authority is reconstructed.
+#[inline(always)]
 pub(super) fn execute_in_context<'a, F, Fut>(
     context: Option<&'a RuntimeContext>,
     identity: BuiltinCatalogIdentity,

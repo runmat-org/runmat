@@ -14,7 +14,7 @@ pub const MPOWER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDe
 pub const MPOWER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MPOWER.INVALID_INPUT",
     identifier: Some("RunMat:mpower:InvalidInput"),
-    when: "The base is unsupported or a matrix base is not square.",
+    when: "The base is unsupported, a matrix base is not square, or a negative floating matrix power requires a singular inverse.",
     message: "mpower: unsupported operand types",
 };
 pub const MPOWER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

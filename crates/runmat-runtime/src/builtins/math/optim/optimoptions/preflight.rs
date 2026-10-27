@@ -240,6 +240,7 @@ fn value_for_field(
                     | OptimOptionField::OutputFcn
                     | OptimOptionField::PlotFcn
                     | OptimOptionField::HessianFcn
+                    | OptimOptionField::JacobianMultiplyFcn
                     | OptimOptionField::HessianMultiplyFcn
                     | OptimOptionField::SubproblemAlgorithm
                     | OptimOptionField::HessianApproximation

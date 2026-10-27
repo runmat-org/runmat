@@ -72,7 +72,10 @@ fn validate_bounded_count(
     if requested <= maximum {
         return Ok(());
     }
-    let mut builder = crate::build_runtime_error(error.message).with_builtin(builtin);
+    // Gathering inputs cannot change an output-arity contract.
+    let mut builder = crate::build_runtime_error(error.message)
+        .with_builtin(builtin)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -112,7 +115,9 @@ pub(crate) fn validate_fixed_form_outputs(
     if requested <= maximum {
         return Ok(());
     }
-    let mut builder = crate::build_runtime_error(error.message).with_builtin(builtin);
+    let mut builder = crate::build_runtime_error(error.message)
+        .with_builtin(builtin)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }

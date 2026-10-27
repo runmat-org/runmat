@@ -229,7 +229,11 @@ pub(super) fn inspect_value(
                 ));
             }
         }
-        Field::OutputFcn | Field::PlotFcn | Field::HessianMultiplyFcn | Field::HessPattern => {}
+        Field::OutputFcn
+        | Field::PlotFcn
+        | Field::HessianMultiplyFcn
+        | Field::JacobianMultiplyFcn
+        | Field::HessPattern => {}
         Field::AbsoluteGapTolerance
         | Field::RelativeGapTolerance
         | Field::MaxFeasiblePoints

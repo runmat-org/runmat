@@ -58,7 +58,9 @@ pub const GPU_DEVICE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
-        accelerator: BuiltinAcceleratorPolicy::Required,
+        // Provider capability is required by the call contract above. Device
+        // inspection and lifecycle control execute on the host, not a kernel.
+        accelerator: BuiltinAcceleratorPolicy::Forbidden,
         residency: BuiltinResidencyPolicy::Host,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::Unsupported,

@@ -59,7 +59,9 @@ fn validate_compressed(
         )));
     }
     if ptr[0] != 0 {
-        return Err(SolverError::InvalidStructure("first offset is not zero".into()));
+        return Err(SolverError::InvalidStructure(
+            "first offset is not zero".into(),
+        ));
     }
     if ptr[outer] != idx.len() || idx.len() != values_len {
         return Err(SolverError::InvalidStructure(format!(
@@ -271,8 +273,7 @@ impl<'a, T: Scalar> CsrRef<'a, T> {
         assert_eq!(x.len(), self.nrows);
         assert_eq!(y.len(), self.ncols);
         y.iter_mut().for_each(|v| *v = T::zero());
-        for row in 0..self.nrows {
-            let xr = x[row];
+        for (row, &xr) in x.iter().enumerate() {
             for entry in self.row_ptr[row]..self.row_ptr[row + 1] {
                 let a = if conjugate {
                     self.values[entry].conj()
@@ -649,7 +650,13 @@ impl<T: Scalar> CsrMatrix<T> {
         &mut self.values
     }
     pub fn into_parts(self) -> (usize, usize, Vec<usize>, Vec<usize>, Vec<T>) {
-        (self.nrows, self.ncols, self.row_ptr, self.col_idx, self.values)
+        (
+            self.nrows,
+            self.ncols,
+            self.row_ptr,
+            self.col_idx,
+            self.values,
+        )
     }
 
     /// Bytes held by the arrays.
@@ -674,27 +681,33 @@ impl<T: Scalar> CsrMatrix<T> {
             .iter()
             .any(|(_, m)| m.nrows() != nrows || m.ncols() != ncols)
         {
-            return Err(SolverError::Dimension("linear combination shapes differ".into()));
+            return Err(SolverError::Dimension(
+                "linear combination shapes differ".into(),
+            ));
         }
         let rows: Vec<(Vec<usize>, Vec<T>)> = par::map_range(nrows, SPMV_ROWS_PER_TASK, |row| {
-                let mut merged: Vec<(usize, T)> = Vec::new();
-                for (coefficient, matrix) in terms {
-                    let (c, v) = matrix.row(row);
-                    merged.extend(c.iter().zip(v).map(|(&col, &val)| (col, *coefficient * val)));
+            let mut merged: Vec<(usize, T)> = Vec::new();
+            for (coefficient, matrix) in terms {
+                let (c, v) = matrix.row(row);
+                merged.extend(
+                    c.iter()
+                        .zip(v)
+                        .map(|(&col, &val)| (col, *coefficient * val)),
+                );
+            }
+            merged.sort_by_key(|e| e.0);
+            let mut cols = Vec::with_capacity(merged.len());
+            let mut vals: Vec<T> = Vec::with_capacity(merged.len());
+            for (col, val) in merged {
+                if cols.last() == Some(&col) {
+                    *vals.last_mut().unwrap() += val;
+                } else {
+                    cols.push(col);
+                    vals.push(val);
                 }
-                merged.sort_by_key(|e| e.0);
-                let mut cols = Vec::with_capacity(merged.len());
-                let mut vals: Vec<T> = Vec::with_capacity(merged.len());
-                for (col, val) in merged {
-                    if cols.last() == Some(&col) {
-                        *vals.last_mut().unwrap() += val;
-                    } else {
-                        cols.push(col);
-                        vals.push(val);
-                    }
-                }
-                (cols, vals)
-            });
+            }
+            (cols, vals)
+        });
         Ok(Self::from_rows(nrows, ncols, rows))
     }
 

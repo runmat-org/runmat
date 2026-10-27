@@ -62,7 +62,10 @@ pub(super) fn value_metadata(field: Field, value: &ValueFact) -> bool {
             _ => false,
         };
     }
-    if field == Field::HessianMultiplyFcn {
+    if matches!(
+        field,
+        Field::HessianMultiplyFcn | Field::JacobianMultiplyFcn
+    ) {
         return matches!(value.kind, ValueKindFact::Callable(_));
     }
     if field == Field::HessPattern {
@@ -220,11 +223,12 @@ pub(super) fn normalized(
                 fact
             })
             .unwrap_or_else(|| ValueFact::scalar(ValueKindFact::Logical)),
-        Field::OutputFcn | Field::PlotFcn | Field::HessianMultiplyFcn => {
-            source.cloned().unwrap_or_else(|| {
-                facts::double(ShapeFact::from(vec![Some(0), Some(0)]), StorageFact::Dense)
-            })
-        }
+        Field::OutputFcn
+        | Field::PlotFcn
+        | Field::HessianMultiplyFcn
+        | Field::JacobianMultiplyFcn => source.cloned().unwrap_or_else(|| {
+            facts::double(ShapeFact::from(vec![Some(0), Some(0)]), StorageFact::Dense)
+        }),
         Field::Diagnostics
         | Field::FunValCheck
         | Field::Display

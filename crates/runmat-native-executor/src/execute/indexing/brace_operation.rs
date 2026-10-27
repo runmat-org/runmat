@@ -149,6 +149,7 @@ mod tests {
                 )
             };
             let indexing = MirIndexing {
+                argument_spans: None,
                 kind: IndexKind::Brace,
                 plan: MirIndexPlan::Slice,
                 components: vec![],

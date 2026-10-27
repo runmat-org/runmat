@@ -109,6 +109,7 @@ pub enum OptimOptionField {
     CheckpointFile,
     MinSampleDistance,
     MinSurrogatePoints,
+    JacobianMultiplyFcn,
 }
 
 impl OptimOptionField {
@@ -128,7 +129,7 @@ impl OptimOptionField {
             _ => false,
         }
     }
-    pub const ALL: [Self; 104] = [
+    pub const ALL: [Self; 105] = [
         Self::TolX,
         Self::TolFun,
         Self::TolCon,
@@ -233,9 +234,11 @@ impl OptimOptionField {
         Self::CheckpointFile,
         Self::MinSampleDistance,
         Self::MinSurrogatePoints,
+        Self::JacobianMultiplyFcn,
     ];
     pub const fn name(self) -> &'static str {
         match self {
+            Self::JacobianMultiplyFcn => "JacobianMultiplyFcn",
             Self::TolX => "TolX",
             Self::TolFun => "TolFun",
             Self::TolCon => "TolCon",

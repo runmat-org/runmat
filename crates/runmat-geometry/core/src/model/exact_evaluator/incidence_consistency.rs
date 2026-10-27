@@ -29,6 +29,12 @@ struct Interval {
     depth: u8,
 }
 
+struct EdgeUse<'a> {
+    edge: &'a ExactEdge,
+    coedge: &'a ExactCoedge,
+    face: &'a ExactFace,
+}
+
 /// Independently checks exact curve endpoints and every curve/pcurve/surface incidence.
 ///
 /// The evaluator owns representation-specific queries; geometry core owns sampling, adaptive
@@ -177,9 +183,7 @@ where
         let end_sample = sample_edge_use(evaluator, edge, coedge, face, pair[1], control)?;
         refine_interval(
             evaluator,
-            edge,
-            coedge,
-            face,
+            EdgeUse { edge, coedge, face },
             Interval {
                 start: pair[0],
                 end: pair[1],
@@ -197,9 +201,7 @@ where
 
 fn refine_interval<E>(
     evaluator: &E,
-    edge: &ExactEdge,
-    coedge: &ExactCoedge,
-    face: &ExactFace,
+    edge_use: EdgeUse<'_>,
     initial: Interval,
     tolerance_m: f64,
     control: &dyn GeometryEvaluationControl,
@@ -208,6 +210,7 @@ fn refine_interval<E>(
 where
     E: ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized,
 {
+    let EdgeUse { edge, coedge, face } = edge_use;
     pending.clear();
     pending.push(initial);
     let mut visited = 0usize;

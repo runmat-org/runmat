@@ -47,6 +47,8 @@ impl FunctionRegistry {
     /// new product; `partitioned_reused` is its disjoint set of proved prior
     /// definitions. Neither a matching numeric ID nor a matching origin can
     /// replace the exact prior body/source/lease for the latter set.
+    /// Other prior definitions omitted from the projection are retired; they
+    /// cannot reappear simply because selection starts from the prior owner.
     pub fn selected_execution_registry_from_prior(
         prior: &Self,
         projected: &Self,
@@ -167,6 +169,15 @@ impl FunctionRegistry {
         }
         fresh.sort_by_key(|(id, _)| id.0);
         let mut selected = prior.clone();
+        let retired = prior
+            .functions
+            .keys()
+            .filter(|id| !projected.functions.contains_key(id) && !partitioned_reused.contains(id))
+            .copied()
+            .collect::<Vec<_>>();
+        for id in retired {
+            selected.remove(id);
+        }
         for (id, body) in fresh {
             // Removing the genuinely old owner first prevents the ordinary
             // same-origin insertion policy from grafting it onto a new body.
@@ -201,6 +212,34 @@ mod tests {
     use runmat_value::FunctionDefinitionOwner;
 
     use super::*;
+
+    #[test]
+    fn omitted_definition_loses_its_name_but_keeps_escaped_handles_alive() {
+        let id = FunctionId(7);
+        let body = FunctionBytecode {
+            function: id,
+            display_name: "removed".into(),
+            ..FunctionBytecode::default()
+        };
+        let lease = FunctionDefinitionOwner::issue(&body.definition_owner, id.0);
+        let mut prior = FunctionRegistry::new(HashMap::from([(id, body.clone())]));
+        prior.names.insert(body.display_name.clone(), id);
+        let selected = FunctionRegistry::selected_execution_registry_from_prior(
+            &prior,
+            &FunctionRegistry::default(),
+            &HashSet::new(),
+            &HashSet::new(),
+            |_| None,
+        )
+        .expect("retire omitted definition");
+        assert!(selected.resolve_name("removed").is_none());
+        assert!(selected.get_current(id).is_none());
+        assert!(Arc::ptr_eq(
+            &selected.get_owned(id, &lease).unwrap().definition_owner,
+            &body.definition_owner,
+        ));
+        assert_eq!(prior.resolve_name("removed"), Some(id));
+    }
 
     #[test]
     fn reused_owner_keeps_its_prior_source_while_new_body_is_published() {

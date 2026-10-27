@@ -4,13 +4,15 @@ use super::*;
 use crate::builtins::math::optim::least_squares::Jacobian;
 use crate::call::{descriptor::RepeatableCallable, BuiltinArguments};
 use crate::execution::RootedValue;
+mod selection;
+use selection::Derivatives;
 pub(super) struct NonlinEvaluator {
     pub(super) cooperation: crate::builtins::math::optim::common::ScalarCooperation,
     function: RepeatableCallable,
     x_shape: Vec<usize>,
     x_scalar: bool,
     residual_shape: Option<Vec<usize>>,
-    supplied: bool,
+    derivatives: Derivatives,
     pending: Option<Jacobian>,
     accepted: Option<Jacobian>,
 }
@@ -21,25 +23,19 @@ impl NonlinEvaluator {
         x_shape: Vec<usize>,
         x_scalar: bool,
         supplied: bool,
+        multiply: Option<&Value>,
     ) -> BuiltinResult<Self> {
         let runtime = cooperation.runtime();
         let rooted = RootedValue::in_optional_context(function, runtime)?;
-        let function = crate::context::with_original_scope(runtime, || {
-            match runtime.and_then(|runtime| runtime.selected_graph_program()) {
-                Some(program) => program.select_repeatable_callable(
-                    runtime.expect("selected program has original runtime"),
-                    rooted,
-                ),
-                None => RepeatableCallable::select_deferred_rooted(runtime, rooted),
-            }
-        })?;
+        let function = selection::select(rooted, runtime)?;
+        let derivatives = Derivatives::new(supplied, multiply, runtime)?;
         Ok(Self {
             cooperation,
             function,
             x_shape,
             x_scalar,
             residual_shape: None,
-            supplied,
+            derivatives,
             pending: None,
             accepted: None,
         })
@@ -56,7 +52,7 @@ impl LeastSquaresEvaluator for NonlinEvaluator {
         }
     }
     fn supplies_jacobian(&self) -> bool {
-        self.supplied
+        self.derivatives.supplied()
     }
     fn accept_residual(&mut self) {
         self.accepted = self.pending.take();
@@ -75,7 +71,7 @@ impl LeastSquaresEvaluator for NonlinEvaluator {
             let arg = x_value(x, &self.x_shape, self.x_scalar)?;
             let runtime = self.cooperation.runtime();
             let arguments = BuiltinArguments::from_borrowed(&[arg], runtime)?;
-            let width = if self.supplied { 2 } else { 1 };
+            let width = if self.derivatives.supplied() { 2 } else { 1 };
             let returned = self
                 .function
                 .invoke_retained(runtime, arguments, width)
@@ -103,17 +99,25 @@ impl LeastSquaresEvaluator for NonlinEvaluator {
                         "residual extent overflow",
                     )
                 })?;
-            if self.supplied {
+            if matches!(self.derivatives, Derivatives::Matrix) {
                 preflight(&returned.as_slice()[1], rows, x.len(), runtime)?;
             }
-            let mut values =
-                crate::context::with_original_scope(runtime, || returned.try_into_values())?;
-            let residual = real_array_with_cooperation(
-                "function output",
-                values.next().expect("selected original residual"),
-                &mut self.cooperation,
-            )
-            .await?;
+            let (function_value, derivative) = crate::context::with_original_scope(
+                runtime,
+                || -> BuiltinResult<(RootedValue, Option<RootedValue>)> {
+                    if self.derivatives.supplied() {
+                        let (first, second) = returned.try_into_pair()?;
+                        Ok((first, Some(second)))
+                    } else {
+                        Ok((returned.try_into_single()?, None))
+                    }
+                },
+            )?;
+            let residual = function_value
+                .with_owned_async(|value| {
+                    real_array_with_cooperation("function output", value, &mut self.cooperation)
+                })
+                .await?;
             if let Some(expected) = &self.residual_shape {
                 if expected != &residual.shape {
                     return Err(lsq_error_with_detail(
@@ -124,14 +128,21 @@ impl LeastSquaresEvaluator for NonlinEvaluator {
             } else {
                 self.residual_shape = Some(residual.shape);
             }
-            if self.supplied {
-                let source = RootedValue::in_optional_context(
-                    values.next().expect("selected original Jacobian"),
-                    self.cooperation.runtime(),
-                )?;
-                self.pending =
-                    Some(Jacobian::matrix(source, rows, x.len(), &mut self.cooperation).await?);
-            }
+            self.pending = match (&self.derivatives, derivative) {
+                (Derivatives::Numerical, None) => None,
+                (Derivatives::Matrix, Some(source)) => {
+                    Some(Jacobian::matrix(source, rows, x.len(), &mut self.cooperation).await?)
+                }
+                (Derivatives::Opaque(function), Some(info)) => Some(Jacobian::Opaque(
+                    crate::builtins::math::optim::least_squares::Opaque::new(
+                        info,
+                        function.clone(),
+                        rows,
+                        x.len(),
+                    ),
+                )),
+                _ => unreachable!("selected derivative output role"),
+            };
             Ok(residual.values)
         })
     }

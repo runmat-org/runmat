@@ -6,12 +6,11 @@ use super::{
     scalar::LinearOperatorScalar, CooperativeOperatorError, LinearOperator, LinearOperatorError,
     TypedLinearOperator,
 };
+use super::{BorrowedWork, ProductWork, UnmanagedWork};
 use crate::context::{host_allocation::HostAllocationReceipt, RuntimeContext};
 use crate::execution::CpuCooperationBudget;
 use num_complex::Complex64;
 use runmat_value::ComplexElement;
-mod work;
-use work::{BorrowedWork, ProductWork, UnmanagedWork};
 
 pub(in crate::builtins::math::linalg) trait SourceScalar:
     Copy
@@ -103,7 +102,7 @@ async fn product<S: SourceScalar, T: LinearOperatorScalar>(
                 output,
                 convert,
                 orientation,
-                &mut BorrowedWork { runtime, budget },
+                &mut BorrowedWork::new(runtime, budget)?,
             )
             .await?;
         }

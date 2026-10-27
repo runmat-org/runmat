@@ -3,32 +3,33 @@ use runmat_mir::{MirCall, MirCallArg};
 use crate::compiler::CompileError;
 use crate::instr::Instr;
 
-use super::core::{call_name, Compiler};
+use super::core::Compiler;
+use runmat_builtins::{BuiltinExecutorIntrinsic, ParallelExecutorIntrinsic};
 
 impl Compiler {
     pub(super) fn try_compile_parallel_call(
         &mut self,
         call: &MirCall,
     ) -> Result<bool, CompileError> {
-        let Some(name) = call_name(call) else {
+        let Some(BuiltinExecutorIntrinsic::Parallel(intrinsic)) = call.executor_intrinsic() else {
             return Ok(false);
         };
-        match name {
-            "parpool" => {
+        match intrinsic {
+            ParallelExecutorIntrinsic::EnsurePool => {
                 self.compile_parallel_arguments(&call.args)?;
                 self.emit(Instr::EnsurePool(call.args.len()));
             }
-            "gcp" => {
+            ParallelExecutorIntrinsic::CurrentPool => {
                 self.compile_parallel_arguments(&call.args)?;
                 self.emit(Instr::CurrentPool(call.args.len()));
             }
-            "parfeval" => {
+            ParallelExecutorIntrinsic::ScheduleFeval => {
                 self.compile_scheduled_call(call, "parfeval", false)?;
             }
-            "parfevalOnAll" => {
+            ParallelExecutorIntrinsic::ScheduleFevalOnAll => {
                 self.compile_scheduled_call(call, "parfevalOnAll", true)?;
             }
-            "fetchOutputs" => {
+            ParallelExecutorIntrinsic::FetchOutputs => {
                 if call.args.is_empty() || !(call.args.len() - 1).is_multiple_of(2) {
                     return Err(self
                         .compile_error(
@@ -47,7 +48,7 @@ impl Compiler {
                     requested_outputs,
                 });
             }
-            "fetchNext" => {
+            ParallelExecutorIntrinsic::FetchNext => {
                 let has_timeout = match call.args.len() {
                     1 => false,
                     2 => true,
@@ -68,7 +69,6 @@ impl Compiler {
                     requested_outputs,
                 });
             }
-            _ => return Ok(false),
         }
         Ok(true)
     }

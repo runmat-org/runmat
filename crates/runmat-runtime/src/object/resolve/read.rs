@@ -40,6 +40,7 @@ async fn read_member_sequence_with_caller(
             base,
             field,
             allow_init,
+            dispatch: ProtocolDispatch::Resolve,
             _roots: roots,
         },
         caller_function_name,
@@ -47,12 +48,30 @@ async fn read_member_sequence_with_caller(
     .await
 }
 
-pub(super) async fn read_member_sequence_text_with_caller(
+pub(super) fn read_member_sequence_text_with_caller<'a>(
+    context: Option<&'a crate::context::RuntimeContext>,
+    base: Value,
+    field: runmat_value::Utf8Text,
+    allow_init: bool,
+    caller_function_name: MemberCaller<'a>,
+) -> impl std::future::Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a {
+    read_member_sequence_text_with_dispatch(
+        context,
+        base,
+        field,
+        allow_init,
+        caller_function_name,
+        ProtocolDispatch::Resolve,
+    )
+}
+
+pub(super) async fn read_member_sequence_text_with_dispatch(
     context: Option<&crate::context::RuntimeContext>,
     base: Value,
     field: runmat_value::Utf8Text,
     allow_init: bool,
     caller_function_name: MemberCaller<'_>,
+    dispatch: ProtocolDispatch,
 ) -> Result<RootedValueSequence, RuntimeError> {
     let roots = member_read_roots(context, &base)?;
     read_member_sequence_scoped(
@@ -61,6 +80,7 @@ pub(super) async fn read_member_sequence_text_with_caller(
             base,
             field,
             allow_init,
+            dispatch,
             _roots: roots,
         },
         caller_function_name,
@@ -72,6 +92,7 @@ struct MemberRead {
     base: Value,
     field: runmat_value::Utf8Text,
     allow_init: bool,
+    dispatch: ProtocolDispatch,
     _roots: RootedValueLease,
 }
 
@@ -105,6 +126,7 @@ async fn read_member_sequence_in_scope(
         base,
         field,
         allow_init,
+        dispatch,
         _roots,
     } = request;
     match base {
@@ -118,14 +140,20 @@ async fn read_member_sequence_in_scope(
                 field,
                 allow_init,
                 caller_function_name,
+                dispatch,
             )
             .await
         }
-        base => {
-            load_scalar_member_with_context(context, base, field, allow_init, caller_function_name)
-                .await
-                .and_then(RootedValue::try_into_sequence)
-        }
+        base => load_scalar_member_with_context(
+            context,
+            base,
+            field,
+            allow_init,
+            caller_function_name,
+            dispatch,
+        )
+        .await
+        .and_then(RootedValue::try_into_sequence),
     }
 }
 
@@ -135,6 +163,7 @@ async fn load_scalar_member_with_context(
     field: runmat_value::Utf8Text,
     allow_init: bool,
     caller_function_name: MemberCaller<'_>,
+    dispatch: ProtocolDispatch,
 ) -> Result<RootedValue, RuntimeError> {
     if let Some(result) = context
         .and_then(|context| crate::parallel::introspection::load_member(context, &base, &field))
@@ -165,7 +194,7 @@ async fn load_scalar_member_with_context(
             };
             let base = Value::Object(obj.clone());
             let access = caller_function_name.protocol_access();
-            if let Some(method) = crate::object::protocol::resolve_object_protocol(
+            if let Some(method) = dispatch.resolve(
                 &base,
                 crate::object::protocol::ObjectProtocol::Subsref,
                 &access,
@@ -302,7 +331,7 @@ async fn load_scalar_member_with_context(
                 return super::graphics::load_graphics_member(context, base, &field).await;
             }
             let access = caller_function_name.protocol_access();
-            if let Some(method) = crate::object::protocol::resolve_object_protocol(
+            if let Some(method) = dispatch.resolve(
                 &base,
                 crate::object::protocol::ObjectProtocol::Subsref,
                 &access,

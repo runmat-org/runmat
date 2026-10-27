@@ -8,6 +8,12 @@ pub(super) enum Candidate {
     Breakdown,
     PreconditionerFailure,
 }
+
+pub(super) struct BasisProjection {
+    pub completed: usize,
+    pub restart: usize,
+    pub dimension: usize,
+}
 use num_complex::Complex64;
 pub fn rotation(a: Complex64, b: Complex64) -> Option<(f64, Complex64)> {
     let aa = a.norm();
@@ -58,14 +64,17 @@ pub(super) async fn candidate_from_basis<
     O: GmresOperations<T>,
 >(
     work: &mut GmresWork<'_, T>,
-    completed: usize,
-    restart: usize,
-    n: usize,
+    projection: BasisProjection,
     beta: Norm,
     side: PreconditionerSide,
     flexible_basis: &[T],
     operations: &mut O,
 ) -> Result<Candidate, O::Error> {
+    let BasisProjection {
+        completed,
+        restart,
+        dimension: n,
+    } = projection;
     for (source, target) in work.rotated_rhs[..completed]
         .chunks(1024)
         .zip(work.coefficients[..completed].chunks_mut(1024))

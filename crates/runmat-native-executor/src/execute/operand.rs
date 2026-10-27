@@ -405,14 +405,9 @@ pub(super) fn evaluate_rvalue(
                     bytes,
                 ))
             };
-            let program_revision = if matches!(
-                &program,
-                runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
-            ) {
-                None
-            } else {
-                state.runtime.program_revision().cloned()
-            };
+            let program_revision = program
+                .program_revision(state.runtime.program_revision())
+                .cloned();
             let future = state
                 .runtime
                 .execution()

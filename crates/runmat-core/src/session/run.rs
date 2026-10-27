@@ -328,6 +328,7 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
+        let _input = self.install_lifecycle_input();
         let mut response = self.execute_request_inner(request).await;
         if let Err(error) = self.lifecycle_host.service_safepoint(&self.runtime_context) {
             if response
@@ -384,7 +385,7 @@ impl RunMatSession {
         let source_name = source_resolution.display_name;
         let source_fullpath_name = source_resolution.fullpath_name;
         let source_text = source_resolution.text;
-        let primary_source = match (
+        let (primary_source, admitted_fullpath) = match (
             &source_input,
             source_fullpath_name.as_deref(),
             self.project_handoff.as_ref(),
@@ -394,14 +395,17 @@ impl RunMatSession {
                 Some(path),
                 Some(handoff),
             ) => {
-                match crate::executable::CapturedPrimarySource::issue(
+                match crate::executable::AdmittedProjectPrimary::issue(
                     &handoff.project,
                     std::path::Path::new(path),
                     &source_text,
                 )
                 .await
                 {
-                    Ok(source) => source,
+                    Ok(source) => {
+                        let (captured, access_path) = source.into_request_parts();
+                        (captured, Some(access_path))
+                    }
                     Err(error) => {
                         return crate::abi::ExecutionResponse {
                             dependency_lock: None,
@@ -419,13 +423,9 @@ impl RunMatSession {
                     }
                 }
             }
-            _ => None,
+            _ => (None, source_fullpath_name.clone()),
         };
         let source_identity = resolve_source_identity(&source_input, &source_text);
-        let admitted_fullpath = primary_source
-            .as_ref()
-            .map(|source| source.access_path.clone())
-            .or_else(|| source_fullpath_name.clone());
         let mut scope = request_scope::RequestExecutionScope::enter(self);
         let session = scope.session();
         session.compat_mode = request.compatibility;

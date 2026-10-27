@@ -77,6 +77,12 @@ pub struct DeferredGraphCapture {
 /// select their exact admitted origin/lease products only after spawn reserves
 /// the task. No execution service or live RuntimeContext is retained.
 pub trait DeferredGraphSnapshot {
+    /// Revision of this immutable selected primary, not the spawning caller.
+    /// Restored products without a retained revision report no observation.
+    fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {
+        None
+    }
+
     fn select_retained_worker_callable(
         &self,
         _runtime: &crate::context::RuntimeContext,
@@ -170,6 +176,10 @@ pub struct DeferredGraphProgram {
 }
 
 impl DeferredGraphProgram {
+    pub fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {
+        self.snapshot.program_revision()
+    }
+
     pub fn select_retained_worker_callable(
         &self,
         runtime: &crate::context::RuntimeContext,
@@ -289,4 +299,18 @@ pub enum DeferredProgram {
     InterpreterV2(Arc<[u8]>),
     RegionSourcesV1(Arc<[u8]>),
     SelectedGraph(DeferredGraphProgram),
+}
+
+impl DeferredProgram {
+    /// Observational revision follows the actual immutable program owner.
+    /// A selected graph must never inherit a different caller's revision.
+    pub fn program_revision<'a>(
+        &'a self,
+        caller: Option<&'a runmat_execution::ProgramRevision>,
+    ) -> Option<&'a runmat_execution::ProgramRevision> {
+        match self {
+            Self::SelectedGraph(selected) => selected.program_revision(),
+            Self::Local | Self::InterpreterV2(_) | Self::RegionSourcesV1(_) => caller,
+        }
+    }
 }

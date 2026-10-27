@@ -41,7 +41,7 @@ fn compiled_capture_free_nested_body_needs_no_activation() {
         capture_proof(body, parent),
         GraphCaptureProof::NestedShared {
             vm_copied: 0,
-            zero_copy: GraphNestedZeroCopy::RequiresCopies,
+            zero_copy: GraphNestedZeroCopy::CanonicalStorage,
         }
     ));
 }

@@ -5,9 +5,9 @@ use std::collections::BinaryHeap;
 
 use super::schedule::LevelSchedule;
 use crate::csr::CsrRef;
-use crate::par;
 use crate::error::{SolverError, SolverResult};
 use crate::operator::Preconditioner;
+use crate::par;
 use crate::scalar::Scalar;
 
 /// ILU(0): factors on the sparsity pattern of `A`. For symmetric `A` the factor is `L D Lᵀ`
@@ -32,7 +32,9 @@ impl<T: Scalar> Ilu0<T> {
     pub fn strict(matrix: CsrRef<'_, T>) -> SolverResult<Self> {
         let n = matrix.nrows();
         if n != matrix.ncols() {
-            return Err(SolverError::Dimension("ILU(0) requires a square matrix".into()));
+            return Err(SolverError::Dimension(
+                "ILU(0) requires a square matrix".into(),
+            ));
         }
         let diagonal = Self::diagonal_positions(matrix)?;
         let (row_ptr, col_idx) = (matrix.row_ptr(), matrix.col_idx());
@@ -40,7 +42,11 @@ impl<T: Scalar> Ilu0<T> {
         let mut position = vec![usize::MAX; n];
         let check = |value: T, row: usize| -> SolverResult<()> {
             let inverse = T::one() / value;
-            if !value.is_finite() || value.abs() == 0.0 || !inverse.is_finite() || inverse.abs() == 0.0 {
+            if !value.is_finite()
+                || value.abs() == 0.0
+                || !inverse.is_finite()
+                || inverse.abs() == 0.0
+            {
                 Err(SolverError::Singular { pivot: row })
             } else {
                 Ok(())
@@ -92,10 +98,10 @@ impl<T: Scalar> Ilu0<T> {
     fn diagonal_positions(matrix: CsrRef<'_, T>) -> SolverResult<Vec<usize>> {
         let n = matrix.nrows();
         let mut diagonal = vec![usize::MAX; n];
-        for row in 0..n {
+        for (row, diagonal) in diagonal.iter_mut().enumerate() {
             let (cols, _) = matrix.row(row);
             match cols.binary_search(&row) {
-                Ok(position) => diagonal[row] = matrix.row_ptr()[row] + position,
+                Ok(position) => *diagonal = matrix.row_ptr()[row] + position,
                 Err(_) => return Err(SolverError::MissingDiagonal { row }),
             }
         }
@@ -138,14 +144,20 @@ impl<T: Scalar> Ilu0<T> {
                         diagonal,
                         shift,
                         spd: symmetric_positive_definite,
-                    })
+                    });
                 }
                 Err(_) => {
-                    shift = if shift == 0.0 { 1e-3 * diagonal_scale } else { 2.0 * shift };
+                    shift = if shift == 0.0 {
+                        1e-3 * diagonal_scale
+                    } else {
+                        2.0 * shift
+                    };
                 }
             }
         }
-        Err(SolverError::Breakdown("ILU(0) pivots remain unusable after shifting".into()))
+        Err(SolverError::Breakdown(
+            "ILU(0) pivots remain unusable after shifting".into(),
+        ))
     }
 
     fn factor(
@@ -186,9 +198,7 @@ impl<T: Scalar> Ilu0<T> {
             }
             let pivot = values[diagonal[i]];
             let scale = matrix.values()[diagonal[i]].abs().max(f64::MIN_POSITIVE);
-            if !pivot.is_finite()
-                || pivot.abs() <= 1e-12 * scale
-                || (positive && pivot.re() <= 0.0)
+            if !pivot.is_finite() || pivot.abs() <= 1e-12 * scale || (positive && pivot.re() <= 0.0)
             {
                 return Err(SolverError::Breakdown(format!("ILU(0) pivot {i}")));
             }
@@ -210,7 +220,8 @@ impl<T: Scalar> Ilu0<T> {
     }
     /// Bytes retained by the factor.
     pub fn retained_bytes(&self) -> u64 {
-        ((self.row_ptr.len() + self.col_idx.len() + self.diagonal.len()) * std::mem::size_of::<usize>()
+        ((self.row_ptr.len() + self.col_idx.len() + self.diagonal.len())
+            * std::mem::size_of::<usize>()
             + self.values.len() * std::mem::size_of::<T>()) as u64
     }
 
@@ -369,16 +380,27 @@ impl<T: Scalar> Ilut<T> {
             }
             let keep = |entries: &mut Vec<(usize, T)>, count: usize| {
                 if entries.len() > count {
-                    entries.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
+                    entries.sort_by(|a, b| {
+                        b.1.abs()
+                            .partial_cmp(&a.1.abs())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
                     entries.truncate(count);
                 }
                 entries.sort_by_key(|e| e.0);
             };
-            keep(&mut lower, options.fill + cols.iter().filter(|&&c| c < i).count());
-            keep(&mut upper, options.fill + cols.iter().filter(|&&c| c > i).count());
+            keep(
+                &mut lower,
+                options.fill + cols.iter().filter(|&&c| c < i).count(),
+            );
+            keep(
+                &mut upper,
+                options.fill + cols.iter().filter(|&&c| c > i).count(),
+            );
             if diagonal.abs() == 0.0 || !diagonal.is_finite() {
                 // Replace a vanished pivot by a scaled tolerance (standard ILUT safeguard).
-                diagonal = T::from_f64((options.drop_tolerance + 1e-8) * row_norm.max(f64::MIN_POSITIVE));
+                diagonal =
+                    T::from_f64((options.drop_tolerance + 1e-8) * row_norm.max(f64::MIN_POSITIVE));
             }
             for (c, v) in lower {
                 l_idx.push(c);

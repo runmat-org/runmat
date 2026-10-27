@@ -941,7 +941,14 @@ impl std::fmt::Display for MatrixPowerEvaluationError {
     }
 }
 
-impl std::error::Error for MatrixPowerEvaluationError {}
+impl std::error::Error for MatrixPowerEvaluationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Matrix(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<crate::builtins::common::matrix::MatrixPowerError> for MatrixPowerEvaluationError {
     fn from(error: crate::builtins::common::matrix::MatrixPowerError) -> Self {

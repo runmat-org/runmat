@@ -102,6 +102,7 @@ fn short_circuit_capture_outer_traversal_excludes_contextual_selector_locals() {
                 source: crate::MirExpansionSource::CellContents {
                     base: MirOperand::Local(MirLocalId(0)),
                     indexing: crate::MirIndexing {
+                        argument_spans: None,
                         kind: runmat_hir::IndexKind::Brace,
                         plan: crate::MirIndexPlan::Slice,
                         components: vec![crate::MirIndexComponent::ContextualExpr(

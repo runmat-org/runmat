@@ -243,9 +243,14 @@ fn read_value_inner(
     let retains_inputs = indexing_requires_retention(indexing);
     let selectors = materialize_selectors(state, &base, indexing, retains_inputs)?;
     match indexing.kind {
-        IndexKind::Paren => {
-            read_operation::read_paren(state, base, selectors, requested_outputs, embedded)
-        }
+        IndexKind::Paren => read_operation::read_paren(
+            state,
+            base,
+            selectors,
+            requested_outputs,
+            embedded,
+            indexing,
+        ),
         IndexKind::Brace => brace_operation::read_brace(
             &state.runtime,
             base,
@@ -255,6 +260,30 @@ fn read_value_inner(
         )
         .map(IndexedReadOutcome::Host),
     }
+}
+
+pub(in crate::execute) fn index_callsite(
+    state: &HostState,
+    indexing: &MirIndexing,
+) -> NativeExecutorResult<Option<runmat_runtime::callsite::CallsiteInfo>> {
+    let Some(spans) = indexing.argument_spans.as_deref() else {
+        return Ok(None);
+    };
+    let source = state
+        .runtime
+        .program_source_id(state.function.source)
+        .ok_or_else(|| {
+            NativeExecutorError::Host(
+                "native selector source is absent from invocation binding".into(),
+            )
+        })?;
+    runmat_runtime::callsite::CallsiteInfo::from_borrowed_in_context(
+        Some(source),
+        spans,
+        &state.runtime,
+    )
+    .map(Some)
+    .map_err(Into::into)
 }
 
 pub(super) fn assign(
@@ -837,6 +866,7 @@ mod tests {
             let mut state = observed_state(&Rc::new(Probe::default()));
             assert!(super::direct_host_indexing_allowed(&state).expect("unbounded host policy"));
             let indexing = MirIndexing {
+                argument_spans: None,
                 kind: IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![MirIndexComponent::Expr(MirOperand::Constant(

@@ -213,52 +213,60 @@ fn method_frame_context_requires_the_exact_current_binding() {
     assert_eq!(error.identifier(), Some("RunMat:StaleObjectMethodFrame"));
 
     let class = class_name("selected_constructor");
-    let issuer = std::sync::Arc::new(());
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _runtime = runtime.enter();
     let selected_facts = || {
         let definition = std::sync::Arc::new(runmat_value::FunctionDefinitionOwner::default());
         let binding = runmat_value::BoundFunctionBinding::local(
             1,
-            std::sync::Arc::downgrade(&issuer),
+            runtime.session_lease(),
             runmat_value::FunctionDefinitionOwner::issue(&definition, 1),
             Vec::new(),
             runmat_value::LocalExport::Ephemeral,
         );
-        let declarations = std::sync::Arc::new(
-            runmat_value::SelectedReceiverDeclarations::new(
-                class.clone(),
-                false,
-                vec![class.clone()],
-                HashMap::from([(
-                    class.clone(),
-                    runmat_value::SelectedReceiverClassDeclaration {
-                        parent: None,
-                        properties: HashMap::from([(
-                            "x".into(),
-                            runmat_value::SelectedReceiverPropertyDeclaration {
-                                is_static: false,
-                                is_constant: false,
-                                is_dependent: false,
-                                get_access: MemberAccess::Private,
-                                set_access: MemberAccess::Private,
-                            },
-                        )]),
-                        events: HashMap::new(),
-                    },
-                )]),
-                HashMap::new(),
-            )
-            .expect("selected constructor declarations"),
-        );
+        let projection = crate::class_registry::prepare_selected_class_projection(vec![
+            crate::class_registry::CheckedClassRegistration {
+                class: RuntimeClass {
+                    name: class.clone(),
+                    parent: None,
+                    properties: HashMap::from([(
+                        "x".into(),
+                        crate::class_registry::RuntimeProperty {
+                            name: "x".into(),
+                            is_static: false,
+                            is_constant: false,
+                            is_dependent: false,
+                            get_access: MemberAccess::Private,
+                            set_access: MemberAccess::Private,
+                            default_value: None,
+                        },
+                    )]),
+                    methods: HashMap::new(),
+                    events: HashMap::new(),
+                },
+                method_bindings: HashMap::new(),
+                is_sealed: false,
+                is_abstract: false,
+                enumerations: Vec::new(),
+            },
+        ])
+        .expect("selected constructor projection");
+        let declarations = projection.receiver_declarations(&class).unwrap();
         let (seal, key) = runmat_value::SelectedReceiverDeclarationSeal::issue();
         assert!(definition.admit_selected_receiver_seal(std::sync::Arc::clone(&seal)));
         assert!(seal.fill(&key, std::sync::Arc::clone(&declarations)));
-        std::rc::Rc::new(
+        let facts = std::rc::Rc::new(
             runmat_value::SelectedObjectClassFacts::new(declarations, binding, HashMap::new())
                 .expect("selected constructor facts"),
-        )
+        );
+        (projection, facts)
     };
-    let original = selected_facts();
-    let replacement = selected_facts();
+    let (projection, original) = selected_facts();
+    let (_, replacement) = selected_facts();
+    // Private property access needs the exact active declaration product as
+    // well as the issuing session and selected method binding.
+    let runtime = runtime.with_selected_class_projection(projection);
+    let _runtime = runtime.enter();
     let selected_owner = runmat_types::ClassMethodOwner {
         declaring_class: class.clone(),
         method: MethodName::from("construct"),
@@ -277,7 +285,6 @@ fn method_frame_context_requires_the_exact_current_binding() {
         let result = resolve_object_protocol(&receiver, ObjectProtocol::Subsasgn, &selected_access);
         if matches {
             assert!(result.expect("original binding").is_none());
-            let runtime = crate::user_functions::test_support::exact_fixture_runtime();
             let denied = futures::executor::block_on(
                 crate::object::resolve::store_member_traced_in_context(
                     &runtime,

@@ -329,7 +329,7 @@ pub(crate) enum NumericInner<T> {
         perm: Vec<usize>,
         inverse: Vec<usize>,
     },
-    Lu(faer::sparse::linalg::lu::NumericLu<usize, T>),
+    Lu(Box<faer::sparse::linalg::lu::NumericLu<usize, T>>),
 }
 
 /// A numeric factorization bound to its (shared) symbolic analysis.
@@ -422,7 +422,10 @@ impl<T: FactorScalar> DirectSolver<T> {
         });
         let previous = std::mem::replace(&mut self.numeric, NumericInner::Llt(Vec::new()));
         let (numeric, regularized) = match self.symbolic.kind {
-            FactorKind::Lu => (lu::factorize::<T>(&self.symbolic, matrix, Some(previous))?, 0),
+            FactorKind::Lu => (
+                lu::factorize::<T>(&self.symbolic, matrix, Some(previous))?,
+                0,
+            ),
             _ => cholesky::factorize::<T>(&self.symbolic, matrix, &self.options, Some(previous))?,
         };
         self.numeric = numeric;
@@ -559,18 +562,28 @@ impl<T: FactorScalar> DirectSolver<T> {
             let b_norm = par::norm2(bc);
             let xc = &mut x[column * n..(column + 1) * n];
             matrix.residual(xc, bc, &mut residual);
-            let mut relative = if b_norm > 0.0 { par::norm2(&residual) / b_norm } else { 0.0 };
+            let mut relative = if b_norm > 0.0 {
+                par::norm2(&residual) / b_norm
+            } else {
+                0.0
+            };
             let mut steps = 0;
-            while steps < self.options.refinement_steps && relative > self.options.refinement_tolerance {
+            while steps < self.options.refinement_steps
+                && relative > self.options.refinement_tolerance
+            {
                 correction.copy_from_slice(&residual);
                 self.solve_in_place(&mut correction, 1)?;
                 for i in 0..n {
                     xc[i] += correction[i];
                 }
                 matrix.residual(xc, bc, &mut residual);
-                let next = if b_norm > 0.0 { par::norm2(&residual) / b_norm } else { 0.0 };
+                let next = if b_norm > 0.0 {
+                    par::norm2(&residual) / b_norm
+                } else {
+                    0.0
+                };
                 steps += 1;
-                if !(next < 0.5 * relative) {
+                if next.partial_cmp(&(0.5 * relative)) != Some(std::cmp::Ordering::Less) {
                     relative = next.min(relative);
                     break;
                 }
@@ -643,11 +656,14 @@ pub(crate) fn estimate_norm1<T: Scalar>(
             })
             .collect();
         let z = apply_transpose(&signs)?;
-        let (index, max) = z
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (i, v.abs()))
-            .fold((0usize, 0.0f64), |best, item| if item.1 > best.1 { item } else { best });
+        let (index, max) =
+            z.iter()
+                .enumerate()
+                .map(|(i, v)| (i, v.abs()))
+                .fold(
+                    (0usize, 0.0f64),
+                    |best, item| if item.1 > best.1 { item } else { best },
+                );
         let ztx: f64 = z.iter().zip(&x).map(|(a, b)| (a.conj() * *b).re()).sum();
         if max <= ztx || index == previous_index {
             break;

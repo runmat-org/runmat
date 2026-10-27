@@ -13,6 +13,38 @@ mod pending_operator;
 #[path = "native_method_expansion/native_sequence_truth.rs"]
 mod native_sequence_truth;
 
+/// A pending input must wake its waiter when the test releases it. Merely
+/// changing an atomic flag is insufficient for a queued native continuation.
+struct InputReadiness {
+    ready: AtomicBool,
+    waker: futures::task::AtomicWaker,
+}
+impl InputReadiness {
+    fn new(ready: bool) -> Self {
+        Self {
+            ready: AtomicBool::new(ready),
+            waker: futures::task::AtomicWaker::new(),
+        }
+    }
+    fn set(&self, ready: bool) {
+        self.ready.store(ready, Ordering::SeqCst);
+        if ready {
+            self.waker.wake();
+        }
+    }
+    async fn wait(&self) {
+        std::future::poll_fn(|cx| {
+            self.waker.register(cx.waker());
+            if self.ready.load(Ordering::SeqCst) {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await
+    }
+}
+
 const COMPOUND_EXPANSION: &str = r#"
 function output = first(value)
     output = struct('second', @(next) value + next);
@@ -129,6 +161,7 @@ fn pending_argument_request(session: &RunMatSession) -> crate::abi::ExecutionReq
 
 fn hot_session() -> RunMatSession {
     let mut session = RunMatSession::with_options(true, false).unwrap();
+    session.use_generic_ready_route_for_testing();
     session.set_native_tiering_config_for_testing(TieringConfig {
         generic_hot_threshold: 1,
         specialized_hot_threshold: 2,
@@ -138,12 +171,28 @@ fn hot_session() -> RunMatSession {
     session
 }
 
+fn poll_until_input<F>(mut execution: std::pin::Pin<&mut F>, calls: &AtomicUsize, expected: usize)
+where
+    F: Future<Output = crate::abi::ExecutionResponse>,
+{
+    let waker = futures::task::noop_waker();
+    let mut context = Context::from_waker(&waker);
+    for _ in 0..64 {
+        assert!(execution.as_mut().poll(&mut context).is_pending());
+        if calls.load(Ordering::SeqCst) >= expected {
+            return;
+        }
+    }
+    panic!("native invocation did not reach its pending input handler");
+}
+
 #[test]
 fn hot_native_compound_dotted_calls_preserve_per_segment_expansion() {
     runmat_gc::gc_test_context(|| {
         for jit in [false, true] {
             let mut session = RunMatSession::with_options(jit, false).unwrap();
             if jit {
+                session.use_generic_ready_route_for_testing();
                 session.set_native_tiering_config_for_testing(TieringConfig {
                     generic_hot_threshold: 1,
                     specialized_hot_threshold: 2,
@@ -223,6 +272,7 @@ fn hot_native_global_read_reflects_nested_invocation_before_top_level_assertion(
         for jit in [false, true] {
             let mut session = RunMatSession::with_options(jit, false).unwrap();
             if jit {
+                session.use_generic_ready_route_for_testing();
                 session.set_native_tiering_config_for_testing(TieringConfig {
                     generic_hot_threshold: 1,
                     specialized_hot_threshold: 2,
@@ -296,7 +346,7 @@ fn warmed_prefix_failure_precedes_later_argument_preparation() {
 fn hot_native_dotted_invocation_retains_prefix_across_pending_later_argument() {
     runmat_gc::gc_test_context(|| {
         let mut session = hot_session();
-        let ready = Arc::new(AtomicBool::new(true));
+        let ready = Arc::new(InputReadiness::new(true));
         let calls = Arc::new(AtomicUsize::new(0));
         let prefix_seen = Arc::new(AtomicBool::new(false));
         session.install_async_input_handler({
@@ -314,14 +364,7 @@ fn hot_native_dotted_invocation_retains_prefix_across_pending_later_argument() {
                     {
                         prefix_seen.store(true, Ordering::SeqCst);
                     }
-                    std::future::poll_fn(|_| {
-                        if ready.load(Ordering::SeqCst) {
-                            Poll::Ready(())
-                        } else {
-                            Poll::Pending
-                        }
-                    })
-                    .await;
+                    ready.wait().await;
                     Ok(crate::execution::InputResponse::Line("3".into()))
                 }
             }
@@ -349,17 +392,16 @@ fn hot_native_dotted_invocation_retains_prefix_across_pending_later_argument() {
         assert!(native_executions >= 2, "warm calls must execute native");
         assert!(prefix_seen.load(Ordering::SeqCst));
 
-        ready.store(false, Ordering::SeqCst);
+        ready.set(false);
         prefix_seen.store(false, Ordering::SeqCst);
         let before = calls.load(Ordering::SeqCst);
         let request = pending_argument_request(&session);
         let mut execution = Box::pin(session.execute_request(request));
-        let waker = futures::task::noop_waker();
-        assert!(Future::poll(execution.as_mut(), &mut Context::from_waker(&waker)).is_pending());
+        poll_until_input(execution.as_mut(), &calls, before + 1);
         assert_eq!(calls.load(Ordering::SeqCst), before + 1);
         assert!(prefix_seen.load(Ordering::SeqCst));
         runmat_gc::gc_collect_major().expect("collect at pending method argument");
-        ready.store(true, Ordering::SeqCst);
+        ready.set(true);
         let response = futures::executor::block_on(execution);
         let outcome = response.result.expect("resume native method call");
         assert!(outcome.used_jit, "resumed invocation must execute native");
@@ -377,16 +419,16 @@ fn hot_native_dotted_invocation_retains_prefix_across_pending_later_argument() {
             Some(&Value::Num(10.0))
         );
 
-        ready.store(false, Ordering::SeqCst);
+        ready.set(false);
         let before_drop = calls.load(Ordering::SeqCst);
         let request = pending_argument_request(&session);
         let mut abandoned = Box::pin(session.execute_request(request));
-        assert!(Future::poll(abandoned.as_mut(), &mut Context::from_waker(&waker)).is_pending());
+        poll_until_input(abandoned.as_mut(), &calls, before_drop + 1);
         assert_eq!(calls.load(Ordering::SeqCst), before_drop + 1);
         drop(abandoned);
         runmat_gc::gc_collect_major().expect("collect after dropping pending invocation");
         assert_eq!(calls.load(Ordering::SeqCst), before_drop + 1);
-        ready.store(true, Ordering::SeqCst);
+        ready.set(true);
         let request = pending_argument_request(&session);
         let response = futures::executor::block_on(session.execute_request(request));
         let recovered = response

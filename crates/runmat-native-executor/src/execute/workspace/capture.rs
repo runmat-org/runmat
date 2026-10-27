@@ -394,16 +394,11 @@ impl<T> ClaimedVec<T> {
 }
 
 fn allocation_error(context: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
-    runmat_runtime::build_runtime_error(format!(
-        "native dynamic target metadata admission failed: {cause}"
-    ))
-    .with_identifier(format!(
-        "{}:{}",
-        context.error_namespace(),
-        cause.runtime_identifier_suffix()
-    ))
-    .with_source(cause)
-    .build()
+    crate::error::allocation_error(
+        Some(context),
+        format!("native dynamic target metadata admission failed: {cause}"),
+        cause,
+    )
 }
 
 fn capture_error(message: &'static str) -> RuntimeError {

@@ -25,11 +25,16 @@ function frames = nativeFramePending()
 end
 "#;
 
+fn frame_field<'a>(value: &'a Value, index: usize, name: &str) -> Option<&'a Value> {
+    match value {
+        Value::Struct(frame) if index == 0 => frame.fields.get(name),
+        Value::StructArray(frames) => frames.field_values(name)?.get(index),
+        _ => None,
+    }
+}
+
 fn frame_name(value: &Value, index: usize) -> Option<&Value> {
-    let Value::StructArray(frames) = value else {
-        return None;
-    };
-    frames.field_values("name")?.get(index)
+    frame_field(value, index, "name")
 }
 
 fn invocation(function: &str, requested_outputs: usize) -> ProcedureInvocation {
@@ -111,17 +116,13 @@ fn forced_native_companion_uses_its_admitted_file_not_primary() {
             values.as_slice()[1],
             Value::String("nativeFrameCompanion".into())
         );
-        let Value::StructArray(frames) = &values.as_slice()[2] else {
-            panic!("companion dbstack must return structured frames");
-        };
+        let frames = &values.as_slice()[2];
         assert_eq!(
-            frames.field_values("file").and_then(|files| files.first()),
+            frame_field(frames, 0, "file"),
             Some(&Value::String("nativeFrameCompanion.m".into()))
         );
-        assert!(
-            matches!(frames.field_values("line").and_then(|lines| lines.first()),
-            Some(Value::Num(line)) if *line >= 1.0)
-        );
+        assert!(matches!(frame_field(frames, 0, "line"),
+            Some(Value::Num(line)) if *line >= 1.0));
     });
 }
 
@@ -156,7 +157,7 @@ fn pending_native_frame_retires_on_drop_and_fresh_call_has_one_frame() {
                         .await
                         .map_err(|_| "native frame gate abandoned".to_string())?;
                 }
-                Ok(crate::execution::InputResponse::Line("ok".into()))
+                Ok(crate::execution::InputResponse::Line("0".into()))
             }
         });
         let control = InvocationControl::default().force_generic_native();

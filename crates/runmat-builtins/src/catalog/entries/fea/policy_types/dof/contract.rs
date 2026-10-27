@@ -1,5 +1,5 @@
 //! Original DOF signatures and errors, including their generic component labels.
-use crate::fea_contract::{errors::ERRORS, parameters::OUT_ANY};
+use crate::fea_contract::{descriptors::ERRORS, parameters::OUT_ANY};
 use crate::*;
 const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
 const DOF_INPUTS: [BuiltinParamDescriptor; 2] = [

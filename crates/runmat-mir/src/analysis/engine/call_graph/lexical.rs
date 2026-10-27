@@ -203,6 +203,7 @@ mod tests {
         crate::MirExpansionSource::CellContents {
             base: MirOperand::Constant(crate::MirConstant::EmptyArray),
             indexing: crate::MirIndexing {
+                argument_spans: None,
                 kind: runmat_hir::IndexKind::Brace,
                 plan: crate::MirIndexPlan::Cell,
                 components: vec![crate::MirIndexComponent::ContextualExpr(region)],

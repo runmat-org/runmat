@@ -196,7 +196,7 @@ impl NativeExecutor {
         // interactive entries include their immutable caller workspace after
         // supplied arguments, just like the legacy request path below.
         let profile_values = || {
-            arguments.supplied().iter().chain(
+            arguments.function_inputs().iter().chain(
                 workspace
                     .as_ref()
                     .into_iter()
@@ -216,7 +216,7 @@ impl NativeExecutor {
             .ok_or_else(|| {
                 NativeExecutorError::Host(format!("native function {} is unavailable", function.0))
             })?;
-        let supplied = arguments.into_supplied_arguments();
+        let supplied = arguments.into_function_inputs();
         let specs = super::state::function_input_specs(function_ir)?;
         let prepared = runmat_runtime::call::function_abi::prepare_function_inputs_rooted(
             &function_ir.name,

@@ -3,12 +3,17 @@
 //! dense algorithm/output boundary, never as a mirror of a sparse CG source.
 use super::*;
 mod columns;
+mod storage;
+use storage::{append, append_typed, copy, finite};
+mod opaque;
 use crate::builtins::math::linalg::ops::linear_operator::{
     CooperativeOperatorError, LinearOperator, LinearOperatorError, ProductOrientation,
 };
 use crate::execution::RootedValue;
+pub(crate) use opaque::Opaque;
 use runmat_value::Value;
 pub(crate) enum Jacobian {
+    Opaque(Opaque),
     RowMajor {
         values: Vec<f64>,
         rows: usize,
@@ -21,6 +26,7 @@ pub(crate) enum Jacobian {
     },
 }
 pub(super) enum Products<'a> {
+    Opaque(&'a Opaque),
     RowMajor {
         values: &'a [f64],
         rows: usize,
@@ -75,6 +81,7 @@ impl Jacobian {
     }
     pub(super) fn dimensions(&self) -> (usize, usize) {
         match self {
+            Self::Opaque(source) => source.dimensions(),
             Self::RowMajor { rows, columns, .. } | Self::Matrix { rows, columns, .. } => {
                 (*rows, *columns)
             }
@@ -85,6 +92,7 @@ impl Jacobian {
         c: &mut ScalarCooperation,
     ) -> BuiltinResult<Products<'a>> {
         match self {
+            Self::Opaque(source) => Ok(Products::Opaque(source)),
             Self::RowMajor {
                 values,
                 rows,
@@ -108,9 +116,17 @@ impl Jacobian {
     /// only a trailing-singleton dense shape header, never its backing.
     pub(super) async fn into_published(
         self,
+        numerical: Option<Vec<f64>>,
         c: &mut ScalarCooperation,
     ) -> BuiltinResult<PublishedJacobian> {
         match self {
+            Self::Opaque(source) => {
+                let (rows, columns) = source.dimensions();
+                match numerical.filter(|values| rows.checked_mul(columns) == Some(values.len())) {
+                    Some(values) => Ok(PublishedJacobian::RowMajor(values)),
+                    None => source.published(c).await,
+                }
+            }
             Self::RowMajor { values, .. } => Ok(PublishedJacobian::RowMajor(values)),
             Self::Matrix {
                 source,
@@ -145,6 +161,9 @@ impl Jacobian {
         &self,
         c: &mut ScalarCooperation,
     ) -> BuiltinResult<Vec<f64>> {
+        if let Self::Opaque(source) = self {
+            return source.row_major(c).await;
+        }
         let (rows, columns) = self.dimensions();
         let length = checked_jacobian_work("lsqnonlin", rows, columns)?;
         let mut values = runmat_value::exact_capacity_vec(length).map_err(allocation)?;
@@ -155,6 +174,7 @@ impl Jacobian {
                     c.completed(chunk.len() as u64).await?;
                 }
             }
+            Self::Opaque(_) => unreachable!("opaque materialization selected above"),
             Self::Matrix { source, .. } => {
                 while values.len() < length {
                     let end = values.len().saturating_add(1024).min(length);
@@ -180,8 +200,33 @@ impl Jacobian {
     }
 }
 impl Products<'_> {
+    pub(super) fn is_opaque(&self) -> bool {
+        matches!(self, Self::Opaque(_))
+    }
+    pub(super) async fn apply_normal(
+        &mut self,
+        input: &[f64],
+        scratch: &mut [f64],
+        output: &mut [f64],
+        c: &mut ScalarCooperation,
+    ) -> BuiltinResult<Option<()>> {
+        if let Self::Opaque(source) = self {
+            return source.normal(input, output, c).await;
+        }
+        if self
+            .apply(ProductOrientation::Normal, input, scratch, c)
+            .await?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        self.apply(ProductOrientation::Adjoint, scratch, output, c)
+            .await
+    }
+
     pub(super) fn dimensions(&self) -> (usize, usize) {
         match self {
+            Self::Opaque(source) => source.dimensions(),
             Self::RowMajor { rows, columns, .. } => (*rows, *columns),
             Self::Matrix(operator) => (operator.rows(), operator.cols()),
         }
@@ -225,6 +270,11 @@ impl Products<'_> {
             return Err(invalid("selected Jacobian column is out of range"));
         }
         match self {
+            Self::Opaque(source) => {
+                source
+                    .append_column(axis, scale, offset, indices, values, c)
+                    .await
+            }
             Self::RowMajor { values: source, .. } => {
                 for row in 0..rows {
                     if !append(
@@ -266,6 +316,7 @@ impl Products<'_> {
             return Err(invalid("Jacobian product dimensions disagree"));
         }
         match self {
+            Self::Opaque(source) => return source.apply(orientation, input, output, c).await,
             Self::RowMajor { values, .. } => {
                 for value in output.iter_mut() {
                     *value = 0.;
@@ -328,7 +379,7 @@ fn operator_error(
             )
         }
         CooperativeOperatorError::Operator(source) => {
-            crate::build_runtime_error(format!("lsqnonlin: invalid Jacobian operator: {source:?}"))
+            crate::build_runtime_error(format!("lsqnonlin: invalid Jacobian operator: {source}"))
                 .with_source(source)
                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                 .build()
@@ -339,9 +390,9 @@ async fn borrow<'a>(
     value: &'a Value,
     c: &mut ScalarCooperation,
 ) -> BuiltinResult<LinearOperator<'a>> {
-    let result = match c.runtime() {
-        Some(runtime) => LinearOperator::borrow_cooperatively(value, runtime).await,
-        None => LinearOperator::borrow_unbounded(value).map_err(CooperativeOperatorError::Operator),
+    let result = {
+        let (runtime, budget) = c.runtime_budget();
+        LinearOperator::borrow_with_budget(value, runtime, budget).await
     };
     result.map_err(|error| operator_error(error, c.runtime()))
 }
@@ -357,139 +408,4 @@ impl Real for f64 {
     fn real(self) -> f64 {
         self
     }
-}
-async fn finite<T: Real>(
-    view: crate::builtins::math::linalg::ops::linear_operator::TypedLinearOperator<'_, T>,
-    c: &mut ScalarCooperation,
-) -> BuiltinResult<()> {
-    use crate::builtins::math::linalg::ops::linear_operator::TypedLinearOperator as V;
-    let check = |value: T| {
-        if value.real().is_finite() {
-            Ok(())
-        } else {
-            Err(invalid("Jacobian must contain finite coefficients"))
-        }
-    };
-    match view {
-        V::Scalar(value) => check(value)?,
-        V::Dense(view) => {
-            for chunk in view.as_slice().chunks(1024) {
-                for &value in chunk {
-                    check(value)?;
-                }
-                c.completed(chunk.len() as u64).await?;
-            }
-        }
-        V::Sparse(view) => {
-            for column in 0..view.cols() {
-                let (_, values) = view.column(column);
-                for chunk in values.chunks(1024) {
-                    for &value in chunk {
-                        check(value)?;
-                    }
-                    c.completed(chunk.len() as u64).await?;
-                }
-                c.completed(1).await?;
-            }
-        }
-    }
-    Ok(())
-}
-async fn copy<T: Real>(
-    view: crate::builtins::math::linalg::ops::linear_operator::TypedLinearOperator<'_, T>,
-    output: &mut [f64],
-    c: &mut ScalarCooperation,
-) -> BuiltinResult<()> {
-    use crate::builtins::math::linalg::ops::linear_operator::TypedLinearOperator as V;
-    let columns = view.cols();
-    match view {
-        V::Scalar(value) => output[0] = value.real(),
-        V::Dense(view) => {
-            for column in 0..columns {
-                for row in 0..view.rows() {
-                    output[row * columns + column] =
-                        view.as_slice()[column * view.rows() + row].real();
-                    c.completed(1).await?;
-                }
-            }
-        }
-        V::Sparse(view) => {
-            for column in 0..columns {
-                let (rows, values) = view.column(column);
-                for (&row, &value) in rows.iter().zip(values) {
-                    output[row * columns + column] = value.real();
-                    c.completed(1).await?;
-                }
-                c.completed(1).await?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn append(
-    row: usize,
-    coefficient: f64,
-    scale: f64,
-    offset: usize,
-    indices: &mut Vec<usize>,
-    values: &mut Vec<f64>,
-) -> BuiltinResult<bool> {
-    let value = coefficient * scale;
-    if !value.is_finite() {
-        return Ok(false);
-    }
-    if value != 0. {
-        indices.push(
-            offset
-                .checked_add(row)
-                .ok_or_else(|| invalid("Jacobian row index overflow"))?,
-        );
-        values.push(value);
-    }
-    Ok(true)
-}
-async fn append_typed<T: Real>(
-    view: crate::builtins::math::linalg::ops::linear_operator::TypedLinearOperator<'_, T>,
-    axis: usize,
-    scale: f64,
-    offset: usize,
-    indices: &mut Vec<usize>,
-    values: &mut Vec<f64>,
-    c: &mut ScalarCooperation,
-) -> BuiltinResult<Option<()>> {
-    use crate::builtins::math::linalg::ops::linear_operator::TypedLinearOperator as V;
-    match view {
-        V::Scalar(value) => {
-            if !append(0, value.real(), scale, offset, indices, values)? {
-                return Ok(None);
-            }
-        }
-        V::Dense(view) => {
-            for row in 0..view.rows() {
-                if !append(
-                    row,
-                    view.as_slice()[axis * view.rows() + row].real(),
-                    scale,
-                    offset,
-                    indices,
-                    values,
-                )? {
-                    return Ok(None);
-                }
-                c.completed(1).await?;
-            }
-        }
-        V::Sparse(view) => {
-            let (rows, source) = view.column(axis);
-            for (&row, &value) in rows.iter().zip(source) {
-                if !append(row, value.real(), scale, offset, indices, values)? {
-                    return Ok(None);
-                }
-                c.completed(1).await?;
-            }
-        }
-    }
-    c.completed(1).await?;
-    Ok(Some(()))
 }

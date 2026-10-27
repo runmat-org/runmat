@@ -1,50 +1,28 @@
 #![cfg(unix)]
 
-use std::ffi::OsString;
 use std::future::Future;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Mutex, MutexGuard};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use crate::session::RunMatSession;
 
-static MAIL_ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
-
-struct MailEnvironment {
-    command: Option<OsString>,
-    outbox: Option<OsString>,
-    _lock: MutexGuard<'static, ()>,
-}
-
-impl MailEnvironment {
-    fn fake_command(executable: &Path) -> Self {
-        let lock = MAIL_ENVIRONMENT_LOCK.lock().expect("mail environment lock");
-        let command = std::env::var_os("RUNMAT_SENDMAIL_COMMAND");
-        let outbox = std::env::var_os("RUNMAT_SENDMAIL_OUTBOX");
-        std::env::set_var("RUNMAT_SENDMAIL_COMMAND", executable);
-        std::env::remove_var("RUNMAT_SENDMAIL_OUTBOX");
-        Self {
-            command,
-            outbox,
-            _lock: lock,
-        }
-    }
-}
-
-impl Drop for MailEnvironment {
-    fn drop(&mut self) {
-        match &self.command {
-            Some(value) => std::env::set_var("RUNMAT_SENDMAIL_COMMAND", value),
-            None => std::env::remove_var("RUNMAT_SENDMAIL_COMMAND"),
-        }
-        match &self.outbox {
-            Some(value) => std::env::set_var("RUNMAT_SENDMAIL_OUTBOX", value),
-            None => std::env::remove_var("RUNMAT_SENDMAIL_OUTBOX"),
-        }
-    }
+fn install_mail_command(session: &RunMatSession, executable: &Path) {
+    let mut environment = session
+        .environment_snapshot()
+        .into_iter()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    environment.insert(
+        "RUNMAT_SENDMAIL_COMMAND".into(),
+        executable.to_str().unwrap().into(),
+    );
+    environment.remove("RUNMAT_SENDMAIL_OUTBOX");
+    session
+        .runtime_context
+        .install_environment_snapshot(environment.into_iter().collect())
+        .expect("install session mail environment");
 }
 
 struct RestoreDirectory(PathBuf);
@@ -118,8 +96,8 @@ fn ordinary_executor_cancellation_drops_owned_mail_child() {
             shell_literal(&marker)
         ),
     );
-    let _mail_environment = MailEnvironment::fake_command(&mail);
     let mut session = isolated_session();
+    install_mail_command(&session, &mail);
     let interrupt = session.interrupt_handle();
     let request = request(
         &session,
@@ -209,7 +187,7 @@ fn ordinary_executor_runs_system_and_mail_through_core_host_driver() {
     let mail = temporary.path().join("fake-sendmail");
     let body = temporary.path().join("captured.eml");
     executable(&mail, &format!("cat > {}", shell_literal(&body)));
-    let _mail_environment = MailEnvironment::fake_command(&mail);
+    install_mail_command(&session, &mail);
     execute_success(
         &mut session,
         "status = sendmail('alice@example.test', 'Subject', 'Body'); assert(status == 0);",
@@ -221,8 +199,7 @@ fn ordinary_executor_runs_system_and_mail_through_core_host_driver() {
 
     let failed = temporary.path().join("fake-sendmail-fail");
     executable(&failed, "printf 'declined' >&2; exit 17");
-    drop(_mail_environment);
-    let _mail_environment = MailEnvironment::fake_command(&failed);
+    install_mail_command(&session, &failed);
     let outcome = execute(
         &mut session,
         "sendmail('alice@example.test', 'Subject', 'Body');",

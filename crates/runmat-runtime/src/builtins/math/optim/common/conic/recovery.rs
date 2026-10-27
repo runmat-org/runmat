@@ -6,6 +6,7 @@ use runmat_builtins::BuiltinCatalogIdentity;
 
 #[derive(Clone, Copy)]
 enum Recovery {
+    Retained,
     Dyadic,
     I16,
     I32,
@@ -25,7 +26,7 @@ where
         &'a mut ScalarCooperation,
     ) -> BuiltinResult<bool>,
 {
-    Ok(checked_owned(values, identity, cooperation, accept)
+    Ok(checked_owned(values, identity, cooperation, None, accept)
         .await?
         .is_some())
 }
@@ -35,6 +36,7 @@ pub(super) async fn checked_owned<F>(
     values: &[f64],
     identity: BuiltinCatalogIdentity,
     cooperation: &mut ScalarCooperation,
+    initial: Option<Vec<BigRational>>,
     mut accept: F,
 ) -> BuiltinResult<Option<Vec<BigRational>>>
 where
@@ -44,35 +46,49 @@ where
     ) -> BuiltinResult<bool>,
 {
     cooperation.completed(0).await?;
-    let mut candidate = runmat_value::exact_capacity_vec(values.len()).map_err(|source| {
-        build_runtime_error(format!(
-            "{}: exact certificate allocation failed",
-            identity.name
-        ))
-        .with_builtin(identity.name)
-        .with_source(source)
-        .build()
-    })?;
+    let retained = initial
+        .as_ref()
+        .is_some_and(|candidate| candidate.len() == values.len());
+    let mut candidate = match initial {
+        Some(candidate) => candidate,
+        None => runmat_value::exact_capacity_vec(values.len()).map_err(|source| {
+            build_runtime_error(format!(
+                "{}: exact certificate allocation failed",
+                identity.name
+            ))
+            .with_builtin(identity.name)
+            .with_source(source)
+            .build()
+        })?,
+    };
     // One reusable candidate, never five simultaneous vectors. Each existing
     // Ratio approximator has at most 30 continued-fraction steps; small widths
     // propose simple relations despite backend residuals, larger widths extend
     // the available denominators. These are proposals, not proof tolerances.
     for recovery in [
+        Recovery::Retained,
         Recovery::Dyadic,
         Recovery::I16,
         Recovery::I32,
         Recovery::I64,
         Recovery::I128,
-    ] {
-        candidate.clear();
-        for chunk in values.chunks(1024) {
-            for &value in chunk {
-                let Some(value) = recover(value, recovery) else {
-                    return Ok(None);
-                };
-                candidate.push(value);
+    ]
+    .into_iter()
+    .skip(usize::from(!retained))
+    {
+        // Reuse the exact proposal's buffer for ordinary numerical recovery;
+        // every proposal passes the same full-model acceptance check.
+        if !matches!(recovery, Recovery::Retained) {
+            candidate.clear();
+            for chunk in values.chunks(1024) {
+                for &value in chunk {
+                    let Some(value) = recover(value, recovery) else {
+                        return Ok(None);
+                    };
+                    candidate.push(value);
+                }
+                cooperation.completed(chunk.len() as u64).await?;
             }
-            cooperation.completed(chunk.len() as u64).await?;
         }
         let accepted = accept(&candidate, cooperation).await?;
         cooperation.completed(0).await?;
@@ -88,6 +104,7 @@ fn recover(value: f64, recovery: Recovery) -> Option<BigRational> {
         return None;
     }
     let proposed = match recovery {
+        Recovery::Retained => return None,
         Recovery::Dyadic => None,
         Recovery::I16 => Ratio::<i16>::approximate_float(value)
             .map(|r| BigRational::new((*r.numer()).into(), (*r.denom()).into())),

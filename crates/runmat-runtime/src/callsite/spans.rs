@@ -62,21 +62,29 @@ impl CallsiteSpans {
         spans: &[Span],
         context: &RuntimeContext,
     ) -> Result<Self, HostAllocationError> {
+        Self::from_projected_in_context(spans, context, |span| *span)
+    }
+
+    pub fn from_projected_in_context<T>(
+        source: &[T],
+        context: &RuntimeContext,
+        project: impl FnMut(&T) -> Span,
+    ) -> Result<Self, HostAllocationError> {
         let policy = HostAllocationReceipt::policy(Some(context))?;
-        if spans.is_empty() {
+        if source.is_empty() {
             return Ok(Vec::new().into());
         }
         if policy == crate::context::host_allocation::HostAllocationPolicy::Unbounded {
-            return Ok(spans.to_vec().into());
+            return Ok(source.iter().map(project).collect::<Vec<_>>().into());
         }
-        let (bytes, claims) = Self::retained_quote_for_len(spans.len())?;
+        let (bytes, claims) = Self::retained_quote_for_len(source.len())?;
         let retained = HostAllocationPlan::retained_exact_output_bytes(bytes, claims)?;
         let receipt =
             HostAllocationReceipt::admit(Some(context), HostAllocationPlan::new(0, retained)?)?
                 .ok_or(HostAllocationError::MissingManagedOwner)?;
         let result = receipt
             .output_permit(context)
-            .and_then(|permit| Self::managed_from_slice(spans, permit));
+            .and_then(|permit| Self::managed_from_projected(source, project, permit));
         receipt.checkpoint(context)?;
         result
     }
@@ -145,6 +153,14 @@ impl CallsiteSpans {
         source: &[Span],
         permit: HostOutputPermit,
     ) -> Result<Self, HostAllocationError> {
+        Self::managed_from_projected(source, |span| *span, permit)
+    }
+
+    fn managed_from_projected<T>(
+        source: &[T],
+        project: impl FnMut(&T) -> Span,
+        permit: HostOutputPermit,
+    ) -> Result<Self, HostAllocationError> {
         if source.is_empty() {
             return Ok(Vec::new().into());
         }
@@ -152,7 +168,7 @@ impl CallsiteSpans {
         spans
             .try_reserve_exact(source.len())
             .map_err(|_| HostAllocationError::Overflow)?;
-        spans.extend_from_slice(source);
+        spans.extend(source.iter().map(project));
         let header_claim = permit
             .reserve_exact_claim(ExactShared::<ManagedSpans>::requested_bytes())
             .map_err(HostAllocationError::Numeric)?;

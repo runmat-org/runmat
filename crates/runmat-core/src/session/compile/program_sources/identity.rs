@@ -80,7 +80,9 @@ fn executable_source_identity_from_candidates(
             // An externally captured full path cannot inherit the root
             // package owner merely because its display name differs. A
             // retained external definition needs its own captured owner.
-            return Err("source path does not match captured project access authority".into());
+            return Err(format!(
+                "source path '{full}' does not match captured project access authority for '{display}'"
+            ));
         }
         let mut relative = candidates
             .iter()

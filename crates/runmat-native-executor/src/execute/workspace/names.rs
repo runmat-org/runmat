@@ -178,13 +178,9 @@ fn source_names<'a>(
 }
 
 fn error(context: Option<&RuntimeContext>, cause: HostAllocationError) -> NativeExecutorError {
-    let namespace = context.map_or_else(|| "RunMat".to_owned(), RuntimeContext::error_namespace);
-    NativeExecutorError::from(
-        runmat_runtime::build_runtime_error(format!(
-            "native workspace name metadata admission failed: {cause}"
-        ))
-        .with_identifier(format!("{namespace}:{}", cause.runtime_identifier_suffix()))
-        .with_source(cause)
-        .build(),
-    )
+    NativeExecutorError::from(crate::error::allocation_error(
+        context,
+        format!("native workspace name metadata admission failed: {cause}"),
+        cause,
+    ))
 }

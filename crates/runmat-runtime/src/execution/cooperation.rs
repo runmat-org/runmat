@@ -58,6 +58,19 @@ impl CpuCooperationBudget {
         self.cancellation.clone()
     }
 
+    /// Remaining work in this SAME budget before its next task turn.
+    /// None denotes NeverYield. This read grants no execution/allocation
+    /// authority and does not reset or charge the original pending work.
+    pub(crate) fn remaining_until_turn(&self) -> Option<NonZeroU64> {
+        match self.policy {
+            CpuCooperationPolicy::NeverYield => None,
+            CpuCooperationPolicy::WorkQuantum(quantum) => Some(
+                NonZeroU64::new(quantum.get() - self.pending_work)
+                    .expect("checkpoint retains less than one original quantum"),
+            ),
+        }
+    }
+
     /// Await an invocation-owned operation, dropping it when cancellation
     /// wins. This is an execution boundary, not a second scheduling policy.
     pub fn await_cancellable<'a, F: std::future::Future + 'a>(

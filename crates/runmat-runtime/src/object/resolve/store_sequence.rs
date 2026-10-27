@@ -61,6 +61,7 @@ async fn store_member_sequence_traced_with_scope<'a, M: MemberStoreScope<'a> + '
             base,
             field,
             values,
+            dispatch: ProtocolDispatch::Resolve,
             _roots: roots,
         },
         caller_function_name,
@@ -97,15 +98,34 @@ struct MemberSequenceStore {
     base: Value,
     field: runmat_value::Utf8Text,
     values: crate::sequence::ValueSequence,
+    dispatch: ProtocolDispatch,
     _roots: RootedValueLease,
 }
 
-async fn store_member_sequence_values_with_caller_scope<'a, M: MemberStoreScope<'a> + 'a>(
+fn store_member_sequence_values_with_caller_scope<'a, M: MemberStoreScope<'a> + 'a>(
     scope: M,
     base: Value,
     field: runmat_value::Utf8Text,
     values: crate::sequence::ValueSequence,
     caller: MemberCaller<'a>,
+) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a {
+    store_member_sequence_values_with_dispatch_scope(
+        scope,
+        base,
+        field,
+        values,
+        caller,
+        ProtocolDispatch::Resolve,
+    )
+}
+
+async fn store_member_sequence_values_with_dispatch_scope<'a, M: MemberStoreScope<'a> + 'a>(
+    scope: M,
+    base: Value,
+    field: runmat_value::Utf8Text,
+    values: crate::sequence::ValueSequence,
+    caller: MemberCaller<'a>,
+    dispatch: ProtocolDispatch,
 ) -> Result<RootedValue, RuntimeError> {
     let runtime = scope.runtime();
     let roots = sequence_store_roots(runtime, &base, values.as_slice())?;
@@ -115,6 +135,7 @@ async fn store_member_sequence_values_with_caller_scope<'a, M: MemberStoreScope<
             base,
             field,
             values,
+            dispatch,
             _roots: roots,
         },
         caller,
@@ -142,6 +163,7 @@ async fn store_member_sequence_traced_in_scope<'a, M: MemberStoreScope<'a> + 'a>
         base,
         field,
         values,
+        dispatch,
         _roots,
     } = request;
     match base {
@@ -164,7 +186,7 @@ async fn store_member_sequence_traced_in_scope<'a, M: MemberStoreScope<'a> + 'a>
                 ));
             }
             let aggregate = Value::ObjectArray(array);
-            let resolution = crate::object::protocol::resolve_object_protocol(
+            let resolution = dispatch.resolve(
                 &aggregate,
                 crate::object::protocol::ObjectProtocol::Subsasgn,
                 &caller_function_name.protocol_access(),
@@ -215,13 +237,14 @@ async fn store_member_sequence_traced_in_scope<'a, M: MemberStoreScope<'a> + 'a>
                 )?;
             let values = crate::execution::RootedValuesIteration::from_sequence(values);
             for (element, value) in array.data().iter().cloned().zip(values) {
-                let selected = store::store_member_text_with_caller_scope(
+                let selected = store::store_member_text_with_dispatch_scope(
                     scope,
                     element,
                     field.clone(),
                     value,
                     caller_function_name,
                     runmat_gc::gc_record_write,
+                    dispatch,
                 )
                 .await?;
                 let child = crate::execution::RootedValueMember::from_rooted(selected)
@@ -242,13 +265,14 @@ async fn store_member_sequence_traced_in_scope<'a, M: MemberStoreScope<'a> + 'a>
             let value = crate::execution::RootedValuesIteration::from_sequence(values)
                 .next()
                 .expect("validated singleton");
-            store::store_member_text_with_caller_scope(
+            store::store_member_text_with_dispatch_scope(
                 scope,
                 base,
                 field,
                 value,
                 caller_function_name,
                 runmat_gc::gc_record_write,
+                dispatch,
             )
             .await
         }
@@ -374,6 +398,37 @@ pub(crate) fn store_member_sequence_values_with_optional_access_scope<
             None => MemberCaller::named(caller),
         },
     )
+}
+
+pub(crate) fn store_default_member_sequence_values<'a>(
+    runtime: Option<&'a crate::context::RuntimeContext>,
+    base: Value,
+    field: runmat_value::Utf8Text,
+    values: crate::sequence::ValueSequence,
+    caller: Option<&'a str>,
+    access: &'a crate::object::protocol::ObjectAccessContext,
+) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a {
+    let caller = MemberCaller::frame(caller, access);
+    match runtime {
+        Some(runtime) => {
+            futures::future::Either::Left(store_member_sequence_values_with_dispatch_scope(
+                ContextualMemberScope(runtime),
+                base,
+                field,
+                values,
+                caller,
+                ProtocolDispatch::Default,
+            ))
+        }
+        None => futures::future::Either::Right(store_member_sequence_values_with_dispatch_scope(
+            OrdinaryMemberScope,
+            base,
+            field,
+            values,
+            caller,
+            ProtocolDispatch::Default,
+        )),
+    }
 }
 pub fn store_member_sequence_traced_with_access<'a>(
     context: &'a crate::context::RuntimeContext,

@@ -60,11 +60,12 @@ impl Offset {
                         policy.invalid("compiled constant coordinate exceeds its sparse shape")
                     );
                 }
-                value
+                // The immutable backing was class-checked on construction and
+                // the coordinate is in bounds. Missing CSC entries are zeros,
+                // not missing numeric storage or a changed class.
+                Ok(value
                     .get(index % value.rows, index / value.rows)
-                    .ok_or_else(|| {
-                        policy.invalid("compiled sparse constant lost its real double class")
-                    })
+                    .unwrap_or(0.0))
             }
         }
     }

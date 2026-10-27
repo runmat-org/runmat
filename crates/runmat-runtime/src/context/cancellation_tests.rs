@@ -7,6 +7,61 @@ use super::{RuntimeContext, RuntimeServicePorts};
 use crate::execution::RuntimeExecutionService;
 
 #[test]
+fn retained_callback_uses_same_session_caller_environment_and_debug_ancestry() {
+    let captured = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    captured
+        .install_environment_snapshot(vec![("CALL_ENV".into(), "registration".into())])
+        .unwrap();
+    let caller_environment =
+        runmat_execution::EnvironmentSnapshot::new(vec![("CALL_ENV".into(), "invocation".into())])
+            .unwrap();
+    let caller = captured
+        .clone()
+        .with_invocation_environment(&caller_environment)
+        .unwrap()
+        .with_debug_frame(crate::debug_context::DebugFrame {
+            function: "caller".into(),
+            source_id: None,
+            span: None,
+        });
+    let projected = captured
+        .clone()
+        .try_with_inherited_callback_invocation_authority_from(&caller)
+        .unwrap()
+        .with_debug_frame(crate::debug_context::DebugFrame {
+            function: "callback".into(),
+            source_id: None,
+            span: None,
+        });
+    {
+        let _scope = projected.enter();
+        assert_eq!(
+            crate::builtins::common::env::var("CALL_ENV").unwrap(),
+            "invocation"
+        );
+        assert_eq!(
+            crate::debug_context::current_frames()
+                .iter()
+                .map(|frame| frame.function.as_str())
+                .collect::<Vec<_>>(),
+            ["callback", "caller"]
+        );
+    }
+    {
+        let _scope = captured.enter();
+        assert_eq!(
+            crate::builtins::common::env::var("CALL_ENV").unwrap(),
+            "registration"
+        );
+        assert!(crate::debug_context::current_frames().is_empty());
+    }
+    let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    assert!(captured
+        .try_with_inherited_callback_invocation_authority_from(&foreign)
+        .is_none());
+}
+
+#[test]
 fn fresh_contexts_register_network_property_protocols_without_construction() {
     let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));

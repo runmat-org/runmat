@@ -74,7 +74,10 @@ parallel_entry!(
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::MaySuspend,
     BuiltinPurity::Impure,
-    &POOL_WRITE_EFFECTS
+    &POOL_WRITE_EFFECTS,
+    BuiltinSemanticKind::ExecutorIntrinsic(crate::BuiltinExecutorIntrinsic::Parallel(
+        crate::ParallelExecutorIntrinsic::EnsurePool
+    ))
 );
 parallel_entry!(
     GCP_CATALOG_ENTRY,
@@ -85,7 +88,10 @@ parallel_entry!(
     BuiltinContractMaturity::DynamicByDesign,
     BuiltinAsyncBehavior::MaySuspend,
     BuiltinPurity::Impure,
-    &POOL_WRITE_EFFECTS
+    &POOL_WRITE_EFFECTS,
+    BuiltinSemanticKind::ExecutorIntrinsic(crate::BuiltinExecutorIntrinsic::Parallel(
+        crate::ParallelExecutorIntrinsic::CurrentPool
+    ))
 );
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GCP_CATALOG_ENTRY, &PARPOOL_CATALOG_ENTRY];

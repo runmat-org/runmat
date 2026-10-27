@@ -14,6 +14,8 @@ use runmat_value::{Utf8Text, Value};
 mod tests;
 
 mod fallback;
+mod super_method;
+pub(crate) use super_method::call_selected_super_method;
 mod operator;
 pub use operator::{
     call_object_operator_method, call_object_operator_method_in_context,

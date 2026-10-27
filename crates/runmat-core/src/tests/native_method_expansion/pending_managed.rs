@@ -94,7 +94,7 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
         let _cwd = super::super::push_cwd(directory.path());
 
         let mut session = hot_session();
-        let ready = Arc::new(AtomicBool::new(true));
+        let ready = Arc::new(InputReadiness::new(true));
         let calls = Arc::new(AtomicUsize::new(0));
         let prefix_seen = Arc::new(AtomicBool::new(false));
         session.install_async_input_handler({
@@ -113,14 +113,7 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
                     {
                         prefix_seen.store(true, Ordering::SeqCst);
                     }
-                    std::future::poll_fn(|_| {
-                        if ready.load(Ordering::SeqCst) {
-                            Poll::Ready(())
-                        } else {
-                            Poll::Pending
-                        }
-                    })
-                    .await;
+                    ready.wait().await;
                     Ok(crate::execution::InputResponse::Line("3".into()))
                 }
             }
@@ -146,13 +139,12 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
         );
         assert!(prefix_seen.load(Ordering::SeqCst));
 
-        ready.store(false, Ordering::SeqCst);
+        ready.set(false);
         prefix_seen.store(false, Ordering::SeqCst);
         let before = calls.load(Ordering::SeqCst);
         let request = path_request(&session, &source);
         let mut execution = Box::pin(session.execute_request(request));
-        let waker = futures::task::noop_waker();
-        assert!(Future::poll(execution.as_mut(), &mut Context::from_waker(&waker)).is_pending());
+        poll_until_input(execution.as_mut(), &calls, before + 1);
         assert_eq!(calls.load(Ordering::SeqCst), before + 1);
         assert!(prefix_seen.load(Ordering::SeqCst));
         let pending_target = OBSERVED_TARGET
@@ -160,7 +152,7 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
             .expect("pending target identity");
         runmat_gc::gc_collect_major().expect("collect while managed receiver is pending");
         assert!(runmat_gc::gc_clone_value(&pending_target).is_ok());
-        ready.store(true, Ordering::SeqCst);
+        ready.set(true);
         let response = futures::executor::block_on(execution);
         let outcome = response.result.expect("resume managed receiver invocation");
         assert!(
@@ -181,11 +173,11 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
             Some(&Value::Num(10.0))
         );
 
-        ready.store(false, Ordering::SeqCst);
+        ready.set(false);
         let before_drop = calls.load(Ordering::SeqCst);
         let request = path_request(&session, &source);
         let mut abandoned = Box::pin(session.execute_request(request));
-        assert!(Future::poll(abandoned.as_mut(), &mut Context::from_waker(&waker)).is_pending());
+        poll_until_input(abandoned.as_mut(), &calls, before_drop + 1);
         assert_eq!(calls.load(Ordering::SeqCst), before_drop + 1);
         let abandoned_target = OBSERVED_TARGET
             .with(|target| target.get())
@@ -199,7 +191,7 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
             "dropping the whole invocation must release its temporary capture"
         );
         assert_eq!(calls.load(Ordering::SeqCst), before_drop + 1);
-        ready.store(true, Ordering::SeqCst);
+        ready.set(true);
         let request = path_request(&session, &source);
         let response = futures::executor::block_on(session.execute_request(request));
         let recovered = response

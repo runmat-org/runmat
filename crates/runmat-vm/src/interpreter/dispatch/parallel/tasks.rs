@@ -193,14 +193,9 @@ pub(super) fn create_future(
             bind_selected_semantic_target(descriptor, function_registry)?;
         }
     }
-    let program_revision = if matches!(
-        &program,
-        runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
-    ) {
-        None
-    } else {
-        context.runtime.program_revision().cloned()
-    };
+    let program_revision = program
+        .program_revision(context.runtime.program_revision())
+        .cloned();
     context
         .runtime
         .execution()

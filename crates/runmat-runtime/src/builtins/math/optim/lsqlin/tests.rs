@@ -64,6 +64,7 @@ fn run(args: Vec<Value>) -> Vec<Value> {
     run_in(&runtime, args)
 }
 fn run_in(runtime: &crate::context::RuntimeContext, args: Vec<Value>) -> Vec<Value> {
+    let _runtime = runtime.enter();
     let _scope = crate::output_count::push_output_count(Some(6)).unwrap();
     let result = block_on(execute(
         Some(runtime),

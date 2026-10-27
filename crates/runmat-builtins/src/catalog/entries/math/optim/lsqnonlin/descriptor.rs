@@ -102,7 +102,7 @@ const fn output_jacobian() -> BuiltinParamDescriptor {
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Finite-difference Jacobian of fun at the solution.",
+        description: "Real Jacobian at the accepted solution: supplied, finite-differenced, or formed through opaque forward products when requested.",
     }
 }
 

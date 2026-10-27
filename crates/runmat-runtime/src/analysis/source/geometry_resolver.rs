@@ -73,7 +73,7 @@ fn inspect_uncached(
     let unit_evidence = match request.source_units {
         Some(authored) => inspected
             .apply_authored(authored, "authored geometry units")
-            .unwrap_or_else(|unresolved| unresolved),
+            .unwrap_or_else(|unresolved| *unresolved),
         None => inspected,
     };
     let units = match request.source_units {
@@ -173,7 +173,8 @@ fn inspect_uncached(
             ));
         }
     };
-    Ok(GeometryInspection {preview_extent_m: preview_extent_m(&imported.asset),
+    Ok(GeometryInspection {
+        preview_extent_m: preview_extent_m(&imported.asset),
         named_selections: None,
         content_digest,
         topology_digest,
@@ -210,14 +211,23 @@ fn undeclared_units(bytes: &[u8], logical_path: &str) -> SourceDiagnostic {
 
 fn preview_extent_m(asset: &runmat_geometry_core::GeometryAsset) -> Option<[f64; 3]> {
     let scale = asset.coordinate_units?.meters_per_unit();
-    let mut points = asset.surface_meshes.iter().flat_map(|mesh| mesh.vertices.iter());
+    let mut points = asset
+        .surface_meshes
+        .iter()
+        .flat_map(|mesh| mesh.vertices.iter());
     let first = *points.next()?;
     let (mut min, mut max) = (first, first);
     for point in points {
-        for axis in 0..3 { min[axis] = min[axis].min(point[axis]); max[axis] = max[axis].max(point[axis]); }
+        for axis in 0..3 {
+            min[axis] = min[axis].min(point[axis]);
+            max[axis] = max[axis].max(point[axis]);
+        }
     }
     let extent = std::array::from_fn(|axis| (max[axis] - min[axis]) * scale);
-    extent.iter().all(|x| x.is_finite() && *x > 0.0).then_some(extent)
+    extent
+        .iter()
+        .all(|x| x.is_finite() && *x > 0.0)
+        .then_some(extent)
 }
 
 fn preview_topology_digest(
@@ -326,12 +336,30 @@ mod inspection_cache {
 
 /// Attach separately captured CAD-asset metadata after cached geometric inspection.
 /// Metadata is never cached by CAD bytes: its own edits must change the checked revision.
-pub(super) fn attach_named_selections(mut inspection: GeometryInspection, bytes: Option<&[u8]>) -> Result<GeometryInspection, SourceDiagnostic> {
+pub(super) fn attach_named_selections(
+    mut inspection: GeometryInspection,
+    bytes: Option<&[u8]>,
+) -> Result<GeometryInspection, SourceDiagnostic> {
     if let Some(bytes) = bytes {
-        let selections: runmat_geometry_core::GeometryNamedSelections = serde_json::from_slice(bytes)
-            .map_err(|e| diagnostic("fea.geometry.invalid_selections", format!("Cannot read saved geometry selections: {e}"), SourceAvailability::Available))?;
-        selections.validate_source(runmat_geometry_core::GeometryDigest::from_bytes(inspection.content_digest.0))
-            .map_err(|e| diagnostic("fea.geometry.selection_review_required", e.to_string(), SourceAvailability::Available))?;
+        let selections: runmat_geometry_core::GeometryNamedSelections =
+            serde_json::from_slice(bytes).map_err(|e| {
+                diagnostic(
+                    "fea.geometry.invalid_selections",
+                    format!("Cannot read saved geometry selections: {e}"),
+                    SourceAvailability::Available,
+                )
+            })?;
+        selections
+            .validate_source(runmat_geometry_core::GeometryDigest::from_bytes(
+                inspection.content_digest.0,
+            ))
+            .map_err(|e| {
+                diagnostic(
+                    "fea.geometry.selection_review_required",
+                    e.to_string(),
+                    SourceAvailability::Available,
+                )
+            })?;
         inspection.named_selections = Some(selections);
     }
     Ok(inspection)
@@ -342,14 +370,19 @@ mod preflight_extent_tests {
     #[test]
     fn preview_extents_use_resolved_physical_scale() {
         let imported = runmat_geometry_io::import_geometry(
-            "tetra.obj", b"v 0 0 0\nv 10 0 0\nv 0 20 0\nv 0 0 30\nf 1 2 3\nf 1 4 2\nf 1 3 4\nf 2 4 3\n",
+            "tetra.obj",
+            b"v 0 0 0\nv 10 0 0\nv 0 20 0\nv 0 0 30\nf 1 2 3\nf 1 4 2\nf 1 3 4\nf 2 4 3\n",
             runmat_geometry_io::GeometryImportOptions {
                 units: runmat_geometry_core::LengthUnit::Millimeter,
                 source_units: Some(runmat_geometry_core::LengthUnit::Millimeter),
                 ..Default::default()
             },
-        ).unwrap();
-        assert_eq!(super::preview_extent_m(&imported.asset), Some([0.01, 0.02, 0.03]));
+        )
+        .unwrap();
+        assert_eq!(
+            super::preview_extent_m(&imported.asset),
+            Some([0.01, 0.02, 0.03])
+        );
         let mut empty = imported.asset;
         empty.surface_meshes.clear();
         assert_eq!(super::preview_extent_m(&empty), None);

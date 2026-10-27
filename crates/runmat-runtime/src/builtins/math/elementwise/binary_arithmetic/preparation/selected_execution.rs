@@ -7,9 +7,10 @@ use crate::context::preparation::{
     execute_request_host_numerical, AdmittedBuiltinPreparation, PreparedHostNumericalOutput,
 };
 use crate::context::VmFusionHostInstruction;
-use futures::{future::Either, FutureExt};
+use futures::future::Either;
 use runmat_builtins::BuiltinBindingIdentity;
 
+#[inline(always)]
 pub(super) fn execute<'a, F, Fut>(
     context: Option<&'a RuntimeContext>,
     identity: BuiltinCatalogIdentity,
@@ -42,14 +43,7 @@ where
             Either::Right(admitted(context, admission, operator, left, right, body))
         }
     };
-    // Carry errors as data so both paths retire the child before its roots.
-    crate::execution::after_result(
-        future.map(Ok::<_, crate::RuntimeError>),
-        move |result| async move {
-            drop(inputs);
-            result
-        },
-    )
+    crate::execution::with_retained_owner(future, inputs)
 }
 fn host<'a, F, Fut>(
     context: &'a RuntimeContext,

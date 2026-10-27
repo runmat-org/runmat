@@ -13,16 +13,11 @@ pub(super) fn alias_admission_error(
     context: &RuntimeContext,
     cause: runmat_runtime::context::host_allocation::HostAllocationError,
 ) -> runmat_runtime::RuntimeError {
-    runmat_runtime::build_runtime_error(format!(
-        "native global-alias storage could not be admitted: {cause}"
-    ))
-    .with_identifier(format!(
-        "{}:{}",
-        context.error_namespace(),
-        cause.runtime_identifier_suffix()
-    ))
-    .with_source(cause)
-    .build()
+    crate::error::allocation_error(
+        Some(context),
+        format!("native global-alias storage could not be admitted: {cause}"),
+        cause,
+    )
 }
 
 pub(super) fn current_value(

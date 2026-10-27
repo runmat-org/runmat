@@ -9,6 +9,7 @@ pub struct ObjectSubscript {
     pub(super) selector: ObjectIndexSelector,
     pub(super) origin: ObjectSubscriptOrigin,
     pub(super) semantic_fallback: Option<std::sync::Arc<runmat_types::CallableIdentity>>,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +26,7 @@ impl ObjectSubscript {
             selector,
             origin: ObjectSubscriptOrigin::Ordinary,
             semantic_fallback: None,
+            input_callsite: None,
         }
     }
 
@@ -34,6 +36,7 @@ impl ObjectSubscript {
             selector,
             origin: ObjectSubscriptOrigin::Ordinary,
             semantic_fallback: None,
+            input_callsite: None,
         }
     }
 
@@ -47,6 +50,7 @@ impl ObjectSubscript {
             selector: ObjectIndexSelector::Member(name),
             origin: ObjectSubscriptOrigin::Ordinary,
             semantic_fallback: None,
+            input_callsite: None,
         }
     }
 
@@ -89,6 +93,7 @@ impl ObjectSubscript {
                 selector: ObjectIndexSelector::Member(name),
                 origin: ObjectSubscriptOrigin::DottedInvokeMember,
                 semantic_fallback,
+                input_callsite: None,
             },
             Self {
                 kind: ObjectIndexKind::Paren,
@@ -97,12 +102,21 @@ impl ObjectSubscript {
                 },
                 origin: ObjectSubscriptOrigin::DottedInvokeArguments,
                 semantic_fallback: None,
+                input_callsite: None,
             },
         ]
     }
 
     pub const fn kind(&self) -> ObjectIndexKind {
         self.kind
+    }
+    pub fn with_input_callsite(mut self, callsite: Option<crate::callsite::CallsiteInfo>) -> Self {
+        self.input_callsite = callsite;
+        self
+    }
+
+    pub(crate) fn input_callsite(&self) -> Option<&crate::callsite::CallsiteInfo> {
+        self.input_callsite.as_ref()
     }
     pub const fn selector(&self) -> &ObjectIndexSelector {
         &self.selector

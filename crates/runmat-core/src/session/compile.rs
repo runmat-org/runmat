@@ -1697,6 +1697,12 @@ impl RunMatSession {
             }
         }
         for source_id in replaced_sources {
+            // Retire the complete replaced source in both views. The execution
+            // view has projected source references, but shares these exact
+            // function identities with the durable session view.
+            for function in session_registry.functions_for_source(source_id) {
+                execution_registry.remove(*function);
+            }
             session_registry.remove_source(source_id);
         }
 

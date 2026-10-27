@@ -92,6 +92,14 @@ pub(super) fn frame_access(
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_runtime::object::protocol::ObjectAccessContext, RuntimeError> {
     let _scope = runtime.enter();
+    if let (Some(owner), Some(function)) = (
+        bytecode.active_class_method_owner.as_ref(),
+        bytecode.active_function,
+    ) {
+        if let Some(access) = runtime.selected_method_frame_access(owner, function)? {
+            return Ok(access);
+        }
+    }
     match bytecode.active_function {
         Some(_)
             if runtime.selected_object_class().is_some()

@@ -701,7 +701,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn char_supports_all_integer_classes_and_reports_surrogate_gap() {
+    fn char_supports_all_integer_classes_and_preserves_utf16_code_units() {
         let values = [
             IntValue::I8(65),
             IntValue::I16(65),
@@ -720,10 +720,16 @@ pub(crate) mod tests {
             assert_eq!(array.data(), runmat_value::encode_utf16_code_units("A"));
         }
 
-        let err = char_builtin(vec![Value::Int(IntValue::U16(0xD800))])
-            .expect_err("surrogate is not a Rust char");
-        assert_eq!(err.identifier(), Some("RunMat:char:InvalidCodePoint"));
-        assert!(err.message().contains("surrogate code unit"));
+        let Value::CharArray(array) = char_builtin(vec![Value::Int(IntValue::U16(0xD800))])
+            .expect("char retains unpaired UTF-16 code units")
+        else {
+            panic!("expected char array");
+        };
+        assert_eq!(
+            array.data(),
+            [runmat_value::Utf16CodeUnit::from_raw(0xD800)]
+        );
+        assert_eq!(array.shape(), [1, 1]);
     }
 
     #[test]

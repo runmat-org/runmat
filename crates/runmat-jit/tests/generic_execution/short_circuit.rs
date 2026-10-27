@@ -87,6 +87,7 @@ fn capture_fixture(taken: bool, count: usize) -> runmat_native_codegen::NativeAs
                 source: runmat_mir::MirExpansionSource::CellContents {
                     base: MirOperand::Local(MirLocalId(0)),
                     indexing: MirIndexing {
+                        argument_spans: None,
                         kind: runmat_types::IndexKind::Brace,
                         plan: MirIndexPlan::Cell,
                         components: vec![MirIndexComponent::Colon],

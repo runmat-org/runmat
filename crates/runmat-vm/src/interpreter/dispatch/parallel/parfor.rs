@@ -393,7 +393,9 @@ async fn execute_parfor_tasks(
                     requested_outputs: 1,
                 },
                 retry: runmat_execution::RetryPolicy::IdempotentInfrastructure,
-                program_revision: None,
+                program_revision: program
+                    .program_revision(context.runtime.program_revision())
+                    .cloned(),
                 environment: runmat_runtime::execution::capture_deferred_environment(
                     &context.runtime,
                 )?,

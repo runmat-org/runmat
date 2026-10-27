@@ -94,12 +94,13 @@ pub fn matrix_scalar_mul(a: &Tensor, scalar: f64) -> Tensor {
     linalg::scalar_mul_real(a, scalar)
 }
 
-/// Matrix power: C = A^n (for positive integer n)
-/// This computes A * A * ... * A (n times) via repeated multiplication
+/// Integer matrix powers use binary exponentiation; floating negative powers
+/// first use the same inverse kernel as inv.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatrixPowerError {
     NonSquare { rows: usize, columns: usize },
     NegativeExponent,
+    Inverse(linalg::InverseError),
     IdentitySizeOverflow,
     StorageClassChanged { left: String, right: String },
     Storage(String),
@@ -115,8 +116,9 @@ impl std::fmt::Display for MatrixPowerError {
                 )
             }
             Self::NegativeExponent => {
-                formatter.write_str("Negative matrix powers not supported yet")
+                formatter.write_str("Negative matrix powers require floating-point storage")
             }
+            Self::Inverse(error) => write!(formatter, "Matrix inverse failed: {error}"),
             Self::IdentitySizeOverflow => {
                 formatter.write_str("matrix power identity size overflow")
             }
@@ -131,7 +133,14 @@ impl std::fmt::Display for MatrixPowerError {
     }
 }
 
-impl std::error::Error for MatrixPowerError {}
+impl std::error::Error for MatrixPowerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Inverse(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 pub fn matrix_power(a: &Tensor, n: i32) -> Result<Tensor, MatrixPowerError> {
     if a.rows() != a.cols() {
@@ -141,21 +150,29 @@ pub fn matrix_power(a: &Tensor, n: i32) -> Result<Tensor, MatrixPowerError> {
         });
     }
 
-    if n < 0 {
+    if n < 0 && !matches!(a.numeric_dtype(), NumericDType::F64 | NumericDType::F32) {
         return Err(MatrixPowerError::NegativeExponent);
     }
 
-    let mut result = numeric_identity(a.numeric_dtype(), a.rows())?;
     if n == 0 {
+        let result = numeric_identity(a.numeric_dtype(), a.rows())?;
         return Tensor::from_numeric_storage(result, a.shape().to_vec())
             .map_err(MatrixPowerError::Storage);
     }
 
-    let mut base = a
-        .clone()
+    let base = if n < 0 {
+        linalg::inverse::real(a).map_err(MatrixPowerError::Inverse)?
+    } else {
+        a.clone()
+    };
+    if n == -1 {
+        return Ok(base);
+    }
+    let mut result = numeric_identity(a.numeric_dtype(), a.rows())?;
+    let mut base = base
         .into_numeric_storage()
         .map_err(MatrixPowerError::Storage)?;
-    let mut exp = n as u32;
+    let mut exp = n.unsigned_abs();
 
     while exp > 0 {
         if exp % 2 == 1 {
@@ -280,8 +297,8 @@ fn numeric_square_matmul(
     }
 }
 
-/// Complex matrix power: C = A^n (for positive integer n)
-/// Uses binary exponentiation with complex matrix multiply
+/// Complex integer powers use the shared inverse for negative exponents and
+/// binary exponentiation with complex matrix multiplication.
 pub fn complex_matrix_power(
     a: &runmat_value::ComplexTensor,
     n: i32,
@@ -292,34 +309,51 @@ pub fn complex_matrix_power(
             columns: a.cols(),
         });
     }
-    if n < 0 {
+    if n < 0 && !matches!(a.numeric_dtype(), NumericDType::F64 | NumericDType::F32) {
         return Err(MatrixPowerError::NegativeExponent);
     }
     if n == 0 {
-        return Ok(complex_matrix_eye(a.rows()));
+        return complex_matrix_identity(a);
     }
-    if n == 1 {
-        return Ok(a.clone());
+    let mut base = if n < 0 {
+        linalg::inverse::complex(a).map_err(MatrixPowerError::Inverse)?
+    } else {
+        a.clone()
+    };
+    if n == 1 || n == -1 {
+        return Ok(base);
     }
-    let mut result = complex_matrix_eye(a.rows());
-    let mut base = a.clone();
-    let mut exp = n as u32;
+    let mut result = complex_matrix_identity(a)?;
+    let mut exp = n.unsigned_abs();
     while exp > 0 {
         if exp % 2 == 1 {
             result = complex_matrix_mul(&result, &base).map_err(MatrixPowerError::Storage)?;
         }
-        base = complex_matrix_mul(&base, &base).map_err(MatrixPowerError::Storage)?;
         exp /= 2;
+        if exp > 0 {
+            base = complex_matrix_mul(&base, &base).map_err(MatrixPowerError::Storage)?;
+        }
     }
     Ok(result)
 }
 
-fn complex_matrix_eye(n: usize) -> runmat_value::ComplexTensor {
-    let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); n * n];
+fn complex_matrix_identity(
+    prototype: &runmat_value::ComplexTensor,
+) -> Result<runmat_value::ComplexTensor, MatrixPowerError> {
+    let n = prototype.rows();
+    let count = n
+        .checked_mul(n)
+        .ok_or(MatrixPowerError::IdentitySizeOverflow)?;
+    let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); count];
     for i in 0..n {
         data[i * n + i] = (1.0, 0.0);
     }
-    runmat_value::ComplexTensor::new_2d(data, n, n).unwrap()
+    runmat_value::ComplexTensor::from_f64_values_with_dtype(
+        data,
+        vec![n, n],
+        prototype.numeric_dtype(),
+    )
+    .map_err(MatrixPowerError::Storage)
 }
 
 /// Create identity matrix

@@ -75,7 +75,7 @@ impl OptimizationPlotLayout {
         // for their own operation; no ambient guard can cross a callback await.
         let _scope = runtime.map(RuntimeContext::enter);
         let handle = new_figure_handle();
-        configure_subplot(count, 1, 1).map_err(graphics_failure)?;
+        configure_subplot(count, 1, 0).map_err(graphics_failure)?;
         let figure = figure_graphics_receiver(handle)
             .map_err(graphics_failure)?
             .ok_or_else(|| failure("new plot figure has no receiver"))?;

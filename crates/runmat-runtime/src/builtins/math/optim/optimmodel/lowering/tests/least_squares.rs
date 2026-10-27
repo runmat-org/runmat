@@ -177,6 +177,19 @@ fn squared_residual_model_preserves_original_dag_shapes_duals_and_terminal_autho
                 &args,
             )
             .await;
+            let point = Value::Struct(runmat_value::StructValue::from_fields_unbounded([(
+                "matrix".into(),
+                Value::Tensor(runmat_value::Tensor::new(vec![3., 0., 0., 4.], vec![2, 2]).unwrap()),
+            )]));
+            assert_eq!(
+                numbers(
+                    call(&original, "evaluate", &[spectral.value().clone(), point])
+                        .await
+                        .value()
+                ),
+                vec![4.],
+                "matrix spectral norm must not become the Frobenius norm of five",
+            );
             let spectral = operation(
                 &original,
                 "optim.problemdef.OptimizationExpression.mpower",
@@ -250,6 +263,13 @@ fn squared_residual_model_preserves_original_dag_shapes_duals_and_terminal_autho
         // Rounded assembled rows say 0>=1; the original tiny affine law is
         // feasible at finite large x, so it must not authorize infeasibility.
         let tiny = tiny_affine(&original, &x).await;
+        let tiny = operation(
+            &original,
+            "optim.problemdef.OptimizationExpression.minus",
+            &tiny,
+            x.value().clone(),
+        )
+        .await;
         let constraint = operation(
             &original,
             "optim.problemdef.OptimizationExpression.ge",

@@ -239,7 +239,7 @@ impl<'de> Deserialize<'de> for PersistentEntityId {
 mod interner {
     use super::PersistentEntityIdData;
     use std::collections::HashMap;
-    use std::hash::{BuildHasher, Hash, Hasher};
+    use std::hash::BuildHasher;
     use std::sync::{Arc, Mutex, OnceLock, Weak};
 
     const SHARDS: usize = 64;
@@ -266,9 +266,7 @@ mod interner {
 
     pub(super) fn intern(data: PersistentEntityIdData) -> Arc<PersistentEntityIdData> {
         let table = table();
-        let mut hasher = table.hasher.build_hasher();
-        data.hash(&mut hasher);
-        let hash = hasher.finish();
+        let hash = table.hasher.hash_one(&data);
         let mut shard = table.shards[(hash as usize) % SHARDS]
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -351,11 +349,21 @@ impl PersistentEntityId {
 
     /// Validate the sole public string encoding of an exact entity selection.
     pub fn validate_analysis_selection_id(value: &str) -> Result<(), GeometryContractError> {
-        let valid = value.strip_prefix(PERSISTENT_SELECTION_PREFIX).is_some_and(|digest| {
-            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        });
-        if valid { Ok(()) } else {
-            Err(GeometryContractError::invalid("persistent selection", "requires the canonical occurrence-qualified ID returned by geometry inspection"))
+        let valid = value
+            .strip_prefix(PERSISTENT_SELECTION_PREFIX)
+            .is_some_and(|digest| {
+                digest.len() == 64
+                    && digest
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            });
+        if valid {
+            Ok(())
+        } else {
+            Err(GeometryContractError::invalid(
+                "persistent selection",
+                "requires the canonical occurrence-qualified ID returned by geometry inspection",
+            ))
         }
     }
 
@@ -491,12 +499,26 @@ mod canonical_selection_contract_tests {
     use super::*;
     #[test]
     fn ordinal_aliases_and_unqualified_names_are_never_persistent_ids() {
-        for value in ["face_000001", "solid_000001", "cad_label_0_1_1_1", "occt:face", "persistent-entity:sha256:ABC"] {
+        for value in [
+            "face_000001",
+            "solid_000001",
+            "cad_label_0_1_1_1",
+            "occt:face",
+            "persistent-entity:sha256:ABC",
+        ] {
             assert!(PersistentEntityId::validate_analysis_selection_id(value).is_err());
         }
-        let id = PersistentEntityId::new(PersistentEntityKind::Face, "exact-face".into(), vec!["root".into()]);
-        PersistentEntityId::validate_analysis_selection_id(&id.analysis_selection_id().unwrap()).unwrap();
-        assert!(serde_json::from_str::<crate::GeometryRegionSelector>(r#"{"kind":"source_alias","value":"face_000001"}"#).is_err());
+        let id = PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "exact-face".into(),
+            vec!["root".into()],
+        );
+        PersistentEntityId::validate_analysis_selection_id(&id.analysis_selection_id().unwrap())
+            .unwrap();
+        assert!(serde_json::from_str::<crate::GeometryRegionSelector>(
+            r#"{"kind":"source_alias","value":"face_000001"}"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -528,7 +550,7 @@ mod canonical_selection_contract_tests {
         detached.source_topology_id = "detached-edge".into();
         assert_eq!(first.source_topology_id, "interned-edge");
         assert_ne!(detached, first);
-        assert!(detached > first || detached < first);
+        assert_ne!(detached.cmp(&first), std::cmp::Ordering::Equal);
     }
 
     #[test]

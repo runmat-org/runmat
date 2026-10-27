@@ -13,6 +13,7 @@ use crate::execution::{RootedValue, RootedValueLease, RootedValueSequence};
 use crate::object::dispatch::{
     call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
 };
+use crate::object::protocol::ProtocolDispatch;
 use crate::RuntimeError;
 use runmat_types::ClassIdentity;
 use runmat_value::{Closure, StructValue, Tensor, Value};
@@ -46,12 +47,15 @@ use graphics::*;
 mod read;
 #[path = "resolve/read_array.rs"]
 mod read_array;
-pub(crate) use read::read_member_sequence_text_with_optional_access;
 pub use read::{
     load_member, load_member_dynamic, load_member_dynamic_with_context, load_member_with_access,
     load_member_with_context, read_member_sequence_text_with_access,
     read_member_sequence_text_with_context, read_member_sequence_with_access,
     read_member_sequence_with_context,
+};
+pub(crate) use read::{
+    read_default_member_sequence_text_with_optional_access,
+    read_member_sequence_text_with_optional_access,
 };
 #[path = "resolve/static.rs"]
 mod static_member;
@@ -71,13 +75,15 @@ pub(crate) use store::{
 };
 #[path = "resolve/store_sequence.rs"]
 mod store_sequence;
-pub(crate) use store_sequence::store_member_sequence_values_with_optional_access_scope;
 pub use store_sequence::{
     member_sequence_cardinality, store_member_dynamic_traced,
     store_member_dynamic_traced_in_context, store_member_sequence_traced,
     store_member_sequence_traced_in_context, store_member_sequence_traced_with_access,
     store_member_sequence_values, store_member_sequence_values_in_context, store_member_traced,
     store_member_traced_in_context,
+};
+pub(crate) use store_sequence::{
+    store_default_member_sequence_values, store_member_sequence_values_with_optional_access_scope,
 };
 #[cfg(test)]
 #[path = "resolve/tests.rs"]

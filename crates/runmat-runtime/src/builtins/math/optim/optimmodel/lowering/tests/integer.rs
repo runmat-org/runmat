@@ -147,43 +147,49 @@ async fn observers(runtime: &RuntimeContext, problem: &RootedValue, start: &Valu
         .unwrap();
         let events = Arc::new(Mutex::new(Vec::<(String, Vec<f64>)>::new()));
         let observed = Arc::clone(&events);
-        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |id, args, requested| {
-                assert_eq!(id, 2160);
-                assert_eq!(requested, 1);
-                let state = crate::builtins::common::validation::value_text_scalar_string(&args[2])
-                    .unwrap();
-                let point = numbers(&args[0]);
-                let Value::Struct(info) = &args[1] else {
-                    panic!("MILP metadata");
-                };
-                if !point.is_empty() {
-                    assert_eq!(point.iter().sum::<f64>(), 1.);
-                    assert_eq!(numbers(&info.fields["fval"]), vec![-8.]);
-                }
-                if state != "iter" {
-                    assert!(point.is_empty());
-                }
-                observed
-                    .lock()
-                    .unwrap()
-                    .push((state.clone(), point.clone()));
-                let response = if fail && !point.is_empty() {
-                    Err(
-                        crate::build_runtime_error("originating model observer error")
-                            .with_identifier("Original:IntegerModelObserver")
-                            .with_source(std::io::Error::other("original model observer cause"))
-                            .build(),
-                    )
-                } else {
-                    Ok(Value::Bool(!point.is_empty()))
-                };
-                Box::pin(async move {
-                    crate::user_functions::test_support::rooted_single_value_sequence(response?)
-                })
-            },
-        )))
-        .unwrap();
+        let _invoker = {
+            // Install in the selected runtime, then restore the foreign ambient
+            // runtime before invoking the model and its observer.
+            let _entry = runtime.enter();
+            crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+                move |id, args, requested| {
+                    assert_eq!(id, 2160);
+                    assert_eq!(requested, 1);
+                    let state =
+                        crate::builtins::common::validation::value_text_scalar_string(&args[2])
+                            .unwrap();
+                    let point = numbers(&args[0]);
+                    let Value::Struct(info) = &args[1] else {
+                        panic!("MILP metadata");
+                    };
+                    if !point.is_empty() {
+                        assert_eq!(point.iter().sum::<f64>(), 1.);
+                        assert_eq!(numbers(&info.fields["fval"]), vec![-8.]);
+                    }
+                    if state != "iter" {
+                        assert!(point.is_empty());
+                    }
+                    observed
+                        .lock()
+                        .unwrap()
+                        .push((state.clone(), point.clone()));
+                    let response = if fail && !point.is_empty() {
+                        Err(
+                            crate::build_runtime_error("originating model observer error")
+                                .with_identifier("Original:IntegerModelObserver")
+                                .with_source(std::io::Error::other("original model observer cause"))
+                                .build(),
+                        )
+                    } else {
+                        Ok(Value::Bool(!point.is_empty()))
+                    };
+                    Box::pin(async move {
+                        crate::user_functions::test_support::rooted_single_value_sequence(response?)
+                    })
+                },
+            )))
+            .unwrap()
+        };
         let callbacks = Value::Cell(
             runmat_value::CellArray::new(
                 vec![Value::FunctionHandle("integer_model_observer".into())],

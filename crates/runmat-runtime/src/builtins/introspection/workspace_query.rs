@@ -108,6 +108,11 @@ enum OptionToken {
 }
 
 fn option_token(value: &Value, owner: WorkspaceQueryOwner) -> BuiltinResult<Option<OptionToken>> {
+    // A matrix supplies one selector per row, not a scalar option token.
+    // Scalar-only positions (filenames and cell members) still reject it.
+    if matches!(value, Value::CharArray(array) if array.rows != 1) {
+        return Ok(None);
+    }
     let Some(text) = value_to_string_scalar(value, owner, QueryError::SelectorType)? else {
         return Ok(None);
     };

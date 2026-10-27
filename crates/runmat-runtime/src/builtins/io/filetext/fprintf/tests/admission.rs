@@ -193,7 +193,7 @@ fn known_invalid_character_matrix_format_precedes_resident_data() {
         std::task::Poll::Ready(Err(error)) => error,
         other => panic!("invalid format geometry must precede data download: {other:?}"),
     };
-    assert_eq!(error.identifier(), Some("RunMat:fprintf:InvalidInput"));
+    assert_eq!(error.identifier(), FPRINTF_ERROR_FORMAT.identifier);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     assert_eq!(resident.probe.retirements(), 0);
 }

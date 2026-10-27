@@ -584,6 +584,7 @@ mod creation_policy_tests {
         let indexed = MirPlace::Index(
             Box::new(MirPlace::Local(MirLocalId(0))),
             MirIndexing {
+                argument_spans: None,
                 kind: IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: Vec::<MirIndexComponent>::new(),

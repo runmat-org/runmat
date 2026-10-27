@@ -183,17 +183,24 @@ fn reject_inventory(
     }) {
         let block = u32::try_from(block.0).unwrap_or(u32::MAX);
         let position = u32::try_from(position).unwrap_or(u32::MAX);
-        return Err(NativeCodegenError::new(
-            "native.capability.distributed_core_pending",
-            "distributed-value and collective Native IR require the R25 distributed core",
-        )
-        .at_point(runmat_types::ProgramPointId {
-            function: portable_function,
-            block,
-            position,
-        })
-        .at_function(function)
-        .for_construct(construct));
+        let (code, message) = match construct {
+            runmat_mir::MirConstructKind::ExecutorIntrinsicCall => (
+                "native.capability.executor_intrinsic",
+                "selected executor intrinsic has no native lowering",
+            ),
+            _ => (
+                "native.capability.distributed_core_pending",
+                "distributed-value and collective Native IR require the R25 distributed core",
+            ),
+        };
+        return Err(NativeCodegenError::new(code, message)
+            .at_point(runmat_types::ProgramPointId {
+                function: portable_function,
+                block,
+                position,
+            })
+            .at_function(function)
+            .for_construct(construct));
     }
     Ok(())
 }

@@ -7,7 +7,7 @@ fn canonical_sqp_outputs_keep_empty_frontiers_and_callback_clock_authority() {
         Some(crate::OptimAlgorithm::ActiveSet)
     );
     assert!(crate::OptimSolver::Fmincon.accepts_algorithm(crate::OptimAlgorithm::ActiveSet));
-    assert!(!crate::OptimSolver::Quadprog.accepts_algorithm(crate::OptimAlgorithm::ActiveSet));
+    assert!(crate::OptimSolver::Quadprog.accepts_algorithm(crate::OptimAlgorithm::ActiveSet));
     assert_eq!(crate::OptimAlgorithm::ActiveSet.name(), "active-set");
     let empty = || {
         super::super::program_facts::double(

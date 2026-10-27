@@ -57,7 +57,8 @@ fn nominal_estimate<T: FactorScalar>(
         }
         col_ptr.push(row_idx.len());
     }
-    let pattern = faer::sparse::SymbolicSparseColMatRef::new_checked(n, n, &col_ptr, None, &row_idx);
+    let pattern =
+        faer::sparse::SymbolicSparseColMatRef::new_checked(n, n, &col_ptr, None, &row_idx);
     let cholesky = faer::sparse::linalg::cholesky::factorize_symbolic_cholesky(
         pattern,
         faer::Side::Lower,
@@ -67,7 +68,8 @@ fn nominal_estimate<T: FactorScalar>(
     let entries = 2 * cholesky.len_val() as u64;
     let scalar = std::mem::size_of::<T>() as u64;
     let par = par::faer_par();
-    let workspace = stack_bytes(symbolic.factorize_numeric_lu_scratch::<T>(par, Default::default()));
+    let workspace =
+        stack_bytes(symbolic.factorize_numeric_lu_scratch::<T>(par, Default::default()));
     let lower_flops = {
         // Same structure-based flop count as the Cholesky estimate, doubled for L and U.
         let est = cholesky.len_val() as f64;
@@ -102,7 +104,7 @@ pub(super) fn factorize<T: FactorScalar>(
     }
     let mut numeric = match previous {
         Some(NumericInner::Lu(numeric)) => numeric,
-        _ => NumericLu::new(),
+        _ => Box::new(NumericLu::new()),
     };
     let par = par::faer_par();
     let mut buffer = memory(inner.factorize_numeric_lu_scratch::<T>(par, Default::default()))?;
@@ -136,14 +138,27 @@ pub(super) fn solve<T: FactorScalar>(
     let view = MatMut::from_column_major_slice_mut(rhs, n, k);
     if symbolic.input_transposed {
         // The factor is of Aᵀ (CSR arrays read as CSC): solve (Aᵀ)ᵀ x = b.
-        let mut buffer = faer::dyn_stack::MemBuffer::new(inner.solve_transpose_in_place_scratch::<T>(k, par));
-        lu.solve_transpose_in_place_with_conj(Conj::No, view, par, faer::dyn_stack::MemStack::new(&mut buffer));
+        let mut buffer =
+            faer::dyn_stack::MemBuffer::new(inner.solve_transpose_in_place_scratch::<T>(k, par));
+        lu.solve_transpose_in_place_with_conj(
+            Conj::No,
+            view,
+            par,
+            faer::dyn_stack::MemStack::new(&mut buffer),
+        );
     } else {
         let mut buffer = faer::dyn_stack::MemBuffer::new(inner.solve_in_place_scratch::<T>(k, par));
-        lu.solve_in_place_with_conj(Conj::No, view, par, faer::dyn_stack::MemStack::new(&mut buffer));
+        lu.solve_in_place_with_conj(
+            Conj::No,
+            view,
+            par,
+            faer::dyn_stack::MemStack::new(&mut buffer),
+        );
     }
     if let Some(position) = rhs.iter().position(|value| !value.is_finite()) {
-        return Err(SolverError::Singular { pivot: position % n.max(1) });
+        return Err(SolverError::Singular {
+            pivot: position % n.max(1),
+        });
     }
     Ok(())
 }
@@ -163,13 +178,26 @@ pub(super) fn solve_transpose<T: FactorScalar>(
     if symbolic.input_transposed {
         // The factor is of Aᵀ: a plain solve is a transpose solve of A.
         let mut buffer = faer::dyn_stack::MemBuffer::new(inner.solve_in_place_scratch::<T>(k, par));
-        lu.solve_in_place_with_conj(Conj::No, view, par, faer::dyn_stack::MemStack::new(&mut buffer));
+        lu.solve_in_place_with_conj(
+            Conj::No,
+            view,
+            par,
+            faer::dyn_stack::MemStack::new(&mut buffer),
+        );
     } else {
-        let mut buffer = faer::dyn_stack::MemBuffer::new(inner.solve_transpose_in_place_scratch::<T>(k, par));
-        lu.solve_transpose_in_place_with_conj(Conj::No, view, par, faer::dyn_stack::MemStack::new(&mut buffer));
+        let mut buffer =
+            faer::dyn_stack::MemBuffer::new(inner.solve_transpose_in_place_scratch::<T>(k, par));
+        lu.solve_transpose_in_place_with_conj(
+            Conj::No,
+            view,
+            par,
+            faer::dyn_stack::MemStack::new(&mut buffer),
+        );
     }
     if let Some(position) = rhs.iter().position(|value| !value.is_finite()) {
-        return Err(SolverError::Singular { pivot: position % n.max(1) });
+        return Err(SolverError::Singular {
+            pivot: position % n.max(1),
+        });
     }
     Ok(())
 }

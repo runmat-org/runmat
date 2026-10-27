@@ -87,9 +87,75 @@ fn absent_or_conflicting_bounds_do_not_manufacture_finite_corrections() {
         .unwrap()
         .unwrap();
     assert!(certificates.is_infeasible());
+    let weights = block_on(certificates.infeasibility_certificate(&mut work))
+        .unwrap()
+        .unwrap();
+    assert_eq!(weights, vec![BigRational::from_integer(1.into()); 2]);
     assert!(block_on(certificates.lower_bound(&[0.0, 0.0], &mut work))
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn retained_contradiction_weights_cancel_original_signed_rows_exactly() {
+    for fixture in [
+        Fixture {
+            a: CscMatrix::zeros((1, 1)),
+            b: vec![2.],
+            f: vec![0.],
+            cones: vec![ZeroConeT(1)],
+        },
+        Fixture {
+            a: CscMatrix::zeros((1, 1)),
+            b: vec![-2.],
+            f: vec![0.],
+            cones: vec![NonnegativeConeT(1)],
+        },
+        Fixture {
+            a: CscMatrix::new(2, 1, vec![0, 2], vec![0, 1], vec![-3., 2.]),
+            b: vec![-6., 3.],
+            f: vec![0.],
+            cones: vec![ZeroConeT(1), NonnegativeConeT(1)],
+        },
+    ] {
+        let view = fixture.view();
+        let mut work = cooperation();
+        let certificates = block_on(LinearCertificates::borrow(&view, &mut work))
+            .unwrap()
+            .unwrap();
+        let weights = block_on(certificates.infeasibility_certificate(&mut work))
+            .unwrap()
+            .unwrap();
+        let numerical = vec![0.; view.b.len()];
+        assert!(block_on(terminal::primal_infeasible(&view, &numerical, &mut work)).unwrap());
+        assert!(!block_on(terminal::primal_infeasible_satisfying(
+            &view,
+            &numerical,
+            &mut work,
+            async |_: &[BigRational], _: &mut ScalarCooperation| Ok(false),
+        ))
+        .unwrap());
+        for column in 0..view.a.n {
+            let sum: BigRational = (view.a.colptr[column]..view.a.colptr[column + 1])
+                .map(|entry| {
+                    BigRational::from_float(view.a.nzval[entry]).unwrap()
+                        * &weights[view.a.rowval[entry]]
+                })
+                .sum();
+            assert!(sum.is_zero());
+        }
+        let rhs: BigRational = view
+            .b
+            .iter()
+            .zip(&weights)
+            .map(|(&rhs, weight)| BigRational::from_float(rhs).unwrap() * weight)
+            .sum();
+        assert!(rhs.is_negative());
+        assert!(weights
+            .iter()
+            .enumerate()
+            .all(|(row, value)| certificates.equalities[row] || !value.is_negative()));
+    }
 }
 #[test]
 fn later_recovery_stronger_bound_is_not_hidden_by_first_finite_dyadic() {

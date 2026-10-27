@@ -1174,14 +1174,26 @@ fn geometry_preview_preserves_assembly_ownership_and_xray_styling() {
     )
     .expect("cad preview scene should be generated");
 
-    assert_eq!(scene.chunks.len(), 1);
-    assert_eq!(scene.chunks[0].owner_node_ids, vec![owner.label_entry]);
-    assert_eq!(scene.chunks[0].regions.len(), 2);
-    assert!(scene.chunks[0]
+    // The shaded surface and its resident wireframe share assembly ownership;
+    // the wireframe is a separate draw item, not a second surface chunk.
+    assert_eq!(scene.chunks.len(), 2);
+    for chunk in &scene.chunks {
+        assert_eq!(chunk.owner_node_ids, vec![owner.label_entry.clone()]);
+    }
+    let surfaces = scene
+        .chunks
+        .iter()
+        .filter(|chunk| !chunk.wireframe_only)
+        .collect::<Vec<_>>();
+    assert_eq!(surfaces.len(), 1);
+    let surface = surfaces[0];
+    assert!(scene.chunks.iter().any(|chunk| chunk.wireframe_only));
+    assert_eq!(surface.regions.len(), 2);
+    assert!(surface
         .regions
         .iter()
         .any(|region| region.region_id == "face_000001"));
-    assert!(scene.chunks[0]
+    assert!(surface
         .regions
         .iter()
         .any(|region| region.region_id == "face_000002"));

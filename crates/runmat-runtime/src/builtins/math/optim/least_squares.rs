@@ -12,7 +12,7 @@ pub(super) mod equation;
 mod terminal;
 use terminal::{finish, result, DerivativeResult};
 mod derivative;
-pub(crate) use derivative::Jacobian;
+pub(crate) use derivative::{Jacobian, Opaque};
 mod criteria;
 pub(crate) use criteria::Criteria;
 mod traversal;
@@ -384,7 +384,24 @@ async fn final_result<E: LeastSquaresEvaluator>(
     step_size: f64,
     message: &str,
 ) -> BuiltinResult<LeastSquaresResult> {
-    if !options.final_jacobian
+    if let Some(source) = evaluator.take_jacobian() {
+        return finish(
+            evaluator,
+            bounds,
+            options,
+            x,
+            residual,
+            DerivativeResult::RetainedWithWorkspace(source, fallback_jacobian),
+            exitflag,
+            iterations,
+            func_count,
+            fallback_optimality,
+            step_size,
+            message,
+        )
+        .await;
+    }
+    if (!options.final_gradient && !options.final_jacobian)
         || (evaluator.analytic_jacobian().is_none()
             && func_count.saturating_add(x.len()) > options.max_fun_evals)
     {

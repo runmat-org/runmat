@@ -15,6 +15,25 @@ pub struct CallsiteInfo {
 }
 
 impl CallsiteInfo {
+    pub fn from_projected_in_context<T>(
+        source_id: Option<SourceId>,
+        arguments: &[T],
+        context: &crate::context::RuntimeContext,
+        project: impl FnMut(&T) -> Span,
+    ) -> Result<Self, crate::RuntimeError> {
+        Ok(Self {
+            source_id,
+            arg_spans: CallsiteSpans::from_projected_in_context(arguments, context, project)
+                .map_err(|source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(context),
+                        "RunMat:Runtime:CallsiteProjection",
+                        "callsite metadata admission failed",
+                        source,
+                    )
+                })?,
+        })
+    }
     pub fn from_borrowed_in_context(
         source_id: Option<SourceId>,
         arg_spans: &[Span],
@@ -67,71 +86,24 @@ impl CallsiteInfo {
     }
 }
 
-/// Keep the ordinary source callsite active only while this future is polled.
-/// This is presentation/source metadata, not permission to select a callee.
-pub async fn with_callsite<F: Future>(
+#[path = "callsite/poll.rs"]
+mod poll;
+
+/// Keep ordinary source metadata active only during each child poll.
+/// Admission remains lazy and this wrapper introduces no allocation.
+pub fn with_callsite<F: Future>(
     info: Option<CallsiteInfo>,
     future: F,
-) -> Result<F::Output, crate::RuntimeError> {
-    let info = admit_callsite(info)?;
-    let mut future = Box::pin(future);
-    poll_function_input_callsite(info, future.as_mut()).await
+) -> impl Future<Output = Result<F::Output, crate::RuntimeError>> {
+    poll::scope(info, future, poll::ScopeKind::Ordinary)
 }
 
-/// Borrow an already pinned owner instead of allocating another Box for its
-/// carrier. Admission and scoped provenance still begin only on first poll.
-pub async fn with_function_input_callsite_pinned<F: Future + ?Sized>(
-    info: Option<CallsiteInfo>,
-    future: std::pin::Pin<&mut F>,
-) -> Result<F::Output, crate::RuntimeError> {
-    let info = admit_callsite(info)?;
-    poll_function_input_callsite(info, future).await
-}
-
-async fn poll_function_input_callsite<F: Future + ?Sized>(
-    info: Option<CallsiteInfo>,
-    mut future: std::pin::Pin<&mut F>,
-) -> Result<F::Output, crate::RuntimeError> {
-    std::future::poll_fn(move |cx| {
-        let guard = info
-            .as_ref()
-            .map(|info| push_callsite_info(info.clone()))
-            .transpose();
-        let _guard = match guard {
-            Ok(guard) => guard,
-            Err(error) => return std::task::Poll::Ready(Err(error)),
-        };
-        match future.as_mut().poll(cx) {
-            std::task::Poll::Ready(output) => std::task::Poll::Ready(Ok(output)),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    })
-    .await
-}
-
-/// Scope caller-expression provenance to each poll, not to a suspended task.
-/// An interleaved invocation can otherwise observe another caller's input names.
-pub async fn with_function_input_callsite<F: Future>(
+/// Scope caller-expression provenance to each poll, not a suspended task.
+pub fn with_function_input_callsite<F: Future>(
     info: Option<CallsiteInfo>,
     future: F,
-) -> Result<F::Output, crate::RuntimeError> {
-    let info = admit_callsite(info)?;
-    let mut future = Box::pin(future);
-    std::future::poll_fn(move |cx| {
-        let guard = info
-            .as_ref()
-            .map(|info| push_function_input_callsite_info(info.clone()))
-            .transpose();
-        let _guard = match guard {
-            Ok(guard) => guard,
-            Err(error) => return std::task::Poll::Ready(Err(error)),
-        };
-        match future.as_mut().poll(cx) {
-            std::task::Poll::Ready(output) => std::task::Poll::Ready(Ok(output)),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    })
-    .await
+) -> impl Future<Output = Result<F::Output, crate::RuntimeError>> {
+    poll::scope(info, future, poll::ScopeKind::FunctionInput)
 }
 
 fn admit_callsite(info: Option<CallsiteInfo>) -> Result<Option<CallsiteInfo>, crate::RuntimeError> {

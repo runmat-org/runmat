@@ -29,6 +29,23 @@ pub struct MirCall {
     pub semantic_kind: BuiltinSemanticKind,
 }
 
+impl MirCall {
+    /// Executor semantics come from the selected builtin contract, not a
+    /// spelling table in MIR. Dynamic/user calls retain ordinary dispatch.
+    pub fn executor_intrinsic(&self) -> Option<runmat_builtins::BuiltinExecutorIntrinsic> {
+        if !matches!(
+            &self.callee,
+            MirCallee::Static(CallableIdentity::Builtin(_))
+        ) {
+            return None;
+        }
+        match self.semantic_kind {
+            BuiltinSemanticKind::ExecutorIntrinsic(operation) => Some(operation),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirCallee {
     Static(CallableIdentity),

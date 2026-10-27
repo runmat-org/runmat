@@ -33,36 +33,55 @@ impl Evidence {
         }
         Ok(Some(hessian))
     }
-    pub(in crate::builtins::math::optim::optimmodel::lowering) async fn gradient(
-        &self,
-        program: &Program,
-        point: exact::Coordinates<'_>,
+    pub(in crate::builtins::math::optim::optimmodel::lowering) fn gradient<'a>(
+        &'a self,
+        program: &'a Program,
+        point: exact::Coordinates<'a>,
         sense: Sense,
         policy: Policy,
-        c: &mut ScalarCooperation,
-    ) -> BuiltinResult<Vec<Rational>> {
+        c: &'a mut ScalarCooperation,
+    ) -> impl std::future::Future<Output = BuiltinResult<Vec<Rational>>> + 'a {
         let at_origin = matches!(point, exact::Coordinates::Origin);
         let retention = match &self.projection {
             Projection::Affine | Projection::Scalar => exact::Retain::Operands,
             Projection::Squares(_) => exact::Retain::ConstantOperands,
         };
-        let operands = exact::evaluate_atomic(
-            exact::Source {
-                source: &program.source,
-                layout: &program.layout,
-                facts: &program.facts,
+        crate::execution::after_result(
+            async move {
+                let operands = exact::evaluate_atomic(
+                    exact::Source {
+                        source: &program.source,
+                        layout: &program.layout,
+                        facts: &program.facts,
+                    },
+                    Some(exact::Subset {
+                        nodes: &self.selection.nodes,
+                        roots: &self.selection.roots,
+                    }),
+                    point,
+                    retention,
+                    &self.atoms,
+                    policy,
+                    c,
+                )
+                .await?;
+                Ok((operands, c))
             },
-            Some(exact::Subset {
-                nodes: &self.selection.nodes,
-                roots: &self.selection.roots,
-            }),
-            point,
-            retention,
-            &self.atoms,
-            policy,
-            c,
+            move |(operands, c)| {
+                self.gradient_from_operands(program, operands, at_origin, sense, policy, c)
+            },
         )
-        .await?;
+    }
+
+    async fn gradient_from_operands(
+        &self,
+        program: &Program,
+        operands: exact::Evaluated,
+        at_origin: bool,
+        sense: Sense,
+        policy: Policy,
+        c: &mut ScalarCooperation,
+    ) -> BuiltinResult<Vec<Rational>> {
         match &self.projection {
             Projection::Affine | Projection::Scalar => {
                 if matches!(self.projection, Projection::Affine) && self.selection.roots.is_empty()

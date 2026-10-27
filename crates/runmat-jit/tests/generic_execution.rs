@@ -2979,6 +2979,7 @@ fn index_fixture() -> runmat_native_codegen::NativeAssembly {
                     value: MirRvalue::Index {
                         base: MirOperand::Local(MirLocalId(0)),
                         indexing: MirIndexing {
+                            argument_spans: None,
                             kind: runmat_types::IndexKind::Paren,
                             plan: MirIndexPlan::Scalar,
                             components: vec![MirIndexComponent::Expr(MirOperand::Constant(
@@ -3035,6 +3036,7 @@ fn member_fixture() -> runmat_native_codegen::NativeAssembly {
 fn index_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 4 };
     let indexing = MirIndexing {
+        argument_spans: None,
         kind: runmat_types::IndexKind::Paren,
         plan: MirIndexPlan::Scalar,
         components: vec![MirIndexComponent::Expr(MirOperand::Constant(
@@ -3094,6 +3096,7 @@ fn index_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
 fn structure_growth_fixture() -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 4 };
     let indexing = MirIndexing {
+        argument_spans: None,
         kind: runmat_types::IndexKind::Paren,
         plan: MirIndexPlan::Scalar,
         components: vec![MirIndexComponent::Expr(MirOperand::Constant(
@@ -3337,6 +3340,7 @@ fn multi_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
                     value: MirRvalue::Index {
                         base: MirOperand::Local(MirLocalId(0)),
                         indexing: MirIndexing {
+                            argument_spans: None,
                             kind: runmat_types::IndexKind::Brace,
                             plan: MirIndexPlan::Cell,
                             components: vec![MirIndexComponent::Colon],
@@ -3423,6 +3427,7 @@ fn sequence_member_assignment_fixture(
             base: MirPlace::Index(
                 Box::new(MirPlace::Local(MirLocalId(1))),
                 MirIndexing {
+                    argument_spans: None,
                     kind: runmat_types::IndexKind::Paren,
                     plan: MirIndexPlan::Slice,
                     components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(4)))],
@@ -3541,6 +3546,7 @@ fn sequence_member_order_fixture(dynamic: bool) -> runmat_native_codegen::Native
             base: MirPlace::Index(
                 Box::new(MirPlace::Local(MirLocalId(1))),
                 MirIndexing {
+                    argument_spans: None,
                     kind: runmat_types::IndexKind::Paren,
                     plan: MirIndexPlan::Slice,
                     components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(2)))],
@@ -3759,6 +3765,7 @@ fn suspending_subscript_prefix_fixture() -> runmat_native_codegen::NativeAssembl
         steps: vec![
             MirSubscriptStep::Member(runmat_hir::MemberName("child".into())),
             MirSubscriptStep::Index(MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![MirIndexComponent::ContextualExpr(end_region)],
@@ -3863,6 +3870,7 @@ fn staged_subscript_suspension_fixture() -> runmat_native_codegen::NativeAssembl
         steps: vec![
             MirSubscriptStep::Member(runmat_hir::MemberName("child".into())),
             MirSubscriptStep::Index(MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![
@@ -4184,6 +4192,7 @@ fn end_scalar_fixture() -> runmat_native_codegen::NativeAssembly {
         MirRvalue::Index {
             base: MirOperand::Local(MirLocalId(0)),
             indexing: MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![MirIndexComponent::ContextualExpr(selector)],
@@ -4235,6 +4244,7 @@ fn end_range_fixture() -> runmat_native_codegen::NativeAssembly {
         MirRvalue::Index {
             base: MirOperand::Local(MirLocalId(0)),
             indexing: MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![MirIndexComponent::ContextualExpr(selector)],
@@ -4356,6 +4366,7 @@ fn end_call_fixture() -> runmat_native_codegen::NativeAssembly {
         MirRvalue::Index {
             base: MirOperand::Local(MirLocalId(0)),
             indexing: MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![MirIndexComponent::ContextualExpr(selector)],
@@ -4428,6 +4439,7 @@ fn end_two_regions_fixture() -> runmat_native_codegen::NativeAssembly {
         MirRvalue::Index {
             base: MirOperand::Local(MirLocalId(0)),
             indexing: MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![
@@ -4486,6 +4498,7 @@ fn end_two_calls_one_step_fixture() -> runmat_native_codegen::NativeAssembly {
         MirRvalue::Index {
             base: MirOperand::Local(MirLocalId(0)),
             indexing: MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![MirIndexComponent::ContextualExpr(selector)],
@@ -4533,6 +4546,7 @@ fn end_nested_context_then_call_fixture() -> runmat_native_codegen::NativeAssemb
                             MirRvalue::Index {
                                 base: MirOperand::Local(MirLocalId(0)),
                                 indexing: MirIndexing {
+                                    argument_spans: None,
                                     kind: runmat_types::IndexKind::Paren,
                                     plan: MirIndexPlan::Slice,
                                     components: vec![MirIndexComponent::ContextualExpr(nested)],
@@ -4566,6 +4580,7 @@ fn end_nested_context_then_call_fixture() -> runmat_native_codegen::NativeAssemb
         MirRvalue::Index {
             base: MirOperand::Local(MirLocalId(0)),
             indexing: MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![MirIndexComponent::ContextualExpr(selector)],
@@ -4664,6 +4679,7 @@ fn caught_contextual_error_fixture() -> runmat_native_codegen::NativeAssembly {
                             MirRvalue::Index {
                                 base: MirOperand::Local(MirLocalId(0)),
                                 indexing: MirIndexing {
+                                    argument_spans: None,
                                     kind: runmat_types::IndexKind::Paren,
                                     plan: MirIndexPlan::Slice,
                                     components: vec![MirIndexComponent::ContextualExpr(selector)],
@@ -4812,6 +4828,7 @@ fn contextual_gc_roots_fixture() -> runmat_native_codegen::NativeAssembly {
         MirRvalue::Index {
             base: MirOperand::Local(MirLocalId(0)),
             indexing: MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: vec![MirIndexComponent::ContextualExpr(selector)],

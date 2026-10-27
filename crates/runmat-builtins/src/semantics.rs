@@ -1,6 +1,8 @@
 use crate::{AccelTag, BuiltinFunction};
 use serde::{Deserialize, Serialize};
 
+pub mod executor;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuiltinSemantics {
     pub compatibility: BuiltinCompatibility,
@@ -148,6 +150,7 @@ impl BuiltinEffects {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BuiltinSemanticKind {
+    ExecutorIntrinsic(executor::BuiltinExecutorIntrinsic),
     General,
     Elementwise,
     ArrayConstructor,

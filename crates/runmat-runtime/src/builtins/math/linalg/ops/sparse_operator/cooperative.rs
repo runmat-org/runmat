@@ -1,6 +1,8 @@
 //! Cooperative borrowing uses the canonical incremental CSC validator.
 use super::{make_view, SparseLinearOperator, SparseOperatorError};
-use crate::builtins::math::linalg::ops::linear_operator::{CooperativeOperatorError, OperatorWork};
+use crate::builtins::math::linalg::ops::linear_operator::{
+    BorrowedWork, CooperativeOperatorError, OperatorWork, ProductWork, UnmanagedWork,
+};
 use crate::context::RuntimeContext;
 use runmat_value::{SparseCscValidation, SparseTensor};
 use std::num::NonZeroUsize;
@@ -10,7 +12,32 @@ impl<'a> SparseLinearOperator<'a> {
         sparse: &'a SparseTensor,
         context: &RuntimeContext,
     ) -> Result<Self, CooperativeOperatorError> {
-        let mut work = OperatorWork::new(context)?;
+        Self::borrow_work(sparse, &mut OperatorWork::new(context)?).await
+    }
+    pub(in crate::builtins::math::linalg) async fn borrow_with_budget(
+        sparse: &'a SparseTensor,
+        context: Option<&RuntimeContext>,
+        budget: Option<&mut crate::execution::CpuCooperationBudget>,
+    ) -> Result<Self, CooperativeOperatorError> {
+        match (context, budget) {
+            (Some(runtime), Some(budget))
+                if budget
+                    .cancellation_token()
+                    .same_generation(&runtime.cancellation()) =>
+            {
+                Self::borrow_work(sparse, &mut BorrowedWork::new(runtime, budget)?).await
+            }
+            (None, None) => {
+                crate::context::host_allocation::HostAllocationReceipt::policy(None)?;
+                Self::borrow_work(sparse, &mut UnmanagedWork).await
+            }
+            _ => Err(crate::context::host_allocation::HostAllocationError::StaleAuthority.into()),
+        }
+    }
+    async fn borrow_work(
+        sparse: &'a SparseTensor,
+        work: &mut impl ProductWork,
+    ) -> Result<Self, CooperativeOperatorError> {
         work.flush().await?;
         sparse
             .cols

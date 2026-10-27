@@ -38,6 +38,7 @@ pub enum MirConstructKind {
     ShortCircuit,
     Range,
     Call,
+    ExecutorIntrinsicCall,
     Aggregate,
     StructLiteral,
     ObjectLiteral,
@@ -104,7 +105,16 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
         R::Binary(_, _, _) => K::Binary,
         R::ShortCircuit { .. } => K::ShortCircuit,
         R::Range { .. } => K::Range,
-        R::Call(_) => K::Call,
+        R::Call(call) => {
+            if call
+                .executor_intrinsic()
+                .is_some_and(|intrinsic| intrinsic.requires_executor_lowering())
+            {
+                K::ExecutorIntrinsicCall
+            } else {
+                K::Call
+            }
+        }
         R::Aggregate { .. } => K::Aggregate,
         R::StructLiteral { .. } => K::StructLiteral,
         R::ObjectLiteral { .. } => K::ObjectLiteral,
@@ -367,7 +377,7 @@ pub fn statement_construct_inventory(statement: &crate::MirStmtKind) -> Vec<MirC
 }
 
 impl MirConstructKind {
-    pub const ALL: [Self; 61] = [
+    pub const ALL: [Self; 62] = [
         Self::PrepareFixedAssignment,
         Self::PreparedAssign,
         Self::Use,
@@ -376,6 +386,7 @@ impl MirConstructKind {
         Self::ShortCircuit,
         Self::Range,
         Self::Call,
+        Self::ExecutorIntrinsicCall,
         Self::Aggregate,
         Self::StructLiteral,
         Self::ObjectLiteral,
@@ -474,7 +485,8 @@ impl MirConstructKind {
             | K::ParFor
             | K::Spmd
             | K::Await => C::StructuredSuspendResume,
-            K::DistributedCreate
+            K::ExecutorIntrinsicCall
+            | K::DistributedCreate
             | K::CodistributedCreate
             | K::CodistributedBuild
             | K::DistributedLocalPart

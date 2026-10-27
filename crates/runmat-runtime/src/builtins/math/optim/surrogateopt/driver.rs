@@ -22,7 +22,7 @@ pub(super) fn run<'a, 'source: 'a>(
     display: OptimDisplay,
     c: &'a mut ScalarCooperation,
 ) -> impl std::future::Future<Output = BuiltinResult<Stop>> + 'a + use<'a, 'source> {
-    drive(controller, observers, display, mode::Ordinary, c)
+    selected_drive(controller, observers, display, mode::Ordinary, c)
 }
 pub(super) fn run_checkpoint<'a, 'source: 'a>(
     controller: &'a mut Controller<'source>,
@@ -33,7 +33,7 @@ pub(super) fn run_checkpoint<'a, 'source: 'a>(
     resume: bool,
     c: &'a mut ScalarCooperation,
 ) -> impl std::future::Future<Output = BuiltinResult<Stop>> + 'a + use<'a, 'source> {
-    drive(
+    selected_drive(
         controller,
         observers,
         display,
@@ -45,6 +45,25 @@ pub(super) fn run_checkpoint<'a, 'source: 'a>(
         c,
     )
 }
+
+fn selected_drive<'a, 'source: 'a, M: mode::Mode + 'a>(
+    controller: &'a mut Controller<'source>,
+    observers: &'a mut Observers,
+    display: OptimDisplay,
+    mode: M,
+    c: &'a mut ScalarCooperation,
+) -> crate::execution::RuntimeContinuationFuture<'a, Stop> {
+    let runtime = c.runtime().cloned();
+    // One numerical controller per solve/checkpoint invocation. Its large
+    // construction frame retires before polling callbacks; trials and probes
+    // do not allocate another controller or acquire another runtime authority.
+    crate::execution::rooted_continuation::admit_optional_hostcall_with_contextual_error(
+        runtime.as_ref(),
+        || drive(controller, observers, display, mode, c),
+    )
+    .unwrap_or_else(crate::execution::RuntimeContinuationFuture::rejected)
+}
+
 async fn drive<M: mode::Mode>(
     controller: &mut Controller<'_>,
     observers: &mut Observers,

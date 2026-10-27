@@ -81,12 +81,13 @@ async fn run(
 pub(super) async fn evaluate_trial(
     plan: &Plan,
     selected: Option<&selection::Selection>,
+    roots: &[GcHandle],
     point: &Value,
     policy: Policy,
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<Result<Evaluated, NumericUndefined>> {
     let inputs = policy.roots(std::iter::once(point), cooperation.runtime())?;
-    let uses = match selected {
+    let mut uses = match selected {
         Some(selection) => selection.uses(plan, policy, cooperation).await?,
         None => {
             let mut uses = HashMap::new();
@@ -99,6 +100,39 @@ pub(super) async fn evaluate_trial(
             uses
         }
     };
+    // Dependency counts belong to the immutable plan; output retention belongs
+    // to this request. A solver can request an intermediate alongside an
+    // ancestor objective without evaluating the graph twice or retiring that
+    // intermediate after its last internal edge.
+    let planned_roots = selected.map_or(plan.roots.as_slice(), |selection| {
+        selection.roots.as_slice()
+    });
+    if roots != planned_roots {
+        for root in planned_roots {
+            let count = uses
+                .get_mut(root)
+                .ok_or_else(|| policy.invalid("planned output root has no use count"))?;
+            *count = count
+                .checked_sub(1)
+                .ok_or_else(|| policy.invalid("planned output root-use count underflow"))?;
+            cooperation.completed(1).await?;
+        }
+        for root in roots {
+            if !plan.nodes.contains_key(root)
+                || selected.is_some_and(|selection| !selection.nodes.contains(root))
+            {
+                return Err(policy
+                    .invalid("requested output root is outside the selected expression graph"));
+            }
+            let count = uses.get_mut(root).ok_or_else(|| {
+                policy.invalid("requested output root has no planned dependency count")
+            })?;
+            *count = count
+                .checked_add(1)
+                .ok_or_else(|| policy.invalid("requested output root-use count overflow"))?;
+            cooperation.completed(1).await?;
+        }
+    }
     run_plan(
         plan,
         selected.map(|selection| &selection.nodes),

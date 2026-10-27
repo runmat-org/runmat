@@ -53,16 +53,57 @@ pub(in crate::builtins::math::optim::patternsearch) async fn run(
     evaluator.state.original_bounds = Some(bounds);
     result
 }
-async fn run_inner(
+fn run_inner<'a, 'e>(
+    base: &'a Point,
+    options: &'a Options,
+    input: &'a Input<'_>,
+    linear: &'a Linear,
+    augmented: Option<&'a Augmented>,
+    deadline: &'a Deadline,
+    bounds: &'a super::super::Bounds,
+    evaluator: &'a mut Evaluator<'e>,
+) -> impl std::future::Future<Output = BuiltinResult<Outcome>> + 'a + use<'a, 'e>
+where
+    'e: 'a,
+{
+    crate::execution::after_result(
+        async move {
+            let prepared = prepare(
+                base, options, input, linear, augmented, deadline, bounds, evaluator,
+            )
+            .await?;
+            Ok((prepared, evaluator))
+        },
+        move |(prepared, evaluator)| {
+            let Some(prepared) = prepared else {
+                return futures::future::Either::Left(std::future::ready(Ok(empty(
+                    Completion::Numerical,
+                ))));
+            };
+            match super::super::super::iteration::selected_search::admit(
+                evaluator.cooperation.runtime().cloned(),
+                move || {
+                    active::run(
+                        base, options, linear, augmented, deadline, bounds, evaluator, prepared,
+                    )
+                },
+            ) {
+                Ok(future) => futures::future::Either::Right(future),
+                Err(error) => futures::future::Either::Left(std::future::ready(Err(error))),
+            }
+        },
+    )
+}
+async fn prepare<'deadline>(
     base: &Point,
     options: &Options,
     input: &Input<'_>,
     linear: &Linear,
     augmented: Option<&Augmented>,
-    deadline: &Deadline,
+    deadline: &'deadline Deadline,
     bounds: &super::super::Bounds,
     evaluator: &mut Evaluator<'_>,
-) -> BuiltinResult<Outcome> {
+) -> BuiltinResult<Option<active::Prepared<'deadline>>> {
     let source = options
         .callback(Field::SearchFcn)
         .ok_or_else(|| invalid("missing genetic search generation"))?;
@@ -73,7 +114,7 @@ async fn run_inner(
         None => Some(base.f),
     };
     let Some(initial) = initial else {
-        return Ok(empty(Completion::Numerical));
+        return Ok(None);
     };
     let runtime = evaluator.cooperation.runtime().cloned();
     let token = runtime
@@ -96,23 +137,14 @@ async fn run_inner(
         evaluator.cooperation,
     )
     .await?;
-    // This one actual child replaces the formerly inline active coroutine.
-    // Preparation is finished before geometry/oracle/controller polling begins.
     let prepared = active::Prepared {
         scope,
         controls,
         timing,
         initial,
     };
-    super::super::super::iteration::selected_search::admit(
-        evaluator.cooperation.runtime().cloned(),
-        move || {
-            active::run(
-                base, options, linear, augmented, deadline, bounds, evaluator, prepared,
-            )
-        },
-    )?
-    .await
+
+    Ok(Some(prepared))
 }
 
 fn empty(completion: Completion) -> Outcome {

@@ -326,7 +326,7 @@ pub(in crate::session) fn install_bound_invoker(
                 let owner = selected_body.class_method_owner.clone();
                 let selected_product = selected_body.selected_class_product.clone();
                 let (runtime, selected_method) =
-                    runtime.take_selected_method_body_for(&binding)?;
+                    selected.prepare_selected_receiver_method(runtime, &binding)?;
                 let (runtime, super_body_owner) =
                     runtime.take_retained_super_body_for(&binding)?;
                 let super_body = if let Some(expected) = super_body_owner {
@@ -344,13 +344,7 @@ pub(in crate::session) fn install_bound_invoker(
                 } else {
                     false
                 };
-                let runtime = if let Some((facts, expected)) = selected_method {
-                    let selected_product =
-                        selected.validate_selected_receiver_method(&binding, &facts, &expected)?;
-                    selected_product
-                        .invocation_runtime(runtime)?
-                        .with_selected_object_class(facts)
-                } else if super_body {
+                let runtime = if selected_method || super_body {
                     runtime
                 } else {
                     runtime.without_selected_object_class()

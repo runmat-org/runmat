@@ -2353,12 +2353,11 @@ impl LoweringCtx {
                             span,
                         }));
                     }
-                    let requested = requested_outputs_for_lvalue_assignment(lvalue, expr);
                     return Ok(Some(HirStmtNode {
                         id: self.alloc_stmt_id(),
                         kind: HirStmtKind::Assign(
                             place,
-                            self.lower_statement_value_expr(expr, requested)?,
+                            self.lower_statement_value_expr(expr, RequestedOutputCount::One)?,
                             *suppressed,
                         ),
                         span,
@@ -2569,10 +2568,7 @@ impl LoweringCtx {
                 );
                 HirStmtKind::Assign(
                     place,
-                    self.lower_statement_value_expr(
-                        expr,
-                        requested_outputs_for_lvalue_assignment(lvalue, expr),
-                    )?,
+                    self.lower_statement_value_expr(expr, RequestedOutputCount::One)?,
                     *suppressed,
                 )
             }
@@ -4032,30 +4028,6 @@ fn lvalue_supports_deletion(lvalue: &runmat_parser::LValue) -> bool {
     matches!(lvalue, runmat_parser::LValue::Index(_, _))
 }
 
-fn requested_outputs_for_lvalue_assignment(
-    lvalue: &runmat_parser::LValue,
-    expr: &AstExpr,
-) -> RequestedOutputCount {
-    // Parenthesis indexing is one assignment destination.  Its cardinality
-    // constrains the shape of the one RHS value; it does not request multiple
-    // function outputs.  Comma-separated destinations (including brace
-    // targets) are represented separately and retain their output-cardinality
-    // selection below.
-    if matches!(lvalue, runmat_parser::LValue::Index(_, _)) {
-        return RequestedOutputCount::One;
-    }
-    if !matches!(expr, AstExpr::FuncCall(_, _, _) | AstExpr::Ident(_, _)) {
-        return RequestedOutputCount::One;
-    }
-    if lvalue_requires_current_nargout(lvalue) {
-        return RequestedOutputCount::CurrentFunctionNargout;
-    }
-    static_lvalue_assignment_count(lvalue)
-        .filter(|count| *count > 1)
-        .map(RequestedOutputCount::Exactly)
-        .unwrap_or(RequestedOutputCount::One)
-}
-
 fn sequence_target_from_place(place: HirPlace) -> Option<crate::HirSequenceTarget> {
     match place {
         HirPlace::Member(base, member) => Some(crate::HirSequenceTarget::Member { base, member }),
@@ -4066,84 +4038,6 @@ fn sequence_target_from_place(place: HirPlace) -> Option<crate::HirSequenceTarge
             Some(crate::HirSequenceTarget::CellContents { base, indexing })
         }
         HirPlace::Binding(_) | HirPlace::Index(_, _) => None,
-    }
-}
-
-fn lvalue_requires_current_nargout(lvalue: &runmat_parser::LValue) -> bool {
-    use runmat_parser::LValue;
-    let indices = match lvalue {
-        LValue::IndexCell(_, indices) => indices,
-        _ => return false,
-    };
-    indices.iter().any(expr_references_nargout)
-}
-
-fn expr_references_nargout(expr: &AstExpr) -> bool {
-    match expr {
-        AstExpr::Ident(name, _) => name == NARGOUT_BUILTIN_NAME,
-        AstExpr::Range(start, step, end, _) => {
-            expr_references_nargout(start)
-                || step.as_deref().is_some_and(expr_references_nargout)
-                || expr_references_nargout(end)
-        }
-        AstExpr::Binary(left, _, right, _) => {
-            expr_references_nargout(left) || expr_references_nargout(right)
-        }
-        AstExpr::Unary(_, inner, _) => expr_references_nargout(inner),
-        AstExpr::Tensor(rows, _) | AstExpr::Cell(rows, _) => rows
-            .iter()
-            .flat_map(|row| row.iter())
-            .any(expr_references_nargout),
-        AstExpr::Index(base, indices, _) | AstExpr::IndexCell(base, indices, _) => {
-            expr_references_nargout(base) || indices.iter().any(expr_references_nargout)
-        }
-        AstExpr::FuncCall(_, args, _)
-        | AstExpr::MethodCall(_, _, args, _)
-        | AstExpr::DottedInvoke(_, _, args, _) => args.iter().any(expr_references_nargout),
-        AstExpr::Member(base, _, _) => expr_references_nargout(base),
-        AstExpr::MemberDynamic(base, name, _) => {
-            expr_references_nargout(base) || expr_references_nargout(name)
-        }
-        AstExpr::AnonFunc { body, .. } => expr_references_nargout(body),
-        _ => false,
-    }
-}
-
-fn static_lvalue_assignment_count(lvalue: &runmat_parser::LValue) -> Option<usize> {
-    use runmat_parser::LValue;
-    match lvalue {
-        LValue::Index(_, indices) | LValue::IndexCell(_, indices) => {
-            indices.iter().try_fold(1usize, |acc, index| {
-                static_index_component_count(index).map(|count| acc.saturating_mul(count))
-            })
-        }
-        _ => None,
-    }
-}
-
-fn static_index_component_count(expr: &AstExpr) -> Option<usize> {
-    match expr {
-        AstExpr::Number(_, _)
-        | AstExpr::IntegerLiteral(_, _)
-        | AstExpr::Ident(_, _)
-        | AstExpr::EndKeyword(_) => Some(1),
-        AstExpr::Tensor(rows, _) => Some(rows.iter().map(Vec::len).sum()),
-        AstExpr::Range(start, step, end, _) => {
-            let start = static_numeric_literal(start)?;
-            let step = step
-                .as_deref()
-                .and_then(static_numeric_literal)
-                .unwrap_or_else(|| {
-                    if start <= static_numeric_literal(end).unwrap_or(start) {
-                        1.0
-                    } else {
-                        -1.0
-                    }
-                });
-            let end = static_numeric_literal(end)?;
-            static_range_count(start, step, end)
-        }
-        _ => None,
     }
 }
 
@@ -4184,16 +4078,6 @@ fn ast_integer_offset_literal(expr: &AstExpr) -> Option<isize> {
         return None;
     }
     Some(value as isize)
-}
-
-fn static_range_count(start: f64, step: f64, end: f64) -> Option<usize> {
-    if step == 0.0 || !start.is_finite() || !step.is_finite() || !end.is_finite() {
-        return None;
-    }
-    if (step > 0.0 && start > end) || (step < 0.0 && start < end) {
-        return Some(0);
-    }
-    Some(((end - start) / step).floor().max(0.0) as usize + 1)
 }
 
 fn assignment_index_context(deletion: bool) -> IndexResultContext {

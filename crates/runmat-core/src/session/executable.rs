@@ -786,6 +786,7 @@ impl RunMatSession {
         invocation: crate::executable::AdmittedProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
+        let _input = self.install_lifecycle_input();
         let mut result = self
             .invoke_executable_inner(unit, invocation, control)
             .await;
@@ -1081,12 +1082,23 @@ fn present_executable_control_failure(
     let RunError::Runtime(cause) = error else {
         return error;
     };
-    if runmat_runtime::runtime_error::error_has_control_cancellation_origin(&cause)
-        && original.stop_reason() == Some(runmat_execution::CancellationReason::Deadline)
+    if let Some(reason) = original
+        .stop_reason()
+        .filter(|_| runmat_runtime::runtime_error::error_has_control_cancellation_origin(&cause))
     {
+        let (identifier, message) = match reason {
+            runmat_execution::CancellationReason::Deadline => (
+                "RunMat:ExecutionDeadline",
+                "executable invocation deadline elapsed",
+            ),
+            _ => (
+                "RunMat:ExecutionCancelled",
+                "executable invocation was cancelled",
+            ),
+        };
         RunError::Runtime(
-            build_runtime_error("executable invocation deadline elapsed")
-                .with_identifier("RunMat:ExecutionDeadline")
+            build_runtime_error(message)
+                .with_identifier(identifier)
                 .with_failure_origin(
                     runmat_runtime::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation,
                 )

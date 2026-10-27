@@ -1,12 +1,10 @@
 use runmat_execution::value::{GraphCallableOwner, GraphNode, GraphNodeRef};
-use runmat_execution::{ExecutableSourceMapV2, ProgramCallable};
-use runmat_execution_artifact::{
-    GraphExecutionRequest, GraphInvocationRoots, ProgramExecutionResponse,
-};
+use runmat_execution::ExecutableSourceMapV2;
+use runmat_execution_artifact::{GraphExecutionRequest, ProgramExecutionResponse};
 use runmat_runtime::context::RuntimeForeignService;
 use runmat_runtime::execution::value_codec::GraphSourceIssuer;
 use runmat_runtime::execution::{RootedValueSequence, RootedValues};
-use runmat_value::{Value, ValueSequence};
+use runmat_value::Value;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -30,6 +28,9 @@ pub fn compiled_graph_execution_capabilities(
 #[path = "graph_request/selected.rs"]
 mod selected;
 use selected::SelectedWorkerGraph;
+#[path = "graph_request/invocation.rs"]
+mod invocation;
+use invocation::invoke_selected_root;
 #[path = "graph_request/restored.rs"]
 mod restored;
 pub use restored::RestoredSelectedGraph;
@@ -114,18 +115,61 @@ async fn invoke_selected_nested_bound(
     .await
 }
 
-async fn invoke_selected_code_bound(
-    selected: &selected::RetainedSelectedGraph,
+#[inline(always)]
+fn invoke_selected_code_bound<'a>(
+    selected: &'a selected::RetainedSelectedGraph,
     caller_runtime: runmat_runtime::context::RuntimeContext,
     binding: runmat_value::BoundFunctionBinding,
     arguments: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    selected_foreign: Option<&'a Rc<dyn RuntimeForeignService>>,
+) -> impl std::future::Future<Output = Result<RootedValueSequence, runmat_runtime::RuntimeError>> + 'a
+{
+    runmat_runtime::execution::after_result(
+        async move {
+            let (runtime, registry) =
+                prepare_selected_bound(selected, caller_runtime, &binding, selected_foreign)?;
+            Ok((runtime, registry, binding, arguments, lexical_environment))
+        },
+        move |(runtime, registry, binding, arguments, lexical_environment)| {
+            crate::interpreter::runner::invoke_selected_graph_bound_in_context(
+                runtime,
+                binding,
+                arguments,
+                requested_outputs,
+                registry,
+                lexical_environment,
+            )
+        },
+    )
+}
+
+// Source/class selection retires before the selected frame begins execution.
+// The successor retains the exact owned registry and invocation runtime.
+fn prepare_selected_bound(
+    selected: &selected::RetainedSelectedGraph,
+    caller_runtime: runmat_runtime::context::RuntimeContext,
+    binding: &runmat_value::BoundFunctionBinding,
     selected_foreign: Option<&Rc<dyn RuntimeForeignService>>,
-) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
+) -> Result<
+    (
+        runmat_runtime::context::RuntimeContext,
+        crate::FunctionRegistry,
+    ),
+    runmat_runtime::RuntimeError,
+> {
     let (caller_runtime, selected_method) =
-        caller_runtime.take_selected_method_body_for(&binding)?;
-    let owner = selected.owner_for_binding(&binding).map_err(graph_error)?;
+        caller_runtime.take_selected_method_body_for(binding)?;
+    let caller_runtime = if selected_method.is_some()
+        || caller_runtime.has_admitted_selected_method_frame_for(binding)
+        || caller_runtime.has_retained_super_body_for(binding)
+    {
+        caller_runtime
+    } else {
+        caller_runtime.without_selected_object_class()
+    };
+    let owner = selected.owner_for_binding(binding).map_err(graph_error)?;
     let unit = selected.unit(owner).map_err(graph_error)?;
     let mut view = unit
         .registry()
@@ -143,7 +187,7 @@ async fn invoke_selected_code_bound(
         .map_err(graph_error)?;
         runtime = product.invocation_runtime(runtime)?;
     }
-    if let Some((facts, method_owner)) = selected_method {
+    if let Some((facts, method_owner, dispatch)) = selected_method {
         let constructor = selected
             .owner_for_binding(facts.constructor())
             .map_err(graph_error)?;
@@ -162,8 +206,23 @@ async fn invoke_selected_code_bound(
             || method_owner.role != runmat_types::ClassMethodRole::Ordinary
             || method_owner.is_static
             || body.class_method_owner.as_ref() != Some(&method_owner)
-            || facts.method_binding(&method_owner.method).as_ref() != Some(&binding)
-            || !product.validates_receiver_method(&facts, &method_owner)
+            || match dispatch {
+                runmat_runtime::context::SelectedMethodDispatch::Virtual => {
+                    facts.method(&method_owner.method)
+                }
+                runmat_runtime::context::SelectedMethodDispatch::Superclass => {
+                    facts.method_by_owner(&method_owner)
+                }
+            }
+            .is_none_or(|method| method.binding.as_ref() != Some(binding) || method.is_abstract)
+            || !match dispatch {
+                runmat_runtime::context::SelectedMethodDispatch::Virtual => {
+                    product.validates_receiver_method(&facts, &method_owner)
+                }
+                runmat_runtime::context::SelectedMethodDispatch::Superclass => {
+                    product.validates_receiver_owned_method(&facts, &method_owner)
+                }
+            }
             || body.selected_source_owner.as_ref().is_none_or(|source| {
                 unit.selected_source_owner()
                     .is_none_or(|selected| !source.same_issuance(selected))
@@ -176,16 +235,10 @@ async fn invoke_selected_code_bound(
         runtime = product
             .invocation_runtime(runtime)?
             .with_selected_object_class(facts);
+        runtime =
+            runtime.with_admitted_selected_method_frame(method_owner, binding.clone(), dispatch)?;
     }
-    crate::interpreter::runner::invoke_selected_graph_bound_in_context(
-        runtime,
-        binding,
-        arguments,
-        requested_outputs,
-        view,
-        lexical_environment,
-    )
-    .await
+    Ok((runtime, view))
 }
 
 struct SelectedFailureSources {
@@ -419,83 +472,6 @@ async fn execute_graph_request_with_context_recorded(
         Err(response) => return response,
     };
     prepared::execute_prepared_graph_request(prepared).await
-}
-
-async fn invoke_selected_root(
-    request: &GraphExecutionRequest,
-    selected: &SelectedWorkerGraph,
-    runtime: &runmat_runtime::context::RuntimeContext,
-    values: RootedValues,
-) -> Result<RootedValueSequence, ProgramExecutionResponse> {
-    match &request.roots {
-        GraphInvocationRoots::Callable { target, .. } => {
-            let invocation = match callable_argument_layout(request.schema_version) {
-                Some(
-                    CallableArgumentLayout::SuppliedOnly | CallableArgumentLayout::LegacyFlattened,
-                ) => {
-                    // Older bound handles already carry captures in the
-                    // supplied prefix. Closures retain their own capture
-                    // generation under either transport schema.
-                    invoke_bound_root(request, selected, values, *target).await
-                }
-                None => Err(runmat_runtime::runtime_error::semantic_error(
-                    "WorkerGraph",
-                    "graph callable argument schema is unsupported",
-                )),
-            };
-            invocation.map_err(|error| graph_runtime_failure_response(error, runtime, selected))
-        }
-        GraphInvocationRoots::Builtin { name, .. } => {
-            if !runmat_builtins::builtin_name_is_known(&name.0) {
-                return Err(failure("graph builtin is absent from the worker catalog"));
-            }
-            let required = runmat_builtins::builtin_required_capabilities(&name.0);
-            if !recipe_supports_capabilities(&request.recipe, &required) {
-                return Err(failure(
-                    "graph recipe weakens builtin accelerator requirements",
-                ));
-            }
-            let sequence = runmat_runtime::call_builtin_sequence_async_with_outputs_in_context(
-                runtime,
-                &name.0,
-                values.values(),
-                usize::from(request.requested_outputs),
-            )
-            .await
-            .map_err(|error| graph_runtime_failure_response(error, runtime, selected))?;
-            Ok(sequence)
-        }
-        GraphInvocationRoots::ParallelRegion { region, .. } => {
-            let Some(primary) = selected.units.first() else {
-                return Err(failure("parallel graph has no primary selected unit"));
-            };
-            let callable = ProgramCallable::parallel_region(*region);
-            let value = super::execute_parallel_region_values(
-                &callable,
-                &request.context,
-                request.requested_outputs,
-                &request.recipe,
-                primary.bytecode(),
-                runtime,
-                values,
-            )
-            .await
-            .map_err(|error| match error {
-                super::ParallelRegionError::Contract(response) => response,
-                super::ParallelRegionError::Runtime(error) => {
-                    graph_runtime_failure_response(error, runtime, selected)
-                }
-            })?;
-            value.with_owned(|value| {
-                let sequence = ValueSequence::single(value).map_err(|error| {
-                    failure(format!("parallel graph result is invalid: {error}"))
-                })?;
-                RootedValueSequence::new(sequence).map_err(|error| {
-                    graph_runtime_failure_response(error.into_runtime_error(), runtime, selected)
-                })
-            })
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

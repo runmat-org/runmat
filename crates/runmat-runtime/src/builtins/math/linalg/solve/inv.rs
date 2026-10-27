@@ -1,6 +1,8 @@
 //! MATLAB-compatible `inv` builtin with GPU-aware fallbacks.
 
+#[cfg(test)]
 use nalgebra::DMatrix;
+#[cfg(test)]
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderInvOptions};
 #[cfg(test)]
@@ -246,122 +248,23 @@ fn inv_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
 }
 
 fn inv_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<Tensor> {
-    let output_dtype = if matrix.numeric_dtype() == NumericDType::F32 {
-        NumericDType::F32
-    } else {
-        NumericDType::F64
-    };
-    let (rows, cols) = matrix_dimensions(matrix.shape())?;
-    if rows == 0 && cols == 0 {
-        return Tensor::new_with_dtype(Vec::new(), matrix.shape().to_vec(), output_dtype)
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
-    }
-    if rows != cols {
-        return Err(builtin_error(format!(
-            "{NAME}: input must be a square matrix."
-        )));
-    }
-    if rows == 0 || cols == 0 {
-        return Tensor::new_with_dtype(Vec::new(), matrix.shape().to_vec(), output_dtype)
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
-    }
-    let values = tensor::tensor_values_f64_cow(matrix);
-    let dm = DMatrix::from_column_slice(rows, cols, &values);
-    let inverse = dm.try_inverse().ok_or_else(|| {
-        builtin_error(format!("{NAME}: matrix is singular to working precision."))
-    })?;
-    matrix_to_tensor(NAME, inverse, matrix.shape(), output_dtype)
+    crate::builtins::common::linalg::inverse::real(matrix).map_err(host_inverse_error)
 }
-
 fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
-    let output_dtype = if matrix.numeric_dtype() == NumericDType::F32 {
-        NumericDType::F32
-    } else {
-        NumericDType::F64
-    };
-    let (rows, cols) = matrix_dimensions(matrix.shape())?;
-    if rows == 0 && cols == 0 {
-        return ComplexTensor::from_f64_values_with_dtype(
-            Vec::new(),
-            matrix.shape().to_vec(),
-            output_dtype,
+    crate::builtins::common::linalg::inverse::complex(matrix).map_err(host_inverse_error)
+}
+fn host_inverse_error(
+    source: crate::builtins::common::linalg::inverse::InverseError,
+) -> RuntimeError {
+    build_runtime_error(format!("{NAME}: {source}"))
+        .with_builtin(NAME)
+        .with_identifier(
+            INV_ERROR_INVALID_INPUT
+                .identifier
+                .expect("inverse input error identifier"),
         )
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")));
-    }
-    if rows != cols {
-        return Err(builtin_error(format!(
-            "{NAME}: input must be a square matrix."
-        )));
-    }
-    if rows == 0 || cols == 0 {
-        return ComplexTensor::from_f64_values_with_dtype(
-            Vec::new(),
-            matrix.shape().to_vec(),
-            output_dtype,
-        )
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")));
-    }
-    let data: Vec<Complex64> = matrix
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| Complex64::new(re, im))
-        .collect();
-    let dm = DMatrix::from_column_slice(rows, cols, &data);
-    let inverse = dm.try_inverse().ok_or_else(|| {
-        builtin_error(format!("{NAME}: matrix is singular to working precision."))
-    })?;
-    matrix_to_complex_tensor(NAME, inverse, matrix.shape(), output_dtype)
-}
-
-fn matrix_dimensions(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
-    match shape.len() {
-        0 => Ok((1, 1)),
-        1 => {
-            if shape[0] == 1 {
-                Ok((1, 1))
-            } else {
-                Err(builtin_error(format!(
-                    "{NAME}: input must be a square matrix."
-                )))
-            }
-        }
-        _ => {
-            if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
-                Err(builtin_error(format!(
-                    "{NAME}: inputs must be 2-D matrices."
-                )))
-            } else {
-                Ok((shape[0], shape[1]))
-            }
-        }
-    }
-}
-
-fn matrix_to_tensor(
-    label: &str,
-    matrix: DMatrix<f64>,
-    shape: &[usize],
-    dtype: NumericDType,
-) -> BuiltinResult<Tensor> {
-    let rows = matrix.nrows();
-    let cols = matrix.ncols();
-    debug_assert_eq!(rows * cols, matrix.len());
-    Tensor::new_with_dtype(matrix.as_slice().to_vec(), shape.to_vec(), dtype)
-        .map_err(|e| builtin_error(format!("{label}: {e}")))
-}
-
-fn matrix_to_complex_tensor(
-    label: &str,
-    matrix: DMatrix<Complex64>,
-    shape: &[usize],
-    dtype: NumericDType,
-) -> BuiltinResult<ComplexTensor> {
-    let rows = matrix.nrows();
-    let cols = matrix.ncols();
-    let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    debug_assert_eq!(rows * cols, matrix.len());
-    ComplexTensor::from_f64_values_with_dtype(data, shape.to_vec(), dtype)
-        .map_err(|e| builtin_error(format!("{label}: {e}")))
+        .with_source(source)
+        .build()
 }
 
 /// Host helper used by acceleration providers that delegate `inv` back to the CPU path.

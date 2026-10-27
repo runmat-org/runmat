@@ -1,5 +1,5 @@
 //! Unchanged descriptor/integer metadata lifted from Runtime domains.rs.
-use crate::fea_contract::{errors::ERRORS, parameters::OUT_ANY};
+use crate::fea_contract::{descriptors::ERRORS, parameters::OUT_ANY};
 use crate::*;
 
 pub const TYPED_DOMAIN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {

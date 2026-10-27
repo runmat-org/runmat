@@ -51,6 +51,10 @@ mod capture;
 mod restored;
 
 impl DeferredGraphSnapshot for SelectedGraphSnapshot {
+    fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {
+        self.primary.revision()
+    }
+
     fn select_retained_worker_callable(
         &self,
         runtime: &runmat_runtime::context::RuntimeContext,
@@ -145,7 +149,7 @@ fn append_class_method_edges(
         GraphClassMethodDependency,
     >,
 ) -> Result<(), ValueCodecError> {
-    for method in facts.methods() {
+    for method in facts.owner_methods() {
         let Some(binding) = method.binding.as_ref() else {
             continue;
         };

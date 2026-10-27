@@ -2,6 +2,8 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 use std::sync::Arc;
+#[path = "tests/opaque.rs"]
+mod opaque;
 
 #[test]
 fn one_output_does_not_publish_unused_gradient_or_jacobian() {
@@ -96,6 +98,7 @@ fn lsqnonlin_bound_vector_reads_typed_integer_storage_exactly() {
 #[test]
 fn lsqnonlin_vector_residual_recovers_parameters() {
     lm_small_residual_requires_stationarity();
+    opaque::controls();
     // One original residual contract across FD, sparse CG and dense LM paths.
     for (supplied, sparse, algorithm, subproblem) in [
         (false, false, "trust-region-reflective", "factorization"),

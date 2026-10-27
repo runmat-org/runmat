@@ -8,6 +8,7 @@ use runmat_analysis_core::{
     SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape,
     SignalValue, TabulatedSignal, TabulatedSignalDomain, Velocity,
 };
+use runmat_types::physical::LengthUnit;
 
 fn exact_signal_evidence(sample_count: usize) -> SignalApproximationEvidence {
     SignalApproximationEvidence {
@@ -58,7 +59,9 @@ fn replace_with_force(model: &mut AnalysisModel, id: &str, region_id: &str, forc
     })];
     model.excitations = vec![ExcitationAction::Force(excitation(
         id,
-        ExcitationTarget::Region(RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(region_id))),
+        ExcitationTarget::Region(RegionTarget::authored(
+            runmat_meshing_core::fixtures::fixture_boundary_selection(region_id),
+        )),
         signal_id,
         ExcitationDistribution::PreserveResultant,
     ))];
@@ -97,7 +100,9 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
     }));
     let mut inlet = excitation(
         &excitation_id.0,
-        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_inlet"))),
+        ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("fluid_inlet"),
+        )),
         signal_id,
         ExcitationDistribution::TopologyField,
     );
@@ -128,9 +133,7 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset};
-use runmat_meshing_core::{
-    CanonicalMeshingContract, ElementOrder, StableDigest,
-};
+use runmat_meshing_core::{CanonicalMeshingContract, ElementOrder, StableDigest};
 use runmat_runtime::analysis::storage;
 use runmat_runtime::analysis::{
     analysis_plan_study_op, analysis_plan_study_sweep_op, analysis_results_by_run_id_op,
@@ -371,7 +374,9 @@ fn contract_acoustic_model(model_id: &str) -> AnalysisModel {
     })];
     model.excitations = vec![ExcitationAction::AcousticPressure(excitation(
         id,
-        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip"))),
+        ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("tip"),
+        )),
         signal_id,
         ExcitationDistribution::PreserveResultant,
     ))];
@@ -465,7 +470,9 @@ fn material_conflict_contract_model() -> AnalysisModel {
         .youngs_modulus_pa = runmat_types::physical::YoungsModulus::new(3.0e9);
     model.materials.push(polymer);
     model.material_assignments = vec![MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span")),
+        target: runmat_analysis_core::PropertyRegionTarget::beam(
+            runmat_meshing_core::fixtures::fixture_edge("beam_span"),
+        ),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Inferred,
@@ -1323,7 +1330,9 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
         runmat_analysis_core::FluidConstraint {
             constraint_id: "bc_cfd_inlet".into(),
             kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("fluid_inlet")),
+                target: RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face(
+                    "fluid_inlet",
+                )),
                 value: runmat_analysis_core::PrescribedValue::Constant(velocity),
             },
         },

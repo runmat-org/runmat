@@ -1,4 +1,4 @@
-use crate::fea_contract::{errors::ERRORS, parameters::OUT_ANY};
+use crate::fea_contract::{descriptors::ERRORS, parameters::OUT_ANY};
 use crate::*;
 
 const DIRECTION_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

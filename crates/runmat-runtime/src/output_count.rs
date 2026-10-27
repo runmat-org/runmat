@@ -156,7 +156,8 @@ mod tests {
                 validate_bounded_outputs(descriptor, error, "solver").expect("valid prefix");
             }
             let _outputs = push_output_count(Some(maximum + 1)).expect("output-count scope");
-            assert!(validate_bounded_outputs(descriptor, error, "solver").is_err());
+            let rejected = validate_bounded_outputs(descriptor, error, "solver").unwrap_err();
+            assert_eq!(rejected.gpu_gather_retry, crate::GpuGatherRetry::Never);
             // ByRequestedOutputCount owners are not globally reinterpreted.
             validate_fixed_outputs(descriptor, error, "solver")
                 .expect("fixed-only wrapper unchanged");

@@ -54,16 +54,26 @@ pub(super) fn map_host_power(
     use crate::builtins::common::matrix::MatrixPowerError;
 
     let message = error.to_string();
-    match error {
+    let descriptor = match &error {
         MatrixPowerEvaluationError::InvalidExponent(_)
         | MatrixPowerEvaluationError::IntegerArithmetic(_)
         | MatrixPowerEvaluationError::Matrix(MatrixPowerError::NegativeExponent) => {
-            invalid_argument(message)
+            &MPOWER_ERROR_INVALID_ARGUMENT
         }
         MatrixPowerEvaluationError::Matrix(MatrixPowerError::IdentitySizeOverflow)
         | MatrixPowerEvaluationError::Matrix(MatrixPowerError::StorageClassChanged { .. })
-        | MatrixPowerEvaluationError::Matrix(MatrixPowerError::Storage(_)) => internal(message),
+        | MatrixPowerEvaluationError::Matrix(MatrixPowerError::Storage(_)) => {
+            &MPOWER_ERROR_INTERNAL
+        }
         MatrixPowerEvaluationError::Matrix(MatrixPowerError::NonSquare { .. })
-        | MatrixPowerEvaluationError::UnsupportedOperands(_) => invalid_input(message),
+        | MatrixPowerEvaluationError::Matrix(MatrixPowerError::Inverse(_))
+        | MatrixPowerEvaluationError::UnsupportedOperands(_) => &MPOWER_ERROR_INVALID_INPUT,
+    };
+    let mut builder = build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_source(error);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
     }
+    builder.build()
 }

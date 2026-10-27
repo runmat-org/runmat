@@ -1,6 +1,6 @@
 //! Exact original-model terminal proofs for zero, nonnegative and SOC blocks.
 use super::super::ScalarCooperation;
-use super::{dimension, recovery::certify, Model};
+use super::{dimension, Model};
 use crate::BuiltinResult;
 use clarabel::solver::SupportedConeT;
 use num_rational::BigRational;
@@ -52,10 +52,17 @@ where
     if !model.valid_layout() || z.len() != model.b.len() {
         return Ok(false);
     }
-    certify(
+    // An exact row contradiction is a proposal, not source authority. It
+    // passes the same full-model and original-domain checks as backend duals.
+    let initial = match super::linear::LinearCertificates::borrow(model, cooperation).await? {
+        Some(certificates) => certificates.infeasibility_certificate(cooperation).await?,
+        None => None,
+    };
+    Ok(super::recovery::checked_owned(
         z,
         model.identity,
         cooperation,
+        initial,
         async |candidate: &[BigRational], cooperation: &mut ScalarCooperation| {
             let mut offset = 0;
             for cone in model.cones {
@@ -96,7 +103,8 @@ where
             domain(candidate, cooperation).await
         },
     )
-    .await
+    .await?
+    .is_some())
 }
 
 pub(crate) async fn descent_ray(
@@ -140,6 +148,7 @@ where
         direction,
         model.identity,
         cooperation,
+        None,
         async |candidate: &[BigRational], cooperation: &mut ScalarCooperation| {
             if !rational_descent_ray(model, candidate, cooperation).await? {
                 return Ok(false);
@@ -236,6 +245,7 @@ where
         point,
         model.identity,
         cooperation,
+        None,
         async |candidate: &[BigRational], cooperation: &mut ScalarCooperation| {
             if !domain(candidate, cooperation).await? {
                 return Ok(false);

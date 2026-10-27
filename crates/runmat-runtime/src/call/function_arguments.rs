@@ -300,6 +300,35 @@ impl RootedFunctionArguments {
                 .expect("supplied suffix is in bounds"),
         )
     }
+
+    /// Lexical captures occupy closure-local slots. A bound method's retained
+    /// receiver is instead the first ordinary function input.
+    pub fn lexical_capture_count(&self) -> usize {
+        match self.callable.as_ref().map(RetainedCallableTarget::value) {
+            Some(Value::Closure(closure))
+                if closure.source_role == runmat_types::FunctionSourceRole::Method =>
+            {
+                0
+            }
+            _ => self.capture_count(),
+        }
+    }
+
+    pub fn function_inputs(&self) -> FunctionArgumentView<'_> {
+        self.view()
+            .range(self.routing().len() + self.lexical_capture_count()..)
+            .expect("function input suffix is in bounds")
+    }
+
+    /// Project the final ABI inputs without flattening or copying a bound
+    /// receiver out of its immutable callable generation.
+    pub fn into_function_inputs(self) -> BuiltinArguments {
+        let start = self.routing().len() + self.lexical_capture_count();
+        BuiltinArguments::new(
+            self.into_range(start..)
+                .expect("function input suffix is in bounds"),
+        )
+    }
     pub fn into_range(
         mut self,
         range: impl std::ops::RangeBounds<usize>,

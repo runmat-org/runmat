@@ -25,6 +25,8 @@ use crate::{
 use runmat_value::Value;
 use std::path::PathBuf;
 
+mod restore;
+
 pub(in super::super) async fn start(
     path: String,
     raw: Raw,
@@ -100,56 +102,27 @@ pub(in super::super) async fn start(
     publication::finalize(&controller, stop, &initial_rng, c).await
 }
 
-pub(in super::super) async fn resume(
+#[inline(always)]
+pub(in super::super) fn resume(
     path_value: Value,
     overrides: Value,
     c: &mut ScalarCooperation,
+) -> impl std::future::Future<Output = BuiltinResult<RootedValueSequence>> + '_ {
+    crate::execution::after_result(restore::read(path_value, overrides, c), |(ready, c)| {
+        run_restored(ready, c)
+    })
+}
+
+async fn run_restored(
+    ready: restore::Restoration,
+    c: &mut ScalarCooperation,
 ) -> BuiltinResult<RootedValueSequence> {
-    let _ = c
-        .runtime()
-        .ok_or_else(SolverTiming::unavailable)?
-        .service_ports()
-        .timing()?;
-    let path_text = crate::builtins::common::validation::value_text_scalar_string(&path_value)
-        .filter(|path| !path.is_empty())
-        .ok_or_else(|| error("checkpoint path must be nonempty scalar text"))?;
-    let read_path = session::path(PathBuf::from(path_text), c)?;
-    let bytes = {
-        let (runtime, budget) = c.runtime_budget();
-        match (runtime, budget) {
-            (Some(runtime), Some(budget)) => read_path.read(runtime, budget).await?,
-            _ => {
-                return Err(error(
-                    "checkpoint reading lacks original cooperation authority",
-                ))
-            }
-        }
-    };
-    let runtime = c
-        .runtime()
-        .cloned()
-        .ok_or_else(|| error("checkpoint restoration requires its current original runtime"))?;
-    let environment = runtime
-        .program_revision()
-        .ok_or_else(|| error("checkpoint restoration lacks its current program environment"))?
-        .environment();
-    let saved = {
-        let (runtime, budget) = c.runtime_budget();
-        let (Some(runtime), Some(budget)) = (runtime, budget) else {
-            return Err(error(
-                "checkpoint decoding lacks original cooperation authority",
-            ));
-        };
-        let mut cooperation = super::json::Cooperation::new(runtime, budget)?;
-        record::Saved::decode(bytes, &environment, &mut cooperation)
-            .await
-            .map_err(super::codec_error)?
-    };
-    if saved.version != record::VERSION || saved.environment != environment {
-        return Err(error(
-            "checkpoint version or execution environment is incompatible",
-        ));
-    }
+    let restore::Restoration {
+        read_path,
+        runtime,
+        saved,
+        overrides,
+    } = ready;
     let overlay = saved.options.overlay(overrides, c).await?;
     let model = saved.geometry.into_input()?;
     let variables = model.lower.len();

@@ -7,10 +7,12 @@ subject to all per-definition checks. A separate test rejects conflicting
 duplicate metadata. This avoids the linked-runtime/TLS ambiguity of unit tests
 that dispatch through another runtime library.
 
-The exhaustive expected sets remain handwritten assertions. They are not
-generated from live declarations, filtered to passing names, or accepted merely
-because a prior run failed. The following additions were checked against source
-at parent revision `4383723333`.
+The exhaustive expected sets are fixed reviewed literals: the original inline
+baseline plus the sorted cutover receipts in `reviewed/`. Tests never compute
+their expectations from the live catalog or filter unexpected names out.
+Differences require source-owner review, not automatic acceptance of failed
+output. The original additions below were checked against source at parent
+revision `4383723333`.
 
 ## Extension expectation provenance
 
@@ -65,3 +67,49 @@ No production behavior changes. Source formatting and diff checks do not qualify
 these tests: execute the metadata projection, settled capabilities, integer
 audit dispositions and exhaustive extension tests on the integrated revision.
 Unrelated generated-document parity tests are not repaired by this packet.
+
+## RM-1290 integrated inventory review
+
+The 0.7.0 integration contains declarations added after the inline baseline.
+The fixed receipts contain 576 audit names and 205 builtin/extension pairs
+(71 distinct extension IDs). They supplement the baseline; they do not replace
+the raw registration, duplicate-consistency, audit well-formedness, extension
+error-contract, compatibility-gate or generated-product tests. No production
+contract is changed to make these expectations pass.
+
+Audit additions were reconciled to literal catalog identities and their shared
+declaration owners: 534 typed FEA members, 22 geometry members, nine GPUDevice
+members, three FEA/geometry method bindings, and eight meshing accessors. FEA
+closed-vocabulary/no-argument and structural-object contracts live in
+`src/fea_contract/{integer,policy_types/integer,policy_choices/integer,study_types/integer}.rs`;
+numeric physical values and exact counts retain their separate positive
+integer capabilities rather than being classified inapplicable. Geometry and
+meshing entries use their catalog-owned method/accessor contracts. GPUDevice
+members take an issued handle, not an integer resource ID; their audit has no
+alias target. The incoming FEA surface replaces the old `fea.authorStudy`,
+`fea.plot` and `fea.step` audit spellings with the typed study/result and method
+surface; those three obsolete baseline audit names are removed, not filtered
+from live discovery. This review does not requalify FEA algorithms.
+
+Extension receipts were checked against the declarations under
+`src/catalog/entries/math/optim/` and `math/ode/odeset/`: GA's shared descriptor
+and creator/crossover/mutation/scaling/selection/plot entry owners; fmincon,
+fminimax, fgoalattain, fseminf, fminunc, linprog, intlinprog, lsqlin, lsqnonneg,
+quadprog, patternsearch, particleswarm, simulannealbnd and surrogateopt; and
+odeset's exact/resident option payload declarations. OptimizationProblem.solve
+and EquationProblem.solve retain the extension unions declared by their actual
+selected-solver entry owners. Integer structural controls, exact numeric
+crossings, single-to-double forms, resident gathers, sparse solver forms and
+the numerical-failure exit status remain distinct IDs. This is an inventory
+receipt, not a new claim of MATLAB parity or numerical acceptance.
+
+The retired `gpudevice-provider-info` facade gate is not retained as a live
+extension expectation. The device contract exposes issued physical lifecycle
+handles and retains only its separately declared logical-selector extension;
+the device catalog tests check that retirement explicitly.
+
+The fixtures are fixed embedded test inputs and require no filesystem service.
+Keep them sorted and duplicate-free. Tests never rewrite them; updates require
+source-owner review. Their
+first matching execution is recorded in the RM-1290 qualification ledger; a
+source review or passing formatter alone is not acceptance.

@@ -173,7 +173,9 @@ pub async fn solve_with<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperati
     operations: &mut O,
 ) -> Result<PcgOutcome, KrylovFailure<O::Error>> {
     if mode.flexible && flexible_previous.len() != rhs.len() {
-        return Err(KrylovFailure::Invalid("flexible PCG previous-residual extent differs from b"));
+        return Err(KrylovFailure::Invalid(
+            "flexible PCG previous-residual extent differs from b",
+        ));
     }
     PcgGeometry::checked(
         rhs.len(),
@@ -194,10 +196,8 @@ pub async fn solve_with<'a, T: Copy + PartialEq, A: Arithmetic<T>, O: PcgOperati
     let mut state = state::RecurrenceState::<T, A>::new(
         rhs,
         initial,
-        parameters.tolerance,
-        parameters.maximum_iterations,
+        parameters,
         work,
-        parameters.preconditioners,
         mode.flexible.then_some(flexible_previous),
         operations,
     )

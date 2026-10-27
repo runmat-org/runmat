@@ -6,6 +6,39 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::HostState;
 
+pub(super) fn input_callsite(
+    state: &HostState,
+    arguments: &[MirDottedInvokeArgument],
+) -> NativeExecutorResult<Option<runmat_runtime::callsite::CallsiteInfo>> {
+    if arguments
+        .iter()
+        .any(|argument| !matches!(argument, MirDottedInvokeArgument::Call(_)))
+    {
+        return Ok(None);
+    }
+    let source = state
+        .runtime
+        .program_source_id(state.function.source)
+        .ok_or_else(|| {
+            NativeExecutorError::Host(
+                "native argument source is absent from invocation binding".into(),
+            )
+        })?;
+    runmat_runtime::callsite::CallsiteInfo::from_projected_in_context(
+        Some(source),
+        arguments,
+        &state.runtime,
+        |argument| match argument {
+            MirDottedInvokeArgument::Call(region) => region.span,
+            MirDottedInvokeArgument::Colon | MirDottedInvokeArgument::Contextual(_) => {
+                unreachable!("non-call selectors were rejected before metadata projection")
+            }
+        },
+    )
+    .map(Some)
+    .map_err(Into::into)
+}
+
 pub(super) fn materialize(
     state: &mut HostState,
     arguments: &[MirDottedInvokeArgument],

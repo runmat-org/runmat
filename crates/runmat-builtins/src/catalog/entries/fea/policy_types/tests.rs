@@ -28,7 +28,7 @@ fn frame_reference_and_dof_bindings_have_unique_complete_canonical_owners() {
                 .iter()
                 .map(|error| (error.code, error.identifier, error.when, error.message))
                 .collect::<Vec<_>>(),
-            crate::fea_contract::errors::ERRORS
+            crate::fea_contract::descriptors::ERRORS
                 .iter()
                 .map(|error| (error.code, error.identifier, error.when, error.message))
                 .collect::<Vec<_>>()

@@ -1,21 +1,55 @@
 //! Recognize once on the original Plan, then compile only selected affine
 //! residual/constraint ancestry while retaining the full original layout/DAG.
 use super::*;
-pub(in crate::builtins::math::optim::optimmodel::lowering) async fn compile(
+use futures::{future::Either, FutureExt};
+use std::future::Future;
+
+enum ModelSelection {
+    Nonlinear(Option<LeastSquares>),
+    AffineOrQuadratic,
+    SquaredResiduals(LeastSquares),
+}
+
+pub(in crate::builtins::math::optim::optimmodel::lowering) fn compile<'a>(
+    formulation: &'a formulation::Formulation,
+    selected_solver: Option<runmat_builtins::OptimSolver>,
+    policy: Policy,
+    c: &'a mut ScalarCooperation,
+) -> impl Future<Output = Lowered<Prepared>> + 'a {
+    crate::execution::after_result(
+        async move {
+            let (source, layout, selection) =
+                prepare_selection(formulation, selected_solver, policy, c).await?;
+            Ok((source, layout, selection, c))
+        },
+        move |(source, layout, selection, c)| match selection {
+            ModelSelection::Nonlinear(squares) => Either::Left(
+                nonlinear::Model::prepare(source, layout, formulation, squares, policy, c)
+                    .map(|result| result.map(|model| Ok(Prepared::Nonlinear(model)))),
+            ),
+            ModelSelection::AffineOrQuadratic => Either::Right(Either::Left(
+                super::super::quadratic::prepare_or_affine(source, layout, formulation, policy, c),
+            )),
+            ModelSelection::SquaredResiduals(squared) => Either::Right(Either::Right(
+                compile_squares(source, layout, squared, formulation, policy, c),
+            )),
+        },
+    )
+}
+
+async fn prepare_selection(
     formulation: &formulation::Formulation,
     selected_solver: Option<runmat_builtins::OptimSolver>,
     policy: Policy,
     c: &mut ScalarCooperation,
-) -> Lowered<Prepared> {
+) -> BuiltinResult<(evaluation::Plan, layout::Layout, ModelSelection)> {
     let source = evaluation::Plan::prepare_roots(&formulation.roots, policy, c).await?;
     let layout = layout::Layout::prepare(&source, policy, c).await?;
     if matches!(
         selected_solver,
         Some(runmat_builtins::OptimSolver::Fmincon | runmat_builtins::OptimSolver::Fminunc)
     ) {
-        return Ok(Ok(Prepared::Nonlinear(
-            nonlinear::Model::prepare(source, layout, formulation, None, policy, c).await?,
-        )));
+        return Ok((source, layout, ModelSelection::Nonlinear(None)));
     }
     let classified = match &formulation.objective {
         Some(objective) => classify(&source, objective.root, policy, c).await?,
@@ -28,14 +62,7 @@ pub(in crate::builtins::math::optim::optimmodel::lowering) async fn compile(
                     "lsqnonlin requires an original positive squared-residual objective",
                 ));
             }
-            return super::super::quadratic::prepare_or_affine(
-                source,
-                layout,
-                formulation,
-                policy,
-                c,
-            )
-            .await;
+            return Ok((source, layout, ModelSelection::AffineOrQuadratic));
         }
         Classification::Unrepresentable => return Err(super::super::run::unverified(
             policy,
@@ -44,11 +71,19 @@ pub(in crate::builtins::math::optim::optimmodel::lowering) async fn compile(
         Classification::LeastSquares(value) => value,
     };
     if selected_solver == Some(runmat_builtins::OptimSolver::Lsqnonlin) {
-        return Ok(Ok(Prepared::Nonlinear(
-            nonlinear::Model::prepare(source, layout, formulation, Some(squared), policy, c)
-                .await?,
-        )));
+        return Ok((source, layout, ModelSelection::Nonlinear(Some(squared))));
     }
+    Ok((source, layout, ModelSelection::SquaredResiduals(squared)))
+}
+
+async fn compile_squares(
+    source: evaluation::Plan,
+    layout: layout::Layout,
+    squared: LeastSquares,
+    formulation: &formulation::Formulation,
+    policy: Policy,
+    c: &mut ScalarCooperation,
+) -> Lowered<Prepared> {
     let mut roots = Vec::new();
     for term in &squared.terms {
         roots.try_reserve(1).map_err(|e| policy.reserve(e))?;

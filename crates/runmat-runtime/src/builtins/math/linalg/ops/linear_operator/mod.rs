@@ -11,7 +11,9 @@ mod symmetry;
 pub(crate) use converted::ProductOrientation;
 pub(in crate::builtins::math::linalg) use converted::SourceScalar;
 pub(crate) use cooperative::CooperativeOperatorError;
-pub(in crate::builtins::math::linalg) use cooperative::OperatorWork;
+pub(in crate::builtins::math::linalg) use cooperative::{
+    BorrowedWork, OperatorWork, ProductWork, UnmanagedWork,
+};
 pub(in crate::builtins::math::linalg) mod scalar;
 
 pub(in crate::builtins::math::linalg) use dense::validate_shape as matrix_dimensions;
@@ -70,6 +72,42 @@ impl<'a> LinearOperator<'a> {
             )),
             _ => Self::borrow_with_context(value, context)
                 .map_err(CooperativeOperatorError::Operator),
+        }
+    }
+
+    /// Borrow the same canonical views under a caller's captured work budget.
+    pub(crate) async fn borrow_with_budget(
+        value: &'a Value,
+        context: Option<&RuntimeContext>,
+        budget: Option<&mut crate::execution::CpuCooperationBudget>,
+    ) -> Result<Self, CooperativeOperatorError> {
+        if let Value::SparseTensor(sparse) = value {
+            return SparseLinearOperator::borrow_with_budget(sparse, context, budget)
+                .await
+                .map(Self::from_sparse);
+        }
+        match (context, budget) {
+            (Some(context), Some(budget)) => {
+                if !budget
+                    .cancellation_token()
+                    .same_generation(&context.cancellation())
+                {
+                    return Err(
+                        crate::context::host_allocation::HostAllocationError::StaleAuthority.into(),
+                    );
+                }
+                budget
+                    .checkpoint(0)
+                    .await
+                    .map_err(CooperativeOperatorError::Execution)?;
+                Self::borrow_with_context(value, context)
+                    .map_err(CooperativeOperatorError::Operator)
+            }
+            (None, None) => {
+                HostAllocationReceipt::policy(None)?;
+                Self::borrow_unbounded(value).map_err(CooperativeOperatorError::Operator)
+            }
+            _ => Err(crate::context::host_allocation::HostAllocationError::StaleAuthority.into()),
         }
     }
 

@@ -34,9 +34,20 @@ pub enum VmFusionHostOperation {
 
 #[derive(Clone)]
 pub struct VmFusionHostRoute {
+    backing: Rc<RouteBacking>,
+}
+
+// This proof travels in every invocation context, including unfused calls.
+// Keep the carrier pointer-sized; facts and progress belong to its region.
+const _: () =
+    assert!(std::mem::size_of::<VmFusionHostRoute>() == std::mem::size_of::<Rc<RouteBacking>>());
+
+// Immutable admission facts and mutable progress have one existing region
+// owner. Cloning a route does not copy its registration/revocation metadata.
+struct RouteBacking {
     origin: VmFusionHostOrigin,
-    expected_operations: Rc<[VmFusionHostOperation]>,
-    state: Rc<RefCell<RouteState>>,
+    expected_operations: Box<[VmFusionHostOperation]>,
+    state: RefCell<RouteState>,
 }
 
 #[derive(Clone)]
@@ -68,39 +79,42 @@ impl VmFusionHostRoute {
             return None;
         }
         Some(Self {
-            state: Rc::new(RefCell::new(RouteState {
-                pending: None,
-                invalid: false,
-                next_pc: origin.registration.span_start(),
-                terminal_confirmed: false,
-                numerical_outputs: None,
-                retirement_active: false,
-            })),
-            origin,
-            expected_operations: expected_operations.into(),
+            backing: Rc::new(RouteBacking {
+                state: RefCell::new(RouteState {
+                    pending: None,
+                    invalid: false,
+                    next_pc: origin.registration.span_start(),
+                    terminal_confirmed: false,
+                    numerical_outputs: None,
+                    retirement_active: false,
+                }),
+                origin,
+                expected_operations: expected_operations.into_boxed_slice(),
+            }),
         })
     }
 
     pub fn contains_pc(&self, pc: usize) -> bool {
-        self.origin.registration.contains_pc(pc)
+        self.backing.origin.registration.contains_pc(pc)
     }
 
     pub fn current_for(&self, runtime: &RuntimeContext) -> bool {
         let same_placement_owner = self
+            .backing
             .origin
             .placement_owner
             .upgrade()
             .zip(runtime.service_ports().placement())
             .is_some_and(|(selected, current)| Rc::ptr_eq(&selected, current));
-        runtime.local_identity() == self.origin.owner
-            && runtime.program_revision() == self.origin.program.as_deref()
+        runtime.local_identity() == self.backing.origin.owner
+            && runtime.program_revision() == self.backing.origin.program.as_deref()
             && runtime
                 .cancellation()
-                .same_generation(&self.origin.cancellation)
+                .same_generation(&self.backing.origin.cancellation)
             && same_placement_owner
             && !runtime.is_cancelled()
-            && self.origin.issuer_live.upgrade().is_some()
-            && self.origin.generation.is_current()
+            && self.backing.origin.issuer_live.upgrade().is_some()
+            && self.backing.origin.generation.is_current()
     }
 
     pub fn install_numerical_outputs(
@@ -111,9 +125,9 @@ impl VmFusionHostRoute {
         if !self.current_for(runtime) {
             return Err(super::vm_fusion_host_outputs::missing_output(runtime));
         }
-        let mut state = self.state.borrow_mut();
+        let mut state = self.backing.state.borrow_mut();
         if state.pending.is_some()
-            || state.next_pc != self.origin.registration.span_start()
+            || state.next_pc != self.backing.origin.registration.span_start()
             || state.numerical_outputs.is_some()
             || state.retirement_active
         {
@@ -170,13 +184,13 @@ impl VmFusionHostRoute {
             return Err(super::vm_fusion_host_outputs::missing_output(runtime));
         }
         let mut outputs = {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.backing.state.borrow_mut();
             if state.invalid
                 || state.retirement_active
                 || !state
                     .pending
                     .is_some_and(|(_, expected, _)| self.instruction_matches(expected, instruction))
-                || !self.expected_operations.contains(&operation)
+                || !self.backing.expected_operations.contains(&operation)
             {
                 state.invalid = true;
                 return Err(super::vm_fusion_host_outputs::invalid_output());
@@ -201,7 +215,7 @@ impl VmFusionHostRoute {
                 outputs.take_intrinsic(runtime, instruction, operator)
             }
         };
-        let mut state = self.state.borrow_mut();
+        let mut state = self.backing.state.borrow_mut();
         state.retirement_active = false;
         if result.is_err() {
             state.invalid = true;
@@ -258,7 +272,7 @@ impl VmFusionHostRoute {
             return Err(super::vm_fusion_host_outputs::missing_output(runtime));
         }
         let (mut outputs, pending_instruction) = {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.backing.state.borrow_mut();
             if state.invalid
                 || state.retirement_active
                 || !state.pending.is_some_and(|(_, expected, _)| {
@@ -289,7 +303,7 @@ impl VmFusionHostRoute {
             (outputs, pending_instruction)
         };
         let result = retire(&mut outputs, pending_instruction);
-        let mut state = self.state.borrow_mut();
+        let mut state = self.backing.state.borrow_mut();
         state.retirement_active = false;
         if result.is_err() {
             state.invalid = true;
@@ -299,7 +313,7 @@ impl VmFusionHostRoute {
     }
 
     pub fn begin_instruction(&self, pc: usize, instruction: VmFusionHostInstruction) {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.backing.state.borrow_mut();
         if !self.contains_pc(pc)
             || state.pending.is_some()
             || state.next_pc != pc
@@ -319,14 +333,14 @@ impl VmFusionHostRoute {
     }
 
     pub fn instruction_exit(&self, pc: usize) {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.backing.state.borrow_mut();
         if state.retirement_active {
             state.invalid = true;
             return;
         }
         match state.pending.take() {
             Some((pending, instruction, true)) if pending == pc => {
-                if pc == self.origin.registration.span_end() {
+                if pc == self.backing.origin.registration.span_end() {
                     if !matches!(
                         instruction,
                         VmFusionHostInstruction::Structural | VmFusionHostInstruction::Unproved
@@ -346,17 +360,17 @@ impl VmFusionHostRoute {
     }
 
     pub fn invalidate(&self) {
-        self.state.borrow_mut().invalid = true;
+        self.backing.state.borrow_mut().invalid = true;
     }
 
     pub fn complete(&self) -> bool {
-        let state = self.state.borrow();
+        let state = self.backing.state.borrow();
         !state.invalid
             && !state.retirement_active
             && state.pending.is_none()
             && state.terminal_confirmed
-            && self.origin.registration.span_end().checked_add(1) == Some(state.next_pc)
-            && self.origin.generation.is_current()
+            && self.backing.origin.registration.span_end().checked_add(1) == Some(state.next_pc)
+            && self.backing.origin.generation.is_current()
             && state
                 .numerical_outputs
                 .as_ref()
@@ -367,7 +381,7 @@ impl VmFusionHostRoute {
         if !self.current_for(runtime) {
             return false;
         }
-        let state = self.state.borrow();
+        let state = self.backing.state.borrow();
         !state.invalid
             && state.pending.is_some_and(|(_, instruction, _)| {
                 matches!(
@@ -388,13 +402,14 @@ impl VmFusionHostRoute {
         if !self.current_for(runtime) {
             return false;
         }
-        let state = self.state.borrow();
+        let state = self.backing.state.borrow();
         !state.invalid
             && state
                 .pending
                 .is_some_and(|(_, expected, _)| self.instruction_matches(expected, instruction))
             && runtime.vm_fusion_selected_binding().is_some_and(|binding| {
-                self.expected_operations
+                self.backing
+                    .expected_operations
                     .contains(&VmFusionHostOperation::Builtin(binding))
             })
     }
@@ -406,10 +421,11 @@ impl VmFusionHostRoute {
     ) {
         let valid = self.current_for(runtime)
             && runtime.vm_fusion_selected_binding().is_some_and(|binding| {
-                self.expected_operations
+                self.backing
+                    .expected_operations
                     .contains(&VmFusionHostOperation::Builtin(binding))
             });
-        let mut state = self.state.borrow_mut();
+        let mut state = self.backing.state.borrow_mut();
         match state.pending.as_mut() {
             Some((_, expected, confirmed))
                 if valid && self.instruction_matches(*expected, instruction) =>
@@ -440,6 +456,7 @@ impl VmFusionHostRoute {
                     VmFusionHostInstruction::ElementwiseBinary
                 )
             ) && self
+                .backing
                 .expected_operations
                 .contains(&VmFusionHostOperation::Intrinsic(
                     runmat_types::OperatorKind::UnaryMinus,
@@ -453,10 +470,11 @@ impl VmFusionHostRoute {
     ) -> bool {
         self.current_for(runtime)
             && self
+                .backing
                 .expected_operations
                 .contains(&VmFusionHostOperation::Intrinsic(operator))
             && {
-                let state = self.state.borrow();
+                let state = self.backing.state.borrow();
                 !state.invalid
                     && state.pending.is_some_and(|(_, instruction, _)| {
                         instruction == VmFusionHostInstruction::Intrinsic(operator)
@@ -471,7 +489,7 @@ impl VmFusionHostRoute {
         operator: runmat_types::OperatorKind,
     ) {
         let valid = self.allows_intrinsic_host(runtime, operator);
-        let mut state = self.state.borrow_mut();
+        let mut state = self.backing.state.borrow_mut();
         match state.pending.as_mut() {
             Some((_, _, confirmed)) if valid => *confirmed = true,
             _ => state.invalid = true,

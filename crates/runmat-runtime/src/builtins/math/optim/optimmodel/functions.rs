@@ -10,7 +10,7 @@ use runmat_types::{
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRole {
     Ordinary,
-    EuclideanNorm,
+    TwoNorm,
 }
 
 pub(super) async fn builtin(
@@ -34,11 +34,11 @@ pub(super) async fn builtin(
         let root = owner::as_expression(value, policy, cooperation).await?;
         let handle = owner::reference(root.value(), policy)?;
         let node = owner::OwnedNode::read(handle, policy)?;
-        if matches!(role, FunctionRole::EuclideanNorm)
-            && node.node().shape.iter().filter(|&&n| n > 1).count() > 1
-        {
-            return Err(policy
-                .invalid("symbolic norm requires a vector; use fcn2optimexpr for other norms"));
+        if matches!(role, FunctionRole::TwoNorm) {
+            // Construction preserves the numerical operation. Only the
+            // lowering classifier can certify a vector Euclidean norm square;
+            // a matrix two-norm remains spectral, never an entry-square sum.
+            crate::builtins::math::linalg::solve::norm::classify_tensor(&node.node().shape)?;
         }
         facts.push(ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
@@ -68,7 +68,7 @@ pub(super) async fn builtin(
         facts.push(crate::value_fact::value_fact(value));
         arguments.push(value.clone());
     }
-    if matches!(role, FunctionRole::EuclideanNorm)
+    if matches!(role, FunctionRole::TwoNorm)
         && args.len() > 1
         && (args.len() != 2
             || !literals.get(1).is_some_and(|literal| {
@@ -76,7 +76,7 @@ pub(super) async fn builtin(
                     || literal.integer_value_i128() == Some(2)
             }))
     {
-        return Err(policy.invalid("symbolic norm supports the Euclidean vector norm"));
+        return Err(policy.invalid("symbolic norm supports the default or numeric-two norm"));
     }
     let entry = runmat_builtins::builtin_catalog_entry_by_name(function.name)
         .ok_or_else(|| policy.invalid("canonical numerical function is unavailable"))?;

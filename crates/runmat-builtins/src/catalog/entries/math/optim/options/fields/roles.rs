@@ -5,6 +5,7 @@ impl OptimOptionField {
         matches!(
             self,
             Self::OutputFcn
+                | Self::JacobianMultiplyFcn
                 | Self::HessianMultiplyFcn
                 | Self::PlotFcn
                 | Self::CreationFcn
@@ -23,6 +24,7 @@ impl OptimOptionField {
         matches!(
             self,
             Self::FunctionTolerance
+                | Self::JacobianMultiplyFcn
                 | Self::HessianFcn
                 | Self::HessianMultiplyFcn
                 | Self::HessPattern

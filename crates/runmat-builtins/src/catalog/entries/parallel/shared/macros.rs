@@ -8,7 +8,7 @@ macro_rules! parallel_entry {
         $maturity:expr,
         $async_behavior:expr,
         $purity:expr,
-        $effects:expr
+        $effects:expr $(, $semantic_kind:expr)?
     ) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             audience: crate::BuiltinCatalogAudience::Public,
@@ -23,7 +23,7 @@ macro_rules! parallel_entry {
                 compatibility: BuiltinCompatibility::Matlab,
                 async_behavior: $async_behavior,
                 purity: $purity,
-                semantic_kind: BuiltinSemanticKind::General,
+                semantic_kind: parallel_entry!(@kind $($semantic_kind)?),
                 workspace_effect: None,
                 environment_effect: None,
                 effects: $effects,
@@ -38,6 +38,8 @@ macro_rules! parallel_entry {
             suppress_auto_output: false,
         };
     };
+    (@kind) => { BuiltinSemanticKind::General };
+    (@kind $kind:expr) => { $kind };
 }
 
 macro_rules! signature {

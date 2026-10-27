@@ -28,7 +28,7 @@ impl Inputs {
     pub(super) fn has_captures(&self) -> bool {
         match self {
             Self::Source { captures, .. } => !captures.is_empty(),
-            Self::Retained(arguments) => arguments.capture_count() != 0,
+            Self::Retained(arguments) => arguments.lexical_capture_count() != 0,
         }
     }
 }

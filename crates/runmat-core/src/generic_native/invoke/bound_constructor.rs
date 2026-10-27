@@ -59,12 +59,13 @@ pub(super) async fn invoke(
                     "selected bound constructor lacks its exact class product",
                 )
             })?
-            .invocation_runtime(runtime)?
+            .invocation_runtime_with_binding(runtime, &registry, &binding)?
     };
     let argument_count = arguments.supplied_count();
     let invocation_owner = owner.clone();
     let function = runmat_hir::FunctionId(binding.function);
     let invoked_function = binding.function;
+    let invocation_binding = binding.clone();
     let make_future = move |selected_runtime: RuntimeContext| async move {
         let selected_runtime =
             selected_runtime.with_constructor_receiver_for_method(Some(&invocation_owner))?;
@@ -76,6 +77,10 @@ pub(super) async fn invoke(
             &execution_sources,
         )?;
         if is_native {
+            // VM semantic entry issues its own frame. Only native entry
+            // needs this projection here, once for this constructor body.
+            let selected_runtime = selected_runtime
+                .with_admitted_constructor_frame(&invocation_owner, invocation_binding)?;
             let selected = selected_runtime.clone();
             return selected
                 .scope(super::native_semantic::invoke_rooted(

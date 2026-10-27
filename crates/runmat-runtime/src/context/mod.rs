@@ -153,7 +153,8 @@ pub use runtime::{
     ProgramExecutionAssignmentGuard, ProgramExecutionJobGuard, ProgramSourceSelectionError,
     RuntimeContext, RuntimeContextLocalId, RuntimeExecutionStack, RuntimeExecutionStackGuard,
     RuntimeLanguageMode, RuntimeLanguagePolicy, SelectedGraphFunction,
-    SelectedGraphFunctionResolver, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
+    SelectedGraphFunctionResolver, SelectedMethodDispatch, DEFAULT_CALLSTACK_LIMIT,
+    DEFAULT_ERROR_NAMESPACE,
 };
 pub(crate) use scope::{
     with_original_scope, LazyRuntimeScope, PreparedUnselectedScope, RuntimeScopeFactory,

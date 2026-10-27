@@ -389,6 +389,7 @@ fn phased_fixed_destination_mir() -> MirAssembly {
     let place = MirPlace::Index(
         Box::new(MirPlace::Local(MirLocalId(0))),
         runmat_mir::MirIndexing {
+            argument_spans: None,
             kind: runmat_types::IndexKind::Paren,
             plan: runmat_mir::MirIndexPlan::Scalar,
             components: vec![runmat_mir::MirIndexComponent::Expansion(
@@ -1265,6 +1266,7 @@ fn selector_mask_limit_is_rejected_before_native_execution() {
             value: MirRvalue::Index {
                 base: MirOperand::Local(MirLocalId(0)),
                 indexing: runmat_mir::MirIndexing {
+                    argument_spans: None,
                     kind: runmat_types::IndexKind::Paren,
                     plan: runmat_mir::MirIndexPlan::Slice,
                     components: vec![runmat_mir::MirIndexComponent::Colon; 33],
@@ -1292,6 +1294,7 @@ fn selector_mask_limit_is_rejected_before_native_execution() {
                 source: runmat_mir::MirExpansionSource::CellContents {
                     base: MirOperand::Constant(MirConstant::EmptyArray),
                     indexing: runmat_mir::MirIndexing {
+                        argument_spans: None,
                         kind: runmat_types::IndexKind::Brace,
                         plan: runmat_mir::MirIndexPlan::Cell,
                         components: vec![runmat_mir::MirIndexComponent::Colon; 33],
@@ -1366,6 +1369,7 @@ fn expression_continuation_geometry_counts_constant_statement_selectors_only_whe
             source: runmat_mir::MirExpansionSource::CellContents {
                 base: MirOperand::Constant(MirConstant::EmptyArray),
                 indexing: runmat_mir::MirIndexing {
+                    argument_spans: None,
                     kind: runmat_types::IndexKind::Brace,
                     plan: runmat_mir::MirIndexPlan::Cell,
                     components,
@@ -1438,6 +1442,7 @@ fn expression_continuation_geometry_counts_nested_dotted_argument_cursors() {
             value: MirRvalue::Index {
                 base: MirOperand::Constant(MirConstant::EmptyArray),
                 indexing: runmat_mir::MirIndexing {
+                    argument_spans: None,
                     kind: runmat_types::IndexKind::Paren,
                     plan: runmat_mir::MirIndexPlan::Scalar,
                     components: vec![runmat_mir::MirIndexComponent::PreparedExpr(prepared)],
@@ -2122,6 +2127,174 @@ fn distributed_and_collective_constructs_fail_with_the_stable_predeclared_reject
     }
 }
 
+fn executor_builtin_call(name: &str) -> MirRvalue {
+    let entry = runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
+    let semantics = entry.legacy_semantics();
+    MirRvalue::Call(runmat_mir::MirCall {
+        callee: runmat_mir::MirCallee::Static(runmat_types::CallableIdentity::Builtin(
+            runmat_types::BuiltinId(entry.identity.name.into()),
+        )),
+        args: Vec::new(),
+        arg_spans: Vec::new(),
+        syntax: runmat_types::CallSyntax::Plain,
+        requested_outputs: runmat_types::RequestedOutputCount::One,
+        fallback_policy: runmat_types::CallableFallbackPolicy::None,
+        workspace_first_name: None,
+        bare_identifier: false,
+        async_behavior: match semantics.async_behavior {
+            runmat_builtins::BuiltinAsyncBehavior::NeverSuspends => {
+                runmat_mir::AsyncBehaviorFact::NeverSuspends
+            }
+            runmat_builtins::BuiltinAsyncBehavior::MaySuspend
+            | runmat_builtins::BuiltinAsyncBehavior::MaySuspendLocally => {
+                runmat_mir::AsyncBehaviorFact::MaySuspend
+            }
+            runmat_builtins::BuiltinAsyncBehavior::RequiresAsyncRuntime => {
+                runmat_mir::AsyncBehaviorFact::RequiresAsyncRuntime
+            }
+        },
+        effects: semantics.effects,
+        workspace_effect: semantics.workspace_effect,
+        environment_effect: semantics.environment_effect,
+        purity: semantics.purity,
+        semantic_kind: semantics.semantic_kind,
+    })
+}
+
+#[test]
+fn executor_only_builtin_contracts_reject_before_native_publication() {
+    for name in ["parfeval", "parfevalOnAll", "fetchOutputs", "fetchNext"] {
+        let value = executor_builtin_call(name);
+        let mir = function(vec![MirStmt {
+            kind: MirStmtKind::Expr(value.clone()),
+            span: Span { start: 0, end: 1 },
+        }]);
+        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        let manifest = manifest(&analysis);
+        let error = lower_with(&mir, &analysis, &manifest).unwrap_err();
+        assert_eq!(error.code, "native.capability.executor_intrinsic");
+        assert_eq!(
+            error.construct,
+            Some(runmat_mir::MirConstructKind::ExecutorIntrinsicCall)
+        );
+        // Even copied metadata cannot turn a runtime-resolved/user target
+        // into the canonical builtin operation by matching its spelling.
+        let MirRvalue::Call(mut shadowed) = value else {
+            unreachable!()
+        };
+        for callee in [
+            runmat_mir::MirCallee::Static(runmat_types::CallableIdentity::DynamicName(
+                runmat_types::SymbolName(name.into()),
+            )),
+            runmat_mir::MirCallee::Static(runmat_types::CallableIdentity::BoundFunction(
+                runmat_types::FunctionId(1),
+            )),
+        ] {
+            shadowed.callee = callee;
+            assert!(shadowed.executor_intrinsic().is_none());
+            assert_eq!(
+                runmat_mir::rvalue_construct_kind(&MirRvalue::Call(shadowed.clone())),
+                runmat_mir::MirConstructKind::Call
+            );
+        }
+    }
+    for name in ["parpool", "gcp"] {
+        let value = executor_builtin_call(name);
+        assert_eq!(
+            runmat_mir::rvalue_construct_kind(&value),
+            runmat_mir::MirConstructKind::Call
+        );
+        let mir = function(vec![MirStmt {
+            kind: MirStmtKind::Expr(value),
+            span: Span { start: 0, end: 1 },
+        }]);
+        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        let mut executable = manifest(&analysis);
+        for function in &analysis.functions {
+            executable
+                .capabilities
+                .0
+                .extend(function.capabilities.0.iter().cloned());
+        }
+        lower_with(&mir, &analysis, &executable)
+            .expect("shared runtime pool calls remain native-supported");
+    }
+}
+
+#[test]
+fn executor_capability_rejection_visits_short_circuit_assignment_targets() {
+    let span = Span { start: 0, end: 1 };
+    let MirRvalue::Call(mut call) = executor_builtin_call("fetchOutputs") else {
+        unreachable!()
+    };
+    call.args
+        .push(runmat_mir::MirCallArg::Single(MirOperand::Local(
+            MirLocalId(1),
+        )));
+    call.arg_spans.push(span);
+    let selector = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(1)),
+                    value: MirRvalue::End,
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(2)),
+                    value: MirRvalue::Call(call),
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(2)),
+    )
+    .unwrap();
+    let value = MirRvalue::ShortCircuit {
+        left: MirOperand::Constant(MirConstant::Bool(true)),
+        op: runmat_mir::MirShortCircuitOp::And,
+        right_temps: vec![MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Index(
+                    Box::new(MirPlace::Local(MirLocalId(0))),
+                    runmat_mir::MirIndexing {
+                        argument_spans: None,
+                        kind: runmat_types::IndexKind::Paren,
+                        plan: runmat_mir::MirIndexPlan::Slice,
+                        components: vec![runmat_mir::MirIndexComponent::ContextualExpr(selector)],
+                        result_context: runmat_types::IndexResultContext::AssignmentTarget,
+                        cell_expand_all: false,
+                    },
+                ),
+                value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("1".into()))),
+            },
+            span,
+        }],
+        right: MirOperand::Constant(MirConstant::Bool(true)),
+    };
+    let mut mir = function(vec![MirStmt {
+        kind: MirStmtKind::Expr(value),
+        span,
+    }]);
+    for id in 1..=2 {
+        mir.bodies
+            .get_mut(&FunctionId(0))
+            .unwrap()
+            .locals
+            .push(MirLocal {
+                id: MirLocalId(id),
+                binding: None,
+                kind: MirLocalKind::Temporary,
+                span,
+            });
+    }
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let error = lower_with(&mir, &analysis, &manifest(&analysis)).unwrap_err();
+    assert_eq!(error.code, "native.capability.executor_intrinsic");
+}
+
 #[test]
 fn capability_rejection_cannot_hide_inside_short_circuit_payloads() {
     let nested = MirStmt {
@@ -2182,6 +2355,7 @@ fn capability_rejection_cannot_hide_inside_sequence_capture_regions() {
             source: runmat_mir::MirExpansionSource::CellContents {
                 base: MirOperand::Constant(MirConstant::EmptyArray),
                 indexing: runmat_mir::MirIndexing {
+                    argument_spans: None,
                     kind: runmat_hir::IndexKind::Brace,
                     plan: runmat_mir::MirIndexPlan::Slice,
                     components: vec![runmat_mir::MirIndexComponent::ContextualExpr(region)],
@@ -2255,7 +2429,7 @@ fn canonical_construct_taxonomy_is_complete_unique_and_serializable() {
     assert!(all.contains(&runmat_mir::MirConstructKind::CaptureSequence));
     assert!(all.contains(&runmat_mir::MirConstructKind::SequenceAssign));
     assert!(all.contains(&runmat_mir::MirConstructKind::WorkspaceFirstStaticProperty));
-    assert_eq!(all.len(), 61);
+    assert_eq!(all.len(), 62);
     assert!(all.contains(&runmat_mir::MirConstructKind::PrepareFixedAssignment));
     assert!(all.contains(&runmat_mir::MirConstructKind::PreparedAssign));
     assert_eq!(

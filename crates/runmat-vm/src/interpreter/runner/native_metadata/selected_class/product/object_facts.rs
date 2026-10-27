@@ -164,8 +164,8 @@ impl SelectedClassProduct {
                 ));
             }
         }
-        let mut methods = HashMap::with_capacity(declarations.methods().len());
-        for (name, method) in declarations.methods() {
+        let mut methods = HashMap::with_capacity(declarations.owner_methods().len());
+        for (owner, method) in declarations.owner_methods() {
             let binding = bodies.get(&method.owner).map(|body| BoundFunctionBinding {
                 function: body.function.0,
                 authority: binding.authority.clone(),
@@ -176,7 +176,7 @@ impl SelectedClassProduct {
                     "selected ordinary method lacks its exact definition lease",
                 ));
             }
-            methods.insert(name.clone(), binding);
+            methods.insert(owner.clone(), binding);
         }
         let facts = SelectedObjectClassFacts::new(declarations, binding.clone(), methods)
             .ok_or_else(|| {
@@ -190,6 +190,28 @@ impl SelectedClassProduct {
 }
 
 impl FunctionRegistry {
+    /// Consume one receiver-method call intent and bind its exact class
+    /// projection before either a Core or VM-local executor enters the body.
+    pub fn prepare_selected_receiver_method(
+        &self,
+        runtime: runmat_runtime::context::RuntimeContext,
+        binding: &BoundFunctionBinding,
+    ) -> Result<(runmat_runtime::context::RuntimeContext, bool), runmat_runtime::RuntimeError> {
+        let (runtime, selected) = runtime.take_selected_method_body_for(binding)?;
+        let Some((facts, expected, dispatch)) = selected else {
+            let admitted = runtime.has_admitted_selected_method_frame_for(binding);
+            return Ok((runtime, admitted));
+        };
+        let product =
+            self.validate_selected_receiver_method_dispatch(binding, &facts, &expected, dispatch)?;
+        let runtime = product
+            .invocation_runtime(runtime)?
+            .with_selected_object_class(facts);
+        let runtime =
+            runtime.with_admitted_selected_method_frame(expected, binding.clone(), dispatch)?;
+        Ok((runtime, true))
+    }
+
     /// Recheck receiver storage against the leased body and the exact class
     /// product in that same definition graph. This is the authority boundary
     /// shared by Core's bound service and the VM-local bound executor.
@@ -198,6 +220,21 @@ impl FunctionRegistry {
         binding: &BoundFunctionBinding,
         facts: &SelectedObjectClassFacts,
         expected: &ClassMethodOwner,
+    ) -> Result<Rc<SelectedClassProduct>, runmat_runtime::RuntimeError> {
+        self.validate_selected_receiver_method_dispatch(
+            binding,
+            facts,
+            expected,
+            runmat_runtime::context::SelectedMethodDispatch::Virtual,
+        )
+    }
+
+    pub fn validate_selected_receiver_method_dispatch(
+        &self,
+        binding: &BoundFunctionBinding,
+        facts: &SelectedObjectClassFacts,
+        expected: &ClassMethodOwner,
+        dispatch: runmat_runtime::context::SelectedMethodDispatch,
     ) -> Result<Rc<SelectedClassProduct>, runmat_runtime::RuntimeError> {
         let function = runmat_hir::FunctionId(binding.function);
         let body = if let Some(lease) = binding.authority.local_lease(binding.function) {
@@ -222,9 +259,18 @@ impl FunctionRegistry {
                     .as_ref()
                     .is_none_or(|product| !product.source_owner().same_issuance(owner))
             })
-            || facts.method(&expected.method).is_none_or(|method| {
+            || match dispatch {
+                runmat_runtime::context::SelectedMethodDispatch::Virtual => {
+                    facts.method(&expected.method)
+                }
+                runmat_runtime::context::SelectedMethodDispatch::Superclass => {
+                    facts.method_by_owner(expected)
+                }
+            }
+            .is_none_or(|method| {
                 &method.owner != expected
-                    || facts.method_binding(&expected.method).as_ref() != Some(binding)
+                    || method.is_abstract
+                    || method.binding.as_ref() != Some(binding)
             })
         {
             return Err(mex(
@@ -255,13 +301,19 @@ impl FunctionRegistry {
             }
         }
         if admitted_product.as_ref().is_none_or(|product| {
-            !product.validates_receiver_method(facts, expected)
-                || body.selected_source_owner.as_ref().is_none_or(|source| {
-                    !product
-                        ._source_owners
-                        .iter()
-                        .any(|selected| selected.same_issuance(source))
-                })
+            !match dispatch {
+                runmat_runtime::context::SelectedMethodDispatch::Virtual => {
+                    product.validates_receiver_method(facts, expected)
+                }
+                runmat_runtime::context::SelectedMethodDispatch::Superclass => {
+                    product.validates_receiver_owned_method(facts, expected)
+                }
+            } || body.selected_source_owner.as_ref().is_none_or(|source| {
+                !product
+                    ._source_owners
+                    .iter()
+                    .any(|selected| selected.same_issuance(source))
+            })
         }) {
             return Err(mex(
                 "ClassMethodBindingInvalid",
@@ -274,5 +326,30 @@ impl FunctionRegistry {
                 "selected receiver lacks its admitted class product",
             )
         })
+    }
+}
+
+impl SelectedClassProduct {
+    pub fn validates_receiver_owned_method(
+        &self,
+        facts: &SelectedObjectClassFacts,
+        owner: &ClassMethodOwner,
+    ) -> bool {
+        let Ok(projection) = self.invocation_projection() else {
+            return false;
+        };
+        let Ok(declarations) = projection.receiver_declarations(self.class()) else {
+            return false;
+        };
+        facts.class() == self.class()
+            && std::sync::Arc::ptr_eq(&declarations, facts.declarations())
+            && declarations
+                .owner_methods()
+                .get(owner)
+                .is_some_and(|declaration| {
+                    facts.method_by_owner(owner).is_some_and(|method| {
+                        std::sync::Arc::ptr_eq(declaration, &method.declaration)
+                    })
+                })
     }
 }

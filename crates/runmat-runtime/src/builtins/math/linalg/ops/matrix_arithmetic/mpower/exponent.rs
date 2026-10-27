@@ -40,6 +40,6 @@ fn parse_floating(value: f64) -> BuiltinResult<i32> {
 
 fn exponent_range_error() -> crate::RuntimeError {
     super::errors::invalid_argument(
-        "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
+        "mpower: exponent must fit the signed 32-bit range (-2^31 through 2^31-1)",
     )
 }

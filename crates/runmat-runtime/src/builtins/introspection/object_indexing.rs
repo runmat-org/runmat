@@ -1,3 +1,4 @@
+use crate::object::protocol::ProtocolDispatch;
 use crate::sequence::ResolveValueSequence;
 use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
@@ -60,7 +61,7 @@ pub(crate) async fn dispatch_subsasgn(
     subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    dispatch_subsasgn_with_context(None, obj, subscript, rhs).await
+    dispatch_subsasgn_with_context(None, obj, subscript, rhs, ProtocolDispatch::Resolve).await
 }
 
 async fn dispatch_subsasgn_with_context(
@@ -68,8 +69,20 @@ async fn dispatch_subsasgn_with_context(
     obj: Value,
     subscript: Value,
     rhs: Value,
+    dispatch: ProtocolDispatch,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    if matches!(dispatch, ProtocolDispatch::Default) {
+        let access = builtin_indexing_access();
+        return crate::object::protocol::assign_builtin_subscript_path(
+            runtime,
+            obj,
+            path,
+            vec![rhs],
+            access,
+        )
+        .await;
+    }
     match runtime {
         Some(runtime) => {
             crate::object::protocol::assign_subscript_path_in_context(
@@ -96,37 +109,42 @@ pub async fn subsref_builtin_registered(
     obj: Value,
     subscript: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    subsref_with_context(runtime.as_ref(), obj, subscript).await
+    subsref_with_context(runtime.as_ref(), obj, subscript, ProtocolDispatch::Default).await
 }
 
 pub async fn subsref_builtin(
     obj: Value,
     subscript: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    subsref_with_context(None, obj, subscript).await
+    subsref_with_context(None, obj, subscript, ProtocolDispatch::Resolve).await
 }
 
 async fn subsref_with_context(
     runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
+    dispatch: ProtocolDispatch,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     let requested = crate::output_count::current_output_count();
-    let access = crate::object::protocol::ObjectAccessContext::default();
+    let access = builtin_indexing_access();
     let request = match requested {
         None => crate::object::protocol::SubscriptReadRequest::require_single(access),
         Some(count) => crate::object::protocol::SubscriptReadRequest::select_outputs(count, access),
     };
     let usage = request.sequence_use;
-    let sequence = match runtime {
-        Some(runtime) => {
+    let sequence = match (dispatch, runtime) {
+        (ProtocolDispatch::Default, runtime) => {
+            crate::object::protocol::read_builtin_subscript_path(runtime, obj, path, request)
+                .await?
+        }
+        (ProtocolDispatch::Resolve, Some(runtime)) => {
             crate::object::protocol::read_subscript_path_sequence_with_access_in_context(
                 runtime, obj, path, request,
             )
             .await?
         }
-        None => {
+        (ProtocolDispatch::Resolve, None) => {
             crate::object::protocol::read_subscript_path_sequence_with_access(obj, path, request)
                 .await?
         }
@@ -157,7 +175,14 @@ pub async fn subsasgn_builtin_registered(
     subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    subsasgn_with_context(runtime.as_ref(), obj, subscript, rhs).await
+    subsasgn_with_context(
+        runtime.as_ref(),
+        obj,
+        subscript,
+        rhs,
+        ProtocolDispatch::Default,
+    )
+    .await
 }
 
 pub async fn subsasgn_builtin(
@@ -165,7 +190,7 @@ pub async fn subsasgn_builtin(
     subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    subsasgn_with_context(None, obj, subscript, rhs).await
+    subsasgn_with_context(None, obj, subscript, rhs, ProtocolDispatch::Resolve).await
 }
 
 async fn subsasgn_with_context(
@@ -173,13 +198,21 @@ async fn subsasgn_with_context(
     obj: Value,
     subscript: Value,
     rhs: Value,
+    dispatch: ProtocolDispatch,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::SUBSASGN_DESCRIPTOR,
         &runmat_builtins::SUBSASGN_ERROR_OUTPUTS,
         "subsasgn",
     )?;
-    dispatch_subsasgn_with_context(runtime, obj, subscript, rhs).await
+    dispatch_subsasgn_with_context(runtime, obj, subscript, rhs, dispatch).await
+}
+
+fn builtin_indexing_access() -> crate::object::protocol::ObjectAccessContext {
+    crate::object::protocol::ObjectAccessContext {
+        caller_class: crate::class_access_context().as_deref().cloned(),
+        ..Default::default()
+    }
 }
 
 #[runtime_builtin(

@@ -192,8 +192,9 @@ fn managed_case_output_retains_original_bytes_and_refunds_or_refuses_before_outp
     )
     .is_err());
     assert_eq!(limited.snapshot().live_reserved_bytes, 0);
-    let cancelled = runtime(&ledger);
-    cancelled.cancellation().cancel();
+    let source_cancellation = runmat_execution::cancellation::CancellationSource::new();
+    let cancelled = runtime(&ledger).with_cancellation_token(source_cancellation.token());
+    source_cancellation.cancel(runmat_execution::CancellationReason::User);
     assert!(transform_character_case(
         Some(&cancelled),
         source,

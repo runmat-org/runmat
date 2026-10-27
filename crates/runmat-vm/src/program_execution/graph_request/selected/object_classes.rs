@@ -107,8 +107,8 @@ pub(super) fn admit(
         let declarations = projection
             .receiver_declarations(product.class())
             .map_err(|error| error.to_string())?;
-        let mut methods = HashMap::with_capacity(declarations.methods().len());
-        for (name, declaration) in declarations.methods() {
+        let mut methods = HashMap::with_capacity(declarations.owner_methods().len());
+        for (method_owner, declaration) in declarations.owner_methods() {
             let admitted_binding = if let Some(target) =
                 class_method_targets.get(&(owner, declaration.owner.clone()))
             {
@@ -134,7 +134,7 @@ pub(super) fn admit(
             {
                 return Err("selected ordinary class method lacks an admitted body".into());
             }
-            methods.insert(name.clone(), admitted_binding);
+            methods.insert(method_owner.clone(), admitted_binding);
         }
         let constructor = bindings
             .get(&owner)
