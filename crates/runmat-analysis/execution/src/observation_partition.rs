@@ -209,6 +209,29 @@ pub fn prepare_observation_fanout(
                     "observation fan-out source sample is absent from recovered fields".into(),
                 )
             })?;
+        // A solid or volume plan selects every partition from one projection of the exact mesh.
+        let volume_projection = if !plan.partitions.is_empty()
+            && !matches!(
+                &preparation.source,
+                crate::ObservationPublishedSource::SampledRecovery { .. }
+            )
+            && (matches!(
+                &admitted.workload,
+                super::observation_source::AdmittedObservationWorkload::Thermal(_)
+            ) || matches!(
+                &preparation.source,
+                crate::ObservationPublishedSource::VolumeMeshRecovery { .. }
+            )) {
+            let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+                "solid-projection observation requires exact mesh",
+            ))?;
+            Some(
+                runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            )
+        } else {
+            None
+        };
         for partition in &plan.partitions {
             let sampled = match &preparation.source {
                 crate::ObservationPublishedSource::SampledRecovery { sampling, .. } => {
@@ -234,16 +257,14 @@ pub fn prepare_observation_fanout(
                 &preparation.source,
                 crate::ObservationPublishedSource::VolumeMeshRecovery { .. }
             ) {
-                let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+                let projection = volume_projection.as_ref().ok_or(AnalysisBridgeError::Identity(
                     "solid-projection observation requires exact mesh",
                 ))?;
-                let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
-                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
                 solid_observation_partition_source_indices(
                     &admitted.request.plan,
                     &plan,
                     partition,
-                    &projection,
+                    projection,
                 )
             } else {
                 structural_observation_partition_source_indices(

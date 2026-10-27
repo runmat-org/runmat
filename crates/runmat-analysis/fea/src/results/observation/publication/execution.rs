@@ -150,6 +150,26 @@ impl ObservationPublicationCatalog {
             groups
                 .try_reserve_exact(plan.partitions.len())
                 .map_err(invalid)?;
+            // One projection and observation topology serve every partition of a volume plan.
+            let volume_projection = match context {
+                ObservationHistorySourceContext::Thermal { mesh, .. }
+                | ObservationHistorySourceContext::VolumeMesh { mesh }
+                    if !plan.partitions.is_empty() =>
+                {
+                    Some(crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?)
+                }
+                _ => None,
+            };
+            let volume_topology = volume_projection
+                .as_ref()
+                .map(|projection| {
+                    crate::results::observation::distributed::source_selection::solid_observation_topology(
+                        &source.plan,
+                        projection,
+                    )
+                })
+                .transpose()
+                .map_err(invalid)?;
             for partition in &plan.partitions {
                 let indices = match context {
                     ObservationHistorySourceContext::Magnetostatic { mesh, .. }
@@ -181,15 +201,16 @@ impl ObservationPublicationCatalog {
                         mesh,
                     )
                     .map_err(invalid)?,
-                    ObservationHistorySourceContext::Thermal { mesh, .. }
-                    | ObservationHistorySourceContext::VolumeMesh { mesh } => {
-                        let projection =
-                            crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
-                        solid_observation_partition_source_indices(
+                    ObservationHistorySourceContext::Thermal { .. }
+                    | ObservationHistorySourceContext::VolumeMesh { .. } => {
+                        let topology = volume_topology
+                            .as_ref()
+                            .ok_or_else(|| invalid("volume observation topology absent"))?;
+                        crate::results::observation::distributed::source_selection::observation_partition_source_indices(
                             &source.plan,
                             &plan,
                             partition,
-                            &projection,
+                            topology,
                         )
                         .map_err(invalid)?
                     }

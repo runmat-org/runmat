@@ -17,6 +17,16 @@ pub fn solid_observation_partition_source_indices(
     partition: &ObservationPartition,
     projection: &AnalysisProjection,
 ) -> Result<Vec<usize>, ObservationError> {
+    let topology = solid_observation_topology(plan, projection)?;
+    observation_partition_source_indices(plan, partition_plan, partition, &topology)
+}
+
+/// The observation topology every partition of `plan` over a solid or volume projection
+/// selects from; derive it once per plan, not once per partition.
+pub(in super::super) fn solid_observation_topology<'a>(
+    plan: &ResolvedObservationPlan,
+    projection: &'a AnalysisProjection,
+) -> Result<ObservationTopology<'a>, ObservationError> {
     // Cell- and face-located observations address the mesh's owner-oriented faces too.
     let faces = plan.observations.iter().any(|observation| {
         matches!(
@@ -24,8 +34,7 @@ pub fn solid_observation_partition_source_indices(
             runmat_analysis_core::FieldLocation::Cell | runmat_analysis_core::FieldLocation::Face
         )
     });
-    let topology = ObservationTopology::from_projection_for(projection, faces)?;
-    observation_partition_source_indices(plan, partition_plan, partition, &topology)
+    ObservationTopology::from_projection_for(projection, faces)
 }
 
 pub(in super::super) fn observation_partition_source_indices(
