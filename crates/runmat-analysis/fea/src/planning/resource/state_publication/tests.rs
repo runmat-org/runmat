@@ -164,7 +164,7 @@ fn original_publication_ceiling_governs_wall_and_exact_memory_admission() {
     .unwrap();
     assert_eq!(first.input.worker.maximum_wall_milliseconds, 17);
     assert_eq!(first.request.max_wall_millis, 17);
-    ceiling.maximum_resident_bytes = first.request.memory_bytes;
+    ceiling.maximum_resident_bytes = Some(first.request.memory_bytes);
     let exact = build_state_publication_resource_plan_with_ceiling(
         &request,
         &catalog,
@@ -173,8 +173,8 @@ fn original_publication_ceiling_governs_wall_and_exact_memory_admission() {
         ceiling,
     )
     .unwrap();
-    assert_eq!(exact.request.memory_bytes, ceiling.maximum_resident_bytes);
-    ceiling.maximum_resident_bytes -= 1;
+    assert_eq!(exact.request.memory_bytes, ceiling.resident_byte_budget());
+    ceiling.maximum_resident_bytes = Some(ceiling.resident_byte_budget() - 1);
     assert!(build_state_publication_resource_plan_with_ceiling(
         &request,
         &catalog,

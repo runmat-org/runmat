@@ -47,7 +47,7 @@ pub(super) async fn run(
             }
         }
     }
-    let ceiling = step.accuracy.resources.maximum_resident_bytes;
+    let ceiling = step.accuracy.resources.resident_byte_budget();
     let wall = step.accuracy.resources.maximum_wall_time_milliseconds;
     let compiled = CompiledAnalysisStudy {
         module_path: "qualification/thermal-radiation.fea".into(),

@@ -87,7 +87,7 @@ impl CanonicalFluidProblem<'_> {
             .reservation
             .resident_bytes_upper_bound
             .checked_add(extra)
-            .is_none_or(|v| v > self.policy.maximum_resident_bytes || v > isize::MAX as u64)
+            .is_none_or(|v| v > self.policy.resident_byte_budget() || v > isize::MAX as u64)
         {
             return Err(Error::Resource("original initial field residency"));
         }

@@ -28,9 +28,14 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             &[
                 concat!(
                     "All five arguments are required and must be nonnegative integer values: ",
-                    "integer-valued doubles or any built-in integer class. Negative, fractional, ",
-                    "nonfinite, or out-of-range values fail with `RunMat:fea:InvalidInput`. The ceilings ",
-                    "are stored exactly; wall time and resident bytes are unsigned 64-bit values.",
+                    "integer-valued doubles or any built-in integer class, at most 2^53 - 1 ",
+                    "(9007199254740991). Negative, fractional, nonfinite, or larger values fail with ",
+                    "`RunMat:fea:InvalidInput`. Values within that bound are stored exactly.",
+                ),
+                concat!(
+                    "Pass `[]` as `maximumResidentBytes` for no authored memory limit; the property is ",
+                    "then empty and placement still limits the study to the capacity of the machine ",
+                    "it runs on.",
                 ),
                 concat!(
                     "Wall time is in milliseconds (600000 is ten minutes) and memory is in bytes (2^32 is",
@@ -74,8 +79,9 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         faq(
             "Can I pass int64 or uint64 values?",
             concat!(
-                "Yes. Every built-in integer class is accepted and kept exact, which matters for byte",
-                " ceilings above 2^53.",
+                "Yes. Every built-in integer class is accepted. Each ceiling must be at most 2^53 - 1 ",
+                "(9007199254740991), the largest integer that study files and the browser represent ",
+                "exactly; larger values fail with `RunMat:fea:InvalidInput`.",
             ),
         ),
         faq(
@@ -96,8 +102,8 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "crates/runmat-builtins/src/catalog/entries/fea/policy_types/accuracy_resource_ceiling/tests.rs::accuracy_resource_ceiling_identities_conform",
         ),
         unit_test(
-            "Resource ceilings stay exact",
-            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::resource_ceilings_stay_exact_and_reject_invalid_counts",
+            "Resource ceilings stay exact within the wire bound",
+            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::resource_ceilings_stay_exact_within_the_wire_bound_and_reject_invalid_counts",
         ),
     ],
     notes: &[],

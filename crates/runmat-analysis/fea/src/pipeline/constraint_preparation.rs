@@ -15,7 +15,7 @@ pub(super) fn compile_inventory<'a>(
     CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
         model,
         mesh,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
     .map_err(|error| match error {
         ConstraintPlanError::WorkspaceLimit {

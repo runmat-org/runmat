@@ -8,14 +8,19 @@ pub struct AnalysisNonlinearRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
+    #[serde(with = "runmat_types::wire_integer")]
     pub increment_count: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub max_newton_iters: usize,
     pub tolerance: f64,
     pub linear_tolerance: f64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub max_load_cutbacks: usize,
     pub minimum_load_increment: f64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub max_accepted_increments: usize,
     pub line_search: bool,
+    #[serde(with = "runmat_types::wire_integer")]
     pub max_line_search_backtracks: usize,
     pub line_search_reduction: f64,
     #[serde(default)]

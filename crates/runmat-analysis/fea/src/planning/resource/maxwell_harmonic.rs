@@ -54,7 +54,7 @@ fn preflight(
     let numerical = crate::physics::maxwell::resources::require_canonical_ceiling(
         &w.model,
         m,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
     .map_err(invalid)?;
     w.validate().map_err(invalid)?;

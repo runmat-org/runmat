@@ -77,7 +77,7 @@ fn recover_structural_frequency_entry_fields_with_state(
     let constraint_plan = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
         workload.model(),
         Some(solver_mesh),
-        workload.procedure_step()?.accuracy.resources.maximum_resident_bytes,
+        workload.procedure_step()?.accuracy.resources.resident_byte_budget(),
     ).map(|compiled| compiled.into_plan())
     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
     let expected_recovery_plan = crate::execution::FieldRecoveryPlan::resolve_structural(

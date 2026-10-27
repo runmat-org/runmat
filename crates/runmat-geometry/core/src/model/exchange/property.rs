@@ -25,7 +25,9 @@ pub struct Ap242EngineeringProperty {
     pub property_id: String,
     pub kind: Ap242EngineeringPropertyKind,
     pub name: String,
+    #[serde(with = "runmat_types::wire_integer")]
     pub source_entity_id: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub representation_entity_id: u64,
     pub value: Ap242Measure,
     pub specification: Option<String>,
@@ -108,6 +110,7 @@ pub enum Ap242MaterialClass {
 pub struct Ap242MaterialCandidate {
     pub material_id: String,
     pub name: String,
+    #[serde(with = "runmat_types::wire_integer")]
     pub source_entity_id: u64,
     pub persistent_id: Option<String>,
     pub class: Ap242MaterialClass,
@@ -147,10 +150,10 @@ impl Ap242MaterialCandidate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum Ap242AssociationTarget {
-    ProductEntity(u64),
-    ProductDefinitionEntity(u64),
-    OccurrenceEntity(u64),
-    ShapeAspectEntity(u64),
+    ProductEntity(#[serde(with = "runmat_types::wire_integer")] u64),
+    ProductDefinitionEntity(#[serde(with = "runmat_types::wire_integer")] u64),
+    OccurrenceEntity(#[serde(with = "runmat_types::wire_integer")] u64),
+    ShapeAspectEntity(#[serde(with = "runmat_types::wire_integer")] u64),
     PersistentId(String),
 }
 
@@ -158,6 +161,7 @@ pub enum Ap242AssociationTarget {
 #[serde(deny_unknown_fields)]
 pub struct Ap242Association {
     pub association_id: String,
+    #[serde(with = "runmat_types::wire_integer")]
     pub source_entity_id: u64,
     pub material_id: String,
     pub target: Ap242AssociationTarget,

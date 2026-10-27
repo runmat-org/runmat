@@ -49,7 +49,7 @@ pub(super) fn reserve(
         add(add(mul(metadata, 2)?, history)?, working)?,
         mul(schedule.points_s().len() as u64, 64)?,
     )?;
-    let maximum = input.policy.maximum_resident_bytes.min(ceiling);
+    let maximum = input.policy.resident_byte_budget().min(ceiling);
     if extra >= maximum {
         return Err(invalid(
             "fluid block history/source exceeds resident ceiling",
@@ -59,7 +59,7 @@ pub(super) fn reserve(
     let mut work = add(profile_work, mul(metadata, 64)?)?;
     for ordinal in range.clone() {
         let mut policy = input.policy;
-        policy.maximum_resident_bytes = maximum - extra;
+        policy.maximum_resident_bytes = Some(maximum - extra);
         let p = CanonicalFluidProblem::prepare_at(
             CanonicalFluidInput {
                 source: input.source,
@@ -88,7 +88,7 @@ pub(super) fn reserve(
         resident = resident.max(add(extra, r.resident_bytes_upper_bound)?);
         work = add(work, r.operator_work_upper_bound)?;
     }
-    if resident > maximum || work > input.policy.maximum_operator_work {
+    if resident > maximum || work > input.policy.operator_work_budget() {
         return Err(invalid("fluid block cumulative work/resident ceiling"));
     }
     Ok(FluidTransientBlockReservation {

@@ -109,11 +109,39 @@ pub enum NumericalEquivalencePolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccuracyResourceCeiling {
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_refinement_cycles: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_solver_tightenings: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_samples: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_wall_time_milliseconds: u64,
-    pub maximum_resident_bytes: u64,
+    /// Authored resident-memory ceiling; `None` (`null` on the wire, never omitted) means no
+    /// authored limit, and placement then limits residency by the machine-capacity authority.
+    /// Read it only through [`AccuracyResourceCeiling::resident_limit`],
+    /// [`AccuracyResourceCeiling::admits_resident_bytes`] or
+    /// [`AccuracyResourceCeiling::resident_byte_budget`].
+    #[serde(with = "runmat_types::wire_integer::option")]
+    pub maximum_resident_bytes: Option<u64>,
+}
+
+impl AccuracyResourceCeiling {
+    /// The authored resident-memory ceiling, if one was authored.
+    pub fn resident_limit(&self) -> Option<u64> {
+        self.maximum_resident_bytes
+    }
+
+    /// Whether `bytes` of residency fits the authored ceiling; always true without one.
+    pub fn admits_resident_bytes(&self, bytes: u64) -> bool {
+        self.maximum_resident_bytes.is_none_or(|limit| bytes <= limit)
+    }
+
+    /// The authored ceiling as a saturating byte budget for planning arithmetic: `u64::MAX`
+    /// without an authored limit, so the only binding limit is the placement's machine capacity.
+    pub fn resident_byte_budget(&self) -> u64 {
+        self.maximum_resident_bytes.unwrap_or(u64::MAX)
+    }
 }
 
 impl AccuracyPlan {
@@ -139,9 +167,9 @@ impl AccuracyPlan {
                 maximum_solver_tightenings: 0,
                 maximum_samples: 1_000_000,
                 maximum_wall_time_milliseconds: 3_600_000,
-                // Unbounded by default: resident memory is execution policy, limited at placement
-                // by the machine-capacity authority. An authored ceiling stays in the definition.
-                maximum_resident_bytes: u64::MAX,
+                // No authored limit by default: resident memory is execution policy, limited at
+                // placement by the machine-capacity authority. An authored ceiling stays in the definition.
+                maximum_resident_bytes: None,
             },
         }
     }

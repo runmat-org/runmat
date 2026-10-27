@@ -52,7 +52,7 @@ impl ThermalWorkload {
             .steps
             .iter()
             .filter(|step| step.step_id == self.step_id)
-            .map(|step| step.accuracy.resources.maximum_resident_bytes)
+            .map(|step| step.accuracy.resources.resident_byte_budget())
             .fold(maximum, u64::min);
         runmat_analysis_core::validate_model_with_dependency_graph_budget(&self.model, maximum)
             .map_err(|error| match error {
@@ -85,7 +85,7 @@ impl ThermalWorkload {
         crate::planning::resource::require_initial_field_ceiling(
             &self.initial_fields,
             LIMITS,
-            step.accuracy.resources.maximum_resident_bytes,
+            step.accuracy.resources.resident_byte_budget(),
         )
         .map_err(|error| invalid(error.to_string()))?;
         super::validate_initial_field_declarations(&self.model, step, &self.initial_fields)?;
@@ -255,7 +255,7 @@ impl ThermalWorkload {
         crate::planning::resource::ThermalPreassemblyResourceFacts::require_input_fits(
             &self.model,
             &self.initial_fields,
-            step.accuracy.resources.maximum_resident_bytes,
+            step.accuracy.resources.resident_byte_budget(),
         )?;
         Ok((
             step,

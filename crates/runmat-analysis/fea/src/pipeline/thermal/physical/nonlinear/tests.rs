@@ -145,7 +145,7 @@ fn cold_initial_guess_uses_real_backtracking_and_rejected_runs_publish_nothing()
     inadmissible.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(inadmissible.execute(&mesh).is_err());
 }
 

@@ -183,7 +183,7 @@ pub(super) async fn run_block(
     config.worker_memory_bytes = workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes;
+        .resident_byte_budget();
     config.worker_scratch_bytes = config.worker_memory_bytes;
     config
         .worker_capabilities

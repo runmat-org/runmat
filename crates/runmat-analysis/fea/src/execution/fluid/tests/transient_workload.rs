@@ -161,7 +161,7 @@ fn transient_workload_retains_authored_initial_time_source_properties_and_cold_o
     ]));
     assert!(cold.recover(&foreign, &m).is_err());
     let mut low = w.clone();
-    low.policy.maximum_resident_bytes = 1;
+    low.policy.maximum_resident_bytes = Some(1);
     assert!(low.prepare(&m).is_err());
 }
 

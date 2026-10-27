@@ -38,7 +38,7 @@ impl PreparedThermalSolve<'_> {
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal numerical and output residency",
             ))?;
-        let maximum = self.step.accuracy.resources.maximum_resident_bytes;
+        let maximum = self.step.accuracy.resources.resident_byte_budget();
         if required > maximum {
             return Err(ResourcePlanningError::AccuracyCeiling {
                 resource: "thermal numerical and output residency",

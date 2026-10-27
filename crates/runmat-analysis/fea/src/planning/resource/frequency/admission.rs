@@ -18,7 +18,7 @@ impl StructuralFrequencyEntryResourceProjection {
                 .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
                 .accuracy
                 .resources
-                .maximum_resident_bytes,
+                .resident_byte_budget(),
         )?;
         Self::new_from_compilation(mesh, &compiled, workload, states, accelerators)
     }
@@ -53,7 +53,7 @@ impl StructuralFrequencyEntryResourceProjection {
                 .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
                 .accuracy
                 .resources
-                .maximum_resident_bytes,
+                .resident_byte_budget(),
         )?;
         Self::for_recovery_from_compilation(mesh, &compiled, workload, states, accelerators)
     }

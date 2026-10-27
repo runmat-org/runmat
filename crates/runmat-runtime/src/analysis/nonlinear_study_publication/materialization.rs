@@ -27,7 +27,7 @@ pub(super) fn admit(
             completed.workload.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes,
+                .resident_byte_budget(),
         );
     let limits = CanonicalLimits::new(
         usize::try_from(ceiling).map_err(|_| storage::AnalysisPublicationError::ResourceLimit {

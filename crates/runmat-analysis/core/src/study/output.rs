@@ -206,7 +206,10 @@ pub enum ObservationValueShape {
     Scalar,
     Vector3,
     SymmetricTensor3,
-    Tensor { extents: Vec<usize> },
+    Tensor {
+        #[serde(with = "runmat_types::wire_integer::vec")]
+        extents: Vec<usize>,
+    },
 }
 
 impl ObservationValueShape {
@@ -346,10 +349,11 @@ pub enum SamplingPolicy {
         interval: f64,
     },
     StudyParameterValues(Vec<f64>),
-    ModeIndices(Vec<usize>),
+    ModeIndices(#[serde(with = "runmat_types::wire_integer::vec")] Vec<usize>),
     Event(ObservationEvent),
     Adaptive {
         minimum_interval: f64,
+        #[serde(with = "runmat_types::wire_integer")]
         maximum_samples: usize,
         relative_change: f64,
     },
@@ -469,8 +473,14 @@ pub enum CompressionPolicy {
 pub enum RetentionPolicy {
     Canonical,
     UntilDependentsComplete,
-    LatestSamples { count: usize },
-    ExplicitSamples { maximum_count: usize },
+    LatestSamples {
+        #[serde(with = "runmat_types::wire_integer")]
+        count: usize,
+    },
+    ExplicitSamples {
+        #[serde(with = "runmat_types::wire_integer")]
+        maximum_count: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -492,10 +502,15 @@ pub enum ObservationPurpose {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservationCostEstimate {
+    #[serde(with = "runmat_types::wire_integer")]
     pub operation_count: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub peak_resident_bytes: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub stored_bytes: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub transfer_bytes: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub collective_count: u64,
 }
 
@@ -553,7 +568,10 @@ pub struct MonitorObservation {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MonitorCadence {
-    AcceptedIncrements { interval: usize },
+    AcceptedIncrements {
+        #[serde(with = "runmat_types::wire_integer")]
+        interval: usize,
+    },
     WallSeconds { interval: f64 },
 }
 
@@ -568,6 +586,7 @@ pub enum MonitorStopCondition {
     },
     AbsoluteChangeBelow {
         threshold: ObservationThreshold,
+        #[serde(with = "runmat_types::wire_integer")]
         consecutive: usize,
     },
 }

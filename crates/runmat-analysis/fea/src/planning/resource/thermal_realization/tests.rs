@@ -175,14 +175,14 @@ fn element_scalar_field_is_included_in_both_order_exact_preassembly_ceiling() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required - 1;
+            .maximum_resident_bytes = Some(required - 1);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual,.. })) if actual == required)
         );
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required;
+            .maximum_resident_bytes = Some(required);
         workload.execute(&mesh).unwrap();
     }
 }
@@ -369,14 +369,14 @@ fn realization_budget_is_composed_and_enforced_for_both_element_orders() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required - facts.realization.reservation_bytes().unwrap().0;
+            .maximum_resident_bytes = Some(required - facts.realization.reservation_bytes().unwrap().0);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual, .. })) if actual == required)
         );
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required;
+            .maximum_resident_bytes = Some(required);
         workload.execute(&mesh).unwrap();
     }
 }

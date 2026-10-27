@@ -598,7 +598,7 @@ fn transient_sequence_preserves_typed_scope_resource_rejection() {
     model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let workload = StructuralTransientWorkload {
         schema_version: 2,
         initial_fields: Vec::new(),

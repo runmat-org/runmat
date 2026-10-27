@@ -15,11 +15,11 @@ impl FluidTransientWorkload {
         Ok(step)
     }
     pub(crate) fn resident_ceiling(&self) -> AnalysisExecutionResult<u64> {
-        Ok(self.policy.maximum_resident_bytes.min(
+        Ok(self.policy.resident_byte_budget().min(
             self.selected_step()?
                 .accuracy
                 .resources
-                .maximum_resident_bytes,
+                .resident_byte_budget(),
         ))
     }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {

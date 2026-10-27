@@ -39,7 +39,7 @@ pub(in crate::results::observation) fn construction_resident_bytes_admitted(
 ) -> AnalysisExecutionResult<u64> {
     let step = workload.validated_step_with_dependency_graph_budget(maximum_resident_bytes)?;
     let maximum_resident_bytes =
-        maximum_resident_bytes.min(step.accuracy.resources.maximum_resident_bytes);
+        maximum_resident_bytes.min(step.accuracy.resources.resident_byte_budget());
     let identities = workload.source_identity_resident_bytes_upper_bound()?;
     require(identities, maximum_resident_bytes)?;
     let validation = manifest.validation_resident_bytes_upper_bound()?;

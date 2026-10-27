@@ -214,7 +214,7 @@ pub fn build_acoustic_resource_plan(
     let properties = PreparedProperties::prepare(
         &workload.model,
         Some(mesh),
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
     .map_err(invalid)?
     .estimated_resident_bytes;

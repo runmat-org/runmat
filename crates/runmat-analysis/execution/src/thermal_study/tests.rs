@@ -298,7 +298,7 @@ fn original_temperature_fields_survive_borrowed_authored_intent_validation() {
     bounded.product.compiled.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     bounded.product.workload.model = bounded.product.compiled.model.clone();
     bounded.product.compiled.properties =
         compile_property_map(&bounded.product.compiled.model, Some(&bounded.mesh)).unwrap();

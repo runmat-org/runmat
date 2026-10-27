@@ -28,7 +28,7 @@ fn retained_metadata_is_explicit_and_composed_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = u64::MAX;
+            .maximum_resident_bytes = None;
         let identity = crate::admission::admit_nonstructural(
             PhysicsFamily::Thermal,
             workload.procedure.procedure(),
@@ -74,14 +74,14 @@ fn retained_metadata_is_explicit_and_composed_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required - 1;
+            .maximum_resident_bytes = Some(required - 1);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual, .. })) if actual == required)
         );
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required;
+            .maximum_resident_bytes = Some(required);
         workload.execute(&mesh).unwrap();
         let mut overflow = retained;
         overflow.inline_bytes = ByteCount(u64::MAX);

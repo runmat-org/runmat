@@ -125,7 +125,7 @@ pub fn prepare_nonlinear_solid_block_task(
             > p.workload.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes
+                .resident_byte_budget()
         {
             return Err(invalid(
                 "nonlinear predecessor exceeds original decode ceiling",

@@ -14,7 +14,7 @@ pub struct FluidTransientSchedule {
 }
 impl FluidTransientSchedule {
     pub fn derive(model: &AnalysisModel, step: &ProcedureStep) -> AnalysisExecutionResult<Self> {
-        Self::derive_with_ceiling(model, step, step.accuracy.resources.maximum_resident_bytes)
+        Self::derive_with_ceiling(model, step, step.accuracy.resources.resident_byte_budget())
     }
     pub(super) fn derive_with_ceiling(
         model: &AnalysisModel,

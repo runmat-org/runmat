@@ -97,14 +97,14 @@ fn complete_manifest_profile_bounds_real_steady_and_transient_headers() {
             workload.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes = required - 1;
+                .maximum_resident_bytes = Some(required - 1);
             assert!(
                 matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: value, .. })) if value == required)
             );
             workload.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes = required;
+                .maximum_resident_bytes = Some(required);
             workload.execute(&mesh).unwrap();
         }
     }

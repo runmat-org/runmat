@@ -91,7 +91,7 @@ impl CompletedNonlinearSolidStudy {
         let maximum = workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes;
+            .resident_byte_budget();
         let observer_profile = profile_serialized(
             &observations.as_ref().map(|o| (&o.manifest, &o.output)),
             limits(maximum)?,

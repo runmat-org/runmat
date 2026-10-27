@@ -37,7 +37,7 @@ fn periodic_graph_workspace_is_admitted_without_raising_the_authored_ceiling() {
         limited.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = 1;
+            .maximum_resident_bytes = Some(1);
         assert!(build_acoustic_resource_plan(&limited, &mesh, facts(&limited, &mesh)).is_err());
     }
 }

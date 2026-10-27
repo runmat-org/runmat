@@ -94,7 +94,7 @@ fn charged_results_fit_admission_and_cannot_use_source_free_plans() {
                 .execute_with_resource_plan(&mesh, &free_plan)
                 .is_err());
             let mut insufficient = plan.input.clone();
-            insufficient.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes - 1;
+            insufficient.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
             assert!(matches!(
                 build_resource_plan(insufficient),
                 Err(ResourcePlanningError::AccuracyCeiling { .. })
@@ -203,13 +203,13 @@ fn both_equations_orders_results_fit_source_bound_admission() {
                     >= demand.solver_admission.resident_bytes_upper_bound
             );
             let mut insufficient = plan.input.clone();
-            insufficient.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes - 1;
+            insufficient.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
             assert!(matches!(
                 build_resource_plan(insufficient),
                 Err(ResourcePlanningError::AccuracyCeiling { .. })
             ));
             let mut exact = plan.input.clone();
-            exact.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
+            exact.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes);
             assert!(build_resource_plan(exact).is_ok());
             let receipt = crate::execution::ElectricalNumericalReceiptArtifact::new(
                 &workload, &result, &mesh,
@@ -236,7 +236,7 @@ fn planning_support_budget_is_checked_before_geometry_or_graph_materialization()
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - 1;
+        .maximum_resident_bytes = Some(required - 1);
     // Invalid geometry would fail canonical admission if it were reached first.
     mesh.topology.nodes[0].coordinates_m =
         runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(

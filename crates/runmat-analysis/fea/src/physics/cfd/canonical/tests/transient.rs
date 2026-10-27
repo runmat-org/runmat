@@ -198,14 +198,14 @@ fn interval_admission_rejects_order_nonfinite_divergence_budget_and_cancellation
         .is_err());
     q[0] = 0.0;
     let mut limited_fixture = closed(2, [0.0; 3], 0.0);
-    limited_fixture.policy.maximum_resident_bytes = p.reservation().resident_bytes_upper_bound;
+    limited_fixture.policy.maximum_resident_bytes = Some(p.reservation().resident_bytes_upper_bound);
     let limited = CanonicalFluidProblem::prepare(limited_fixture.input()).unwrap();
     assert!(matches!(
         limited.prepare_backward_euler(0.0, 1.0, fields(&p, &u, &pressure, &q)),
         Err(Error::Resource(_))
     ));
     let mut work_fixture = closed(2, [0.0; 3], 0.0);
-    work_fixture.policy.maximum_operator_work = p.reservation().operator_work_upper_bound;
+    work_fixture.policy.maximum_operator_work = Some(p.reservation().operator_work_upper_bound);
     let work_limited = CanonicalFluidProblem::prepare(work_fixture.input()).unwrap();
     assert!(matches!(
         work_limited.prepare_backward_euler(0.0, 1.0, fields(&p, &u, &pressure, &q)),

@@ -195,7 +195,7 @@ pub async fn execute_structural_workloads_locally(
         .sequence
         .steps
         .iter()
-        .map(|step| step.accuracy.resources.maximum_resident_bytes)
+        .map(|step| step.accuracy.resources.resident_byte_budget())
         .max()
         .ok_or_else(|| {
             crate::NativeExecutionError::Configuration(

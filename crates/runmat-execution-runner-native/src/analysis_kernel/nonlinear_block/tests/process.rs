@@ -102,7 +102,7 @@ fn terminated_producers_resume_original_history() {
                 workload.model.sequence.steps[0]
                     .accuracy
                     .resources
-                    .maximum_resident_bytes,
+                    .resident_byte_budget(),
             )
             .unwrap();
         let payload = cold.block.canonical_bytes().unwrap().len() as u64

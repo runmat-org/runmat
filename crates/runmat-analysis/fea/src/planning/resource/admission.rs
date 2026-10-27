@@ -89,7 +89,7 @@ pub fn admit_resource_plan(
     }
     let memory_capacity = inventory
         .memory_bytes
-        .min(plan.input.accuracy_ceiling.maximum_resident_bytes);
+        .min(plan.input.accuracy_ceiling.resident_byte_budget());
     if plan.request.memory_bytes <= memory_capacity
         && plan.request.scratch_bytes <= inventory.scratch_bytes
     {

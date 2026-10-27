@@ -35,15 +35,15 @@ fn modal_preassembly_reserves_subgraph_proof_envelope_and_enforces_original_ceil
     // An upper graph's own successful factorization cannot reserve this subgraph inventory.
     assert!(workspace_bytes_upper_bound.0 >= envelope.resident_bytes_limit());
     let mut too_small = plan.input.clone();
-    too_small.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes - 1;
+    too_small.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
     assert!(super::super::build_resource_plan(too_small).is_err());
     assert_eq!(
-        plan.input.accuracy_ceiling.maximum_resident_bytes,
+        plan.input.accuracy_ceiling.resident_byte_budget(),
         workload
             .procedure_step()
             .unwrap()
             .accuracy
             .resources
-            .maximum_resident_bytes
+            .resident_byte_budget()
     );
 }

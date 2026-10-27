@@ -184,7 +184,7 @@ fn solved_fields_survive_cold_workload_admission_and_first_dynamic_block() {
         insufficient.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = 1;
+            .maximum_resident_bytes = Some(1);
         assert!(insufficient.validate().is_err());
     }
 }

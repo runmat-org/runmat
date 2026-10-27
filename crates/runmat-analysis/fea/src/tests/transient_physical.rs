@@ -434,7 +434,7 @@ fn execute_transient_workload(
             if identity == result.manifest().identity
     ));
     let mut insufficient = recovery_plan.input.clone();
-    insufficient.accuracy_ceiling.maximum_resident_bytes = recovery_plan.request.memory_bytes - 1;
+    insufficient.accuracy_ceiling.maximum_resident_bytes = Some(recovery_plan.request.memory_bytes - 1);
     assert!(matches!(
         crate::planning::resource::build_resource_plan(insufficient),
         Err(
