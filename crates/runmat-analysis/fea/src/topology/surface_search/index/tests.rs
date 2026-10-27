@@ -105,19 +105,22 @@ fn ties_unmatched_invalid_inventory_and_budgets_never_return_a_partial_pairing()
 }
 #[test]
 fn curved_bernstein_hull_contains_overshoot_outside_the_nodal_box() {
-    // z=u-1.5*u^2 reaches 1/6 between nodes, above the maximum nodal z=1/8.
+    // z=k*(u-1.5*u^2) reaches k/6 between nodes, above the maximum nodal z=k/8. The amplitude
+    // k keeps the face inside the shared boundary-face admission rule (converged curved
+    // moments); the unscaled k=1 face is rejected by that rule.
+    let k = 0.2;
     let nodes = [
         [0., 0., 0.],
-        [1., 0., -0.5],
+        [1., 0., -0.5 * k],
         [0., 1., 0.],
-        [0.5, 0., 0.125],
-        [0.5, 0.5, 0.125],
+        [0.5, 0., 0.125 * k],
+        [0.5, 0.5, 0.125 * k],
         [0., 0.5, 0.],
     ];
     let surface = BoundarySurface::derive(BoundaryTriangleOrder::Tri6, &nodes).unwrap();
     let bounds = surface.bounds().unwrap();
-    assert_eq!(bounds.maximum_m[2], 0.5);
-    assert!((surface.evaluate([1.0 / 3.0; 3]).unwrap().position_m[2] - 1.0 / 6.0).abs() < 1e-14);
+    assert!((bounds.maximum_m[2] - 0.5 * k).abs() < 1e-15);
+    assert!((surface.evaluate([1.0 / 3.0; 3]).unwrap().position_m[2] - k / 6.0).abs() < 1e-14);
     for i in 0..=20 {
         for j in 0..=20 - i {
             let p = surface

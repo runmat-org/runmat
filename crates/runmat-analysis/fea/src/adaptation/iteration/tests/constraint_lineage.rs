@@ -8,7 +8,7 @@ use runmat_analysis_core::{
 };
 use runmat_meshing_core::{
     fixtures::{canonical_tetrahedron_solver_mesh, connected_quadratic_tetrahedron_solver_mesh},
-    ElementOrder, PersistentEntityId, PersistentEntityKind,
+    ElementOrder, PersistentEntityKind,
 };
 
 // witness: FEA-ADAPTATION-GOVERNANCE-001/family_transfer_constraints @
@@ -27,10 +27,9 @@ fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliase
     for mesh in [&mut source, &mut target] {
         mesh.topology.boundary_faces[0]
             .provenance
-            .push(PersistentEntityId::new(
+            .push(runmat_meshing_core::fixtures::fixture_entity(
                 PersistentEntityKind::Face,
-                "adaptive_clamp".into(),
-                vec![],
+                "adaptive_clamp",
             ));
         mesh.topology.boundary_faces[0].provenance.sort();
         mesh.seal_canonical_digest().unwrap();

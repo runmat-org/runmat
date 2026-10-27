@@ -4541,7 +4541,7 @@ fn load_sweep_preserves_solver_mesh_dof_count() {
         if let runmat_analysis_core::ExcitationTarget::Region(target) =
             &mut action.excitation_mut().target
         {
-            target.region_id = "tip".to_owned();
+            target.region_id = crate::fixtures::fixture_target_selection("tip");
         }
     }
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
@@ -4597,7 +4597,7 @@ fn large_load_sweep_does_not_fabricate_dofs_from_excitation_count() {
         if let runmat_analysis_core::ExcitationTarget::Region(target) =
             &mut action.excitation_mut().target
         {
-            target.region_id = "tip".to_owned();
+            target.region_id = crate::fixtures::fixture_target_selection("tip");
         }
     }
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
