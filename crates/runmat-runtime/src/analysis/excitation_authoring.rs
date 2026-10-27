@@ -68,7 +68,7 @@ pub(crate) fn append_constant_excitation(
             ExcitationTarget::Region(RegionTarget::volume(region_id)),
             ElectricCurrent::new(real_amperes),
             ElectricCurrent::new(imaginary_amperes),
-            frequency_hz.map(|frequency| frequency.canonical_value()),
+            frequency_hz,
             ExcitationDistribution::PreserveResultant,
             PhysicalSignal::ElectricCurrent,
             ExcitationAction::ElectricCurrent,
