@@ -8,7 +8,9 @@
 #include <TDataStd_Name.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_LayerTool.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
 #include <algorithm>
@@ -80,9 +82,9 @@ void ExactNameTable::add(std::unordered_map<const TopoDS_TShape*, std::vector<st
   }
 }
 
-void ExactNameTable::add_face_name(const TopoDS_Shape& face, const std::string& name) {
-  retained_.push_back(face);
-  add(faces_, face, name);
+void ExactNameTable::add_subshape_name(const TopoDS_Shape& subshape, const std::string& name) {
+  retained_.push_back(subshape);
+  add(subshapes_, subshape, name);
 }
 
 void ExactNameTable::add_solid_name(const TopoDS_Shape& solid, const std::string& name) {
@@ -90,9 +92,9 @@ void ExactNameTable::add_solid_name(const TopoDS_Shape& solid, const std::string
   add(solids_, solid, name);
 }
 
-void ExactNameTable::add_face_tag(const TopoDS_Shape& face, const std::string& tag) {
-  retained_.push_back(face);
-  add(face_tags_, face, tag);
+void ExactNameTable::add_subshape_tag(const TopoDS_Shape& subshape, const std::string& tag) {
+  retained_.push_back(subshape);
+  add(subshape_tags_, subshape, tag);
 }
 
 void ExactNameTable::add_solid_tag(const TopoDS_Shape& solid, const std::string& tag) {
@@ -100,9 +102,9 @@ void ExactNameTable::add_solid_tag(const TopoDS_Shape& solid, const std::string&
   add(solid_tags_, solid, tag);
 }
 
-const std::vector<std::string>& ExactNameTable::face_tags(const TopoDS_Shape& face) const {
-  const auto found = face_tags_.find(face.TShape().get());
-  return found == face_tags_.end() ? no_names() : found->second;
+const std::vector<std::string>& ExactNameTable::subshape_tags(const TopoDS_Shape& subshape) const {
+  const auto found = subshape_tags_.find(subshape.TShape().get());
+  return found == subshape_tags_.end() ? no_names() : found->second;
 }
 
 std::vector<std::string> ExactNameTable::solid_tags(const TopoDS_Shape& solid) const {
@@ -124,13 +126,23 @@ ExactNameTable ExactNameTable::transferred(
   ExactNameTable result;
   result.body_name_ = body_name_;
   result.body_tags_ = body_tags_;
-  for (TopExp_Explorer faces(source, TopAbs_FACE); faces.More(); faces.Next()) {
-    const TopoDS_Shape target = image(faces.Current());
-    for (const std::string& name : face_names(faces.Current())) {
-      result.add_face_name(target, name);
-    }
-    for (const std::string& tag : face_tags(faces.Current())) {
-      result.add_face_tag(target, tag);
+  for (const TopAbs_ShapeEnum kind : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX}) {
+    TopTools_IndexedMapOfShape subshapes;
+    TopExp::MapShapes(source, kind, subshapes);
+    for (Standard_Integer index = 1; index <= subshapes.Extent(); ++index) {
+      const TopoDS_Shape& subshape = subshapes(index);
+      const std::vector<std::string>& names = subshape_names(subshape);
+      const std::vector<std::string>& tags = subshape_tags(subshape);
+      if (names.empty() && tags.empty()) {
+        continue;
+      }
+      const TopoDS_Shape target = image(subshape);
+      for (const std::string& name : names) {
+        result.add_subshape_name(target, name);
+      }
+      for (const std::string& tag : tags) {
+        result.add_subshape_tag(target, tag);
+      }
     }
   }
   for (TopExp_Explorer solids(source, TopAbs_SOLID); solids.More(); solids.Next()) {
@@ -155,9 +167,9 @@ void ExactNameTable::set_body_name(const std::string& name) {
   body_name_ = name;
 }
 
-const std::vector<std::string>& ExactNameTable::face_names(const TopoDS_Shape& face) const {
-  const auto found = faces_.find(face.TShape().get());
-  return found == faces_.end() ? no_names() : found->second;
+const std::vector<std::string>& ExactNameTable::subshape_names(const TopoDS_Shape& subshape) const {
+  const auto found = subshapes_.find(subshape.TShape().get());
+  return found == subshapes_.end() ? no_names() : found->second;
 }
 
 std::vector<std::string> ExactNameTable::solid_names(const TopoDS_Shape& solid) const {
@@ -207,10 +219,9 @@ ExactNameTable ExactNameTable::from_definition(const TDF_Label& definition,
     if (shape.IsNull()) {
       continue;
     }
-    // A named group of solids names each solid; a named shell or group of faces names each face.
-    if (shape.ShapeType() > TopAbs_FACE) {
-      continue;
-    }
+    // A named group of solids names each solid; a named shell or group of faces names each face;
+    // a named wire or group of edges names each edge; a named vertex names itself. A label names
+    // the highest kind it holds only, so a named face never names its edges.
     if (TopExp_Explorer(shape, TopAbs_SOLID).More()) {
       for (TopExp_Explorer solids(shape, TopAbs_SOLID); solids.More(); solids.Next()) {
         table.add_solid_name(solids.Current(), name);
@@ -218,13 +229,19 @@ ExactNameTable ExactNameTable::from_definition(const TDF_Label& definition,
           table.add_solid_tag(solids.Current(), tag);
         }
       }
-    } else {
-      for (TopExp_Explorer faces(shape, TopAbs_FACE); faces.More(); faces.Next()) {
-        table.add_face_name(faces.Current(), name);
+      continue;
+    }
+    for (const TopAbs_ShapeEnum kind : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX}) {
+      if (!TopExp_Explorer(shape, kind).More()) {
+        continue;
+      }
+      for (TopExp_Explorer subshapes(shape, kind); subshapes.More(); subshapes.Next()) {
+        table.add_subshape_name(subshapes.Current(), name);
         for (const std::string& tag : tags) {
-          table.add_face_tag(faces.Current(), tag);
+          table.add_subshape_tag(subshapes.Current(), tag);
         }
       }
+      break;
     }
   }
   return table;

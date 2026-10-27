@@ -484,6 +484,59 @@ geometry part {
     assert!(messages[0].contains("\"Fixed end\", \"Loaded end\""), "{}", messages[0]);
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/inspected_selector_semantics @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Edge and vertex name selectors are checked against the edge and vertex names the
+//   inspected source carries, like face and solid names.
+#[test]
+fn edge_and_vertex_name_selectors_must_match_names_the_source_carries() {
+    let source = r#"
+geometry frame {
+    file = "./geometry/frame.step"
+    units = mm
+    region girder : edge { select name "Girder"; expect exactly_one }
+    region base : vertex { select name "Left base"; expect exactly_one }
+    region brace : edge { select name "Brace"; expect exactly_one }
+    region apex : vertex { select name "Apex"; expect exactly_one }
+}
+"#;
+    let host = TestHost::default().with_named_geometry(
+        "project/geometry/frame.step",
+        8,
+        &[
+            ("edge", "Girder"),
+            ("edge", "Ground"),
+            ("vertex", "Left base"),
+            ("face", "Apex"),
+        ],
+    );
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    let messages = program
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 2, "{messages:#?}");
+    assert!(
+        messages[0].contains("selects edge name \"Brace\"")
+            && messages[0].contains("named edges: \"Girder\", \"Ground\""),
+        "{}",
+        messages[0]
+    );
+    // A face name never satisfies a vertex selector.
+    assert!(
+        messages[1].contains("selects vertex name \"Apex\"")
+            && messages[1].contains("named vertices: \"Left base\""),
+        "{}",
+        messages[1]
+    );
+}
+
 #[test]
 fn shared_interfaces_reach_the_imported_geometry_definition() {
     let source = r#"
