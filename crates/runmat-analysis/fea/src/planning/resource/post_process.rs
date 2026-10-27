@@ -28,9 +28,6 @@ const POST_PROCESS_CPU_MILLICORES: u32 = 1_000;
 const POST_PROCESS_WALL_MILLISECONDS: u64 = 3_600_000;
 const POST_PROCESS_FIXED_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const POST_PROCESS_FIXED_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
-/// Post-processing phases carry no authored memory ceiling; placement admits them against the
-/// machine-capacity authority like every other phase.
-const POST_PROCESS_MAXIMUM_RESIDENT_BYTES: u64 = u64::MAX;
 const DERIVED_OUTPUT_RECORD_OVERHEAD_BYTES: u64 = 64 * 1024;
 const CANONICAL_NUMERIC_BYTES_UPPER_BOUND: u64 = 9;
 
@@ -603,7 +600,9 @@ pub(super) fn post_process_ceiling() -> AccuracyResourceCeiling {
         maximum_solver_tightenings: 0,
         maximum_samples: 1_000_000,
         maximum_wall_time_milliseconds: POST_PROCESS_WALL_MILLISECONDS,
-        maximum_resident_bytes: Some(POST_PROCESS_MAXIMUM_RESIDENT_BYTES),
+        // Post-processing phases carry no authored memory ceiling; placement admits them
+        // against the machine-capacity authority like every other phase.
+        maximum_resident_bytes: None,
     }
 }
 

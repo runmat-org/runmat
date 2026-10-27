@@ -22,9 +22,11 @@ pub fn build_acoustic_frequency_assembly_resource_plan(
         maximum_wall_time_milliseconds: authored
             .maximum_wall_time_milliseconds
             .min(generic.maximum_wall_time_milliseconds),
-        maximum_resident_bytes: authored
-            .maximum_resident_bytes
-            .min(generic.maximum_resident_bytes),
+        // The tighter of two optional ceilings; `None` (no cap) never tightens.
+        maximum_resident_bytes: match (authored.resident_limit(), generic.resident_limit()) {
+            (Some(authored), Some(generic)) => Some(authored.min(generic)),
+            (limit, None) | (None, limit) => limit,
+        },
     };
     if demand.entry_count.0 > ceiling.maximum_samples as u64 {
         return Err(ResourcePlanningError::AccuracyCeiling {
