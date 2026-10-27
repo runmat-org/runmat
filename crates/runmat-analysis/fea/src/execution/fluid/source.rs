@@ -30,6 +30,9 @@ pub(crate) struct PreparedFluidSource {
     pub boundaries: Vec<AnalysisBoundary>,
     pub excitations: Vec<ExcitationAction>,
     pub preparation_resident_bytes: u64,
+    /// Canonical plans derived from this source; every recovery, accuracy and publication
+    /// consumer of the source shares them instead of re-deriving stencils and patterns.
+    plans: crate::physics::cfd::canonical::CanonicalFluidPlanCache,
 }
 
 /// Prepared sources retained per process. Preparation is a pure function of the authoring
@@ -246,6 +249,7 @@ impl PreparedFluidSource {
             boundaries,
             excitations,
             preparation_resident_bytes,
+            plans: Default::default(),
         })
     }
     pub(super) fn input<'a>(
@@ -292,8 +296,12 @@ impl PreparedFluidSource {
             _ => crate::excitation::ProjectionSample::Static,
         };
         let problem =
-            CanonicalFluidProblem::prepare_at(self.input(&workload.model, workload.policy), sample)
-                .map_err(invalid)?;
+            CanonicalFluidProblem::prepare_shared(
+                self.input(&workload.model, workload.policy),
+                sample,
+                &self.plans,
+            )
+            .map_err(invalid)?;
         require_bytes(
             add_bytes(
                 self.preparation_resident_bytes,
