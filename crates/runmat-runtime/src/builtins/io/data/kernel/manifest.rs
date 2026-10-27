@@ -123,8 +123,8 @@ pub(in crate::builtins::io::data) async fn fill_array_in_manifest(
 }
 
 pub(in crate::builtins::io::data) async fn delete_array_in_manifest_on(
-    provider: &dyn runmat_filesystem::FsProvider,
-    root: &std::path::Path,
+    _provider: &dyn runmat_filesystem::FsProvider,
+    _root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
     budget: &mut Option<crate::execution::CpuCooperationBudget>,
@@ -136,18 +136,8 @@ pub(in crate::builtins::io::data) async fn delete_array_in_manifest_on(
             "DataTransaction.delete_array: array '{array_name}' not found"
         )));
     }
-    let array_dir = root.join("arrays").join(array_name);
-    if provider.metadata(&array_dir).await.is_ok() {
-        provider.remove_dir_all(&array_dir).await.map_err(|err| {
-            crate::data::data_error_with_source(
-                format!(
-                    "DataTransaction.delete_array: failed to remove '{}': {err}",
-                    array_dir.display()
-                ),
-                err,
-            )
-        })?;
-    }
+    // Removing the manifest reference does not authorize deleting storage still
+    // reachable through the currently published manifest or a snapshot.
     Ok(())
 }
 

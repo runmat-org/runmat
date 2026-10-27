@@ -45,7 +45,7 @@ const BEGIN_DOC: BuiltinDocumentation = docs::documentation(docs::Content {
     description: "`tx = Dataset.begin(ds)` reads the manifest sequence and returns a managed DataTransaction child pinned to the Dataset's provider and resolved root.",
     keywords: &["Dataset.begin", "DataTransaction", "dataset", "transaction"],
     related: &["DataTransaction.commit", "DataTransaction.abort"],
-    sections: &[BuiltinDocumentationSection { heading: "Concurrency", paragraphs: &["Queued writes remain process-local until commit. Commit rejects a changed manifest sequence before applying queued operations; a later provider failure can still leave partial chunk effects, so this is not an atomic multi-file transaction."] }],
+    sections: &[BuiltinDocumentationSection { heading: "Concurrency", paragraphs: &["Queued writes remain process-local until commit. Commit checks the manifest sequence, writes array changes into fresh revisions, and publishes their references through the manifest. Rejected publication preserves previously referenced array objects. Failed writes can leave unreferenced revision files; commit is not a filesystem-wide transaction."] }],
     examples: &[docs::example("dataset-begin", "Begin and abort a transaction", "schema = struct(); schema.arrays = struct();\nds = data.create('begin.data', schema);\ntx = Dataset.begin(ds);\nstate = DataTransaction.status(tx);", "assert(strcmp(state, 'open')); assert(DataTransaction.abort(tx));" )],
     faqs: &[BuiltinDocumentationFaq { question: "Can a transaction move to another provider?", answer: "No. It retains the Dataset handle's exact provider and root." }],
     verification: LIFECYCLE_VERIFICATION,

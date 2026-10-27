@@ -6,6 +6,8 @@ use runmat_value::{ComplexTensor, IntegerComplexStorage, StructValue};
 mod handle_receipt;
 #[path = "tests/slice_cooperation.rs"]
 mod slice_cooperation;
+#[path = "tests/publication.rs"]
+mod publication;
 
 fn tensor_values(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()
@@ -665,6 +667,7 @@ struct CountingDataUploadProvider {
     swap_on_write: Mutex<Option<Arc<dyn FsProvider>>>,
     suspend_after_swap: bool,
     suspensions: Arc<Mutex<usize>>,
+    reject_manifest_writes: std::sync::atomic::AtomicBool,
 }
 
 struct HttpDataUploadProvider {
@@ -904,6 +907,16 @@ impl FsProvider for CountingDataUploadProvider {
 
     async fn write(&self, path: &Path, data: &[u8]) -> std::io::Result<()> {
         let replacement = self.swap_on_write.lock().expect("swap lock").take();
+        if path.file_name().is_some_and(|name| name == "manifest.json")
+            && self
+                .reject_manifest_writes
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "manifest head changed",
+            ));
+        }
         if let Some(replacement) = replacement {
             runmat_filesystem::set_provider(replacement);
             runmat_filesystem::set_current_dir_async("/replacement")
@@ -1238,8 +1251,18 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     assert_eq!(*suspensions.lock().expect("suspension count"), 1);
     let root = dir.path().join("pinned.data");
     assert!(root.join("manifest.json").is_file());
-    assert!(root.join("arrays/sample/data.f64.json").is_file());
-    assert!(root.join("arrays/sample/chunks/obj_0_0.json").is_file());
+    let manifest: crate::data::DataManifest =
+        serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();
+    let meta = &manifest.arrays["sample"];
+    assert!(root.join(&meta.data_path).is_file());
+    let index: DataChunkIndex = serde_json::from_slice(
+        &std::fs::read(root.join(meta.chunk_index_path.as_ref().unwrap())).unwrap(),
+    )
+    .unwrap();
+    assert!(index
+        .chunks
+        .iter()
+        .all(|chunk| root.join(&chunk.data_path).is_file()));
     assert!(
         futures::executor::block_on(replacement.read(std::path::Path::new(
             "/replacement/pinned.data/manifest.json"
@@ -1433,8 +1456,37 @@ fn slice_write_updates_only_touched_chunks() {
     call_builtin("DataArray.write", &[arr.value().clone(), full]).expect("initial write");
 
     let root = std::path::PathBuf::from(&path);
-    let untouched_path = root.join("arrays/temperature/chunks/obj_1_1.json");
-    let touched_path = root.join("arrays/temperature/chunks/obj_0_0.json");
+    let read_index = || {
+        let manifest =
+            futures::executor::block_on(crate::data::read_manifest_async(&root)).unwrap();
+        let path = root.join(
+            manifest.arrays["temperature"]
+                .chunk_index_path
+                .as_ref()
+                .unwrap(),
+        );
+        serde_json::from_slice::<DataChunkIndex>(
+            &futures::executor::block_on(runmat_filesystem::read_async(path)).unwrap(),
+        )
+        .unwrap()
+    };
+    let before_index = read_index();
+    let untouched_path = root.join(
+        &before_index
+            .chunks
+            .iter()
+            .find(|c| c.key == "1.1")
+            .unwrap()
+            .data_path,
+    );
+    let touched_path = root.join(
+        &before_index
+            .chunks
+            .iter()
+            .find(|c| c.key == "0.0")
+            .unwrap()
+            .data_path,
+    );
     let untouched_before =
         futures::executor::block_on(runmat_filesystem::read_async(&untouched_path))
             .expect("read untouched before");
@@ -1458,7 +1510,30 @@ fn slice_write_updates_only_touched_chunks() {
     let untouched_after =
         futures::executor::block_on(runmat_filesystem::read_async(&untouched_path))
             .expect("read untouched after");
-    let touched_after = futures::executor::block_on(runmat_filesystem::read_async(&touched_path))
+    let after_index = read_index();
+    let next_untouched = root.join(
+        &after_index
+            .chunks
+            .iter()
+            .find(|c| c.key == "1.1")
+            .unwrap()
+            .data_path,
+    );
+    let next_touched = root.join(
+        &after_index
+            .chunks
+            .iter()
+            .find(|c| c.key == "0.0")
+            .unwrap()
+            .data_path,
+    );
+    assert_eq!(next_untouched, untouched_path);
+    assert_ne!(next_touched, touched_path);
+    assert_eq!(
+        touched_before,
+        futures::executor::block_on(runmat_filesystem::read_async(&touched_path)).unwrap()
+    );
+    let touched_after = futures::executor::block_on(runmat_filesystem::read_async(&next_touched))
         .expect("read touched after");
     assert_eq!(untouched_before, untouched_after);
     assert_ne!(touched_before, touched_after);

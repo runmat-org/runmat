@@ -20,7 +20,7 @@ const WRITE_DOC: BuiltinDocumentation = docs::documentation(docs::Content {
     related: &["DataArray.write", "DataTransaction.commit"],
     sections: &[BuiltinDocumentationSection { heading: "Validation and ownership", paragraphs: &["The queue call validates the managed transaction and array name, but slice geometry, declared dtype, and values are checked during commit. Values may be resident until the commit path gathers them; no GPU execution or publication is promised by this queue call."] }],
     examples: &[docs::example("tx-write", "Queue a slice write", "schema = struct(); schema.arrays.sample = struct('dtype', 'uint64', 'shape', [1 2]);\nds = data.create('tx-write.data', schema);\ntx = Dataset.begin(ds);\ntf = DataTransaction.write(tx, 'sample', {':', 2}, uint64(8));\nDataTransaction.commit(tx);\narr = Dataset.array(ds, 'sample');", "assert(tf); assert(isequal(DataArray.read(arr), uint64([0 8])));")],
-    faqs: &[BuiltinDocumentationFaq { question: "Does queueing write array chunks?", answer: "No. Chunk effects occur at commit; later failures may leave partial chunks." }],
+    faqs: &[BuiltinDocumentationFaq { question: "Does queueing write array chunks?", answer: "No. Commit writes fresh array revisions. A failed publication can leave unreferenced revision files, but does not overwrite previously referenced chunks." }],
     verification: VERIFY,
 });
 transaction_entry!(
@@ -96,10 +96,10 @@ transaction_entry!(
 const DELETE_DOC: BuiltinDocumentation = docs::documentation(docs::Content {
     name: "DataTransaction.delete_array",
     summary: "Queue deletion of a named stored array.",
-    description: "`tf = DataTransaction.delete_array(tx, arrayName)` queues the name; commit removes its manifest entry and stored array directory through the pinned provider.",
+    description: "`tf = DataTransaction.delete_array(tx, arrayName)` queues the name; commit removes its entry from the published manifest through the pinned provider. Stored revisions remain available to snapshots and readers that still reference them.",
     keywords: &["DataTransaction.delete_array", "transaction", "delete", "dataset"],
     related: &["DataTransaction.create_array", "DataTransaction.commit"],
-    sections: &[BuiltinDocumentationSection { heading: "Error timing", paragraphs: &["A missing stored array or filesystem removal failure is reported during commit, not during queue insertion. This is a destructive operation and multi-file rollback is not guaranteed."] }],
+    sections: &[BuiltinDocumentationSection { heading: "Error timing", paragraphs: &["A missing stored array or manifest publication failure is reported during commit, not during queue insertion. Rejected publication leaves the array and its stored revisions unchanged."] }],
     examples: &[docs::example("tx-delete-array", "Queue an array deletion", "schema = struct(); schema.arrays.sample = struct('dtype', 'f64', 'shape', [1 1]);\nds = data.create('tx-delete.data', schema);\ntx = Dataset.begin(ds);\ntf = DataTransaction.delete_array(tx, 'sample');\nDataTransaction.commit(tx);\nfresh = Dataset.refresh(ds);", "assert(tf); assert(~Dataset.has_array(fresh, 'sample'));")],
     faqs: &[BuiltinDocumentationFaq { question: "Can abort restore a committed deletion?", answer: "No. Abort only discards pending changes before commit." }],
     verification: VERIFY,
