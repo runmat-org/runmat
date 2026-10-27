@@ -59,7 +59,7 @@ pub(super) fn reserve(
     let mut work = add(profile_work, mul(metadata, 64)?)?;
     for ordinal in range.clone() {
         let mut policy = input.policy;
-        policy.maximum_resident_bytes = Some(maximum - extra);
+        policy.set_resident_byte_budget(maximum - extra);
         let p = CanonicalFluidProblem::prepare_at(
             CanonicalFluidInput {
                 source: input.source,
