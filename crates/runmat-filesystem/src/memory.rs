@@ -18,6 +18,7 @@ mod bounded;
 mod handle_commit;
 mod mapped;
 mod rename;
+pub(crate) mod scope;
 mod staged;
 
 #[derive(Clone, Debug)]

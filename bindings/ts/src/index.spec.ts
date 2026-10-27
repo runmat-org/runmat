@@ -333,7 +333,7 @@ describe("initRunMat wiring", () => {
     expect(options[0].fsProvider).toBe(fsProvider);
   });
 
-  it("passes telemetry consent through to native init", async () => {
+  it("passes explicit settings and telemetry policy through to native init", async () => {
     const captured: any[] = [];
     const native: NativeModule = {
       default: async () => {},
@@ -344,10 +344,13 @@ describe("initRunMat wiring", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    await initRunMat({ telemetryConsent: false, enableGpu: false });
+    await initRunMat({ applicationSettings: "isolatedMemory", telemetryConsent: false, enableGpu: false });
 
     expect(captured).toHaveLength(1);
     expect(captured[0].telemetryConsent).toBe(false);
+    expect(captured[0].applicationSettings).toBe("isolatedMemory");
+    await initRunMat({ enableGpu: false });
+    expect(captured[1].applicationSettings).toBeUndefined();
   });
 
   it("passes the browser execution host through without interpreting it", async () => {

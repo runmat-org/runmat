@@ -15,7 +15,7 @@ impl RunMatSession {
         // expose the same builtin semantics before HIR lowers bare builtin
         // forms such as `functiontests(localfunctions)`.
         runmat_runtime::builtins::wasm_registry::register_all();
-        snapshot.validate()?;
+        let compatibility = super::snapshot_environment::compatibility(snapshot)?;
         if let Some(installed) = self.project_revision() {
             if *snapshot.program_revision.graph_digest()
                 != runmat_execution::Digest::from_bytes(*installed.graph_digest.bytes())
@@ -34,7 +34,7 @@ impl RunMatSession {
         }
         Ok(runmat_static_analysis::testing::discover_frozen_tests(
             snapshot,
-            self.compat_mode(),
+            compatibility,
         ))
     }
 

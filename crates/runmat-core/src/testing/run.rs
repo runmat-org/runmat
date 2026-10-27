@@ -31,11 +31,12 @@ impl RunMatSession {
         snapshot: &FrozenTestRunSnapshot,
         selector: &TestSelector,
     ) -> Result<CoreTestRun, TestDomainError> {
-        let _admission = self.admit_execution(None);
         let plan = self
             .discover_tests(snapshot)?
             .select(selector)
             .into_plan("runmat-core")?;
+        self.configure_test_snapshot(snapshot)?;
+        let _admission = self.admit_execution(None);
         let parameters = plan
             .tests()
             .map(|test| (test.id.clone(), test.parameters.clone()))

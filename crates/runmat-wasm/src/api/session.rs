@@ -85,6 +85,8 @@ pub struct RunMatWasm {
     package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
     execution_service: std::rc::Rc<BrowserExecutionService>,
     dialog_host: RefCell<Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>>,
+    application_settings:
+        Option<std::rc::Rc<runmat_runtime::context::IsolatedMemoryPreferenceService>>,
 }
 
 pub(crate) struct InFlightSession<'a> {
@@ -209,7 +211,20 @@ impl RunMatWasm {
             package_cache,
             execution_service,
             dialog_host: RefCell::new(dialog_host),
+            application_settings: None,
         }
+    }
+
+    pub(crate) fn with_application_settings(
+        mut self,
+        settings: std::rc::Rc<runmat_runtime::context::IsolatedMemoryPreferenceService>,
+    ) -> Result<Self, String> {
+        self.session
+            .get_mut()
+            .install_application_settings(settings.clone())
+            .map_err(|error| error.to_string())?;
+        self.application_settings = Some(settings);
+        Ok(self)
     }
 
     pub(crate) fn ensure_not_disposed(&self) -> Result<(), JsValue> {
@@ -1200,6 +1215,13 @@ impl RunMatWasm {
         let consent = config.telemetry_consent;
         let mut session = RunMatSession::with_options(config.enable_jit, config.verbose)
             .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
+        if let Some(settings) = &self.application_settings {
+            session
+                .install_application_settings(settings.clone())
+                .map_err(|err| {
+                    js_error(&format!("Failed to restore application settings: {err}"))
+                })?;
+        }
         session.set_telemetry_consent(consent);
         if let Some(cid) = config.telemetry_client_id.clone() {
             session.set_telemetry_client_id(Some(cid));
@@ -1211,6 +1233,9 @@ impl RunMatWasm {
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
         session.install_execution_services(self.execution_service.clone());
+        if self.execution_service.has_owned_cpu_worker() {
+            session.install_owned_builtin_work_service(self.execution_service.clone());
+        }
         if let Some(host) = self.dialog_host.borrow().clone() {
             session.install_host_service(host);
         }

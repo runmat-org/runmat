@@ -43,8 +43,6 @@ impl RunMatSession {
         attempt: u32,
         cancellation: CancellationToken,
     ) -> Result<CoreTestAttempt, TestDomainError> {
-        let _admission = self.admit_execution(Some(&cancellation));
-        snapshot.validate()?;
         if snapshot.program_revision != plan.program_revision {
             return Err(TestDomainError::InvalidField {
                 field: "plan.program_revision",
@@ -72,6 +70,8 @@ impl RunMatSession {
                 field: "test_id",
                 reason: format!("test '{}' is not present in the plan", test_id.as_str()),
             })?;
+        self.configure_test_snapshot(snapshot)?;
+        let _admission = self.admit_execution(Some(&cancellation));
         let parameters = plan
             .tests()
             .map(|test| (test.id.clone(), test.parameters.clone()))

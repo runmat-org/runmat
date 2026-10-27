@@ -155,6 +155,18 @@ fn integer_complex_and_foreign_inputs_do_not_enter_floating_predicates() {
     assert!(runmat_accelerate_api::is_unsupported_provider_operation(
         &provider.logical_isfinite(&integer).unwrap_err()
     ));
+    // Exercise the public asynchronous boundary, not just its synchronous
+    // preparation helper: unsupported class admission must remain pre-effect.
+    for result in [
+        block_on(provider.elem_eq(&integer, &integer)),
+        block_on(provider.elem_ne(&integer, &integer)),
+        block_on(provider.elem_lt(&integer, &integer)),
+        block_on(provider.elem_le(&integer, &integer)),
+        block_on(provider.elem_gt(&integer, &integer)),
+        block_on(provider.elem_ge(&integer, &integer)),
+    ] {
+        assert!(result.unwrap_err().is_unsupported());
+    }
     let complex = provider
         .upload_numeric(&HostNumericTensorView {
             data: HostNumericDataView::F64(&[1.0, 0.0]),
@@ -174,4 +186,7 @@ fn integer_complex_and_foreign_inputs_do_not_enter_floating_predicates() {
     assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
         &provider.logical_and(&integer, &foreign).unwrap_err()
     ));
+    assert!(!block_on(provider.elem_ne(&integer, &foreign))
+        .unwrap_err()
+        .is_unsupported());
 }

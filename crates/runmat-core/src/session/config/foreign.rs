@@ -103,6 +103,18 @@ impl RunMatSession {
         }
     }
 
+    /// Apply the resolved foreign policy before installing project artifacts.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_foreign_config(
+        &mut self,
+        config: &runmat_config::runtime::ForeignConfig,
+    ) -> Result<(), RuntimeError> {
+        self.set_mex_config(&config.mex);
+        self.set_native_ffi_config(&config.native)?;
+        self.set_java_config(&config.java)?;
+        self.set_python_config(&config.python)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_mex_config(&mut self, config: &runmat_config::runtime::MexConfig) {
         let unmanifested = match config.unmanifested {

@@ -107,6 +107,8 @@ import {
   FEA_RUN_DATASET_SCHEMA_VERSION,
 } from "./fea-contracts.js";
 import { createDefaultFsProvider } from "./fs/default.js";
+import type { FreezeTestSnapshotInput, ProjectTestLayout, RunMatTestPreparationNative } from "./testing/types.js";
+export type { FreezeTestSnapshotInput, ProjectTestLayout } from "./testing/types.js";
 import type { PlotPresenceFrame, PlotPointerPosition } from "./plot-presence.js";
 export type { PlotPresenceFrame, PlotPointerPosition } from "./plot-presence.js";
 import { createIndexedDbPackageCache } from "./package-cache/indexeddb.js";
@@ -398,7 +400,11 @@ export interface LegacyRunmatConfigMigration {
 
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
+/** Explicit session-isolated settings; omission retains browser persistence. */
+export type ApplicationSettingsMode = "isolatedMemory";
+
 export interface RunMatInitOptions {
+  applicationSettings?: ApplicationSettingsMode;
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
@@ -1218,6 +1224,7 @@ export interface RunMatSessionHandle {
 }
 
 interface NativeInitOptions {
+  applicationSettings?: ApplicationSettingsMode;
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
@@ -1498,8 +1505,8 @@ interface RunMatNativeModule {
   ) => GitSnapshotWire;
   planGitAcquisition?: (request: GitAcquisitionPlanRequest) => GitAcquisitionPlan;
   validateGitSnapshot?: (snapshot: GitSnapshotWire) => GitSnapshotWire;
-  projectTestLayout?: (input: unknown) => unknown;
-  freezeTestSnapshot?: (input: unknown) => Record<string, unknown>;
+  projectTestLayout?: RunMatTestPreparationNative["projectTestLayout"];
+  freezeTestSnapshot?: RunMatTestPreparationNative["freezeTestSnapshot"];
   runTests?: (input: unknown, backend: unknown) => Promise<unknown>;
   runTestsWithEvents?: (
     input: unknown,
@@ -1679,6 +1686,7 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     }
   }
   const session = await native.initRunMat({
+    applicationSettings: options.applicationSettings,
     enableGpu: effectiveEnableGpu,
     enableJit: options.enableJit ?? false,
     verbose: options.verbose ?? false,
@@ -1778,13 +1786,13 @@ export async function planGitAcquisition(
 export async function projectTestLayout(input: {
   manifestPath: string;
   manifestContent: string;
-}): Promise<unknown> {
+}): Promise<ProjectTestLayout> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "projectTestLayout");
   return native.projectTestLayout(input);
 }
 
-export async function freezeTestSnapshot(input: unknown): Promise<Record<string, unknown>> {
+export async function freezeTestSnapshot(input: FreezeTestSnapshotInput): Promise<Record<string, unknown>> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "freezeTestSnapshot");
   return native.freezeTestSnapshot(input);

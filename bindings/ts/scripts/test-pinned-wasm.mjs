@@ -49,6 +49,7 @@ filesystem.readVersion = async (path, versionId, size, snapshotId) => {
   return captured;
 };
 const session = await initRunMat({
+  applicationSettings: "isolatedMemory",
   enableGpu: false, enableJit: false, telemetryConsent: false,
   fsProvider: filesystem,
   wasmModule: await readFile(new URL("../dist/pkg-web/runmat_wasm_web_bg.wasm", import.meta.url)),
@@ -91,6 +92,11 @@ try {
   assert.deepEqual(await filesystem.readFile(manifestPath), peerManifest);
   assert.deepEqual(await filesystem.readFile(indexPath), indexBytes);
   for (const [path, bytes] of oldObjects) assert.deepEqual(await filesystem.readFile(path), bytes);
+  const settings = await session.executeRequest({ source: { kind: "text", name: "/settings.m", text: "setpref('PinnedSmoke', 'Value', 7);" } });
+  assert.equal(settings.error, undefined, JSON.stringify(settings.error));
+  session.resetSession();
+  const reset = await session.executeRequest({ source: { kind: "text", name: "/settings-reset.m", text: "assert(getpref('PinnedSmoke', 'Value') == 7);" } });
+  assert.equal(reset.error, undefined, JSON.stringify(reset.error));
   const packageEntries = [];
   for (const [path, text] of [
     ["/runmat.toml", "[package]\nname='application'\nversion='1.0.0'\n[sources]\nroots=['src']\n[dependencies]\nhelper={path='vendor/helper'}\n"],

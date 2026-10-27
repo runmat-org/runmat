@@ -9114,6 +9114,7 @@ dependencies = [
  "runmat-execution-runner",
  "runmat-test",
  "runmat-test-runner",
+ "runmat-time",
  "runmat-types",
  "serde",
  "serde_json",
@@ -9125,6 +9126,7 @@ version = "0.6.2"
 dependencies = [
  "anyhow",
  "log",
+ "runmat-accelerate",
  "runmat-aot",
  "runmat-config",
  "runmat-core",

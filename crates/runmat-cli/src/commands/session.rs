@@ -47,16 +47,9 @@ pub(crate) fn create_session_with_graphics(
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(resolved_error_namespace(config));
-    engine.set_mex_config(&config.foreign.mex);
     engine
-        .set_native_ffi_config(&config.foreign.native)
-        .context("failed to configure native-library isolation")?;
-    engine
-        .set_java_config(&config.foreign.java)
-        .context("failed to configure Java runtime")?;
-    engine
-        .set_python_config(&config.foreign.python)
-        .context("failed to configure Python runtime")?;
+        .set_foreign_config(&config.foreign)
+        .context("failed to configure foreign runtimes")?;
     engine.set_selected_foreign_config(std::sync::Arc::new(config.clone()));
     engine
         .attach_graphics_host(graphics)

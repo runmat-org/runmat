@@ -15,7 +15,7 @@ use tokio::sync::watch;
 #[derive(Clone, Debug)]
 pub struct LocalBackendConfig {
     pub isolation: IsolationMode,
-    pub enable_jit: bool,
+    pub execution: super::NativeWorkerExecutionConfig,
     pub max_workers: usize,
     pub project_handoff: Option<FrozenProjectHandoff>,
 }
@@ -24,7 +24,7 @@ impl LocalBackendConfig {
     pub fn new(isolation: IsolationMode) -> Self {
         Self {
             isolation,
-            enable_jit: true,
+            execution: super::NativeWorkerExecutionConfig::default(),
             max_workers: std::thread::available_parallelism()
                 .map(usize::from)
                 .unwrap_or(1),
@@ -77,11 +77,11 @@ impl LocalBackend {
     fn spawn_state(&self, submission: RunSubmission) -> Result<Arc<LocalState>, BackendError> {
         let (sender, receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
-        let enable_jit = self.config.enable_jit;
+        let execution = self.config.execution.clone();
         let project = self.config.project_handoff.clone();
         std::thread::Builder::new()
             .name("runmat-test-session".into())
-            .spawn(move || worker_loop(receiver, ready_sender, submission, enable_jit, project))
+            .spawn(move || worker_loop(receiver, ready_sender, submission, execution, project))
             .map_err(|error| {
                 BackendError::new(
                     BackendErrorKind::Unavailable,
@@ -322,10 +322,10 @@ fn worker_loop(
     commands: mpsc::Receiver<LocalCommand>,
     ready: mpsc::SyncSender<Result<(), BackendError>>,
     submission: RunSubmission,
-    enable_jit: bool,
+    execution: super::NativeWorkerExecutionConfig,
     project: Option<FrozenProjectHandoff>,
 ) {
-    let mut session = match RunMatSession::with_options(enable_jit, false) {
+    let mut session = match RunMatSession::with_options(execution.enable_jit, false) {
         Ok(session) => session,
         Err(error) => {
             let _ = ready.send(Err(crashed(format!(
@@ -334,6 +334,18 @@ fn worker_loop(
             return;
         }
     };
+    if let Err(error) = session.configure_test_snapshot(&submission.snapshot) {
+        let _ = ready.send(Err(rejected(format!(
+            "invalid frozen test environment: {error}"
+        ))));
+        return;
+    }
+    if let Err(error) = session.set_foreign_config(&execution.foreign) {
+        let _ = ready.send(Err(rejected(format!(
+            "invalid local test foreign policy: {error}"
+        ))));
+        return;
+    }
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
