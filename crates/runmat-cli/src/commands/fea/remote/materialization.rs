@@ -214,7 +214,6 @@ pub(crate) fn materialize_remote_outputs(
         runmat_runtime::meshing::MeshingExecutionOutput {
             artifact: result.mesh.artifact,
             evidence: result.mesh.evidence,
-            region_aliases: result.region_resolution.aliases,
         },
         numerical,
         runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(run_id)
@@ -286,7 +285,6 @@ pub(crate) fn materialize_remote_sweep_outputs(
                         runmat_runtime::meshing::MeshingExecutionOutput {
                             artifact: result.mesh.artifact,
                             evidence: result.mesh.evidence,
-                            region_aliases: result.region_resolution.aliases,
                         },
                         numerical,
                         completion,

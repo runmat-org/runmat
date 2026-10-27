@@ -28,7 +28,6 @@ pub mod problem {
     pub mod quantity;
     pub mod random_vibration;
     pub mod reference_point;
-    pub mod region_resolution;
     pub mod response_spectrum;
     pub mod signal;
     pub mod structure;
@@ -199,9 +198,6 @@ pub use problem::random_vibration::{
     RandomSpectrumInterpolation, SpectralDensityConvention,
 };
 pub use problem::reference_point::ReferencePoint;
-pub use problem::region_resolution::{
-    resolve_geometry_region_aliases, GeometryRegionAliases, GeometryRegionResolutionError,
-};
 pub use problem::response_spectrum::{
     DirectionalCombination, ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy,
     ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy, ShockResponseSpectrumMethod,

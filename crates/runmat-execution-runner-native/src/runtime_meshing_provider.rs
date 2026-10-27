@@ -95,42 +95,14 @@ pub fn native_meshing_execution_provider() -> MeshingExecutionProvider {
             partition_policy: NativeMeshingPartitionPolicy::default(),
         })
         .map_err(|error| error.to_string())
-        .and_then(|result| {
-            let NativeExactMeshingResult {
-                dag_result,
-                source_edge_ids,
-                source_face_ids,
-                source_region_ids,
-            } = result;
-            Ok(MeshingExecutionOutput {
+        .map(|result| {
+            let NativeExactMeshingResult { dag_result, .. } = result;
+            MeshingExecutionOutput {
                 artifact: dag_result.artifact,
                 evidence: dag_result.evidence,
-                region_aliases: source_region_identities(
-                    source_edge_ids,
-                    source_face_ids,
-                    source_region_ids,
-                )?,
-            })
+            }
         })
     })
-}
-
-fn source_region_identities(
-    source_edge_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
-    source_face_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
-    source_region_ids: std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
-) -> Result<std::collections::BTreeMap<String, runmat_geometry_core::PersistentEntityId>, String> {
-    source_edge_ids
-        .into_values()
-        .chain(source_face_ids.into_values())
-        .chain(source_region_ids.into_values())
-        .map(|entity| {
-            entity
-                .analysis_selection_id()
-                .map(|key| (key, entity))
-                .map_err(|error| error.to_string())
-        })
-        .collect()
 }
 
 pub fn mesh_source_with_native_execution(
@@ -233,13 +205,6 @@ fn verify_expected_source_sha256(
 mod tests {
     use super::*;
 
-    fn identity(
-        kind: runmat_geometry_core::PersistentEntityKind,
-        source: &str,
-    ) -> runmat_geometry_core::PersistentEntityId {
-        runmat_geometry_core::PersistentEntityId::new(kind, source.into(), vec!["root".into()])
-    }
-
     #[test]
     fn admitted_geometry_digest_rejects_changed_source_bytes() {
         let expected = *Digest::sha256(b"original").bytes();
@@ -247,25 +212,5 @@ mod tests {
             verify_expected_source_sha256(Path::new("part.step"), b"changed", Some(expected))
                 .expect_err("changed geometry must fail");
         assert!(error.to_string().contains("changed after geometry.load"));
-    }
-
-    #[test]
-    fn runtime_meshing_exports_canonical_persistent_entity_keys() {
-        let edge = identity(runmat_geometry_core::PersistentEntityKind::Edge, "edge");
-        let face = identity(runmat_geometry_core::PersistentEntityKind::Face, "face");
-        let solid = identity(runmat_geometry_core::PersistentEntityKind::Region, "solid");
-        let aliases = source_region_identities(
-            std::collections::BTreeMap::from([(0, edge.clone())]),
-            std::collections::BTreeMap::from([(0, face.clone())]),
-            std::collections::BTreeMap::from([(0, solid.clone())]),
-        )
-        .unwrap();
-
-        assert_eq!(aliases[&edge.analysis_selection_id().unwrap()], edge);
-        assert_eq!(aliases[&face.analysis_selection_id().unwrap()], face);
-        assert_eq!(aliases[&solid.analysis_selection_id().unwrap()], solid);
-        assert!(!aliases.contains_key("face_000001"));
-        runmat_analysis_core::GeometryRegionAliases::new(aliases)
-            .expect("runtime meshing aliases should satisfy typed topology validation");
     }
 }

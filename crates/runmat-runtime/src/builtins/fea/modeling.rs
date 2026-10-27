@@ -140,14 +140,8 @@ pub(super) fn create_study_object_from_args(
     let options = StudyConstructorOptions::parse(args.view().range(3..)?)?;
     let supplied_mesh = options.mesh.clone();
     let supplied_execution = options.execution.clone();
-    let (mut model, frozen_generators) = (composed_model.model, composed_model.frozen_generators);
+    let (model, frozen_generators) = (composed_model.model, composed_model.frozen_generators);
     require_model_geometry(STUDY_NAME, &model, &geometry)?;
-    if let Some(mesh) = supplied_mesh.as_ref() {
-        let aliases = runmat_analysis_core::GeometryRegionAliases::new(mesh.region_aliases.clone())
-            .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
-        model = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
-            .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
-    }
     validate_model_against_geometry(&model, &CoordinateFrame::Global).map_err(|error| {
         builtin_error(
             STUDY_NAME,

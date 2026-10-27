@@ -103,12 +103,8 @@ pub fn prepare_fluid_study_publication(
                 error, &context, invalid,
             )
         })?;
-    let persisted = super::meshing::persist_mesh_output(&crate::meshing::MeshingExecutionOutput {
-        artifact: mesh.clone(),
-        evidence: meshing_evidence.clone(),
-        region_aliases: Default::default(),
-    })
-    .map_err(invalid)?;
+    let persisted =
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
