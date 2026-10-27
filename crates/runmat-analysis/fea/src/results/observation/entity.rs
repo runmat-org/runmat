@@ -14,6 +14,7 @@ pub enum ObservationEntity {
     Connector(StableDigest),
     Point {
         identity: StableDigest,
+        #[serde(with = "runmat_types::wire_integer")]
         ordinal: u64,
         position_m: [f64; 3],
         source_element: StableDigest,

@@ -50,7 +50,7 @@ pub(super) fn verify_original_root_with(
     let maximum_resident_bytes = original.workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes;
+        .resident_byte_budget();
     let directory = tempfile::tempdir().unwrap();
     let mut cold =
         FilesystemObjectStore::open(directory.path().join("retained"), limits.max_object_bytes)

@@ -326,7 +326,7 @@ fn output_inventory_and_combined_residency_are_rejected_before_execution() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - 1;
+        .maximum_resident_bytes = Some(required - 1);
     let error = execute_thermal_solver_result_objects(
         &workload,
         &mesh,
@@ -344,7 +344,7 @@ fn output_inventory_and_combined_residency_are_rejected_before_execution() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required;
+        .maximum_resident_bytes = Some(required);
     execute_thermal_solver_result_objects(
         &workload,
         &mesh,

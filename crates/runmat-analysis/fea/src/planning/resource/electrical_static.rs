@@ -93,7 +93,7 @@ fn require_support_preparation_ceiling(
     let maximum = workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes;
+        .resident_byte_budget();
     if required > maximum {
         return Err(ResourcePlanningError::AccuracyCeiling {
             resource: "electrical support preparation bytes",
@@ -254,7 +254,7 @@ pub fn build_electrical_static_resource_plan(
     let properties = PreparedProperties::prepare(
         &workload.model,
         Some(mesh),
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
     .map_err(invalid)?
     .estimated_resident_bytes;
@@ -311,7 +311,7 @@ pub fn build_electrical_static_resource_plan(
     let budget = step
         .accuracy
         .resources
-        .maximum_resident_bytes
+        .resident_byte_budget()
         .min(prepared.machine_memory_bytes);
     let iterative = iterative_solve_bytes(nodes, support)?;
     let direct = electrical_direct_solve(

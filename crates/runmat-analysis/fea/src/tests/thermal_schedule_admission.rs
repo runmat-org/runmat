@@ -144,7 +144,7 @@ fn impossible_sample_or_retained_memory_ceilings_fail_before_thermal_assembly() 
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 439;
+        .maximum_resident_bytes = Some(439);
     // Isolate mandatory field storage from the independently validated observation budget.
     workload.model.sequence.steps[0].observations.clear();
     workload.procedure = ThermalProcedureControl::BackwardEuler { snapshot_count: 5 };
@@ -176,7 +176,7 @@ fn impossible_sample_or_retained_memory_ceilings_fail_before_thermal_assembly() 
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1024 * 1024;
+        .maximum_resident_bytes = Some(1024 * 1024);
     workload.procedure = ThermalProcedureControl::BackwardEuler {
         snapshot_count: usize::MAX,
     };
@@ -246,7 +246,7 @@ fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = total - 1;
+            .maximum_resident_bytes = Some(total - 1);
         let error = workload.execute(&mesh).unwrap_err();
         assert!(
             matches!(error, crate::FeaRunError::Resource(
@@ -257,7 +257,7 @@ fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = total;
+            .maximum_resident_bytes = Some(total);
         workload.execute(&mesh).unwrap();
         let mut overflowing = observations;
         overflowing.catalog_copy_bytes = crate::planning::resource::ByteCount(u64::MAX);
@@ -312,7 +312,7 @@ fn deferred_primary_fields_do_not_reserve_unexecuted_dynamic_histories() {
     input.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 8 << 30;
+        .maximum_resident_bytes = Some(8 << 30);
     for request in &mut input.model.sequence.steps[0].observations {
         if let runmat_analysis_core::ObservationRequest::History(spec) = request {
             spec.sampling = runmat_analysis_core::SamplingPolicy::EveryAcceptedIncrement;
@@ -326,7 +326,7 @@ fn deferred_primary_fields_do_not_reserve_unexecuted_dynamic_histories() {
             < input.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes
+                .resident_byte_budget()
     );
     let original = input.identity().unwrap();
     let result = prepared.execute_primary_fields().unwrap();

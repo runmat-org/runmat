@@ -12,7 +12,7 @@ fn request(kind: AccuracySourceKind, maximum: u64) -> AccuracyEvaluationRequest 
     let result =
         SolverResultIdentity::from_step_result(producer, Digest::sha256("result")).unwrap();
     let mut plan = AccuracyPlan::baseline("admission");
-    plan.resources.maximum_resident_bytes = maximum;
+    plan.resources.maximum_resident_bytes = Some(maximum);
     plan.resources.maximum_wall_time_milliseconds = 60_000;
     AccuracyEvaluationRequest::new(producer, kind, result, None, plan).unwrap()
 }

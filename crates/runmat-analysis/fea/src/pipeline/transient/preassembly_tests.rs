@@ -178,7 +178,7 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
     rejected.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let error = prepare_transient_checkpoint_scope(&rejected, &mesh, None).unwrap_err();
     assert!(matches!(
         error,
@@ -199,7 +199,7 @@ fn transient_block_checks_scope_residency_before_its_initial_assembly() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let error = run_transient_block(StructuralTransientRunBlockInput {
         workload: &workload,
         solver_mesh: &mesh,
@@ -232,7 +232,7 @@ fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = u64::from(u32::MAX);
+        .maximum_resident_bytes = Some(u64::from(u32::MAX));
     let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
     let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
     let block_plan = crate::planning::resource::build_structural_transient_block_resource_plan(
@@ -252,7 +252,7 @@ fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
     constrained.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = block_plan.request.memory_bytes - 1;
+        .maximum_resident_bytes = Some(block_plan.request.memory_bytes - 1);
     // The authored ceiling is part of the workload, so the constrained block has its own scope.
     let constrained_scope = prepare_transient_checkpoint_scope(&constrained, &mesh, None).unwrap();
     let constrained_request =

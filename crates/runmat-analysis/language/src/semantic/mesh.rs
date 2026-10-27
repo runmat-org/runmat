@@ -635,12 +635,12 @@ fn optional_integer(
         );
         return None;
     };
-    source.parse().ok().or_else(|| {
+    source.parse().ok().and_then(runmat_types::wire_integer::bounded).or_else(|| {
         invalid(
             declaration,
             value,
             name,
-            "non-negative 64-bit integer",
+            "non-negative integer of at most 2^53 - 1",
             diagnostics,
         );
         None

@@ -5,7 +5,9 @@ use super::MeshingContractError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CancellationPolicy {
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_checkpoint_latency_ms: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_work_units_between_checks: u64,
 }
 

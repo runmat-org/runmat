@@ -370,7 +370,7 @@ pub(crate) fn plan_family_study(
             })
             .map_err(|error| error.to_string())?;
             let mut step = single_step(&product.compiled.model, kind)?;
-            step.0 = step.0.min(product.workload.policy.maximum_resident_bytes);
+            step.0 = step.0.min(product.workload.policy.resident_byte_budget());
             (
                 FamilyStudyPreparation::Fluid(Box::new(FluidStudyPreparation {
                     local_execution: context.local_execution,
@@ -456,7 +456,7 @@ fn single_step(model: &AnalysisModel, kind: StudyFamilyKind) -> Result<(u64, u64
         ));
     };
     Ok((
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
         step.accuracy.resources.maximum_wall_time_milliseconds,
     ))
 }

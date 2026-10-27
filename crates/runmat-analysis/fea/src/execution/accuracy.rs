@@ -187,7 +187,7 @@ impl AccuracyEvaluationRequest {
                     producer,
                     source_kind,
                     source_result,
-                    plan.resources.maximum_resident_bytes,
+                    plan.resources.resident_byte_budget(),
                 )?;
                 Some(observations.identity())
             }

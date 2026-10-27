@@ -193,8 +193,16 @@ pub async fn resources(args: crate::call::BuiltinArguments) -> BuiltinResult<Val
         maximum_samples: usize_from_value(NAME, &args[2])?,
         maximum_wall_time_milliseconds: u64::try_from(usize_from_value(NAME, &args[3])?)
             .map_err(|_| builtin_error(NAME, &ERROR_INPUT, "wall-time ceiling exceeds u64"))?,
-        maximum_resident_bytes: u64::try_from(usize_from_value(NAME, &args[4])?)
-            .map_err(|_| builtin_error(NAME, &ERROR_INPUT, "resident-byte ceiling exceeds u64"))?,
+        // `[]` authors "no resident-byte limit" (placement still applies machine capacity).
+        maximum_resident_bytes: if matches!(&args[4], Value::Tensor(tensor) if tensor.is_empty()) {
+            None
+        } else {
+            Some(
+                u64::try_from(usize_from_value(NAME, &args[4])?).map_err(|_| {
+                    builtin_error(NAME, &ERROR_INPUT, "resident-byte ceiling exceeds u64")
+                })?,
+            )
+        },
     };
     serializable_to_object(NAME, &ERROR_INTERNAL, RESOURCES_CLASS, &ceiling)
 }
@@ -491,17 +499,45 @@ mod tests {
     }
 
     #[test]
-    fn resource_ceilings_stay_exact_and_reject_invalid_counts() {
+    fn resource_ceilings_stay_exact_within_the_wire_bound_and_reject_invalid_counts() {
         registered();
-        let wide = (1u64 << 53) + 1;
-        let value = ceiling(Value::Int(IntValue::U64(wide))).unwrap();
+        let max = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+        let value = ceiling(Value::Int(IntValue::U64(max))).unwrap();
         let ceiling_value: AccuracyResourceCeiling =
             object_payload("test", &value, RESOURCES_CLASS).unwrap();
-        assert_eq!(ceiling_value.maximum_resident_bytes, wide);
+        assert_eq!(ceiling_value.maximum_resident_bytes, Some(max));
         assert_eq!(ceiling_value.maximum_solver_tightenings, 2);
         assert_eq!(ceiling_value.maximum_wall_time_milliseconds, 600_000);
+        assert_eq!(
+            ceiling(Value::Num(1024.0))
+                .and_then(|value| object_payload::<AccuracyResourceCeiling>(
+                    "test",
+                    &value,
+                    RESOURCES_CLASS
+                ))
+                .unwrap()
+                .maximum_resident_bytes,
+            Some(1024)
+        );
+        let unbounded = ceiling(empty_double_value()).unwrap();
+        let unbounded: AccuracyResourceCeiling =
+            object_payload("test", &unbounded, RESOURCES_CLASS).unwrap();
+        assert_eq!(unbounded.maximum_resident_bytes, None);
+        assert!(ceiling(Value::Int(IntValue::U64(max + 1))).is_err());
+        assert!(ceiling(Value::Int(IntValue::U64(u64::MAX))).is_err());
+        assert!(ceiling(Value::Num((max + 1) as f64)).is_err());
         assert!(ceiling(Value::Num(-1.0)).is_err());
         assert!(ceiling(Value::Num(2.5)).is_err());
+        assert!(block_on(resources(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num((max + 1) as f64),
+                Value::Num(0.0),
+                Value::Num(0.0),
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ])
+        ))
+        .is_err());
         assert!(block_on(resources(
             crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)])
         ))

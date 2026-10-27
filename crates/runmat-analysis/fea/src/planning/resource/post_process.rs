@@ -603,7 +603,7 @@ pub(super) fn post_process_ceiling() -> AccuracyResourceCeiling {
         maximum_solver_tightenings: 0,
         maximum_samples: 1_000_000,
         maximum_wall_time_milliseconds: POST_PROCESS_WALL_MILLISECONDS,
-        maximum_resident_bytes: POST_PROCESS_MAXIMUM_RESIDENT_BYTES,
+        maximum_resident_bytes: Some(POST_PROCESS_MAXIMUM_RESIDENT_BYTES),
     }
 }
 

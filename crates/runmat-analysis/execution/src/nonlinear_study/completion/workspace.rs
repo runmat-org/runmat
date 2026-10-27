@@ -21,7 +21,7 @@ fn import_workspace(
     let ceiling = study.preparation.product.workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes;
+        .resident_byte_budget();
     let available = ceiling
         .checked_sub(study.admit_retention(None, None)?)
         .ok_or_else(|| limit("nonlinear import has no remaining workspace"))?;

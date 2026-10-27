@@ -28,6 +28,7 @@ pub enum GeometryScalarExpression {
     },
     ParameterComponent {
         name: String,
+        #[serde(with = "runmat_types::wire_integer")]
         component: usize,
     },
     Negate {

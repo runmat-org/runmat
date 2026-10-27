@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Span {
+    #[serde(with = "crate::wire_integer")]
     pub start: usize,
+    #[serde(with = "crate::wire_integer")]
     pub end: usize,
 }
 

@@ -51,7 +51,7 @@ pub(super) fn select(
     crate::planning::resource::require_borrowed_initial_field_ceiling(
         &selected,
         runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64),
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
     let selected = selected.into_iter().cloned().collect::<Vec<_>>();

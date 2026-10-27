@@ -135,7 +135,7 @@ export type FeaAccuracyTarget = { observation: string } | { quantity: FeaObserva
 export type FeaAccuracyTolerance = { relative: number } | { absolute: { quantity: FeaObservationQuantity; canonical_value: number } };
 export interface FeaAccuracyCriterion { criterion_id: string; target: FeaAccuracyTarget; contribution: FeaErrorContributionKind; tolerance: FeaAccuracyTolerance; evidence: "a_posteriori_estimator" | "convergence_study" | "conservation_balance" | "residual_bound" | "reference_comparison" | "statistical_confidence" | "transfer_bound"; mandatory: boolean; }
 export type FeaErrorContributionKind = "geometry_admission" | "boundary_approximation" | "spatial_discretization" | "algebraic" | "nonlinear" | "temporal" | "frequency_sampling" | "modal_truncation" | "stochastic" | "coupling" | "interface_projection" | "field_transfer" | "signal_interpolation" | "recovery" | "observation_sampling" | "precision" | "execution_equivalence";
-export interface FeaAccuracyPlan { accuracy_plan_id: string; criteria: FeaAccuracyCriterion[]; unavailable_evidence: "fail" | "mark_indeterminate"; exceeded_limit: "refine" | "tighten_solver" | "extend_sampling" | "fail"; equivalence: "deterministic" | { relative_tolerance: number } | { absolute_tolerance: number }; resources: { maximum_refinement_cycles: number; maximum_solver_tightenings: number; maximum_samples: number; maximum_wall_time_milliseconds: number; maximum_resident_bytes: number }; }
+export interface FeaAccuracyPlan { accuracy_plan_id: string; criteria: FeaAccuracyCriterion[]; unavailable_evidence: "fail" | "mark_indeterminate"; exceeded_limit: "refine" | "tighten_solver" | "extend_sampling" | "fail"; equivalence: "deterministic" | { relative_tolerance: number } | { absolute_tolerance: number }; resources: { maximum_refinement_cycles: number; maximum_solver_tightenings: number; maximum_samples: number; maximum_wall_time_milliseconds: number; maximum_resident_bytes: number | null }; }
 export interface FeaProcedureStep {
   step_id: string; family: FeaPhysicsFamily; procedure: FeaAnalysisProcedure; solution_space: "direct" | "modal_reduced";
   excitation_case_selection: "all" | { only: string[] };
@@ -389,8 +389,8 @@ export interface FeaCanonicalFluidPolicy {
   pressure_relaxation: number;
   linear_relative_tolerance: number;
   physical_relative_tolerance: number;
-  maximum_resident_bytes: number;
-  maximum_operator_work: number;
+  maximum_resident_bytes: number | null;
+  maximum_operator_work: number | null;
   maximum_authority_items: number;
 }
 

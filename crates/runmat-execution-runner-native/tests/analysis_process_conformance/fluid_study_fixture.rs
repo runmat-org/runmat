@@ -59,7 +59,7 @@ pub(super) async fn cold_fixture(
     let ceiling = model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes;
+        .resident_byte_budget();
     let policy = FluidStudyPlanningPolicy {
         numerical: fixture.policy,
         geometry: geometry_policy(),
@@ -84,7 +84,7 @@ pub(super) async fn cold_fixture(
     config.worker_arguments = vec!["--child".into()];
     config.max_workers = 1;
     config.worker_cpu_millicores = 1000;
-    config.worker_memory_bytes = ceiling.min(fixture.policy.maximum_resident_bytes);
+    config.worker_memory_bytes = ceiling.min(fixture.policy.resident_byte_budget());
     config.worker_scratch_bytes = config.worker_memory_bytes;
     config.worker_capabilities = capabilities();
     let session = NativeProgramSession::new(config).unwrap();
@@ -92,8 +92,8 @@ pub(super) async fn cold_fixture(
     let store_root = session.object_store().root().to_path_buf();
     let resources = ResourceRequest {
         cpu_millicores: 1000,
-        memory_bytes: ceiling.min(fixture.policy.maximum_resident_bytes),
-        scratch_bytes: ceiling.min(fixture.policy.maximum_resident_bytes),
+        memory_bytes: ceiling.min(fixture.policy.resident_byte_budget()),
+        scratch_bytes: ceiling.min(fixture.policy.resident_byte_budget()),
         max_wall_millis: product.compiled.model.sequence.steps[0]
             .accuracy
             .resources
@@ -148,7 +148,9 @@ pub(super) async fn cold_fixture(
             import_fluid_study_completion(&store, done.preparation().unwrap(), missing).is_err()
         );
         let mut foreign = done.preparation().unwrap();
-        foreign.policy.numerical.maximum_resident_bytes -= 1;
+        let resident = foreign.policy.numerical.maximum_resident_bytes;
+        foreign.policy.numerical.maximum_resident_bytes =
+            Some(resident.map_or(1, |bytes| bytes - 1));
         assert!(import_fluid_study_completion(&store, foreign, closures.clone()).is_err());
         if fixture
             .actions

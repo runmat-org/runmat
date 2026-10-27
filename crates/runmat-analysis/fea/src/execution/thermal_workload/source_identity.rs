@@ -59,7 +59,7 @@ impl ThermalWorkload {
         };
         require(maximum_resident_bytes)?;
         let step = self.validated_step_with_dependency_graph_budget(maximum_resident_bytes)?;
-        require(step.accuracy.resources.maximum_resident_bytes)?;
+        require(step.accuracy.resources.resident_byte_budget())?;
         let sequence = SequenceIdentity::from_solver_contract(&self.model.sequence)?;
         let producer = StepIdentity::from_solver_contract(sequence, step)?;
         let workload = Self::identity_for(

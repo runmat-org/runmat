@@ -25,7 +25,7 @@ pub(super) fn workspace(
     let mut available = request
         .plan
         .resources
-        .maximum_resident_bytes
+        .resident_byte_budget()
         .checked_sub(baseline.request.memory_bytes)
         .ok_or_else(|| {
             AnalysisBridgeError::Invalid("thermal source baseline exceeds ceiling".into())

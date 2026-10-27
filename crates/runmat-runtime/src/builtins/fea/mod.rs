@@ -1547,7 +1547,24 @@ fn exact_bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
     }
 }
 
+/// A non-negative integer argument to an FEA builtin. Every such value lands on an
+/// FEA wire contract, so it is held to the shared wire bound (2^53 - 1) here, at the
+/// one place builtins read counts, rejecting exactly what contract decoding rejects.
 fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
+    let count = platform_usize_from_value(builtin, value)?;
+    runmat_types::wire_integer::bounded(count).ok_or_else(|| {
+        builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!(
+                "integer {count} exceeds the FEA wire-contract bound of {} (2^53 - 1)",
+                runmat_types::wire_integer::MAX_WIRE_INTEGER
+            ),
+        )
+    })
+}
+
+fn platform_usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
     if let Some(int) = tensor_utils::scalar_integer_value(value) {
         return int.try_to_usize().ok_or_else(|| {
             builtin_error(
@@ -2631,12 +2648,15 @@ mod tests {
             vec![2, 4]
         );
 
-        let maximum = usize_from_value("fea.test", &Value::Int(IntValue::U64(u64::MAX)));
+        let bound = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+        let maximum = usize_from_value("fea.test", &Value::Int(IntValue::U64(bound)));
         if usize::BITS == 64 {
-            assert_eq!(maximum.unwrap(), usize::MAX);
+            assert_eq!(maximum.unwrap(), bound as usize);
         } else {
             assert!(maximum.is_err());
         }
+        assert!(usize_from_value("fea.test", &Value::Int(IntValue::U64(bound + 1))).is_err());
+        assert!(usize_from_value("fea.test", &Value::Int(IntValue::U64(u64::MAX))).is_err());
     }
 
     #[test]
@@ -2751,7 +2771,7 @@ mod tests {
 
     #[test]
     fn fea_result_selectors_are_exact_one_based_vectors_and_flags_are_zero_one() {
-        let wide = 9_007_199_254_740_993_u64;
+        let wide = runmat_types::wire_integer::MAX_WIRE_INTEGER;
         let selectors = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
             .expect("wide selector vector");
         let decoded = one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(selectors));
@@ -2763,6 +2783,14 @@ mod tests {
                 Some("RunMat:fea:InvalidInput")
             );
         }
+        let beyond = Tensor::new_integer(IntegerStorage::U64(vec![wide + 2]), vec![1, 1])
+            .expect("selector beyond the wire bound");
+        assert_eq!(
+            one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(beyond))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:fea:InvalidInput")
+        );
 
         let selectors = Tensor::new_integer(IntegerStorage::U32(vec![3, 1, 3]), vec![3, 1])
             .expect("selector vector");
@@ -4414,7 +4442,7 @@ mod tests {
     #[test]
     fn fea_usize_parser_reads_typed_integer_storage_exactly_and_rejects_float_boundary() {
         let wide = if usize::BITS == 64 {
-            9_007_199_254_740_993
+            runmat_types::wire_integer::MAX_WIRE_INTEGER
         } else {
             u32::MAX as u64
         };
@@ -4425,6 +4453,14 @@ mod tests {
             usize_from_value(STUDY_NAME, &Value::Tensor(typed)).expect("typed integer"),
             wide as usize
         );
+        let beyond = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![
+                runmat_types::wire_integer::MAX_WIRE_INTEGER + 2,
+            ]),
+            vec![1, 1],
+        )
+        .expect("typed integer beyond the wire bound");
+        assert!(usize_from_value(STUDY_NAME, &Value::Tensor(beyond)).is_err());
 
         let boundary = if usize::BITS == 64 {
             usize::MAX as f64

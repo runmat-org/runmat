@@ -103,10 +103,10 @@ crate::planning::resource::LocalExecutionPlan::serial(),
 );
         let admitted = admission.unwrap_or_else(|error| panic!(
             "finer continuum admission rejected quadratic={quadratic} damped={damped} cells={cells} original_ceiling={} error={error}",
-            workload.model.sequence.steps[0].accuracy.resources.maximum_resident_bytes
+            workload.model.sequence.steps[0].accuracy.resources.resident_byte_budget()
         ));
         eprintln!("finer continuum source/scope admitted (not full history) quadratic={quadratic} damped={damped} cells={cells} request={:?} original_ceiling={}",
-            admitted.request, workload.model.sequence.steps[0].accuracy.resources.maximum_resident_bytes);
+            admitted.request, workload.model.sequence.steps[0].accuracy.resources.resident_byte_budget());
         let result = governed_history(&workload, &mesh);
         assert_eq!(result.time_points_s.len(), 401);
         assert_eq!(result.time_points_s[0], 0.0);

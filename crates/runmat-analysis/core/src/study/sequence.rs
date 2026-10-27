@@ -172,6 +172,7 @@ pub enum IndependentDomain {
         origin: f64,
         start: f64,
         end: f64,
+        #[serde(with = "runmat_types::wire_integer")]
         interval_count: usize,
     },
     FrequencyHertz(Vec<f64>),
@@ -180,6 +181,7 @@ pub enum IndependentDomain {
         end: f64,
     },
     Eigenvalue {
+        #[serde(with = "runmat_types::wire_integer")]
         requested_count: usize,
     },
     StudyParameter {

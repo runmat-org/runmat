@@ -167,7 +167,7 @@ fn prepared_understatement_and_count_only_tiny_policy_fail_closed() {
     tiny.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let mut malformed = m.clone();
     malformed.topology.volume_elements[0]
         .node_ids

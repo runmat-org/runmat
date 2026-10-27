@@ -107,13 +107,13 @@ impl ThermalPreassemblyResourceFacts {
             ));
         }
         let history = ThermalHistoryResourceFacts::derive(mesh, schedule, &model.interfaces)?;
-        history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
+        history.require_fits(step.accuracy.resources.resident_byte_budget())?;
         // Reuse the workload's bounded input envelope; do not allocate canonical bytes or a
         // serde value tree to decide whether the model fits the authored resident ceiling.
         let model_materialization_bytes = Self::input_materialization_bytes(model, initial_fields)?;
         require_ceiling(
             model_materialization_bytes.0,
-            step.accuracy.resources.maximum_resident_bytes,
+            step.accuracy.resources.resident_byte_budget(),
         )?;
         // Admit projection, canonical validation and support construction before deriving them.
         // Operator facts retain this estimate in the final composed numerical envelope.
@@ -126,10 +126,10 @@ impl ThermalPreassemblyResourceFacts {
             .ok_or(ResourcePlanningError::Overflow("thermal operator planning"))?;
         require_ceiling(
             before_projection,
-            step.accuracy.resources.maximum_resident_bytes,
+            step.accuracy.resources.resident_byte_budget(),
         )?;
         let operators = ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?;
-        operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
+        operators.require_fits(&history, step.accuracy.resources.resident_byte_budget())?;
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
         let observations = match observations {
             crate::pipeline::thermal::ThermalObservationExecution::Inline => {
@@ -175,7 +175,7 @@ impl ThermalPreassemblyResourceFacts {
         .ok_or(ResourcePlanningError::Overflow(
             "thermal field construction reservation",
         ))?;
-        let maximum = step.accuracy.resources.maximum_resident_bytes;
+        let maximum = step.accuracy.resources.resident_byte_budget();
         require_ceiling(base, maximum)?;
         // Admit actual selected metadata before owned constitutive/section/audit cloning.
         // The compiler owns selection for both the profile and materialization passes.

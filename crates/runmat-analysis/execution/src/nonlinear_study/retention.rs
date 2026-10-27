@@ -40,7 +40,7 @@ impl NonlinearSolidStudyCoordinator {
         let ceiling = self.preparation.product.workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes;
+            .resident_byte_budget();
         let profile = profile_serialized(
             &(
                 &self.preparation.product.compiled,

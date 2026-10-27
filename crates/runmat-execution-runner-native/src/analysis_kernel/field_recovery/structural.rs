@@ -82,7 +82,7 @@ pub(super) fn execute(
                 .procedure_step()?
                 .accuracy
                 .resources
-                .maximum_resident_bytes
+                .resident_byte_budget()
                 .min(resource_plan.request.memory_bytes),
             &all_input_facts,
             resource_plan.input.worker.fixed_memory_bytes,

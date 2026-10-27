@@ -41,6 +41,7 @@ pub struct WorkspaceCaptureRequest {
     pub root: PathBuf,
     pub excluded_subtrees: Vec<PathBuf>,
     pub max_files: u32,
+    #[serde(with = "runmat_types::wire_integer")]
     pub max_bytes: u64,
 }
 

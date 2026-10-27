@@ -86,6 +86,7 @@ impl Ap242ExchangeInventory {
 #[serde(deny_unknown_fields)]
 pub struct Ap242UnsupportedConcept {
     pub entity_type: String,
+    #[serde(with = "runmat_types::wire_integer::vec")]
     pub entity_ids: Vec<u64>,
     pub reason: String,
 }
