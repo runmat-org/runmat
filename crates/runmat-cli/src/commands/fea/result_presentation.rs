@@ -90,6 +90,8 @@ pub(super) struct ThermalEnergyBalanceSummary {
     boundary_loss_w: f64,
     storage_rate_w: f64,
     prescribed_boundary_power_w: f64,
+    prescribed_heat_entering_w: f64,
+    prescribed_heat_leaving_w: f64,
     residual_w: f64,
     relative_residual: f64,
 }
@@ -101,6 +103,8 @@ impl From<&runmat_analysis_fea::contracts::ThermalEnergyBalance> for ThermalEner
             boundary_loss_w: balance.boundary_loss_w.canonical_value(),
             storage_rate_w: balance.storage_rate_w.canonical_value(),
             prescribed_boundary_power_w: balance.prescribed_boundary_power_w.canonical_value(),
+            prescribed_heat_entering_w: balance.prescribed_heat_flow.entering_w.canonical_value(),
+            prescribed_heat_leaving_w: balance.prescribed_heat_flow.leaving_w.canonical_value(),
             residual_w: balance.residual_w.canonical_value(),
             relative_residual: balance.relative_residual,
         }
@@ -213,6 +217,12 @@ fn print_summary(study_id: &str, mut summary: LocalRunSummary, json: bool) -> Re
             balance.prescribed_boundary_power_w,
             balance.residual_w,
             balance.relative_residual
+        );
+        println!(
+            "  {} {:.6} W in, {:.6} W out",
+            styles.label("heat through prescribed temperatures:"),
+            balance.prescribed_heat_entering_w,
+            balance.prescribed_heat_leaving_w
         );
     }
     for assessment in &summary.assessment_summary.assessments {

@@ -10,7 +10,9 @@ use super::FeaRunResult;
 mod energy;
 mod initial_evidence;
 mod nonlinear_evidence;
-pub use energy::{ThermalEnergyBalance, ThermalEnergyBalanceError, ThermalPowerScale};
+pub use energy::{
+    ThermalEnergyBalance, ThermalEnergyBalanceError, ThermalPowerScale, ThermalPrescribedHeatFlow,
+};
 pub use nonlinear_evidence::{
     ThermalNonlinearSampleEvidence, THERMAL_MAXIMUM_BACKTRACKING_TRIALS,
     THERMAL_MAXIMUM_NEWTON_CORRECTIONS,
