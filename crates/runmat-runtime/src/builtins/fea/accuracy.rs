@@ -499,6 +499,44 @@ mod tests {
     }
 
     #[test]
+    fn object_layer_restores_absent_nullable_fields_and_wire_decode_stays_strict() {
+        registered();
+        for resident in [Some(4096), None] {
+            let mut plan = AccuracyPlan::baseline("bracket.accuracy");
+            plan.resources.maximum_resident_bytes = resident;
+            let value = serializable_to_object("test", &ERROR_INTERNAL, PLAN_CLASS, &plan).unwrap();
+            assert_eq!(
+                object_payload::<AccuracyPlan>("test", &value, PLAN_CLASS).unwrap(),
+                plan
+            );
+            let value =
+                serializable_to_object("test", &ERROR_INTERNAL, RESOURCES_CLASS, &plan.resources)
+                    .unwrap();
+            assert_eq!(
+                object_payload::<AccuracyResourceCeiling>("test", &value, RESOURCES_CLASS).unwrap(),
+                plan.resources
+            );
+        }
+        // Wire decode keeps rejecting an omitted resident-byte ceiling.
+        let mut wire =
+            serde_json::to_value(AccuracyPlan::baseline("bracket.accuracy").resources).unwrap();
+        wire.as_object_mut()
+            .unwrap()
+            .remove("maximum_resident_bytes");
+        let err = serde_json::from_value::<AccuracyResourceCeiling>(wire.clone()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("missing field `maximum_resident_bytes`"));
+        // A required non-nullable property absent from an object is still rejected as missing.
+        wire.as_object_mut().unwrap().remove("maximum_samples");
+        let err = decode_object_json::<AccuracyResourceCeiling>(wire).unwrap_err();
+        assert!(
+            err.to_string().contains("missing field `maximum_samples`"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn resource_ceilings_stay_exact_within_the_wire_bound_and_reject_invalid_counts() {
         registered();
         let max = runmat_types::wire_integer::MAX_WIRE_INTEGER;
