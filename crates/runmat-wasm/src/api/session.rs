@@ -43,7 +43,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::api::init::install_fs_provider_value;
-use crate::api::streams::js_input_request;
+#[cfg(target_arch = "wasm32")]
+use crate::api::streams::JsInputHandler;
 use crate::runtime::config::{
     parse_language_compat_from_str, parse_workspace_export_mode, request_error_namespace,
     SessionConfig,
@@ -51,10 +52,7 @@ use crate::runtime::config::{
 use crate::runtime::execution::BrowserExecutionService;
 use crate::runtime::gpu::{capture_memory_usage, GpuStatus};
 use crate::runtime::logging::init_logging_once;
-use crate::runtime::state::{
-    clear_figure_event_callback as clear_figure_event_callback_state, set_js_stdin_handler,
-    JS_STDIN_HANDLER,
-};
+use crate::runtime::state::clear_figure_event_callback as clear_figure_event_callback_state;
 use crate::wire::errors::{
     js_error, js_value_to_string, run_error_payload, run_error_to_js, runtime_error_to_js,
     RunMatErrorKind,
@@ -72,6 +70,8 @@ use crate::wire::value::{integer_json_value, MAX_DATA_PREVIEW};
 pub struct RunMatWasm {
     pub(crate) session: RefCell<RunMatSession>,
     in_flight_session: Cell<bool>,
+    #[cfg(target_arch = "wasm32")]
+    input_handler: RefCell<Option<JsInputHandler>>,
     pub(crate) fea_selection: RefCell<Option<super::fea_execution::BrowserFeaSelection>>,
     clear_workspace_after_flight: Cell<bool>,
     #[cfg(target_arch = "wasm32")]
@@ -195,6 +195,8 @@ impl RunMatWasm {
         Self {
             session: RefCell::new(session),
             in_flight_session: Cell::new(false),
+            #[cfg(target_arch = "wasm32")]
+            input_handler: RefCell::new(None),
             fea_selection: RefCell::new(None),
             clear_workspace_after_flight: Cell::new(false),
             #[cfg(target_arch = "wasm32")]
@@ -1230,9 +1232,9 @@ impl RunMatWasm {
         }
         let mut slot = self.session.borrow_mut();
         *slot = session;
-        let has_stdin_handler = JS_STDIN_HANDLER.with(|s| s.borrow().is_some());
-        if has_stdin_handler {
-            slot.install_async_input_handler(|req| async move { js_input_request(req).await });
+        #[cfg(target_arch = "wasm32")]
+        if let Some(handler) = self.input_handler.borrow().as_ref() {
+            handler.install_on(&mut slot);
         }
         runtime_reset_plot_state();
         runtime_invalidate_surface_revisions();
@@ -1368,17 +1370,15 @@ impl RunMatWasm {
         #[cfg(target_arch = "wasm32")]
         {
             if handler.is_null() || handler.is_undefined() {
-                set_js_stdin_handler(None);
-                let mut session = self.session.borrow_mut();
-                session.clear_async_input_handler();
+                self.session.borrow_mut().clear_async_input_handler();
+                self.input_handler.borrow_mut().take();
             } else {
                 let func = handler
                     .dyn_into::<js_sys::Function>()
                     .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
-                set_js_stdin_handler(Some(func));
-                let mut session = self.session.borrow_mut();
-                session
-                    .install_async_input_handler(|req| async move { js_input_request(req).await });
+                let registration = JsInputHandler::new(func);
+                registration.install_on(&mut self.session.borrow_mut());
+                self.input_handler.replace(Some(registration));
             }
             Ok(())
         }
@@ -1850,7 +1850,7 @@ impl RunMatWasm {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            set_js_stdin_handler(None);
+            self.input_handler.borrow_mut().take();
             clear_figure_event_callback_state();
         }
     }
