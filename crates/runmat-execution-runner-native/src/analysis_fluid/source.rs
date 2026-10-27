@@ -1,5 +1,6 @@
 //! Authenticated bridge-to-runtime boundary, without a runtime artifact dependency.
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use runmat_analysis_execution::{
     import_fluid_study_completion, prepare_fluid_study_root, CompletedFluidStudy,
@@ -16,6 +17,11 @@ struct RetainedFluidSource<S> {
     completed: CompletedFluidStudy,
     store: S,
     objects: BTreeMap<Digest, Vec<u8>>,
+    /// The completion that one cold replay of `completed` over this source's immutable
+    /// store and retained objects produced, after every catalog object was read back
+    /// verified. Both inputs are fixed for the source's lifetime, so the replay is keyed
+    /// by this source and its result root digest; later authentications compare against it.
+    replayed: OnceLock<FluidStudyCompletion>,
 }
 
 impl<S: CacheImport> CacheImport for RetainedFluidSource<S> {
@@ -164,6 +170,22 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
     }
 
     fn authenticate(&self, candidate: &FluidStudyCompletion) -> Result<(), String> {
+        let expected = self.replayed()?;
+        if expected.root.logical_digest != candidate.root.logical_digest || expected != candidate {
+            return Err("runtime fluid completion differs from authenticated replay".into());
+        }
+        Ok(())
+    }
+}
+
+impl<S: CacheImport + Send + Sync> RetainedFluidSource<S> {
+    /// Replay the saved study once: import every phase from authored inputs, rebuild the
+    /// completion DTO and read back every catalog object verified. The source is immutable,
+    /// so a later authentication reuses this verified replay instead of importing again.
+    fn replayed(&self) -> Result<&FluidStudyCompletion, String> {
+        if let Some(replayed) = self.replayed.get() {
+            return Ok(replayed);
+        }
         let replay = import_fluid_study_completion(
             self,
             self.completed.preparation().map_err(|e| e.to_string())?,
@@ -171,13 +193,10 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
         )
         .map_err(|error| error.to_string())?;
         let expected = completion(&replay, self)?;
-        if &expected != candidate {
-            return Err("runtime fluid completion differs from authenticated replay".into());
-        }
         for reference in &expected.catalog.objects {
             PublishedObjectSource::read_verified(self, reference)?;
         }
-        Ok(())
+        Ok(self.replayed.get_or_init(|| expected))
     }
 }
 
@@ -267,6 +286,7 @@ pub(crate) fn convert(
             .collect(),
         completed,
         store,
+        replayed: OnceLock::new(),
     };
     let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
@@ -287,6 +307,7 @@ pub fn fluid_study_completion_from_source(
         completed,
         store: source,
         objects: BTreeMap::new(),
+        replayed: OnceLock::new(),
     };
     let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
