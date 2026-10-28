@@ -79,6 +79,10 @@ pub(super) struct StructuralStudyRootRequest {
     pub(super) materials: Vec<StructuralStudyMaterial>,
     pub(super) planning: StudyRootPlanning,
     pub(super) local_execution: LocalExecutionPlan,
+    /// Execution policy `memory_per_worker`: every placement (local or remote) plans each
+    /// worker within it. Absent when not authored, so roots without it keep their bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) memory_per_worker_bytes: Option<u64>,
     pub(super) analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub(super) input_materializations: Vec<InputMaterializationPlanRequest>,
     pub(super) geometry_meshing: ProgramExecutionDescriptor,
@@ -103,6 +107,7 @@ impl StructuralStudyRootRequest {
             || self.study.module_path.trim().is_empty()
             || self.study.study_id.trim().is_empty()
             || self.geometry_argument_count == 0
+            || self.memory_per_worker_bytes == Some(0)
             || self.geometry_meshing.artifact.form != ExecutableForm::MeshingWorkload
             || self.geometry_meshing.recipe.execution_mode
                 != crate::GEOMETRY_MESHING_ROOT_EXECUTION_MODE
@@ -182,6 +187,8 @@ pub struct StructuralStudyRootPreparation {
     pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
     pub planning: StudyRootPlanning,
     pub local_execution: LocalExecutionPlan,
+    /// The execution policy's `memory_per_worker`, when authored.
+    pub memory_per_worker_bytes: Option<u64>,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<InputMaterializationPlan>,
     pub initial_fields: Vec<runmat_analysis_fea::execution::InitialFieldBinding>,

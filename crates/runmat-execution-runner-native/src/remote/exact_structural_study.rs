@@ -227,6 +227,7 @@ pub(super) async fn execute_with_completed_meshing(
         resources,
         &decoded.analysis_accelerator_requests,
         decoded.local_execution,
+        decoded.memory_per_worker_bytes,
     ) {
         Ok(resources) => resources,
         Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error)),
@@ -311,13 +312,20 @@ struct Composition<'a, 'recovery> {
     recovery: StructuralTransientRecoveryAdmission<'recovery>,
 }
 
+/// The task envelope of one analysis worker inside the remote allocation. As in local
+/// placement, the execution policy's `memory_per_worker` bounds each worker's resident memory:
+/// the request is min(allocation, memory_per_worker), and the solve path is planned within it.
 pub(super) fn admit_analysis_task_resources(
     resources: &AllocationResources,
     expected_accelerators: &[runmat_execution::resource::AcceleratorRequest],
     local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    memory_per_worker_bytes: Option<u64>,
 ) -> Result<runmat_execution::resource::ResourceRequest, String> {
-    let task_resources =
+    let mut task_resources =
         super::pool_resources::task_resources(resources).map_err(|error| error.to_string())?;
+    if let Some(maximum) = memory_per_worker_bytes {
+        task_resources.memory_bytes = task_resources.memory_bytes.min(maximum);
+    }
     if task_resources.accelerators != expected_accelerators {
         return Err(
             "allocated accelerators differ from the immutable structural-study request".into(),
@@ -359,20 +367,20 @@ mod allocation_tests {
     #[test]
     fn remote_allocation_must_match_the_immutable_study_request() {
         let serial = runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial();
-        assert!(admit_analysis_task_resources(&resources(0), &[], serial).is_ok());
+        assert!(admit_analysis_task_resources(&resources(0), &[], serial, None).is_ok());
         let mut fractional = resources(0);
         fractional.cpu_millicores = 500;
-        assert!(admit_analysis_task_resources(&fractional, &[], serial)
+        assert!(admit_analysis_task_resources(&fractional, &[], serial, None)
             .unwrap_err()
             .contains("allocated CPU differs"));
         let parallel = runmat_analysis_fea::planning::resource::LocalExecutionPlan::fixed(
             runmat_analysis_fea::planning::resource::LocalThreadCount::new(2).unwrap(),
         )
         .unwrap();
-        assert!(admit_analysis_task_resources(&resources(0), &[], parallel)
+        assert!(admit_analysis_task_resources(&resources(0), &[], parallel, None)
             .unwrap_err()
             .contains("allocated CPU differs"));
-        assert!(admit_analysis_task_resources(&resources(1), &[], serial)
+        assert!(admit_analysis_task_resources(&resources(1), &[], serial, None)
             .unwrap_err()
             .contains("immutable structural-study request"));
         let requested = runmat_execution::resource::AcceleratorRequest {
@@ -386,16 +394,35 @@ mod allocation_tests {
             &resources(0),
             std::slice::from_ref(&requested),
             serial,
+            None,
         )
         .unwrap_err()
         .contains("immutable structural-study request"));
         assert_eq!(
-            admit_analysis_task_resources(&resources(1), &[requested], serial)
+            admit_analysis_task_resources(&resources(1), &[requested], serial, None)
                 .unwrap()
                 .accelerators
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn memory_per_worker_bounds_the_remote_analysis_task() {
+        let serial = runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial();
+        let allocation = resources(0);
+        let unbounded = admit_analysis_task_resources(&allocation, &[], serial, None).unwrap();
+        assert_eq!(unbounded.memory_bytes, allocation.memory_bytes);
+        let capped =
+            admit_analysis_task_resources(&allocation, &[], serial, Some(1 << 19)).unwrap();
+        assert_eq!(capped.memory_bytes, 1 << 19);
+        // Scratch and CPU stay the allocation's; only resident memory is the policy's.
+        assert_eq!(capped.scratch_bytes, unbounded.scratch_bytes);
+        assert_eq!(capped.cpu_millicores, unbounded.cpu_millicores);
+        // A policy above the allocation never raises the request past what was granted.
+        let above =
+            admit_analysis_task_resources(&allocation, &[], serial, Some(1 << 30)).unwrap();
+        assert_eq!(above.memory_bytes, allocation.memory_bytes);
     }
 }
 

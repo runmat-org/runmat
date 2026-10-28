@@ -221,6 +221,8 @@ pub struct DecodedExactStructuralStudyRoot {
     pub geometry_source_digest: Digest,
     pub workloads: StructuralStudyWorkloads,
     pub local_execution: LocalExecutionPlan,
+    /// The execution policy's `memory_per_worker` from the typed study root, when authored.
+    pub memory_per_worker_bytes: Option<u64>,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<InputMaterializationPlan>,
     pub exact_meshing: ProgramExecutionRequest,

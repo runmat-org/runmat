@@ -95,6 +95,9 @@ pub(super) async fn linear(
             "linear structural study cannot consume a transient recovery closure".into(),
         ));
     }
+    // Planned within the task's resident envelope, min(allocation, memory_per_worker), as local
+    // placement plans within min(machine, memory_per_worker).
+    let worker_memory_bytes = policy.resources.memory_bytes;
     let sequence = match crate::execute_structural_sequence_remotely(
         Arc::clone(&pool),
         StructuralSequencePreparation {
@@ -110,7 +113,7 @@ pub(super) async fn linear(
             accelerator_requests: decoded.analysis_accelerator_requests.clone(),
             local_execution: decoded.local_execution,
             solve_selection: runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
-                machine_memory_bytes: None,
+                machine_memory_bytes: Some(worker_memory_bytes),
             },
         },
         policy,
