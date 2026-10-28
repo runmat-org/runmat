@@ -45,6 +45,8 @@ pub use root::{
 pub struct CompletedFluidStudy {
     replay: completion::FluidStudyReplayContext,
     closures: Vec<FluidStudyResultClosure>,
+    /// The field-recovery admission the coordinator derived when it prepared that phase.
+    field_recovery_plan: runmat_analysis_fea::planning::resource::FeaResourcePlan,
     pub compiled: CompiledAnalysisStudy,
     pub workload: runmat_analysis_fea::execution::FluidSteadyWorkload,
     pub result: ImportedFluidSteadyResult,
@@ -357,6 +359,10 @@ impl FluidStudyCoordinator {
                 required_capabilities: self.preparation.required_capabilities,
             },
             closures: self.closures,
+            field_recovery_plan: self
+                .recovery_task
+                .expect("completed field recovery")
+                .resource_plan,
             compiled: self.preparation.product.compiled,
             workload,
             result: self.result.expect("completed solve"),

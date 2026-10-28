@@ -93,10 +93,7 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
         // Authenticate the retained artifact rather than generating fresh numeric copies
         // from U/p/q. Original phase admission is rederived from the saved immutable chain.
         self.authenticate(candidate)?;
-        let plan = self
-            .completed
-            .field_recovery_resource_plan_for(self.preparation.clone(), self)
-            .map_err(|e| e.to_string())?;
+        let plan = self.completed.field_recovery_resource_plan();
         let runmat_analysis_fea::planning::resource::FeaResourceDemand::FluidFieldRecovery(demand) =
             &plan.input.demand
         else {
