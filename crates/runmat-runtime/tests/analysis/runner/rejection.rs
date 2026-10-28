@@ -40,6 +40,10 @@ pub(super) fn check(
     }
     let mut error_code = None;
     for (placement, result) in results {
+        let expected = match placement {
+            "gpu" => spec.expect_gpu_run_error.unwrap_or(expected),
+            _ => expected,
+        };
         match result {
             Ok(_) => failures.push(format!(
                 "expected {placement} run error code {expected}, but run succeeded"
@@ -48,8 +52,8 @@ pub(super) fn check(
                 error_code = Some(error.error_code.clone());
                 if error.error_code != expected {
                     failures.push(format!(
-                        "{placement} run error mismatch: expected {expected}, got {}",
-                        error.error_code
+                        "{placement} run error mismatch: expected {expected}, got {}: {}",
+                        error.error_code, error.message
                     ));
                 }
             }
