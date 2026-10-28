@@ -270,7 +270,7 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
             let request = chunk.direct_request().unwrap();
             let response = crate::execute_host_program_request(request.clone()).await;
             response.validate_against(request).unwrap();
-            let runmat_execution_artifact::ProgramExecutionResponse::Success { value } = response
+            let runmat_execution_artifact::ProgramExecutionResponse::Success { outputs: values } = response
             else {
                 panic!("named density callable failed: {response:?}")
             };

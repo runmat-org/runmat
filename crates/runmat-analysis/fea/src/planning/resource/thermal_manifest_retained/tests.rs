@@ -28,7 +28,7 @@ fn retained_metadata_is_explicit_and_composed_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = None;
+            .maximum_resident_bytes = Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
         let identity = crate::admission::admit_nonstructural(
             PhysicsFamily::Thermal,
             workload.procedure.procedure(),

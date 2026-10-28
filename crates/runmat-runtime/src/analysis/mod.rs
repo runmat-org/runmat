@@ -1490,40 +1490,6 @@ fn prepare_study_run(
             BTreeMap::new(),
         )
     })?;
-    let aliases = runmat_analysis_core::GeometryRegionAliases::new(study_mesh.region_aliases)
-        .map_err(|error| {
-            operation_error(
-                ANALYSIS_RUN_STUDY_OPERATION,
-                ANALYSIS_RUN_STUDY_OP_VERSION,
-                &prepared.context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                error.to_string(),
-                BTreeMap::new(),
-            )
-        })?;
-    prepared.model =
-        runmat_analysis_core::resolve_geometry_region_aliases(&prepared.model, &aliases).map_err(
-            |error| {
-                operation_error(
-                    ANALYSIS_RUN_STUDY_OPERATION,
-                    ANALYSIS_RUN_STUDY_OP_VERSION,
-                    &prepared.context,
-                    OperationErrorSpec {
-                        error_code: "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
-                        error_type: OperationErrorType::Validation,
-                        retryable: false,
-                        severity: OperationErrorSeverity::Error,
-                    },
-                    error.to_string(),
-                    BTreeMap::new(),
-                )
-            },
-        )?;
     prepared.solver_mesh_artifact_path = study_mesh.artifact_path;
     prepared.meshing_evidence_artifact_path = study_mesh.evidence_path;
     Ok(prepared)

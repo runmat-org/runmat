@@ -4,11 +4,10 @@ mod persistence;
 #[cfg(feature = "plot-core")]
 mod visualization;
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
-use runmat_geometry_core::{LengthUnit, PersistentEntityId};
+use runmat_geometry_core::LengthUnit;
 use runmat_meshing_core::{MeshingEvidence, MeshingRequestSettings, SolverMeshArtifact};
 
 pub use persistence::{write_canonical_artifact_pair, write_canonical_artifacts};
@@ -35,10 +34,6 @@ pub struct MeshingExecutionRequest {
 pub struct MeshingExecutionOutput {
     pub artifact: SolverMeshArtifact,
     pub evidence: MeshingEvidence,
-    /// Importer-authored aliases for material domains and boundary entities, bound to persistent
-    /// exact-geometry identity. Alias prefixes encode the entity role (`edge_`, `face_`, or
-    /// `solid_`); consumers still validate compatibility with their typed target.
-    pub region_aliases: BTreeMap<String, PersistentEntityId>,
 }
 
 pub type MeshingExecutionProvider = Arc<

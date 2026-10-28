@@ -74,17 +74,12 @@ fn witness(order: ElementOrder) {
     )
     .expect("direct transient intent should prepare");
     let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
-        mut workload,
+        workload,
         block_plan,
     } = intent.workloads()
     else {
         panic!("test requires a direct transient workload")
     };
-    let aliases =
-        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
-            .unwrap();
-    workload.model =
-        runmat_analysis_core::resolve_geometry_region_aliases(&workload.model, &aliases).unwrap();
     let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
         &workload,
         &meshing_output.artifact,
@@ -212,15 +207,13 @@ fn witness(order: ElementOrder) {
     )
     .unwrap();
     let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
-        mut workload,
+        workload,
         ..
     } = cold.workloads()
     else {
         panic!("direct consumer workload")
     };
     assert_eq!(workload.initial_fields, vec![u, v]);
-    workload.model =
-        runmat_analysis_core::resolve_geometry_region_aliases(&workload.model, &aliases).unwrap();
     let mesh = mesh_output(order).artifact;
     let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
         &workload, &mesh, None,
@@ -276,6 +269,5 @@ fn mesh_output(order: ElementOrder) -> crate::meshing::MeshingExecutionOutput {
     crate::meshing::MeshingExecutionOutput {
         artifact,
         evidence,
-        region_aliases: BTreeMap::new(),
     }
 }

@@ -98,7 +98,7 @@ pub fn prepare_electrical_study_publication(
             )
         })?;
     let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence, &Default::default())
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence)
             .map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload.step_id.clone(),

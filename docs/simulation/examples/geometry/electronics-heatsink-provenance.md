@@ -12,7 +12,7 @@ Unmodified STEP model from the KiCad community's `kicad-packages3D` library:
 The filename is a nominal part label. Imported dimensions are approximately
 124.75 × 34.99 × 35 mm, rather than the 50 mm dimension suggested by that label.
 The native study uses the actual solid and its face areas. The flat mounting face
-is `face_000001`, at y = −2.54 mm, with area approximately 4,366.20 mm².
+is the first source face, at y = −2.54 mm, with area approximately 4,366.20 mm².
 
 Material and boundary conditions are instructional RunMat inputs, not specifications
 or measured performance supplied by the CAD author or a heat-sink manufacturer.

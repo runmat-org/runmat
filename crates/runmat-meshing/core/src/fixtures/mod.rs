@@ -78,13 +78,10 @@ pub fn fixture_face(source: &str) -> String {
     fixture_selection(PersistentEntityKind::Face, source)
 }
 
-/// Canonical face selector for a fixture boundary name. Point ids (`node:`), importer aliases
-/// (`face_######`) and selectors that are already canonical pass through unchanged.
+/// Canonical face selector for a fixture boundary name. Point ids (`node:`) and selectors that
+/// are already canonical pass through unchanged.
 pub fn fixture_boundary_selection(name: &str) -> String {
-    let importer_alias = name
-        .strip_prefix("face_")
-        .is_some_and(|digits| digits.len() == 6 && digits.bytes().all(|b| b.is_ascii_digit()));
-    if name.starts_with("node:") || name.starts_with("persistent-entity:sha256:") || importer_alias {
+    if name.starts_with("node:") || name.starts_with("persistent-entity:sha256:") {
         name.to_owned()
     } else {
         fixture_face(name)

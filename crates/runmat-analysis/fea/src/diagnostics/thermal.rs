@@ -22,7 +22,7 @@ pub(crate) enum ThermalDiagnosticMessage<'a> {
         digest: Digest,
         values: [f64; 5],
     },
-    Energy([f64; 7]),
+    Energy([f64; 9]),
     Recovery([usize; 3]),
 }
 
@@ -55,8 +55,8 @@ impl Display for ThermalDiagnosticMessage<'_> {
                 "all_linear_solves_converged=true max_relative_residual_norm={residual:.16e} residual_target={target:.16e} minimum_temperature_k={minimum:.16e} maximum_temperature_k={maximum:.16e}"),
             Self::Constitutive { digest, values: [conductivity, capacity, density, conductivity_spread, capacity_spread] } => write!(f,
                 "property_semantic_digest={digest} conductivity_mean={conductivity:.16e} heat_capacity_mean={capacity:.16e} density_mean={density:.16e} conductivity_spread_ratio={conductivity_spread:.16e} heat_capacity_spread_ratio={capacity_spread:.16e}"),
-            Self::Energy([storage, boundary, applied, prescribed, residual, relative, maximum]) => write!(f,
-                "storage_rate_w={storage:.16e} boundary_loss_w={boundary:.16e} applied_power_w={applied:.16e} prescribed_boundary_power_w={prescribed:.16e} residual_w={residual:.16e} final_relative_residual={relative:.16e} max_relative_residual={maximum:.16e}"),
+            Self::Energy([storage, boundary, applied, prescribed, entering, leaving, residual, relative, maximum]) => write!(f,
+                "storage_rate_w={storage:.16e} boundary_loss_w={boundary:.16e} applied_power_w={applied:.16e} prescribed_boundary_power_w={prescribed:.16e} prescribed_heat_entering_w={entering:.16e} prescribed_heat_leaving_w={leaving:.16e} residual_w={residual:.16e} final_relative_residual={relative:.16e} max_relative_residual={maximum:.16e}"),
             Self::Recovery([nodes, elements, faces]) => write!(f,
                 "basis=physical_quadrature node_count={nodes} element_count={elements} boundary_face_count={faces}"),
         }
@@ -103,7 +103,7 @@ fn projection(step: &str) -> [DiagnosticSerialization<'_, ThermalDiagnosticMessa
             digest,
             values: [WIDEST_FLOAT; 5],
         },
-        ThermalDiagnosticMessage::Energy([WIDEST_FLOAT; 7]),
+        ThermalDiagnosticMessage::Energy([WIDEST_FLOAT; 9]),
         ThermalDiagnosticMessage::Recovery([usize::MAX; 3]),
     ];
     messages.map(|message| DiagnosticSerialization {

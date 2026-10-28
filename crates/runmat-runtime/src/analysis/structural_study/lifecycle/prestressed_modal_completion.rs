@@ -231,7 +231,7 @@ pub(in crate::analysis) fn complete_prestressed_modal_study(
 
 pub(super) fn complete_structural_prestressed_modal(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     authored_workloads: BTreeMap<
@@ -267,7 +267,7 @@ pub(super) fn complete_structural_prestressed_modal(
         study_id: intent.study_id,
         study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
         authored_study_digest: intent.authored_study_digest,
-        model: resolved_model,
+        model: study_model,
         steps: intent
             .steps
             .into_iter()

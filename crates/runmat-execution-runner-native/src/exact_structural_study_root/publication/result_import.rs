@@ -279,9 +279,6 @@ pub fn import_exact_structural_study_result(
             "input materialization inventory contains unreferenced objects",
         ));
     }
-    let aliases =
-        runmat_analysis_core::GeometryRegionAliases::new(region_resolution.aliases.clone())
-            .map_err(protocol)?;
     let mut resolved_model = expected
         .workloads
         .authored_model()
@@ -329,9 +326,6 @@ pub fn import_exact_structural_study_result(
             "whole-study result retained an unmaterialized spectral generator",
         ));
     }
-    resolved_model =
-        runmat_analysis_core::resolve_geometry_region_aliases(&resolved_model, &aliases)
-            .map_err(protocol)?;
     let resolved_compiled_model = resolved_model.clone();
     let mut resolved_workloads = expected.workloads.clone();
     resolved_workloads

@@ -5,7 +5,7 @@ use super::{
     apply_matrix, sample_ambient_temperature, ThermalAssemblyError, ThermalOperatorAssembly,
 };
 use crate::{
-    contracts::{ThermalEnergyBalance, ThermalPowerScale},
+    contracts::{ThermalEnergyBalance, ThermalPowerScale, ThermalPrescribedHeatFlow},
     excitation::ExcitationSamplePoint,
 };
 
@@ -169,11 +169,23 @@ impl ThermalOperatorAssembly {
         // Both claims describe the same recovered nodal transfers. Summing the
         // unrounded quadrature terms separately can exceed the nodal L1 scale
         // by rounding alone when every reaction has the same sign.
+        // A positive reaction is heat leaving the body. Gross flows count prescribed-temperature
+        // nodes only: relation nodes exchange heat inside the model.
         let mut reaction = PowerSum::default();
         let mut reaction_absolute = PowerSum::default();
-        for value in nodal_reaction {
+        let mut entering = PowerSum::default();
+        let mut leaving = PowerSum::default();
+        let prescribed = self.prescribed_temperature_k.canonical_values();
+        for (node, value) in nodal_reaction.into_iter().enumerate() {
             reaction.add(value);
             reaction_absolute.add(value.abs());
+            if prescribed[node].is_some() {
+                if value < 0.0 {
+                    entering.add(-value);
+                } else {
+                    leaving.add(value);
+                }
+            }
         }
         Ok(ThermalEnergyBalance::from_power_transfers(
             runmat_types::physical::Power::new(storage.total()),
@@ -185,6 +197,10 @@ impl ThermalOperatorAssembly {
                 boundary_w: runmat_types::physical::Power::new(boundary_absolute.total()),
                 applied_w: runmat_types::physical::Power::new(applied_absolute.total()),
                 prescribed_w: runmat_types::physical::Power::new(reaction_absolute.total()),
+            },
+            ThermalPrescribedHeatFlow {
+                entering_w: runmat_types::physical::Power::new(entering.total()),
+                leaving_w: runmat_types::physical::Power::new(leaving.total()),
             },
         ))
     }

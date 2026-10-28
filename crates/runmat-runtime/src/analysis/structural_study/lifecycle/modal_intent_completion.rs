@@ -4,7 +4,7 @@ use super::*;
 
 pub(super) fn complete_structural_modal(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     authored_workload: runmat_analysis_fea::execution::StructuralModalWorkload,
@@ -27,7 +27,7 @@ pub(super) fn complete_structural_modal(
         &step.procedure_step.step_id,
     );
     complete_modal_study(
-        prepared_completion(intent, resolved_model, persisted_mesh),
+        prepared_completion(intent, study_model, persisted_mesh),
         solver_mesh,
         authored_workload,
         numerical,
@@ -38,7 +38,7 @@ pub(super) fn complete_structural_modal(
 
 pub(super) fn complete_structural_modal_transient(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     authored_workloads: BTreeMap<
@@ -69,7 +69,7 @@ pub(super) fn complete_structural_modal_transient(
         &transient_step.procedure_step.step_id,
     );
     complete_modal_transient_study(
-        prepared_completion(intent, resolved_model, persisted_mesh),
+        prepared_completion(intent, study_model, persisted_mesh),
         solver_mesh,
         authored_workloads,
         numerical,

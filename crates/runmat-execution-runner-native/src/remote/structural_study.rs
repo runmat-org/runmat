@@ -1,6 +1,5 @@
 //! Remote composition for a typed study whose workloads are derived after exact meshing.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use runmat_execution::Digest;
@@ -96,7 +95,7 @@ pub(super) async fn execute_for_composition(
     }
     let regions = match &completed.regions {
         MeshedGeometryRegions::Materialized(regions) => regions,
-        MeshedGeometryRegions::PersistentEntities(_) => {
+        MeshedGeometryRegions::PersistentEntities => {
             return Ok(
                 super::exact_structural_study::RemoteExactStructuralStudyComposition::Failed(
                     "typed studies require source-neutral materialized geometry".into(),
@@ -148,7 +147,7 @@ pub(super) async fn execute_for_composition(
         )
     })?;
     let mut completed = completed;
-    completed.regions = MeshedGeometryRegions::PersistentEntities(BTreeMap::new());
+    completed.regions = MeshedGeometryRegions::PersistentEntities;
     let execution_view = crate::DecodedExactStructuralStudyRoot {
         authored_study_digest: decoded.authored_study_digest,
         frozen_project_digest: decoded.frozen_project_digest,

@@ -42,12 +42,14 @@ fn candidate_provenance_bounds_original_deduplicated_selection_for_both_orders()
         let entity = PersistentEntityId::new(
             PersistentEntityKind::Face,
             "common".into(),
-            vec!["instance".repeat(1024)],
+            // A selectable identity keeps each path segment within 256 bytes; 32 segments keep
+            // the original 8 KiB of assembly-path metadata.
+            vec!["instance".repeat(32); 32],
         );
         for face in &mut mesh.topology.boundary_faces {
             face.provenance.push(entity.clone());
         }
-        let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("common"));
+        let target = RegionTarget::boundary(entity.analysis_selection_id().unwrap());
         let profile =
             super::super::profile::constraint_target_workspace_profile(&mesh, &target).unwrap();
         let resolved = super::super::resolve_nodal_target(&mesh, &target, "fixed").unwrap();

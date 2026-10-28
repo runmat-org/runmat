@@ -10,7 +10,6 @@ use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
 
-mod aliases;
 mod inspection;
 mod object;
 mod options;
@@ -91,8 +90,8 @@ pub async fn load_binding(args: crate::call::BuiltinArguments) -> BuiltinResult<
     load_builtin(text(LOAD_NAME, mesh_path)?, text(LOAD_NAME, evidence_path)?).await
 }
 
-/// Load a canonical mesh/evidence pair and any region-alias sidecar written by
-/// `meshing.save`. Shared by the binding and FEA unit tests.
+/// Load a canonical mesh/evidence pair written by `meshing.save` or `runmat mesh`.
+/// Shared by the binding and FEA unit tests.
 pub async fn load_builtin(mesh_path: String, evidence_path: String) -> BuiltinResult<Value> {
     let mesh_bytes = runmat_filesystem::read(&mesh_path)
         .map_err(|cause| error(LOAD_NAME, format!("failed to read {mesh_path}: {cause}")))?;
@@ -109,12 +108,7 @@ pub async fn load_builtin(mesh_path: String, evidence_path: String) -> BuiltinRe
     evidence
         .validate(&artifact)
         .map_err(|cause| error(LOAD_NAME, cause.to_string()))?;
-    let region_aliases = aliases::read_sidecar(LOAD_NAME, &mesh_path, &artifact)?;
-    mesh_object(MeshPayload {
-        artifact,
-        evidence,
-        region_aliases,
-    })
+    mesh_object(MeshPayload { artifact, evidence })
 }
 
 #[runtime_builtin(
@@ -145,20 +139,10 @@ pub async fn save_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<
         .evidence
         .canonical_encode()
         .map_err(|cause| error(SAVE_NAME, cause.to_string()))?;
-    let sidecar_path = aliases::sidecar_path(&mesh_path);
-    if sidecar_path == evidence_path {
-        return Err(error(
-            SAVE_NAME,
-            "the evidence path must not be the mesh region-alias sidecar path",
-        ));
-    }
-    let sidecar_bytes =
-        aliases::encode_sidecar(SAVE_NAME, &payload.artifact, &payload.region_aliases)?;
     crate::meshing::write_canonical_artifacts(
         &[
             (std::path::Path::new(&mesh_path), &mesh_bytes),
             (std::path::Path::new(&evidence_path), &evidence_bytes),
-            (std::path::Path::new(&sidecar_path), &sidecar_bytes),
         ],
         force,
     )
@@ -285,33 +269,7 @@ mod tests {
             runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
         let evidence =
             runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&artifact);
-        mesh_object(MeshPayload {
-            artifact,
-            evidence,
-            region_aliases: Default::default(),
-        })
-        .expect("fixture mesh object")
-    }
-
-    fn aliased_mesh_value() -> (
-        Value,
-        std::collections::BTreeMap<String, runmat_geometry_core::PersistentEntityId>,
-    ) {
-        let artifact =
-            runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-        let evidence =
-            runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&artifact);
-        let aliases = std::collections::BTreeMap::from([(
-            "solid_000001".to_string(),
-            artifact.topology.regions[0].region_id.clone(),
-        )]);
-        let value = mesh_object(MeshPayload {
-            artifact,
-            evidence,
-            region_aliases: aliases.clone(),
-        })
-        .expect("fixture mesh object");
-        (value, aliases)
+        mesh_object(MeshPayload { artifact, evidence }).expect("fixture mesh object")
     }
 
     fn text_value(path: &std::path::Path) -> Value {
@@ -319,78 +277,49 @@ mod tests {
     }
 
     #[test]
-    fn save_and_load_retain_region_aliases_through_the_sidecar() {
+    fn save_and_load_round_trip_only_the_canonical_artifacts() {
         let directory = tempfile::TempDir::new().expect("temporary directory");
         let mesh_path = directory.path().join("part.solver-mesh.cbor");
         let evidence_path = directory.path().join("part.meshing-evidence.cbor");
-        let (mesh, aliases) = aliased_mesh_value();
+        let mesh = tetrahedron_mesh_value();
+        let expected = payload_from_value(SAVE_NAME, &mesh).expect("payload");
         assert!(futures::executor::block_on(save_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![
-                mesh,
+                mesh.clone(),
                 text_value(&mesh_path),
                 text_value(&evidence_path),
             ])
         ))
         .expect("save"));
-        let sidecar = directory.path().join("part.solver-mesh.cbor.regions.json");
-        assert!(sidecar.exists());
+        // Region identity lives in the canonical mesh itself; no second file restates it.
+        let mut written = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        written.sort();
+        assert_eq!(
+            written,
+            ["part.meshing-evidence.cbor", "part.solver-mesh.cbor"]
+        );
         let loaded = futures::executor::block_on(load_builtin(
             mesh_path.to_string_lossy().to_string(),
             evidence_path.to_string_lossy().to_string(),
         ))
         .expect("load");
-        let payload = payload_from_value(LOAD_NAME, &loaded).expect("payload");
-        assert_eq!(payload.region_aliases, aliases);
-
-        // A mesh written without a sidecar (for example by `runmat mesh`) loads without aliases.
-        std::fs::remove_file(&sidecar).unwrap();
-        let loaded = futures::executor::block_on(load_builtin(
-            mesh_path.to_string_lossy().to_string(),
-            evidence_path.to_string_lossy().to_string(),
-        ))
-        .expect("load without sidecar");
-        assert!(payload_from_value(LOAD_NAME, &loaded)
-            .unwrap()
-            .region_aliases
-            .is_empty());
-    }
-
-    #[test]
-    fn load_rejects_a_sidecar_from_another_mesh_and_save_protects_it() {
-        let directory = tempfile::TempDir::new().expect("temporary directory");
-        let mesh_path = directory.path().join("part.solver-mesh.cbor");
-        let evidence_path = directory.path().join("part.meshing-evidence.cbor");
-        let (mesh, _) = aliased_mesh_value();
-        futures::executor::block_on(save_builtin(
-            crate::builtins::common::test_support::builtin_arguments(vec![
-                mesh.clone(),
-                text_value(&mesh_path),
-                text_value(&evidence_path),
-            ]),
-        ))
-        .expect("save");
-        // Existing destinations, including the sidecar, are protected without Force.
+        assert_eq!(
+            payload_from_value(LOAD_NAME, &loaded).expect("payload"),
+            expected
+        );
+        // Existing destinations are protected without Force.
         let error = futures::executor::block_on(save_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![
-                mesh.clone(),
+                mesh,
                 text_value(&mesh_path),
                 text_value(&evidence_path),
             ]),
         ))
         .expect_err("protected");
         assert_eq!(error.identifier(), Some("RunMat:meshing:InvalidInput"));
-        let sidecar = directory.path().join("part.solver-mesh.cbor.regions.json");
-        let text = std::fs::read_to_string(&sidecar).unwrap();
-        let tampered = text.replacen("\"artifact_digest\": \"", "\"artifact_digest\": \"00", 1);
-        std::fs::write(&sidecar, tampered).unwrap();
-        let error = futures::executor::block_on(load_builtin(
-            mesh_path.to_string_lossy().to_string(),
-            evidence_path.to_string_lossy().to_string(),
-        ))
-        .expect_err("foreign sidecar");
-        assert!(error
-            .message()
-            .contains("belongs to a different solver mesh"));
     }
 
     #[test]
