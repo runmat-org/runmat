@@ -1,8 +1,10 @@
 //! Authenticated bridge-to-runtime boundary, without a runtime artifact dependency.
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use runmat_analysis_execution::{
-    import_fluid_study_completion, prepare_fluid_study_root, CompletedFluidStudy,
+    import_fluid_study_completion, prepare_fluid_study_root_for, CompletedFluidStudy,
+    FluidStudyPreparation, VerifiedFluidStudy,
 };
 use runmat_execution::{
     value::{PublishedObjectSource, ValueRef},
@@ -14,8 +16,16 @@ use runmat_runtime::analysis::{FluidStudyCompletion, FluidStudyObjectSource, Flu
 struct RetainedFluidSource<S> {
     artifact_access: runmat_execution_artifact::ArtifactAccess,
     completed: CompletedFluidStudy,
+    /// `completed.preparation()`, validated and re-planned once: the retained study is
+    /// immutable, so every replay, field materialization and DTO build shares it.
+    preparation: FluidStudyPreparation,
     store: S,
     objects: BTreeMap<Digest, Vec<u8>>,
+    /// The authenticated completion every candidate is compared against. A study this
+    /// process's coordinator verified ([`VerifiedFluidStudy`]) sets it at conversion; a
+    /// decoded study sets it from one cold replay of `completed` over this source's
+    /// immutable store, after every catalog object was read back verified.
+    authenticated: OnceLock<FluidStudyCompletion>,
 }
 
 impl<S: CacheImport> CacheImport for RetainedFluidSource<S> {
@@ -83,10 +93,7 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
         // Authenticate the retained artifact rather than generating fresh numeric copies
         // from U/p/q. Original phase admission is rederived from the saved immutable chain.
         self.authenticate(candidate)?;
-        let plan = self
-            .completed
-            .field_recovery_resource_plan(self)
-            .map_err(|e| e.to_string())?;
+        let plan = self.completed.field_recovery_resource_plan();
         let runmat_analysis_fea::planning::resource::FeaResourceDemand::FluidFieldRecovery(demand) =
             &plan.input.demand
         else {
@@ -94,7 +101,7 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
                 "fluid native field materialization lacks original recovery authority".into(),
             );
         };
-        let preparation = self.completed.preparation().map_err(|e| e.to_string())?;
+        let preparation = &self.preparation;
         let mut limits = preparation.output_policy.inventory_limits();
         limits.max_total_bytes = limits
             .max_total_bytes
@@ -164,29 +171,47 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
     }
 
     fn authenticate(&self, candidate: &FluidStudyCompletion) -> Result<(), String> {
-        let replay = import_fluid_study_completion(
-            self,
-            self.completed.preparation().map_err(|e| e.to_string())?,
-            self.completed.result_closures().to_vec(),
-        )
-        .map_err(|error| error.to_string())?;
-        let expected = completion(&replay, self)?;
-        if &expected != candidate {
+        let expected = self.authenticated()?;
+        if expected.root.logical_digest != candidate.root.logical_digest || expected != candidate {
             return Err("runtime fluid completion differs from authenticated replay".into());
-        }
-        for reference in &expected.catalog.objects {
-            PublishedObjectSource::read_verified(self, reference)?;
         }
         Ok(())
     }
 }
 
+impl<S: CacheImport + Send + Sync> RetainedFluidSource<S> {
+    /// The authenticated completion. For a decoded study, replay the saved study once:
+    /// import every phase from authored inputs, rebuild the completion DTO and read back
+    /// every catalog object verified. The source is immutable, so a later authentication
+    /// reuses this verified replay instead of importing again.
+    fn authenticated(&self) -> Result<&FluidStudyCompletion, String> {
+        if let Some(authenticated) = self.authenticated.get() {
+            return Ok(authenticated);
+        }
+        let replay = import_fluid_study_completion(
+            self,
+            self.preparation.clone(),
+            self.completed.result_closures().to_vec(),
+        )
+        .map_err(|error| error.to_string())?;
+        // The replay was imported from exactly this preparation.
+        let root = prepare_fluid_study_root_for(&replay, self.preparation.clone())
+            .map_err(|error| error.to_string())?;
+        let expected = completion(&replay, &self.preparation, self, root.root, root.catalog)?;
+        for reference in &expected.catalog.objects {
+            PublishedObjectSource::read_verified(self, reference)?;
+        }
+        Ok(self.authenticated.get_or_init(|| expected))
+    }
+}
+
 fn completion(
     completed: &CompletedFluidStudy,
+    preparation: &FluidStudyPreparation,
     source: &impl CacheImport,
+    root: ValueRef,
+    catalog: runmat_execution_artifact::PublishedObjectCatalog,
 ) -> Result<FluidStudyCompletion, String> {
-    let root = prepare_fluid_study_root(completed).map_err(|error| error.to_string())?;
-    let preparation = completed.preparation().map_err(|error| error.to_string())?;
     Ok(FluidStudyCompletion {
         host_workload_digest: completed
             .result_closures()
@@ -245,21 +270,25 @@ fn completion(
         terminal_usage: completed.terminal_usage.evidence.clone(),
         publication: completed.publication.result.clone(),
         frozen_project_digest: preparation.frozen_project_digest,
-        root: root.root,
-        catalog: root.catalog,
+        root,
+        catalog,
     })
 }
 
+/// Convert the study this process's coordinator just verified. It is the same process's
+/// own typed, already-validated result, so its DTO is the authenticated completion: no
+/// replay of the phase import against it.
 pub(crate) fn convert(
-    completed: CompletedFluidStudy,
+    verified: VerifiedFluidStudy,
     store: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(FluidStudyCompletion, FluidStudyObjectSource), String> {
-    let root = prepare_fluid_study_root(&completed).map_err(|error| error.to_string())?;
-    let source = RetainedFluidSource {
-        artifact_access: completed
-            .preparation()
-            .map_err(|e| e.to_string())?
-            .artifact_access,
+    let preparation = verified.preparation();
+    let completed = verified.into_completed();
+    let root = prepare_fluid_study_root_for(&completed, preparation.clone())
+        .map_err(|error| error.to_string())?;
+    let mut source = RetainedFluidSource {
+        artifact_access: preparation.artifact_access.clone(),
+        preparation,
         objects: root
             .objects
             .into_iter()
@@ -267,9 +296,16 @@ pub(crate) fn convert(
             .collect(),
         completed,
         store,
+        authenticated: OnceLock::new(),
     };
-    let dto = completion(&source.completed, &source)?;
-    source.authenticate(&dto)?;
+    let dto = completion(
+        &source.completed,
+        &source.preparation,
+        &source,
+        root.root,
+        root.catalog,
+    )?;
+    source.authenticated = OnceLock::from(dto.clone());
     Ok((dto, FluidStudyObjectSource::new(source)))
 }
 
@@ -279,16 +315,24 @@ pub fn fluid_study_completion_from_source(
     completed: CompletedFluidStudy,
     source: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(FluidStudyCompletion, FluidStudyObjectSource), String> {
+    let preparation = completed.preparation().map_err(|e| e.to_string())?;
     let source = RetainedFluidSource {
-        artifact_access: completed
-            .preparation()
-            .map_err(|e| e.to_string())?
-            .artifact_access,
+        artifact_access: preparation.artifact_access.clone(),
+        preparation,
         completed,
         store: source,
         objects: BTreeMap::new(),
+        authenticated: OnceLock::new(),
     };
-    let dto = completion(&source.completed, &source)?;
+    let root = prepare_fluid_study_root_for(&source.completed, source.preparation.clone())
+        .map_err(|error| error.to_string())?;
+    let dto = completion(
+        &source.completed,
+        &source.preparation,
+        &source,
+        root.root,
+        root.catalog,
+    )?;
     source.authenticate(&dto)?;
     Ok((dto, FluidStudyObjectSource::new(source)))
 }

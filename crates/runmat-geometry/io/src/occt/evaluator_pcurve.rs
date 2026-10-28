@@ -14,6 +14,7 @@ impl ExactPcurveEvaluator for OcctExactEvaluator {
         let value = ffi::bridge::exact_pcurve_range(
             self.session_id,
             key.face,
+            key.face_reversed,
             key.wire,
             key.position,
             key.seam_image,
@@ -67,6 +68,7 @@ impl OcctExactEvaluator {
         let value = ffi::bridge::exact_pcurve_derivatives(
             self.session_id,
             key.face,
+            key.face_reversed,
             key.wire,
             key.position,
             key.seam_image,

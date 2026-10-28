@@ -17,15 +17,56 @@ pub fn solid_observation_partition_source_indices(
     partition: &ObservationPartition,
     projection: &AnalysisProjection,
 ) -> Result<Vec<usize>, ObservationError> {
-    // Cell- and face-located observations address the mesh's owner-oriented faces too.
-    let faces = plan.observations.iter().any(|observation| {
+    SolidObservationSourceSelection::new(plan, projection)?
+        .partition_source_indices(partition_plan, partition)
+}
+
+/// Source-index selection for every partition of one resolved plan over a solid or volume
+/// projection. The observation topology is derived once here and shared, read-only, by every
+/// partition of every observation of the plan (including partitions selected concurrently).
+pub struct SolidObservationSourceSelection<'a> {
+    plan: &'a ResolvedObservationPlan,
+    topology: ObservationTopology<'a>,
+}
+
+impl<'a> SolidObservationSourceSelection<'a> {
+    pub fn new(
+        plan: &'a ResolvedObservationPlan,
+        projection: &'a AnalysisProjection,
+    ) -> Result<Self, ObservationError> {
+        Ok(Self {
+            plan,
+            topology: solid_observation_topology(plan, projection)?,
+        })
+    }
+
+    pub fn partition_source_indices(
+        &self,
+        partition_plan: &ObservationPartitionPlan,
+        partition: &ObservationPartition,
+    ) -> Result<Vec<usize>, ObservationError> {
+        observation_partition_source_indices(self.plan, partition_plan, partition, &self.topology)
+    }
+}
+
+/// The observation topology every partition of `plan` over a solid or volume projection
+/// selects from; derive it once per plan, not once per partition.
+pub(in super::super) fn solid_observation_topology<'a>(
+    plan: &ResolvedObservationPlan,
+    projection: &'a AnalysisProjection,
+) -> Result<ObservationTopology<'a>, ObservationError> {
+    ObservationTopology::from_projection_for(projection, observation_topology_faces(plan))
+}
+
+/// Cell- and face-located observations address the mesh's owner-oriented faces too; the
+/// solid observation topology of a plan depends on the projection and this flag only.
+pub(in super::super) fn observation_topology_faces(plan: &ResolvedObservationPlan) -> bool {
+    plan.observations.iter().any(|observation| {
         matches!(
             observation.spec.source_location,
             runmat_analysis_core::FieldLocation::Cell | runmat_analysis_core::FieldLocation::Face
         )
-    });
-    let topology = ObservationTopology::from_projection_for(projection, faces)?;
-    observation_partition_source_indices(plan, partition_plan, partition, &topology)
+    })
 }
 
 pub(in super::super) fn observation_partition_source_indices(

@@ -416,6 +416,7 @@ impl StructuralRandomResponseStudyCoordinator {
                     program_revision: self.preparation.program_revision.clone(),
                     chunk_bytes: self.preparation.chunk_bytes,
                     inventory_limits: self.preparation.inventory_limits,
+                    local_execution: self.preparation.local_execution,
                 },
             )?);
             self.phase = StudyPhase::Observing;

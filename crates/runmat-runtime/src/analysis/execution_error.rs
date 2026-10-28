@@ -67,6 +67,7 @@ pub(super) fn map_fea_run_error(
         FeaRunError::Resource(error) => {
             let error_type = match &error {
                 ResourcePlanningError::AccuracyCeiling { .. }
+                | ResourcePlanningError::StaticSolveCeiling { .. }
                 | ResourcePlanningError::Inventory(_)
                 | ResourcePlanningError::Capability(_)
                 | ResourcePlanningError::Accelerator { .. } => OperationErrorType::Capacity,

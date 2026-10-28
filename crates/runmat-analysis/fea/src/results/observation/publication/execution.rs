@@ -143,6 +143,11 @@ impl ObservationPublicationCatalog {
         mut visit: impl FnMut(ObservationResultExecution) -> AnalysisExecutionResult<()>,
     ) -> AnalysisExecutionResult<()> {
         context.validate()?;
+        // Every result of one catalog selects over the same mesh: derive its projection once,
+        // and the observation topology once per face flag, not once per published result.
+        let projection = std::cell::OnceCell::new();
+        let topologies: [std::cell::OnceCell<crate::results::observation::ObservationTopology<'_>>; 2] =
+            Default::default();
         self.visit_results(|source, observation_id, result, evidence| {
             let plan = self.execution_plan(source, observation_id, evidence)?;
             let field = source_field(source, &plan, evidence)?;
@@ -150,6 +155,33 @@ impl ObservationPublicationCatalog {
             groups
                 .try_reserve_exact(plan.partitions.len())
                 .map_err(invalid)?;
+            let volume_topology = match context {
+                ObservationHistorySourceContext::Thermal { mesh, .. }
+                | ObservationHistorySourceContext::VolumeMesh { mesh }
+                    if !plan.partitions.is_empty() =>
+                {
+                    if projection.get().is_none() {
+                        let derived =
+                            crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
+                        let _ = projection.set(derived);
+                    }
+                    let projection = projection.get().expect("derived projection");
+                    let faces = crate::results::observation::distributed::source_selection::observation_topology_faces(
+                        &source.plan,
+                    );
+                    let slot = &topologies[usize::from(faces)];
+                    if slot.get().is_none() {
+                        let derived =
+                            crate::results::observation::ObservationTopology::from_projection_for(
+                                projection, faces,
+                            )
+                            .map_err(invalid)?;
+                        let _ = slot.set(derived);
+                    }
+                    slot.get()
+                }
+                _ => None,
+            };
             for partition in &plan.partitions {
                 let indices = match context {
                     ObservationHistorySourceContext::Magnetostatic { mesh, .. }
@@ -181,15 +213,15 @@ impl ObservationPublicationCatalog {
                         mesh,
                     )
                     .map_err(invalid)?,
-                    ObservationHistorySourceContext::Thermal { mesh, .. }
-                    | ObservationHistorySourceContext::VolumeMesh { mesh } => {
-                        let projection =
-                            crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
-                        solid_observation_partition_source_indices(
+                    ObservationHistorySourceContext::Thermal { .. }
+                    | ObservationHistorySourceContext::VolumeMesh { .. } => {
+                        let topology = volume_topology
+                            .ok_or_else(|| invalid("volume observation topology absent"))?;
+                        crate::results::observation::distributed::source_selection::observation_partition_source_indices(
                             &source.plan,
                             &plan,
                             partition,
-                            &projection,
+                            topology,
                         )
                         .map_err(invalid)?
                     }
@@ -218,9 +250,13 @@ impl ObservationPublicationCatalog {
         evidence: &ObservationPartitionEvidence,
     ) -> AnalysisExecutionResult<ObservationPartitionPlan> {
         evidence.validate().map_err(invalid)?;
-        let plan =
-            ObservationPartitionPlan::derive(&source.plan, observation, self.execution_policy)
-                .map_err(invalid)?;
+        // `visit_results` validated `source` (and so its plan identity) before visiting it.
+        let plan = ObservationPartitionPlan::derive_for_validated_plan(
+            &source.plan,
+            observation,
+            self.execution_policy,
+        )
+        .map_err(invalid)?;
         if plan.identity != evidence.partition_plan
             || plan.partitions.len() != evidence.contributions.len()
         {

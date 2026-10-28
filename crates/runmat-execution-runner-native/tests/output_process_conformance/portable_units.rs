@@ -10,7 +10,11 @@ use runmat_execution_artifact::{
 use runmat_execution_runner::{DriverSnapshot, TaskSubmission};
 use runmat_execution_runner_native::NativeProgramSession;
 
-async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExecutionRequest {
+pub(super) async fn request(
+    text: &str,
+    selected: Option<&str>,
+    outputs: u16,
+) -> ProgramExecutionRequest {
     let directory = tempfile::tempdir().unwrap();
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     let source = runmat_core::ExecutableSource::frozen(

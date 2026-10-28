@@ -550,6 +550,7 @@ use source_selection::prepare_observation_field_partition;
 pub use source_selection::{
     prepare_solid_observation_field_partition, prepare_structural_observation_field_partition,
     solid_observation_partition_source_indices, structural_observation_partition_source_indices,
+    SolidObservationSourceSelection,
 };
 
 pub(super) fn validate_observation_partition_input<'a>(

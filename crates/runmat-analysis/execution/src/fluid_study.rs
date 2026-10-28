@@ -35,13 +35,18 @@ pub(crate) mod tests;
 pub use completion::{
     import_fluid_study_completion, FluidStudyResultClosure, FluidStudyResultPhase,
 };
-pub use root::{import_fluid_study_root, prepare_fluid_study_root, PreparedFluidStudyRoot};
+pub use root::{
+    import_fluid_study_root, prepare_fluid_study_root, prepare_fluid_study_root_for,
+    PreparedFluidStudyRoot,
+};
 
 /// Owned terminal artifacts for the exact standalone authored steady envelope.
 /// Consuming the coordinator does not clone numerical storage.
 pub struct CompletedFluidStudy {
     replay: completion::FluidStudyReplayContext,
     closures: Vec<FluidStudyResultClosure>,
+    /// The field-recovery admission the coordinator derived when it prepared that phase.
+    field_recovery_plan: runmat_analysis_fea::planning::resource::FeaResourcePlan,
     pub compiled: CompiledAnalysisStudy,
     pub workload: runmat_analysis_fea::execution::FluidSteadyWorkload,
     pub result: ImportedFluidSteadyResult,
@@ -56,6 +61,34 @@ pub struct CompletedFluidStudy {
     pub publication: ImportedPublishedResult,
 }
 
+/// A study this process's own coordinator drove to completion: each phase response was
+/// admitted and validated by `FluidStudyCoordinator` as it arrived, in this process.
+/// Only [`FluidStudyCoordinator::into_verified`] constructs it, so holding one is the proof
+/// that no replay is needed. Completions decoded from bytes stay [`CompletedFluidStudy`]
+/// and are authenticated by a full replay.
+pub struct VerifiedFluidStudy(CompletedFluidStudy);
+
+impl VerifiedFluidStudy {
+    /// The coordinator's own preparation: `FluidStudyCoordinator::new` validated it and
+    /// every phase was admitted against it, so it is not validated or re-planned again.
+    pub fn preparation(&self) -> FluidStudyPreparation {
+        self.0.assemble_preparation(self.0.workload.clone())
+    }
+
+    /// Give up the in-process proof (for example, to treat the study as a cold source).
+    pub fn into_completed(self) -> CompletedFluidStudy {
+        self.0
+    }
+}
+
+impl std::ops::Deref for VerifiedFluidStudy {
+    type Target = CompletedFluidStudy;
+    fn deref(&self) -> &CompletedFluidStudy {
+        &self.0
+    }
+}
+
+#[derive(Clone)]
 pub struct FluidStudyPreparation {
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: FluidStudyPlanningPolicy,
@@ -103,11 +136,7 @@ pub struct FluidStudyCoordinator {
 
 impl FluidStudyCoordinator {
     pub fn new(preparation: FluidStudyPreparation) -> AnalysisBridgeResult<Self> {
-        preparation
-            .product
-            .compiled
-            .validate_against(&preparation.mesh)
-            .map_err(|error| invalid(error.to_string()))?;
+        // Re-planning validates the compiled study against the mesh first.
         let expected = plan_fluid_study_product(
             preparation.product.compiled.clone(),
             &preparation.mesh,
@@ -134,7 +163,8 @@ impl FluidStudyCoordinator {
             tail: None,
             recovery_task: None,
             fields: None,
-            observation_state: crate::sampled_history_observations::SampledHistoryWorkflow::default(),
+            observation_state: crate::sampled_history_observations::SampledHistoryWorkflow::default(
+            ),
             usage: None,
         })
     }
@@ -304,6 +334,11 @@ impl FluidStudyCoordinator {
             })
     }
 
+    /// The completed study as this process's own verified result.
+    pub fn into_verified(self) -> AnalysisBridgeResult<VerifiedFluidStudy> {
+        self.into_completed().map(VerifiedFluidStudy)
+    }
+
     pub fn into_completed(self) -> AnalysisBridgeResult<CompletedFluidStudy> {
         self.require(FluidStudyPhase::Complete)?;
         let workload = self.preparation.workload().clone();
@@ -320,6 +355,10 @@ impl FluidStudyCoordinator {
                 required_capabilities: self.preparation.required_capabilities,
             },
             closures: self.closures,
+            field_recovery_plan: self
+                .recovery_task
+                .expect("completed field recovery")
+                .resource_plan,
             compiled: self.preparation.product.compiled,
             workload,
             result: self.result.expect("completed solve"),

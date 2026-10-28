@@ -83,6 +83,8 @@ pub(crate) struct AnchoredEnergyCheck<'a> {
     resident: u64,
     admitted: EnergyAdmission,
     failed: bool,
+    /// A local block could not be certified positive: the verdict is indeterminate.
+    uncertified: bool,
     peak_resident: u64,
     local_proofs: VecDeque<(Vec<f64>, f64)>,
 }
@@ -167,6 +169,7 @@ impl<'a> AnchoredEnergyCheck<'a> {
             resident,
             admitted,
             failed: false,
+            uncertified: false,
             peak_resident: resident,
             local_proofs: VecDeque::new(),
         })
@@ -220,9 +223,10 @@ impl<'a> AnchoredEnergyCheck<'a> {
         {
             return Err(EnergyError::InvalidBlock);
         }
-        if nodes
-            .iter()
-            .all(|&node| self.projection.row(node).is_none())
+        if self.uncertified
+            || nodes
+                .iter()
+                .all(|&node| self.projection.row(node).is_none())
         {
             return Ok(());
         }
@@ -281,7 +285,12 @@ impl<'a> AnchoredEnergyCheck<'a> {
                         .checked_mul(6)
                         .ok_or(EnergyError::Arithmetic)?,
                 )?;
-                let lower = local::lower_bound(values, n)?;
+                let Some(lower) = local::lower_bound(values, n)? else {
+                    // An element energy this sufficient check cannot certify leaves the
+                    // global bound undecided; the remaining stream is not needed.
+                    self.uncertified = true;
+                    return Ok(());
+                };
                 if self.local_proofs.len() == LOCAL_PROOF_CACHE_CAPACITY {
                     let (removed, _) = self
                         .local_proofs
@@ -393,6 +402,12 @@ impl<'a> AnchoredEnergyCheck<'a> {
     pub fn finish(mut self) -> Result<EnergyVerdict, EnergyError> {
         if self.failed {
             return Err(EnergyError::InvalidBlock);
+        }
+        if self.uncertified {
+            return Ok(EnergyVerdict::Indeterminate {
+                graph_lower: 0.0,
+                error_upper: 0.0,
+            });
         }
         let n = self.matrix.rows();
         self.charge(

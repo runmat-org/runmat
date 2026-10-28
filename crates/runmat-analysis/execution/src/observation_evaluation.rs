@@ -36,6 +36,8 @@ pub struct ObservationPreparation {
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
+    /// The admitted local CPU plan independent fan-out work (per observation partition) runs on.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 /// Published metadata and transport reference; thermal variants never own numerical history.

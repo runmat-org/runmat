@@ -81,12 +81,14 @@ OcctCurveProjectionPayload exact_curve_inverse_project(
 OcctPcurveDerivativesPayload exact_pcurve_derivatives(
     std::uint64_t session_id,
     std::uint64_t face_key,
+    bool face_reversed,
     std::uint64_t wire_key,
     std::uint64_t coedge_position,
     std::int8_t seam_image,
     double parameter);
 OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
                                          std::uint64_t face_key,
+                                         bool face_reversed,
                                          std::uint64_t wire_key,
                                          std::uint64_t coedge_position,
                                          std::int8_t seam_image);

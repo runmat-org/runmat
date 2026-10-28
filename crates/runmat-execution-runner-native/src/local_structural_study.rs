@@ -100,6 +100,8 @@ pub async fn execute_prepared_study_locally_with_observers(
 
     let decoded = crate::decode_structural_study_root(&request, &composition_store)?;
     config.max_workers = workers.max(1);
+    // The root's execution policy bounds every analysis worker this placement launches.
+    config.authored_worker_memory_bytes = decoded.memory_per_worker_bytes;
     config.worker_cpu_millicores = decoded
         .local_execution
         .checked_cpu_millicores()

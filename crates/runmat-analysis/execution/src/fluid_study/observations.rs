@@ -81,6 +81,7 @@ impl SampledHistorySource for Context<'_> {
                 program_revision: self.program_revision().clone(),
                 chunk_bytes: policy.chunk_bytes(),
                 inventory_limits: policy.inventory_limits(),
+                local_execution: self.study.preparation.local_execution,
             },
             sample,
         ))

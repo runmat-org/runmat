@@ -19,7 +19,7 @@ use crate::pipeline::{
 
 mod acoustic;
 mod electrical;
-mod fluid;
+pub(super) mod fluid;
 mod magnetic;
 mod maxwell;
 #[cfg(test)]

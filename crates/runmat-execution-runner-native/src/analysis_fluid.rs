@@ -9,8 +9,8 @@ use crate::{
 };
 use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_execution::{
-    AnalysisHostWorkload, CompletedFluidStudy, FluidStudyCoordinator, FluidStudyPhase,
-    FluidStudyPreparation, PreparedAnalysisProgram, PreparedAnalysisTaskClosure,
+    AnalysisHostWorkload, FluidStudyCoordinator, FluidStudyPhase,
+    FluidStudyPreparation, PreparedAnalysisProgram, PreparedAnalysisTaskClosure, VerifiedFluidStudy,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
@@ -29,7 +29,7 @@ pub async fn execute_fluid_study_locally(
     session: crate::NativeProgramSession,
     preparation: FluidStudyPreparation,
     policy: FluidStudyExecutionPolicy,
-) -> NativeExecutionResult<CompletedFluidStudy> {
+) -> NativeExecutionResult<VerifiedFluidStudy> {
     execute_with_pool(
         &mut crate::analysis_task_pool::LocalAnalysisTaskPool::new(session),
         preparation,
@@ -42,7 +42,7 @@ pub(crate) async fn execute_with_pool(
     pool: &mut impl AnalysisTaskPool,
     preparation: FluidStudyPreparation,
     policy: FluidStudyExecutionPolicy,
-) -> NativeExecutionResult<CompletedFluidStudy> {
+) -> NativeExecutionResult<VerifiedFluidStudy> {
     policy.resources.validate().map_err(protocol)?;
     let scope_id = pool.scope_id();
     let pool_id = pool.pool_id();
@@ -165,7 +165,7 @@ pub(crate) async fn execute_with_pool(
             "fluid lifecycle execution pool or scope changed between phases",
         ));
     }
-    coordinator.into_completed().map_err(protocol)
+    coordinator.into_verified().map_err(protocol)
 }
 
 async fn execute_one(

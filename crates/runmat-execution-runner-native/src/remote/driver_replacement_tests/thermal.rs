@@ -101,6 +101,7 @@ pub(super) fn prepare_authored_root(
         planning: crate::StudyRootPlanning::Structural(planning),
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        memory_per_worker_bytes: None,
         input_materializations: Vec::new(),
         initial_fields: Vec::new(),
         geometry_meshing,

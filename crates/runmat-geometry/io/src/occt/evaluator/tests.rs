@@ -27,6 +27,8 @@ const DISCONNECTED_SOLIDS: &[u8] =
     include_bytes!("../../../tests/fixtures/disconnected_solids.brep");
 const DISCONNECTED_SOLIDS_REVERSED: &[u8] =
     include_bytes!("../../../tests/fixtures/disconnected_solids_reversed.brep");
+const REVERSED_SHELL_HOLE: &[u8] =
+    include_bytes!("../../../tests/fixtures/reversed_shell_hole.brep");
 const GAPPED_SHEET: &[u8] = include_bytes!("../../../tests/fixtures/gapped_sheet.brep");
 const INDEPENDENT_CONTACT: &[u8] =
     include_bytes!("../../../tests/fixtures/independent_contact.step");
@@ -1539,3 +1541,55 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
 }
 
 mod surface_session;
+
+/// A solid whose shell is stored reversed (as STEP readers produce for air around parts): its
+/// faces' stored orientation is opposite to their use in the body, and the cylindrical hole's
+/// two seam uses are traversed in opposite order. Every pcurve, seam images included, resolves
+/// on the face use the topology traversed.
+#[test]
+fn seam_pcurves_resolve_on_reversed_face_uses() {
+    let imported = import_exact_cad(
+        "reversed_shell_hole.brep",
+        REVERSED_SHELL_HOLE,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions {
+            source_units: Some(LengthUnit::Millimeter),
+            ..ExactCadImportOptions::default()
+        },
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let evaluator = OcctExactEvaluator::new(&imported).unwrap();
+    let mut seam_points = std::collections::BTreeMap::<_, Vec<(u8, [f64; 2])>>::new();
+    for coedge in &imported.topology.coedges {
+        let range = runmat_geometry_core::ExactPcurveEvaluator::parameter_range(
+            &evaluator,
+            &coedge.pcurve_evaluator_id,
+        )
+        .unwrap();
+        let value = runmat_geometry_core::ExactPcurveEvaluator::derivatives(
+            &evaluator,
+            &coedge.pcurve_evaluator_id,
+            (range.start + range.end) * 0.5,
+            &Unlimited,
+        )
+        .unwrap();
+        if let Some(image) = coedge.seam_image {
+            seam_points
+                .entry(coedge.edge_id.clone())
+                .or_default()
+                .push((image, native_uv(&value.point_uv)));
+        }
+    }
+    assert_eq!(seam_points.len(), 1, "the hole has one seam edge");
+    for images in seam_points.values_mut() {
+        images.sort_by_key(|(image, _)| *image);
+        assert_eq!(
+            images.iter().map(|(image, _)| *image).collect::<Vec<_>>(),
+            [0, 1]
+        );
+        let [(_, first), (_, second)] = [images[0], images[1]];
+        let distance = ((first[0] - second[0]).powi(2) + (first[1] - second[1]).powi(2)).sqrt();
+        assert!(distance > 1.0, "seam images coincide: {images:?}");
+    }
+}

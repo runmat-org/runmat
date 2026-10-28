@@ -185,7 +185,9 @@ impl CompiledPropertyMap {
             shell_properties: Arc::new(shell_properties),
             audit: Arc::new(audit),
         };
-        compiled.validate_integrity()?;
+        // Both digests were derived above from these exact contents; only the structure
+        // remains to check. Decoded or shared maps still run the full validate_integrity.
+        super::identity::validate_structure(&compiled)?;
         Ok(compiled)
     }
 

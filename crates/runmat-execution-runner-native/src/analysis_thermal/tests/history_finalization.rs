@@ -181,6 +181,7 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
                 program_revision: revision.clone(),
                 chunk_bytes,
                 inventory_limits: limits,
+                local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             },
             fields[0].sample,
             None,

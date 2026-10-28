@@ -108,6 +108,7 @@ pub fn decode_exact_structural_study_root(
         geometry_source_digest: root.geometry_source_digest,
         workloads: root.workloads,
         local_execution: root.local_execution,
+        memory_per_worker_bytes: None,
         analysis_accelerator_requests: root.analysis_accelerator_requests,
         input_materializations,
         exact_meshing,

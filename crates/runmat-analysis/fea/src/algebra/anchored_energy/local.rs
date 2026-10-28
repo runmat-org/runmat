@@ -27,8 +27,10 @@ pub(super) fn perturbation_lower(
     (bound.is_finite() && bound > 0.0).then_some(bound)
 }
 /// Verify a positive LDL candidate with an outward residual. Its triangular inverse
-/// majorant bounds both norms without assuming floating point solves are exact.
-pub(super) fn lower_bound(block: &[f64], width: usize) -> Result<f64, EnergyError> {
+/// majorant bounds both norms without assuming floating point solves are exact. `None` when the
+/// block cannot be certified positive (a nonpositive pivot, or roundoff that swamps the bound):
+/// that is no disproof of the assembled operator, so the proof becomes indeterminate.
+pub(super) fn lower_bound(block: &[f64], width: usize) -> Result<Option<f64>, EnergyError> {
     if block.iter().any(|v| !v.is_finite()) {
         return Err(EnergyError::InvalidBlock);
     }
@@ -49,7 +51,7 @@ pub(super) fn lower_bound(block: &[f64], width: usize) -> Result<f64, EnergyErro
             v -= l[i * n + k] * l[i * n + k] * d[k];
         }
         if !v.is_finite() || v <= 0.0 {
-            return Err(EnergyError::InvalidBlock);
+            return Ok(None);
         }
         d[i] = v;
     }
@@ -105,7 +107,7 @@ pub(super) fn lower_bound(block: &[f64], width: usize) -> Result<f64, EnergyErro
     .next_up();
     let lower = (positive_lower - error).next_down();
     if !lower.is_finite() || lower <= 0.0 {
-        return Err(EnergyError::InvalidBlock);
+        return Ok(None);
     }
-    Ok(lower)
+    Ok(Some(lower))
 }

@@ -38,6 +38,7 @@ pub struct StatisticalObservationSource {
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -187,6 +188,7 @@ impl StatisticalStudyObservations {
                 program_revision: self.source.program_revision.clone(),
                 chunk_bytes: self.source.chunk_bytes,
                 inventory_limits: self.source.inventory_limits,
+                local_execution: self.source.local_execution,
             },
         )?;
         self.phase = Phase::AwaitingPartitions;

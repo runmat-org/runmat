@@ -188,7 +188,7 @@ impl AnalysisProjection {
     }
 }
 
-struct ProjectionCancellation;
+pub(crate) struct ProjectionCancellation;
 impl MeshingCancellationSignal for ProjectionCancellation {
     fn is_cancelled(&self) -> bool {
         crate::is_fea_cancelled()

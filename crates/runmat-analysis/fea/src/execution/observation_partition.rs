@@ -18,6 +18,7 @@ use super::{
 
 mod attribution;
 mod identity;
+pub(crate) use identity::validate_published_observation_source;
 use identity::{evaluation_identity, reduction_identity};
 
 use attribution::{validate_contribution_attribution, validate_event_attribution};
@@ -103,7 +104,8 @@ impl ObservationPartitionEvaluationRequest {
         }
         let request = Self {
             schema_version: 1,
-            identity: Self::published_identity(
+            // `source.validate()` and `partition_plan.validate_for` succeeded above.
+            identity: Self::published_identity_validated(
                 source,
                 partition_plan,
                 partition,
@@ -261,7 +263,12 @@ impl ObservationPartitionReductionRequest {
             .collect::<Vec<_>>();
         let request = Self {
             schema_version: 1,
-            identity: Self::published_identity(source, partition_plan, &contribution_identities)?,
+            // `source.validate()` and `partition_plan.validate_for` succeeded above.
+            identity: Self::published_identity_validated(
+                source,
+                partition_plan,
+                &contribution_identities,
+            )?,
             producer: source.producer,
             source_request: source.identity(),
             partition_plan: partition_plan.identity,

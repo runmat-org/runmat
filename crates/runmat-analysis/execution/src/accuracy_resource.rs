@@ -2,6 +2,7 @@
 mod source_admission;
 mod thermal;
 pub use source_admission::validate_admitted_accuracy_source;
+pub(crate) use source_admission::validate_derived_accuracy_source;
 #[cfg(test)]
 mod tests;
 use crate::{

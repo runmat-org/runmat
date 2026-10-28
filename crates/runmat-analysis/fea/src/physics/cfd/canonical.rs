@@ -212,17 +212,34 @@ pub enum CanonicalFluidError {
     },
 }
 
-/// Prepared inputs are immutable after source/authority validation.
+/// Prepared inputs are immutable after source/authority validation. The problem borrows the
+/// source, topology and boundary authorities and shares the lifetime-free numerical plan.
 pub struct CanonicalFluidProblem<'a> {
     source: &'a AnalysisProjection,
     topology: &'a FiniteVolumeTopology,
+    boundaries: Vec<boundary::FaceBoundary<'a>>,
+    /// The plan's identity, unless a moving structure has since set this problem's wall
+    /// velocities (which the shared plan does not carry).
+    numerical_input_identity: Digest,
+    plan: std::sync::Arc<CanonicalFluidPlan>,
+}
+
+impl std::ops::Deref for CanonicalFluidProblem<'_> {
+    type Target = CanonicalFluidPlan;
+    fn deref(&self) -> &CanonicalFluidPlan {
+        &self.plan
+    }
+}
+
+/// Everything a fluid problem derives from its authored inputs at one sample that does not
+/// borrow them: material constants, forcing, reservation, identities, stencils and patterns.
+pub struct CanonicalFluidPlan {
     density: f64,
     viscosity: f64,
     /// Shear-rate dependent viscosity law; `viscosity` is then its low-shear reference.
     rheology: Option<runmat_analysis_core::GeneralizedNewtonianLaw>,
     /// Per cell: the porous-zone linear (μ/K) and quadratic (½ρC₂) resistance coefficients.
     porous: Vec<Option<(f64, f64)>>,
-    boundaries: Vec<boundary::FaceBoundary<'a>>,
     boundary_balance_plan: boundary_balances::BoundaryBalancePlan,
     body_force_n_per_m3: Vec<[f64; 3]>,
     policy: CanonicalFluidPolicy,
@@ -261,6 +278,51 @@ impl<'a> CanonicalFluidProblem<'a> {
     }
 
     pub fn prepare_at(
+        input: CanonicalFluidInput<'a>,
+        sample: crate::excitation::ProjectionSample,
+    ) -> Result<Self, CanonicalFluidError> {
+        Self::derive_at(input, sample)
+    }
+
+    /// Prepares through `plans`, which must belong to the owner of every input except
+    /// `signals` and `policy` (an immutable prepared source). A plan derived once for the same
+    /// signals, policy and sample is shared; only the borrowed boundary list is rebuilt.
+    pub fn prepare_shared(
+        input: CanonicalFluidInput<'a>,
+        sample: crate::excitation::ProjectionSample,
+        plans: &CanonicalFluidPlanCache,
+    ) -> Result<Self, CanonicalFluidError> {
+        let key = identity(
+            "fea-fluid-plan-cache-key/v1",
+            &(input.policy, &sample, input.signals),
+        )?;
+        if let Some(plan) = plans.get(&key) {
+            let sample_point = crate::excitation::ExcitationSamplePoint::try_from(&sample)
+                .map_err(|e| CanonicalFluidError::InputRealization(e.to_string()))?;
+            let boundaries = boundary::compile(boundary::BoundaryInput {
+                source: input.source,
+                topology: input.topology,
+                constraints: input.constraints,
+                operators: input.boundary_operators,
+                signals: input.signals,
+                excitations: input.excitations,
+                density: plan.density,
+                sample: sample_point,
+            })?;
+            return Ok(Self {
+                source: input.source,
+                topology: input.topology,
+                boundaries,
+                numerical_input_identity: plan.numerical_input_identity,
+                plan,
+            });
+        }
+        let problem = Self::derive_at(input, sample)?;
+        plans.insert(key, problem.plan.clone());
+        Ok(problem)
+    }
+
+    fn derive_at(
         input: CanonicalFluidInput<'a>,
         sample: crate::excitation::ProjectionSample,
     ) -> Result<Self, CanonicalFluidError> {
@@ -447,14 +509,11 @@ impl<'a> CanonicalFluidProblem<'a> {
                 policy,
             ),
         )?;
-        Ok(Self {
-            source,
-            topology,
+        let plan = std::sync::Arc::new(CanonicalFluidPlan {
             density,
             viscosity,
             rheology: material.rheology,
             porous,
-            boundaries,
             boundary_balance_plan,
             body_force_n_per_m3,
             policy,
@@ -471,6 +530,13 @@ impl<'a> CanonicalFluidProblem<'a> {
             velocity_stencils,
             momentum_jacobian,
             operator_pattern: linear::cell_operator_pattern(topology)?,
+        });
+        Ok(Self {
+            source,
+            topology,
+            boundaries,
+            numerical_input_identity: plan.numerical_input_identity,
+            plan,
         })
     }
 
@@ -546,6 +612,32 @@ const INPUT_IDENTITY_LIMITS: runmat_canonical_codec::CanonicalLimits =
         65536,
         32,
     );
+
+/// Plans shared by the problems of one immutable prepared source. Capacity is small: a
+/// steady study uses one sample; a transient study's interval endpoints are not retained.
+#[derive(Default)]
+pub struct CanonicalFluidPlanCache {
+    plans: std::sync::Mutex<Vec<(Digest, std::sync::Arc<CanonicalFluidPlan>)>>,
+}
+
+const PLAN_CACHE_CAPACITY: usize = 2;
+
+impl CanonicalFluidPlanCache {
+    fn get(&self, key: &Digest) -> Option<std::sync::Arc<CanonicalFluidPlan>> {
+        let plans = self.plans.lock().unwrap_or_else(|e| e.into_inner());
+        plans.iter().find(|(k, _)| k == key).map(|(_, p)| p.clone())
+    }
+    fn insert(&self, key: Digest, plan: std::sync::Arc<CanonicalFluidPlan>) {
+        let mut plans = self.plans.lock().unwrap_or_else(|e| e.into_inner());
+        if plans.iter().any(|(k, _)| *k == key) {
+            return;
+        }
+        if plans.len() == PLAN_CACHE_CAPACITY {
+            plans.remove(0);
+        }
+        plans.push((key, plan));
+    }
+}
 
 fn identity<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CanonicalFluidError> {
     runmat_canonical_codec::encode_contract(

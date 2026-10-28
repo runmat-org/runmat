@@ -102,6 +102,16 @@ pub fn fluid_state_publication_requests(
 ) -> AnalysisExecutionResult<Vec<SemanticStatePublicationRequest>> {
     result.validate_for(workload, mesh)?;
     let topology = result.native_field_topology(workload, mesh)?;
+    requests_on(workload, result, &topology)
+}
+
+/// The declared publication requests of a result whose `validate_for` succeeded, on its native
+/// field topology.
+fn requests_on(
+    workload: &FluidSteadyWorkload,
+    result: &FluidSteadySolverResult,
+    topology: &FiniteVolumeFieldTopology,
+) -> AnalysisExecutionResult<Vec<SemanticStatePublicationRequest>> {
     workload.model.sequence.steps[0]
         .state_outputs
         .iter()
@@ -118,22 +128,28 @@ pub fn fluid_state_publication_requests(
         .collect()
 }
 
+/// Validate `request` against `result` and return the result's native field topology.
 pub(super) fn validate_request(
     request: &SemanticStatePublicationRequest,
     workload: &FluidSteadyWorkload,
     mesh: &SolverMeshArtifact,
     result: &FluidSteadySolverResult,
-) -> AnalysisExecutionResult<()> {
+) -> AnalysisExecutionResult<FiniteVolumeFieldTopology> {
     request.validate()?;
-    if !fluid_state_publication_requests(workload, mesh, result)?.contains(request) {
+    result.validate_for(workload, mesh)?;
+    let topology = result.native_field_topology(workload, mesh)?;
+    if !requests_on(workload, result, &topology)?.contains(request) {
         return Err(invalid(
             "fluid publication differs from original complete authored declaration",
         ));
     }
-    Ok(())
+    Ok(topology)
 }
 
-pub fn fluid_state_publication_profiles(
+/// The size certificate of exactly one declared fluid state publication, bound to the exact
+/// solver payload. Each state publication profiles only its own state, never the others.
+pub fn fluid_state_publication_profile(
+    request: &SemanticStatePublicationRequest,
     workload: &FluidSteadyWorkload,
     mesh: &SolverMeshArtifact,
     result: &FluidSteadySolverResult,
@@ -145,27 +161,17 @@ pub fn fluid_state_publication_profiles(
             "fluid state profile source payload differs from original immutable result",
         ));
     }
-    let requests = fluid_state_publication_requests(workload, mesh, result)?;
-    let topology = result.native_field_topology(workload, mesh)?;
-    let entries = requests
-        .into_iter()
-        .map(|request| {
-            let profile = request.encoding_profile(
-                SemanticStatePublicationProfileSource::FluidPrimaryFields {
-                    workload,
-                    mesh,
-                    result,
-                },
-            )?;
-            StatePublicationProfileEntry::new(request, profile)
-        })
-        .collect::<AnalysisExecutionResult<Vec<_>>>()?;
+    let topology = validate_request(request, workload, mesh, result)?;
+    // The request, result and topology were validated just above: profile from them.
+    let profile = super::resource_profile::fluid::profile_validated(
+        request, workload, mesh, &bytes, &topology,
+    )?;
     StatePublicationProfiles::new(
         result.producer_identity(),
         result.identity()?,
         topology.identity().discretization_digest(),
         source_payload_digest,
-        entries,
+        vec![StatePublicationProfileEntry::new(request.clone(), profile)?],
     )
 }
 
@@ -176,9 +182,8 @@ impl CanonicalSemanticState {
         mesh: &SolverMeshArtifact,
         result: &FluidSteadySolverResult,
     ) -> AnalysisExecutionResult<Self> {
-        validate_request(request, workload, mesh, result)?;
+        let topology = validate_request(request, workload, mesh, result)?;
         let result_bytes = result.canonical_bytes()?;
-        let topology = result.native_field_topology(workload, mesh)?;
         fluid_state_publication_workspace_bytes(workload, mesh, &result_bytes)?;
         Self::new(CanonicalSemanticStateInput {
             producer: request.producer,

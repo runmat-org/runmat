@@ -108,6 +108,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         planning: crate::StudyRootPlanning::Structural(planning),
         analysis_accelerator_requests: Vec::new(),
         local_execution,
+        memory_per_worker_bytes: Some(3 << 30),
         input_materializations: Vec::new(),
         initial_fields: Vec::new(),
         geometry_meshing,
@@ -149,6 +150,8 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     assert_eq!(decoded.materials, resolved.material_catalog);
     assert_eq!(decoded.planning, crate::StudyRootPlanning::Structural(planning));
     assert_eq!(decoded.local_execution, local_execution);
+    // memory_per_worker travels with the root, so a remote placement plans within it too.
+    assert_eq!(decoded.memory_per_worker_bytes, Some(3 << 30));
     assert!(decoded.analysis_accelerator_requests.is_empty());
     assert_eq!(
         prepared.transport_objects().unwrap().len(),
@@ -573,6 +576,7 @@ fn prepare_source(
         }),
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        memory_per_worker_bytes: None,
         input_materializations: Vec::new(),
         initial_fields: Vec::new(),
         geometry_meshing,

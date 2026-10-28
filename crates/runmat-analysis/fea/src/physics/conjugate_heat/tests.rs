@@ -383,3 +383,18 @@ fn warm_up_stores_the_applied_heat_and_settles_on_the_steady_state() {
         );
     }
 }
+
+// Moved from the retired runtime fixture `cht_coupled_invalid_interface_mapping`: a structural
+// contact interface cannot stand in for the conjugate heat transfer interface on the wetted wall.
+#[test]
+fn structural_contact_interface_is_not_a_conjugate_interface() {
+    let mut c = case([2, 5, 1], ThermalInterfaceTransfer::Perfect);
+    prescribe(&mut c, "channel_y_max", TOP);
+    let p = prepare(&c);
+    let flux = vec![0.0; p.topology.faces.len()];
+    assert!(ConjugateHeatProblem::prepare(input(&c, &p, &flux)).is_ok());
+    c.model.interfaces[0].kind = AnalysisInterfaceKind::Contact(ContactInterfaceModel {
+        friction: ContactFriction::Frictionless,
+    });
+    assert!(ConjugateHeatProblem::prepare(input(&c, &p, &flux)).is_err());
+}

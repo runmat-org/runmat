@@ -127,7 +127,7 @@ pub(super) async fn cold_fixture(
     )
     .await
     .unwrap();
-    let preparation = done.preparation().unwrap();
+    let preparation = done.preparation();
     let closures = done.result_closures().to_vec();
     // The execution API has consumed and terminated its session. Reopen its filesystem store;
     // the public source guard retains directory lifetime, without retaining decoded fields.
@@ -140,14 +140,14 @@ pub(super) async fn cold_fixture(
         let mut reordered = closures.clone();
         reordered.swap(0, 1);
         assert!(
-            import_fluid_study_completion(&store, done.preparation().unwrap(), reordered).is_err()
+            import_fluid_study_completion(&store, done.preparation(), reordered).is_err()
         );
         let mut missing = closures.clone();
         missing.pop();
         assert!(
-            import_fluid_study_completion(&store, done.preparation().unwrap(), missing).is_err()
+            import_fluid_study_completion(&store, done.preparation(), missing).is_err()
         );
-        let mut foreign = done.preparation().unwrap();
+        let mut foreign = done.preparation();
         let resident = foreign.policy.numerical.maximum_resident_bytes;
         foreign.policy.numerical.maximum_resident_bytes =
             Some(resident.map_or(1, |bytes| bytes - 1));
@@ -157,7 +157,7 @@ pub(super) async fn cold_fixture(
             .iter()
             .any(|a| matches!(a, ExcitationAction::MassFlow(_)))
         {
-            let mut foreign = done.preparation().unwrap();
+            let mut foreign = done.preparation();
             // A different balanced physical source preserves shape and requested work;
             // it still cannot inherit the original fields, receipt or publication.
             for model in [

@@ -197,3 +197,118 @@ pub(super) fn ceiling_selects_the_static_path() {
         Some(StaticSolvePath::ProvingFactorization)
     );
 }
+
+/// The elastic rigidity fallback answers to the same effective ceiling as the factorization:
+/// below both plans the planner refuses with a resource error naming both requirements and the
+/// ceiling, instead of returning a plan the worker pool cannot admit.
+pub(super) fn fallback_is_admitted_against_the_ceiling() {
+    use crate::planning::resource::{
+        build_static_resource_plan_selecting, FeaResourcePlan, LocalExecutionPlan,
+        ResourcePlanningError, StaticResourcePreflight, StaticSolvePath, StaticSolveSelection,
+    };
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(1 << 40);
+    let mesh = structured_cantilever(8, ElementOrder::Tet10);
+    let constraints =
+        crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    let fields = crate::post::fields::structural_static_observable_field_definitions().unwrap();
+    let observations = crate::results::observation::resolve_structural_observation_plan(
+        &model.sequence.steps[0],
+        &model,
+        Some(&mesh),
+        &constraints,
+        &fields,
+        crate::results::observation::ObservationLimits::default(),
+    )
+    .unwrap();
+    let plan = |model: &runmat_analysis_core::AnalysisModel,
+                selection: StaticSolveSelection|
+     -> Result<FeaResourcePlan, ResourcePlanningError> {
+        build_static_resource_plan_selecting(
+            StaticResourcePreflight {
+                compilation: None,
+                prepared_inputs: None,
+                model,
+                step: &model.sequence.steps[0],
+                backend: ComputeBackend::Cpu,
+                preconditioner: SpdPreconditionerKind::Auto,
+                observation_execution:
+                    crate::results::observation::ObservationExecutionPolicy::serial(),
+                mesh: Some(&mesh),
+                constraints: &constraints,
+                observations: &observations,
+                accelerator_requests: &[],
+                local_execution: LocalExecutionPlan::serial(),
+            },
+            selection,
+        )
+    };
+    let direct = plan(
+        &model,
+        StaticSolveSelection::Recorded(StaticSolvePath::ProvingFactorization),
+    )
+    .unwrap()
+    .request;
+    let elastic = plan(
+        &model,
+        StaticSolveSelection::Recorded(StaticSolvePath::ElasticRigidityMultigrid),
+    )
+    .unwrap()
+    .request;
+    let elastic_need = elastic.memory_bytes.max(elastic.scratch_bytes);
+    assert!(elastic_need < direct.memory_bytes);
+    // Exactly at the elastic plan's need the fallback is admitted.
+    let admitted = plan(
+        &model,
+        StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: Some(elastic_need),
+        },
+    )
+    .expect("the elastic plan fits its own requirement");
+    assert!(admitted.request.memory_bytes <= elastic_need);
+    assert!(admitted.request.scratch_bytes <= elastic_need);
+    // One byte below, the machine ceiling refuses both paths and names both requirements.
+    let ceiling = elastic_need - 1;
+    let error = plan(
+        &model,
+        StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: Some(ceiling),
+        },
+    )
+    .expect_err("no path fits below the elastic plan");
+    assert_eq!(
+        error,
+        ResourcePlanningError::StaticSolveCeiling {
+            factorization_resident_bytes: Some(direct.memory_bytes),
+            multigrid_resident_bytes: elastic.memory_bytes,
+            multigrid_scratch_bytes: Some(elastic.scratch_bytes),
+            maximum: ceiling,
+        }
+    );
+    let message = error.to_string();
+    for figure in [direct.memory_bytes, elastic.memory_bytes, elastic.scratch_bytes, ceiling] {
+        assert!(message.contains(&figure.to_string()), "{message}");
+    }
+    // The authored ceiling binds the same way: the elastic plan is refused inside planning and
+    // its resident requirement is still named.
+    let mut authored = model.clone();
+    authored.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
+        Some(elastic.memory_bytes - 1);
+    match plan(
+        &authored,
+        StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
+    ) {
+        Err(ResourcePlanningError::StaticSolveCeiling {
+            factorization_resident_bytes: Some(factor),
+            multigrid_resident_bytes,
+            maximum,
+            ..
+        }) => {
+            assert!(factor > maximum && multigrid_resident_bytes > maximum);
+            assert_eq!(maximum, elastic.memory_bytes - 1);
+        }
+        other => panic!("expected a static solve ceiling error, got {other:?}"),
+    }
+}

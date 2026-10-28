@@ -5,11 +5,12 @@ use std::rc::Rc;
 use runmat_execution::{
     CollectiveRequest, CollectiveResponse, CollectiveSequence, SpmdTaskContext,
 };
-use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
+use runmat_process_host::ipc::{write_payload, FrameLimits};
 use runmat_runtime::context::{RuntimeCollectiveService, RuntimeServiceFuture};
 use runmat_runtime::RuntimeError;
 use runmat_types::CollectiveId;
-use tokio::io::{BufReader, BufWriter, Stdin, Stdout};
+use runmat_process_host::ipc::ParentFrames;
+use tokio::io::{BufWriter, Stdout};
 
 use crate::protocol::{CollectiveProcessResult, WorkerDriverMessage, WorkerProcessMessage};
 
@@ -20,13 +21,14 @@ pub(super) struct StdioCollectiveChannel {
 }
 
 struct StdioCollectiveIo {
-    reader: BufReader<Stdin>,
+    /// Frames from the parent link thread, which owns the request pipe.
+    reader: ParentFrames,
     writer: BufWriter<Stdout>,
 }
 
 impl StdioCollectiveChannel {
     pub(super) fn new(
-        reader: BufReader<Stdin>,
+        reader: ParentFrames,
         writer: BufWriter<Stdout>,
         limits: FrameLimits,
     ) -> Self {
@@ -43,7 +45,7 @@ impl StdioCollectiveChannel {
         &self,
     ) -> Result<Vec<u8>, runmat_process_host::ProcessHostError> {
         let mut io = self.io.lock().await;
-        read_payload(&mut io.reader, self.limits).await
+        next_frame(&mut io.reader).await
     }
 
     pub(super) async fn write_payload(
@@ -60,8 +62,18 @@ impl StdioCollectiveChannel {
     ) -> Result<Vec<u8>, runmat_process_host::ProcessHostError> {
         let mut io = self.io.lock().await;
         write_payload(&mut io.writer, payload, self.limits).await?;
-        read_payload(&mut io.reader, self.limits).await
+        next_frame(&mut io.reader).await
     }
+}
+
+async fn next_frame(
+    frames: &mut ParentFrames,
+) -> Result<Vec<u8>, runmat_process_host::ProcessHostError> {
+    frames.recv().await.unwrap_or_else(|| {
+        Err(runmat_process_host::ProcessHostError::Protocol(
+            "parent request pipe closed".into(),
+        ))
+    })
 }
 
 pub(super) struct StdioCollectiveService {

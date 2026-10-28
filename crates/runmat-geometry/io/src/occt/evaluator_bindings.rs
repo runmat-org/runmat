@@ -20,6 +20,7 @@ pub(super) struct EvaluatorBindings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PcurveKey {
     pub face: u64,
+    pub face_reversed: bool,
     pub wire: u64,
     pub position: u64,
     pub seam_image: i8,
@@ -296,9 +297,12 @@ fn parse_edge_token(token: &str) -> Result<u64, GeometryEvaluationError> {
 
 fn parse_pcurve_token(token: &str) -> Result<PcurveKey, GeometryEvaluationError> {
     let parts = token.split(':').collect::<Vec<_>>();
-    if let ["face", face, "wire", wire, "coedge", position, "seam", seam_image] = parts.as_slice() {
+    if let ["face", face, "use", face_use, "wire", wire, "coedge", position, "seam", seam_image] =
+        parts.as_slice()
+    {
         let parsed = PcurveKey {
             face: face.parse().unwrap_or(0),
+            face_reversed: *face_use == "reversed",
             wire: wire.parse().unwrap_or(0),
             position: position.parse().unwrap_or(0),
             seam_image: seam_image.parse().unwrap_or(-2),
@@ -307,9 +311,12 @@ fn parse_pcurve_token(token: &str) -> Result<PcurveKey, GeometryEvaluationError>
             && parsed.wire != 0
             && parsed.position != 0
             && (-1..=1).contains(&parsed.seam_image)
-            && format!(
-                "face:{:020}:wire:{:020}:coedge:{:020}:seam:{}",
-                parsed.face, parsed.wire, parsed.position, parsed.seam_image
+            && super::exact_projection_evaluators::pcurve_token(
+                parsed.face,
+                parsed.face_reversed,
+                parsed.wire,
+                parsed.position,
+                parsed.seam_image,
             ) == token
         {
             return Ok(parsed);

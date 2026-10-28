@@ -410,7 +410,7 @@ pub(super) async fn run() {
         .unwrap();
         // Exact retained codec regression: the transport builder excludes the
         // separately reserved canonical partition/materialization workspace.
-        let recovery_plan = reopened.field_recovery_resource_plan(&cold).unwrap();
+        let recovery_plan = reopened.field_recovery_resource_plan();
         let runmat_analysis_fea::planning::resource::FeaResourceDemand::FluidFieldRecovery(
             recovery_demand,
         ) = &recovery_plan.input.demand
@@ -560,6 +560,19 @@ pub(super) async fn run() {
             assert!(publish(&wrong, &options).is_err());
         }
         previous_receipt = Some(actual.numerical_receipt.clone());
+        // Live, replayed, accuracy and published validations of the catalog share one
+        // (catalog, step, mesh) validation; a repeat is accepted, a foreign step is not.
+        let catalog = actual.observation_catalog.as_ref().expect("authored catalog");
+        let step = &actual.workload.model.sequence.steps[0];
+        let context =
+            runmat_analysis_fea::execution::ObservationHistorySourceContext::VolumeMesh {
+                mesh: &mesh,
+            };
+        catalog.validate_for(step, context).unwrap();
+        catalog.validate_for(step, context).unwrap();
+        let mut foreign = step.clone();
+        foreign.step_id = runmat_analysis_core::ProcedureStepId("foreign".into());
+        assert!(catalog.validate_for(&foreign, context).is_err());
     }
 }
 
