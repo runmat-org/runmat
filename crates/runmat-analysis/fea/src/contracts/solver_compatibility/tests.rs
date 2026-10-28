@@ -299,11 +299,14 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
             SolverMethod::GeneralGmres,
             SolverPreconditioner::Jacobi,
         ),
+        // Canonical CHT is the monolithic flow-advected conjugate energy realization; its
+        // publication reports the flow lifecycle's GMRES/Jacobi pair. The partitioned
+        // projection pair belonged to the removed reduced realization.
         (
             PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
             AnalysisProcedure::Static,
-            SolverMethod::ChtConjugateProjection,
-            SolverPreconditioner::ThermalCfdProjection,
+            SolverMethod::GeneralGmres,
+            SolverPreconditioner::Jacobi,
         ),
     ];
     for (family, procedure, method, preconditioner) in cases {
@@ -317,6 +320,16 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
         )
         .is_err());
     }
+    let canonical_cht = nonstructural_identity(
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+        AnalysisProcedure::Static,
+    );
+    assert!(validate_solver_formulation_compatibility(
+        &canonical_cht,
+        SolverMethod::ChtConjugateProjection,
+        SolverPreconditioner::ThermalCfdProjection,
+    )
+    .is_err());
 }
 
 #[test]
