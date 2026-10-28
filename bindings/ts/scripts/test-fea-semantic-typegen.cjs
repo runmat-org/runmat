@@ -174,17 +174,28 @@ assert.equal(omissions.isRoot(withCeiling({ offset: { signed: -MAX - 1 } })), fa
 assert.equal(omissions.isRoot({ ...root, color: [255, 0, 0] }), true);
 assert.equal(omissions.isRoot({ ...root, color: [256, 0, 0] }), false, "narrow integers keep their own range");
 // A 64-bit field without the adapter is refused, as is an adapter on the wrong shape.
-for (const [field, message] of [
-  ["pub unbounded: u64,", /must carry #\[serde\(with = "runmat_types::wire_integer/],
-  ["pub unbounded: Option<usize>,", /must carry/],
-  ["pub unbounded: Vec<i64>,", /must carry/],
+for (const [field, message, jsonType] of [
+  ["pub unbounded: u64,", /must carry #\[serde\(with = "runmat_types::wire_integer/, "number"],
+  ["pub unbounded: Option<usize>,", /must carry/, "number | null"],
+  ["pub unbounded: Vec<i64>,", /must carry/, "number[]"],
   ["#[serde(with = \"runmat_types::wire_integer\")]\n    pub unbounded: Option<u64>,", /does not match field type/],
 ]) {
   const wide = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-fea-typegen-wide-"));
   fs.writeFileSync(path.join(wide, "wide.rs"), `#[derive(Serialize)]\npub struct Wide {\n    ${field}\n}\n`);
-  assert.throws(() => renderReachable(parseDeclarations(rustFiles(wide)), ["Wide"]), message, field);
+  const declarations = parseDeclarations(rustFiles(wide));
+  assert.throws(() => renderReachable(declarations, ["Wide"]), message, field);
+  if (jsonType) {
+    const scalarTypes = new Map(["u64", "usize", "i64"].map((name) => [name, "number"]));
+    assert.ok(renderReachable(declarations, ["Wide"], { scalarTypes }).includes(`unbounded: ${jsonType};`));
+    assert.throws(() => renderReachable(declarations, ["Wide"]), message, "consumer policy must not leak");
+  }
   fs.rmSync(wide, { recursive: true, force: true });
 }
+const jsonScalars = renderReachable(registry, ["Root"], {
+  scalarTypes: new Map([["u8", "number"], ["u32", "number"]]),
+});
+assert.match(jsonScalars, /color: \[number, number, number\]/);
+assert.match(jsonScalars, /maximum_samples: WireU64;/, "explicit Serde adapters retain their wire representation");
 const composedGuards = require("typescript").transpileModule(renderGuards(`
 export type Value<T> = { constant: T } | { values: T[] };
 export interface Point { x: number }

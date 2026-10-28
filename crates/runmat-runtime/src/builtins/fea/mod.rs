@@ -1153,9 +1153,12 @@ fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
 /// Analysis fields store their values row-major: the last shape axis varies fastest, so one
 /// node's or element's components are contiguous. Runtime tensors are column-major, so the
 /// values are reordered so that `values(i, :)` is entity `i` and `values(:, k)` is component `k`.
-/// A length that disagrees with the shape is passed through for `Tensor::new` to reject.
+/// Invalid or overflowing shapes are passed through for `Tensor::new` to reject.
 fn row_major_to_column_major(values: &[f64], shape: &[usize]) -> Vec<f64> {
-    if shape.len() < 2 || values.len() != shape.iter().product::<usize>() {
+    let count = shape
+        .iter()
+        .try_fold(1_usize, |count, &extent| count.checked_mul(extent));
+    if shape.len() < 2 || count != Some(values.len()) {
         return values.to_vec();
     }
     let mut reordered = vec![0.0; values.len()];

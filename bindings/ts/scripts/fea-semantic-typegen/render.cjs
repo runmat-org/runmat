@@ -12,12 +12,12 @@ const TERMINALS = new Map([
   ["Span", "{ start: WireU64; end: WireU64 }"],
 ]);
 
-function renderReachable(registry, roots, { externalTypes = [] } = {}) {
+function renderReachable(registry, roots, { externalTypes = [], scalarTypes = new Map() } = {}) {
   const external = new Set(externalTypes);
   const reachable = new Set();
   const visiting = new Set();
   const visit = (name) => {
-    if (reachable.has(name) || TERMINALS.has(name) || external.has(name)) return;
+    if (reachable.has(name) || TERMINALS.has(name) || scalarTypes.has(name) || external.has(name)) return;
     const declaration = registry.get(name);
     if (!declaration) throw new Error(`Unresolved serialized Rust type ${name}`);
     if (declaration.conflicts?.length) {
@@ -30,7 +30,7 @@ function renderReachable(registry, roots, { externalTypes = [] } = {}) {
     reachable.add(name);
   };
   roots.forEach(visit);
-  return [...reachable].sort().map((name) => renderDeclaration(registry.get(name), registry)).join("\n\n");
+  return [...reachable].sort().map((name) => renderDeclaration(registry.get(name), registry, scalarTypes)).join("\n\n");
 }
 
 function dependencies(declaration, registry) {
@@ -38,29 +38,29 @@ function dependencies(declaration, registry) {
   return [...new Set(identifiers)].filter((name) => registry.has(name) && !declaration.generics.includes(name));
 }
 
-function renderDeclaration(declaration, registry) {
+function renderDeclaration(declaration, registry, scalarTypes) {
   declaration = { ...declaration, body: declaration.body.replace(/\bSelf\b/g, declaration.name) };
   const generics = declaration.generics.length ? `<${declaration.generics.join(", ")}>` : "";
   if (declaration.kind === "type") {
-    return `export type ${declaration.name}${generics} = ${renderType(declaration.body, registry, declaration.generics)};`;
+    return `export type ${declaration.name}${generics} = ${renderType(declaration.body, registry, declaration.generics, scalarTypes)};`;
   }
   if (declaration.kind === "struct") {
     if (hasSerde(declaration.attrs, "transparent") && declaration.shape === "tuple") {
-      return `export type ${declaration.name}${generics} = ${renderTupleFields(declaration.body, registry, declaration.generics)[0]};`;
+      return `export type ${declaration.name}${generics} = ${renderTupleFields(declaration.body, registry, declaration.generics, scalarTypes)[0]};`;
     }
     if (declaration.shape === "named") {
-      return `export interface ${declaration.name}${generics} ${renderFields(declaration.body, declaration.attrs, registry, declaration.generics)}`;
+      return `export interface ${declaration.name}${generics} ${renderFields(declaration.body, declaration.attrs, registry, declaration.generics, scalarTypes)}`;
     }
     if (declaration.shape === "tuple") {
-      const members = renderTupleFields(declaration.body, registry, declaration.generics);
+      const members = renderTupleFields(declaration.body, registry, declaration.generics, scalarTypes);
       return `export type ${declaration.name}${generics} = ${members.length === 1 ? members[0] : `[${members.join(", ")}]`};`;
     }
     return `export type ${declaration.name}${generics} = Record<never, never>;`;
   }
-  return `export type ${declaration.name}${generics} = ${renderEnum(declaration, registry)};`;
+  return `export type ${declaration.name}${generics} = ${renderEnum(declaration, registry, scalarTypes)};`;
 }
 
-function renderFields(body, containerAttrs, registry, generics) {
+function renderFields(body, containerAttrs, registry, generics, scalarTypes) {
   const renameAll = serde(containerAttrs, "rename_all");
   const fields = splitTopLevel(body).flatMap((raw) => {
     const match = raw.match(/^((?:#\[[\s\S]*?\]\s*)*)(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*):\s*([\s\S]+)$/);
@@ -69,7 +69,7 @@ function renderFields(body, containerAttrs, registry, generics) {
     const omission = serde(match[1], "skip_serializing_if");
     const optional = omission !== null;
     const omitsNone = option && omission === "Option::is_none";
-    const type = renderSerializedFieldType(match[3].trim(), match[1], registry, generics, omitsNone);
+    const type = renderSerializedFieldType(match[3].trim(), match[1], registry, generics, scalarTypes, omitsNone);
     const explicit = serde(match[1], "rename");
     const name = explicit ?? rename(match[2], renameAll);
     return [`  ${safeProperty(name)}${optional ? "?" : ""}: ${type};`];
@@ -79,7 +79,7 @@ function renderFields(body, containerAttrs, registry, generics) {
 
 // Named fields, tuple variants, and transparent tuple structs share the same
 // Serde field adapters. Attributes describe the wire; they are not Rust types.
-function renderSerializedFieldType(raw, attrs, registry, generics, omitsNone = false) {
+function renderSerializedFieldType(raw, attrs, registry, generics, scalarTypes, omitsNone = false) {
   const option = unwrap(raw, "Option");
   const adapter = serde(attrs, "with");
   const binary = adapter === "serde_bytes";
@@ -94,21 +94,21 @@ function renderSerializedFieldType(raw, attrs, registry, generics, omitsNone = f
     return renderAdaptedField(raw, adapter) + (adapter.endsWith("::option") ? " | null" : "");
   }
   if (binary && raw !== "Vec<u8>") throw new Error("serde_bytes requires a byte vector");
-  const type = canonicalStorage ? renderType(storageType, registry, generics) : canonicalScalar ? "number" : binary ? "Uint8Array | number[]" : renderType(option ?? raw, registry, generics);
+  const type = canonicalStorage ? renderType(storageType, registry, generics, scalarTypes) : canonicalScalar ? "number" : binary ? "Uint8Array | number[]" : renderType(option ?? raw, registry, generics, scalarTypes);
   return type + (option && !omitsNone ? " | null" : "");
 }
 
-function renderTupleFields(body, registry, generics) {
+function renderTupleFields(body, registry, generics, scalarTypes) {
   return splitTopLevel(body).flatMap((raw) => {
     const match = raw.match(/^((?:#\[[\s\S]*?\]\s*)*)([\s\S]+)$/);
     if (!match) throw new Error(`Unsupported serialized tuple field ${raw}`);
     if (hasSerde(match[1], "skip") || hasSerde(match[1], "skip_serializing")) return [];
     if (serde(match[1], "skip_serializing_if") !== null) throw new Error(`Conditional tuple field omission requires an explicit wire contract: ${raw}`);
-    return [renderSerializedFieldType(stripVisibility(match[2]), match[1], registry, generics)];
+    return [renderSerializedFieldType(stripVisibility(match[2]), match[1], registry, generics, scalarTypes)];
   });
 }
 
-function renderEnum(declaration, registry) {
+function renderEnum(declaration, registry, scalarTypes) {
   const renameAll = serde(declaration.attrs, "rename_all");
   const tag = serde(declaration.attrs, "tag");
   const content = serde(declaration.attrs, "content");
@@ -117,7 +117,7 @@ function renderEnum(declaration, registry) {
     const parsed = parseVariant(raw);
     if (!parsed || hasSerde(parsed.attrs, "skip") || hasSerde(parsed.attrs, "skip_serializing")) return [];
     const name = serde(parsed.attrs, "rename") ?? rename(parsed.name, renameAll);
-    const payload = variantPayload(parsed, declaration, registry);
+    const payload = variantPayload(parsed, declaration, registry, scalarTypes);
     if (untagged) return [payload ?? "null"];
     if (tag) {
       const tagged = `${safeProperty(tag)}: ${JSON.stringify(name)}`;
@@ -142,41 +142,42 @@ function parseVariant(raw) {
   throw new Error(`Unsupported enum variant ${raw}`);
 }
 
-function variantPayload(variant, declaration, registry) {
+function variantPayload(variant, declaration, registry, scalarTypes) {
   if (variant.shape === "unit") return null;
-  if (variant.shape === "named") return renderFields(variant.body, declaration.attrs, registry, declaration.generics);
-  const values = renderTupleFields(variant.body, registry, declaration.generics);
+  if (variant.shape === "named") return renderFields(variant.body, declaration.attrs, registry, declaration.generics, scalarTypes);
+  const values = renderTupleFields(variant.body, registry, declaration.generics, scalarTypes);
   return values.length === 1 ? values[0] : `[${values.join(", ")}]`;
 }
 
-function renderType(raw, registry, generics) {
+function renderType(raw, registry, generics, scalarTypes) {
   let source = stripVisibility(raw.trim()).replace(/^&(?:'\w+\s+)?/, "").trim();
   const array = source.match(/^\[([\s\S]+);\s*(\d+)\]$/);
   if (array) {
     const length = Number(array[2]);
     if (!Number.isSafeInteger(length) || length > 1024) throw new Error(`Unsupported fixed array length ${array[2]}`);
-    return `[${Array.from({ length }, () => renderType(array[1], registry, generics)).join(", ")}]`;
+    return `[${Array.from({ length }, () => renderType(array[1], registry, generics, scalarTypes)).join(", ")}]`;
   }
   const tuple = source.startsWith("(") && source.endsWith(")") ? splitTopLevel(source.slice(1, -1)) : null;
-  if (tuple) return `[${tuple.map((value) => renderType(value, registry, generics)).join(", ")}]`;
+  if (tuple) return `[${tuple.map((value) => renderType(value, registry, generics, scalarTypes)).join(", ")}]`;
   for (const wrapper of ["Vec", "BTreeSet", "HashSet", "Box", "Arc", "std::sync::Arc", "Rc"]) {
     const inner = unwrap(source, wrapper);
-    if (inner) return ["Vec", "BTreeSet", "HashSet"].includes(wrapper) ? `${renderType(inner, registry, generics)}[]` : renderType(inner, registry, generics);
+    if (inner) return ["Vec", "BTreeSet", "HashSet"].includes(wrapper) ? `${renderType(inner, registry, generics, scalarTypes)}[]` : renderType(inner, registry, generics, scalarTypes);
   }
   const option = unwrap(source, "Option");
-  if (option) return `${renderType(option, registry, generics)} | null`;
+  if (option) return `${renderType(option, registry, generics, scalarTypes)} | null`;
   for (const map of ["BTreeMap", "HashMap"]) {
     const inner = unwrap(source, map);
     if (inner) {
       const [key, value] = splitTopLevel(inner);
-      return `Record<${renderType(key, registry, generics)}, ${renderType(value, registry, generics)}>`;
+      return `Record<${renderType(key, registry, generics, scalarTypes)}, ${renderType(value, registry, generics, scalarTypes)}>`;
     }
   }
   const coordinate = source.match(/^(?:[A-Za-z_][A-Za-z0-9_]*::)*CoordinateUnits<[^>]+>$/);
   if (coordinate) return "LengthUnit"; // role is enforced by Rust, erased in serde
   const generic = source.match(/^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Za-z_][A-Za-z0-9_]*)<([\s\S]+)>$/);
-  if (generic) return `${generic[1]}<${splitTopLevel(generic[2]).map((value) => renderType(value, registry, generics)).join(", ")}>`;
+  if (generic) return `${generic[1]}<${splitTopLevel(generic[2]).map((value) => renderType(value, registry, generics, scalarTypes)).join(", ")}>`;
   const name = source.split("::").at(-1);
+  if (scalarTypes.has(name)) return scalarTypes.get(name);
   if (WIDE.has(name)) throw wideIntegerError(source);
   if (TERMINALS.has(name)) return TERMINALS.get(name);
   if (generics.includes(name)) return name;

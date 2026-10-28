@@ -9287,6 +9287,7 @@ name = "runmat-workspace-contracts"
 version = "0.6.2"
 dependencies = [
  "ciborium",
+ "runmat-types",
  "schemars",
  "serde",
  "serde_bytes",
