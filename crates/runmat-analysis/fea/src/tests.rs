@@ -5228,3 +5228,82 @@ fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
     }
     assert!(tied.frequencies_hz()[0] > free.frequencies_hz()[0] * (1.0 + 1.0e-6));
 }
+
+fn assert_one_fallback_warning(run: &crate::contracts::FeaRunResult, family: &str) {
+    let warnings = run
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code
+                == crate::contracts::accelerator_admission::ACCELERATOR_ADMISSION_FALLBACK_CODE
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(warnings.len(), 1, "{:?}", run.diagnostics);
+    assert!(warnings[0].message.contains(family), "{}", warnings[0].message);
+    assert_eq!(run.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(run.execution_backend, crate::ExecutionBackend::Cpu);
+}
+
+fn required<R>(body: impl FnOnce() -> R) -> R {
+    crate::contracts::accelerator_admission::with_accelerator_admission_policy(
+        crate::contracts::accelerator_admission::AcceleratorAdmissionPolicy::Required,
+        body,
+    )
+}
+
+#[test]
+fn modal_gpu_request_falls_back_to_cpu_reference_with_parity_unless_required() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps = vec![ProcedureStep::structural_modal("modal_1".to_string())];
+    let cpu =
+        crate::run_modal_with_options(&model, ComputeBackend::Cpu, baseline_modal_options())
+            .unwrap();
+    let gpu =
+        crate::run_modal_with_options(&model, ComputeBackend::Gpu, baseline_modal_options())
+            .unwrap();
+    assert_one_fallback_warning(&gpu.run, "structural modal");
+    assert_eq!(gpu.frequencies_hz(), cpu.frequencies_hz());
+    assert_eq!(gpu.mode_shapes, cpu.mode_shapes);
+    assert!(matches!(
+        required(|| crate::run_modal_with_options(
+            &model,
+            ComputeBackend::Gpu,
+            baseline_modal_options()
+        )),
+        Err(crate::contracts::FeaRunError::AcceleratorRequired(_))
+    ));
+}
+
+#[test]
+fn transient_gpu_request_without_a_device_falls_back_with_parity_unless_required() {
+    if crate::contracts::accelerator_admission::device_unavailable_reason().is_none() {
+        return;
+    }
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
+    let cpu = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        baseline_transient_options(),
+    )
+    .unwrap();
+    let gpu = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        baseline_transient_options(),
+    )
+    .unwrap();
+    assert_one_fallback_warning(&gpu.run, "structural transient");
+    assert_eq!(gpu.time_points_s, cpu.time_points_s);
+    assert_eq!(gpu.displacement_snapshots, cpu.displacement_snapshots);
+    assert!(matches!(
+        required(|| crate::run_transient_with_options(
+            &model,
+            ComputeBackend::Gpu,
+            baseline_transient_options()
+        )),
+        Err(crate::contracts::FeaRunError::AcceleratorRequired(_))
+    ));
+}
