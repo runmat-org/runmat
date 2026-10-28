@@ -675,7 +675,7 @@ fn object_payload_omitting<T: DeserializeOwned>(
         }
     }
     let json = serde_json::Value::Object(fields);
-    serde_json::from_value(json).map_err(|err| {
+    decode_object_json(json).map_err(|err| {
         builtin_error_with_source(
             builtin,
             &ERROR_INPUT,
@@ -685,6 +685,74 @@ fn object_payload_omitting<T: DeserializeOwned>(
             ),
             err,
         )
+    })
+}
+
+/// Object layer: absent property = null; wire decode remains strict.
+///
+/// Runtime values have no null, so `serializable_to_object_value` omits null
+/// properties. This is the one boundary where object properties become the typed
+/// value again, and it restores that rule exactly: a field that serde itself reports
+/// as required and missing is filled with null at the reported path, at most once,
+/// and decoding is retried. Defaulted fields (including skip-if-empty vectors) are
+/// never reported missing, so they are untouched; a required non-nullable field
+/// filled with null fails, and the original missing-field error is returned.
+/// Wire/JSON decoding (`serde_json::from_value` elsewhere) keeps rejecting omission.
+fn decode_object_json<T: DeserializeOwned>(
+    mut json: serde_json::Value,
+) -> Result<T, serde_json::Error> {
+    let mut filled: Vec<(String, String)> = Vec::new();
+    let mut last_fill: Option<(String, serde_json::Error)> = None;
+    loop {
+        let err = match serde_path_to_error::deserialize::<_, T>(&json) {
+            Ok(value) => return Ok(value),
+            Err(err) => err,
+        };
+        let path = err.path().iter().cloned().collect::<Vec<_>>();
+        let path_text = err.path().to_string();
+        let message = err.inner().to_string();
+        let missing = message
+            .strip_prefix("missing field `")
+            .and_then(|rest| rest.strip_suffix('`'))
+            .map(str::to_owned);
+        if let Some((fill_path, original)) = last_fill.take() {
+            // The previous fill did not resolve its field: report the field as missing.
+            if missing.is_none() && path_text == fill_path {
+                return Err(original);
+            }
+        }
+        let Some(field) = missing else {
+            return Err(err.into_inner());
+        };
+        let key = (path_text.clone(), field.clone());
+        if filled.contains(&key) {
+            return Err(err.into_inner());
+        }
+        let Some(serde_json::Value::Object(target)) = json_at_path(&mut json, &path) else {
+            return Err(err.into_inner());
+        };
+        if target.contains_key(&field) {
+            return Err(err.into_inner());
+        }
+        target.insert(field.clone(), serde_json::Value::Null);
+        let fill_path = if path.is_empty() {
+            field.clone()
+        } else {
+            format!("{path_text}.{field}")
+        };
+        filled.push(key);
+        last_fill = Some((fill_path, err.into_inner()));
+    }
+}
+
+fn json_at_path<'a>(
+    json: &'a mut serde_json::Value,
+    path: &[serde_path_to_error::Segment],
+) -> Option<&'a mut serde_json::Value> {
+    path.iter().try_fold(json, |node, segment| match segment {
+        serde_path_to_error::Segment::Map { key } => node.as_object_mut()?.get_mut(key),
+        serde_path_to_error::Segment::Seq { index } => node.as_array_mut()?.get_mut(*index),
+        _ => None,
     })
 }
 
@@ -1060,8 +1128,11 @@ fn field_object(
 
 fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
     match &field.values {
-        AnalysisFieldValues::HostF64(values) => Tensor::new(values.clone(), field.shape.clone())
-            .map(Value::Tensor)
+        AnalysisFieldValues::HostF64(values) => Tensor::new(
+            row_major_to_column_major(values, &field.shape),
+            field.shape.clone(),
+        )
+        .map(Value::Tensor)
             .map_err(|err| {
                 builtin_error(
                     FIELD_NAME,
@@ -1077,6 +1148,35 @@ fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
             &["element_count"],
         ),
     }
+}
+
+/// Analysis fields store their values row-major: the last shape axis varies fastest, so one
+/// node's or element's components are contiguous. Runtime tensors are column-major, so the
+/// values are reordered so that `values(i, :)` is entity `i` and `values(:, k)` is component `k`.
+/// A length that disagrees with the shape is passed through for `Tensor::new` to reject.
+fn row_major_to_column_major(values: &[f64], shape: &[usize]) -> Vec<f64> {
+    if shape.len() < 2 || values.len() != shape.iter().product::<usize>() {
+        return values.to_vec();
+    }
+    let mut reordered = vec![0.0; values.len()];
+    let mut index = vec![0_usize; shape.len()];
+    for &value in values {
+        let mut position = 0;
+        let mut stride = 1;
+        for (axis, &extent) in shape.iter().enumerate() {
+            position += index[axis] * stride;
+            stride *= extent;
+        }
+        reordered[position] = value;
+        for axis in (0..shape.len()).rev() {
+            index[axis] += 1;
+            if index[axis] < shape[axis] {
+                break;
+            }
+            index[axis] = 0;
+        }
+    }
+    reordered
 }
 
 fn usize_slice_tensor(values: &[usize], rows: usize, cols: usize) -> BuiltinResult<Value> {
@@ -1547,7 +1647,24 @@ fn exact_bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
     }
 }
 
+/// A non-negative integer argument to an FEA builtin. Every such value lands on an
+/// FEA wire contract, so it is held to the shared wire bound (2^53 - 1) here, at the
+/// one place builtins read counts, rejecting exactly what contract decoding rejects.
 fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
+    let count = platform_usize_from_value(builtin, value)?;
+    runmat_types::wire_integer::bounded(count).ok_or_else(|| {
+        builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!(
+                "integer {count} exceeds the FEA wire-contract bound of {} (2^53 - 1)",
+                runmat_types::wire_integer::MAX_WIRE_INTEGER
+            ),
+        )
+    })
+}
+
+fn platform_usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
     if let Some(int) = tensor_utils::scalar_integer_value(value) {
         return int.try_to_usize().ok_or_else(|| {
             builtin_error(
@@ -2606,7 +2723,31 @@ mod tests {
 
     fn object_payload<T: DeserializeOwned>(value: &Value) -> T {
         let json = value_to_json("fea.test", value).expect("typed FEA value should encode");
-        serde_json::from_value(json).expect("typed FEA value should decode")
+        decode_object_json(json).expect("typed FEA value should decode")
+    }
+
+    #[test]
+    fn object_layer_null_fill_leaves_defaulted_fields_alone() {
+        #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Probe {
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            items: Vec<u64>,
+            #[serde(with = "runmat_types::wire_integer::option")]
+            limit: Option<u64>,
+        }
+        let make = |items: Vec<u64>, limit: Option<u64>| Probe { items, limit };
+        for probe in [
+            make(Vec::new(), None),
+            make(vec![3], Some(7)),
+            make(Vec::new(), Some(1)),
+            make(vec![2], None),
+        ] {
+            let properties = omit_null_object_fields(serde_json::to_value(&probe).unwrap());
+            assert_eq!(decode_object_json::<Probe>(properties).unwrap(), probe);
+        }
+        assert!(serde_json::from_value::<Probe>(serde_json::json!({})).is_err());
+        assert!(decode_object_json::<Probe>(serde_json::json!({ "limit": [] })).is_err());
     }
 
     #[test]
@@ -2631,12 +2772,15 @@ mod tests {
             vec![2, 4]
         );
 
-        let maximum = usize_from_value("fea.test", &Value::Int(IntValue::U64(u64::MAX)));
+        let bound = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+        let maximum = usize_from_value("fea.test", &Value::Int(IntValue::U64(bound)));
         if usize::BITS == 64 {
-            assert_eq!(maximum.unwrap(), usize::MAX);
+            assert_eq!(maximum.unwrap(), bound as usize);
         } else {
             assert!(maximum.is_err());
         }
+        assert!(usize_from_value("fea.test", &Value::Int(IntValue::U64(bound + 1))).is_err());
+        assert!(usize_from_value("fea.test", &Value::Int(IntValue::U64(u64::MAX))).is_err());
     }
 
     #[test]
@@ -2751,7 +2895,7 @@ mod tests {
 
     #[test]
     fn fea_result_selectors_are_exact_one_based_vectors_and_flags_are_zero_one() {
-        let wide = 9_007_199_254_740_993_u64;
+        let wide = runmat_types::wire_integer::MAX_WIRE_INTEGER;
         let selectors = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
             .expect("wide selector vector");
         let decoded = one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(selectors));
@@ -2763,6 +2907,14 @@ mod tests {
                 Some("RunMat:fea:InvalidInput")
             );
         }
+        let beyond = Tensor::new_integer(IntegerStorage::U64(vec![wide + 2]), vec![1, 1])
+            .expect("selector beyond the wire bound");
+        assert_eq!(
+            one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(beyond))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:fea:InvalidInput")
+        );
 
         let selectors = Tensor::new_integer(IntegerStorage::U32(vec![3, 1, 3]), vec![3, 1])
             .expect("selector vector");
@@ -3214,6 +3366,47 @@ mod tests {
         assert!(error
             .message()
             .contains("duplicate thermo-mechanical FEA domain"));
+    }
+
+    #[test]
+    fn vector_field_values_have_one_row_per_node_and_one_column_per_component() {
+        // Three nodes with displacement u_i = (i, 10 i, 100 i), stored node-major as the
+        // analysis producers publish them.
+        let field = AnalysisField {
+            field_id: "structural.displacement".into(),
+            shape: vec![3, 3],
+            values: AnalysisFieldValues::HostF64(vec![
+                1.0, 10.0, 100.0, 2.0, 20.0, 200.0, 3.0, 30.0, 300.0,
+            ]),
+        };
+        let descriptor = AnalysisFieldDescriptor::from_field(&field);
+        let object = field_to_object(&field, &descriptor).expect("field object");
+        let Some(Value::Tensor(values)) = object.properties().get("values") else {
+            panic!("expected values tensor");
+        };
+        assert_eq!(values.shape(), vec![3, 3]);
+        let column_major = values.materialize_f64();
+        let column = |k: usize| column_major[3 * k..3 * (k + 1)].to_vec();
+        assert_eq!(column(0), vec![1.0, 2.0, 3.0], "u(:,1) is the x component");
+        assert_eq!(column(1), vec![10.0, 20.0, 30.0], "u(:,2) is the y component");
+        assert_eq!(column(2), vec![100.0, 200.0, 300.0], "u(:,3) is the z component");
+        let row = |i: usize| [0, 1, 2].map(|k| column_major[i + 3 * k]);
+        assert_eq!(row(1), [2.0, 20.0, 200.0], "u(2,:) is node 2's vector");
+
+        // A rank-3 tensor field keeps the same rule on every axis.
+        let tensor = AnalysisField {
+            field_id: "structural.stress_tensor".into(),
+            shape: vec![2, 2, 2],
+            values: AnalysisFieldValues::HostF64((0..8).map(f64::from).collect()),
+        };
+        let Value::Tensor(values) = field_values_value(&tensor).expect("tensor values") else {
+            panic!("expected values tensor");
+        };
+        // Row-major entry (i, j, k) = 4 i + 2 j + k sits at column-major i + 2 j + 4 k.
+        assert_eq!(
+            values.materialize_f64(),
+            vec![0.0, 4.0, 2.0, 6.0, 1.0, 5.0, 3.0, 7.0]
+        );
     }
 
     #[test]
@@ -4414,7 +4607,7 @@ mod tests {
     #[test]
     fn fea_usize_parser_reads_typed_integer_storage_exactly_and_rejects_float_boundary() {
         let wide = if usize::BITS == 64 {
-            9_007_199_254_740_993
+            runmat_types::wire_integer::MAX_WIRE_INTEGER
         } else {
             u32::MAX as u64
         };
@@ -4425,6 +4618,14 @@ mod tests {
             usize_from_value(STUDY_NAME, &Value::Tensor(typed)).expect("typed integer"),
             wide as usize
         );
+        let beyond = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![
+                runmat_types::wire_integer::MAX_WIRE_INTEGER + 2,
+            ]),
+            vec![1, 1],
+        )
+        .expect("typed integer beyond the wire bound");
+        assert!(usize_from_value(STUDY_NAME, &Value::Tensor(beyond)).is_err());
 
         let boundary = if usize::BITS == 64 {
             usize::MAX as f64
@@ -4570,6 +4771,7 @@ mod tests {
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
                 effective_memory_ceiling_bytes: None,
+                static_solve_path: None,
             },
         };
         crate::analysis::storage::persist_run_result(&run).expect("run should persist");
@@ -4711,6 +4913,7 @@ mod tests {
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
                 effective_memory_ceiling_bytes: None,
+                static_solve_path: None,
             },
         };
         crate::analysis::storage::persist_run_result(&run).expect("indexed run should persist");

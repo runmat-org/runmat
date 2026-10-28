@@ -990,10 +990,10 @@ fn analysis_model_decode_rejects_noncanonical_units_and_validate_maps_frame_mism
     let mut wire = serde_json::to_value(&canonical).expect("encode canonical model");
     assert_eq!(
         wire["units"],
-        serde_json::to_value(LengthUnit::Meter).unwrap()
+        serde_json::to_value(runmat_types::physical::LengthUnit::Meter).unwrap()
     );
     serde_json::from_value::<AnalysisModel>(wire.clone()).expect("decode canonical model");
-    wire["units"] = serde_json::to_value(LengthUnit::Inch).unwrap();
+    wire["units"] = serde_json::to_value(runmat_types::physical::LengthUnit::Inch).unwrap();
     let unit_err = serde_json::from_value::<AnalysisModel>(wire)
         .expect_err("canonical model admission must reject inch coordinates");
     assert!(unit_err

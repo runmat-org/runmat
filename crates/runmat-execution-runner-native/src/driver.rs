@@ -1185,6 +1185,7 @@ mod task_completion_tests {
                 max_stderr_bytes: 1024,
                 local_cpu_capacity_millicores: None,
                 local_memory_capacity_bytes: None,
+                authored_worker_memory_bytes: None,
                 worker_memory_bytes: 1024 * 1024 * 1024,
                 worker_scratch_bytes: 1024 * 1024 * 1024,
                 worker_cpu_millicores: 1000,

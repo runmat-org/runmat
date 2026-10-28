@@ -1,6 +1,5 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshArtifact};
 use runmat_types::MethodName;
 use runmat_value::{IntegerStorage, ObjectInstance, Tensor, UnboundedObjectBuilder, Value};
@@ -19,7 +18,6 @@ pub const MESH_CLASS: &str = runmat_builtins::MESHING_MESH_OBJECT_CLASS.display_
 pub const EVIDENCE_CLASS: &str = runmat_builtins::MESHING_EVIDENCE_CLASS.display_name();
 const ARTIFACT_PROPERTY: &str = "__runmat_meshing_artifact_cbor";
 const EVIDENCE_PROPERTY: &str = "__runmat_meshing_evidence_cbor";
-const REGION_MAP_PROPERTY: &str = "__runmat_meshing_region_map_json";
 
 static MESHING_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(runmat_builtins::MESHING_MESH_OBJECT_CLASS);
@@ -28,7 +26,6 @@ static MESHING_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
 pub(super) struct MeshPayload {
     pub artifact: SolverMeshArtifact,
     pub evidence: MeshingEvidence,
-    pub region_aliases: BTreeMap<String, PersistentEntityId>,
 }
 
 pub(super) fn mesh_object(payload: MeshPayload) -> BuiltinResult<Value> {
@@ -75,14 +72,6 @@ pub(super) fn mesh_object(payload: MeshPayload) -> BuiltinResult<Value> {
     object.insert(
         EVIDENCE_PROPERTY.to_string(),
         byte_tensor(evidence_bytes, GENERATE_NAME)?,
-    );
-    object.insert(
-        REGION_MAP_PROPERTY.to_string(),
-        Value::String(
-            serde_json::to_string(&payload.region_aliases)
-                .map_err(|cause| error(GENERATE_NAME, cause.to_string()))?
-                .into(),
-        ),
     );
     Ok(Value::Object(object.finish()))
 }
@@ -240,17 +229,7 @@ pub(super) fn payload_from_value(
     evidence
         .validate(&artifact)
         .map_err(|cause| error(builtin, cause.to_string()))?;
-    let region_aliases = match object.properties().get(REGION_MAP_PROPERTY) {
-        Some(Value::String(json)) => {
-            serde_json::from_str(json).map_err(|cause| error(builtin, cause.to_string()))?
-        }
-        _ => return Err(error(builtin, "meshing.Mesh is missing its region mapping")),
-    };
-    Ok(MeshPayload {
-        artifact,
-        evidence,
-        region_aliases,
-    })
+    Ok(MeshPayload { artifact, evidence })
 }
 
 fn byte_tensor(bytes: Vec<u8>, builtin: &'static str) -> BuiltinResult<Value> {
@@ -285,7 +264,6 @@ impl From<crate::meshing::MeshingExecutionOutput> for MeshPayload {
         Self {
             artifact: output.artifact,
             evidence: output.evidence,
-            region_aliases: output.region_aliases,
         }
     }
 }
@@ -298,7 +276,6 @@ pub(crate) fn execution_output_from_value(
     Ok(crate::meshing::MeshingExecutionOutput {
         artifact: payload.artifact,
         evidence: payload.evidence,
-        region_aliases: payload.region_aliases,
     })
 }
 
@@ -335,11 +312,7 @@ mod tests {
     fn payload() -> MeshPayload {
         let artifact = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
         let evidence = fixtures::canonical_tetrahedron_meshing_evidence(&artifact);
-        MeshPayload {
-            artifact,
-            evidence,
-            region_aliases: BTreeMap::new(),
-        }
+        MeshPayload { artifact, evidence }
     }
 
     #[test]

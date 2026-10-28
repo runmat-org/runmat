@@ -121,7 +121,7 @@ fn source_decode_authenticates_chunks_before_join_and_rejects_tiny_ceiling() {
     w.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(prepare_fluid_steady_inputs(
         &w,
         &m,
@@ -354,8 +354,8 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
             pressure_relaxation: 0.25,
             linear_relative_tolerance: 1e-10,
             physical_relative_tolerance: 1e-8,
-            maximum_resident_bytes: 1_000_000_000,
-            maximum_operator_work: 1_000_000_000_000,
+            maximum_resident_bytes: Some(1_000_000_000),
+            maximum_operator_work: Some(1_000_000_000_000),
             maximum_authority_items: 100,
         },
         geometry_policy: FiniteVolumeProjectionPolicy {

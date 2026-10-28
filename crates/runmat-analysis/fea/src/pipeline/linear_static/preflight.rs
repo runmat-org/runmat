@@ -504,7 +504,7 @@ mod tests {
         model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = 1;
+            .maximum_resident_bytes = Some(1);
         let error = prepare_static_preassembly(
             &model,
             &model.sequence.steps[0],
@@ -531,7 +531,7 @@ mod tests {
         model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = 1;
+            .maximum_resident_bytes = Some(1);
         let constraints = CanonicalStructuralConstraintPlan::compile_for_model(&model, None)
             .expect("physical beam constraint plan");
         let error = prepare_static_preassembly(

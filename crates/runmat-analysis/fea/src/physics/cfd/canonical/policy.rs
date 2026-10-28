@@ -10,8 +10,8 @@ impl CanonicalFluidPolicy {
             || self.maximum_nonorthogonal_iterations == 0
             || self.maximum_linear_iterations == 0
             || self.gmres_restart == 0
-            || self.maximum_resident_bytes == 0
-            || self.maximum_operator_work == 0
+            || self.maximum_resident_bytes == Some(0)
+            || self.maximum_operator_work == Some(0)
             || self.maximum_authority_items == 0
             || !self.linear_relative_tolerance.is_finite()
             || !(0.0..1.0).contains(&self.linear_relative_tolerance)

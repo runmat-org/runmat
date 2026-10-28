@@ -75,7 +75,7 @@ pub(super) fn ceiling_selects_the_static_path() {
         StaticSolveSelection,
     };
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = 1 << 40;
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(1 << 40);
     let mesh = structured_cantilever(8, ElementOrder::Tet10);
     let constraints =
         crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
@@ -157,7 +157,7 @@ pub(super) fn ceiling_selects_the_static_path() {
         Some(StaticSolvePath::ElasticRigidityMultigrid)
     );
     let mut authored = model.clone();
-    authored.sequence.steps[0].accuracy.resources.maximum_resident_bytes = between;
+    authored.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(between);
     assert_eq!(
         path(plan(&authored, unbounded)),
         Some(StaticSolvePath::ElasticRigidityMultigrid)
@@ -172,7 +172,7 @@ pub(super) fn ceiling_selects_the_static_path() {
     );
     // An explicit direct request never takes the elastic path, whatever the ceiling.
     let mut direct_request = authored.clone();
-    direct_request.sequence.steps[0].accuracy.resources.maximum_resident_bytes = 1 << 40;
+    direct_request.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(1 << 40);
     assert_eq!(
         path(build_static_resource_plan_selecting(
             StaticResourcePreflight {

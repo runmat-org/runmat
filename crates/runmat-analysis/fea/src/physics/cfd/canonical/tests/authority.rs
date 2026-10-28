@@ -168,7 +168,7 @@ fn actual_authority_profile_is_reserved_and_rejects_before_binding() {
     assert!(exact.operator_work_upper_bound > base.operator_work_upper_bound);
     assert!(exact.resident_bytes_upper_bound > base.resident_bytes_upper_bound);
     let mut cap = fixture.policy;
-    cap.maximum_operator_work = base.operator_work_upper_bound;
+    cap.maximum_operator_work = Some(base.operator_work_upper_bound);
     assert!(matches!(
         admit(cap),
         Err(CanonicalFluidError::Resource(
@@ -176,8 +176,8 @@ fn actual_authority_profile_is_reserved_and_rejects_before_binding() {
         ))
     ));
     cap = fixture.policy;
-    cap.maximum_operator_work = exact.operator_work_upper_bound;
-    cap.maximum_resident_bytes = exact.resident_bytes_upper_bound;
+    cap.maximum_operator_work = Some(exact.operator_work_upper_bound);
+    cap.maximum_resident_bytes = Some(exact.resident_bytes_upper_bound);
     assert_eq!(admit(cap).unwrap(), exact);
     cap.maximum_authority_items = 1;
     assert!(matches!(admit(cap), Err(CanonicalFluidError::Resource(_))));

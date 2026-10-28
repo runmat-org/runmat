@@ -160,12 +160,9 @@ fn external_input(scope: &str) -> ProgramExecutionObject {
 /// The host a chunk's compiled program requires, as production derives it.
 fn chunk_host(chunk: &PreparedGeneratorChunk) -> runmat_execution::host::ExecutionHostRequirement {
     chunk
-        .request
-        .artifact
-        .execution_host_requirement(
-            &chunk.request.recipe,
-            BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
-        )
+        .execution_host_requirement(BTreeSet::from([
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+        ]))
         .unwrap()
 }
 

@@ -218,6 +218,7 @@ fn admit_structural_frequency_result_with_state(
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events: Vec::<FallbackEvent>::new(),
             effective_memory_ceiling_bytes: None,
+            static_solve_path: None,
         },
         numerical_result: AnalysisStudyStepNumericalResultData::StructuralFrequency(Box::new(
             StructuralFrequencyResultsData {

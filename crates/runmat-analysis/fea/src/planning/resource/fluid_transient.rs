@@ -125,7 +125,7 @@ pub(crate) fn plan_from_projection(
         return Err(invalid("fluid transient source/output budget differs"));
     }
     let mut ceiling = request.workload.model.sequence.steps[0].accuracy.resources;
-    ceiling.maximum_resident_bytes = request.workload.resident_ceiling().map_err(invalid)?;
+    ceiling.set_resident_byte_budget(request.workload.resident_ceiling().map_err(invalid)?);
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::FluidTransientBlock(projection.workload),

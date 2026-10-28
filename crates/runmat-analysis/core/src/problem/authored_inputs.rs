@@ -23,7 +23,7 @@ pub enum AuthoredInputType {
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum AuthoredInputValue {
     Boolean(bool),
-    Integer(i64),
+    Integer(#[serde(with = "runmat_types::wire_integer")] i64),
     Real(f64),
     Complex { real: f64, imaginary: f64 },
     String(String),

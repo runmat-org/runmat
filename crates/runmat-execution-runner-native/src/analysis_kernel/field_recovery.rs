@@ -177,7 +177,7 @@ fn execute_structural_frequency_field_recovery(
                     .procedure_step()?
                     .accuracy
                     .resources
-                    .maximum_resident_bytes,
+                    .resident_byte_budget(),
             ),
             &all_input_facts,
             resource_plan.input.worker.fixed_memory_bytes,

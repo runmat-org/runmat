@@ -1,5 +1,5 @@
 //! Family-aware presentation of already admitted native local completions.
-use super::{local_summary, print_summary, LocalRunSummary};
+use super::{local_summary, print_summary, LocalRunSummary, SolvePlacementSummary};
 use anyhow::Result;
 use runmat_execution_runner_native::CompletedFeaStudyResult;
 use runmat_runtime::analysis::AnalysisStudyRunData;
@@ -13,6 +13,7 @@ pub(in super::super) fn completed_summary(
         CompletedFeaStudyResult::Structural(result) => local_summary(root_id, result, publication),
         CompletedFeaStudyResult::Electrical(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
             thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: match result
@@ -55,6 +56,7 @@ pub(in super::super) fn completed_summary(
         CompletedFeaStudyResult::AcousticResponse(result) => Ok(LocalRunSummary {
             thermal_energy_balance: None,
             assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
             root_id: root_id.into(),
             procedure: match result.completion.workload.solver {
                 runmat_analysis_fea::execution::AcousticResponseSolver::Modal { .. } => {
@@ -90,6 +92,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Magnetic(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
             thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "magnetostatics",
@@ -119,6 +122,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Maxwell(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
             thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "harmonic_maxwell",
@@ -148,6 +152,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Nonlinear(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
             thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "quasistatic_j2_solid",
@@ -177,6 +182,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Fluid(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
             thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "steady_incompressible_fluid",
@@ -206,6 +212,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Acoustic(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
             thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "acoustic_harmonic",
@@ -235,6 +242,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Thermal(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            solve_placement: SolvePlacementSummary::default(),
             thermal_energy_balance: result
                 .completion
                 .manifest

@@ -27,7 +27,7 @@ pub(super) fn admit(
             completed.workload.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes,
+                .resident_byte_budget(),
         );
     let limits = CanonicalLimits::new(
         usize::try_from(ceiling).map_err(|_| storage::AnalysisPublicationError::ResourceLimit {
@@ -91,6 +91,7 @@ pub(super) fn admit(
         quality_policy: contracts::format_quality_policy(QualityPolicy::Strict),
         fallback_events: Vec::new(),
         effective_memory_ceiling_bytes: None,
+        static_solve_path: None,
     };
     let output = OperationEnvelope::new(
         AnalysisOperation::Nonlinear.name(),

@@ -233,7 +233,7 @@ pub(super) fn problem<'a>(
                 maximum_outer_iterations: 3000,
                 // Tight outer and linear targets on the coupled reference raise the
                 // conservative work bound past the interactive default.
-                maximum_operator_work: u64::MAX / 4,
+                maximum_operator_work: None,
                 // The deformed-passage pressure system stagnates near 1e-9; the coupled
                 // reference needs only the physical target below the coupling tolerance.
                 linear_relative_tolerance: 1e-8,

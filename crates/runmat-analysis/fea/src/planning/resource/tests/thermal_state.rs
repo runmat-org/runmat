@@ -74,7 +74,7 @@ fn solved_thermal_inventory_changes_preflight_identity_memory_and_publication() 
         thermal.request.memory_bytes >= baseline.request.memory_bytes + source_and_recovery_bytes
     );
     assert_ne!(thermal.identity, baseline.identity);
-    step.accuracy.resources.maximum_resident_bytes = baseline.request.memory_bytes;
+    step.accuracy.resources.maximum_resident_bytes = Some(baseline.request.memory_bytes);
     assert!(matches!(
         build(&step),
         Err(ResourcePlanningError::AccuracyCeiling { .. })

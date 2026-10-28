@@ -140,7 +140,7 @@ pub fn analysis_prepare_structural_study_intent_op(
                             step.procedure_step
                                 .accuracy
                                 .resources
-                                .maximum_resident_bytes,
+                                .resident_byte_budget(),
                         )
                         .map_err(|error| {
                             portable_study_contract_error(&study, error.to_string())

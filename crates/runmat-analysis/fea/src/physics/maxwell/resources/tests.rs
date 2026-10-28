@@ -37,7 +37,7 @@ fn exact_local_ceiling_and_raw_metadata_are_counted_before_expansion() {
         denied.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = 0;
+            .maximum_resident_bytes = Some(0);
         let step_id = denied.sequence.steps[0].step_id.as_str();
         let error = crate::physics::maxwell::compile_canonical_input(
             &denied,
@@ -93,7 +93,7 @@ fn replicated_property_metadata_and_selected_policy_are_not_ignored() {
     big.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = grown.total_bytes;
+        .maximum_resident_bytes = Some(grown.total_bytes);
     // The authored ceiling is part of the serialized model, so re-measure with it set.
     let exact = require_canonical_ceiling(&big, &mesh, u64::MAX)
         .unwrap()
@@ -101,12 +101,12 @@ fn replicated_property_metadata_and_selected_policy_are_not_ignored() {
     big.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = exact;
+        .maximum_resident_bytes = Some(exact);
     assert!(require_selected_ceiling(&big, &mesh, id.as_str()).is_ok());
     big.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes -= 1;
+        .maximum_resident_bytes = Some(exact - 1);
     assert!(require_selected_ceiling(&big, &mesh, id.as_str()).is_err());
     assert!(require_selected_ceiling(&big, &mesh, "foreign-step").is_err());
     big.sequence.steps.push(big.sequence.steps[0].clone());

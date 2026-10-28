@@ -124,7 +124,7 @@ pub fn analysis_complete_structural_study_intent_op(
 
 fn complete_linear_sequence(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: super::super::meshing::ResolvedStudyMesh,
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     mut authored_workloads: BTreeMap<
@@ -135,6 +135,7 @@ fn complete_linear_sequence(
     completion_identity: AnalysisStudyCompletionIdentity,
     preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
 ) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
+    let effective_memory_ceiling_bytes = result.effective_memory_ceiling_bytes;
     let mut numerical_by_step = BTreeMap::new();
     for step in result.steps {
         if numerical_by_step
@@ -175,7 +176,7 @@ fn complete_linear_sequence(
                     "prepared linear workload is absent for an authored procedure step",
                 )
             })?;
-        workload.model = resolved_model.clone();
+        workload.model = study_model.clone();
         let AnalysisSolverOptions::StructuralLinear(mut options) =
             step.authored_execution.solver_options.clone()
         else {
@@ -219,7 +220,10 @@ fn complete_linear_sequence(
             prepared_linear,
             numerical.result.run,
             Some(&assigned_run_id),
-            None,
+            crate::analysis::StaticSolvePlacement {
+                effective_memory_ceiling_bytes,
+                static_solve_path: numerical.static_solve_path,
+            },
         )?;
         let mut authored_execution = step.authored_execution;
         authored_execution.solver_options =
@@ -260,7 +264,7 @@ fn complete_linear_sequence(
             study_id: intent.study_id,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
             authored_study_digest: intent.authored_study_digest,
-            model: resolved_model,
+            model: study_model,
             steps: authored_steps,
             operation_sequence: intent.operation_sequence,
             solver_mesh_artifact_path: persisted_mesh.artifact_path,
@@ -275,7 +279,7 @@ fn complete_linear_sequence(
 
 fn complete_direct_transient(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: super::super::meshing::ResolvedStudyMesh,
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     mut workload: runmat_analysis_fea::execution::StructuralTransientWorkload,
@@ -312,7 +316,7 @@ fn complete_direct_transient(
             "direct-transient workload has non-transient authored solver options",
         ));
     };
-    workload.model = resolved_model.clone();
+    workload.model = study_model.clone();
     let source_producer = result.result.manifest().scope.step;
     let solver_result_identity = result.result.manifest().identity;
     let recovered = runmat_analysis_fea::pipeline::transient::recover_completed_transient_run(
@@ -335,7 +339,7 @@ fn complete_direct_transient(
     })?;
     let original_fields =
         runmat_analysis_fea::pipeline::transient::original_transient_field_source(
-            &resolved_model,
+            &study_model,
             &solver_mesh,
             source_producer,
             solver_result_identity,
@@ -365,7 +369,7 @@ fn complete_direct_transient(
         Some(&assigned_run_id),
     )?;
     let sequence_identity = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
-        &resolved_model.sequence,
+        &study_model.sequence,
     )
     .map_err(|error| {
         intent_completion_error(
@@ -432,7 +436,7 @@ fn complete_direct_transient(
             study_id: intent.study_id,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
             authored_study_digest: intent.authored_study_digest,
-            model: resolved_model,
+            model: study_model,
             steps: vec![super::PreparedStudyStep {
                 authored_execution,
                 procedure_step: step.procedure_step.clone(),

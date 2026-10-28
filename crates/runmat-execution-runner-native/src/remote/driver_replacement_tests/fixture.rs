@@ -137,7 +137,7 @@ pub(super) fn exact_study_fixture_with_wall_time(
                 artifact_access: access.clone(),
                 source_name: "box.brep",
                 source_bytes: BOX,
-                import_options: ExactCadImportOptions::default(),
+                import_options: ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
                 contact_definitions: Vec::new(),
                 meshing_request: coarse_box_request(),
                 preferred_edges_per_partition: 64,
@@ -182,7 +182,7 @@ pub(super) fn exact_study_fixture_with_wall_time(
                 artifact_access: access.clone(),
                 source_name: "box.brep",
                 source_bytes: BOX,
-                import_options: ExactCadImportOptions::default(),
+                import_options: ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
                 contact_definitions: Vec::new(),
                 meshing_request,
                 preferred_edges_per_partition: 64,
@@ -340,20 +340,21 @@ pub(super) fn exact_study_fixture_with_wall_time(
 }
 
 fn box_direct_transient_workload() -> StructuralTransientWorkload {
+    let selectors = crate::exact_structural_sweep_root::conformance_tests::box_selectors();
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.geometry_id = "box".into();
     model.geometry_revision = 1;
     model.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::solid("solid_000001");
+        runmat_analysis_core::PropertyRegionTarget::solid(selectors.solid_selector());
     model.constraints[0].visit_targets_mut(|target| {
-        *target = runmat_analysis_core::RegionTarget::boundary("face_000001");
+        *target = runmat_analysis_core::RegionTarget::boundary(selectors.fixed_face_selector());
     });
     let runmat_analysis_core::ExcitationTarget::Region(target) =
         &mut model.excitations[0].excitation_mut().target
     else {
         panic!("cantilever fixture must use a regional excitation")
     };
-    *target = runmat_analysis_core::RegionTarget::boundary("face_000002");
+    *target = runmat_analysis_core::RegionTarget::boundary(selectors.loaded_face_selector());
     model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
         "box-direct-transient-sequence",
         vec![runmat_analysis_core::ProcedureStep::structural_transient(
@@ -374,7 +375,7 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
 
 pub(super) fn coarse_box_request() -> MeshingRequest {
     let mut request = crate::resolve_native_meshing_request(
-        &ExactCadImportOptions::default(),
+        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
         runmat_meshing_core::MeshingRequestSettings::default(),
     )
     .unwrap();

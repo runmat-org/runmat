@@ -33,7 +33,7 @@ impl ThermalSolveSchedule {
             model,
             step,
             procedure,
-            step.accuracy.resources.maximum_resident_bytes,
+            step.accuracy.resources.resident_byte_budget(),
         )
     }
 
@@ -53,7 +53,7 @@ impl ThermalSolveSchedule {
         let ceiling = step
             .accuracy
             .resources
-            .maximum_resident_bytes
+            .resident_byte_budget()
             .min(maximum_resident_bytes);
         let history_bytes = history_schedule_construction_resident_bytes(step)
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;

@@ -143,10 +143,10 @@ fn thermal_plan_is_source_bound_host_only_and_accounts_for_outputs() {
             wrong.inputs.encoded_payload_bytes.0 += 1;
             assert!(build_thermal_resource_plan(&workload, &mesh, 1024, wrong).is_err());
             let mut bounded = plan.input.clone();
-            bounded.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes - 1;
+            bounded.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
             assert!(build_resource_plan(bounded).is_err());
             let mut bounded = plan.input.clone();
-            bounded.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
+            bounded.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes);
             assert!(build_resource_plan(bounded).is_ok());
         }
     }
@@ -181,10 +181,10 @@ fn retained_source_fact_is_additive_identity_bound_and_exactly_ceiling_admitted(
             plan
         );
         let mut below = plan.input.clone();
-        below.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes - 1;
+        below.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
         assert!(build_resource_plan(below).is_err());
         let mut exact = plan.input.clone();
-        exact.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
+        exact.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes);
         assert!(build_resource_plan(exact).is_ok());
         let mut changed = retained.clone();
         changed

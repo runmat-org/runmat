@@ -10,7 +10,7 @@ fn estimates(completed: &CompletedNonlinearSolidStudy) -> AnalysisBridgeResult<(
             "nonlinear completion requires original standalone step",
         ));
     };
-    let ceiling = step.accuracy.resources.maximum_resident_bytes;
+    let ceiling = step.accuracy.resources.resident_byte_budget();
     let profile = runmat_canonical_codec::profile_serialized(
         &(
             &completed.compiled,
@@ -119,7 +119,7 @@ fn admit(completed: &CompletedNonlinearSolidStudy, bytes: u64) -> AnalysisBridge
         > completed.workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes
+            .resident_byte_budget()
     {
         return Err(limit(
             "nonlinear completion storage exceeds original authored memory",

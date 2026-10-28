@@ -103,7 +103,7 @@ fn projected_profile_bounds_actual_finite_extreme_records_and_metadata_growth() 
         };
         records[1].message = ThermalDiagnosticMessage::Stability([value; 4]);
         records[1].severity = FeaDiagnosticSeverity::Info;
-        records[3].message = ThermalDiagnosticMessage::Energy([value; 7]);
+        records[3].message = ThermalDiagnosticMessage::Energy([value; 9]);
         records[3].severity = FeaDiagnosticSeverity::Info;
         let actual: Vec<_> = records
             .iter()

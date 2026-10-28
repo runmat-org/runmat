@@ -662,6 +662,18 @@ pub(super) fn assemble_linear_system_impl(
         solved_nodal_temperature_k,
         solid_energy,
     } = execution;
+    if structural_requirement.is_none() {
+        return Err(LinearAssemblyError::CouplingRealization(
+            "assembly requires an explicit structural formulation; other physics must use their physical assembly operators, not a synthetic shared RHS".into(),
+        ));
+    }
+    if electro_thermal_context.is_some()
+        && structural_requirement != Some(StructuralFormulationRequirement::SyntheticOperator)
+    {
+        return Err(LinearAssemblyError::CouplingRealization(
+            "electro-thermal structural coupling requires a solved physical electrical/thermal transfer; the legacy synthetic Joule-heating RHS is not a physical formulation".into(),
+        ));
+    }
     if solved_nodal_temperature_k.is_some()
         && (solver_mesh.is_none()
             || structural_requirement
@@ -1113,31 +1125,23 @@ pub(super) fn assemble_linear_system_impl(
     if let Some(operators) = solid_operators.as_ref() {
         mass_diag[..mesh_dof_count].copy_from_slice(&operators.lumped_mass_diag[..mesh_dof_count]);
     }
-    let mut stiffness_csr = solid_operators
-        .as_ref()
-        .map(|operators| operators.stiffness.clone());
-    let mut mass_csr = solid_operators
-        .as_ref()
-        .map(|operators| operators.consistent_mass.clone());
-    let mut damping_csr = solid_operators
-        .as_ref()
-        .map(|operators| operators.damping.clone());
-    stiffness_csr = stiffness_csr.map(|matrix| {
+    // The solid operators move into the structural DOF space; no copy of them stays alive.
+    let expanded = |matrix: RealSparseMatrix| {
         matrix
-            .expanded_square(dof_count)
+            .into_expanded_square(dof_count)
             .expect("structural DOF expansion is valid")
-    });
-    let solid_element_stiffness_csr = stiffness_csr.clone();
-    mass_csr = mass_csr.map(|matrix| {
-        matrix
-            .expanded_square(dof_count)
-            .expect("structural DOF expansion is valid")
-    });
-    damping_csr = damping_csr.map(|matrix| {
-        matrix
-            .expanded_square(dof_count)
-            .expect("structural DOF expansion is valid")
-    });
+    };
+    let (mut stiffness_csr, mass_csr, mut damping_csr) = match solid_operators {
+        Some(operators) => (
+            Some(expanded(operators.stiffness)),
+            Some(expanded(operators.consistent_mass)),
+            Some(expanded(operators.damping)),
+        ),
+        None => (None, None, None),
+    };
+    // The element-only stiffness is retained only when connectors join the solid operator: the
+    // connector-anchored nullspace proof needs both parts.
+    let mut solid_element_stiffness_csr = None;
     let mut structural_connector_stiffness_count = 0;
     let mut structural_connector_damping_count = 0;
     let mut structural_connector_plan = None;
@@ -1220,16 +1224,17 @@ pub(super) fn assemble_linear_system_impl(
             let connector = connector_stiffness
                 .finish()
                 .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?;
-            let solid = stiffness_csr.as_ref().ok_or({
+            let solid = stiffness_csr.take().ok_or({
                 LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
             })?;
             let combined = RealSparseMatrix::scaled_sum(
-                &[(1.0, solid), (1.0, &connector)],
+                &[(1.0, &solid), (1.0, &connector)],
                 OperatorRole::Stiffness,
                 MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
             )
             .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?;
             structural_connector_stiffness_csr = Some(connector);
+            solid_element_stiffness_csr = Some(solid);
             stiffness_csr = Some(combined);
         }
         if summary.damping_count > 0 {
@@ -3115,7 +3120,10 @@ mod tests {
         assert_eq!(summary.structural_moment_projection.len(), 1);
         let projection = &summary.structural_moment_projection[0];
         assert_eq!(projection.load_id, "moment_tip");
-        assert_eq!(projection.region_id, "tip");
+        assert_eq!(
+            projection.region_id,
+            runmat_meshing_core::fixtures::fixture_boundary_selection("tip")
+        );
         assert_eq!(projection.target_node_count, 3);
         assert!(projection.projection_applied);
         for residual in projection
@@ -3150,15 +3158,16 @@ mod tests {
 
         let err = assemble_physical_structural_system(&model, Some(mesh))
             .expect_err("strict solver mesh assembly should reject unmapped loads");
+        let missing_tip = runmat_meshing_core::fixtures::fixture_boundary_selection("missing_tip");
 
         assert!(matches!(
             err,
             LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(ref message))
-                if message.contains("load_tip") && message.contains("missing_tip")
+                if message.contains("load_tip") && message.contains(&missing_tip)
         ));
         let message = err.to_string();
         assert!(message.contains("load_id=load_tip"));
-        assert!(message.contains("region_id=missing_tip"));
+        assert!(message.contains(&format!("region_id={missing_tip}")));
     }
 
     #[test]
@@ -3187,7 +3196,10 @@ mod tests {
         ));
         let message = err.to_string();
         assert!(message.contains("`fixed_root`"));
-        assert!(message.contains("`missing_root`"));
+        assert!(message.contains(&format!(
+            "`{}`",
+            runmat_meshing_core::fixtures::fixture_boundary_selection("missing_root")
+        )));
     }
 
     #[test]
@@ -4203,7 +4215,9 @@ mod tests {
             error,
             LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(message))
                 if message.contains("missing_tip")
-                    && message.contains("not_a_connectivity_region")
+                    && message.contains(&runmat_meshing_core::fixtures::fixture_boundary_selection(
+                        "not_a_connectivity_region"
+                    ))
         ));
     }
 

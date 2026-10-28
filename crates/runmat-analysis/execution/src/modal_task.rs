@@ -124,7 +124,7 @@ pub fn prepare_structural_modal_task(
             .procedure_step()?
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let constraints = compiled.plan();

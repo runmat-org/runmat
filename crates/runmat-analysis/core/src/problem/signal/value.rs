@@ -8,6 +8,7 @@ pub enum SignalValue<Q> {
     Vector3([Q; 3]),
     /// Canonical row-major values: the last shape axis varies fastest.
     Tensor {
+        #[serde(with = "runmat_types::wire_integer::vec")]
         shape: Vec<usize>,
         values: Vec<Q>,
     },

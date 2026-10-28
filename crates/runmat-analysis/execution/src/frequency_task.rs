@@ -107,7 +107,7 @@ pub fn prepare_structural_frequency_fanout(
         runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
             workload.model(),
             Some(&mesh),
-            workload.procedure_step()?.accuracy.resources.maximum_resident_bytes,
+            workload.procedure_step()?.accuracy.resources.resident_byte_budget(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_projection = StructuralFrequencyEntryResourceProjection::new_from_compilation(

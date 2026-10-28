@@ -235,6 +235,7 @@ pub struct SignalArtifactRef {
     pub schema: String,
     pub domain: SignalArtifactDomain,
     pub topology_digest: Option<String>,
+    #[serde(with = "runmat_types::wire_integer")]
     pub sample_count: usize,
 }
 
@@ -276,6 +277,7 @@ pub struct SignalApproximationEvidence {
     pub max_absolute_error: Option<f64>,
     pub max_relative_error: Option<f64>,
     pub derivative_max_absolute_error: Option<f64>,
+    #[serde(with = "runmat_types::wire_integer")]
     pub sample_count: usize,
 }
 
@@ -469,8 +471,8 @@ impl GeneratorDomain {
 #[serde(rename_all = "snake_case")]
 pub enum GeneratorArgument {
     Boolean(bool),
-    SignedInteger(i64),
-    UnsignedInteger(u64),
+    SignedInteger(#[serde(with = "runmat_types::wire_integer")] i64),
+    UnsignedInteger(#[serde(with = "runmat_types::wire_integer")] u64),
     Real(f64),
     Text(String),
     RealVector(Vec<f64>),
@@ -483,12 +485,14 @@ pub enum SignalSamplingPolicy {
     Uniform {
         start: f64,
         end: f64,
+        #[serde(with = "runmat_types::wire_integer")]
         sample_count: usize,
     },
     Adaptive {
         start: f64,
         end: f64,
         max_absolute_error: f64,
+        #[serde(with = "runmat_types::wire_integer")]
         max_samples: usize,
     },
     CanonicalPoints(Vec<f64>),
@@ -500,6 +504,7 @@ pub enum GeneratorEffectPolicy {
     Pure,
     DeclaredImmutableArtifacts,
     SeededRandom {
+        #[serde(with = "runmat_types::wire_integer")]
         seed: u64,
         distribution: RandomDistribution,
     },

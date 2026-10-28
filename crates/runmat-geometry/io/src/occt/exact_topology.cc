@@ -94,6 +94,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     payload.point_y = point.Y();
     payload.point_z = point.Z();
     payload.tolerance = BRep_Tool::Tolerance(vertex);
+    if (names != nullptr) {
+      append_names(payload.names, names->subshape_names(vertex));
+      append_names(payload.tags, names->subshape_tags(vertex));
+    }
     result.vertices.push_back(payload);
   }
   std::sort(result.vertices.begin(), result.vertices.end(),
@@ -125,6 +129,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     payload.closed = closed;
     payload.periodic = closed && curve.IsPeriodic();
     payload.degenerate = BRep_Tool::Degenerated(edge);
+    if (names != nullptr) {
+      append_names(payload.names, names->subshape_names(edge));
+      append_names(payload.tags, names->subshape_tags(edge));
+    }
     result.edges.push_back(payload);
   }
   std::sort(result.edges.begin(), result.edges.end(),
@@ -164,8 +172,8 @@ void append_exact_topology(OcctExactShapePayload& result,
     face_payload.periodic_v = periodic_v;
     face_payload.singular = false;
     if (names != nullptr) {
-      append_names(face_payload.names, names->face_names(face));
-      append_names(face_payload.tags, names->face_tags(face));
+      append_names(face_payload.names, names->subshape_names(face));
+      append_names(face_payload.tags, names->subshape_tags(face));
     }
 
     for (TopoDS_Iterator wires(face, Standard_False, Standard_True); wires.More(); wires.Next()) {

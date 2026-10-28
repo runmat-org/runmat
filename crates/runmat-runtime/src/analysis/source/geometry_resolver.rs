@@ -127,6 +127,8 @@ fn inspect_uncached(
         Ok(Some(exact)) => {
             for (id, names) in &exact.entity_names {
                 let role = match id.kind {
+                    runmat_geometry_core::PersistentEntityKind::Vertex => "vertex",
+                    runmat_geometry_core::PersistentEntityKind::Edge => "edge",
                     runmat_geometry_core::PersistentEntityKind::Face => "face",
                     runmat_geometry_core::PersistentEntityKind::Solid => "solid",
                     _ => continue,

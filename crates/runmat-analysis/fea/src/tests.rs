@@ -251,7 +251,7 @@ fn direct_physical_static_rejects_accuracy_memory_ceiling_before_assembly() {
     model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let error = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect_err("direct physical solve must admit its resource plan before assembly");
     assert!(matches!(
@@ -286,7 +286,7 @@ fn direct_connector_static_without_connector_observation_preflights_memory() {
     model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let error = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -346,7 +346,7 @@ fn direct_solid_connector_static_preflights_memory() {
     model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let error = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect_err("solid connector must preflight before assembly");
     assert!(matches!(
@@ -1188,7 +1188,7 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
     rejected_model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let error = crate::run_linear_static_with_options(
         &rejected_model,
         ComputeBackend::Cpu,
@@ -4541,7 +4541,7 @@ fn load_sweep_preserves_solver_mesh_dof_count() {
         if let runmat_analysis_core::ExcitationTarget::Region(target) =
             &mut action.excitation_mut().target
         {
-            target.region_id = "tip".to_owned();
+            target.region_id = crate::fixtures::fixture_target_selection("tip");
         }
     }
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
@@ -4597,7 +4597,7 @@ fn large_load_sweep_does_not_fabricate_dofs_from_excitation_count() {
         if let runmat_analysis_core::ExcitationTarget::Region(target) =
             &mut action.excitation_mut().target
         {
-            target.region_id = "tip".to_owned();
+            target.region_id = crate::fixtures::fixture_target_selection("tip");
         }
     }
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)

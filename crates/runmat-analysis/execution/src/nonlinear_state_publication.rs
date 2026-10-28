@@ -74,7 +74,7 @@ fn decode_source(
         > workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes
+            .resident_byte_budget()
     {
         return Err(invalid(
             "nonlinear publication original decode exceeds authored ceiling",

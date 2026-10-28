@@ -20,6 +20,10 @@ fn workload() -> ThermalWorkload {
     });
     model.sequence =
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_transient("heat")]);
+    // The authored ceiling is part of the encoded model, so resident requirements are
+    // measured under a non-binding authored ceiling (present, like the ceilings tests author).
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
+        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -233,7 +237,7 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - history.retained_metadata_bytes.0;
+        .maximum_resident_bytes = Some(required - history.retained_metadata_bytes.0);
     assert!(matches!(workload.execute(&mesh),
         Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling {
             required: actual, ..
@@ -241,7 +245,7 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - 1;
+        .maximum_resident_bytes = Some(required - 1);
     let error = workload.execute(&mesh).unwrap_err();
     assert!(
         matches!(error, crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual, maximum, .. }) if actual == required && maximum == required - 1),
@@ -250,7 +254,7 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required;
+        .maximum_resident_bytes = Some(required);
     workload.execute(&mesh).unwrap();
     assert!(csr_bytes(u64::MAX, 1).is_err());
     assert!(csr_bytes(1, u64::MAX).is_err());

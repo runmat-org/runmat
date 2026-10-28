@@ -286,6 +286,7 @@ pub(super) fn execute_thermal_with_options(
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
             effective_memory_ceiling_bytes: None,
+            static_solve_path: None,
         },
     };
 

@@ -121,7 +121,7 @@ fn source_authority_conflicts_quantity_and_budget_reject_before_solve() {
                 let required = CanonicalFluidProblem::prepare(f.input())
                     .unwrap()
                     .reservation();
-                f.policy.maximum_operator_work = required.operator_work_upper_bound - 1;
+                f.policy.maximum_operator_work = Some(required.operator_work_upper_bound - 1);
             }
             7 => {
                 let mut wrong = case(2, ReferenceCase::Duct, false).signals.remove(0);
@@ -301,7 +301,7 @@ fn nonuniform_face_areas_use_integral_rates_and_work_is_admitted_before_binding(
         assert!((areas.iter().sum::<f64>() - 6.0).abs() < 1e-13);
         assert!((outward - 0.048 * if id == "mass-inlet" { -1.0 } else { 1.0 }).abs() < 1e-14);
     }
-    f.policy.maximum_operator_work = required.operator_work_upper_bound - 1;
+    f.policy.maximum_operator_work = Some(required.operator_work_upper_bound - 1);
     assert!(matches!(
         CanonicalFluidProblem::prepare(f.input()),
         Err(CanonicalFluidError::Resource(_))

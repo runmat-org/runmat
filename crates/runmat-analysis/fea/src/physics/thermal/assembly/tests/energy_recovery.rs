@@ -45,10 +45,18 @@ fn energy_assembly(
     source_density: f64,
 ) -> ThermalOperatorAssembly {
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+    energy_assembly_on(model, &mesh, source_density)
+}
+
+fn energy_assembly_on(
+    model: &AnalysisModel,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    source_density: f64,
+) -> ThermalOperatorAssembly {
     assemble(
         model,
-        &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
+        mesh,
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh, &[])
             .unwrap()
             .support(),
         &heat_generation(source_density),
@@ -325,6 +333,90 @@ fn small_boundary_flux_is_not_lost_in_robin_forcing_regardless_of_operator_order
         // leave roundoff-scale signed corner weights in the nodal absolute sum.
         assert!((energy.relative_residual - 1.0).abs() < 1.0e-12);
         model.boundaries.reverse();
+    }
+}
+
+// witness: FEA-THERMAL-FIELDS-001/global_energy @ thermal_steady/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: A bar held at two end temperatures reports its closed-form through-flow
+//   k*A*dT/L as the heat entering and leaving through the prescribed ends, while the net
+//   prescribed reaction cancels; other boundary conditions are covered elsewhere.
+#[test]
+fn bar_between_two_fixed_temperatures_reports_its_closed_form_heat_flow() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    // The slab fixture is the unit cube [0, 1]^3: a prism of length 1 m along x whose
+    // prescribed end faces x = 0 and x = 1 each have area 1 m^2.
+    let (length_m, area_m2) = (1.0, 1.0);
+    for (order, mesh) in [
+        (ElementOrder::Tet4, runmat_meshing_core::fixtures::slab_mesh(2)),
+        (ElementOrder::Tet10, runmat_meshing_core::fixtures::quadratic_slab_mesh(2)),
+    ] {
+        let mut assembly = energy_assembly_on(&model, &mesh, 0.0);
+        let coordinates = assembly
+            .projection
+            .nodes
+            .iter()
+            .map(|node| node.coordinates_m.canonical_value())
+            .collect::<Vec<_>>();
+        let (cold_k, hot_k) = (300.0, 350.0);
+        for (node, point) in coordinates.iter().enumerate() {
+            let prescribed = if point[0] == 0.0 {
+                Some(cold_k)
+            } else if (point[0] - length_m).abs() <= 1.0e-12 * length_m {
+                Some(hot_k)
+            } else {
+                None
+            };
+            assembly
+                .prescribed_temperature_k
+                .try_replace(node, runmat_types::physical::Quantity::new(prescribed))
+                .unwrap();
+        }
+        let reference = assembly
+            .steady_reference_temperatures(&model, ExcitationSamplePoint::Static, 293.15)
+            .unwrap();
+        let operator = assembly
+            .steady_increment_operator(&model, ExcitationSamplePoint::Static, &reference)
+            .unwrap();
+        let solved = solve_operator_system(
+            &operator,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+        );
+        assert!(solved.converged);
+        let mut temperature = solved.solution;
+        for (node, value) in temperature.iter_mut().enumerate() {
+            *value = assembly.prescribed_temperature_k.canonical_values()[node]
+                .unwrap_or(*value + reference[node]);
+        }
+        let balance = assembly
+            .energy_balance(
+                &model,
+                ExcitationSamplePoint::Static,
+                &temperature,
+                &temperature,
+                1.0,
+                0.0,
+            )
+            .unwrap();
+        balance.validate().unwrap();
+        // A linear field is exact in both element orders: Q = k A (T_hot - T_cold) / L.
+        let conductivity = assembly.element_conductivity_w_per_mk.canonical_values()[0];
+        let expected = conductivity * area_m2 * (hot_k - cold_k) / length_m;
+        assert!(expected > 0.0);
+        let flow = balance.prescribed_heat_flow;
+        for gross in [flow.entering_w, flow.leaving_w] {
+            assert!(
+                (gross.canonical_value() - expected).abs() <= expected * 1.0e-8,
+                "{order:?}: expected {expected} W, {balance:?}"
+            );
+        }
+        assert!(
+            balance.prescribed_boundary_power_w.canonical_value().abs() <= expected * 1.0e-8,
+            "{order:?}: {balance:?}"
+        );
     }
 }
 

@@ -141,7 +141,7 @@ fn magnetic_workload_rejects_unsupported_policy_and_resource_ceiling_before_proj
     too_small.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     let error = too_small.execute(&slab_mesh(2)).unwrap_err().to_string();
     assert!(error.contains("resource preflight"), "{error}");
     let mut missing = base.clone();

@@ -355,12 +355,12 @@ impl SteadyStudyTail {
             .retained_context_bytes
             .checked_add(additional)
             .ok_or_else(|| invalid("terminal retained context overflow"))?;
-        if bytes > self.source.step.accuracy.resources.maximum_resident_bytes {
+        if bytes > self.source.step.accuracy.resources.resident_byte_budget() {
             return Err(
                 runmat_analysis_fea::planning::resource::ResourcePlanningError::AccuracyCeiling {
                     resource: "terminal retained resident bytes",
                     required: bytes,
-                    maximum: self.source.step.accuracy.resources.maximum_resident_bytes,
+                    maximum: self.source.step.accuracy.resources.resident_byte_budget(),
                 }
                 .into(),
             );

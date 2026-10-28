@@ -29,7 +29,7 @@ impl<'a> ThermalFieldSourceAuthority<'a> {
     ) -> AnalysisExecutionResult<Self> {
         let binding = workload.bind_source_identities_admitted(maximum_resident_bytes)?;
         let step = binding.step;
-        let ceiling = maximum_resident_bytes.min(step.accuracy.resources.maximum_resident_bytes);
+        let ceiling = maximum_resident_bytes.min(step.accuracy.resources.resident_byte_budget());
         let manifest_bytes = manifest.validate_admitted(ceiling)?;
         let projected_bytes =
             AnalysisProjection::derivation_resident_bytes_estimate(mesh).map_err(invalid)?;

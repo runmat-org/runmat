@@ -12,6 +12,8 @@ use local::completed_summary;
 pub(super) struct LocalRunSummary {
     #[serde(flatten)]
     assessment_summary: AssessmentSummary,
+    #[serde(flatten)]
+    solve_placement: SolvePlacementSummary,
     /// Signed global heat balance of the final thermal solve, in watts.
     #[serde(skip_serializing_if = "Option::is_none")]
     thermal_energy_balance: Option<ThermalEnergyBalanceSummary>,
@@ -41,6 +43,40 @@ pub(super) fn definition_run_ids(step_run_ids: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Where the static solves ran and how: the effective memory ceiling the placement admitted and
+/// the solve path each static step selected under it. Provenance only, outside every identity.
+#[derive(Serialize, Default)]
+pub(super) struct SolvePlacementSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effective_memory_ceiling_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    static_solve_paths: std::collections::BTreeMap<
+        String,
+        runmat_analysis_fea::planning::resource::StaticSolvePath,
+    >,
+}
+
+impl SolvePlacementSummary {
+    fn of(numerical: &runmat_runtime::analysis::StructuralStudyNumericalResult) -> Self {
+        match numerical {
+            runmat_runtime::analysis::StructuralStudyNumericalResult::LinearSequence(sequence) => {
+                Self {
+                    effective_memory_ceiling_bytes: sequence.effective_memory_ceiling_bytes,
+                    static_solve_paths: sequence
+                        .steps
+                        .iter()
+                        .filter_map(|step| {
+                            step.static_solve_path
+                                .map(|path| (step.step_id.as_str().to_string(), path))
+                        })
+                        .collect(),
+                }
+            }
+            _ => Self::default(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct AssessmentSummary {
     run_status: runmat_runtime::analysis::RunStatus,
@@ -54,6 +90,8 @@ pub(super) struct ThermalEnergyBalanceSummary {
     boundary_loss_w: f64,
     storage_rate_w: f64,
     prescribed_boundary_power_w: f64,
+    prescribed_heat_entering_w: f64,
+    prescribed_heat_leaving_w: f64,
     residual_w: f64,
     relative_residual: f64,
 }
@@ -65,6 +103,8 @@ impl From<&runmat_analysis_fea::contracts::ThermalEnergyBalance> for ThermalEner
             boundary_loss_w: balance.boundary_loss_w.canonical_value(),
             storage_rate_w: balance.storage_rate_w.canonical_value(),
             prescribed_boundary_power_w: balance.prescribed_boundary_power_w.canonical_value(),
+            prescribed_heat_entering_w: balance.prescribed_heat_flow.entering_w.canonical_value(),
+            prescribed_heat_leaving_w: balance.prescribed_heat_flow.leaving_w.canonical_value(),
             residual_w: balance.residual_w.canonical_value(),
             relative_residual: balance.relative_residual,
         }
@@ -88,6 +128,7 @@ pub(super) fn local_summary(
 ) -> Result<LocalRunSummary> {
     Ok(LocalRunSummary {
         assessment_summary: publication.into(),
+        solve_placement: SolvePlacementSummary::of(completed.numerical()),
         thermal_energy_balance: None,
         root_id: root_id.into(),
         procedure: numerical_kind(completed.numerical()),
@@ -176,6 +217,12 @@ fn print_summary(study_id: &str, mut summary: LocalRunSummary, json: bool) -> Re
             balance.prescribed_boundary_power_w,
             balance.residual_w,
             balance.relative_residual
+        );
+        println!(
+            "  {} {:.6} W in, {:.6} W out",
+            styles.label("heat through prescribed temperatures:"),
+            balance.prescribed_heat_entering_w,
+            balance.prescribed_heat_leaving_w
         );
     }
     for assessment in &summary.assessment_summary.assessments {

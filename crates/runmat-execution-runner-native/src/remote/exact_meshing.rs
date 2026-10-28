@@ -37,7 +37,8 @@ pub(super) struct CompletedRemoteExactMeshing {
 
 #[derive(Clone)]
 pub(super) enum MeshedGeometryRegions {
-    PersistentEntities(BTreeMap<String, PersistentEntityId>),
+    /// Meshed directly from the exact source; the mesh provenance carries canonical identities.
+    PersistentEntities,
     Materialized(runmat_geometry_ops::ResolvedGeometryRegions),
 }
 
@@ -320,8 +321,6 @@ pub(super) async fn execute_for_composition(
     expected_admission_inventory.push(admission_reference.clone());
     validate_reference_closure(admitted.result_objects(), &expected_admission_inventory)?;
     validate_source_entities(&admission, geometry.geometry_objects())?;
-    let source_edge_ids = admission.source_edge_ids.clone();
-    let source_face_ids = admission.source_face_ids.clone();
     let source_region_ids = admission.source_region_ids.clone();
     let mut meshing_request = decoded.request.meshing_request;
     if !crate::exact_geometry_admission::same_requested_tolerance(
@@ -370,33 +369,14 @@ pub(super) async fn execute_for_composition(
         .map(|region| region.region_id.clone())
         .collect::<BTreeSet<_>>();
     validate_source_entity_bijection("region", &source_region_ids, &meshed_region_ids)?;
-    let region_aliases = source_identities(&source_edge_ids, &source_face_ids, &source_region_ids)?;
     Ok(RemoteExactMeshingComposition::Completed(Box::new(
         CompletedRemoteExactMeshing {
             document: admission.document,
-            regions: MeshedGeometryRegions::PersistentEntities(region_aliases),
+            regions: MeshedGeometryRegions::PersistentEntities,
             materialization: None,
             result,
         },
     )))
-}
-
-fn source_identities(
-    edges: &BTreeMap<u64, PersistentEntityId>,
-    faces: &BTreeMap<u64, PersistentEntityId>,
-    regions: &BTreeMap<u64, PersistentEntityId>,
-) -> NativeExecutionResult<BTreeMap<String, PersistentEntityId>> {
-    edges
-        .values()
-        .chain(faces.values())
-        .chain(regions.values())
-        .map(|entity| {
-            entity
-                .analysis_selection_id()
-                .map(|key| (key, entity.clone()))
-                .map_err(protocol)
-        })
-        .collect()
 }
 
 fn package_completed(

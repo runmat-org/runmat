@@ -287,7 +287,7 @@ pub fn import_family_study_result(
         .sequence
         .steps
         .first()
-        .map(|step| step.accuracy.resources.maximum_resident_bytes)
+        .map(|step| step.accuracy.resources.resident_byte_budget())
         .ok_or_else(|| protocol("family study has no authored step"))?;
     let result = crate::imported_family_result(
         family,

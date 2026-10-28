@@ -136,7 +136,7 @@ async fn run_exact_structural_sweep_conformance() {
         artifact_access: access.clone(),
         source_name: "box.brep",
         source_bytes: BOX,
-        import_options: ExactCadImportOptions::default(),
+        import_options: ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
         contact_definitions: Vec::new(),
         meshing_request: meshing_request.clone(),
         preferred_edges_per_partition: 3,
@@ -358,7 +358,7 @@ async fn run_exact_structural_sweep_conformance() {
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -646,9 +646,8 @@ async fn run_exact_structural_sweep_conformance() {
             .signals
             .iter()
             .all(|signal| signal.generator().is_none()));
-        assert!(result.region_resolution.aliases.contains_key("face_000001"));
-        let constrained_face = &result.region_resolution.aliases["face_000001"];
-        let loaded_face = &result.region_resolution.aliases["face_000002"];
+        let constrained_face = &box_selectors().fixed_face;
+        let loaded_face = &box_selectors().loaded_face;
         assert_eq!(
             resolved_workload.model.constraints[0]
                 .target()
@@ -675,21 +674,6 @@ async fn run_exact_structural_sweep_conformance() {
                 .flat_map(|face| &face.provenance)
                 .any(|identity| identity == selected));
         }
-        let mut missing_alias = box_structural_workload();
-        missing_alias.model.constraints[0].visit_targets_mut(|target| {
-            *target = runmat_analysis_core::RegionTarget::boundary("face_999999");
-        });
-        let aliases = runmat_analysis_core::GeometryRegionAliases::new(
-            result.region_resolution.aliases.clone(),
-        )
-        .unwrap();
-        assert!(matches!(
-            runmat_analysis_core::resolve_geometry_region_aliases(&missing_alias.model, &aliases),
-            Err(runmat_analysis_core::GeometryRegionResolutionError::UnresolvedImporterAlias {
-                alias
-            }) if alias == "face_999999"
-        ));
-
         pool.remove_worker(worker.id, false).await.unwrap();
     };
     let (server_result, ()) = tokio::join!(server, client);
@@ -1082,8 +1066,8 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
         .unwrap();
         assert_eq!(local, *buckling_result.buckling_result);
 
-        let fixed_face = &imported.region_resolution.aliases["face_000001"];
-        let loaded_face = &imported.region_resolution.aliases["face_000002"];
+        let fixed_face = &box_selectors().fixed_face;
+        let loaded_face = &box_selectors().loaded_face;
         let fixed_centroid = boundary_centroid(&imported.mesh.artifact, fixed_face);
         let loaded_centroid = boundary_centroid(&imported.mesh.artifact, loaded_face);
         assert!((fixed_centroid[0] - 0.0).abs() <= 1.0e-12);
@@ -1270,19 +1254,60 @@ async fn generated_box_workload(
     (workload, prepared)
 }
 
+/// Canonical persistent identities of the box fixture's source solid and of its first two
+/// source faces (x = 0 and x = 1).
+pub(crate) struct BoxSelectors {
+    pub(crate) solid: runmat_geometry_core::PersistentEntityId,
+    pub(crate) fixed_face: runmat_geometry_core::PersistentEntityId,
+    pub(crate) loaded_face: runmat_geometry_core::PersistentEntityId,
+}
+
+impl BoxSelectors {
+    pub(crate) fn solid_selector(&self) -> String {
+        self.solid.analysis_selection_id().unwrap()
+    }
+
+    pub(crate) fn fixed_face_selector(&self) -> String {
+        self.fixed_face.analysis_selection_id().unwrap()
+    }
+
+    pub(crate) fn loaded_face_selector(&self) -> String {
+        self.loaded_face.analysis_selection_id().unwrap()
+    }
+}
+
+pub(crate) fn box_selectors() -> &'static BoxSelectors {
+    static SELECTORS: std::sync::OnceLock<BoxSelectors> = std::sync::OnceLock::new();
+    SELECTORS.get_or_init(|| {
+        let imported = import_exact_cad(
+            "box.brep",
+            BOX,
+            GeometryFormat::Brep,
+            &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+            &GeometryImportContext::new(),
+        )
+        .unwrap();
+        BoxSelectors {
+            solid: imported.topology.regions[0].id.clone(),
+            fixed_face: imported.source_face_ids[&0].clone(),
+            loaded_face: imported.source_face_ids[&1].clone(),
+        }
+    })
+}
+
 fn box_structural_workload() -> StructuralLinearWorkload {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.geometry_id = "box".into();
     model.geometry_revision = 1;
     model.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::solid("solid_000001");
+        runmat_analysis_core::PropertyRegionTarget::solid(box_selectors().solid_selector());
     model.constraints[0].visit_targets_mut(|target| {
-        *target = runmat_analysis_core::RegionTarget::boundary("face_000001");
+        *target = runmat_analysis_core::RegionTarget::boundary(box_selectors().fixed_face_selector());
     });
     if let runmat_analysis_core::ExcitationTarget::Region(target) =
         &mut model.excitations[0].excitation_mut().target
     {
-        *target = runmat_analysis_core::RegionTarget::boundary("face_000002");
+        *target = runmat_analysis_core::RegionTarget::boundary(box_selectors().loaded_face_selector());
     } else {
         panic!("cantilever fixture must use a region excitation");
     }
@@ -1677,7 +1702,7 @@ fn box_buckling_workloads() -> runmat_analysis_execution::StructuralStudyWorkloa
     else {
         panic!("box preload fixture must use a region excitation")
     };
-    *target = runmat_analysis_core::RegionTarget::boundary("face_000002");
+    *target = runmat_analysis_core::RegionTarget::boundary(box_selectors().loaded_face_selector());
     let runmat_analysis_core::PhysicalSignal::Force(signal) =
         &mut preload_workload.model.signals[0]
     else {
@@ -1771,7 +1796,7 @@ fn boundary_centroid(
 
 fn coarse_box_request() -> MeshingRequest {
     let mut request = crate::resolve_native_meshing_request(
-        &ExactCadImportOptions::default(),
+        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
         runmat_meshing_core::MeshingRequestSettings::default(),
     )
     .unwrap();

@@ -6,6 +6,7 @@ const path = require("path");
 const { parseDeclarations, rustFiles } = require("./fea-semantic-typegen/syntax.cjs");
 const { renderReachable } = require("./fea-semantic-typegen/render.cjs");
 const { renderGuards } = require("./fea-semantic-typegen/guards.cjs");
+const { aliasDeclarations } = require("./fea-semantic-typegen/wire-integers.cjs");
 
 const bindingsRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(bindingsRoot, "../..");
@@ -31,7 +32,9 @@ const registry = parseDeclarations([...scanRoots.flatMap(rustFiles), ...assessme
     FieldLocation: "crates/runmat-analysis/core/src/study/output.rs",
   },
 });
-const body = renderReachable(registry, ["FeaReassessmentRequest", "PublishedStudyReassessment", "PublishedCaseAssessments", "PublishedStudyAssessment", "CoordinateFrame", "FeaSemanticProgram", "FeaSourceIndex", "FeaSourceCheckResult", "FeaWorkspaceSnapshot", "FeaWorkspaceEdit", "FeaBrowseRequest", "FeaBrowsePage", "FeaBrowseOutcome", "FeaQueryError"], { externalTypes: ["FeaDiagnostic", "FeaCheckStatus"] });
+const contractBody = renderReachable(registry, ["FeaReassessmentRequest", "PublishedStudyReassessment", "PublishedCaseAssessments", "PublishedStudyAssessment", "CoordinateFrame", "FeaSemanticProgram", "FeaSourceIndex", "FeaSourceCheckResult", "FeaWorkspaceSnapshot", "FeaWorkspaceEdit", "FeaBrowseRequest", "FeaBrowsePage", "FeaBrowseOutcome", "FeaQueryError"], { externalTypes: ["FeaDiagnostic", "FeaCheckStatus"] });
+// Every integer alias is declared here so the workspace contracts can import them.
+const body = `${aliasDeclarations("WireU8 WireU16 WireU32 WireI8 WireI16 WireI32 WireU64 WireI64")}\n\n${contractBody}`;
 if (/:\s*(?:unknown|any)\b|\b(?:unknown|any)\[\]/.test(body)) {
   throw new Error("Canonical FEA semantic bindings must not contain unknown or any fields");
 }

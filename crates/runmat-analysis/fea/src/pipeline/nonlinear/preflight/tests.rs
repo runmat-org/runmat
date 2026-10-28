@@ -82,7 +82,7 @@ fn authored_memory_ceiling_rejects_before_physical_assembly_and_solve() {
     model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = plan.request.memory_bytes - 1;
+        .maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
     let error = run_nonlinear_with_options(&model, ComputeBackend::Cpu, options).unwrap_err();
     assert!(
         error
@@ -97,7 +97,7 @@ fn retained_context_capacity_and_overflow_remain_typed_before_physical_preparati
     use crate::planning::resource::ResourcePlanningError;
     let (mut model, mesh, _) = fixture::prepare(1, false);
     // An authored ceiling: the default is unbounded and placement applies machine capacity.
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = 8 << 30;
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(8 << 30);
     let options = NonlinearSolveOptions {
         solver_mesh: Some(mesh),
         max_accepted_increments: 8,
@@ -105,7 +105,7 @@ fn retained_context_capacity_and_overflow_remain_typed_before_physical_preparati
     };
     let step = &model.sequence.steps[0];
     let plan = prepare(&model, step, ComputeBackend::Cpu, &options).unwrap();
-    let maximum = step.accuracy.resources.maximum_resident_bytes;
+    let maximum = step.accuracy.resources.resident_byte_budget();
     let retained = maximum - plan.request.memory_bytes + 1;
     let error = super::super::preparation::prepare_with_retained(
         &model,
@@ -139,7 +139,7 @@ fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
     for quadratic in [false, true] {
         let (mut model, mesh, _) = fixture::prepare(1, quadratic);
         // An authored ceiling: the default is unbounded and placement applies machine capacity.
-        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = 8 << 30;
+        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(8 << 30);
         let mut options = NonlinearSolveOptions {
             solver_mesh: Some(mesh),
             max_accepted_increments: 8,
@@ -202,7 +202,7 @@ fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
             same, recovery,
             "readonly work must not depend on Newton caps/search"
         );
-        let maximum = step.accuracy.resources.maximum_resident_bytes;
+        let maximum = step.accuracy.resources.resident_byte_budget();
         let error = super::super::preparation::prepare_recovery(
             &model,
             &options,
@@ -223,7 +223,7 @@ fn diag_resource_scaling_with_mesh_size() {
     for cells in [2, 4, 6] {
         let (model, mesh, _) = fixture::prepare(cells, true);
         let mut model = model;
-        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = u64::MAX / 4;
+        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(u64::MAX / 4);
         let options = NonlinearSolveOptions {
             solver_mesh: Some(mesh.clone()),
             ..NonlinearSolveOptions::default()

@@ -18,8 +18,11 @@ pub enum Ap242ParameterAccess {
 pub struct Ap242Parameter {
     pub parameter_id: String,
     pub name: String,
+    #[serde(with = "runmat_types::wire_integer")]
     pub source_entity_id: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub representation_entity_id: u64,
+    #[serde(with = "runmat_types::wire_integer::vec")]
     pub owner_entity_ids: Vec<u64>,
     pub persistent_id: Option<String>,
     pub value: Ap242Measure,

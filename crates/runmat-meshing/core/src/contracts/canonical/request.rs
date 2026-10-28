@@ -218,7 +218,9 @@ impl MeshingQualityTargets {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshingSizeLimits {
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_nodes: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_elements: u64,
     /// Bounds the exact geometric recursions (surface acceptance subdivision, segment split
     /// depth, restart passes); it describes the admitted construction, not the machine.

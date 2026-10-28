@@ -25,6 +25,10 @@ fn workload(procedure: ThermalProcedureControl) -> ThermalWorkload {
     model.material_assignments[0].confidence = EvidenceConfidence::Probable;
     model.materials.push(alternate);
     model.sequence = AnalysisSequence::from_steps("thermal", vec![step]);
+    // The authored ceiling is part of the encoded model, so resident requirements are
+    // measured under a non-binding authored ceiling (present, like the ceilings tests author).
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
+        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -97,14 +101,14 @@ fn complete_manifest_profile_bounds_real_steady_and_transient_headers() {
             workload.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes = required - 1;
+                .maximum_resident_bytes = Some(required - 1);
             assert!(
                 matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: value, .. })) if value == required)
             );
             workload.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes = required;
+                .maximum_resident_bytes = Some(required);
             workload.execute(&mesh).unwrap();
         }
     }

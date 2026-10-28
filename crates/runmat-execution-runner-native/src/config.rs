@@ -18,6 +18,11 @@ pub struct NativeExecutionConfig {
     pub local_cpu_capacity_millicores: Option<u32>,
     #[serde(default)]
     pub local_memory_capacity_bytes: Option<u64>,
+    /// The authored per-worker resident ceiling (`execution { resources { memory_per_worker } }`).
+    /// Analysis placement plans each worker within min(this, the step's authored ceiling, the
+    /// host's admitted memory). Execution policy only: it never enters a study identity.
+    #[serde(default)]
+    pub authored_worker_memory_bytes: Option<u64>,
     pub max_message_bytes: u32,
     pub max_object_bytes: u64,
     pub max_stderr_bytes: usize,
@@ -69,6 +74,7 @@ impl NativeExecutionConfig {
                 .map_or(1, |count| count.get().min(32) as u32),
             local_cpu_capacity_millicores: Some(super::machine_capacity::cpu_millicores()),
             local_memory_capacity_bytes: Some(super::machine_capacity::memory_bytes()?),
+            authored_worker_memory_bytes: None,
             max_message_bytes: 64 * 1024 * 1024,
             max_object_bytes: 512 * 1024 * 1024,
             max_stderr_bytes: 1024 * 1024,
@@ -113,6 +119,7 @@ impl NativeExecutionConfig {
             || self.max_workers == 0
             || self.local_cpu_capacity_millicores == Some(0)
             || self.local_memory_capacity_bytes == Some(0)
+            || self.authored_worker_memory_bytes == Some(0)
             || self.max_message_bytes == 0
             || self.max_object_bytes == 0
             || self.max_stderr_bytes == 0

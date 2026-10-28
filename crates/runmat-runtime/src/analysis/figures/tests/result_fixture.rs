@@ -57,6 +57,7 @@ pub(super) fn simple_run_result(
             quality_policy: "strict".to_string(),
             fallback_events: Vec::new(),
             effective_memory_ceiling_bytes: None,
+            static_solve_path: None,
         },
     }
 }

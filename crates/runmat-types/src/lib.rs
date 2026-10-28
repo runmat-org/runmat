@@ -21,6 +21,7 @@ pub mod serde_f32;
 pub mod serde_f64;
 pub mod source;
 pub mod version;
+pub mod wire_integer;
 
 pub use contract::*;
 pub use convolution::ConvolutionMode;
