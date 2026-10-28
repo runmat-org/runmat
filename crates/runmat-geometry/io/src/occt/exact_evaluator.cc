@@ -123,6 +123,7 @@ struct PcurveData {
 
 PcurveData pcurve(const ExactEvaluatorSession& session,
                   std::uint64_t face_key,
+                  bool face_reversed,
                   std::uint64_t wire_key,
                   std::uint64_t coedge_position,
                   std::int8_t seam_image) {
@@ -133,7 +134,11 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
     throw std::runtime_error("OCCT exact pcurve token is outside the B-rep topology");
   }
 
-  const TopoDS_Face face_use = face(session, face_key);
+  // The shape table stores a face in its orientation within its first shell; the topology
+  // defines coedge positions and seam images on the face's use in the body, whose orientation
+  // the token carries. Seam uses of a reversed face are traversed in the opposite order.
+  TopoDS_Face face_use = face(session, face_key);
+  face_use.Orientation(face_reversed ? TopAbs_REVERSED : TopAbs_FORWARD);
 
   TopoDS_Wire wire;
   for (TopoDS_Iterator wires(face_use, Standard_False, Standard_True); wires.More(); wires.Next()) {
@@ -346,12 +351,13 @@ OcctCurveProjectionPayload exact_curve_inverse_project(
 
 OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
                                          std::uint64_t face_key,
+                                         bool face_reversed,
                                          std::uint64_t wire_key,
                                          std::uint64_t coedge_position,
                                          std::int8_t seam_image) {
   const auto value = session(session_id);
   const PcurveData pcurve_value =
-      pcurve(*value, face_key, wire_key, coedge_position, seam_image);
+      pcurve(*value, face_key, face_reversed, wire_key, coedge_position, seam_image);
   OcctCurveRangePayload result;
   result.start = pcurve_value.start;
   result.end = pcurve_value.end;
@@ -361,13 +367,14 @@ OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
 OcctPcurveDerivativesPayload exact_pcurve_derivatives(
     std::uint64_t session_id,
     std::uint64_t face_key,
+    bool face_reversed,
     std::uint64_t wire_key,
     std::uint64_t coedge_position,
     std::int8_t seam_image,
     double parameter) {
   const auto value = session(session_id);
   const PcurveData pcurve_value =
-      pcurve(*value, face_key, wire_key, coedge_position, seam_image);
+      pcurve(*value, face_key, face_reversed, wire_key, coedge_position, seam_image);
   require_finite(parameter, "pcurve parameter");
   if (parameter < pcurve_value.start || parameter > pcurve_value.end) {
     throw std::runtime_error("OCCT exact pcurve parameter is outside the edge domain");

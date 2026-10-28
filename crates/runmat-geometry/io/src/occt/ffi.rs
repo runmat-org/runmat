@@ -568,6 +568,7 @@ pub(crate) mod bridge {
         fn exact_pcurve_derivatives(
             session_id: u64,
             face_key: u64,
+            face_reversed: bool,
             wire_key: u64,
             coedge_position: u64,
             seam_image: i8,
@@ -577,6 +578,7 @@ pub(crate) mod bridge {
         fn exact_pcurve_range(
             session_id: u64,
             face_key: u64,
+            face_reversed: bool,
             wire_key: u64,
             coedge_position: u64,
             seam_image: i8,
