@@ -127,7 +127,7 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use runmat_geometry_core::{EntityKind, GeometryAsset, LengthUnit};
+use runmat_geometry_core::{EntityKind, GeometryAsset};
 use runmat_meshing_core::{
     CanonicalMeshingContract, ElementOrder, StableDigest,
 };
