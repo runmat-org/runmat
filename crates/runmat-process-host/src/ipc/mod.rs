@@ -6,7 +6,9 @@ mod meter;
 mod parent;
 pub mod session;
 pub mod stdio;
-pub use parent::{WorkerParentGuard, WORKER_PARENT_MONITOR_STACK_BYTES};
+pub use parent::{
+    ParentFrames, WorkerParentGuard, WorkerParentLink, WORKER_PARENT_MONITOR_STACK_BYTES,
+};
 
 #[cfg(unix)]
 pub mod unix;

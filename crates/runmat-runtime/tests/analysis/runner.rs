@@ -1282,7 +1282,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             *assignment
                 .target
                 .selected_region_id_mut()
-                .expect("fixture uses selected material region") = "thermal_core".to_owned();
+                .expect("fixture uses selected material region") =
+                runmat_meshing_core::fixtures::fixture_region("thermal_core");
         }
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_transient(
             format!("step_thermal_{}", spec_id),
@@ -1317,7 +1318,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             model,
             vec![FixtureExcitation {
                 excitation_id: format!("load_thermal_heat_source_{}", spec_id),
-                region_id: "thermal_core".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_region("thermal_core"),
                 quantity: FixtureExcitationQuantity::HeatGeneration(1.2e6),
             }],
         );
@@ -1337,7 +1338,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     model,
                     vec![FixtureExcitation {
                         excitation_id: format!("load_thermal_invalid_heat_source_{}", spec_id),
-                        region_id: "thermal_core".to_string(),
+                        region_id: runmat_meshing_core::fixtures::fixture_region("thermal_core"),
                         quantity: FixtureExcitationQuantity::Moment([1.0, 0.0, 0.0]),
                     }],
                 );
@@ -2823,7 +2824,9 @@ fn run_fixture_cpu(
         ),
         AnalysisSolverOptions::ElectricalStatic(_)
         | AnalysisSolverOptions::Magnetostatic(_)
-        | AnalysisSolverOptions::MaxwellHarmonic(_) => Err(typed_electromagnetic_required()),
+        | AnalysisSolverOptions::MaxwellHarmonic(_) => panic!(
+            "electromagnetic fixtures must execute through the governed typed study runner, not the legacy single-run fixture harness"
+        ),
     })
 }
 
@@ -2912,7 +2915,9 @@ fn run_fixture_gpu(
         ),
         AnalysisSolverOptions::ElectricalStatic(_)
         | AnalysisSolverOptions::Magnetostatic(_)
-        | AnalysisSolverOptions::MaxwellHarmonic(_) => Err(typed_electromagnetic_required()),
+        | AnalysisSolverOptions::MaxwellHarmonic(_) => panic!(
+            "electromagnetic fixtures must execute through the governed typed study runner, not the legacy single-run fixture harness"
+        ),
     }
     };
     boxed_fixture_run_result(match mode {
@@ -3931,22 +3936,36 @@ fn push_structural_shell_moment_threshold_assertions(
         );
     }
 
-    for (name, field_id) in [
+    // A single shell triangle loaded only by a nodal moment carries no transverse load, so
+    // equilibrium of the transverse-displacement rows forces the integral of the transverse
+    // shear resultant over the element to vanish. The MITC3 assumed-shear field is linear, so
+    // its centroid value (the published one) is zero up to round-off: Q = div(M) = 0 for this
+    // pure-bending patch. The original lower bound of 1e-12 predates the MITC3 tying
+    // (22468691f4, which removed parasitic shear locking) and asserted the locking artefact.
+    for (name, field_id, min, max) in [
         (
             "structural_shell_membrane_force_max_abs",
             FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+            Some(0.0),
+            None,
         ),
         (
             "structural_shell_bending_moment_max_abs",
             FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+            Some(1.0e-12),
+            None,
         ),
         (
             "structural_shell_transverse_shear_max_abs",
             FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+            Some(0.0),
+            Some(1.0e-9),
         ),
         (
             "structural_shell_von_mises_max_abs",
             FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+            Some(1.0e-12),
+            None,
         ),
     ] {
         push_threshold_assertion!(
@@ -3956,12 +3975,8 @@ fn push_structural_shell_moment_threshold_assertions(
             name,
             field_id,
             analysis_result_field_max_abs(run, field_id),
-            if name == "structural_shell_membrane_force_max_abs" {
-                Some(0.0)
-            } else {
-                Some(1.0e-12)
-            },
-            None,
+            min,
+            max,
         );
     }
 }
@@ -6212,6 +6227,18 @@ pub(super) fn run_fixture(
                                 gpu_envelope.data.provenance.solver_backend
                             ));
                         }
+                    }
+                    // The modal eigensolver runs on the shared CPU sparse layer; a GPU request
+                    // must say so rather than report a device solve.
+                    if spec.id.starts_with("modal_large_gpu_provider")
+                        && !gpu_envelope.data.run.diagnostics.iter().any(|diagnostic| {
+                            diagnostic.code == "FEA_MODAL_ACCELERATOR_ADMISSION_FALLBACK"
+                        })
+                    {
+                        failures.push(format!(
+                            "fixture {} must report FEA_MODAL_ACCELERATOR_ADMISSION_FALLBACK for a GPU modal request",
+                            spec.id
+                        ));
                     }
                     if env_bool("RUNMAT_FEA_ENFORCE_SPEEDUP_GATES").unwrap_or(false) {
                         if let Some(min_speedup_ratio) = spec.min_gpu_speedup_ratio {
@@ -8541,20 +8568,4 @@ pub(super) fn run_fixture(
         threshold_assertions,
         failures,
     }
-}
-
-fn typed_electromagnetic_required() -> runmat_runtime::operations::OperationErrorEnvelope {
-    use runmat_runtime::operations::{
-        operation_error, OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
-    };
-    operation_error(
-        "fea.run_study", "fea.run_study/v1", &OperationContext::new(None, None),
-        OperationErrorSpec {
-            error_code: "RM.FEA.RUN_STUDY.STATIC_EM_TYPED_EXECUTION_REQUIRED",
-            error_type: OperationErrorType::Contract, retryable: false,
-            severity: OperationErrorSeverity::Fatal,
-        },
-        "electromagnetic fixtures require genuine governed typed execution; scalar harness has no physical EM solver",
-        std::collections::BTreeMap::new(),
-    )
 }

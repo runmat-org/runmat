@@ -76,7 +76,7 @@ pub use assembly_demand::{
     StructuralRandomResponseAssemblyResourceDemand,
     StructuralTransientResultAssemblyResourceDemand,
 };
-pub use error::ResourcePlanningError;
+pub use error::{ResourcePlanningError, RESIDENT_MEMORY_RESOURCE};
 pub use modal_demand::{
     StructuralModalResourceDemand, StructuralModalResponseSpectrumDirectionResourceDemand,
 };

@@ -237,6 +237,7 @@ pub use observation_history_finalization::{
     FinalizedObservationHistory, ObservationHistoryFinalizationRequest,
     ObservationHistoryFinalizationRequestIdentity, ObservationHistorySourceContext,
 };
+pub(crate) use observation_partition::validate_published_observation_source;
 pub use observation_partition::{
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
 };
@@ -280,7 +281,7 @@ pub use solve::{
     StructuralLinearStateInput, StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 pub use state::{
-    fluid_state_publication_profiles, fluid_state_publication_requests,
+    fluid_state_publication_profile, fluid_state_publication_requests,
     fluid_state_publication_workspace_bytes, nonlinear_solid_state_publication_requests,
     semantic_state_retained_storage_bytes, AcousticPhasorConvention, BoundThermalStateTransfer,
     CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,

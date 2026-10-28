@@ -61,6 +61,8 @@ pub enum CoercivityError {
     },
     #[error("coercivity symbolic ordering could not cover the complete operator graph")]
     SymbolicOrdering,
+    #[error("coercivity proof was cancelled")]
+    Cancelled,
     #[error("coercivity evidence does not match its prepared operator or right-hand side")]
     BindingMismatch,
     #[error("coercivity evidence identity encoding failed: {0}")]
@@ -220,6 +222,7 @@ impl CoercivityCertificate {
                 update_count: 0,
                 update_limit: 0,
             },
+            runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
             _ => CoercivityError::SymbolicOrdering,
         })?;
         // Scaled pivots l_jj² / a_jj are the pivots of D^{-1/2} A D^{-1/2}; a tiny one is a

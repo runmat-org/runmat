@@ -2025,6 +2025,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
         runmat_analysis_fea::results::field::RecoveredFieldSample::Final,
         None,
@@ -2047,6 +2048,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
         runmat_analysis_fea::results::field::RecoveredFieldSample::TimeSeconds(0.0),
         None,
@@ -2070,12 +2072,61 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
         runmat_analysis_fea::results::field::RecoveredFieldSample::Final,
         None,
     )
     .unwrap();
     assert_eq!(observation_fanout.partitions.len(), 5);
+    // The fan-out on the admitted pool equals the serial fan-out bit for bit, in canonical order.
+    let parallel_plan =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(4_000)
+            .unwrap();
+    assert!(!parallel_plan.is_serial());
+    let parallel_fanout = prepare_observation_fanout(
+        &store,
+        ObservationPreparation {
+            source_host: field_prepared.host.clone(),
+            source: ObservationPublishedSource::Structural {
+                recovery_request: field_prepared.request.clone(),
+                fields: imported_fields.clone(),
+            },
+            source_workload: ObservationWorkloadSource::Linear(prepared.inputs[0].clone()),
+            mesh: Some(prepared.inputs[1].clone()),
+            accelerator_requests: observation_accelerators.clone(),
+            sequence,
+            step: producer_step.clone(),
+            limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            local_execution: parallel_plan,
+        },
+        runmat_analysis_fea::results::field::RecoveredFieldSample::Final,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        parallel_fanout.partitions.len(),
+        observation_fanout.partitions.len()
+    );
+    for (parallel, serial) in parallel_fanout
+        .partitions
+        .iter()
+        .zip(&observation_fanout.partitions)
+    {
+        assert_eq!(
+            parallel.request.canonical_bytes().unwrap(),
+            serial.request.canonical_bytes().unwrap()
+        );
+        assert_eq!(parallel.partition, serial.partition);
+        assert_eq!(parallel.source_fields, serial.source_fields);
+        assert_eq!(parallel.resource_plan, serial.resource_plan);
+        assert_eq!(parallel.resource_plan_objects, serial.resource_plan_objects);
+        assert_eq!(parallel.host, serial.host);
+        assert_eq!(parallel.inputs, serial.inputs);
+    }
     let mut partition_dependencies = BTreeMap::new();
     for partition in &observation_fanout.partitions {
         assert_eq!(

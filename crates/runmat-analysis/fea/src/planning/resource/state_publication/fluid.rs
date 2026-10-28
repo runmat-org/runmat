@@ -1,21 +1,29 @@
 //! Complete original FV publication through the shared semantic-state phase.
 use super::*;
 use crate::execution::{
-    fluid_state_publication_profiles, fluid_state_publication_workspace_bytes,
-    FluidSteadySolverResult, FluidSteadyWorkload,
+    fluid_state_publication_workspace_bytes, FluidSteadySolverResult, FluidSteadyWorkload,
+    StatePublicationProfiles,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
+/// `catalog` is the profile of exactly this request (`fluid_state_publication_profile`).
 pub fn build_fluid_state_publication_resource_plan(
     request: &SemanticStatePublicationRequest,
     workload: &FluidSteadyWorkload,
     mesh: &SolverMeshArtifact,
     result: &FluidSteadySolverResult,
     source_payload_digest: Digest,
+    catalog: &StatePublicationProfiles,
     facts: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let invalid = |e: &dyn std::fmt::Display| ResourcePlanningError::Invalid(e.to_string());
-    let catalog = fluid_state_publication_profiles(workload, mesh, result, source_payload_digest)
+    catalog
+        .validate_source(
+            request.producer,
+            request.source_result,
+            request.topology_digest,
+            source_payload_digest,
+        )
         .map_err(|e| invalid(&e))?;
     let entry = catalog.entry(request).map_err(|e| invalid(&e))?;
     let bytes = result.canonical_bytes().map_err(|e| invalid(&e))?;

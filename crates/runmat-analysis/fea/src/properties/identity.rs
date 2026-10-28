@@ -130,6 +130,13 @@ struct AuditContract {
 }
 
 pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
+    validate_structure(compiled)?;
+    validate_digests(compiled)
+}
+
+/// Key, role and audit-coverage checks; digests are checked separately because a map whose
+/// digests were just derived from these exact contents need not encode them a second time.
+pub(super) fn validate_structure(compiled: &CompiledPropertyMap) -> Result<(), String> {
     if compiled.identity.geometry_id.trim().is_empty() {
         return Err("compiled property map geometry id is empty".into());
     }
@@ -176,6 +183,10 @@ pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
     }
     drop(audit_identities);
     drop(element_identities);
+    Ok(())
+}
+
+fn validate_digests(compiled: &CompiledPropertyMap) -> Result<(), String> {
     let semantic = semantic_digest(
         &CompiledPropertySource {
             geometry_id: compiled.identity.geometry_id.clone(),

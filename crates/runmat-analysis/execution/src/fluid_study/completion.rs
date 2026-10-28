@@ -73,7 +73,16 @@ impl CompletedFluidStudy {
         &self,
         source: &impl CacheImport,
     ) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::FeaResourcePlan> {
-        let mut coordinator = FluidStudyCoordinator::new(self.preparation()?)?;
+        self.field_recovery_resource_plan_for(self.preparation()?, source)
+    }
+
+    /// As `field_recovery_resource_plan`, from this study's already validated preparation.
+    pub fn field_recovery_resource_plan_for(
+        &self,
+        preparation: FluidStudyPreparation,
+        source: &impl CacheImport,
+    ) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::FeaResourcePlan> {
+        let mut coordinator = FluidStudyCoordinator::new(preparation)?;
         let solve = self
             .closures
             .first()

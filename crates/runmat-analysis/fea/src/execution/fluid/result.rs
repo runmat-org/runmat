@@ -236,7 +236,11 @@ impl FluidSteadySolverResult {
             .ok_or_else(|| invalid("transient conjugate study retained no interval"))?
             .time_s;
         source
-            .conjugate_heat_at(workload, coupled.flow.face_volume_flux_m3_per_s.canonical_values(), arrival)?
+            .conjugate_heat_at(
+                workload,
+                coupled.flow.face_volume_flux_m3_per_s.canonical_values(),
+                arrival,
+            )?
             .recover_step(
                 &coupled.departure,
                 &coupled.energy,
@@ -359,7 +363,7 @@ impl FluidSteadySolverResult {
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
-        self.validate_prepared(workload, &workload.prepare(mesh)?, mesh)
+        self.validate_prepared(workload, &*workload.prepare(mesh)?, mesh)
     }
     pub fn recover_original(
         &self,
@@ -371,7 +375,7 @@ impl FluidSteadySolverResult {
         // Return retained verified evidence, not a recomputed replacement field.
         Ok(self.original().residual.clone())
     }
-    fn validate_prepared(
+    pub(super) fn validate_prepared(
         &self,
         workload: &FluidSteadyWorkload,
         source: &PreparedFluidSource,

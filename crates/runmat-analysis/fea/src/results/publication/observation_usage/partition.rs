@@ -25,8 +25,10 @@ pub(super) fn validate_partition_tasks(
         if selections.len() != partition_plan.partitions.len() {
             return Err(invalid("execution source groups omit canonical partitions"));
         }
+        // One source and partition-plan validation serves every partition and the reduction.
+        crate::execution::validate_published_observation_source(source, partition_plan)?;
         for (partition, selected) in partition_plan.partitions.iter().zip(selections) {
-            let request = ObservationPartitionEvaluationRequest::published_identity(
+            let request = ObservationPartitionEvaluationRequest::published_identity_validated(
                 source,
                 partition_plan,
                 partition,
@@ -53,7 +55,7 @@ pub(super) fn validate_partition_tasks(
                         && value.source_value_count.0 == values)
             })?;
         }
-        let request = ObservationPartitionReductionRequest::published_identity(
+        let request = ObservationPartitionReductionRequest::published_identity_validated(
             source,
             partition_plan,
             &evidence.contributions,

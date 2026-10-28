@@ -170,6 +170,9 @@ fn function_facts(
             .map(operation_pattern_from_value_fact)
             .collect(),
         effects: semantic.effects.clone(),
+        // Static editor facts carry no compiled proof of cooperative suspension, so a
+        // suspending callable is checked as non-cooperative (the stricter contract).
+        cooperative_suspension: false,
         capabilities: semantic.capabilities.clone(),
     })
 }

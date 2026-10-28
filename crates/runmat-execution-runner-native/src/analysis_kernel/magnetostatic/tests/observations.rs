@@ -486,6 +486,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                     program_revision: task.program.request.recipe.program_revision.clone(),
                     chunk_bytes: 1024,
                     inventory_limits: limits,
+                    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 }
             };
         assert!(prepare_observation_fanout(
