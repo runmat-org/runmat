@@ -75,7 +75,7 @@ sobol = { workspace = true }
 nalgebra = "0.32"
 faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg", "sparse-linalg"] }
 rustfft = "6.2"
-futures = "0.3"
+futures = "0.3.32"
 pin-project-lite = "0.2.17"
 async-recursion = "1.1"
 flate2 = "1.1"

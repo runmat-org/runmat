@@ -19,6 +19,8 @@ use crate::{
     GeometryFormat,
 };
 
+mod map_entries;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportedExactCad {
@@ -49,9 +51,11 @@ pub struct ImportedExactCad {
     /// names), in precedence order. A face that shared interfaces made from several authored
     /// faces carries all of their names, the smallest owning solid's first. Like
     /// `source_face_ids`, this selector metadata does not enter canonical geometry identity.
+    #[serde(with = "map_entries")]
     pub entity_names: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
     /// Presentation layers (STEP `PRESENTATION_LAYER_ASSIGNMENT`) on faces and solids; a solid
     /// also carries its part's layers. Selector metadata outside canonical geometry identity.
+    #[serde(with = "map_entries")]
     pub entity_tags: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
     /// Analysis identity and mutation policy admitted before the kernel import. Keeping this on
     /// the imported object prevents closure construction from claiming a different tolerance or
@@ -63,7 +67,7 @@ pub struct ImportedExactCad {
         BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
     /// Exact result-table join used only while translating kernel feature history. Shape-table
     /// keys never become semantic identity and never cross the geometry contract boundary.
-    #[serde(with = "kernel_entity_id_wire")]
+    #[serde(with = "map_entries")]
     pub(crate) kernel_entity_ids: BTreeMap<
         (u64, runmat_geometry_core::PersistentEntityKind, u64),
         runmat_geometry_core::PersistentEntityId,
@@ -531,31 +535,6 @@ pub fn import_exact_cad(
 
 #[cfg(test)]
 mod tests;
-
-// JSON object keys cannot represent the kernel-private composite join key.
-// Keep every entry when transferring the validated native import to a WASM host.
-mod kernel_entity_id_wire {
-    use super::*;
-    type Key = (u64, runmat_geometry_core::PersistentEntityKind, u64);
-    type Id = runmat_geometry_core::PersistentEntityId;
-    pub fn serialize<S: serde::Serializer>(
-        value: &BTreeMap<Key, Id>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        value.iter().collect::<Vec<_>>().serialize(serializer)
-    }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<Key, Id>, D::Error> {
-        let entries = Vec::<(Key, Id)>::deserialize(deserializer)?;
-        let count = entries.len();
-        let result: BTreeMap<_, _> = entries.into_iter().collect();
-        if result.len() != count {
-            return Err(serde::de::Error::custom("duplicate kernel entity identity"));
-        }
-        Ok(result)
-    }
-}
 
 mod representation_wire {
     use base64::{engine::general_purpose::STANDARD, Engine};
