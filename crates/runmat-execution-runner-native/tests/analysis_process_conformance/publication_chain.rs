@@ -152,6 +152,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             program_revision: program_revision.clone(),
             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: limits,
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
         runmat_analysis_fea::results::field::RecoveredFieldSample::Final,
         None,

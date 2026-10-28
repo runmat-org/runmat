@@ -421,7 +421,7 @@ impl FluidSteadySolverResult {
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<u64> {
-        profile::requested_bytes(self, workload, &workload.prepare(mesh)?)
+        profile::requested_bytes(self, workload, &*workload.prepare(mesh)?)
     }
     pub fn native_field_topology(
         &self,
@@ -429,8 +429,8 @@ impl FluidSteadySolverResult {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<FiniteVolumeFieldTopology> {
         // Validate without cloning retained residual/traction arrays.
-        self.validate_for(workload, mesh)?;
         let source = workload.prepare(mesh)?;
+        self.validate_prepared(workload, &source, mesh)?;
         profile::admit(self, workload, &source)?;
         FiniteVolumeFieldTopology::derive(&source.source, &source.topology).map_err(invalid)
     }
@@ -441,11 +441,11 @@ impl FluidSteadySolverResult {
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<(VolumeMeshLayout, AnalysisProjection)> {
-        self.validate_for(workload, mesh)?;
         let source = workload.prepare(mesh)?;
+        self.validate_prepared(workload, &source, mesh)?;
         profile::admit(self, workload, &source)?;
         let layout = VolumeMeshLayout::derive(&source.source, &source.topology)?;
-        Ok((layout, source.source))
+        Ok((layout, source.source.clone()))
     }
 
     pub fn native_field_request(

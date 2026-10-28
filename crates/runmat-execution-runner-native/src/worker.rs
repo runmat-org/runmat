@@ -25,12 +25,19 @@ enum WorkerExecutionOutcome {
 }
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
-    let (reader, writer) = runmat_process_host::ipc::stdio::endpoint()
+    // The endpoint also selects binary standard streams; its async reader is replaced by the
+    // parent link, which owns the request pipe on its own thread.
+    let (_unused_reader, writer) = runmat_process_host::ipc::stdio::endpoint()
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let limits = FrameLimits {
         max_message_bytes: WORKER_MAX_MESSAGE_BYTES,
     };
-    let channel = collective::StdioCollectiveChannel::new(reader, writer, limits);
+    // Parent loss (the request pipe closing before this worker publishes its terminal frame)
+    // ends the worker at once, even while a non-yielding solve holds the executor.
+    let (parent, frames) =
+        runmat_process_host::ipc::WorkerParentLink::start(std::io::stdin(), limits)
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let channel = collective::StdioCollectiveChannel::new(frames, writer, limits);
     let payload = channel.read_payload().await?;
     // The parent assigns this runnable child to its JobObject before writing
     // the first request. No RunMat provider or foreign helper is initialized
@@ -84,6 +91,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
         }
         Ok(WorkerExecutionOutcome::RetirementUnverified { message, owner }) => {
             let _owner = owner;
+            parent.disarm();
             let payload = serde_json::to_vec(
                 &crate::protocol::WorkerProcessMessage::RetirementUnverified { message },
             );
@@ -102,6 +110,8 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
         ),
     }
     .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    // The parent may close the request pipe as soon as it reads the terminal frame.
+    parent.disarm();
     channel.write_payload(&payload).await?;
     Ok(())
 }

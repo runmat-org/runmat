@@ -97,6 +97,7 @@ pub(super) async fn execute(
         resources,
         &decoded.analysis_accelerator_requests,
         decoded.local_execution,
+        decoded.memory_per_worker_bytes,
     ) {
         Ok(resources) => resources,
         Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error)),

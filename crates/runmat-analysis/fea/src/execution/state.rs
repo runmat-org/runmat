@@ -31,7 +31,7 @@ mod maxwell;
 mod nonlinear;
 pub use electrical::CanonicalElectricalStaticStatePayload;
 pub use fluid::{
-    fluid_state_publication_profiles, fluid_state_publication_requests,
+    fluid_state_publication_profile, fluid_state_publication_requests,
     fluid_state_publication_workspace_bytes, CanonicalFluidStatePayload,
 };
 pub use magnetic::CanonicalMagnetostaticStatePayload;

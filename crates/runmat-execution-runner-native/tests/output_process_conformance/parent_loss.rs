@@ -8,20 +8,33 @@ use runmat_process_host::{
 };
 
 pub(super) async fn verify(config: &NativeExecutionConfig) {
-    let mut call = call_source(1,
-        "function [first, second] = original_output_values(); fprintf(1,'original before parent loss'); while true; first=13; end; second=29; end").await;
-    call.console = Some(ConsoleLimits {
+    // The production launch for a placed Direct program: its exact reservation and console
+    // controls. The source never yields, so only the worker's parent link can observe loss.
+    let mut program = super::portable_units::request(
+        "fprintf(1,'original before parent loss'); while true; first = 13; end",
+        None,
+        0,
+    )
+    .await;
+    program.console = Some(ConsoleLimits {
         max_records: 4,
         max_text_bytes: 100,
     });
-    let request = materialized_request(
-        &call,
-        runmat_execution::OutputContract {
-            owned_work: None,
-            requested_outputs: 1,
+    let request = runmat_execution_artifact::ReservedProgramExecutionRequest::new(
+        program,
+        ResourceRequest {
+            cpu_millicores: config.worker_cpu_millicores,
+            memory_bytes: config.worker_memory_bytes,
+            scratch_bytes: config.worker_scratch_bytes,
+            max_wall_millis: 30_000,
+            max_artifact_bytes: 1024 * 1024,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: vec![],
+            required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
         },
-        runmat_execution_artifact::ProgramTarget::portable("original-parent-loss"),
-    );
+    )
+    .unwrap();
     let mut command = HostCommand::new(&config.executable);
     command.arguments = config.worker_arguments.clone();
     command.max_stderr_bytes = config.max_stderr_bytes;
@@ -32,26 +45,21 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     let limits = FrameLimits {
         max_message_bytes: config.max_message_bytes,
     };
-    write_payload(
-        &mut writer,
-        &serde_json::to_vec(&runmat_execution_artifact::WorkerProgramRequest::Graph(
-            request,
-        ))
-        .unwrap(),
-        limits,
-    )
-    .await
-    .unwrap();
+    write_payload(&mut writer, &serde_json::to_vec(&request).unwrap(), limits)
+        .await
+        .unwrap();
     let bytes = tokio::time::timeout(Duration::from_secs(30), read_payload(&mut reader, limits))
         .await
         .expect("original non-yielding source did not deliver its first write")
         .unwrap();
-    let WorkerProcessMessage::Console { record } = serde_json::from_slice(&bytes).unwrap() else {
-        panic!("worker must stream the original write before entering its loop");
+    let message: WorkerProcessMessage = serde_json::from_slice(&bytes).unwrap();
+    let WorkerProcessMessage::Console { record } = message else {
+        panic!("worker must stream the original write before entering its loop, got {message:?}");
     };
     assert_eq!(record.sequence, 1);
     assert_eq!(record.stream, ConsoleStream::Stdout);
     assert_eq!(record.text.as_ref(), "original before parent loss");
+    let dropped = std::time::Instant::now();
     drop(writer);
     let exit = match tokio::time::timeout(Duration::from_secs(30), child.wait()).await {
         Ok(exit) => exit.unwrap(),
@@ -63,5 +71,8 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     };
     assert!(!exit.success);
     assert_eq!(exit.code, Some(1));
-    println!("non-yielding original worker streamed its prefix and exited on parent loss");
+    println!(
+        "non-yielding original worker streamed its prefix and exited {:?} after parent loss",
+        dropped.elapsed()
+    );
 }

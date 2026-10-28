@@ -14,6 +14,20 @@ pub enum ResourcePlanningError {
         required: u64,
         maximum: u64,
     },
+    /// Neither static solve path fits the effective resident ceiling, min(authored, the memory
+    /// the placement grants one worker). Both paths' requirements are named; a requirement the
+    /// planner could not size (another authored limit bound first) is reported as unknown.
+    #[error(
+        "no static solve path fits the resident memory ceiling of {maximum} bytes: the proving factorization requires {} resident bytes; the elastic rigidity multigrid requires {multigrid_resident_bytes} resident bytes and {} scratch bytes",
+        display_bytes(.factorization_resident_bytes),
+        display_bytes(.multigrid_scratch_bytes)
+    )]
+    StaticSolveCeiling {
+        factorization_resident_bytes: Option<u64>,
+        multigrid_resident_bytes: u64,
+        multigrid_scratch_bytes: Option<u64>,
+        maximum: u64,
+    },
     #[error("worker inventory is insufficient: {0}")]
     Inventory(&'static str),
     #[error("worker lacks required capability `{0:?}`")]
@@ -36,6 +50,13 @@ impl From<runmat_canonical_codec::CanonicalCodecError> for ResourcePlanningError
     fn from(value: runmat_canonical_codec::CanonicalCodecError) -> Self {
         Self::Encoding(value.to_string())
     }
+}
+
+/// The accuracy-ceiling resource name for resident memory.
+pub const RESIDENT_MEMORY_RESOURCE: &str = "resident memory bytes";
+
+fn display_bytes(bytes: &Option<u64>) -> String {
+    bytes.map_or_else(|| "an unknown number of".into(), |bytes| bytes.to_string())
 }
 
 impl ResourcePlanningError {

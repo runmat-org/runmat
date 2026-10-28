@@ -59,16 +59,7 @@ impl CoercivityWorkEnvelope {
             return Err(CoercivityError::IncompatibleOperator);
         }
         let estimate = analyze(pattern)?;
-        let mut edges = std::collections::BTreeSet::new();
-        for row in 0..pattern.rows() {
-            for entry in pattern.row_range(row) {
-                let column = pattern.column(entry);
-                if row != column {
-                    edges.insert((row.min(column), row.max(column)));
-                }
-            }
-        }
-        Self::from_estimate(&estimate, edges.len() as u64)
+        Self::from_estimate(&estimate, undirected_edge_count(pattern))
     }
 
     pub(super) fn from_estimate(estimate: &FactorEstimate, edges: u64) -> Result<Self, CoercivityError> {
@@ -121,6 +112,39 @@ impl CoercivityWorkEnvelope {
     }
 }
 
+/// Distinct unordered off-diagonal pairs `{row, column}` of a square pattern. Rows hold strictly
+/// increasing columns, so a lower entry is a new pair only when its mirror is absent; counting
+/// in place avoids materializing an edge set the size of the operator.
+fn undirected_edge_count(pattern: &SparsePattern) -> u64 {
+    let mut edges = 0_u64;
+    for row in 0..pattern.rows() {
+        for entry in pattern.row_range(row) {
+            let column = pattern.column(entry);
+            let counted = match column.cmp(&row) {
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Equal => false,
+                std::cmp::Ordering::Less => !row_contains(pattern, column, row),
+            };
+            edges += u64::from(counted);
+        }
+    }
+    edges
+}
+
+fn row_contains(pattern: &SparsePattern, row: usize, column: usize) -> bool {
+    let range = pattern.row_range(row);
+    let (mut low, mut high) = (range.start, range.end);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        match pattern.column(middle).cmp(&column) {
+            std::cmp::Ordering::Less => low = middle + 1,
+            std::cmp::Ordering::Greater => high = middle,
+            std::cmp::Ordering::Equal => return true,
+        }
+    }
+    false
+}
+
 /// Floating point operations of the numeric factorization, rounded up.
 pub(super) fn flop_count(estimate: &FactorEstimate) -> u64 {
     if estimate.flops.is_finite() && estimate.flops > 0.0 {
@@ -156,6 +180,26 @@ pub(super) fn analyze(pattern: &SparsePattern) -> Result<FactorEstimate, Coerciv
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn undirected_edges_count_each_unordered_pair_once() {
+        // Rows: 0 -> {0, 2, 3}, 1 -> {0, 1}, 2 -> {0, 2}, 3 -> {1}; pairs {0,2} and {0,3} upper,
+        // {0,1} only lower, {0,2} mirrored, {1,3} only lower: four distinct pairs.
+        let pattern =
+            SparsePattern::try_new(4, 4, vec![0, 3, 5, 7, 8], vec![0, 2, 3, 0, 1, 0, 2, 1])
+                .unwrap();
+        let mut reference = std::collections::BTreeSet::new();
+        for row in 0..pattern.rows() {
+            for entry in pattern.row_range(row) {
+                let column = pattern.column(entry);
+                if row != column {
+                    reference.insert((row.min(column), row.max(column)));
+                }
+            }
+        }
+        assert_eq!(reference.len(), 4);
+        assert_eq!(undirected_edge_count(&pattern), reference.len() as u64);
+    }
 
     #[test]
     fn envelope_quotes_exact_symbolic_counts_with_headroom() {

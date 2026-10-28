@@ -13,6 +13,7 @@ pub fn prepare_structural_study_root(
         materials,
         planning,
         local_execution,
+        memory_per_worker_bytes,
         analysis_accelerator_requests,
         input_materializations,
         initial_fields,
@@ -72,6 +73,7 @@ pub fn prepare_structural_study_root(
             .collect(),
         planning,
         local_execution,
+        memory_per_worker_bytes,
         analysis_accelerator_requests,
         input_materializations: input_materializations
             .iter()
