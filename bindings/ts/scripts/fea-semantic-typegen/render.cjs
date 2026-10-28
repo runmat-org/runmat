@@ -1,15 +1,15 @@
 const { hasSerde, serde, splitTopLevel } = require("./syntax.cjs");
+const { ADAPTER, NARROW, WIDE, renderAdaptedField, wideIntegerError } = require("./wire-integers.cjs");
 
 const TERMINALS = new Map([
   ["bool", "boolean"],
   ["String", "string"],
   ["str", "string"],
   ["f32", "number"], ["f64", "number"],
-  ["i8", "number"], ["i16", "number"], ["i32", "number"], ["i64", "number"], ["isize", "number"],
-  ["u8", "number"], ["u16", "number"], ["u32", "number"], ["u64", "number"], ["usize", "number"],
+  ...NARROW,
   ["LogicalSourcePath", "string"], ["SourceSymbol", "string"], ["ExecutionProfileIdentity", "string"],
   ["PathBuf", "string"], ["ContentDigest", "string"], ["Digest", "string"], ["NormalizedRelativePath", "string"],
-  ["Span", "{ start: number; end: number }"],
+  ["Span", "{ start: WireU64; end: WireU64 }"],
 ]);
 
 function renderReachable(registry, roots, { externalTypes = [] } = {}) {
@@ -89,6 +89,10 @@ function renderSerializedFieldType(raw, attrs, registry, generics, omitsNone = f
   const storageType = storedQuantity ? splitTopLevel(storedQuantity[1])[1] : null;
   if (canonicalStorage && !storageType) throw new Error(`Canonical storage has no explicit shape: ${raw}`);
   const canonicalScalar = ["runmat_types::physical::canonical_scalar", "runmat_types::physical::canonical_scalar::optional"].includes(adapter);
+  if (adapter?.startsWith(ADAPTER)) {
+    if (option && omitsNone && adapter === ADAPTER + "::option") return renderAdaptedField(raw, adapter);
+    return renderAdaptedField(raw, adapter) + (adapter.endsWith("::option") ? " | null" : "");
+  }
   if (binary && raw !== "Vec<u8>") throw new Error("serde_bytes requires a byte vector");
   const type = canonicalStorage ? renderType(storageType, registry, generics) : canonicalScalar ? "number" : binary ? "Uint8Array | number[]" : renderType(option ?? raw, registry, generics);
   return type + (option && !omitsNone ? " | null" : "");
@@ -173,6 +177,7 @@ function renderType(raw, registry, generics) {
   const generic = source.match(/^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Za-z_][A-Za-z0-9_]*)<([\s\S]+)>$/);
   if (generic) return `${generic[1]}<${splitTopLevel(generic[2]).map((value) => renderType(value, registry, generics)).join(", ")}>`;
   const name = source.split("::").at(-1);
+  if (WIDE.has(name)) throw wideIntegerError(source);
   if (TERMINALS.has(name)) return TERMINALS.get(name);
   if (generics.includes(name)) return name;
   if (registry.has(name)) return name;

@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const {splitTopLevel} = require("./fea-semantic-typegen/syntax.cjs");
+const { ADAPTER: WIRE_INTEGER_ADAPTER, renderAdaptedField, wideIntegerError } = require("./fea-semantic-typegen/wire-integers.cjs");
 
 const bindingsRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(bindingsRoot, "../..");
@@ -182,9 +183,10 @@ function rustTypeToTs(type) {
     case "bool":
       return { type: "boolean", nullable: false };
     case "usize":
+    case "u64":
+      throw wideIntegerError(trimmed);
     case "u8":
     case "u16":
-    case "u64":
     case "u32":
     case "f64":
       return { type: "number", nullable: false };
@@ -351,6 +353,8 @@ function readStructBody(source, name) {
   return match.groups.body;
 }
 
+const unboundedWideIntegers = [];
+
 function readStructFields(source, name, options = {}) {
   const body = readStructBody(source, name);
   const fields = [];
@@ -378,6 +382,7 @@ function readStructFields(source, name, options = {}) {
   let skipIfNone = false;
   let canonicalScalar = false;
   let canonicalStorage = false;
+  let wireAdapter = null;
   const renameAll = options.renameAll ?? null;
 
   for (const line of lines) {
@@ -399,6 +404,8 @@ function readStructFields(source, name, options = {}) {
     }
     if (['#[serde(with = "runmat_types::physical::canonical_scalar")]', '#[serde(with = "runmat_types::physical::canonical_scalar::optional")]'].includes(line)) { canonicalScalar = true; continue; }
     if (line === '#[serde(with = "runmat_types::physical::canonical_storage")]') { canonicalStorage = true; continue; }
+    const wireMatch = line.match(/^#\[serde\(with = "(runmat_types::wire_integer(?:::option|::vec)?)"\)\]$/);
+    if (wireMatch) { wireAdapter = wireMatch[1]; continue; }
     if (line.startsWith("#[")) {
       continue;
     }
@@ -412,7 +419,14 @@ function readStructFields(source, name, options = {}) {
     const storageMatch = canonicalStorage ? rustType.match(/^(?:[A-Za-z_][A-Za-z0-9_]*::)*Quantity<([\s\S]+)>$/) : null;
     if (canonicalStorage && !storageMatch) throw new Error(`Canonical storage requires shared quantity shape: ${rustType}`);
     const storageType = storageMatch ? splitTopLevel(storageMatch[1])[1] : null;
-    const tsType = canonicalStorage ? rustTypeToTs(storageType) : canonicalScalar ? (/^Option\s*</.test(rustType) ? { type: "number | null", nullable: true } : { type: "number", nullable: false }) : rustTypeToTs(rustType);
+    // Wide integers are bounded to 2^53 - 1 by the adapter; this file declares no guards, so they stay `number`.
+    let tsType;
+    try {
+    tsType = wireAdapter ? { type: renderAdaptedField(rustType, wireAdapter).replace(/^Wire[UI]64/, "number") + (wireAdapter.endsWith("::option") ? " | null" : ""), nullable: wireAdapter.endsWith("::option") } : canonicalStorage ? rustTypeToTs(storageType) : canonicalScalar ? (/^Option\s*</.test(rustType) ? { type: "number | null", nullable: true } : { type: "number", nullable: false }) : rustTypeToTs(rustType);
+    } catch (error) {
+      unboundedWideIntegers.push(`${name}.${rustName}: ${rustType}`);
+      continue;
+    }
     const defaultName = renameAll === "camelCase" ? snakeToCamel(rustName) : rustName;
     fields.push({
       name: rename ?? defaultName,
@@ -423,6 +437,7 @@ function readStructFields(source, name, options = {}) {
     skipIfNone = false;
     canonicalScalar = false;
     canonicalStorage = false;
+    wireAdapter = null;
   }
 
   return fields;
@@ -563,7 +578,7 @@ export type FeaAccuracyTarget = { observation: string } | { quantity: FeaObserva
 export type FeaAccuracyTolerance = { relative: number } | { absolute: { quantity: FeaObservationQuantity; canonical_value: number } };
 export interface FeaAccuracyCriterion { criterion_id: string; target: FeaAccuracyTarget; contribution: FeaErrorContributionKind; tolerance: FeaAccuracyTolerance; evidence: "a_posteriori_estimator" | "convergence_study" | "conservation_balance" | "residual_bound" | "reference_comparison" | "statistical_confidence" | "transfer_bound"; mandatory: boolean; }
 export type FeaErrorContributionKind = "geometry_admission" | "boundary_approximation" | "spatial_discretization" | "algebraic" | "nonlinear" | "temporal" | "frequency_sampling" | "modal_truncation" | "stochastic" | "coupling" | "interface_projection" | "field_transfer" | "signal_interpolation" | "recovery" | "observation_sampling" | "precision" | "execution_equivalence";
-export interface FeaAccuracyPlan { accuracy_plan_id: string; criteria: FeaAccuracyCriterion[]; unavailable_evidence: "fail" | "mark_indeterminate"; exceeded_limit: "refine" | "tighten_solver" | "extend_sampling" | "fail"; equivalence: "deterministic" | { relative_tolerance: number } | { absolute_tolerance: number }; resources: { maximum_refinement_cycles: number; maximum_solver_tightenings: number; maximum_samples: number; maximum_wall_time_milliseconds: number; maximum_resident_bytes: number }; }
+export interface FeaAccuracyPlan { accuracy_plan_id: string; criteria: FeaAccuracyCriterion[]; unavailable_evidence: "fail" | "mark_indeterminate"; exceeded_limit: "refine" | "tighten_solver" | "extend_sampling" | "fail"; equivalence: "deterministic" | { relative_tolerance: number } | { absolute_tolerance: number }; resources: { maximum_refinement_cycles: number; maximum_solver_tightenings: number; maximum_samples: number; maximum_wall_time_milliseconds: number; maximum_resident_bytes: number | null }; }
 export interface FeaProcedureStep {
   step_id: string; family: FeaPhysicsFamily; procedure: FeaAnalysisProcedure; solution_space: "direct" | "modal_reduced";
   excitation_case_selection: "all" | { only: string[] };
@@ -675,6 +690,9 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     ...analysisInterfaces.flatMap((interfaceSource) => [interfaceSource, ""]),
     canonicalInputs,
   ].join("\n");
+  if (unboundedWideIntegers.length) {
+    throw new Error(`FEA analysis contract fields lack the 2^53 - 1 wire-integer adapter (#[serde(with = "${WIRE_INTEGER_ADAPTER}[::option|::vec]")]):\n  ${unboundedWideIntegers.join("\n  ")}`);
+  }
   fs.writeFileSync(outputPath, contents);
   console.log(
     `Generated ${constants.length} FEA analysis constants, ${enumTypes.length + progressEnums.length + authoringEnums.length} type unions, and ${progressInterfaces.length + analysisInterfaces.length} analysis interfaces.`

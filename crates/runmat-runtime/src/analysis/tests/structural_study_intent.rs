@@ -748,20 +748,11 @@ fn structural_modal_intent_recovers_and_publishes_all_mode_shapes_without_resolv
         OperationContext::new(Some("trace-modal-completion".into()), None),
     )
     .expect("modal intent should prepare");
-    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralModal { mut workload } =
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralModal { workload } =
         intent.workloads()
     else {
         panic!("test requires a standalone modal workload")
     };
-    let aliases =
-        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
-            .unwrap();
-    workload
-        .replace_model(
-            runmat_analysis_core::resolve_geometry_region_aliases(workload.model(), &aliases)
-                .unwrap(),
-        )
-        .unwrap();
     let result = runmat_analysis_fea::pipeline::modal::execute_structural_modal_workload(
         &workload,
         &meshing_output.artifact,
@@ -910,16 +901,8 @@ fn modal_transient_intent_publishes_the_exact_basis_and_both_runtime_results() {
     else {
         panic!("second workload must be modal transient")
     };
-    let aliases =
-        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
-            .unwrap();
-    let resolved_model =
-        runmat_analysis_core::resolve_geometry_region_aliases(modal_workload.model(), &aliases)
-            .unwrap();
-    let mut modal_workload = *modal_workload;
-    modal_workload
-        .replace_model(resolved_model.clone())
-        .unwrap();
+    let modal_model = modal_workload.model().clone();
+    let modal_workload = *modal_workload;
     let modal_result = runmat_analysis_fea::pipeline::modal::execute_structural_modal_workload(
         &modal_workload,
         &meshing_output.artifact,
@@ -932,10 +915,10 @@ fn modal_transient_intent_publishes_the_exact_basis_and_both_runtime_results() {
         )
         .unwrap();
     let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
-        &resolved_model.sequence,
+        &modal_model.sequence,
     )
     .unwrap();
-    let modal_step = resolved_model
+    let modal_step = modal_model
         .sequence
         .steps
         .iter()
@@ -959,7 +942,7 @@ fn modal_transient_intent_publishes_the_exact_basis_and_both_runtime_results() {
     )
     .unwrap();
     let mut template = *template;
-    template.model = resolved_model;
+    template.model = modal_model;
     let transition = runmat_analysis_fea::execution::CanonicalStateTransition::bind_upstream(
         &template.model,
         &template.step_id,
@@ -1921,7 +1904,6 @@ fn ready_minimal_meshing_output() -> crate::meshing::MeshingExecutionOutput {
     crate::meshing::MeshingExecutionOutput {
         artifact,
         evidence,
-        region_aliases: std::collections::BTreeMap::new(),
     }
 }
 

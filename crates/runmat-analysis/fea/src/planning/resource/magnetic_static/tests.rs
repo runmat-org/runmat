@@ -135,7 +135,7 @@ fn magnetic_resource_authority_and_low_ceiling_fail_closed() {
     low.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(magnetostatic_result_payload_bytes_upper_bound(&low, &m).is_err());
     assert!(low.execute_with_resource_plan(&m, &plan).is_err());
 }

@@ -162,7 +162,7 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = u64::from(u32::MAX);
+            .maximum_resident_bytes = Some(u64::from(u32::MAX));
         let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
         let mut flux = workload.model.excitations[0].excitation().clone();
         flux.excitation_id = ExcitationId("flux".into());
@@ -245,7 +245,7 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = total - 1;
+            .maximum_resident_bytes = Some(total - 1);
         assert!(source.reservation_bytes().unwrap().0 > 0);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required, .. }))
@@ -254,7 +254,7 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = total;
+            .maximum_resident_bytes = Some(total);
         workload.execute(&mesh).unwrap();
     }
 }

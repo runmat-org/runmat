@@ -175,7 +175,7 @@ pub fn build_prepared_structural_recovery_resource_plan(
                 .procedure_step()?
                 .accuracy
                 .resources
-                .maximum_resident_bytes
+                .resident_byte_budget()
                 .min(plan.request.memory_bytes),
             &crate::prepared_input_resource_facts(inputs)?,
             plan.input.worker.fixed_memory_bytes,

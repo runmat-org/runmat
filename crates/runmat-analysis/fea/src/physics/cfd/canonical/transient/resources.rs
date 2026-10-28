@@ -55,12 +55,12 @@ pub(super) fn reserve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidRes
             )?,
         )?,
     )?;
-    if result.resident_bytes_upper_bound > p.policy.maximum_resident_bytes
+    if result.resident_bytes_upper_bound > p.policy.resident_byte_budget()
         || result.resident_bytes_upper_bound > isize::MAX as u64
     {
         return Err(Error::Resource("transient resident bytes"));
     }
-    if result.operator_work_upper_bound > p.policy.maximum_operator_work {
+    if result.operator_work_upper_bound > p.policy.operator_work_budget() {
         return Err(Error::Resource("transient operator work"));
     }
     Ok(result)

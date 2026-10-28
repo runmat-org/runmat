@@ -137,12 +137,12 @@ fn prepare_for<'a>(
         .ok_or(crate::planning::resource::ResourcePlanningError::Overflow(
             "original nonlinear preparation plus retained context",
         ))?;
-    if required > execution_step.accuracy.resources.maximum_resident_bytes {
+    if required > execution_step.accuracy.resources.resident_byte_budget() {
         return Err(
             crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
                 resource: "original nonlinear preparation plus retained context",
                 required,
-                maximum: execution_step.accuracy.resources.maximum_resident_bytes,
+                maximum: execution_step.accuracy.resources.resident_byte_budget(),
             }
             .into(),
         );

@@ -10,7 +10,7 @@ pub fn initial_field_source_ceiling(
     sequence
         .steps
         .iter()
-        .map(|step| step.accuracy.resources.maximum_resident_bytes)
+        .map(|step| step.accuracy.resources.resident_byte_budget())
         .min()
         .ok_or_else(|| {
             ResourcePlanningError::Invalid(

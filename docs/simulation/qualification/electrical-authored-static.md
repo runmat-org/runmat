@@ -45,8 +45,9 @@ is used.
 
 ## Independent reference and exact ownership
 
-OCCT constructs and reimports a 1 m × 1 m × 1 m prism. Authored persistent faces
-`face_000001` and `face_000002` must resolve to x=0 and x=1 respectively;
+OCCT constructs and reimports a 1 m × 1 m × 1 m prism. The study selects its first
+two source faces by their canonical persistent identities
+(`persistent-entity:sha256:...`), which must resolve to x=0 and x=1 respectively;
 all boundary-node coordinates, outward orientation and unit face area are checked
 against the actual canonical mesh. Constant prescribed potentials act on those
 faces; remaining faces have natural zero flux. Every physical volume element must

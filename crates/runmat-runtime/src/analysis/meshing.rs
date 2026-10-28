@@ -1,9 +1,7 @@
 //! Runtime composition boundary for canonical study meshing.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::CanonicalMeshingContract;
 use sha2::{Digest as _, Sha256};
 
@@ -15,7 +13,6 @@ use super::{
 pub(crate) struct ResolvedStudyMesh {
     pub artifact_path: Option<String>,
     pub evidence_path: Option<String>,
-    pub region_aliases: BTreeMap<String, PersistentEntityId>,
 }
 
 pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStudyMesh, String> {
@@ -25,14 +22,12 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
         return Ok(ResolvedStudyMesh {
             artifact_path: Some(path.to_owned()),
             evidence_path: spec.meshing_evidence_artifact_path.clone(),
-            region_aliases: BTreeMap::new(),
         });
     }
     let Some(settings) = spec.meshing_settings.clone() else {
         return Ok(ResolvedStudyMesh {
             artifact_path: None,
             evidence_path: None,
-            region_aliases: BTreeMap::new(),
         });
     };
     let output = crate::meshing::execute_meshing(&crate::meshing::MeshingExecutionRequest {
@@ -82,14 +77,13 @@ pub(super) fn meshing_contact_definitions_for_model(
 pub(crate) fn persist_mesh_output(
     output: &crate::meshing::MeshingExecutionOutput,
 ) -> Result<ResolvedStudyMesh, String> {
-    persist_mesh_borrowed(&output.artifact, &output.evidence, &output.region_aliases)
+    persist_mesh_borrowed(&output.artifact, &output.evidence)
 }
 
 /// Persist original admitted inventories without constructing a second mesh owner.
 pub(crate) fn persist_mesh_borrowed(
     artifact: &runmat_meshing_core::SolverMeshArtifact,
     evidence: &runmat_meshing_core::MeshingEvidence,
-    region_aliases: &BTreeMap<String, PersistentEntityId>,
 ) -> Result<ResolvedStudyMesh, String> {
     let artifact_digest = encode_digest(artifact.canonical_digest.bytes());
     let root = current_fea_runtime_config()
@@ -119,7 +113,6 @@ pub(crate) fn persist_mesh_borrowed(
     Ok(ResolvedStudyMesh {
         artifact_path: Some(artifact_path.display().to_string()),
         evidence_path: Some(evidence_path.display().to_string()),
-        region_aliases: region_aliases.clone(),
     })
 }
 

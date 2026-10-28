@@ -50,6 +50,8 @@ pub struct ExecutionResourceLimits {
     /// `None` (the default) admits every core of the worker; the host resolves it once.
     #[serde(default)]
     pub cpu_threads_per_worker: Option<u32>,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub maximum_memory_bytes_per_worker: Option<u64>,
     pub accelerators: AcceleratorPreference,
 }

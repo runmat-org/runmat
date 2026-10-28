@@ -157,7 +157,7 @@ fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
             .is_err()
     );
     let mut low = f.input();
-    low.policy.maximum_operator_work = full.reservation().operator_work_upper_bound - 1;
+    low.policy.maximum_operator_work = Some(full.reservation().operator_work_upper_bound - 1);
     assert!(FluidTransientBlock::prepare(&model, &step.step_id, low, previous, 0..3).is_err());
     assert!(
         FluidTransientBlock::prepare(&model, &step.step_id, f.input(), previous, 0..4).is_err()
@@ -194,7 +194,7 @@ fn fluid_time_schedule_uses_authored_observations_and_rejects_false_step_domain(
     tiny.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(FluidTransientSchedule::derive(&tiny, &tiny.sequence.steps[0]).is_err());
     s.independent_domain = IndependentDomain::Static;
     w.model.sequence.steps[0] = s.clone();

@@ -110,10 +110,15 @@ fn selected_source_replanning_preserves_original_authority_and_rejects_other_int
     wrong.scope = ThermalStudyScope::Standalone;
     assert!(ThermalStudyCoordinator::new(wrong).is_err());
     let mut wrong = retained_preparation();
-    wrong.product.compiled.model.sequence.steps[0]
+    let resources = &mut wrong.product.compiled.model.sequence.steps[0]
         .accuracy
-        .resources
-        .maximum_resident_bytes -= 1;
+        .resources;
+    resources.maximum_resident_bytes = Some(
+        resources
+            .resident_byte_budget()
+            .min(runmat_types::wire_integer::MAX_WIRE_INTEGER)
+            - 1,
+    );
     assert!(ThermalStudyCoordinator::new(wrong).is_err());
     let mut wrong = retained_preparation();
     wrong.field_source = None;

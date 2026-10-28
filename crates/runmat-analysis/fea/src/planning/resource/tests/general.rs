@@ -83,7 +83,7 @@ fn governed_general_demand_obeys_the_original_resource_ceiling() {
     let mut planned = input(PartitioningPolicy::Monolithic);
     operator_mut(&mut planned).solve =
         SolveResourcePolicy::GeneralSparse(general(policy(), 1_000_000));
-    planned.accuracy_ceiling.maximum_resident_bytes = 100;
+    planned.accuracy_ceiling.maximum_resident_bytes = Some(100);
     assert!(matches!(
         build_resource_plan(planned),
         Err(ResourcePlanningError::AccuracyCeiling {

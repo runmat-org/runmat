@@ -214,7 +214,7 @@ impl ObservationPublicationCatalog {
     /// alone excludes observation declarations and cannot establish this relationship.
     /// This checks authorship, not mesh-derived target indices; use `validate_for` for both.
     pub fn validate_authored_step(&self, step: &ProcedureStep) -> AnalysisExecutionResult<()> {
-        self.validate_metadata_admitted(step.accuracy.resources.maximum_resident_bytes)?;
+        self.validate_metadata_admitted(step.accuracy.resources.resident_byte_budget())?;
         if self.declarations != step.observations
             || self.plan.step_id != step.step_id
             || self.plan.independent_domain != step.independent_domain

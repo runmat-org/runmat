@@ -39,7 +39,7 @@ pub(super) fn ceiling(
     workload: &FluidSteadyWorkload,
 ) -> Result<runmat_analysis_core::AccuracyResourceCeiling, ResourcePlanningError> {
     let mut ceiling = workload.model.sequence.steps[0].accuracy.resources;
-    ceiling.maximum_resident_bytes = workload.resident_ceiling().map_err(invalid)?;
+    ceiling.set_resident_byte_budget(workload.resident_ceiling().map_err(invalid)?);
     Ok(ceiling)
 }
 

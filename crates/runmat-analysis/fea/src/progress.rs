@@ -35,9 +35,11 @@ pub struct FeaProgressEvent {
     pub phase: FeaProgressPhase,
     pub status: FeaProgressStatus,
     pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub current: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub total: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fraction: Option<f64>,

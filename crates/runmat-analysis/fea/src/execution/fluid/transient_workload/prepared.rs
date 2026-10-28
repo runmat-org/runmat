@@ -15,11 +15,12 @@ impl PreparedFluidTransient<'_> {
     }
     pub(super) fn block(&self) -> AnalysisExecutionResult<super::super::FluidTransientBlock<'_>> {
         let mut policy = self.workload.policy;
-        policy.maximum_resident_bytes = self
-            .workload
-            .resident_ceiling()?
-            .checked_sub(self.source.preparation_resident_bytes)
-            .ok_or_else(|| invalid("transient source exhausts block ceiling"))?;
+        policy.set_resident_byte_budget(
+            self.workload
+                .resident_ceiling()?
+                .checked_sub(self.source.preparation_resident_bytes)
+                .ok_or_else(|| invalid("transient source exhausts block ceiling"))?,
+        );
         let schedule = super::super::FluidTransientSchedule::derive(
             &self.workload.model,
             self.workload.selected_step()?,

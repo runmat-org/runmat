@@ -311,8 +311,8 @@ fn graded_slab_solver_benchmark() {
     let mut f = f;
     // Benchmark budgets: the study converges in a handful of coupled steps.
     f.policy.maximum_outer_iterations = 50;
-    f.policy.maximum_resident_bytes = 24_000_000_000;
-    f.policy.maximum_operator_work = u64::MAX / 4;
+    f.policy.maximum_resident_bytes = Some(24_000_000_000);
+    f.policy.maximum_operator_work = None;
     let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
     let prepare = start.elapsed().as_secs_f64();
     let cells = p.topology.cells.len();

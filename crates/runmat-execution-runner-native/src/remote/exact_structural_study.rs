@@ -179,20 +179,19 @@ pub(super) async fn execute_with_completed_meshing(
         ));
     }
 
-    let aliases = match &completed.regions {
-        super::exact_meshing::MeshedGeometryRegions::PersistentEntities(aliases) => aliases,
+    match &completed.regions {
+        super::exact_meshing::MeshedGeometryRegions::PersistentEntities => {}
         super::exact_meshing::MeshedGeometryRegions::Materialized(regions) => {
             return Ok(RemoteExactStructuralStudyComposition::Failed(format!(
                 "{} typed geometry regions require mesh-property compilation before structural execution",
                 regions.len()
             )))
         }
-    };
+    }
     let resolution = TopologyRegionResolution {
-        schema_version: 1,
+        schema_version: TopologyRegionResolution::SCHEMA_VERSION,
         geometry_source_digest: decoded.geometry_source_digest,
         solver_mesh_digest: Digest::from_bytes(*completed.result.artifact.canonical_digest.bytes()),
-        aliases: aliases.clone(),
     };
     resolution.validate()?;
     let region_resolution_objects =
@@ -223,9 +222,6 @@ pub(super) async fn execute_with_completed_meshing(
         Ok(completed) => completed,
         Err(terminal) => return Ok(signal_composition(terminal)),
     };
-    if let Err(error) = resolve_model_boundary_aliases(&mut resolved_model, &resolution) {
-        return Ok(RemoteExactStructuralStudyComposition::Failed(error));
-    }
     workloads.replace_model(resolved_model).map_err(protocol)?;
     let task_resources = match admit_analysis_task_resources(
         resources,
@@ -465,65 +461,4 @@ pub(super) fn composition(
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
-}
-
-fn resolve_model_boundary_aliases(
-    model: &mut runmat_analysis_core::AnalysisModel,
-    resolution: &TopologyRegionResolution,
-) -> Result<(), String> {
-    let aliases = runmat_analysis_core::GeometryRegionAliases::new(resolution.aliases.clone())
-        .map_err(|error| error.to_string())?;
-    *model = runmat_analysis_core::resolve_geometry_region_aliases(model, &aliases)
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use runmat_analysis_fea::execution::StructuralLinearWorkload;
-    use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
-    use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
-    use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
-    use runmat_analysis_fea::ComputeBackend;
-    use runmat_execution::Digest;
-    use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
-
-    use super::*;
-
-    #[test]
-    fn unresolved_importer_alias_is_a_coordinator_resolution_failure() {
-        let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let step_id = model.sequence.steps[0].step_id.clone();
-        let mut workload = StructuralLinearWorkload {
-            schema_version: 2,
-            model,
-            step_id,
-            backend: ComputeBackend::Cpu,
-            preconditioner: SpdPreconditionerKind::Auto,
-            algebra_backend: LinearAlgebraBackendKind::CpuReference,
-            observation_execution:
-                runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
-            require_solver_mesh_for_solid: true,
-            state_input: None,
-        };
-        workload.model.constraints[0].visit_targets_mut(|target| {
-            *target = runmat_analysis_core::RegionTarget::boundary("face_000002")
-        });
-        let resolution = TopologyRegionResolution {
-            schema_version: 1,
-            geometry_source_digest: Digest::sha256(b"geometry"),
-            solver_mesh_digest: Digest::sha256(b"mesh"),
-            aliases: BTreeMap::from([(
-                "face_000001".into(),
-                PersistentEntityId::new(
-                    PersistentEntityKind::Face,
-                    "face-a".into(),
-                    vec!["root".into()],
-                ),
-            )]),
-        };
-
-        let error = resolve_model_boundary_aliases(&mut workload.model, &resolution).unwrap_err();
-        assert!(error.contains("face_000002"));
-    }
 }

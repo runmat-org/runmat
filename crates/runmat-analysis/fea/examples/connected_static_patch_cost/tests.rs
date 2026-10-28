@@ -46,7 +46,7 @@ fn connected_preflight_tracks_expanded_proof_and_upper_pattern_fallback() {
         let ceiling = model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes;
+            .resident_byte_budget();
         let workload = StructuralLinearWorkload {
             schema_version: 2,
             step_id: model.sequence.steps[0].step_id.clone(),
@@ -80,7 +80,7 @@ fn connected_preflight_tracks_expanded_proof_and_upper_pattern_fallback() {
             capped.model.sequence.steps[0]
                 .accuracy
                 .resources
-                .maximum_resident_bytes = 32 * 1024 * 1024;
+                .maximum_resident_bytes = Some(32 * 1024 * 1024);
             let error = build_structural_resource_plan(
                 Some(&mesh),
                 &constraints,
@@ -142,7 +142,7 @@ fn refined_connected_tet10_preflight_reserves_and_rejects_a_lower_ceiling() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = plan.request.memory_bytes - 1;
+        .maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
     assert!(matches!(
         build_structural_resource_plan(
             Some(&mesh),

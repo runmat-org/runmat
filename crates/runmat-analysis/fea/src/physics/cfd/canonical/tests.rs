@@ -488,10 +488,10 @@ fn closed_gauge_overlap_nonfinite_and_resource_inputs_fail_closed() {
     f.constraints.push(f.constraints[0].clone());
     assert!(CanonicalFluidProblem::prepare(f.input()).is_err());
     let mut f = case(1, ReferenceCase::Couette, false);
-    f.policy.maximum_resident_bytes = 1;
+    f.policy.maximum_resident_bytes = Some(1);
     assert!(CanonicalFluidProblem::prepare(f.input()).is_err());
     let mut f = case(1, ReferenceCase::Couette, false);
-    f.policy.maximum_operator_work = 1;
+    f.policy.maximum_operator_work = Some(1);
     assert!(CanonicalFluidProblem::prepare(f.input()).is_err());
     let mut f = case(1, ReferenceCase::Couette, false);
     f.material = material();
@@ -647,4 +647,37 @@ fn coupled_solve_reaches_the_segregated_fixed_point_in_far_fewer_outer_iteration
         coupled.outer_iterations,
         segregated.outer_iterations
     );
+}
+
+#[test]
+fn policy_caps_are_null_without_a_cap_and_share_the_wire_bound() {
+    use super::CanonicalFluidPolicy;
+    let policy = CanonicalFluidPolicy::default();
+    let json = serde_json::to_value(policy).unwrap();
+    assert!(json["maximum_resident_bytes"].is_null());
+    assert!(json["maximum_operator_work"].is_null());
+    assert_eq!(serde_json::from_value::<CanonicalFluidPolicy>(json.clone()).unwrap(), policy);
+    assert_eq!(policy.resident_byte_budget(), u64::MAX);
+    assert_eq!(policy.operator_work_budget(), u64::MAX);
+    let max = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+    for field in ["maximum_resident_bytes", "maximum_operator_work"] {
+        let with = |value: serde_json::Value| {
+            let mut json = json.clone();
+            json[field] = value;
+            serde_json::from_value::<CanonicalFluidPolicy>(json)
+        };
+        let decoded = with(max.into()).unwrap();
+        assert_eq!(decoded.resident_byte_budget().min(decoded.operator_work_budget()), max);
+        assert!(with((max + 1).into()).is_err());
+        assert!(with((-1).into()).is_err());
+        assert!(with(1.5.into()).is_err());
+        let mut omitted = json.clone();
+        omitted.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<CanonicalFluidPolicy>(omitted).is_err());
+        let zero = with(0.into()).unwrap();
+        assert!(zero.validate().is_err());
+    }
+    let mut wide = policy;
+    wide.maximum_operator_work = Some(max + 1);
+    assert!(serde_json::to_value(wide).is_err());
 }

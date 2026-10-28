@@ -12,7 +12,7 @@ pub(crate) fn time_breakpoints(
         step,
         start_time_s,
         end_time_s,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
     .map(|(points, _)| points)
 }

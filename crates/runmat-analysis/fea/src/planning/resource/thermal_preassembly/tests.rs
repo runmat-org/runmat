@@ -13,6 +13,10 @@ fn workload() -> ThermalWorkload {
     });
     model.sequence =
         AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_transient("heat")]);
+    // The authored ceiling is part of the encoded model, so resident requirements are
+    // measured under a non-binding authored ceiling (present, like the ceilings tests author).
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
+        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -61,7 +65,7 @@ fn field_construction_scratch_is_composed_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required - scratch;
+            .maximum_resident_bytes = Some(required - scratch);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(
             ResourcePlanningError::AccuracyCeiling { required: actual, .. }
@@ -70,7 +74,7 @@ fn field_construction_scratch_is_composed_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required;
+            .maximum_resident_bytes = Some(required);
         let result = workload.execute(&mesh).unwrap();
         assert_eq!(result.run.identity, facts.admitted_identity);
         assert_eq!(result.run.identity, admitted_identity(&workload, &mesh));
@@ -90,7 +94,7 @@ fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = u64::from(u32::MAX);
+        .maximum_resident_bytes = Some(u64::from(u32::MAX));
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let schedule = workload.solve_schedule().unwrap();
     let facts = ThermalPreassemblyResourceFacts::derive(
@@ -107,7 +111,7 @@ fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - 1;
+        .maximum_resident_bytes = Some(required - 1);
     // The catalog is part of that complete requirement.
     assert!(catalog > 0 && catalog < required);
     let outcome = workload.execute(&mesh);
@@ -211,8 +215,7 @@ fn assignment_diagnostics_are_admitted_and_checked_before_retention() {
             facts.assignment_diagnostics
         );
         let mut bounded = step.clone();
-        bounded.accuracy.resources.maximum_resident_bytes =
-            preassembly.reservation_bytes().unwrap().0 - 1;
+        bounded.accuracy.resources.maximum_resident_bytes = Some(preassembly.reservation_bytes().unwrap().0 - 1);
         assert!(matches!(
             ThermalPreassemblyResourceFacts::derive(
                 &[],
@@ -240,7 +243,7 @@ fn mesh_validation_is_admitted_before_projection_in_derivation_and_execution() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1_000_000;
+        .maximum_resident_bytes = Some(1_000_000);
     let schedule = workload.solve_schedule().unwrap();
     assert!(matches!(
         ThermalPreassemblyResourceFacts::derive(
@@ -262,7 +265,7 @@ fn mesh_validation_is_admitted_before_projection_in_derivation_and_execution() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = u64::MAX;
+        .maximum_resident_bytes = None;
     assert!(matches!(
         workload.execute(&mesh),
         Err(crate::FeaRunError::Resource(
@@ -360,7 +363,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required - 1;
+            .maximum_resident_bytes = Some(required - 1);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(
             ResourcePlanningError::AccuracyCeiling { required: actual, maximum, .. }
@@ -369,7 +372,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required;
+            .maximum_resident_bytes = Some(required);
         let result = workload.execute(&mesh).unwrap();
         assert!(result
             .temperature_snapshots
@@ -413,7 +416,7 @@ fn planning_ceiling_precedes_geometric_projection_at_exact_boundary() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required - 1;
+            .maximum_resident_bytes = Some(required - 1);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(
             ResourcePlanningError::AccuracyCeiling { required: actual, maximum, .. }
@@ -422,7 +425,7 @@ fn planning_ceiling_precedes_geometric_projection_at_exact_boundary() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required;
+            .maximum_resident_bytes = Some(required);
         let expected = crate::topology::AnalysisProjectionError::InvalidElementGeometry {
             element_id: mesh.topology.volume_elements[0].element_id,
         }
@@ -488,14 +491,14 @@ fn retained_property_metadata_is_reserved_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required - 1;
+            .maximum_resident_bytes = Some(required - 1);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual, .. })) if actual == required)
         );
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required;
+            .maximum_resident_bytes = Some(required);
         workload.execute(&mesh).unwrap();
     }
 }

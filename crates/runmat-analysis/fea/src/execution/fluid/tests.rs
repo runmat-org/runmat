@@ -114,8 +114,8 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
             pressure_relaxation: 0.25,
             linear_relative_tolerance: 1e-10,
             physical_relative_tolerance: 1e-8,
-            maximum_resident_bytes: 1_000_000_000,
-            maximum_operator_work: 1_000_000_000_000,
+            maximum_resident_bytes: Some(1_000_000_000),
+            maximum_operator_work: Some(1_000_000_000_000),
             maximum_authority_items: 100,
         },
         geometry_policy: FiniteVolumeProjectionPolicy {
@@ -456,8 +456,7 @@ fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expan
             > projection.numerical.resident_bytes_upper_bound
     );
     let mut caller_limited = workload.clone();
-    caller_limited.policy.maximum_resident_bytes =
-        projection.phase_resident_bytes_upper_bound.0 - 1;
+    caller_limited.policy.maximum_resident_bytes = Some(projection.phase_resident_bytes_upper_bound.0 - 1);
     assert!(caller_limited.prepare(&mesh).is_ok());
     assert!(
         crate::planning::resource::derive_fluid_steady_resource_projection(&caller_limited, &mesh)
@@ -466,7 +465,7 @@ fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expan
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(workload.prepare(&mesh).is_err());
     assert!(
         crate::planning::resource::derive_fluid_steady_resource_projection(&workload, &mesh)
@@ -592,7 +591,7 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
     )
     .unwrap();
     let mut low_preparation = workload.clone();
-    low_preparation.policy.maximum_resident_bytes = numerical.resident_bytes_upper_bound;
+    low_preparation.policy.maximum_resident_bytes = Some(numerical.resident_bytes_upper_bound);
     let mut invalid_geometry = mesh.clone();
     invalid_geometry.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     let error = low_preparation
@@ -605,7 +604,7 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
         "{error}"
     );
     let mut wrong = workload.clone();
-    wrong.policy.maximum_resident_bytes = 1;
+    wrong.policy.maximum_resident_bytes = Some(1);
     assert!(FluidSteadySolverResult::from_canonical_bytes_for(
         &bytes,
         Digest::sha256(&bytes),
@@ -614,7 +613,7 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
     )
     .is_err());
     let mut wrong = workload.clone();
-    wrong.policy.maximum_operator_work = 1;
+    wrong.policy.maximum_operator_work = Some(1);
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
     wrong.model.sequence.steps[0].procedure = AnalysisProcedure::TransientResponse;

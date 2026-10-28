@@ -41,7 +41,7 @@ fn original_source(
     unique(inputs, Kind::SolverResult)?;
     let facts = crate::object::prepared_input_resource_facts_from_refs(inputs.iter().copied())?;
     if facts.decoded_resident_bytes_admission_budget.0
-        > request.plan.resources.maximum_resident_bytes
+        > request.plan.resources.resident_byte_budget()
     {
         return Err(invalid(
             "fluid accuracy source decode exceeds authored ceiling",

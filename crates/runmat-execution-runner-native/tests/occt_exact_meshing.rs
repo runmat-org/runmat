@@ -86,15 +86,13 @@ fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
                 .any(|region| region.region_id == element.region_id)
         }));
 
-    let aliases = runmat_analysis_core::GeometryRegionAliases::new(
-        topology
-            .regions
-            .iter()
-            .enumerate()
-            .map(|(index, region)| (format!("solid_{:06}", index + 1), region.id.clone()))
-            .collect(),
-    )
-    .expect("source-solid aliases should be valid");
+    // Model regions name each CAD solid by its canonical persistent selector; the solver matches
+    // that selector against the mesh provenance directly.
+    let selectors = topology
+        .regions
+        .iter()
+        .map(|region| region.id.analysis_selection_id().unwrap())
+        .collect::<Vec<_>>();
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
     );
@@ -108,13 +106,11 @@ fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
     .map(runmat_types::physical::MassDensity::new);
     model.materials.push(second_material);
     model.material_assignments = vec![
-        material_assignment("solid_000001", &model.materials[0].material_id),
-        material_assignment("solid_000002", &model.materials[1].material_id),
+        material_assignment(&selectors[0], &model.materials[0].material_id),
+        material_assignment(&selectors[1], &model.materials[1].material_id),
     ];
-    let resolved = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
-        .expect("source-solid aliases should resolve to persistent identities");
     let inventory =
-        runmat_analysis_fea::properties::compile_solid_property_map(&resolved, &result.artifact)
+        runmat_analysis_fea::properties::compile_solid_property_map(&model, &result.artifact)
             .expect("two selected CAD solids should compile their material assignments");
     runmat_analysis_fea::assembly::solver_solid::assemble_solver_solid_operators(
         &result.artifact,
@@ -122,11 +118,21 @@ fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
     )
     .expect("two selected CAD solids should receive exactly one material each");
 
-    model.material_assignments.pop();
-    let incomplete = runmat_analysis_core::resolve_geometry_region_aliases(&model, &aliases)
-        .expect("the remaining source-solid alias should still resolve");
+    // A legacy importer ordinal is not an identity and selects nothing.
+    let mut legacy = model.clone();
+    legacy.material_assignments[0] =
+        material_assignment("solid_000001", &legacy.materials[0].material_id);
     let error =
-        runmat_analysis_fea::properties::compile_solid_property_map(&incomplete, &result.artifact)
+        runmat_analysis_fea::properties::compile_solid_property_map(&legacy, &result.artifact)
+            .expect_err("a legacy solid_000001 selector must not match a meshed CAD solid");
+    assert!(error.to_string().contains("solid_000001") || matches!(
+        error,
+        runmat_analysis_fea::properties::PropertyCompilationError::InvalidCoverage { .. }
+    ));
+
+    model.material_assignments.pop();
+    let error =
+        runmat_analysis_fea::properties::compile_solid_property_map(&model, &result.artifact)
             .expect_err("unassigned CAD solids must fail during property compilation");
     assert!(matches!(
         error,
@@ -185,7 +191,7 @@ fn execute_fixture_with_layout(
         source_name,
         source_bytes,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
         &GeometryImportContext::new(),
     )
     .unwrap();

@@ -73,8 +73,8 @@ fn policy() -> FluidStudyPlanningPolicy {
             pressure_relaxation: 0.25,
             linear_relative_tolerance: 1e-5,
             physical_relative_tolerance: 1e-8,
-            maximum_resident_bytes: 1_000_000_000,
-            maximum_operator_work: 1_000_000_000_000,
+            maximum_resident_bytes: Some(1_000_000_000),
+            maximum_operator_work: Some(1_000_000_000_000),
             maximum_authority_items: 100,
         },
         geometry: FiniteVolumeProjectionPolicy {

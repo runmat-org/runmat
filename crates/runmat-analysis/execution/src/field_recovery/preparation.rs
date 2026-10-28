@@ -97,7 +97,7 @@ pub fn prepare_structural_field_recovery(
                 .procedure_step()?
                 .accuracy
                 .resources
-                .maximum_resident_bytes,
+                .resident_byte_budget(),
             &source_facts,
             runmat_analysis_fea::planning::resource::ByteCount(0),
         )?;

@@ -9,7 +9,9 @@
 #include <Message_ProgressIndicator.hxx>
 #include <Message_Report.hxx>
 #include <TDF_LabelSequence.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
@@ -212,9 +214,9 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
   TopoDS_Compound compound;
   compound_builder.MakeCompound(compound);
   std::unordered_map<const TopoDS_TShape*, std::size_t> owners;
-  // (volume, name) per shared face, then sorted into the documented precedence.
+  // (volume, name) per shared face, edge or vertex, then sorted into the documented precedence.
   std::unordered_map<const TopoDS_TShape*, std::pair<TopoDS_Shape, std::vector<std::tuple<double, std::string>>>>
-      face_names;
+      subshape_names;
   for (std::size_t index = 0; index < inputs.size(); ++index) {
     check_cancelled(options);
     const Input& input = inputs[index];
@@ -241,34 +243,38 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
     for (const std::string& tag : body.names.solid_tags(input.solid)) {
       result.names.add_solid_tag(image, tag);
     }
-    for (TopExp_Explorer faces(input.solid, TopAbs_FACE); faces.More(); faces.Next()) {
-      const std::vector<std::string>& tags = body.names.face_tags(faces.Current());
-      for (const TopoDS_Shape& face_image : images(builder, faces.Current(), TopAbs_FACE)) {
-        for (const std::string& tag : tags) {
-          result.names.add_face_tag(face_image, tag);
+    for (const TopAbs_ShapeEnum kind : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX}) {
+      TopTools_IndexedMapOfShape subshapes;
+      TopExp::MapShapes(input.solid, kind, subshapes);
+      for (Standard_Integer sub = 1; sub <= subshapes.Extent(); ++sub) {
+        const TopoDS_Shape& subshape = subshapes(sub);
+        const std::vector<std::string>& tags = body.names.subshape_tags(subshape);
+        const std::vector<std::string>& names = body.names.subshape_names(subshape);
+        if (tags.empty() && names.empty()) {
+          continue;
         }
-      }
-    }
-    for (TopExp_Explorer faces(input.solid, TopAbs_FACE); faces.More(); faces.Next()) {
-      const std::vector<std::string>& names = body.names.face_names(faces.Current());
-      if (names.empty()) {
-        continue;
-      }
-      for (const TopoDS_Shape& face_image : images(builder, faces.Current(), TopAbs_FACE)) {
-        auto& entry = face_names[face_image.TShape().get()];
-        entry.first = face_image;
-        for (const std::string& name : names) {
-          entry.second.emplace_back(input.volume, name);
+        for (const TopoDS_Shape& subshape_image : images(builder, subshape, kind)) {
+          for (const std::string& tag : tags) {
+            result.names.add_subshape_tag(subshape_image, tag);
+          }
+          if (names.empty()) {
+            continue;
+          }
+          auto& entry = subshape_names[subshape_image.TShape().get()];
+          entry.first = subshape_image;
+          for (const std::string& name : names) {
+            entry.second.emplace_back(input.volume, name);
+          }
         }
       }
     }
   }
-  for (auto& [key, entry] : face_names) {
+  for (auto& [key, entry] : subshape_names) {
     (void)key;
     std::sort(entry.second.begin(), entry.second.end());
     for (const auto& [volume, name] : entry.second) {
       (void)volume;
-      result.names.add_face_name(entry.first, name);
+      result.names.add_subshape_name(entry.first, name);
     }
   }
   result.shape = compound;

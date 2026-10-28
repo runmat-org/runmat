@@ -289,12 +289,19 @@ fn presolve_transport_bounds_postsolve_closure_and_preserves_numerical_result() 
 #[test]
 fn output_inventory_and_combined_residency_are_rejected_before_execution() {
     let mut workload = workload(ThermalProcedureControl::BackwardEuler { snapshot_count: 3 });
+    // The authored ceiling is part of the encoded workload, so the requirement is measured
+    // with a non-binding ceiling of the same canonical integer width as the ceilings below.
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(u64::from(u32::MAX));
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let prepared = workload.prepare(&mesh).unwrap();
     let profile = prepared.transport_profile(1024).unwrap();
     let output = projected_transport_output_resource_facts(&profile).unwrap();
     let required = prepared.numerical_reservation_bytes().unwrap().0
         + output.construction_resident_bytes_admission_budget.0;
+    assert!(required > u64::from(u16::MAX) && required < u64::from(u32::MAX));
     drop(prepared);
     for limits in [
         ObjectInventoryLimits {
@@ -326,7 +333,7 @@ fn output_inventory_and_combined_residency_are_rejected_before_execution() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - 1;
+        .maximum_resident_bytes = Some(required - 1);
     let error = execute_thermal_solver_result_objects(
         &workload,
         &mesh,
@@ -344,7 +351,7 @@ fn output_inventory_and_combined_residency_are_rejected_before_execution() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required;
+        .maximum_resident_bytes = Some(required);
     execute_thermal_solver_result_objects(
         &workload,
         &mesh,

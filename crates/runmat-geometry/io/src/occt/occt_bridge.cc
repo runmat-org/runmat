@@ -32,6 +32,9 @@
 #include <ShapeAnalysis_Edge.hxx>
 #include <TopoDS_Compound.hxx>
 #include <StepShape_AdvancedFace.hxx>
+#include <StepShape_EdgeCurve.hxx>
+#include <StepShape_TopologicalRepresentationItem.hxx>
+#include <StepShape_VertexPoint.hxx>
 #include <TransferBRep.hxx>
 #include <XSControl_TransferReader.hxx>
 #include <Transfer_TransientProcess.hxx>
@@ -307,11 +310,19 @@ CadDocument finish_xcaf_document(CadDocument result) {
   return result;
 }
 
-// OCCT's sub-shape name reading misses faces of a solid's inner shells (BREP_WITH_VOIDS cavities,
-// such as an electrode cavity in an insulator). Every named ADVANCED_FACE in the file is mapped
-// through the transfer result to its kernel face and labeled in the part that owns it, unless
-// OCCT already labeled it.
-static void label_named_step_faces(const Handle(XSControl_WorkSession)& session, CadDocument& document) {
+// OCCT's sub-shape name reading misses faces, edges and vertices of a solid's inner shells
+// (BREP_WITH_VOIDS cavities, such as an electrode cavity in an insulator). Every named
+// ADVANCED_FACE, EDGE_CURVE and VERTEX_POINT in the file is mapped through the transfer result to
+// its kernel shape and labeled in the part that owns it, unless OCCT already labeled it.
+static TopAbs_ShapeEnum named_step_subshape_kind(const Handle(Standard_Transient)& entity) {
+  if (entity->IsKind(STANDARD_TYPE(StepShape_AdvancedFace))) return TopAbs_FACE;
+  if (entity->IsKind(STANDARD_TYPE(StepShape_EdgeCurve))) return TopAbs_EDGE;
+  if (entity->IsKind(STANDARD_TYPE(StepShape_VertexPoint))) return TopAbs_VERTEX;
+  return TopAbs_SHAPE;
+}
+
+static void label_named_step_subshapes(const Handle(XSControl_WorkSession)& session,
+                                       CadDocument& document) {
   if (session.IsNull() || !document.has_xcaf || document.shape_tool.IsNull()) {
     return;
   }
@@ -322,16 +333,20 @@ static void label_named_step_faces(const Handle(XSControl_WorkSession)& session,
   }
   std::vector<std::pair<TopoDS_Shape, std::string>> named;
   for (Standard_Integer index = 1; index <= model->NbEntities(); ++index) {
-    const Handle(StepShape_AdvancedFace) face =
-        Handle(StepShape_AdvancedFace)::DownCast(model->Value(index));
-    if (face.IsNull() || face->Name().IsNull() || face->Name()->Length() == 0) {
+    const Handle(StepShape_TopologicalRepresentationItem) item =
+        Handle(StepShape_TopologicalRepresentationItem)::DownCast(model->Value(index));
+    if (item.IsNull() || item->Name().IsNull() || item->Name()->Length() == 0) {
       continue;
     }
-    const TopoDS_Shape shape = TransferBRep::ShapeResult(transfer->TransientProcess(), face);
-    if (shape.IsNull() || shape.ShapeType() != TopAbs_FACE) {
+    const TopAbs_ShapeEnum kind = named_step_subshape_kind(item);
+    if (kind == TopAbs_SHAPE) {
       continue;
     }
-    named.emplace_back(shape, std::string(face->Name()->ToCString()));
+    const TopoDS_Shape shape = TransferBRep::ShapeResult(transfer->TransientProcess(), item);
+    if (shape.IsNull() || shape.ShapeType() != kind) {
+      continue;
+    }
+    named.emplace_back(shape, std::string(item->Name()->ToCString()));
   }
   if (named.empty()) {
     return;
@@ -343,25 +358,28 @@ static void label_named_step_faces(const Handle(XSControl_WorkSession)& session,
     if (!XCAFDoc_ShapeTool::IsSimpleShape(definition)) {
       continue;
     }
-    TopTools_IndexedMapOfShape faces;
-    TopExp::MapShapes(XCAFDoc_ShapeTool::GetShape(definition), TopAbs_FACE, faces);
+    TopTools_IndexedMapOfShape subshapes;
+    const TopoDS_Shape definition_shape = XCAFDoc_ShapeTool::GetShape(definition);
+    for (const TopAbs_ShapeEnum kind : {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX}) {
+      TopExp::MapShapes(definition_shape, kind, subshapes);
+    }
     std::unordered_map<const TopoDS_TShape*, Standard_Integer> by_tshape;
-    for (Standard_Integer face = 1; face <= faces.Extent(); ++face) {
-      by_tshape.emplace(faces(face).TShape().get(), face);
+    for (Standard_Integer subshape = 1; subshape <= subshapes.Extent(); ++subshape) {
+      by_tshape.emplace(subshapes(subshape).TShape().get(), subshape);
     }
     for (const auto& [shape, name] : named) {
       const auto found = by_tshape.find(shape.TShape().get());
       if (found == by_tshape.end()) {
         continue;
       }
-      const TopoDS_Shape& face = faces(found->second);
+      const TopoDS_Shape& subshape = subshapes(found->second);
       TDF_Label existing;
-      if (document.shape_tool->FindSubShape(definition, face, existing) &&
+      if (document.shape_tool->FindSubShape(definition, subshape, existing) &&
           !exact_label_name(existing).empty()) {
         continue;
       }
       const TDF_Label label = existing.IsNull()
-                                  ? document.shape_tool->AddSubShape(definition, face)
+                                  ? document.shape_tool->AddSubShape(definition, subshape)
                                   : existing;
       if (!label.IsNull()) {
         TDataStd_Name::Set(label, TCollection_ExtendedString(name.c_str(), Standard_True));
@@ -428,9 +446,9 @@ CadDocument read_step_shape(const std::string& path,
   if (status != IFSelect_RetDone) {
     throw std::runtime_error("OCCT STEP reader did not return IFSelect_RetDone");
   }
-  // CAD tools write face and body names on STEP representation items. OCCT reads them into
-  // XCAF sub-shape labels only when the model asks for it; set it on this file's model so
-  // `select name` resolves authored face names without touching process-global settings.
+  // CAD tools write body, face, edge and vertex names on STEP representation items. OCCT reads
+  // them into XCAF sub-shape labels only when the model asks for it; set it on this file's model
+  // so `select name` resolves authored names without touching process-global settings.
   Handle(StepData_StepModel) step_model =
       Handle(StepData_StepModel)::DownCast(reader.Reader().WS()->Model());
   if (step_model.IsNull()) {
@@ -459,7 +477,7 @@ CadDocument read_step_shape(const std::string& path,
   }
   check_cancelled(options);
   CadDocument finished = finish_xcaf_document(std::move(result));
-  label_named_step_faces(reader.Reader().WS(), finished);
+  label_named_step_subshapes(reader.Reader().WS(), finished);
   return finished;
 }
 

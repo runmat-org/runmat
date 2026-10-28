@@ -90,9 +90,9 @@ impl FluidTransientBlockWorkload {
             require_work(
                 recovery.operator_work,
                 block.reservation().operator_work_upper_bound,
-                self.workload.policy.maximum_operator_work,
+                self.workload.policy.operator_work_budget(),
             )?,
-            self.workload.policy.maximum_operator_work,
+            self.workload.policy.operator_work_budget(),
         )?;
         Ok(PreparedFluidTransientContinuation {
             request: self,
@@ -158,7 +158,7 @@ fn block<'a>(
     range: Range<usize>,
 ) -> AnalysisExecutionResult<super::super::FluidTransientBlock<'a>> {
     let mut policy = p.workload.policy;
-    policy.maximum_resident_bytes = profile::require_complete_budget(p, scope)?;
+    policy.set_resident_byte_budget(profile::require_complete_budget(p, scope)?);
     super::super::FluidTransientBlock::prepare(
         &p.workload.model,
         &p.workload.step_id,
@@ -217,7 +217,7 @@ pub(super) fn recover(
             != require_work(
                 recovery_work,
                 prepared.reservation().operator_work_upper_bound,
-                p.workload.policy.maximum_operator_work,
+                p.workload.policy.operator_work_budget(),
             )?
         {
             return Err(invalid("fluid checkpoint original block work differs"));
@@ -225,14 +225,14 @@ pub(super) fn recover(
         work = require_work(
             work,
             entry.charged_operator_work,
-            p.workload.policy.maximum_operator_work,
+            p.workload.policy.operator_work_budget(),
         )?;
         recovery_resident_bytes =
             recovery_resident_bytes.max(prepared.reservation().resident_bytes_upper_bound);
         recovery_work = require_work(
             recovery_work,
             prepared.reservation().operator_work_upper_bound,
-            p.workload.policy.maximum_operator_work,
+            p.workload.policy.operator_work_budget(),
         )?;
         prepared.recover(&entry.original)?;
         previous = entry
@@ -299,7 +299,7 @@ impl PreparedFluidTransientContinuation<'_> {
         reservation.operator_work_upper_bound = require_work(
             self.recovery.operator_work,
             reservation.operator_work_upper_bound,
-            self.request.workload.policy.maximum_operator_work,
+            self.request.workload.policy.operator_work_budget(),
         )?;
         Ok(reservation)
     }
@@ -317,12 +317,12 @@ impl PreparedFluidTransientContinuation<'_> {
         let task_charge = require_work(
             self.recovery.operator_work,
             block.reservation().operator_work_upper_bound,
-            self.request.workload.policy.maximum_operator_work,
+            self.request.workload.policy.operator_work_budget(),
         )?;
         let charged = require_work(
             old.charged_operator_work(),
             task_charge,
-            self.request.workload.policy.maximum_operator_work,
+            self.request.workload.policy.operator_work_budget(),
         )?;
         let original = block.execute()?;
         let mut result = old.clone();

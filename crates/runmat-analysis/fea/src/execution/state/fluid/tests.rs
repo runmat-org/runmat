@@ -89,7 +89,7 @@ fn fluid_state_rejects_original_source_and_declaration_substitution() {
             .is_err()
     );
     let mut capped = workload.clone();
-    capped.policy.maximum_resident_bytes = 1;
+    capped.policy.maximum_resident_bytes = Some(1);
     assert!(
         CanonicalSemanticState::from_fluid_publication(&request, &capped, &mesh, &result).is_err()
     );

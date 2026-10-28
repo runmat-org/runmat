@@ -449,7 +449,7 @@ fn modal_completion_error(
 
 pub(super) fn prepared_completion(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
 ) -> PreparedStudyCompletion {
     PreparedStudyCompletion {
@@ -458,7 +458,7 @@ pub(super) fn prepared_completion(
         study_id: intent.study_id,
         study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
         authored_study_digest: intent.authored_study_digest,
-        model: resolved_model,
+        model: study_model,
         steps: intent
             .steps
             .into_iter()

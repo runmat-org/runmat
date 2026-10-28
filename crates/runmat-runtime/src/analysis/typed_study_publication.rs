@@ -151,7 +151,6 @@ pub fn prepare_structural_study_publication(
         crate::meshing::MeshingExecutionOutput {
             artifact: result.mesh().clone(),
             evidence: result.meshing_evidence().clone(),
-            region_aliases: Default::default(),
         },
         result.numerical().clone(),
         publication_identity,

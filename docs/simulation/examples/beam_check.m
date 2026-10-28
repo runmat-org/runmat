@@ -11,7 +11,7 @@ for k = 1:numel(studies)
     run = fea.run(studies(k));
     results = fea.results(run);
     u = fea.field(results, fea.StructuralField.displacement());
-    peak = max(vecnorm(u, 2, 2));
+    peak = max(vecnorm(u.values, 2, 2));
     fprintf("%-24s peak %.5f mm, beam theory %.5f mm, difference %+.2f%%\n", ...
         studies(k), 1e3 * peak, 1e3 * delta, 100 * (peak - delta) / delta);
 end

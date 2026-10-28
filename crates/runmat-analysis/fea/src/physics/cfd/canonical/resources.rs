@@ -51,7 +51,7 @@ pub(super) fn admit_authority_profile(
     mut reservation: CanonicalFluidReservation,
 ) -> Result<CanonicalFluidReservation, Error> {
     let mut profile = AuthorityProfile {
-        maximum_units: p.maximum_operator_work,
+        maximum_units: p.operator_work_budget(),
         maximum_entities: p.maximum_authority_items as u64,
         ..AuthorityProfile::default()
     };
@@ -178,10 +178,10 @@ pub(super) fn admit_authority_profile(
         reservation.resident_bytes_upper_bound,
         mul(profile.resolved_entities, 16)?,
     )?;
-    if reservation.operator_work_upper_bound > p.maximum_operator_work {
+    if reservation.operator_work_upper_bound > p.operator_work_budget() {
         return Err(Error::Resource("source authority operator work"));
     }
-    if reservation.resident_bytes_upper_bound > p.maximum_resident_bytes
+    if reservation.resident_bytes_upper_bound > p.resident_byte_budget()
         || reservation.resident_bytes_upper_bound > isize::MAX as u64
     {
         return Err(Error::Resource("source authority resident bytes"));
@@ -433,10 +433,10 @@ impl CanonicalFluidReservation {
                 )?,
             )?;
         }
-        if bytes > p.maximum_resident_bytes || bytes > isize::MAX as u64 {
+        if bytes > p.resident_byte_budget() || bytes > isize::MAX as u64 {
             return Err(Error::Resource("resident bytes"));
         }
-        if work > p.maximum_operator_work {
+        if work > p.operator_work_budget() {
             return Err(Error::Resource("operator work"));
         }
         Ok(CanonicalFluidReservation {
