@@ -282,7 +282,7 @@ fn direct_connector_static_without_connector_observation_preflights_memory() {
     let admitted_limit = model.sequence.steps[0]
         .accuracy
         .resources
-        .resident_byte_budget();
+        .maximum_resident_bytes;
     model.sequence.steps[0]
         .accuracy
         .resources
@@ -306,7 +306,7 @@ fn direct_connector_static_without_connector_observation_preflights_memory() {
     model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = Some(admitted_limit);
+        .maximum_resident_bytes = admitted_limit;
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -342,7 +342,7 @@ fn direct_solid_connector_static_preflights_memory() {
     let admitted_limit = model.sequence.steps[0]
         .accuracy
         .resources
-        .resident_byte_budget();
+        .maximum_resident_bytes;
     model.sequence.steps[0]
         .accuracy
         .resources
@@ -362,7 +362,7 @@ fn direct_solid_connector_static_preflights_memory() {
     model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = Some(admitted_limit);
+        .maximum_resident_bytes = admitted_limit;
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect("admitted solid connector must solve");
     assert_eq!(

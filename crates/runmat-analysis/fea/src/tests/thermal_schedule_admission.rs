@@ -15,6 +15,10 @@ fn workload() -> ThermalWorkload {
         ));
     }
     model.sequence = runmat_analysis_core::AnalysisSequence::from_steps("heat", vec![step]);
+    // The authored ceiling is part of the encoded model, so resident requirements are
+    // measured under a non-binding authored ceiling (present, like the ceilings tests author).
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
+        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
