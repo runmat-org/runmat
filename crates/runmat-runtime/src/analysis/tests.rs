@@ -371,7 +371,7 @@ pub(super) fn sample_solid_model() -> AnalysisModel {
     append_constant_excitation(
         &mut model,
         "load_tip",
-        "tip",
+        runmat_meshing_core::fixtures::fixture_face("tip"),
         ConstantExcitation::Force([0.0, -1000.0, 0.0]),
     );
     model
@@ -736,7 +736,7 @@ fn test_model_for_geometry(
             append_constant_excitation(
                 &mut model,
                 "excitation_default_acoustic_pressure",
-                "tip",
+                runmat_meshing_core::fixtures::fixture_face("tip"),
                 ConstantExcitation::AcousticPressure(1.0),
             );
         }
@@ -938,7 +938,10 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo:closed_cube".to_string(),
         source: GeometrySource {
-            unit_evidence: Default::default(),
+            unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                runmat_geometry_core::LengthUnit::Meter,
+                "canonical solver fixture",
+            ),
             path: "/fixtures/closed_cube.step".to_string(),
             sha256: "hash-closed-cube".to_string(),
             importer_version: "test".to_string(),
