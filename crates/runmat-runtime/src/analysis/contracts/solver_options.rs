@@ -19,10 +19,6 @@ impl AnalysisSolverOptions {
             Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralTransient(options) => options.solver_mesh_artifact_path = None,
             Self::IncompressibleFlow(_) => {}
-            Self::ConjugateHeatTransfer(options) => options.solver_mesh_artifact_path = None,
-            Self::FluidStructureInteraction(options) => {
-                options.solver_mesh_artifact_path = None;
-            }
             Self::StructuralNonlinear(options) => options.solver_mesh_artifact_path = None,
         }
     }
@@ -102,7 +98,8 @@ impl AnalysisSolverOptions {
                 SolutionSpace::Direct | SolutionSpace::ModalReduced,
             ) => Ok(Self::StructuralTransient(AnalysisTransientRunOptions::default())),
             // Flow studies, standalone or coupled to heat transfer or a structure, run the one
-            // canonical finite-volume flow lifecycle and share its solver options.
+            // canonical finite-volume flow lifecycle and share its solver options: there is no
+            // separate conjugate-heat-transfer or fluid-structure solver-options variant.
             (Fluid, Static | TransientResponse, SolutionSpace::Direct)
             | (
                 Coupled(

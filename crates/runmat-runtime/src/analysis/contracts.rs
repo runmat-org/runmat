@@ -1908,8 +1908,6 @@ pub enum AnalysisSolverOptions {
     ThermalDiffusion(AnalysisThermalRunOptions),
     StructuralTransient(AnalysisTransientRunOptions),
     IncompressibleFlow(AnalysisCfdRunOptions),
-    ConjugateHeatTransfer(AnalysisChtRunOptions),
-    FluidStructureInteraction(AnalysisFsiRunOptions),
     StructuralNonlinear(AnalysisNonlinearRunOptions),
 }
 
@@ -2807,6 +2805,26 @@ mod tests {
             AnalysisProcedure::TransientResponse,
         );
         assert!(AnalysisSolverOptions::defaults_for(&electrothermal).is_err());
+    }
+
+    #[test]
+    fn coupled_flow_steps_resolve_the_one_canonical_flow_solver_options() {
+        for family in [
+            CoupledPhysicsFamily::ConjugateHeatTransfer,
+            CoupledPhysicsFamily::FluidStructureInteraction,
+        ] {
+            let step = ProcedureStep::coupled("coupled_flow", family, AnalysisProcedure::Static);
+            let options = AnalysisSolverOptions::defaults_for(&step).expect("coupled flow defaults");
+            assert!(matches!(options, AnalysisSolverOptions::IncompressibleFlow(_)));
+            assert!(options.supports(&step));
+        }
+        for retired in ["conjugate_heat_transfer", "fluid_structure_interaction"] {
+            assert!(serde_json::from_value::<AnalysisSolverOptions>(serde_json::json!({
+                "solver": retired,
+                "options": {},
+            }))
+            .is_err());
+        }
     }
 
     #[test]

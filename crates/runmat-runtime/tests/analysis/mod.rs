@@ -16,12 +16,10 @@ use runmat_meshing_core::{
 };
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_acoustic_with_options_op,
-    analysis_run_cfd_with_options_op, analysis_run_cht_with_options_op,
-    analysis_run_fsi_with_options_op, analysis_run_linear_static_with_options,
+    analysis_run_cfd_with_options_op, analysis_run_linear_static_with_options,
     analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
     analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
-    analysis_validate, AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    analysis_validate, AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
     AnalysisResultsQuery, AnalysisRunOptions, AnalysisSolverOptions,
     AnalysisStructuralTimeStepPolicy, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
     FallbackEvent, FallbackReason, FallbackStage, PrecisionMode, PreconditionerMode, QualityPolicy,

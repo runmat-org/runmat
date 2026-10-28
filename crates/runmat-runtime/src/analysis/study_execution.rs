@@ -7,8 +7,7 @@ use crate::operations::{
 
 use super::contracts::{AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverOptions};
 use super::{
-    analysis_run_cfd_with_options_op, execute_acoustic_with_options, execute_cht_with_options,
-    execute_fsi_with_options, execute_modal_with_options, execute_nonlinear_with_options,
+    analysis_run_cfd_with_options_op, execute_acoustic_with_options, execute_modal_with_options, execute_nonlinear_with_options,
     execute_transient_with_options, linear_static_execution::execute_linear_static_with_executor,
     thermal_execution::execute_thermal_with_options, StructuralLinearExecutor,
     ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
@@ -210,37 +209,6 @@ pub(super) fn execute_study_step(
                 context.clone(),
             )?;
             Ok((run, AnalysisSolverOptions::IncompressibleFlow(options)))
-        }
-        AnalysisSolverOptions::ConjugateHeatTransfer(authored_options) => {
-            let mut options = authored_options.clone();
-            attach_solver_mesh_artifact_path(
-                &mut options.solver_mesh_artifact_path,
-                solver_mesh_artifact_path,
-            );
-            let run = execute_cht_with_options(
-                &model,
-                execution.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, AnalysisSolverOptions::ConjugateHeatTransfer(options)))
-        }
-        AnalysisSolverOptions::FluidStructureInteraction(authored_options) => {
-            let mut options = authored_options.clone();
-            attach_solver_mesh_artifact_path(
-                &mut options.solver_mesh_artifact_path,
-                solver_mesh_artifact_path,
-            );
-            let run = execute_fsi_with_options(
-                &model,
-                execution.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((
-                run,
-                AnalysisSolverOptions::FluidStructureInteraction(options),
-            ))
         }
         AnalysisSolverOptions::StructuralNonlinear(authored_options) => {
             let mut options = authored_options.clone();

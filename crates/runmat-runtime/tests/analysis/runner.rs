@@ -154,9 +154,9 @@ fn fluid_constraint(
 }
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
-    fea_buckling_mode_shape_field_id, fea_fsi_fluid_velocity_field_id,
+    fea_buckling_mode_shape_field_id,
     fea_thermal_temperature_field_id, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
     FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
     FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
@@ -688,8 +688,6 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
             )
         }
         AnalysisSolverOptions::IncompressibleFlow(_) => FEA_FIELD_CFD_VELOCITY.to_string(),
-        AnalysisSolverOptions::ConjugateHeatTransfer(_) => FEA_FIELD_CHT_FLUID_VELOCITY.to_string(),
-        AnalysisSolverOptions::FluidStructureInteraction(_) => fea_fsi_fluid_velocity_field_id(0),
         AnalysisSolverOptions::StructuralLinear(_)
         | AnalysisSolverOptions::StructuralModes(_)
         | AnalysisSolverOptions::StructuralFrequency(_)
@@ -2817,40 +2815,6 @@ fn run_fixture_cpu(
             AnalysisCfdRunOptions::default(),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisSolverOptions::ConjugateHeatTransfer(_) => analysis_run_cht_with_options_op(
-            model,
-            ComputeBackend::Cpu,
-            AnalysisChtRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                sample_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisChtRunOptions::default().sample_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
-            },
-            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
-        ),
-        AnalysisSolverOptions::FluidStructureInteraction(_) => analysis_run_fsi_with_options_op(
-            model,
-            ComputeBackend::Cpu,
-            AnalysisFsiRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                sample_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisFsiRunOptions::default().sample_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
-            },
-            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
-        ),
         AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -2938,40 +2902,6 @@ fn run_fixture_gpu(
             model,
             ComputeBackend::Gpu,
             AnalysisCfdRunOptions::default(),
-            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-        ),
-        AnalysisSolverOptions::ConjugateHeatTransfer(_) => analysis_run_cht_with_options_op(
-            model,
-            ComputeBackend::Gpu,
-            AnalysisChtRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                sample_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisChtRunOptions::default().sample_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
-            },
-            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-        ),
-        AnalysisSolverOptions::FluidStructureInteraction(_) => analysis_run_fsi_with_options_op(
-            model,
-            ComputeBackend::Gpu,
-            AnalysisFsiRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                sample_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisFsiRunOptions::default().sample_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
-            },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
@@ -4256,8 +4186,6 @@ fn fixture_requires_solver_mesh(spec: &FixtureSpec, model: &AnalysisModel) -> bo
             || matches!(
                 AnalysisSolverOptions::defaults_for(fixture_procedure_step(model)),
                 Ok(AnalysisSolverOptions::ThermalDiffusion(_))
-                    | Ok(AnalysisSolverOptions::ConjugateHeatTransfer(_))
-                    | Ok(AnalysisSolverOptions::FluidStructureInteraction(_))
                     | Ok(AnalysisSolverOptions::MaxwellHarmonic(_))
             )
             || spec.id.starts_with("electro_thermal_joule_"))
