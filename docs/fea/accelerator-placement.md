@@ -31,7 +31,8 @@ the whole sequence) prints the warning and records it in the published study's `
 ## Strict placement: `accelerators = required`
 
 `accelerators = required` in the execution policy, or `strict = true` in
-`fea.ExecutionStep.new(step, backend, solverOptions, strict)`, selects the strict policy. A study
+`fea.ExecutionStep.new(step, backend, solverOptions, strict)` (an optional trailing argument that
+defaults to `false`), selects the strict policy. A study
 that cannot run on the accelerator fails closed with `RM.FEA.ACCELERATOR_REQUIRED`
 (`FEA_ACCELERATOR_REQUIRED` in the solver message):
 

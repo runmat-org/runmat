@@ -76,9 +76,21 @@ pub async fn execution_step(
     step: Value,
     backend: Value,
     options: Value,
-    strict: Value,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ExecutionStep.new";
+    // `strict` is an optional trailing logical; omitted means fallback to the CPU reference.
+    let strict = match (rest.len(), rest.first()) {
+        (0, _) => false,
+        (1, Some(strict)) => super::logical_from_value(NAME, strict)?,
+        _ => {
+            return Err(builtin_error(
+                NAME,
+                &ERROR_INPUT,
+                "fea.ExecutionStep.new accepts at most four arguments",
+            ))
+        }
+    };
     let step = procedure_step(NAME, &step)?;
     let options: AnalysisSolverOptions = from_typed_value(NAME, SOLVER_OPTIONS_CLASS, &options)?;
     if !options.supports(&step) {
@@ -93,7 +105,7 @@ pub async fn execution_step(
         backend: from_typed_value(NAME, BACKEND_CLASS, &backend)?,
         // `strict = true` is `accelerators = required`: a GPU step that cannot run on the
         // accelerator fails closed instead of falling back to cpu_reference.
-        accelerator_admission: if super::logical_from_value(NAME, &strict)? {
+        accelerator_admission: if strict {
             runmat_analysis_core::AcceleratorAdmissionPolicy::Required
         } else {
             runmat_analysis_core::AcceleratorAdmissionPolicy::FallbackToCpu
@@ -230,7 +242,7 @@ mod tests {
             modal_step,
             backend_cpu().await.unwrap(),
             static_options,
-            Value::Bool(false),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )
         .await
         .unwrap_err();
@@ -247,15 +259,19 @@ mod tests {
             .await
             .unwrap();
         let options = solver_defaults(step.clone()).await.unwrap();
-        for (strict, expected) in [
-            (false, runmat_analysis_core::AcceleratorAdmissionPolicy::FallbackToCpu),
-            (true, runmat_analysis_core::AcceleratorAdmissionPolicy::Required),
+        let fallback = runmat_analysis_core::AcceleratorAdmissionPolicy::FallbackToCpu;
+        let required = runmat_analysis_core::AcceleratorAdmissionPolicy::Required;
+        // Omitting `strict` keeps three-argument calls working and selects the fallback.
+        for (rest, expected) in [
+            (Vec::new(), fallback),
+            (vec![Value::Bool(false)], fallback),
+            (vec![Value::Bool(true)], required),
         ] {
             let value = execution_step(
                 step.clone(),
                 backend_gpu().await.unwrap(),
                 options.clone(),
-                Value::Bool(strict),
+                crate::builtins::common::test_support::builtin_arguments(rest),
             )
             .await
             .unwrap();
@@ -264,14 +280,19 @@ mod tests {
             assert_eq!(execution.accelerator_admission, expected);
             assert_eq!(execution.backend, ComputeBackend::Gpu);
         }
-        assert!(execution_step(
-            step,
-            backend_gpu().await.unwrap(),
-            options,
-            Value::String("yes".into()),
-        )
-        .await
-        .is_err());
+        for rest in [
+            vec![Value::String("yes".into())],
+            vec![Value::Bool(true), Value::Bool(true)],
+        ] {
+            assert!(execution_step(
+                step.clone(),
+                backend_gpu().await.unwrap(),
+                options.clone(),
+                crate::builtins::common::test_support::builtin_arguments(rest),
+            )
+            .await
+            .is_err());
+        }
     }
 
     #[tokio::test]
@@ -299,7 +320,7 @@ mod tests {
             first,
             backend_cpu().await.unwrap(),
             first_options,
-            Value::Bool(false),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )
         .await
         .unwrap();

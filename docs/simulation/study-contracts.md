@@ -599,7 +599,8 @@ study = fea.study("bracket", geometry, model, ...
 
 A step that requests `fea.ComputeBackend.gpu()` falls back to the CPU reference path with one
 `FEA_ACCELERATOR_ADMISSION_FALLBACK` warning when the accelerator path cannot run it. Pass
-`strict = true` to `fea.ExecutionStep.new(step, backend, solverOptions, strict)` (the same policy
+`strict = true` as the optional fourth argument of
+`fea.ExecutionStep.new(step, backend, solverOptions, strict)` (omitted means `false`; the same policy
 as `accelerators = required` in a `.fea` execution policy) to fail closed with
 `RM.FEA.ACCELERATOR_REQUIRED` instead.
 

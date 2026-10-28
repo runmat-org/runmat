@@ -180,6 +180,13 @@ pub fn recover_completed_transient_run(
             "recovered transient execution backend differs from its canonical receipt".into(),
         ));
     }
+    // The run reports the workload's requested backend; a block path that ran on cpu_reference
+    // after a GPU request carries exactly one fallback warning (strict placement fails closed).
+    let mut recovered = recovered;
+    crate::contracts::accelerator_admission::settle_accelerator_execution(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransient,
+        &mut recovered.run,
+    )?;
     Ok(recovered)
 }
 

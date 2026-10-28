@@ -102,6 +102,7 @@ pub(super) fn prepare_authored_root(
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         memory_per_worker_bytes: None,
+        accelerator_admission: Default::default(),
         input_materializations: Vec::new(),
         initial_fields: Vec::new(),
         geometry_meshing,

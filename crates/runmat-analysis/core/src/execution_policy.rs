@@ -86,6 +86,13 @@ pub enum AcceleratorAdmissionPolicy {
     Required,
 }
 
+impl AcceleratorAdmissionPolicy {
+    /// The default policy: a requested accelerator that cannot run falls back to `cpu_reference`.
+    pub fn is_fallback(&self) -> bool {
+        *self == Self::FallbackToCpu
+    }
+}
+
 impl ExecutionResourceLimits {
     /// The admission policy the authored accelerator preference selects.
     pub fn accelerator_admission(&self) -> AcceleratorAdmissionPolicy {

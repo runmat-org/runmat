@@ -262,12 +262,16 @@ fn prepare_transient_scope_basis(
 pub fn run_transient_block(
     input: StructuralTransientRunBlockInput<'_>,
 ) -> Result<StructuralTransientSegment, FeaRunError> {
-    // Blocks keep the workload's placement identity; strict placement fails before the block
-    // assembles when admission already knows the device will not run.
-    crate::contracts::accelerator_admission::admit_accelerator(
+    // Blocks keep the workload's placement identity (the requested backend); strict placement
+    // fails before the block assembles when admission already knows the device will not run,
+    // and a known fallback solves the block on cpu_reference. The recovered run restores the
+    // requested backend and carries the one fallback warning
+    // (`recover_completed_transient_run`).
+    let solve_backend = crate::contracts::accelerator_admission::admit_accelerator(
         crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransient,
         input.workload.backend,
-    )?;
+    )?
+    .effective;
     input
         .workload
         .validate()
@@ -336,7 +340,7 @@ pub fn run_transient_block(
         predecessor: input.predecessor,
         initial_summary: &basis.initial_assembly,
         options: &options,
-        backend: input.workload.backend,
+        backend: solve_backend,
         initial_conditions,
         observation_cursors: input.observation_cursors,
     };
@@ -350,7 +354,7 @@ pub fn run_transient_block(
                     summary: &basis.initial_assembly,
                     motions: &basis.motions,
                     options: &options,
-                    backend: input.workload.backend,
+                    backend: solve_backend,
                     request: input.request,
                     predecessor: input.predecessor,
                     initial_conditions: block_input.initial_conditions,
@@ -385,7 +389,7 @@ pub fn run_transient_block(
                         summary: &basis.initial_assembly,
                         motions: &basis.motions,
                         options: &options,
-                        backend: input.workload.backend,
+                        backend: solve_backend,
                         request: input.request,
                         predecessor: input.predecessor,
                         initial_conditions: block_input.initial_conditions,

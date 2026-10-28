@@ -54,6 +54,15 @@ pub(super) async fn execute_for_composition(
     recovery_publisher: &mut dyn StructuralTransientRecoveryPublisher,
 ) -> NativeExecutionResult<super::exact_structural_study::RemoteExactStructuralStudyComposition> {
     let decoded = crate::decode_structural_study_root(request, pool.as_ref())?;
+    // A strict (`accelerators = required`) study whose placement this worker cannot honor
+    // fails here, before meshing or any analysis task, instead of after a full remote run.
+    if let Err(error) = decoded.admit_accelerator_placement() {
+        return Ok(
+            super::exact_structural_study::RemoteExactStructuralStudyComposition::Failed(
+                error.to_string(),
+            ),
+        );
+    }
     let input_materializations = decoded.input_materializations.clone();
     let artifact_access = decoded.artifact_access.clone();
     let geometry_contract =

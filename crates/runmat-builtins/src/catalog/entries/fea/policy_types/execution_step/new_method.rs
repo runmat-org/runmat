@@ -13,6 +13,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         "Bind one procedure step to a compute backend, its accelerator admission, and solver options.",
     ),
     description: concat!(
+        "`fea.ExecutionStep.new(step, backend, solverOptions)` or ",
         "`fea.ExecutionStep.new(step, backend, solverOptions, strict)` returns an ",
         "`fea.ExecutionStep` with properties `step_id`, `backend`, `accelerator_admission`, and ",
         "`solver_options`. Only the step's identifier is retained; the step itself stays in ",
@@ -37,6 +38,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "GPU fallback and strict placement",
             &[
                 concat!(
+                    "`strict` is optional and defaults to `false`. ",
                     "With `strict = false`, a step that requests `fea.ComputeBackend.gpu()` but cannot ",
                     "run on the accelerator (its solver has no device path, or no accelerator is ",
                     "assigned) runs on the CPU reference path: the result reports `cpu_reference` as ",
@@ -71,13 +73,25 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             concat!(
                 "step = fea.StructuralStep.static('preload');\n",
                 "execution = fea.ExecutionStep.new(step, fea.ComputeBackend.gpu(), ...\n",
-                "    fea.SolverOptions.defaults(step), false);",
+                "    fea.SolverOptions.defaults(step));",
             ),
             concat!(
                 "assert(strcmp(class(execution), 'fea.ExecutionStep'));\n",
                 "assert(execution.step_id == \"preload\");\n",
                 "assert(execution.backend == \"gpu\");\n",
                 "assert(execution.accelerator_admission == \"fallback_to_cpu\");",
+            ),
+        ),
+        example(
+            "gpu-static-strict",
+            "Require the accelerator for a static step",
+            concat!(
+                "step = fea.StructuralStep.static('preload');\n",
+                "execution = fea.ExecutionStep.new(step, fea.ComputeBackend.gpu(), ...\n",
+                "    fea.SolverOptions.defaults(step), true);",
+            ),
+            concat!(
+                "assert(execution.accelerator_admission == \"required\");",
             ),
         ),
     ],
@@ -138,8 +152,9 @@ policy_entry!(
         (
             "strict",
             LogicalArray,
-            "Logical scalar; true fails closed when a GPU step cannot run on the accelerator.",
-            PolicyArg::Logical,
+            "Optional logical scalar (default false); true fails closed when a GPU step cannot run on the accelerator.",
+            PolicyArg::Optional(&PolicyArg::Logical),
+            default: "false",
         ),
     ],
     output: ("execution", "Typed fea.ExecutionStep."),
