@@ -173,6 +173,46 @@ pub fn admit_study_accelerator<'a>(
     })
 }
 
+/// The placement a host admitted for a whole study before submission: the authored policy and,
+/// when the study was planned on `cpu_reference` although the accelerator was requested, the one
+/// fallback warning its published result carries.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcceleratorPlacement {
+    #[serde(default)]
+    pub policy: AcceleratorAdmissionPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<FeaDiagnostic>,
+}
+
+impl AcceleratorPlacement {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Settles a finished study under the admitted placement. `steps` yields, per published
+    /// step, its step identifier, requested backend and executed backend. Strict placement fails
+    /// closed when any requested accelerator step ran on the CPU (a decline a worker could only
+    /// discover at solve time); otherwise the planned fallback warning is returned for the
+    /// study publication.
+    pub fn settle_study<'a>(
+        &self,
+        steps: impl IntoIterator<Item = (&'a str, ComputeBackend, ExecutionBackend)>,
+    ) -> Result<Option<FeaDiagnostic>, AcceleratorRequiredError> {
+        if self.policy == AcceleratorAdmissionPolicy::Required {
+            if let Some((step_id, _, _)) = steps.into_iter().find(|(_, requested, executed)| {
+                *requested == ComputeBackend::Gpu && *executed != ExecutionBackend::Accelerator
+            }) {
+                return Err(AcceleratorRequiredError {
+                    family: "study",
+                    reason: format!("step `{step_id}` ran on cpu_reference"),
+                });
+            }
+        }
+        Ok(self.fallback.clone())
+    }
+}
+
 /// Strict placement could not run on the accelerator.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
@@ -439,5 +479,33 @@ mod tests {
             )
         })
         .is_err());
+    }
+
+    #[test]
+    fn study_placement_publishes_the_planned_fallback_and_strict_fails_closed_on_cpu_steps() {
+        let planned = AcceleratorPlacement {
+            policy: AcceleratorAdmissionPolicy::FallbackToCpu,
+            fallback: Some(fallback_diagnostic(AcceleratorFamily::StructuralModal, "test")),
+        };
+        let cpu_step = [("modal", ComputeBackend::Cpu, ExecutionBackend::Cpu)];
+        assert_eq!(
+            planned.settle_study(cpu_step).unwrap().unwrap().code,
+            ACCELERATOR_ADMISSION_FALLBACK_CODE
+        );
+        let strict = AcceleratorPlacement {
+            policy: AcceleratorAdmissionPolicy::Required,
+            fallback: None,
+        };
+        assert!(strict
+            .settle_study([("heat", ComputeBackend::Gpu, ExecutionBackend::Accelerator)])
+            .unwrap()
+            .is_none());
+        let error = strict
+            .settle_study([("heat", ComputeBackend::Gpu, ExecutionBackend::Cpu)])
+            .unwrap_err();
+        assert!(error.to_string().starts_with(ACCELERATOR_REQUIRED_CODE));
+        assert!(AcceleratorPlacement::default().is_default());
+        let json = serde_json::to_string(&planned).unwrap();
+        assert_eq!(serde_json::from_str::<AcceleratorPlacement>(&json).unwrap(), planned);
     }
 }

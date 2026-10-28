@@ -194,6 +194,7 @@ pub fn prepare_structural_study_root(
         initial_fields,
         geometry_request,
         expected_meshing_request,
+        accelerator_placement: Default::default(),
     };
     expectation.validate()?;
     Ok(PreparedStructuralStudyRoot {

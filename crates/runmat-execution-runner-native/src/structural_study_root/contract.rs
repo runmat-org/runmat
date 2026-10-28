@@ -1,5 +1,6 @@
 //! Immutable authored root and client-held result authority.
 use super::*;
+use runmat_analysis_fea::accelerator_admission::AcceleratorPlacement;
 
 /// Family-specific planning carried by the one portable authored study root.
 ///
@@ -217,6 +218,9 @@ pub struct StructuralStudyResultExpectation {
     pub initial_fields: Vec<runmat_analysis_fea::execution::InitialFieldBinding>,
     pub geometry_request: runmat_analysis_execution::GeometryMaterializationRequest,
     pub expected_meshing_request: runmat_meshing_core::MeshingRequest,
+    /// The placement the submitting host admitted; settled when the result is published.
+    #[serde(default, skip_serializing_if = "AcceleratorPlacement::is_default")]
+    pub accelerator_placement: AcceleratorPlacement,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

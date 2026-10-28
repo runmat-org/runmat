@@ -62,6 +62,7 @@ async fn execute_study(
                     workers: None,
                     backend: execution.compute.backend,
                     accelerators: execution.compute.accelerators.clone(),
+                    accelerator_placement: execution.compute.placement.clone(),
                     ..Default::default()
                 },
             )
@@ -120,6 +121,7 @@ async fn execute_sweep(
                     workers: None,
                     backend: execution.compute.backend,
                     accelerators: execution.compute.accelerators.clone(),
+                    accelerator_placement: execution.compute.placement.clone(),
                     ..Default::default()
                 },
             )
@@ -201,7 +203,10 @@ async fn execute_sweep_remotely(
         config,
     )
     .await?;
-    let saved_expectation = placeholder.root.result_expectation();
+    let mut saved_expectation = placeholder.root.result_expectation();
+    for study in &mut saved_expectation.studies {
+        study.accelerator_placement = compute.placement.clone();
+    }
     let mut assessment_functions = Vec::with_capacity(saved_expectation.studies.len());
     for study in &saved_expectation.studies {
         assessment_functions.push(
@@ -449,22 +454,23 @@ fn resolve_compute_allocation(
     profile: Option<&runmat_config::project::ProjectExecutionProfile>,
 ) -> Result<FeaComputeAllocation> {
     use runmat_analysis_core::{AcceleratorPreference, BackendPreference};
-    use runmat_analysis_fea::accelerator_admission::admit_study_accelerator;
+    use runmat_analysis_fea::accelerator_admission::{admit_study_accelerator, AcceleratorPlacement};
 
-    let cpu = || FeaComputeAllocation {
+    let cpu = |placement| FeaComputeAllocation {
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
         accelerators: Vec::new(),
+        placement,
     };
     let backend = policy.map_or(BackendPreference::Auto, |policy| policy.backend);
     let preference = policy.map_or(AcceleratorPreference::Disabled, |policy| {
         policy.resources.accelerators
     });
-    if backend == BackendPreference::Cpu || preference == AcceleratorPreference::Disabled {
-        return Ok(cpu());
-    }
     let admission_policy = policy
         .map(|policy| policy.resources.accelerator_admission())
         .unwrap_or_default();
+    if backend == BackendPreference::Cpu || preference == AcceleratorPreference::Disabled {
+        return Ok(cpu(AcceleratorPlacement::default()));
+    }
     let mut allocation = None;
     let admission = admit_study_accelerator(
         steps,
@@ -482,15 +488,23 @@ fn resolve_compute_allocation(
         },
     )
     .map_err(anyhow::Error::new)?;
-    if let Some(fallback) = &admission.fallback {
+    if let Some(fallback) = admission.fallback {
         eprintln!("warning: {}: {}", fallback.code, fallback.message);
-        return Ok(cpu());
+        // The published study carries the same warning.
+        return Ok(cpu(AcceleratorPlacement {
+            policy: admission_policy,
+            fallback: Some(fallback),
+        }));
     }
     let request = allocation
         .context("accelerator admission admitted the device without an allocation request")?;
     Ok(FeaComputeAllocation {
         backend: runmat_analysis_fea::ComputeBackend::Gpu,
         accelerators: vec![request],
+        placement: AcceleratorPlacement {
+            policy: admission_policy,
+            fallback: None,
+        },
     })
 }
 

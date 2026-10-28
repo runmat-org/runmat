@@ -447,6 +447,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             result_quality,
             evidence_artifact_path,
             result_manifest_artifact_path: None,
+            diagnostics: Vec::new(),
         },
     );
     Ok(DeferredStudyRun {

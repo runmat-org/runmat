@@ -2298,6 +2298,11 @@ pub struct AnalysisStudyRunData {
     pub evidence_artifact_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_manifest_artifact_path: Option<String>,
+    /// Study-level diagnostics decided before any step ran, such as the one
+    /// `FEA_ACCELERATOR_ADMISSION_FALLBACK` warning of a study planned on `cpu_reference`
+    /// although the accelerator was requested.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<FeaDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
