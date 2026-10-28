@@ -7,11 +7,12 @@ use runmat_analysis_core::{
 fn original_model_checks_and_owned_planning_topology() {
     // Regenerated deliberately after the formulation-maturity field left the authored step
     // encoding (catalog-port b6501a93d2), and again when the authored memory ceiling default
-    // became unbounded; the owned/checked graphs still agree byte for byte.
+    // became unbounded, and again when an unbounded ceiling became an explicit null (wire
+    // integers bounded to 2^53 - 1); the owned/checked graphs still agree byte for byte.
     let expected = [
-        "sha256:8d9f70bfc73eb463a64579533b0d7f45121bb468932303ae004148f9a397a5e7",
-        "sha256:bee92f4fef5248c533b8d19b9129a1b0771c80a615453b73004bcfdce9c2c978",
-        "sha256:5c2e830b317529efa4dafe4eba10f9ffd0311d26b490cd77260bd4c0fe04b09d",
+        "sha256:3790cd03b9feac2136dd4ca72ecfe6b81af164ec6f67a466fccd76b5086b959d",
+        "sha256:40c486ec16bf5437e9dafccd9a2a137f64c67780547d04cdaab1e3cdcdd03576",
+        "sha256:9c4bf1b9ab3f0aef866c85129944fb350fc1020e68112e3b54828a4487c2eafe",
     ];
     let mut actual = Vec::new();
     for count in [1, 4, 32] {

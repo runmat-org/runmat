@@ -41,16 +41,18 @@ pub enum AuthoredSignalTopologySelector {
 pub enum SignalShape {
     Scalar,
     Vector3,
-    Tensor(Vec<usize>),
+    Tensor(#[serde(with = "runmat_types::wire_integer::vec")] Vec<usize>),
     TopologyField {
         topology_id: String,
         location: crate::FieldLocation,
+        #[serde(with = "runmat_types::wire_integer")]
         component_count: usize,
     },
     /// An authored generator declaration. It has no numerical cardinality until
     /// an authenticated resolver creates a distinct mesh-bound `TopologyField`.
     DeferredTopologyField {
         selector: AuthoredSignalTopologySelector,
+        #[serde(with = "runmat_types::wire_integer")]
         component_count: usize,
     },
 }

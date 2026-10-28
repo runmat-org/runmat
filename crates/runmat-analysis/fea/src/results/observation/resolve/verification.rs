@@ -55,7 +55,7 @@ where
     let fields = fields.into_iter();
     let (topology, remaining) = ObservationTopology::from_projection_admitted(
         projection,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )?;
     let topology = if ObservationTopology::needs_faces(fields.clone()) {
         topology.with_projection_faces()?
@@ -82,7 +82,7 @@ pub(crate) fn verify_sampled_observation_plan(
         None,
         fields.iter(),
         plan,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
 }
 
@@ -106,7 +106,7 @@ pub(crate) fn verify_structural_observation_plan(
         Some(&connectors),
         fields.iter(),
         plan,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
 }
 

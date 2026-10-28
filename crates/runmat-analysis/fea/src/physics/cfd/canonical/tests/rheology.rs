@@ -26,7 +26,7 @@ fn shear_thinning_power_law_channel_converges_to_the_closed_form_profile() {
     for cells in [2, 4, 8] {
         let mut f = case(cells, ReferenceCase::Duct, false);
         f.material.rheology = Some(law);
-        f.policy.maximum_operator_work = u64::MAX;
+        f.policy.maximum_operator_work = None;
         f.material.dynamic_viscosity = DynamicViscosity::new(law.low_shear_viscosity());
         // Every authored boundary carries the plane power-law profile (u depends on y only).
         for constraint in &mut f.constraints {

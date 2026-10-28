@@ -13,7 +13,7 @@ fn original_frequency_projection_reuses_compilation_without_source_scope_substit
             .unwrap()
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .unwrap();
     let states = StructuralFrequencyStateInputs {
@@ -73,7 +73,7 @@ fn original_frequency_projection_reuses_compilation_without_source_scope_substit
             .unwrap()
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .unwrap();
     let repeated = StructuralFrequencyEntryResourceProjection::new_from_compilation(
@@ -102,7 +102,7 @@ pub(super) fn assert_recovery_compilation(
             .unwrap()
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .unwrap();
     let carried = super::super::build_structural_frequency_recovery_resource_plan_from_compilation(

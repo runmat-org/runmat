@@ -202,7 +202,7 @@ fn coordinator_rejects_substituted_authored_workload_and_insufficient_retention_
     p.product.compiled.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1024;
+        .maximum_resident_bytes = Some(1024);
     p.product = plan_nonlinear_solid_study_product(
         p.product.compiled.clone(),
         &p.mesh,

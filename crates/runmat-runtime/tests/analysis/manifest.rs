@@ -1915,10 +1915,10 @@ fn unit_mismatch_is_rejected_at_canonical_model_decode() {
     let mut wire = serde_json::to_value(&model).expect("encode canonical fixture");
     assert_eq!(
         wire["units"],
-        serde_json::to_value(LengthUnit::Meter).unwrap()
+        serde_json::to_value(runmat_types::physical::LengthUnit::Meter).unwrap()
     );
     serde_json::from_value::<AnalysisModel>(wire.clone()).expect("decode canonical fixture");
-    wire["units"] = serde_json::to_value(LengthUnit::Inch).unwrap();
+    wire["units"] = serde_json::to_value(runmat_types::physical::LengthUnit::Inch).unwrap();
     let error = serde_json::from_value::<AnalysisModel>(wire)
         .expect_err("canonical fixture admission must reject inch coordinates");
     assert!(error

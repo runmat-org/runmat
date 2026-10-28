@@ -108,7 +108,7 @@ pub(crate) fn compile_canonical_input(
     super::resources::require_canonical_ceiling(
         model,
         mesh,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )?;
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;

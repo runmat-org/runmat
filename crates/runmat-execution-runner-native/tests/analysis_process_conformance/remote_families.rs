@@ -195,6 +195,34 @@ study response {
 }
 "#;
 
+/// Replace the box fixture's source ordinals (`face_00000N`, `solid_000001`) with the canonical
+/// persistent selectors of `box.brep`; the solver matches canonical identities only.
+fn box_selectors(source: &str) -> String {
+    let imported = runmat_geometry_io::import_exact_cad(
+        "box.brep",
+        BOX_BREP,
+        runmat_geometry_io::GeometryFormat::Brep,
+        &runmat_geometry_io::ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..runmat_geometry_io::ExactCadImportOptions::default() },
+        &runmat_geometry_io::GeometryImportContext::new(),
+    )
+    .unwrap();
+    let mut source = source.replace(
+        "\"solid_000001\"",
+        &format!(
+            "\"{}\"",
+            imported.topology.regions[0].id.analysis_selection_id().unwrap()
+        ),
+    );
+    for (ordinal, face) in &imported.source_face_ids {
+        source = source.replace(
+            &format!("\"face_{:06}\"", ordinal + 1),
+            &format!("\"{}\"", face.analysis_selection_id().unwrap()),
+        );
+    }
+    assert!(!source.contains("\"face_0"), "unmapped box face ordinal");
+    source
+}
+
 fn nonlinear_source() -> String {
     include_str!("../../../../docs/simulation/examples/small-strain-j2.fea")
         .replace("./geometry/box.brep", "./box.brep")
@@ -218,12 +246,12 @@ pub(super) async fn run() {
         .unwrap_or(2);
     let selected = std::env::var("RUNMAT_REMOTE_FAMILY_ONLY").ok();
     let families: Vec<(&'static str, String)> = vec![
-        ("thermal", THERMAL.to_string()),
-        ("electrical", ELECTRICAL.to_string()),
-        ("magnetic", MAGNETIC.to_string()),
-        ("maxwell", MAXWELL.to_string()),
-        ("acoustic", ACOUSTIC.to_string()),
-        ("fluid", FLUID.to_string()),
+        ("thermal", box_selectors(THERMAL)),
+        ("electrical", box_selectors(ELECTRICAL)),
+        ("magnetic", box_selectors(MAGNETIC)),
+        ("maxwell", box_selectors(MAXWELL)),
+        ("acoustic", box_selectors(ACOUSTIC)),
+        ("fluid", box_selectors(FLUID)),
         ("nonlinear", nonlinear_source()),
     ];
     let mut evidence = Vec::new();

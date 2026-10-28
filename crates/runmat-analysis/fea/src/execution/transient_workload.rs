@@ -113,7 +113,7 @@ impl StructuralTransientWorkload {
         crate::planning::resource::require_initial_field_ceiling(
             &self.initial_fields,
             TRANSIENT_WORKLOAD_LIMITS,
-            step.accuracy.resources.maximum_resident_bytes,
+            step.accuracy.resources.resident_byte_budget(),
         )
         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         super::validate_initial_field_declarations(&self.model, step, &self.initial_fields)?;

@@ -62,16 +62,27 @@ pub struct CanonicalFluidPolicy {
     pub pressure_velocity_coupling: PressureVelocityCoupling,
     #[serde(deserialize_with = "deserialize_acceleration")]
     pub fixed_point_acceleration: Option<crate::solve::fixed_point::AndersonOnePolicy>,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_outer_iterations: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_nonorthogonal_iterations: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_linear_iterations: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub gmres_restart: usize,
     pub momentum_relaxation: f64,
     pub pressure_relaxation: f64,
     pub linear_relative_tolerance: f64,
     pub physical_relative_tolerance: f64,
-    pub maximum_resident_bytes: u64,
-    pub maximum_operator_work: u64,
+    /// Resident-byte cap of the solve; `None` (serialized `null`) is no cap of its own.
+    /// Read it only through [`CanonicalFluidPolicy::resident_byte_budget`].
+    #[serde(with = "runmat_types::wire_integer::option")]
+    pub maximum_resident_bytes: Option<u64>,
+    /// Operator-work cap of the solve; `None` (serialized `null`) is no cap of its own.
+    /// Read it only through [`CanonicalFluidPolicy::operator_work_budget`].
+    #[serde(with = "runmat_types::wire_integer::option")]
+    pub maximum_operator_work: Option<u64>,
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_authority_items: usize,
 }
 
@@ -85,6 +96,25 @@ pub enum PressureVelocityCoupling {
     Coupled,
     /// Relaxed SIMPLE outer iteration (segregated momentum and pressure solves).
     Segregated,
+}
+
+impl CanonicalFluidPolicy {
+    /// Resident bytes the solve may hold; no cap admits every byte count.
+    pub fn resident_byte_budget(&self) -> u64 {
+        self.maximum_resident_bytes.unwrap_or(u64::MAX)
+    }
+
+    /// Operator work the solve may charge; no cap admits every work count.
+    pub fn operator_work_budget(&self) -> u64 {
+        self.maximum_operator_work.unwrap_or(u64::MAX)
+    }
+
+    /// Stores a derived saturating resident budget as the cap: the inverse of
+    /// `resident_byte_budget`. A budget above the wire bound (2^53 - 1 bytes) cannot bind any
+    /// placement, so it is stored as no cap instead of an unrepresentable integer.
+    pub fn set_resident_byte_budget(&mut self, budget: u64) {
+        self.maximum_resident_bytes = runmat_types::wire_integer::bounded(budget);
+    }
 }
 
 impl Default for CanonicalFluidPolicy {
@@ -102,8 +132,8 @@ impl Default for CanonicalFluidPolicy {
             physical_relative_tolerance: 1e-8,
             // No fixed size caps: the step's authored resource budget (accuracy resources)
             // bounds resident memory, and the execution envelope bounds time.
-            maximum_resident_bytes: u64::MAX,
-            maximum_operator_work: u64::MAX,
+            maximum_resident_bytes: None,
+            maximum_operator_work: None,
             maximum_authority_items: 1_000_000,
         }
     }

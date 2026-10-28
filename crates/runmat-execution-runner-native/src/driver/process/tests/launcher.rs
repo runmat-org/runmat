@@ -58,6 +58,7 @@ fn shell_driver(script: &str) -> (tempfile::TempDir, Arc<LocalDriver>) {
             max_stderr_bytes: 4096,
             local_cpu_capacity_millicores: None,
             local_memory_capacity_bytes: None,
+            authored_worker_memory_bytes: None,
             worker_memory_bytes: 1024 * 1024 * 1024,
             worker_scratch_bytes: 1024 * 1024 * 1024,
             worker_cpu_millicores: 1000,

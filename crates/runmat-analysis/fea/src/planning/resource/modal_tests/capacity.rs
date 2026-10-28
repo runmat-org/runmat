@@ -54,6 +54,6 @@ fn modal_capacity_binds_workload_workspace_payload_and_original_ceiling() {
     }
     assert!(super::super::build_resource_plan(understated).is_err());
     let mut ceiling = plan.input.clone();
-    ceiling.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes - 1;
+    ceiling.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
     assert!(super::super::build_resource_plan(ceiling).is_err());
 }

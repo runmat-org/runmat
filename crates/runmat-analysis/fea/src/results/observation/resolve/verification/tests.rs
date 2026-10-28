@@ -202,7 +202,7 @@ fn original_verification_inventory_limit_remains_typed_at_source_boundary() {
             )
             .unwrap();
         let catalog = super::super::field_catalog::declaration_inventory_resident_bytes(1).unwrap();
-        step.accuracy.resources.maximum_resident_bytes = topology + catalog - 1;
+        step.accuracy.resources.maximum_resident_bytes = Some(topology + catalog - 1);
         let error =
             verify_observation_plan(&step, &projection, std::slice::from_ref(&definition), &plan)
                 .unwrap_err();

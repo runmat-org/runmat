@@ -142,7 +142,7 @@ fn tiny_authored_ceiling_and_wrong_input_inventory_are_rejected() {
     w.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = 1;
+        .maximum_resident_bytes = Some(1);
     assert!(prepare_maxwell_harmonic_inputs(
         &w,
         &m,

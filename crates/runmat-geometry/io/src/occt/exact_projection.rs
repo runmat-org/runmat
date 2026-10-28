@@ -63,18 +63,24 @@ pub(super) fn project_exact_contracts(
         contacts: Vec::new(),
     };
 
+    // Authored names and tags of every entity kind, keyed by the entity's persistent identity.
+    let mut entity_names = BTreeMap::new();
+    let mut entity_tags = BTreeMap::new();
     topology.vertices = payload
         .vertices
         .iter()
         .map(|vertex| {
             let path = occurrences.path(vertex.occurrence_index)?;
+            let id = names.shape_id(
+                PersistentEntityKind::Vertex,
+                vertex.shape_key,
+                vertex.occurrence_index,
+                path,
+            )?;
+            record_names(&mut entity_names, &id, &vertex.names);
+            record_names(&mut entity_tags, &id, &vertex.tags);
             Ok(ExactVertex {
-                id: names.shape_id(
-                    PersistentEntityKind::Vertex,
-                    vertex.shape_key,
-                    vertex.occurrence_index,
-                    path,
-                )?,
+                id,
                 point_m: runmat_types::physical::Quantity::<
                     runmat_types::physical::kind::Position,
                     _,
@@ -98,13 +104,16 @@ pub(super) fn project_exact_contracts(
         .iter()
         .map(|edge| {
             let path = occurrences.path(edge.occurrence_index)?;
+            let id = names.shape_id(
+                PersistentEntityKind::Edge,
+                edge.shape_key,
+                edge.occurrence_index,
+                path,
+            )?;
+            record_names(&mut entity_names, &id, &edge.names);
+            record_names(&mut entity_tags, &id, &edge.tags);
             Ok(ExactEdge {
-                id: names.shape_id(
-                    PersistentEntityKind::Edge,
-                    edge.shape_key,
-                    edge.occurrence_index,
-                    path,
-                )?,
+                id,
                 curve_evaluator_id: names.curve_id(edge.shape_key)?,
                 start_vertex_id: names.optional_shape_id(
                     PersistentEntityKind::Vertex,
@@ -193,8 +202,6 @@ pub(super) fn project_exact_contracts(
         .sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut source_face_ids = BTreeMap::new();
-    let mut entity_names = BTreeMap::new();
-    let mut entity_tags = BTreeMap::new();
     topology.faces = payload
         .faces
         .iter()

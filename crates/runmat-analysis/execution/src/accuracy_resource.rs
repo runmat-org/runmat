@@ -46,7 +46,7 @@ pub fn build_prepared_accuracy_resource_plan(
         let mut available = request
             .plan
             .resources
-            .maximum_resident_bytes
+            .resident_byte_budget()
             .checked_sub(input_facts.decoded_resident_bytes_admission_budget.0)
             .ok_or_else(|| {
                 AnalysisBridgeError::Invalid("fluid accuracy decode exceeds source ceiling".into())

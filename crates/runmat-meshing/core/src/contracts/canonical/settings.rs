@@ -16,6 +16,7 @@ pub struct MeshingRequestSettings {
     pub element_order: ElementOrder,
     #[serde(default, skip_serializing_if = "MeshDimension::is_solid")]
     pub dimension: MeshDimension,
+    #[serde(with = "runmat_types::wire_integer")]
     pub deterministic_seed: u64,
     #[serde(with = "runmat_types::physical::canonical_scalar")]
     pub target_edge_length_m: runmat_types::physical::Length,

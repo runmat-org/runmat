@@ -20,8 +20,11 @@ pub(super) async fn execute_prepared_with_source(
     let case_id = prepared.realized.study_id.clone();
     let workers = options.workers.unwrap_or(prepared.workers).max(1);
     let root = crate::prepare_structural_study_root(prepared.root).map_err(|e| e.to_string())?;
+    let mut config =
+        crate::NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?;
+    config.authored_worker_memory_bytes = prepared.memory_per_worker_bytes;
     let completed = crate::execute_prepared_study_locally_with_observers(
-        crate::NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?,
+        config,
         root,
         workers,
         crate::LocalStructuralStudyObservers {

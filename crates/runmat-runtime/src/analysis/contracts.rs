@@ -279,6 +279,7 @@ pub struct AnalysisTransientRunOptions {
     pub time_step_policy: AnalysisStructuralTimeStepPolicy,
     pub residual_target: f64,
     #[serde(default = "default_transient_block_intervals")]
+    #[serde(with = "runmat_types::wire_integer")]
     pub maximum_intervals_per_block: u64,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
@@ -306,6 +307,7 @@ pub struct AnalysisAcousticRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
+    #[serde(with = "runmat_types::wire_integer")]
     pub mode_count: usize,
     pub residual_warn_threshold: f64,
 }
@@ -345,7 +347,9 @@ pub struct AnalysisChtRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
+    #[serde(with = "runmat_types::wire_integer")]
     pub sample_count: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
@@ -373,7 +377,9 @@ pub struct AnalysisFsiRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
+    #[serde(with = "runmat_types::wire_integer")]
     pub sample_count: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
@@ -401,6 +407,7 @@ pub struct AnalysisThermalRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
+    #[serde(with = "runmat_types::wire_integer")]
     pub snapshot_count: usize,
     pub residual_warn_threshold: f64,
     #[serde(default)]
@@ -620,6 +627,18 @@ pub struct RunProvenance {
     /// memory this host admitted), when known. Provenance only: it never enters an identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_memory_ceiling_bytes: Option<u64>,
+    /// The static solve path the admitted plan selected under that ceiling, when the step is a
+    /// static SPD solve. Provenance only: it never enters an identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_solve_path: Option<runmat_analysis_fea::planning::resource::StaticSolvePath>,
+}
+
+/// Where a static solve ran and how: the effective memory ceiling and the solve path it
+/// selected. Run provenance only; neither value enters an identity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StaticSolvePlacement {
+    pub effective_memory_ceiling_bytes: Option<u64>,
+    pub static_solve_path: Option<runmat_analysis_fea::planning::resource::StaticSolvePath>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -949,9 +968,11 @@ pub struct AnalysisFieldBinding {
 pub struct AnalysisFieldRequestOptions {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub offset: Option<usize>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub limit: Option<usize>,
 }
 
@@ -1011,8 +1032,11 @@ pub struct AnalysisFieldPageResult {
     pub field_id: String,
     pub descriptor: AnalysisFieldDescriptor,
     pub values: AnalysisFieldPageValues,
+    #[serde(with = "runmat_types::wire_integer")]
     pub offset: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub count: usize,
+    #[serde(with = "runmat_types::wire_integer")]
     pub total_count: usize,
     pub truncated: bool,
 }
@@ -1085,6 +1109,7 @@ pub struct AnalysisObjectArtifactMetadata {
     pub schema_version: u32,
     pub artifact_id: String,
     pub src: String,
+    #[serde(with = "runmat_types::wire_integer")]
     pub bytes: u64,
     pub mime: String,
     pub kind: String,
@@ -1097,9 +1122,15 @@ pub struct AnalysisObjectArtifactMetadata {
 pub struct AnalysisFieldPagingDescriptor {
     pub mode: String,
     pub value_unit: String,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub total_count: Option<usize>,
+    #[serde(with = "runmat_types::wire_integer")]
     pub page_size: usize,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub page_count: Option<usize>,
+    #[serde(with = "runmat_types::wire_integer")]
     pub default_materialize_limit: usize,
 }
 
@@ -1122,6 +1153,8 @@ pub struct AnalysisFieldStorageRef {
     pub kind: String,
     pub field_id: String,
     pub storage: AnalysisFieldStorage,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub size_bytes: Option<u64>,
 }
 
@@ -1150,15 +1183,23 @@ pub struct AnalysisFieldDescriptor {
     pub unit: Option<String>,
     #[serde(default)]
     pub location: AnalysisFieldLocation,
+    #[serde(with = "runmat_types::wire_integer::vec")]
     pub shape: Vec<usize>,
+    #[serde(with = "runmat_types::wire_integer")]
     pub element_count: usize,
     #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer")]
     pub entity_count: usize,
     #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer")]
     pub value_count: usize,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub component_count: Option<usize>,
     pub residency: String,
     pub storage: AnalysisFieldStorage,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub size_bytes: Option<u64>,
     pub paging: AnalysisFieldPagingDescriptor,
     #[serde(rename = "storageRef")]
@@ -2839,8 +2880,11 @@ pub enum AnalysisExecutionReadiness {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnalysisExecutionDuration {
+    #[serde(with = "runmat_types::wire_integer")]
     pub lower_millis: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub upper_millis: u64,
+    #[serde(with = "runmat_types::wire_integer")]
     pub sample_count: u64,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2848,7 +2892,11 @@ pub struct AnalysisExecutionDuration {
 pub struct AnalysisExecutionCandidate {
     pub mode: AnalysisExecutionMode,
     pub cores: Option<u32>,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub memory_bytes: Option<u64>,
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
     pub estimated_millis: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_evidence: Option<AnalysisExecutionDuration>,

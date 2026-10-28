@@ -336,6 +336,26 @@ impl RealSparseMatrix {
         dense
     }
 
+    /// [`Self::expanded_square`] that consumes the matrix: an unchanged size with no stored zero
+    /// reuses the value storage instead of copying it. The result is identical.
+    pub fn into_expanded_square(self, size: usize) -> Result<Self, RealSparseMatrixError> {
+        if size == self.rows()
+            && self.rows() == self.columns()
+            && self.values.iter().all(|value| *value != 0.0)
+        {
+            return Ok(Self {
+                pattern: self.pattern,
+                values: self.values,
+                scalar_domain: ScalarDomain::Real,
+                precision: ScalarPrecision::F64,
+                role: self.role,
+                properties: self.properties,
+                contributions: std::sync::Arc::new(Vec::new()),
+            });
+        }
+        self.expanded_square(size)
+    }
+
     pub fn expanded_square(&self, size: usize) -> Result<Self, RealSparseMatrixError> {
         if size < self.rows() || self.rows() != self.columns() {
             return Err(RealSparseMatrixError::ShapeMismatch);

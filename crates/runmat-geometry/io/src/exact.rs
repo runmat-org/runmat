@@ -234,6 +234,11 @@ impl ImportedExactCad {
         };
         if selected.is_empty() {
             let role_name = format!("{role:?}").to_lowercase();
+            let role_plural = if role_name == "vertex" {
+                "vertices".to_string()
+            } else {
+                format!("{role_name}s")
+            };
             let mut available = candidates
                 .iter()
                 .flat_map(|(_, values)| values.iter().cloned())
@@ -242,11 +247,11 @@ impl ImportedExactCad {
             available.dedup();
             return Err(if available.is_empty() {
                 format!(
-                    "no {role_name} is {verb} \"{value}\"; the source has no {verb} {role_name}s"
+                    "no {role_name} is {verb} \"{value}\"; the source has no {verb} {role_plural}"
                 )
             } else {
                 format!(
-                    "no {role_name} is {verb} \"{value}\"; {verb} {role_name}s: {}",
+                    "no {role_name} is {verb} \"{value}\"; {verb} {role_plural}: {}",
                     available
                         .iter()
                         .map(|candidate| format!("\"{candidate}\""))

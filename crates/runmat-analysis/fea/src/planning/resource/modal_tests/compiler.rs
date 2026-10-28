@@ -13,7 +13,7 @@ fn original_modal_compiler_inventory_and_source_scope_govern_canonical_request()
             .unwrap()
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .unwrap();
     let fresh = build_structural_modal_resource_plan(
@@ -61,7 +61,7 @@ fn original_modal_compiler_inventory_and_source_scope_govern_canonical_request()
             .unwrap()
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .unwrap();
     assert_eq!(

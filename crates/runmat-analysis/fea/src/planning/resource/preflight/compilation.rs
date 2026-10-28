@@ -41,7 +41,7 @@ pub(super) fn original_peak(
             CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
                 input.model,
                 input.mesh,
-                input.step.accuracy.resources.maximum_resident_bytes,
+                input.step.accuracy.resources.resident_byte_budget(),
             )
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
         )

@@ -57,8 +57,8 @@ pub fn policy() -> CanonicalFluidPolicy {
         pressure_relaxation: 0.25,
         linear_relative_tolerance: 1e-11,
         physical_relative_tolerance: 1e-7,
-        maximum_resident_bytes: 2_000_000_000,
-        maximum_operator_work: 100_000_000_000_000,
+        maximum_resident_bytes: Some(2_000_000_000),
+        maximum_operator_work: Some(100_000_000_000_000),
         maximum_authority_items: 10000,
     }
 }

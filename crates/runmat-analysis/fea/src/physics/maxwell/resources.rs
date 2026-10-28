@@ -44,7 +44,7 @@ pub(crate) fn require_selected_ceiling(
     if steps.next().is_some() {
         return Err(resource("selected step is ambiguous"));
     }
-    require_canonical_ceiling(model, mesh, step.accuracy.resources.maximum_resident_bytes)
+    require_canonical_ceiling(model, mesh, step.accuracy.resources.resident_byte_budget())
 }
 
 pub(crate) fn require_canonical_ceiling(

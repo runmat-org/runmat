@@ -276,6 +276,10 @@ pub(crate) mod bridge {
         point_y: f64,
         point_z: f64,
         tolerance: f64,
+        /// Authored names, in precedence order; selector metadata outside persistent identity.
+        names: Vec<String>,
+        /// Presentation layers (semantic tags); selector metadata outside persistent identity.
+        tags: Vec<String>,
     }
 
     #[derive(Debug, Clone)]
@@ -289,6 +293,10 @@ pub(crate) mod bridge {
         closed: bool,
         periodic: bool,
         degenerate: bool,
+        /// Authored names, in precedence order; selector metadata outside persistent identity.
+        names: Vec<String>,
+        /// Presentation layers (semantic tags); selector metadata outside persistent identity.
+        tags: Vec<String>,
     }
 
     #[derive(Debug, Clone)]

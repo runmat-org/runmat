@@ -12,7 +12,7 @@ pub(crate) fn required_time_history_samples(
         step,
         ScalarHistoryDomain::TimeSeconds,
         None,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
 }
 
@@ -23,7 +23,7 @@ pub(crate) fn required_bounded_time_history_samples(
     required_bounded_time_history_samples_admitted(
         step,
         maximum,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
 }
 
@@ -47,7 +47,7 @@ pub(crate) fn required_load_factor_history_samples(
         step,
         ScalarHistoryDomain::LoadFactor,
         None,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )
 }
 
@@ -104,7 +104,7 @@ fn required_scalar_history_samples(
 fn required_history_coordinates(
     step: &ProcedureStep,
 ) -> Result<Vec<RecoveredFieldSample>, ObservationError> {
-    required_history_coordinates_bounded(step, None, step.accuracy.resources.maximum_resident_bytes)
+    required_history_coordinates_bounded(step, None, step.accuracy.resources.resident_byte_budget())
 }
 
 fn required_history_coordinates_bounded(

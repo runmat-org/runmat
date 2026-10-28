@@ -150,7 +150,7 @@ fn block_admission_binds_inputs_output_and_cumulative_history() {
         ceiling.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = plan.request.memory_bytes - 1;
+            .maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
         let scoped = NonlinearSolidBlockRequest {
             workload: ceiling.identity().unwrap(),
             ..request

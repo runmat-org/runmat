@@ -53,6 +53,7 @@ pub(super) fn admit_statistical_persistence(
         quality_policy: quality_policy.into(),
         fallback_events: Vec::new(),
         effective_memory_ceiling_bytes: None,
+        static_solve_path: None,
     };
     let run = AnalysisRunResult {
         observation_scalars: Vec::new(),

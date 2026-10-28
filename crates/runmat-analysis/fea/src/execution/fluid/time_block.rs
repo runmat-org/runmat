@@ -163,7 +163,7 @@ impl<'a> FluidTransientBlock<'a> {
         }
         // Borrowed source profiling precedes model validation, time union and field traversal.
         let metadata = runmat_canonical_codec::profile_serialized(model, super::LIMITS)?;
-        if metadata.materialization_resident_bytes_estimate > input.policy.maximum_resident_bytes {
+        if metadata.materialization_resident_bytes_estimate > input.policy.resident_byte_budget() {
             return Err(invalid(
                 "fluid block source profile exceeds resident ceiling",
             ));
@@ -220,8 +220,8 @@ impl<'a> FluidTransientBlock<'a> {
             step,
             input
                 .policy
-                .maximum_resident_bytes
-                .min(step.accuracy.resources.maximum_resident_bytes),
+                .resident_byte_budget()
+                .min(step.accuracy.resources.resident_byte_budget()),
         )?;
         if range.start >= range.end || range.end >= schedule.points_s().len() {
             return Err(invalid(
@@ -236,7 +236,7 @@ impl<'a> FluidTransientBlock<'a> {
             &range,
             retain.len(),
             metadata.materialization_resident_bytes_estimate,
-            step.accuracy.resources.maximum_resident_bytes,
+            step.accuracy.resources.resident_byte_budget(),
         )?;
         let bytes = runmat_canonical_codec::encode_contract(
             b"runmat-fluid-temporal-block/v1\0",

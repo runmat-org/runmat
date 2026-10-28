@@ -353,6 +353,26 @@ fn generator_arguments(
         .collect()
 }
 
+/// Generator arguments land on the FEA wire contract, so 64-bit integers are held to
+/// its bound here, at authoring, rather than failing later when the signal is encoded.
+fn wire_bounded<T: runmat_types::wire_integer::WireInteger>(
+    builtin: &'static str,
+    index: usize,
+    value: T,
+) -> BuiltinResult<T> {
+    runmat_types::wire_integer::bounded(value).ok_or_else(|| {
+        builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!(
+                "Arguments entry {} integer {value} exceeds the FEA wire-contract bound of {} (2^53 - 1)",
+                index + 1,
+                runmat_types::wire_integer::MAX_WIRE_INTEGER
+            ),
+        )
+    })
+}
+
 fn generator_argument(
     builtin: &'static str,
     index: usize,
@@ -364,11 +384,15 @@ fn generator_argument(
             IntValue::I8(value) => GeneratorArgument::SignedInteger(i64::from(*value)),
             IntValue::I16(value) => GeneratorArgument::SignedInteger(i64::from(*value)),
             IntValue::I32(value) => GeneratorArgument::SignedInteger(i64::from(*value)),
-            IntValue::I64(value) => GeneratorArgument::SignedInteger(*value),
+            IntValue::I64(value) => {
+                GeneratorArgument::SignedInteger(wire_bounded(builtin, index, *value)?)
+            }
             IntValue::U8(value) => GeneratorArgument::UnsignedInteger(u64::from(*value)),
             IntValue::U16(value) => GeneratorArgument::UnsignedInteger(u64::from(*value)),
             IntValue::U32(value) => GeneratorArgument::UnsignedInteger(u64::from(*value)),
-            IntValue::U64(value) => GeneratorArgument::UnsignedInteger(*value),
+            IntValue::U64(value) => {
+                GeneratorArgument::UnsignedInteger(wire_bounded(builtin, index, *value)?)
+            }
         },
         Value::Num(value) if value.is_finite() => GeneratorArgument::Real(*value),
         Value::String(value) => GeneratorArgument::Text(value.to_string()),
@@ -434,6 +458,24 @@ mod tests {
     use runmat_value::{CellArray, Closure};
 
     #[test]
+    fn generator_arguments_are_held_to_the_wire_bound_at_authoring() {
+        let bound = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+        assert!(generator_argument("test", 0, &Value::Int(IntValue::U64(bound))).is_ok());
+        for value in [
+            Value::Int(IntValue::U64(bound + 1)),
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Int(IntValue::I64(i64::MIN)),
+        ] {
+            assert_eq!(
+                generator_argument("test", 0, &value)
+                    .unwrap_err()
+                    .identifier(),
+                Some("RunMat:fea:InvalidInput")
+            );
+        }
+    }
+
+    #[test]
     fn callable_constructor_freezes_captures_and_exact_argument_kinds() {
         let domain = block_on(time_domain()).unwrap();
         let sampling = block_on(uniform_sampling(
@@ -452,7 +494,7 @@ mod tests {
         let arguments = Value::Cell(
             CellArray::new(
                 vec![
-                    Value::Int(IntValue::U64(u64::MAX)),
+                    Value::Int(IntValue::U64(runmat_types::wire_integer::MAX_WIRE_INTEGER)),
                     Value::String("pulse".into()),
                 ],
                 1,
@@ -483,7 +525,7 @@ mod tests {
         assert_eq!(
             generator.invocation.arguments,
             vec![
-                GeneratorArgument::UnsignedInteger(u64::MAX),
+                GeneratorArgument::UnsignedInteger(runmat_types::wire_integer::MAX_WIRE_INTEGER),
                 GeneratorArgument::Text("pulse".into())
             ]
         );

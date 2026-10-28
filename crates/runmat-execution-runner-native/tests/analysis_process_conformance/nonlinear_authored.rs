@@ -138,7 +138,7 @@ pub(super) async fn run() {
         let memory = result.completion.workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes;
+            .resident_byte_budget();
         let publication = case.publication;
         drop(result);
         let (cold, source) = nonlinear_solid_study_completion_from_source(

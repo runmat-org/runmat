@@ -45,7 +45,7 @@ fn preflight(
         w.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .map_err(invalid)
 }

@@ -68,7 +68,7 @@ pub fn build_structural_modal_resource_plan(
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )?;
     build_structural_modal_resource_plan_from_compilation(
         mesh,

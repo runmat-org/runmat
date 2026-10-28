@@ -171,6 +171,7 @@ fn test_structural_sequence_result(
             solver_result_identity,
             result,
             numerical_receipt,
+            static_solve_path: None,
         }],
         states,
     })
@@ -584,13 +585,6 @@ fn replace_with_moment_excitation(model: &mut AnalysisModel, excitation_id: &str
         action_ids: vec![ExcitationId(excitation_id.to_string())],
         activation: ExcitationCaseActivation::Always,
     }];
-}
-
-fn excitation_region_id(action: &ExcitationAction) -> &str {
-    let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target else {
-        panic!("expected a region excitation target");
-    };
-    target.region_id.as_str()
 }
 
 fn sample_cht_model() -> AnalysisModel {
@@ -4086,6 +4080,12 @@ fn scoped_fea_artifact_roots(root: &Path) -> FeaRuntimeConfigRestoreGuard {
 }
 
 fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, PathBuf) {
+    write_ready_analysis_mesh_artifact(test_name, &ready_minimal_analysis_mesh())
+}
+
+/// The minimal tetrahedron with canonical CAD face provenance (`root`, `tip`), shaped like the
+/// output of the runner-native exact meshing provider.
+fn ready_minimal_analysis_mesh() -> SolverMeshArtifact {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     mesh.topology.boundary_faces[0]
@@ -4100,7 +4100,7 @@ fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, Path
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest()
         .expect("seal canonical solver mesh fixture");
-    write_ready_analysis_mesh_artifact(test_name, &mesh)
+    mesh
 }
 
 fn write_ready_analysis_mesh_artifact(
@@ -4128,85 +4128,66 @@ fn persistent_face(source_topology_id: &str) -> PersistentEntityId {
     )
 }
 
+fn run_study_through_meshing_provider(
+    spec: &AnalysisStudySpec,
+) -> Result<AnalysisStudyRunData, String> {
+    let mesh = ready_minimal_analysis_mesh();
+    let evidence = runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&mesh);
+    let _provider = crate::meshing::replace_meshing_execution_provider(Some(std::sync::Arc::new(
+        move |_request: &crate::meshing::MeshingExecutionRequest| {
+            Ok(crate::meshing::MeshingExecutionOutput {
+                artifact: mesh.clone(),
+                evidence: evidence.clone(),
+            })
+        },
+    )))
+    .expect("install meshing provider");
+    analysis_run_study_op(spec, OperationContext::new(None, None))
+        .map(|envelope| envelope.data)
+        .map_err(|error| format!("{error:?}"))
+}
+
 #[test]
-fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
-    let mut model = sample_model();
-    model.constraints[0].visit_targets_mut(|target| {
+fn provider_meshing_output_runs_the_study_by_canonical_selectors_only() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("provider-meshing-canonical-selectors");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry.source.sha256 = "ab".repeat(32);
+    let canonical = |target: &mut RegionTarget| {
+        if matches!(target.region_id.as_str(), "root" | "tip") {
+            target.region_id = persistent_face(&target.region_id)
+                .analysis_selection_id()
+                .unwrap();
+        }
+    };
+    for constraint in &mut spec.model.constraints {
+        constraint.visit_targets_mut(canonical);
+    }
+    for action in &mut spec.model.excitations {
+        if let ExcitationTarget::Region(target) = &mut action.excitation_mut().target {
+            canonical(target);
+        }
+    }
+    assert!(spec.solver_mesh_artifact_path.is_none());
+    assert!(spec.meshing_settings.is_some());
+
+    // The provider's mesh carries canonical CAD identities; the model names them directly.
+    let run = run_study_through_meshing_provider(&spec)
+        .expect("canonical selectors resolve against the provider mesh");
+    assert!(run.solver_mesh_artifact_path.is_some());
+
+    // A legacy importer ordinal is not an identity: nothing maps it, so the study is rejected.
+    let mut legacy = spec.clone();
+    legacy.model.constraints[0].visit_targets_mut(|target| {
         *target = RegionTarget::boundary("face_000001");
     });
-    let runmat_analysis_core::ExcitationTarget::Region(target) =
-        &mut model.excitations[0].excitation_mut().target
-    else {
-        panic!("expected region excitation target");
-    };
-    *target = RegionTarget::boundary("face_000002");
-    model.sequence.steps[0]
-        .observations
-        .push(runmat_analysis_core::ObservationRequest::Field(
-            runmat_analysis_core::ObservationSpec {
-                observation_id: runmat_analysis_core::ObservationId("temperature".into()),
-                quantity: runmat_analysis_core::ObservationQuantity::Temperature,
-                value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
-                target: runmat_analysis_core::ObservationTarget::Spatial(ExcitationTarget::Region(
-                    RegionTarget::boundary("face_000001"),
-                )),
-                source_location: runmat_analysis_core::FieldLocation::Node,
-                output_location: runmat_analysis_core::FieldLocation::Node,
-                recovery: runmat_analysis_core::RecoveryPolicy::Native,
-                component: runmat_analysis_core::ObservationComponent::All,
-                frame: CoordinateFrame::Global,
-                sign_convention: runmat_analysis_core::SignConvention::Native,
-                complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
-                sampling: runmat_analysis_core::SamplingPolicy::Final,
-                reduction: None,
-                storage: runmat_analysis_core::ObservationStoragePolicy {
-                    precision: SignalPrecision::Real64,
-                    compression: runmat_analysis_core::CompressionPolicy::None,
-                    retention: runmat_analysis_core::RetentionPolicy::Canonical,
-                    partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
-                },
-                purpose: runmat_analysis_core::ObservationPurpose::Visualization,
-                cost: runmat_analysis_core::ObservationCostPolicy::UpperBound(
-                    runmat_analysis_core::ObservationCostEstimate {
-                        operation_count: 0,
-                        peak_resident_bytes: 0,
-                        stored_bytes: 0,
-                        transfer_bytes: 0,
-                        collective_count: 0,
-                    },
-                ),
-            },
-        ));
-    let aliases = BTreeMap::from([
-        ("face_000001".to_owned(), persistent_face("exact-face-a")),
-        ("face_000002".to_owned(), persistent_face("exact-face-b")),
-    ]);
-    let expected_a = aliases["face_000001"]
-        .analysis_selection_id()
-        .expect("persistent face A must produce a selection identity");
-    let expected_b = aliases["face_000002"]
-        .analysis_selection_id()
-        .expect("persistent face B must produce a selection identity");
-
-    model = runmat_analysis_core::resolve_geometry_region_aliases(
-        &model,
-        &runmat_analysis_core::GeometryRegionAliases::new(aliases).unwrap(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        model.constraints[0].target().expect("target").region_id,
-        expected_a
-    );
-    assert_eq!(excitation_region_id(&model.excitations[0]), expected_b);
-    assert!(matches!(
-        model.sequence.steps[0].observations[0]
-            .spec()
-            .map(|spec| &spec.target),
-        Some(runmat_analysis_core::ObservationTarget::Spatial(
-            ExcitationTarget::Region(target)
-        )) if target.region_id == expected_a
-    ));
+    let error = run_study_through_meshing_provider(&legacy)
+        .expect_err("a legacy face_000001 selector must be rejected");
+    assert!(error.contains("face_000001"), "{error}");
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -4325,7 +4306,7 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             requested_backend: ComputeBackend::Cpu,
             options: &options,
             assigned_run_id: Some("rejected-property-coverage"),
-            effective_memory_ceiling_bytes: None,
+            placement: Default::default(),
         },
         solved.data.run.clone(),
     )
@@ -4346,7 +4327,7 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             requested_backend: ComputeBackend::Cpu,
             options: &options,
             assigned_run_id: Some("rejected-structural-capability"),
-            effective_memory_ceiling_bytes: None,
+            placement: Default::default(),
         },
         solved.data.run,
     )

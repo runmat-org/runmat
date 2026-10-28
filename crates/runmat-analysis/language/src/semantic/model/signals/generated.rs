@@ -387,6 +387,7 @@ fn generator_argument(
                 source
                     .parse::<i64>()
                     .ok()
+                    .and_then(runmat_types::wire_integer::bounded)
                     .map(GeneratorArgument::SignedInteger)
             } else {
                 source.parse::<f64>().ok().map(GeneratorArgument::Real)

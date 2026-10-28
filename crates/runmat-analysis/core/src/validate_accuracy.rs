@@ -260,7 +260,7 @@ fn validate_resources(
     let resources = plan.resources;
     if resources.maximum_samples == 0
         || resources.maximum_wall_time_milliseconds == 0
-        || resources.maximum_resident_bytes == 0
+        || resources.resident_limit() == Some(0)
     {
         return accuracy_error(
             plan,
@@ -278,7 +278,7 @@ fn validate_resources(
         if spec
             .cost
             .upper_bound()
-            .is_some_and(|cost| cost.peak_resident_bytes > resources.maximum_resident_bytes)
+            .is_some_and(|cost| !resources.admits_resident_bytes(cost.peak_resident_bytes))
         {
             return accuracy_error(
                 plan,
@@ -418,6 +418,71 @@ mod tests {
             validate_accuracy(&step),
             Err(AnalysisValidationError::InvalidAccuracyPlan { .. })
         ));
+    }
+
+    #[test]
+    fn resource_ceiling_decode_and_validation_share_the_wire_bound() {
+        use crate::AccuracyResourceCeiling;
+        let max = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+        let decode = |samples: &str, bytes: &str| {
+            serde_json::from_str::<AccuracyResourceCeiling>(&format!(
+                r#"{{"maximum_refinement_cycles":0,"maximum_solver_tightenings":0,"maximum_samples":{samples},"maximum_wall_time_milliseconds":1000{bytes}}}"#
+            ))
+        };
+        // Null is "no authored limit"; omission is rejected rather than read as null.
+        let unbounded = decode("10", r#","maximum_resident_bytes":null"#).unwrap();
+        assert_eq!(unbounded.resident_limit(), None);
+        assert!(unbounded.admits_resident_bytes(u64::MAX));
+        assert!(decode("10", "").is_err());
+        assert_eq!(
+            decode("10", r#","maximum_resident_bytes":4096"#)
+                .unwrap()
+                .resident_limit(),
+            Some(4096)
+        );
+        assert_eq!(
+            decode("10", &format!(r#","maximum_resident_bytes":{max}"#))
+                .unwrap()
+                .resident_limit(),
+            Some(max)
+        );
+        for rejected in [
+            (max + 1).to_string(),
+            u64::MAX.to_string(),
+            "-1".into(),
+            "1.5".into(),
+        ] {
+            assert!(
+                decode("10", &format!(r#","maximum_resident_bytes":{rejected}"#)).is_err(),
+                "decoded resident bytes {rejected}"
+            );
+        }
+        assert_eq!(
+            decode(&max.to_string(), r#","maximum_resident_bytes":null"#)
+                .unwrap()
+                .maximum_samples,
+            usize::try_from(max).unwrap()
+        );
+        assert!(decode(&(max + 1).to_string(), r#","maximum_resident_bytes":null"#).is_err());
+        // Encoding always writes the field (null when unbounded) and refuses values above the bound.
+        let encoded = serde_json::to_value(unbounded).unwrap();
+        assert_eq!(encoded["maximum_resident_bytes"], serde_json::Value::Null);
+        let mut wide = unbounded;
+        wide.maximum_resident_bytes = Some(max + 1);
+        assert!(serde_json::to_string(&wide).is_err());
+        // Validation keeps each field's lower bound: zero bytes or samples are prohibited,
+        // zero refinement cycles and solver tightenings are allowed.
+        let mut step = ProcedureStep::structural_static("structural");
+        for (bytes, valid) in [(None, true), (Some(max), true), (Some(1), true), (Some(0), false)] {
+            step.accuracy.resources.maximum_resident_bytes = bytes;
+            assert_eq!(validate_accuracy(&step).is_ok(), valid, "resident bytes {bytes:?}");
+        }
+        step.accuracy.resources.maximum_resident_bytes = None;
+        step.accuracy.resources.maximum_refinement_cycles = 0;
+        step.accuracy.resources.maximum_solver_tightenings = 0;
+        validate_accuracy(&step).unwrap();
+        step.accuracy.resources.maximum_samples = 0;
+        assert!(validate_accuracy(&step).is_err());
     }
 
     #[test]

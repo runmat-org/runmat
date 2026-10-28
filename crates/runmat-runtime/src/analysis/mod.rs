@@ -181,6 +181,10 @@ pub struct StructuralStudyStepNumericalResult {
     pub solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
     pub result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
+    /// The static solve path the step's admitted plan selected; `None` when unknown.
+    /// Provenance only, never identity.
+    #[serde(default)]
+    pub static_solve_path: Option<runmat_analysis_fea::planning::resource::StaticSolvePath>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -358,7 +362,7 @@ pub use contracts::{
     AnalysisValidateResult, BucklingResultsData, ContactEnforcementOptions, FallbackEvent,
     FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
     NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate,
-    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus, StaticSolvePlacement,
     StructuralFrequencyResultsData, StructuralRandomResponseResultsData,
     StructuralResponseSpectrumResultsData, ThermalResultsData, TransientIntegrationMethod,
     TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
@@ -1486,40 +1490,6 @@ fn prepare_study_run(
             BTreeMap::new(),
         )
     })?;
-    let aliases = runmat_analysis_core::GeometryRegionAliases::new(study_mesh.region_aliases)
-        .map_err(|error| {
-            operation_error(
-                ANALYSIS_RUN_STUDY_OPERATION,
-                ANALYSIS_RUN_STUDY_OP_VERSION,
-                &prepared.context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                error.to_string(),
-                BTreeMap::new(),
-            )
-        })?;
-    prepared.model =
-        runmat_analysis_core::resolve_geometry_region_aliases(&prepared.model, &aliases).map_err(
-            |error| {
-                operation_error(
-                    ANALYSIS_RUN_STUDY_OPERATION,
-                    ANALYSIS_RUN_STUDY_OP_VERSION,
-                    &prepared.context,
-                    OperationErrorSpec {
-                        error_code: "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
-                        error_type: OperationErrorType::Validation,
-                        retryable: false,
-                        severity: OperationErrorSeverity::Error,
-                    },
-                    error.to_string(),
-                    BTreeMap::new(),
-                )
-            },
-        )?;
     prepared.solver_mesh_artifact_path = study_mesh.artifact_path;
     prepared.meshing_evidence_artifact_path = study_mesh.evidence_path;
     Ok(prepared)
@@ -2067,6 +2037,7 @@ fn analysis_admit_buckling_run_with_id(
         quality_policy: contracts::format_quality_policy(options.quality_policy),
         fallback_events: Vec::new(),
         effective_memory_ceiling_bytes: None,
+        static_solve_path: None,
     };
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),
@@ -2393,6 +2364,7 @@ fn execute_acoustic_with_options(
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
             effective_memory_ceiling_bytes: None,
+            static_solve_path: None,
         },
     };
 
@@ -2958,6 +2930,7 @@ fn analysis_admit_transient_run_with_id(
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
             effective_memory_ceiling_bytes: None,
+            static_solve_path: None,
         },
     };
 
@@ -3482,6 +3455,7 @@ fn execute_nonlinear_with_options(
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
             effective_memory_ceiling_bytes: None,
+            static_solve_path: None,
         },
     };
 
@@ -3607,7 +3581,7 @@ fn analysis_complete_linear_static_run_with_id(
     assigned_run_id: Option<&str>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let context = prepared.context.clone();
-    let envelope = analysis_admit_linear_static_run_with_id(prepared, run, assigned_run_id, None)?;
+    let envelope = analysis_admit_linear_static_run_with_id(prepared, run, assigned_run_id, Default::default())?;
     persist_linear_static_run(&context, &envelope.data)?;
     Ok(envelope)
 }
@@ -3616,7 +3590,7 @@ fn analysis_admit_linear_static_run_with_id(
     prepared: PreparedStructuralLinearRun,
     run: FeaRunResult,
     assigned_run_id: Option<&str>,
-    effective_memory_ceiling_bytes: Option<u64>,
+    placement: StaticSolvePlacement,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let result = linear_static_result::admit_linear_static_result(
         linear_static_result::LinearStaticResultInput {
@@ -3625,7 +3599,7 @@ fn analysis_admit_linear_static_run_with_id(
             requested_backend: prepared.workload.backend,
             options: &prepared.options,
             assigned_run_id,
-            effective_memory_ceiling_bytes,
+            placement,
         },
         run,
     )

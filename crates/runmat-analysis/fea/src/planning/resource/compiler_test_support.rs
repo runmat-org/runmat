@@ -35,7 +35,7 @@ pub(super) fn assert_compiler_contract(plan: &FeaResourcePlan, original_peak: u6
     let mut input = plan.input.clone();
     let compiler = plan.request.memory_bytes * 2;
     peak(&mut input.demand).0 = compiler;
-    input.accuracy_ceiling.maximum_resident_bytes = u64::MAX;
+    input.accuracy_ceiling.maximum_resident_bytes = None;
     let dominated = build_resource_plan(input.clone()).unwrap();
     assert_eq!(
         dominated.request.memory_bytes,
@@ -46,12 +46,12 @@ pub(super) fn assert_compiler_contract(plan: &FeaResourcePlan, original_peak: u6
             + dominated.breakdown.resource_plan_transport_closure_bytes.0
             + dominated.breakdown.resource_plan_decoded_resident_bytes.0
     );
-    input.accuracy_ceiling.maximum_resident_bytes = dominated.request.memory_bytes;
+    input.accuracy_ceiling.maximum_resident_bytes = Some(dominated.request.memory_bytes);
     assert_eq!(
         build_resource_plan(input.clone()).unwrap().request,
         dominated.request
     );
-    input.accuracy_ceiling.maximum_resident_bytes -= 1;
+    input.accuracy_ceiling.maximum_resident_bytes = Some(input.accuracy_ceiling.resident_byte_budget() - 1);
     assert!(matches!(
         build_resource_plan(input),
         Err(ResourcePlanningError::AccuracyCeiling { .. })

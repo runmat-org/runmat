@@ -172,7 +172,7 @@ pub fn prepare_structural_linear_program(
             .procedure_step()?
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let constraint_plan = compilation.plan();
@@ -446,7 +446,7 @@ fn structural_topology_digest(
             .procedure_step()?
             .accuracy
             .resources
-            .maximum_resident_bytes,
+            .resident_byte_budget(),
     )
     .map(|compiled| compiled.plan().topology.discretization_digest())
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))

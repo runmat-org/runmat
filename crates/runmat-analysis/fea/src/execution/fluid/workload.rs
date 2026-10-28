@@ -70,8 +70,8 @@ impl FluidSteadyWorkload {
         }
         Ok(self
             .policy
-            .maximum_resident_bytes
-            .min(step.accuracy.resources.maximum_resident_bytes))
+            .resident_byte_budget()
+            .min(step.accuracy.resources.resident_byte_budget()))
     }
     pub fn coupling(&self) -> FluidCoupling {
         match self.model.sequence.steps.as_slice() {

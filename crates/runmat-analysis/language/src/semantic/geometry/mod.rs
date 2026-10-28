@@ -277,10 +277,12 @@ fn check_authored_names(
             continue;
         }
         let role = match region.role {
+            GeometryRegionRole::Vertex => "vertex",
+            GeometryRegionRole::Edge => "edge",
             GeometryRegionRole::Face => "face",
             GeometryRegionRole::Solid | GeometryRegionRole::Cell => "solid",
-            GeometryRegionRole::Vertex | GeometryRegionRole::Edge => continue,
         };
+        let roles = if role == "vertex" { "vertices".to_string() } else { format!("{role}s") };
         let available = inspection
             .facts
             .authored_names
@@ -292,12 +294,12 @@ fn check_authored_names(
         }
         let message = if available.is_empty() {
             format!(
-                "region `{}` selects {role} name \"{name}\", but `{}` names no {role}s",
+                "region `{}` selects {role} name \"{name}\", but `{}` names no {roles}",
                 region.region_id, inspection.source_path
             )
         } else {
             format!(
-                "region `{}` selects {role} name \"{name}\", which `{}` does not carry; named {role}s: {}",
+                "region `{}` selects {role} name \"{name}\", which `{}` does not carry; named {roles}: {}",
                 region.region_id,
                 inspection.source_path,
                 available

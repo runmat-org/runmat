@@ -2,6 +2,23 @@
 // Do not edit by hand.
 import type { FeaDiagnostic, FeaCheckStatus } from './fea-analysis-contracts.js';
 
+/** Integer in [0, 255]; guards check Number.isSafeInteger and the range. */
+export type WireU8 = number;
+/** Integer in [0, 65535]; guards check Number.isSafeInteger and the range. */
+export type WireU16 = number;
+/** Integer in [0, 4294967295]; guards check Number.isSafeInteger and the range. */
+export type WireU32 = number;
+/** Integer in [-128, 127]; guards check Number.isSafeInteger and the range. */
+export type WireI8 = number;
+/** Integer in [-32768, 32767]; guards check Number.isSafeInteger and the range. */
+export type WireI16 = number;
+/** Integer in [-2147483648, 2147483647]; guards check Number.isSafeInteger and the range. */
+export type WireI32 = number;
+/** Integer in [0, 9007199254740991]; guards check Number.isSafeInteger and the range. */
+export type WireU64 = number;
+/** Integer in [-9007199254740991, 9007199254740991]; guards check Number.isSafeInteger and the range. */
+export type WireI64 = number;
+
 export interface Acceleration {
   meters_per_second_squared: number;
 }
@@ -44,11 +61,11 @@ export interface AccuracyPlan {
 export type AccuracyPlanId = string;
 
 export interface AccuracyResourceCeiling {
-  maximum_refinement_cycles: number;
-  maximum_solver_tightenings: number;
-  maximum_samples: number;
-  maximum_wall_time_milliseconds: number;
-  maximum_resident_bytes: number;
+  maximum_refinement_cycles: WireU64;
+  maximum_solver_tightenings: WireU64;
+  maximum_samples: WireU64;
+  maximum_wall_time_milliseconds: WireU64;
+  maximum_resident_bytes: WireU64 | null;
 }
 
 export type AccuracyTarget = { observation: ObservationId }
@@ -128,15 +145,15 @@ export interface AngularVelocity {
 
 export interface Ap242Association {
   association_id: string;
-  source_entity_id: number;
+  source_entity_id: WireU64;
   material_id: string;
   target: Ap242AssociationTarget;
 }
 
-export type Ap242AssociationTarget = { kind: "product_entity"; value: number }
-  | { kind: "product_definition_entity"; value: number }
-  | { kind: "occurrence_entity"; value: number }
-  | { kind: "shape_aspect_entity"; value: number }
+export type Ap242AssociationTarget = { kind: "product_entity"; value: WireU64 }
+  | { kind: "product_definition_entity"; value: WireU64 }
+  | { kind: "occurrence_entity"; value: WireU64 }
+  | { kind: "shape_aspect_entity"; value: WireU64 }
   | { kind: "persistent_id"; value: string };
 
 export type Ap242Capability = "product_structure"
@@ -163,7 +180,7 @@ export type Ap242CapabilityDisposition = "absent"
 export interface Ap242CapabilityRecord {
   capability: Ap242Capability;
   disposition: Ap242CapabilityDisposition;
-  evidence_entity_ids: number[];
+  evidence_entity_ids: WireU64[];
   detail: string;
 }
 
@@ -171,8 +188,8 @@ export interface Ap242EngineeringProperty {
   property_id: string;
   kind: Ap242EngineeringPropertyKind;
   name: string;
-  source_entity_id: number;
-  representation_entity_id: number;
+  source_entity_id: WireU64;
+  representation_entity_id: WireU64;
   value: Ap242Measure;
   specification: string | null;
   environment: Ap242EnvironmentCondition[];
@@ -209,7 +226,7 @@ export interface Ap242ExchangeInventory {
 export interface Ap242MaterialCandidate {
   material_id: string;
   name: string;
-  source_entity_id: number;
+  source_entity_id: WireU64;
   persistent_id: string | null;
   class: Ap242MaterialClass;
   property_ids: string[];
@@ -224,9 +241,9 @@ export type Ap242Measure = SourceQuantity;
 export interface Ap242Parameter {
   parameter_id: string;
   name: string;
-  source_entity_id: number;
-  representation_entity_id: number;
-  owner_entity_ids: number[];
+  source_entity_id: WireU64;
+  representation_entity_id: WireU64;
+  owner_entity_ids: WireU64[];
   persistent_id: string | null;
   value: Ap242Measure;
   minimum: Ap242Measure | null;
@@ -239,8 +256,8 @@ export type Ap242ParameterAccess = "read_only"
 
 export interface Ap242PersistentId {
   persistent_id: string;
-  source_entity_id: number;
-  owner_entity_id: number | null;
+  source_entity_id: WireU64;
+  owner_entity_id: WireU64 | null;
   role: Ap242PersistentIdRole;
 }
 
@@ -254,7 +271,7 @@ export type Ap242PersistentIdRole = "product"
 
 export interface Ap242UnsupportedConcept {
   entity_type: string;
-  entity_ids: number[];
+  entity_ids: WireU64[];
   reason: string;
 }
 
@@ -272,7 +289,7 @@ export type AssessmentEvidenceRequirement = "authored_samples"
 export interface AssessmentFunctionReference {
   module_path: string;
   symbol: string;
-  source_digest: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
+  source_digest: [WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8];
 }
 
 export type AssessmentIssue = "invalid_definition"
@@ -621,7 +638,7 @@ export type AuthoredInputType = { kind: "boolean" }
   | { kind: "region"; detail: GeometryRegionRole };
 
 export type AuthoredInputValue = { kind: "boolean"; value: boolean }
-  | { kind: "integer"; value: number }
+  | { kind: "integer"; value: WireI64 }
   | { kind: "real"; value: number }
   | { kind: "complex"; value: {
   real: number;
@@ -1147,8 +1164,8 @@ export interface CadPhysicalMaterialEvidence {
 }
 
 export interface CadRegionOwnership {
-  faceId?: number;
-  curveId?: number;
+  faceId?: WireU64;
+  curveId?: WireU64;
   label?: CadLabelRef;
   ownerPath?: CadLabelRef[];
   layers?: string[];
@@ -1170,8 +1187,8 @@ export type CadSemanticKind = "assembly"
   | "unknown";
 
 export interface CancellationPolicy {
-  maximum_checkpoint_latency_ms: number;
-  maximum_work_units_between_checks: number;
+  maximum_checkpoint_latency_ms: WireU64;
+  maximum_work_units_between_checks: WireU64;
 }
 
 export interface CartesianFrame {
@@ -1301,7 +1318,7 @@ export type DiagnosticSeverity = "info"
 
 export interface DimensionedQuantityWire<S> {
   dimension: PhysicalDimension;
-  angle_power?: number;
+  angle_power?: WireI8;
   semantic_kind?: QuantityKind;
   value_si: S;
 }
@@ -1329,7 +1346,7 @@ export interface Displacement {
 
 export interface DynamicDimension {
   dimension: PhysicalDimension;
-  angle_power?: number;
+  angle_power?: WireI8;
   semantic_kind?: QuantityKind;
 }
 
@@ -1458,8 +1475,8 @@ export type ExcitationTarget = { region: RegionTarget }
 
 export interface ExecutionResourceLimits {
   workers: InclusiveCountRange | null;
-  cpu_threads_per_worker: number | null;
-  maximum_memory_bytes_per_worker: number | null;
+  cpu_threads_per_worker: WireU32 | null;
+  maximum_memory_bytes_per_worker: WireU64 | null;
   accelerators: AcceleratorPreference;
 }
 
@@ -1488,7 +1505,7 @@ export interface FeaBrowsePage {
   revision: SourceDigest;
   entries: FeaSourceIndexEntry[];
   next: FeaQueryCursor | null;
-  total: number;
+  total: WireU32;
   details: FeaObjectDetails[];
 }
 
@@ -1497,7 +1514,7 @@ export interface FeaBrowseRequest {
   module_path: string | null;
   filter: FeaQueryFilter;
   after: FeaQueryCursor | null;
-  limit: number;
+  limit: WireU16;
   detail: FeaQueryDetail;
 }
 
@@ -1508,7 +1525,7 @@ export interface FeaDeclaredMaterial {
 
 export interface FeaDiagnosticLocation {
   path: string;
-  span: { start: number; end: number };
+  span: { start: WireU64; end: WireU64 };
 }
 
 export interface FeaExecutionBinding {
@@ -1576,7 +1593,7 @@ export interface FeaObjectDetails {
 
 export interface FeaQueryCursor {
   revision: SourceDigest;
-  offset: number;
+  offset: WireU32;
   filter: FeaQueryFilter;
   module_path: string | null;
   detail: FeaQueryDetail;
@@ -1696,7 +1713,7 @@ export type FeaSymbolKind = "geometry"
 
 export type FeaWorkspaceEdit = {
   path: string;
-  bytes: number[];
+  bytes: WireU8[];
 type: "write" }
   | {
   path: string;
@@ -1709,7 +1726,7 @@ type: "rename" };
 export interface FeaWorkspaceFile {
   path: string;
   version: string;
-  bytes: number[];
+  bytes: WireU8[];
 }
 
 export interface FeaWorkspaceSnapshot {
@@ -1803,8 +1820,8 @@ export interface GeneratedGeometryDefinition {
 }
 
 export type GeneratorArgument = { boolean: boolean }
-  | { signed_integer: number }
-  | { unsigned_integer: number }
+  | { signed_integer: WireI64 }
+  | { unsigned_integer: WireU64 }
   | { real: number }
   | { text: string }
   | { real_vector: number[] }
@@ -1829,7 +1846,7 @@ export type GeneratorDomain = "time_seconds"
 export type GeneratorEffectPolicy = "pure"
   | "declared_immutable_artifacts"
   | { seeded_random: {
-  seed: number;
+  seed: WireU64;
   distribution: RandomDistribution;
 } };
 
@@ -1886,7 +1903,7 @@ export type GeometryDefinitionSource = ImportedGeometryDefinition & { kind: "imp
   | DerivedGeometryDefinition & { kind: "derived" }
   | GeneratedGeometryDefinition & { kind: "generated" };
 
-export type GeometryDigest = [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
+export type GeometryDigest = [WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8];
 
 export interface GeometryFeature {
   feature_id: string;
@@ -1978,7 +1995,7 @@ export interface GeometryFeatureRegionSelection {
 }
 
 export interface GeometryNamedSelections {
-  schema_version: number;
+  schema_version: WireU16;
   source_digest: GeometryDigest;
   regions: GeometryRegionDefinition[];
 }
@@ -2049,7 +2066,7 @@ kind: "source_measure" }
 kind: "parameter" }
   | {
   name: string;
-  component: number;
+  component: WireU64;
 kind: "parameter_component" }
   | {
   value: GeometryScalarExpression;
@@ -2113,22 +2130,22 @@ export interface ImportedCadEnvironmentCondition {
 
 export interface ImportedCadMaterialAssociation {
   association_id: string;
-  source_entity_id: number;
+  source_entity_id: WireU64;
   target: ImportedCadMaterialAssociationTarget;
 }
 
-export type ImportedCadMaterialAssociationTarget = { kind: "product_entity"; value: number }
-  | { kind: "product_definition_entity"; value: number }
-  | { kind: "occurrence_entity"; value: number }
-  | { kind: "shape_aspect_entity"; value: number }
+export type ImportedCadMaterialAssociationTarget = { kind: "product_entity"; value: WireU64 }
+  | { kind: "product_definition_entity"; value: WireU64 }
+  | { kind: "occurrence_entity"; value: WireU64 }
+  | { kind: "shape_aspect_entity"; value: WireU64 }
   | { kind: "persistent_id"; value: string };
 
 export interface ImportedCadMaterialProperty {
   property: ImportedCadMaterialPropertyKind;
   source_property_id: string;
   source_name: string;
-  source_entity_id: number;
-  representation_entity_id: number;
+  source_entity_id: WireU64;
+  representation_entity_id: WireU64;
   value: SourceQuantity;
   specification: string | null;
   environment: ImportedCadEnvironmentCondition[];
@@ -2151,7 +2168,7 @@ export interface ImportedCadMaterialProvenance {
   geometry_id: string;
   source_material_id: string;
   source_material_name: string;
-  source_entity_id: number;
+  source_entity_id: WireU64;
   persistent_id: string | null;
   specification: string | null;
   associations: ImportedCadMaterialAssociation[];
@@ -2178,8 +2195,8 @@ export interface ImportedGeometryDefinition {
 }
 
 export interface InclusiveCountRange {
-  minimum: number;
-  maximum: number;
+  minimum: WireU32;
+  maximum: WireU32;
 }
 
 export type IndependentDomain = "static"
@@ -2187,7 +2204,7 @@ export type IndependentDomain = "static"
   origin: number;
   start: number;
   end: number;
-  interval_count: number;
+  interval_count: WireU64;
 } }
   | { frequency_hertz: number[] }
   | { load_factor: {
@@ -2195,7 +2212,7 @@ export type IndependentDomain = "static"
   end: number;
 } }
   | { eigenvalue: {
-  requested_count: number;
+  requested_count: WireU64;
 } }
   | { study_parameter: {
   parameter_id: string;
@@ -2429,20 +2446,20 @@ export type MeshSizeControlTarget = "solid"
 export interface MeshingRequestSettings {
   element_order: ElementOrder;
   dimension?: MeshDimension;
-  deterministic_seed: number;
+  deterministic_seed: WireU64;
   target_edge_length_m: number;
   maximum_chordal_deviation_m: number;
   maximum_grading_ratio: number;
   limits: MeshingSizeLimits;
   cancellation: CancellationPolicy;
-  cells_across_gap?: number;
+  cells_across_gap?: WireU32;
   size_controls?: MeshSizeControl[];
 }
 
 export interface MeshingSizeLimits {
-  maximum_nodes: number;
-  maximum_elements: number;
-  maximum_recursion_depth: number;
+  maximum_nodes: WireU64;
+  maximum_elements: WireU64;
+  maximum_recursion_depth: WireU32;
 }
 
 export type ModalCombination = "srss"
@@ -2466,7 +2483,7 @@ export interface Moment {
 }
 
 export type MonitorCadence = { accepted_increments: {
-  interval: number;
+  interval: WireU64;
 } }
   | { wall_seconds: {
   interval: number;
@@ -2487,7 +2504,7 @@ export type MonitorStopCondition = { less_than: {
 } }
   | { absolute_change_below: {
   threshold: ObservationThreshold;
-  consecutive: number;
+  consecutive: WireU64;
 } };
 
 export type NumericalDataSource<T> = { authored: {
@@ -2525,11 +2542,11 @@ export type ObservationComponent = "all"
   | "magnitude";
 
 export interface ObservationCostEstimate {
-  operation_count: number;
-  peak_resident_bytes: number;
-  stored_bytes: number;
-  transfer_bytes: number;
-  collective_count: number;
+  operation_count: WireU64;
+  peak_resident_bytes: WireU64;
+  stored_bytes: WireU64;
+  transfer_bytes: WireU64;
+  collective_count: WireU64;
 }
 
 export type ObservationCostPolicy = { mode: "automatic" }
@@ -2543,7 +2560,7 @@ export type ObservationEntity = { node: StableDigest }
   | { connector: StableDigest }
   | { point: {
   identity: StableDigest;
-  ordinal: number;
+  ordinal: WireU64;
   position_m: [number, number, number];
   source_element: StableDigest;
 } };
@@ -2673,7 +2690,7 @@ export type ObservationValueShape = "scalar"
   | "vector3"
   | "symmetric_tensor3"
   | { tensor: {
-  extents: number[];
+  extents: WireU64[];
 } };
 
 export type OperatorPartitioner = "auto"
@@ -2681,7 +2698,7 @@ export type OperatorPartitioner = "auto"
   | "geometric";
 
 export type ParallelismLimit = { kind: "auto" }
-  | { kind: "fixed"; maximum: number };
+  | { kind: "fixed"; maximum: WireU32 };
 
 export type PartialAccessPolicy = "manifest_and_chunks"
   | "whole_artifact";
@@ -2713,14 +2730,14 @@ export type PersistentEntityKind = "assembly"
   | "contact";
 
 export interface PhysicalDimension {
-  length: number;
-  mass: number;
-  time: number;
-  current: number;
-  temperature: number;
-  amount: number;
-  luminous_intensity: number;
-  information: number;
+  length: WireI8;
+  mass: WireI8;
+  time: WireI8;
+  current: WireI8;
+  temperature: WireI8;
+  amount: WireI8;
+  luminous_intensity: WireI8;
+  information: WireI8;
 }
 
 export type PhysicalQuantityKind = QuantityKind;
@@ -2812,7 +2829,7 @@ export interface ProcedureStep {
 
 export type ProcedureStepId = string;
 
-export type ProgramFunctionId = number;
+export type ProgramFunctionId = WireU32;
 
 export interface ProjectionRequirement {
   preserve_resultant: boolean;
@@ -2982,7 +2999,7 @@ export interface ReactivePower {
 
 export type RecoveredFieldSample = { domain: "final" }
   | { domain: "time_seconds"; coordinate: number }
-  | { domain: "mode_index"; coordinate: number }
+  | { domain: "mode_index"; coordinate: WireU64 }
   | { domain: "frequency_hertz"; coordinate: number }
   | { domain: "load_factor"; coordinate: number }
   | { domain: "study_parameter_value"; coordinate: number };
@@ -3047,7 +3064,7 @@ export type RequiredAccuracyEvidence = "aposteriori_estimator"
   | "transfer_bound";
 
 export interface ResiliencePolicy {
-  retries: number;
+  retries: WireU16;
   checkpoint: CheckpointPreference;
 }
 
@@ -3084,10 +3101,10 @@ export type RestartPolicy = "fresh"
 export type RetentionPolicy = "canonical"
   | "until_dependents_complete"
   | { latest_samples: {
-  count: number;
+  count: WireU64;
 } }
   | { explicit_samples: {
-  maximum_count: number;
+  maximum_count: WireU64;
 } };
 
 export type RigidResponsePolicy = "disabled"
@@ -3124,11 +3141,11 @@ export type SamplingPolicy = "final"
   interval: number;
 } }
   | { study_parameter_values: number[] }
-  | { mode_indices: number[] }
+  | { mode_indices: WireU64[] }
   | { event: ObservationEvent }
   | { adaptive: {
   minimum_interval: number;
-  maximum_samples: number;
+  maximum_samples: WireU64;
   relative_change: number;
 } };
 
@@ -3220,7 +3237,7 @@ export interface SignalApproximationEvidence {
   max_absolute_error: number | null;
   max_relative_error: number | null;
   derivative_max_absolute_error: number | null;
-  sample_count: number;
+  sample_count: WireU64;
 }
 
 export type SignalArtifactDomain = "constant"
@@ -3245,7 +3262,7 @@ export interface SignalArtifactRef {
   schema: string;
   domain: SignalArtifactDomain;
   topology_digest: string | null;
-  sample_count: number;
+  sample_count: WireU64;
 }
 
 export type SignalExtrapolation = "reject"
@@ -3314,33 +3331,33 @@ export type SignalSampleApproach = "at"
 export type SignalSamplingPolicy = { uniform: {
   start: number;
   end: number;
-  sample_count: number;
+  sample_count: WireU64;
 } }
   | { adaptive: {
   start: number;
   end: number;
   max_absolute_error: number;
-  max_samples: number;
+  max_samples: WireU64;
 } }
   | { canonical_points: number[] };
 
 export type SignalShape = "scalar"
   | "vector3"
-  | { tensor: number[] }
+  | { tensor: WireU64[] }
   | { topology_field: {
   topology_id: string;
   location: FieldLocation;
-  component_count: number;
+  component_count: WireU64;
 } }
   | { deferred_topology_field: {
   selector: AuthoredSignalTopologySelector;
-  component_count: number;
+  component_count: WireU64;
 } };
 
 export type SignalValue<Q> = { scalar: Q }
   | { vector3: [Q, Q, Q] }
   | { tensor: {
-  shape: number[];
+  shape: WireU64[];
   values: Q[];
 } };
 
@@ -3351,7 +3368,7 @@ export type SolverObservationEvent = "first_yield"
   | "contact_status_change"
   | "convergence_failure";
 
-export type SourceDigest = [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
+export type SourceDigest = [WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8];
 
 export interface SourceMeasure<K> {
   source_value: number;
@@ -3442,7 +3459,7 @@ export interface SphericalFrame {
   azimuth_reference: [number, number, number];
 }
 
-export type StableDigest = [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
+export type StableDigest = [WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8, WireU8];
 
 export interface StandardWaveform<Q> {
   kind: StandardWaveformKind;
@@ -3723,7 +3740,7 @@ export interface UnitDefinitionWire {
   dimension: PhysicalDimension;
   scale: number;
   offset: number;
-  angle_power?: number;
+  angle_power?: WireI8;
 }
 
 export interface Velocity {

@@ -144,7 +144,7 @@ fn prepare_validated_model<'a>(
     crate::planning::resource::require_initial_field_ceiling(
         &options.initial_fields,
         crate::execution::THERMAL_WORKLOAD_LIMITS,
-        step.accuracy.resources.maximum_resident_bytes,
+        step.accuracy.resources.resident_byte_budget(),
     )?;
     crate::physics::thermal::initial_state::fields::validate_selected(
         model,
@@ -185,7 +185,7 @@ fn prepare_validated_model<'a>(
             &identity,
             observations,
         )?;
-    facts.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
+    facts.require_fits(step.accuracy.resources.resident_byte_budget())?;
     Ok(PreparedThermalSolve {
         model,
         backend,

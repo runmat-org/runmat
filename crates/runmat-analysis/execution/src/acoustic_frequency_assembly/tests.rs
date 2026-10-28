@@ -26,7 +26,7 @@ fn fixture_with_memory(
     model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.1, 0.2]);
-    step.accuracy.resources.maximum_resident_bytes = maximum_resident_bytes;
+    step.accuracy.resources.maximum_resident_bytes = Some(maximum_resident_bytes);
     model.sequence.steps = vec![step];
     model
         .constraints
