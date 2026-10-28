@@ -1548,3 +1548,42 @@ fn physical_tet4_undamped_step_preserves_work_energy_balance() {
         "maximum relative balance={maximum_relative_balance}"
     );
 }
+
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/fixed_component_motion @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: Acceleration-driven support motion closes the discrete work-energy balance.
+#[test]
+fn acceleration_driven_support_motion_closes_the_work_energy_balance() {
+    let model = fixture_model(FixtureId::StructuralTransientTet4SupportMotionReference);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let mut final_support_work = Vec::new();
+    for interval_count in [80, 160, 320] {
+        let result = crate::run_transient_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            TransientSolveOptions {
+                time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
+                residual_target: 1.0e-10,
+                solver_mesh: Some(mesh.clone()),
+                ..baseline_transient_options()
+            },
+        )
+        .unwrap();
+        let maximum_relative_error = result
+            .relative_energy_balance_error_snapshots
+            .iter()
+            .map(|field| field.as_host_f64().unwrap()[0])
+            .fold(0.0_f64, f64::max);
+        assert!(
+            maximum_relative_error <= 1.0e-9,
+            "intervals={interval_count} maximum_relative_energy_balance_error={maximum_relative_error}"
+        );
+        final_support_work.push(
+            result.support_work_snapshots.last().unwrap().as_host_f64().unwrap()[0],
+        );
+    }
+    // The support work is a convergent quadrature of the delivered energy, not a closing remainder.
+    let first = (final_support_work[0] - final_support_work[1]).abs();
+    let second = (final_support_work[1] - final_support_work[2]).abs();
+    assert!(first / second > 3.5, "final_support_work={final_support_work:?}");
+}

@@ -214,6 +214,14 @@ pub(super) fn problem<'a>(
     p: &'a Prepared,
     tolerance: f64,
 ) -> FluidStructureProblem<'a> {
+    try_problem(c, p, tolerance).unwrap()
+}
+
+fn try_problem<'a>(
+    c: &'a Case,
+    p: &'a Prepared,
+    tolerance: f64,
+) -> Result<FluidStructureProblem<'a>, FluidStructureError> {
     FluidStructureProblem::prepare(FluidStructureInput {
         model: &c.model,
         mesh: &c.mesh,
@@ -246,7 +254,6 @@ pub(super) fn problem<'a>(
             ..FluidStructurePolicy::default()
         },
     })
-    .unwrap()
 }
 
 /// (result, inlet pressure, inflow per unit depth). The inlet prescribes velocity on a face that
@@ -338,4 +345,19 @@ fn impulsively_started_flow_over_a_compliant_wall_conserves_interface_energy() {
     let mut tampered = result.clone();
     tampered.structure.displacement[0] += 1e-6;
     assert!(problem.recover_transient(&tampered).is_err());
+}
+
+// Moved from the retired runtime fixture `fsi_coupled_invalid_interface_mapping`: a structural
+// contact interface cannot stand in for the wetted fluid–structure interface.
+#[test]
+fn structural_contact_interface_is_not_a_fluid_structure_interface() {
+    let mut c = case(1e9);
+    c.model.interfaces[0].kind = AnalysisInterfaceKind::Contact(ContactInterfaceModel {
+        friction: ContactFriction::Frictionless,
+    });
+    let p = prepared(&c);
+    assert!(matches!(
+        try_problem(&c, &p, 1e-6),
+        Err(FluidStructureError::Unsupported(_))
+    ));
 }
