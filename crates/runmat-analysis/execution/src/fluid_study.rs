@@ -136,11 +136,7 @@ pub struct FluidStudyCoordinator {
 
 impl FluidStudyCoordinator {
     pub fn new(preparation: FluidStudyPreparation) -> AnalysisBridgeResult<Self> {
-        preparation
-            .product
-            .compiled
-            .validate_against(&preparation.mesh)
-            .map_err(|error| invalid(error.to_string()))?;
+        // Re-planning validates the compiled study against the mesh first.
         let expected = plan_fluid_study_product(
             preparation.product.compiled.clone(),
             &preparation.mesh,
