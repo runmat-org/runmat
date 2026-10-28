@@ -140,7 +140,14 @@ pub struct PreparedFluidStudyRoot {
 pub fn prepare_fluid_study_root(
     completed: &CompletedFluidStudy,
 ) -> AnalysisBridgeResult<PreparedFluidStudyRoot> {
-    let preparation = completed.preparation()?;
+    prepare_fluid_study_root_for(completed, completed.preparation()?)
+}
+
+/// As `prepare_fluid_study_root`, from the study's already validated preparation.
+pub fn prepare_fluid_study_root_for(
+    completed: &CompletedFluidStudy,
+    preparation: FluidStudyPreparation,
+) -> AnalysisBridgeResult<PreparedFluidStudyRoot> {
     let access = preparation.artifact_access.clone();
     let policy = preparation.output_policy;
     let descendants = descendant_catalog(completed, &access)?;

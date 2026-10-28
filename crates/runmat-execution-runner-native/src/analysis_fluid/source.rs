@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use runmat_analysis_execution::{
-    import_fluid_study_completion, prepare_fluid_study_root, CompletedFluidStudy,
+    import_fluid_study_completion, prepare_fluid_study_root_for, CompletedFluidStudy,
     FluidStudyPreparation,
 };
 use runmat_execution::{
@@ -210,7 +210,8 @@ fn completion(
     preparation: &FluidStudyPreparation,
     source: &impl CacheImport,
 ) -> Result<FluidStudyCompletion, String> {
-    let root = prepare_fluid_study_root(completed).map_err(|error| error.to_string())?;
+    let root = prepare_fluid_study_root_for(completed, preparation.clone())
+        .map_err(|error| error.to_string())?;
     Ok(FluidStudyCompletion {
         host_workload_digest: completed
             .result_closures()
@@ -278,8 +279,9 @@ pub(crate) fn convert(
     completed: CompletedFluidStudy,
     store: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(FluidStudyCompletion, FluidStudyObjectSource), String> {
-    let root = prepare_fluid_study_root(&completed).map_err(|error| error.to_string())?;
     let preparation = completed.preparation().map_err(|e| e.to_string())?;
+    let root = prepare_fluid_study_root_for(&completed, preparation.clone())
+        .map_err(|error| error.to_string())?;
     let source = RetainedFluidSource {
         artifact_access: preparation.artifact_access.clone(),
         preparation,

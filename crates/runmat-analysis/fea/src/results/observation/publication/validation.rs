@@ -5,7 +5,20 @@ impl ObservationPublicationCatalog {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.validate_metadata()
     }
+    /// Metadata validation is a pure function of the catalog's content, which its identity
+    /// seals: a catalog value exists only after `new` derived that identity from its content or
+    /// decoding checked it (uncached), so a catalog whose identity already validated in this
+    /// process is not validated again.
     pub(super) fn validate_metadata(&self) -> AnalysisExecutionResult<()> {
+        let key = self.identity.digest();
+        if seen(&VALIDATED_METADATA, key) {
+            return Ok(());
+        }
+        self.validate_metadata_uncached()?;
+        remember(&VALIDATED_METADATA, key);
+        Ok(())
+    }
+    pub(super) fn validate_metadata_uncached(&self) -> AnalysisExecutionResult<()> {
         self.plan.validate_identity().map_err(invalid)?;
         self.source.validate()?;
         if self.schema_version != 2

@@ -27,6 +27,17 @@ pub(super) fn reduction_identity(
     )
 }
 
+/// The source request is valid and the partition plan is the canonical plan of its resolved
+/// observation plan: the precondition of every published partition and reduction identity.
+pub(crate) fn validate_published_observation_source(
+    source: &ObservationEvaluationRequest,
+    plan: &ObservationPartitionPlan,
+) -> AnalysisExecutionResult<()> {
+    source.validate()?;
+    plan.validate_for(&source.plan)
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))
+}
+
 impl ObservationPartitionEvaluationRequest {
     /// Reconstruct the canonical task identity without loading numerical field blocks.
     /// The caller must authenticate the selected block-set identity and event attribution
@@ -38,9 +49,19 @@ impl ObservationPartitionEvaluationRequest {
         fields: RecoveredFieldPartitionSetIdentity,
         event: Option<ObservationEventAttribution>,
     ) -> AnalysisExecutionResult<ObservationPartitionEvaluationRequestIdentity> {
-        source.validate()?;
-        plan.validate_for(&source.plan)
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        validate_published_observation_source(source, plan)?;
+        Self::published_identity_validated(source, plan, partition, fields, event)
+    }
+
+    /// As `published_identity`, after `validate_published_observation_source(source, plan)` succeeded for
+    /// this exact source and plan; one validation serves every partition of the plan.
+    pub(crate) fn published_identity_validated(
+        source: &ObservationEvaluationRequest,
+        plan: &ObservationPartitionPlan,
+        partition: &ObservationPartition,
+        fields: RecoveredFieldPartitionSetIdentity,
+        event: Option<ObservationEventAttribution>,
+    ) -> AnalysisExecutionResult<ObservationPartitionEvaluationRequestIdentity> {
         if plan.partitions.get(partition.ordinal as usize) != Some(partition) {
             return Err(AnalysisExecutionError::Identity(
                 "published observation partition is noncanonical",
@@ -70,9 +91,16 @@ impl ObservationPartitionReductionRequest {
         plan: &ObservationPartitionPlan,
         contributions: &[ObservationPartitionContributionIdentity],
     ) -> AnalysisExecutionResult<ObservationPartitionReductionRequestIdentity> {
-        source.validate()?;
-        plan.validate_for(&source.plan)
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        validate_published_observation_source(source, plan)?;
+        Self::published_identity_validated(source, plan, contributions)
+    }
+
+    /// As `published_identity`, after `validate_published_observation_source(source, plan)` succeeded.
+    pub(crate) fn published_identity_validated(
+        source: &ObservationEvaluationRequest,
+        plan: &ObservationPartitionPlan,
+        contributions: &[ObservationPartitionContributionIdentity],
+    ) -> AnalysisExecutionResult<ObservationPartitionReductionRequestIdentity> {
         let mut ordered = Vec::new();
         ordered
             .try_reserve_exact(contributions.len())

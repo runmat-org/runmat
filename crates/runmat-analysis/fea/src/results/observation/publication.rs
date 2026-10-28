@@ -32,8 +32,9 @@ fn content_limits(bytes: usize) -> CanonicalLimits {
     )
 }
 fn encode_scaled<T: Serialize>(domain: &str, value: &T) -> AnalysisExecutionResult<Vec<u8>> {
-    let profile = runmat_canonical_codec::profile_canonical_encoding(value, content_limits(usize::MAX))
-        .map_err(invalid)?;
+    let profile =
+        runmat_canonical_codec::profile_canonical_encoding(value, content_limits(usize::MAX))
+            .map_err(invalid)?;
     let bytes = usize::try_from(profile.encoded_bytes_upper_bound)
         .map_err(|_| invalid("catalog exceeds the address space"))?;
     encode_contract(PREFIX, domain, value, content_limits(bytes)).map_err(invalid)
@@ -119,7 +120,9 @@ impl TryFrom<CatalogWire> for ObservationPublicationCatalog {
             execution_policy: wire.execution_policy,
             execution: wire.execution,
         };
-        value.validate()?;
+        // Decoded identities are claims until checked against the decoded content.
+        value.validate_metadata_uncached()?;
+        remember(&VALIDATED_METADATA, value.identity.digest());
         Ok(value)
     }
 }
@@ -135,19 +138,19 @@ enum ExecutionCheck {
 /// validates its catalog when it is built, and again in accuracy preparation, accuracy import
 /// and publication; each is the same pure function of the keyed content, so the process runs
 /// it once. Only successes are retained; a different catalog, step or mesh misses.
-const VALIDATED_CONTEXT_CAPACITY: usize = 8;
+const VALIDATED_CAPACITY: usize = 8;
 static VALIDATED_CONTEXTS: std::sync::Mutex<Vec<Digest>> = std::sync::Mutex::new(Vec::new());
+/// Catalog identities whose context-free metadata validated in this process.
+static VALIDATED_METADATA: std::sync::Mutex<Vec<Digest>> = std::sync::Mutex::new(Vec::new());
 
-fn validated_context_seen(key: Digest) -> bool {
-    VALIDATED_CONTEXTS
-        .lock()
-        .is_ok_and(|seen| seen.contains(&key))
+fn seen(memo: &std::sync::Mutex<Vec<Digest>>, key: Digest) -> bool {
+    memo.lock().is_ok_and(|seen| seen.contains(&key))
 }
 
-fn remember_validated_context(key: Digest) {
-    if let Ok(mut seen) = VALIDATED_CONTEXTS.lock() {
+fn remember(memo: &std::sync::Mutex<Vec<Digest>>, key: Digest) {
+    if let Ok(mut seen) = memo.lock() {
         seen.retain(|k| *k != key);
-        if seen.len() == VALIDATED_CONTEXT_CAPACITY {
+        if seen.len() == VALIDATED_CAPACITY {
             seen.remove(0);
         }
         seen.push(key);
@@ -188,7 +191,7 @@ impl ObservationPublicationCatalog {
         context.validate()?;
         value.validate_for_context(step, context, ExecutionCheck::Derived)?;
         if let Some(key) = value.validated_context_key(step, context)? {
-            remember_validated_context(key);
+            remember(&VALIDATED_CONTEXTS, key);
         }
         Ok(value)
     }
@@ -230,12 +233,12 @@ impl ObservationPublicationCatalog {
     ) -> AnalysisExecutionResult<()> {
         context.validate()?;
         let key = self.validated_context_key(step, context)?;
-        if key.is_some_and(validated_context_seen) {
+        if key.is_some_and(|key| seen(&VALIDATED_CONTEXTS, key)) {
             return Ok(());
         }
         self.validate_for_context(step, context, ExecutionCheck::Rederive)?;
         if let Some(key) = key {
-            remember_validated_context(key);
+            remember(&VALIDATED_CONTEXTS, key);
         }
         Ok(())
     }

@@ -237,6 +237,7 @@ pub use observation_history_finalization::{
     FinalizedObservationHistory, ObservationHistoryFinalizationRequest,
     ObservationHistoryFinalizationRequestIdentity, ObservationHistorySourceContext,
 };
+pub(crate) use observation_partition::validate_published_observation_source;
 pub use observation_partition::{
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
 };
