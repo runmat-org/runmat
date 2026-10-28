@@ -19,6 +19,8 @@ mod acceleration;
 mod linked_selected;
 #[path = "execute/target_test.rs"]
 mod target_test;
+mod failure;
+pub(crate) use failure::ProcessFailure;
 
 enum InvocationMode<'a> {
     Application,
@@ -48,9 +50,10 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         None,
     )
     .map(|_| ())
+    .map_err(|error| error.to_string())
 }
 
-pub(crate) fn execute_linked(input: LinkedAotProcessInput) -> Result<(), String> {
+pub(crate) fn execute_linked(input: LinkedAotProcessInput) -> Result<(), ProcessFailure> {
     let LinkedAotProcessParts {
         input,
         source_service_factory,
@@ -86,7 +89,8 @@ pub(crate) fn execute_linked_test(
         network_service_factory,
         external_factories,
         Some((header, request)),
-    )?
+    )
+    .map_err(|error| error.to_string())?
     .ok_or_else(|| "target-test execution omitted its receiver result".into())
 }
 
@@ -97,7 +101,7 @@ fn execute_with_linked_authority(
     network_service_factory: *const std::ffi::c_void,
     external_factories: crate::input::LinkedExternalFactories,
     test: Option<(&NativePairedProductHeader, &NativeTargetTestRequest)>,
-) -> Result<Option<NativeTargetTestResult>, String> {
+) -> Result<Option<NativeTargetTestResult>, ProcessFailure> {
     let _console_forwarder = if test.is_some() {
         crate::output::install_test_console_forwarder()
     } else {
@@ -411,7 +415,8 @@ fn execute_with_linked_authority(
             return Err(format!(
                 "standalone object cannot resolve native function {}",
                 function.id.0
-            ));
+            )
+            .into());
         }
         // SAFETY: every resolver result names a function lowered with
         // Runtime's exact NativeEntryPoint signature.
@@ -573,13 +578,13 @@ fn execute_with_linked_authority(
             }));
         }
         if let Some((_, diagnostic)) = execution_failure {
-            return Err(diagnostic);
+            return Err(ProcessFailure::Runtime(diagnostic));
         }
-        cleanup_lifecycle?;
-        final_cleanup?;
-        foreign_lifecycle
-            .into_result()
-            .map_err(|error| format!("standalone foreign shutdown failed: {error}"))?;
+        cleanup_lifecycle.map_err(ProcessFailure::Runtime)?;
+        final_cleanup.map_err(ProcessFailure::Runtime)?;
+        foreign_lifecycle.into_result().map_err(|error| {
+            ProcessFailure::Runtime(format!("standalone foreign shutdown failed: {error}"))
+        })?;
         Ok(None)
     })));
     // A rejected graceful close is Abandoned, not a reason to close the
@@ -587,7 +592,9 @@ fn execute_with_linked_authority(
     mex_guard.force_abandon_if_needed();
     lifecycle_host.force_close();
     let execution_result = result
-        .map_err(|error| format!("standalone local task driver failed: {error}"))
+        .map_err(|error| {
+            ProcessFailure::Runtime(format!("standalone local task driver failed: {error}"))
+        })
         .and_then(|result| result);
     #[cfg(feature = "source-evaluation")]
     let source_retirement = source_evaluation_owner
@@ -609,7 +616,7 @@ fn execute_with_linked_authority(
             }
             diagnostic.push_str(&error);
         } else {
-            return Err(error);
+            return Err(ProcessFailure::Runtime(error));
         }
     }
     if let Some(test) = mode.test() {
@@ -618,7 +625,10 @@ fn execute_with_linked_authority(
         let ledger = test_ledger
             .as_ref()
             .ok_or_else(|| "target-test managed ledger is absent".to_string())?;
-        return test.result(completion, ledger, started).map(Some);
+        return test
+            .result(completion, ledger, started)
+            .map(Some)
+            .map_err(ProcessFailure::from);
     }
     Ok(None)
 }

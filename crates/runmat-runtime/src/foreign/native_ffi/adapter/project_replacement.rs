@@ -30,7 +30,7 @@ pub struct ReadyNativeProjectReplacement<'a> {
     state: std::cell::RefMut<'a, NativeFfiSessionState>,
     catalog: std::cell::RefMut<'a, NativeProjectCatalog>,
     identities: std::cell::RefMut<'a, BTreeSet<String>>,
-    _client: std::cell::RefMut<'a, Option<IsolatedNativeFfiClient>>,
+    _client: std::cell::RefMut<'a, Option<NativeFfiHostClient>>,
     lease: std::cell::RefMut<'a, Option<runmat_process_host::private_bytes::PrivateByteLease>>,
     retirement: Option<VerifiedNativeProjectRetirement<'a>>,
 }
@@ -222,7 +222,7 @@ impl<'a> ReadyNativeProjectReplacement<'a> {
         state.libraries.retain(|_, entry| !entry.project_owned);
         state.libraries.extend(staged.libraries);
         *catalog = staged.catalog;
-        *identities = if staged.next_policy.isolate {
+        *identities = if staged.owner.uses_host(staged.next_policy) {
             staged
                 .identities
                 .into_iter()
@@ -439,7 +439,7 @@ impl NativeFfiAdapter {
             self.validate_available_alias(&alias)?;
         }
         let interop = manifest.interop_manifest();
-        if policy.isolate {
+        if self.uses_host(policy) {
             return Ok(PreparedNativeArtifact {
                 alias: alias.clone(),
                 identity: identity.clone(),

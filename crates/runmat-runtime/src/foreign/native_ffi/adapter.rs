@@ -55,7 +55,7 @@ use super::request::{
 };
 use super::session::{LibraryEntry, NativeFfiSessionState, OpaquePointerView, PointerEntry};
 use super::{
-    IsolatedNativeFfiClient, NativeClientRetirement, NativeFfiIsolationPolicy,
+    NativeClientRetirement, NativeFfiHostClient, NativeFfiIsolationPolicy,
     NativeProjectLoadRequest, NativeWireError,
 };
 use crate::context::{ForeignCall, ForeignCallCompletion, RuntimeContext};
@@ -121,7 +121,7 @@ pub struct NativeFfiAdapter {
     released: Arc<ReleaseQueue>,
     callback_router: Option<Rc<dyn NativeFfiCallbackRouter>>,
     isolation_policy: Cell<NativeFfiIsolationPolicy>,
-    isolated_client: Rc<RefCell<Option<IsolatedNativeFfiClient>>>,
+    isolated_client: Rc<RefCell<Option<NativeFfiHostClient>>>,
     isolated_call_active: Rc<Cell<bool>>,
     bootstrap_unverified: ProcessSpawnEvidence,
     project_catalog: Rc<RefCell<NativeProjectCatalog>>,
@@ -181,8 +181,8 @@ fn native_retirement_error(error: NativeWireError) -> RuntimeError {
 }
 
 struct IsolatedClientRetirementGuard {
-    slot: Rc<RefCell<Option<IsolatedNativeFfiClient>>>,
-    client: Option<IsolatedNativeFfiClient>,
+    slot: Rc<RefCell<Option<NativeFfiHostClient>>>,
+    client: Option<NativeFfiHostClient>,
 }
 
 impl Drop for IsolatedClientRetirementGuard {
@@ -211,7 +211,7 @@ pub trait NativeFfiCallbackRouter {
         &self,
         callback_id: u64,
         arguments: &[Value],
-    ) -> Result<crate::execution::RootedValue, String>;
+    ) -> Result<crate::execution::RootedValue, RuntimeError>;
 }
 
 impl std::fmt::Debug for NativeFfiAdapter {
@@ -225,6 +225,13 @@ impl std::fmt::Debug for NativeFfiAdapter {
 }
 
 impl NativeFfiAdapter {
+    /// Only the native host's internal adapter executes synchronously. Public
+    /// in-process calls use its dedicated OS thread; untrusted calls use a
+    /// contained process. Both hosts share the same invocation protocol.
+    fn uses_host(&self, policy: NativeFfiIsolationPolicy) -> bool {
+        policy.isolate || self.callback_router.is_none()
+    }
+
     pub fn new(handles: ForeignHandleRegistry) -> Result<Rc<Self>, RuntimeError> {
         Self::new_with_callback_router(handles, None)
     }
@@ -415,7 +422,7 @@ impl NativeFfiAdapter {
                     self.clear_retired_state();
                 }
                 NativeFfiRetirement::Retired {
-                    scope: Some(scope),
+                    scope,
                     result: result.map_err(native_retirement_error),
                 }
             }
@@ -465,7 +472,7 @@ impl NativeFfiAdapter {
         manifest_path: &std::path::Path,
     ) -> Result<String, RuntimeError> {
         let revision = self.idle_project_identity()?;
-        if self.isolation_policy.get().isolate
+        if self.uses_host(self.isolation_policy.get())
             && (self.isolated_call_active.get()
                 || self.isolated_client.borrow().is_some()
                 || self.bootstrap_state.get() != NativeBootstrapState::Unstarted)
@@ -474,7 +481,7 @@ impl NativeFfiAdapter {
                 "isolated prepared native artifacts must be installed before child startup",
             ));
         }
-        let isolated = self.isolation_policy.get().isolate;
+        let isolated = self.uses_host(self.isolation_policy.get());
         let mut direct_snapshot = if isolated
             && self.private_root_origin.get() != NativePrivateRootOrigin::AdmittedRoot
         {
@@ -675,7 +682,7 @@ impl ForeignAdapter for NativeFfiAdapter {
             });
         }
         let policy = self.isolation_policy.get();
-        if !policy.isolate {
+        if !self.uses_host(policy) {
             let result =
                 crate::foreign::runtime::root_adapter_result(self.invoke_operation(context, call));
             return Box::pin(async move { ForeignCallCompletion::invoked(result) });
@@ -718,13 +725,17 @@ impl ForeignAdapter for NativeFfiAdapter {
                 };
                 if owner.client.is_none() {
                     owner.client = Some(
-                        IsolatedNativeFfiClient::spawn(
-                            process_group_placement,
-                            bootstrap_unverified.clone(),
-                            snapshot_parent,
-                            project_bytes,
-                        )
-                        .await
+                        if policy.isolate {
+                            NativeFfiHostClient::spawn(
+                                process_group_placement,
+                                bootstrap_unverified.clone(),
+                                snapshot_parent,
+                                project_bytes,
+                            )
+                            .await
+                        } else {
+                            NativeFfiHostClient::spawn_thread(snapshot_parent, project_bytes).await
+                        }
                         .map_err(|error| {
                             crate::build_runtime_error(error.message)
                                 .with_builtin("native_ffi")

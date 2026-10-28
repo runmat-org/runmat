@@ -1,6 +1,6 @@
 //! Optional host-owned ports from the exact target-built selected archive.
-//! The stock factory feature supplies console and callable owners. A custom
-//! embedding supplies matching factories and live owners for its reached kinds.
+//! Stock factories supply console, callback and immutable builtin owners.
+//! A custom embedding supplies matching factories and live owners for its reached kinds.
 
 use runmat_execution::host::{
     native_host_callback_service_abi, native_hosted_dynamic_dispatch_abi, native_ui_service_abi,

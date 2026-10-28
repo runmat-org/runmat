@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use runmat_native_ffi::{
-    prepare_header, prepare_header_with_declarations, HeaderPreparation, NativeType,
+    prepare_header, prepare_header_with_declarations, HeaderPreparation, NativeScalar, NativeType,
     ParameterDirection,
 };
 
@@ -92,4 +92,24 @@ fn compiler_frontend_prepares_c_declarations() {
         Some(runmat_native_ffi::PointerOwnership::Borrowed)
     );
     assert!(pointer.return_nullable);
+    let apply = metadata.libraries[0]
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "fixture_apply")
+        .expect("callback prototype");
+    let integer = NativeType::Scalar {
+        scalar: NativeScalar::I32,
+    };
+    assert_eq!(apply.return_type, integer);
+    assert_eq!(apply.parameters[0].ty, integer);
+    let NativeType::Callback {
+        return_type,
+        parameters,
+        ..
+    } = &apply.parameters[1].ty
+    else {
+        panic!("callback parameter must retain its callable type");
+    };
+    assert_eq!(**return_type, integer);
+    assert_eq!(parameters[0].ty, integer);
 }

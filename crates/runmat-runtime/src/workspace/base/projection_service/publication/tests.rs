@@ -465,6 +465,52 @@ fn finite_borrowed_aggregate_write_refuses_before_publication() {
     );
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn finite_private_owned_write_moves_the_original_aggregate_generation() {
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_parallel(Rc::new(ManagedObserverMemory(ledger.clone()))),
+        );
+    let (owner, service) = BaseWorkspaceProjectionService::private_empty(Some(&runtime)).unwrap();
+    let baseline = ledger.snapshot().live_claimed_bytes;
+    let cell =
+        runmat_value::CellArray::new(vec![Value::String("owned input".into())], 1, 1).unwrap();
+    let payload = cell.data().as_ptr();
+    let shape = cell.shape.as_ptr();
+    let value = Value::Cell(cell);
+    assert!(service
+        .assign_ref_with_context(&runtime, "input", &value)
+        .is_err());
+    assert!(service
+        .try_lookup_with_context(&runtime, "input")
+        .unwrap()
+        .is_none());
+
+    service
+        .assign_with_context(&runtime, "input", value)
+        .unwrap();
+    let generation = service
+        .capture_workspace_generation_with_context(&runtime)
+        .unwrap()
+        .unwrap();
+    let retained = generation.read_lease("input").unwrap();
+    let Value::Cell(published) = retained.value() else {
+        panic!("owned Cell must retain its class");
+    };
+    assert_eq!(published.data().as_ptr(), payload);
+    assert_eq!(published.shape.as_ptr(), shape);
+    assert!(ledger.snapshot().live_claimed_bytes > baseline);
+    drop(generation);
+    drop(service);
+    drop(owner);
+    assert_eq!(published.data(), &[Value::String("owned input".into())]);
+    drop(retained);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, baseline);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn finite_repeated_executor_store_retires_prior_gc_generation_before_publication() {

@@ -270,6 +270,27 @@ impl NativeShutdownResult {
 }
 
 impl NativeWireError {
+    pub(super) fn from_runtime(error: crate::RuntimeError) -> Self {
+        Self::from_runtime_ref(&error)
+    }
+
+    pub(super) fn from_runtime_ref(error: &crate::RuntimeError) -> Self {
+        Self {
+            identifier: error
+                .identifier()
+                .unwrap_or("RunMat:NativeFFI:InvocationFailed")
+                .into(),
+            message: error.to_string(),
+        }
+    }
+
+    pub(super) fn into_runtime(self) -> crate::RuntimeError {
+        crate::build_runtime_error(self.message)
+            .with_builtin("native_ffi")
+            .with_identifier(self.identifier)
+            .build()
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         validate_text(&self.identifier, "error identifier")?;
         validate_text(&self.message, "error message")
@@ -343,6 +364,24 @@ fn validate_text(value: &str, label: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn callback_error_keeps_origin_identifier_through_wire_roundtrip() {
+        let original = crate::build_runtime_error("callback control")
+            .with_identifier("RunMat:NativeFFI:OriginControl")
+            .build();
+        let result = NativeCallbackResult {
+            request_id: 1,
+            callback_id: 2,
+            outcome: Err(NativeWireError::from_runtime(original)),
+        };
+        result.validate().unwrap();
+        let encoded = serde_json::to_vec(&result).unwrap();
+        let decoded: NativeCallbackResult = serde_json::from_slice(&encoded).unwrap();
+        let error = decoded.outcome.unwrap_err().into_runtime();
+        assert_eq!(error.identifier(), Some("RunMat:NativeFFI:OriginControl"));
+        assert!(error.to_string().contains("callback control"));
+    }
 
     #[test]
     fn protocol_rejects_zero_identities_and_oversized_batches() {

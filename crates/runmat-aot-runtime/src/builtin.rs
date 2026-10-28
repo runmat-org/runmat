@@ -40,18 +40,28 @@ pub fn resolve(
         }
         bindings.push(binding);
     }
-    Ok(Some(Rc::new(ClosedWorldBuiltins::new(bindings)?)))
+    Ok(Some(Rc::new(ImmutableBuiltinBindings::new(bindings)?)))
 }
 
-struct ClosedWorldBuiltins {
+/// Capture the stock archive's immutable native inventory for an explicitly
+/// admitted hosted-dispatch invocation. This table owns its registration
+/// identity; lookups never fall back to another process-global table.
+#[cfg(feature = "stock-hosted-factories")]
+pub(super) fn hosted_bindings() -> Result<Rc<dyn RuntimeBuiltinService>, String> {
+    Ok(Rc::new(ImmutableBuiltinBindings::new(
+        runmat_runtime::builtin::runtime_builtin_bindings(),
+    )?))
+}
+
+struct ImmutableBuiltinBindings {
     by_name: BTreeMap<String, Vec<RuntimeBuiltinBinding>>,
     /// Nonpersistable identity for this immutable resolved binding table.
     instance: u64,
 }
 
-static NEXT_CLOSED_WORLD_INSTANCE: AtomicU64 = AtomicU64::new(1);
+static NEXT_BINDING_TABLE_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
-impl ClosedWorldBuiltins {
+impl ImmutableBuiltinBindings {
     fn new(bindings: Vec<RuntimeBuiltinBinding>) -> Result<Self, String> {
         let mut by_name = BTreeMap::<String, Vec<RuntimeBuiltinBinding>>::new();
         for binding in bindings {
@@ -69,14 +79,14 @@ impl ClosedWorldBuiltins {
             }
             variants.push(binding);
         }
-        let instance = NEXT_CLOSED_WORLD_INSTANCE
+        let instance = NEXT_BINDING_TABLE_INSTANCE
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .expect("closed-world builtin registration identity exhausted");
+            .expect("immutable builtin registration identity exhausted");
         Ok(Self { by_name, instance })
     }
 }
 
-impl RuntimeBuiltinService for ClosedWorldBuiltins {
+impl RuntimeBuiltinService for ImmutableBuiltinBindings {
     fn bindings_by_name(&self, name: &str) -> Vec<RuntimeBuiltinBinding> {
         self.by_name
             .get(&name.to_ascii_lowercase())
@@ -94,10 +104,17 @@ impl RuntimeBuiltinService for ClosedWorldBuiltins {
                 member.identity == binding.identity
                     && member.provenance == binding.provenance
                     && std::ptr::fn_addr_eq(member.implementation, binding.implementation)
+                    && match (member.continuation_layout, binding.continuation_layout) {
+                        (Some(installed), Some(candidate)) => {
+                            std::ptr::fn_addr_eq(installed, candidate)
+                        }
+                        (None, None) => true,
+                        _ => false,
+                    }
             })
             .then(|| {
                 Digest::sha256_serialized(&(
-                    "runmat.aot-closed-world-registration.v1",
+                    "runmat.aot-immutable-binding-registration.v1",
                     self.instance,
                 ))
                 .expect("typed immutable registration scope serializes")
@@ -107,12 +124,12 @@ impl RuntimeBuiltinService for ClosedWorldBuiltins {
 
 #[cfg(test)]
 mod tests {
-    use super::ClosedWorldBuiltins;
+    use super::ImmutableBuiltinBindings;
     use runmat_runtime::context::RuntimeBuiltinService;
 
     #[test]
     fn closed_world_service_never_falls_back_for_an_absent_name() {
-        let service = ClosedWorldBuiltins::new(Vec::new()).expect("empty exact registry");
+        let service = ImmutableBuiltinBindings::new(Vec::new()).expect("empty exact registry");
         assert!(service.bindings_by_name("abs").is_empty());
     }
 
@@ -120,8 +137,8 @@ mod tests {
     fn immutable_instance_revision_certifies_only_its_exact_selected_binding() {
         let binding = runmat_runtime::builtin::runtime_builtin_bindings_by_name("strcmp")[0];
         let other = runmat_runtime::builtin::runtime_builtin_bindings_by_name("strcmpi")[0];
-        let first = ClosedWorldBuiltins::new(vec![binding]).expect("exact binding table");
-        let second = ClosedWorldBuiltins::new(vec![binding]).expect("distinct exact table");
+        let first = ImmutableBuiltinBindings::new(vec![binding]).expect("exact binding table");
+        let second = ImmutableBuiltinBindings::new(vec![binding]).expect("distinct exact table");
         assert!(first.binding_registration_revision(binding).is_some());
         assert_ne!(
             first.binding_registration_revision(binding),
@@ -131,5 +148,8 @@ mod tests {
         let mut foreign_code = binding;
         foreign_code.implementation = other.implementation;
         assert_eq!(first.binding_registration_revision(foreign_code), None);
+        let mut missing_layout = binding;
+        assert!(missing_layout.continuation_layout.take().is_some());
+        assert_eq!(first.binding_registration_revision(missing_layout), None);
     }
 }

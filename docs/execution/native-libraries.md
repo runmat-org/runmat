@@ -64,6 +64,10 @@ A pointer returned by a library remains opaque until its declaration establishes
 
 Pointers returned with borrowed ownership remain tied to the loaded library and session. Owned pointers require a declared release contract. Nullable returns remain explicitly nullable. RunMat rejects calls when an argument cannot be represented by the declared native type without violating its range or ownership contract.
 
+## Callbacks
+
+Native callback declarations support scalar parameters and a scalar return value. Pass a RunMat function handle for the declared callback argument. The native library must invoke the callback on the thread making the native call, not on its own worker threads. The RunMat callback runs in the originating runtime context and can suspend while its executor continues driving the call. Its callable and arguments remain rooted until the callback completes. The native callback function pointer is valid only during that native invocation; a library must not retain it after returning. An originating RunMat exception retains its identifier when the native invocation reports the failure; RunMat does not unwind a language exception through C frames. Recursive entry into the same active native host is rejected.
+
 ## Compilation And Remote Execution
 
 `runmat compile` embeds the canonical prepared-interface manifest and exact library bytes in the standalone program. At startup, the linked runtime validates the bundle, writes it into a private temporary directory, seals the files read-only, installs only the requested interfaces, and admits the executable's interop requirements before running its entrypoint. The resulting executable does not depend on the project checkout or the original library path.
@@ -83,4 +87,6 @@ You can opt a trusted interface into the RunMat process:
 isolation = "in_process"
 ```
 
-In-process calls avoid the process transfer boundary, but a faulty library can corrupt or terminate RunMat. Exact digests provide identity and tamper detection in both modes; they do not make library code safe. Standalone compiled programs and distributed workers retain process isolation for packaged native interfaces.
+In-process libraries and their pointer resources belong to a dedicated native host thread. Calls use the same bounded value and callback protocol as the process host, with an in-memory transport. The protocol limits each encoded value to 512 MiB. The evaluator remains available to execute callbacks, including callbacks that suspend; no evaluator workspace or GC-owned value is sent to the native thread.
+
+A faulty in-process library can corrupt or terminate RunMat. Cancellation closes its transport and retirement waits for the native thread to exit, including its thread-local destructors. RunMat cannot safely kill a thread stuck in noncooperative C code; an unverified retirement retains its library and private bytes rather than reporting successful cleanup. Use process isolation when calls need crash containment or forcible termination. Exact digests provide identity and tamper detection in both modes; they do not make library code safe. Standalone compiled programs and distributed workers retain process isolation for packaged native interfaces.

@@ -60,12 +60,20 @@ pub(crate) fn ensure_required_providers(bundle: &MexArtifactBundle) -> Result<()
         )
         .is_none()
     {
-        let provider = runmat_accelerate::backend::cuda::register_cuda_provider()
-            .map_err(|error| format!("initialize standalone CUDA MEX provider: {error}"))?;
-        if provider.is_none() {
-            return Err(
-                "standalone CUDA MEX artifact requires an available CUDA driver and device".into(),
-            );
+        #[cfg(not(feature = "cuda"))]
+        return Err(
+            "standalone CUDA MEX artifact requires CUDA support in this runtime build".into(),
+        );
+        #[cfg(feature = "cuda")]
+        {
+            let provider = runmat_accelerate::backend::cuda::register_cuda_provider()
+                .map_err(|error| format!("initialize standalone CUDA MEX provider: {error}"))?;
+            if provider.is_none() {
+                return Err(
+                    "standalone CUDA MEX artifact requires an available CUDA driver and device"
+                        .into(),
+                );
+            }
         }
     }
     Ok(())

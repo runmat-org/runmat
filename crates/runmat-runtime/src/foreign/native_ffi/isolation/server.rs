@@ -30,8 +30,6 @@ use crate::foreign::{
     ForeignAdapter, ForeignHandleRegistry, NativeFfiAdapter, NativeFfiCallbackRouter,
 };
 
-type StdioChannel = HostChannel<std::io::Stdout>;
-
 pub async fn run_native_ffi_extension_host() -> Result<(), String> {
     let encoded_secret = std::env::var(NATIVE_FFI_HOST_SECRET_ENV)
         .map_err(|_| "native-library host bootstrap secret is unavailable".to_string())?;
@@ -59,6 +57,45 @@ pub async fn run_native_ffi_extension_host() -> Result<(), String> {
     )
     .map_err(|error| error.to_string())?;
     let limits = session.limits;
+    let frontend = std::env::var_os(NATIVE_FFI_HOST_FRONTEND_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| "clang".into());
+    std::env::remove_var(NATIVE_FFI_HOST_FRONTEND_ENV);
+    run_host(reader, writer, limits, snapshots, frontend).await
+}
+
+pub(super) fn run_thread_host(
+    reader: impl Read + Send + 'static,
+    writer: impl Write + 'static,
+    resources: &super::client::NativeChildResources,
+    frontend: PathBuf,
+) -> Result<(), String> {
+    let snapshots = Rc::new(
+        SharedSnapshotStore::open_existing(resources.root_path())
+            .map_err(|error| error.to_string())?,
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("could not start native host runtime: {error}"))?;
+    runtime.block_on(run_host(
+        reader,
+        writer,
+        FrameLimits {
+            max_message_bytes: NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
+        },
+        snapshots,
+        frontend,
+    ))
+}
+
+async fn run_host(
+    reader: impl Read + Send + 'static,
+    writer: impl Write + 'static,
+    limits: FrameLimits,
+    snapshots: Rc<SharedSnapshotStore>,
+    frontend: PathBuf,
+) -> Result<(), String> {
     let inbox = super::super::super::isolation_input::spawn_input_reader(
         reader,
         "runmat-native-ffi-input",
@@ -67,7 +104,7 @@ pub async fn run_native_ffi_extension_host() -> Result<(), String> {
     let _input_close = super::super::super::isolation_input::InputMailboxClose::new(inbox.clone());
     let channel = Rc::new(RefCell::new(HostChannel {
         inbox,
-        writer,
+        writer: Box::new(writer),
         limits,
     }));
     let callback_router = Rc::new(IsolatedCallbackRouter {
@@ -77,10 +114,6 @@ pub async fn run_native_ffi_extension_host() -> Result<(), String> {
         depth: Cell::new(0),
     });
     let handles = ForeignHandleRegistry::default();
-    let frontend = std::env::var_os(NATIVE_FFI_HOST_FRONTEND_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "clang".into());
-    std::env::remove_var(NATIVE_FFI_HOST_FRONTEND_ENV);
     let adapter = NativeFfiAdapter::new_with_callback_router_and_frontend(
         handles,
         Some(callback_router.clone() as Rc<dyn NativeFfiCallbackRouter>),
@@ -338,13 +371,13 @@ impl RemoteResources {
     }
 }
 
-struct HostChannel<W> {
+struct HostChannel {
     inbox: std::sync::Arc<super::super::super::isolation_input::InputMailbox<NativeDriverMessage>>,
-    writer: W,
+    writer: Box<dyn Write>,
     limits: FrameLimits,
 }
 
-impl<W: Write> HostChannel<W> {
+impl HostChannel {
     fn write_host(&mut self, message: &NativeHostMessage) -> Result<(), String> {
         message
             .validate()
@@ -370,7 +403,7 @@ fn read_native_driver(
 }
 
 struct IsolatedCallbackRouter {
-    channel: Rc<RefCell<StdioChannel>>,
+    channel: Rc<RefCell<HostChannel>>,
     snapshots: Rc<SharedSnapshotStore>,
     active_request: Cell<u64>,
     depth: Cell<u16>,
@@ -381,16 +414,24 @@ impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
         // Channel and snapshot storage contain serialized payloads only.
         Some(())
     }
-    fn dispatch(&self, callback_id: u64, arguments: &[Value]) -> Result<RootedValue, String> {
-        let _input_roots =
-            RootedValueLease::for_values(arguments.iter()).map_err(|error| error.to_string())?;
+    fn dispatch(
+        &self,
+        callback_id: u64,
+        arguments: &[Value],
+    ) -> Result<RootedValue, crate::RuntimeError> {
+        let _input_roots = RootedValueLease::for_values(arguments.iter())
+            .map_err(|error| callback_protocol_error(error.to_string()))?;
         let request_id = self.active_request.get();
         if request_id == 0 {
-            return Err("native callback has no active invocation".into());
+            return Err(callback_protocol_error(
+                "native callback has no active invocation",
+            ));
         }
         let depth = self.depth.get().saturating_add(1);
         if depth > NATIVE_FFI_HOST_MAX_CALLBACK_DEPTH {
-            return Err("native callback depth limit exceeded".into());
+            return Err(callback_protocol_error(
+                "native callback depth limit exceeded",
+            ));
         }
         self.depth.set(depth);
         let result = (|| {
@@ -398,7 +439,7 @@ impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
                 .iter()
                 .map(|value| encode_portable(value, &self.snapshots).map(NativeWireValue::Portable))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| error.message)?;
+                .map_err(NativeWireError::into_runtime)?;
             self.channel
                 .borrow_mut()
                 .write_host(&NativeHostMessage::Callback(NativeCallbackRequest {
@@ -406,25 +447,34 @@ impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
                     callback_id,
                     depth,
                     arguments,
-                }))?;
+                }))
+                .map_err(callback_protocol_error)?;
             let inbox = self.channel.borrow().inbox.clone();
-            let response = inbox.read_blocking()?;
+            let response = inbox.read_blocking().map_err(callback_protocol_error)?;
             let NativeDriverMessage::CallbackResult(response) = response else {
-                return Err("native host expected a callback result".into());
+                return Err(callback_protocol_error(
+                    "native host expected a callback result",
+                ));
             };
             if response.request_id != request_id || response.callback_id != callback_id {
-                return Err("native callback result identity does not match the request".into());
+                return Err(callback_protocol_error(
+                    "native callback result identity does not match the request",
+                ));
             }
-            let values = response.outcome.map_err(|error| error.message)?;
+            let values = response.outcome.map_err(NativeWireError::into_runtime)?;
             let [value] = values.as_slice() else {
-                return Err("native callback did not return exactly one value".into());
+                return Err(callback_protocol_error(
+                    "native callback did not return exactly one value",
+                ));
             };
             match value {
                 NativeWireValue::Portable(transfer) => decode_portable(transfer, &self.snapshots)
-                    .map_err(|error| error.message)?
+                    .map_err(NativeWireError::into_runtime)?
                     .into_rooted_value()
-                    .map_err(|error| error.to_string()),
-                _ => Err("native callback returned a nonportable value".into()),
+                    .map_err(|error| callback_protocol_error(error.to_string())),
+                _ => Err(callback_protocol_error(
+                    "native callback returned a nonportable value",
+                )),
             }
         })();
         self.depth.set(depth - 1);
@@ -433,11 +483,11 @@ impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
 }
 
 fn runtime_wire_error(error: crate::RuntimeError) -> NativeWireError {
-    NativeWireError {
-        identifier: error
-            .identifier()
-            .unwrap_or("RunMat:NativeFFI:InvocationFailed")
-            .into(),
-        message: error.to_string(),
-    }
+    NativeWireError::from_runtime(error)
+}
+
+fn callback_protocol_error(message: impl Into<String>) -> crate::RuntimeError {
+    crate::build_runtime_error(message)
+        .with_identifier("RunMat:NativeFFI:CallbackProtocol")
+        .build()
 }

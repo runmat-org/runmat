@@ -10,6 +10,8 @@ mod callback;
 mod loopback;
 #[path = "native_paired/receipt.rs"]
 mod receipt;
+#[path = "native_paired/review.rs"]
+mod review;
 #[path = "native_paired/witness.rs"]
 mod witness;
 
@@ -61,9 +63,13 @@ async fn main() -> Result<()> {
     let reopening = arguments
         .first()
         .is_some_and(|value| value.as_os_str() == std::ffi::OsStr::new("--reopen"));
-    let issuing = arguments
-        .first()
-        .is_some_and(|value| value.as_os_str() == std::ffi::OsStr::new("--issue-installation"));
+    let awaiting_review = arguments.first().is_some_and(|value| {
+        value.as_os_str() == std::ffi::OsStr::new("--await-installation-review")
+    });
+    let issuing = awaiting_review
+        || arguments
+            .first()
+            .is_some_and(|value| value.as_os_str() == std::ffi::OsStr::new("--issue-installation"));
     ensure!(
         if reopening || issuing {
             matches!(arguments.len(), 9 | 10)
@@ -367,6 +373,9 @@ async fn main() -> Result<()> {
     }
     write_new(&qualification_output, &qualification.to_canonical_bytes()?)?;
     if issuing {
+        if awaiting_review {
+            review::wait(&arguments[5], &arguments[6]).await?;
+        }
         issue_installation_admissions(
             &product,
             &arguments[5],

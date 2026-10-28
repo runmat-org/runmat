@@ -868,10 +868,13 @@ impl NativeWorkspaceState {
                 } else if self._private_owner.is_some()
                     && !self.global_aliases.has_binding_for_slot(slot)
                 {
+                    // This adapter receives an owned Value, including prepared
+                    // varargout/aggregate replacements. Preserve that transfer
+                    // instead of asking Base to certify a borrowed alias.
                     if let Some(context) = context {
-                        canonical.assign_ref_with_context(context, name, &value)?;
+                        canonical.assign_with_context(context, name, value)?;
                     } else {
-                        canonical.assign(name, value.clone())?;
+                        canonical.assign(name, value)?;
                     }
                 } else if self.publish && !self.global_aliases.has_binding_for_slot(slot) {
                     match origin {

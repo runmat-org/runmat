@@ -1462,7 +1462,7 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
     ) -> Result<(), RuntimeError> {
         self.ensure_mutation_context(context)?;
         if self.is_private()? {
-            return self.private_assign_ref(context, name, &value);
+            return self.private_assign_owned(context, name, value);
         }
         self.capture_canonical_prefix(Some(context))?;
         if HostAllocationReceipt::policy(Some(context))
@@ -1502,7 +1502,7 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
     ) -> Result<(), RuntimeError> {
         self.ensure_mutation_context(context)?;
         if self.is_private()? {
-            return self.private_assign_ref(context, name, &value);
+            return self.private_assign_owned(context, name, value);
         }
         self.assign_ref_with_context(context, name, &value)
     }

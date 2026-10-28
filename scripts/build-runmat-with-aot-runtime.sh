@@ -89,7 +89,7 @@ if "$runtime_no_default"; then
   runtime_build+=(--no-default-features)
 fi
 # This helper builds the stock CLI's runtime. CPU-only feature selection does
-# not remove its console/callable factories; custom embedding archives use
+# not remove its console/callable/builtin factories; custom embedding archives use
 # the runtime crate directly with their own qualified factory symbols.
 runtime_features=(stock-hosted-factories)
 if "$runtime_wgpu"; then runtime_features+=(wgpu); fi

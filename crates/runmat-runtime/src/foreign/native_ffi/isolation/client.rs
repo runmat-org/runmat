@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::time::Duration;
 
+use super::transport::{HostOwner, HostReader, HostWriter};
 use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
 use runmat_process_host::ipc::{
     authenticate_driver, read_payload, write_payload, FrameLimits, HostHandshake, SessionSecret,
@@ -25,13 +26,40 @@ use super::{
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::execution::{RootedValueLease, RootedValueMember, RootedValues, RootedValuesBuilder};
 use crate::foreign::{ForeignErrorKind, ForeignHandleRegistry, ForeignResourceMetadata};
-use crate::{build_runtime_error, foreign::foreign_error, RuntimeError};
+use crate::{foreign::foreign_error, RuntimeError};
 
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-struct NativeChildResources {
-    snapshots: SharedSnapshotStore,
-    project_bytes: Option<runmat_process_host::private_bytes::PrivateByteLease>,
+fn retain_callback_failure(
+    error: RuntimeError,
+    retained: &mut Option<RuntimeError>,
+) -> NativeWireError {
+    let wire = NativeWireError::from_runtime_ref(&error);
+    if retained.is_none() {
+        *retained = Some(error);
+    }
+    wire
+}
+
+/// Hosted entrypoints have a timer driver and enforce the ordinary retirement
+/// deadline. A plain Future embedder can still await a trusted thread's exact
+/// join without requiring an unrelated Tokio runtime or a blocking executor.
+async fn shutdown_step<F: std::future::Future>(
+    future: F,
+    operation: &str,
+) -> Result<F::Output, NativeWireError> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::time::timeout(DEFAULT_SHUTDOWN_TIMEOUT, future)
+            .await
+            .map_err(|_| wire_error("RunMat:NativeFFI:Timeout", format!("{operation} timed out")))
+    } else {
+        Ok(future.await)
+    }
+}
+
+pub(super) struct NativeChildResources {
+    pub(super) snapshots: SharedSnapshotStore,
+    pub(super) project_bytes: Option<runmat_process_host::private_bytes::PrivateByteLease>,
 }
 
 impl Deref for NativeChildResources {
@@ -82,10 +110,10 @@ impl Default for NativeFfiIsolationPolicy {
     }
 }
 
-pub struct IsolatedNativeFfiClient {
-    child: BootstrapBoundChild<NativeChildResources>,
-    reader: tokio::process::ChildStdout,
-    writer: tokio::process::ChildStdin,
+pub struct NativeFfiHostClient {
+    child: HostOwner,
+    reader: HostReader,
+    writer: HostWriter,
     limits: FrameLimits,
     next_request_id: u64,
     next_callback_id: u64,
@@ -114,12 +142,58 @@ pub enum NativeClientRetirement {
         prior_protocol: Option<NativeWireError>,
     },
     Retired {
-        scope: ContainedChildRetirement,
+        scope: Option<ContainedChildRetirement>,
         result: Result<(), NativeWireError>,
     },
 }
 
-impl IsolatedNativeFfiClient {
+impl NativeFfiHostClient {
+    pub async fn spawn_thread(
+        snapshot_parent: Option<SharedSnapshotParent>,
+        project_bytes: Option<runmat_process_host::private_bytes::PrivateByteLease>,
+    ) -> Result<Self, NativeWireError> {
+        let snapshots = match snapshot_parent.as_ref() {
+            Some(parent) => SharedSnapshotStore::create_in_parent(parent),
+            None => SharedSnapshotStore::create(),
+        }
+        .map_err(|error| wire_error("RunMat:NativeFFI:ValueSnapshot", error.to_string()))?;
+        let (child, reader, writer) = super::transport::spawn_thread(
+            NativeChildResources {
+                snapshots,
+                project_bytes,
+            },
+            resolve_frontend(),
+        )
+        .map_err(|error| wire_error("RunMat:NativeFFI:HostSpawn", error))?;
+        Ok(Self {
+            child,
+            reader,
+            writer,
+            limits: FrameLimits {
+                max_message_bytes: NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
+            },
+            next_request_id: 1,
+            next_callback_id: 1,
+            local_to_remote: BTreeMap::new(),
+            remote_to_local: BTreeMap::new(),
+            shutdown_progress: ShutdownProgress::Open,
+            user_state: NativeUserState::Known(false),
+        })
+    }
+
+    async fn abort_host(&mut self) -> Result<Option<ContainedChildRetirement>, String> {
+        if self.child.is_thread() {
+            // Drop both halves: EOF releases callback waits, and a native
+            // owner returning a large result cannot remain blocked writing
+            // into an abandoned evaluator's bounded buffer.
+            self.reader = HostReader::Closed;
+            self.writer = HostWriter::Closed;
+            shutdown_step(self.child.wait(), "native host thread retirement")
+                .await
+                .map_err(|error| format!("{}: {}", error.identifier, error.message))??;
+        }
+        self.child.retire().await
+    }
     pub async fn load_project(
         &mut self,
         runtime: RuntimeContext,
@@ -142,7 +216,7 @@ impl IsolatedNativeFfiClient {
             match tokio::time::timeout(timeout, wait).await {
                 Ok(outcome) => outcome,
                 Err(_) => {
-                    let _ = self.child.terminate_contained_child().await;
+                    let _ = self.abort_host().await;
                     return Err(runtime_error(wire_error(
                         "RunMat:NativeFFI:ProjectLoad",
                         "isolated native project load timed out",
@@ -287,9 +361,9 @@ impl IsolatedNativeFfiClient {
         .await
         .map_err(|error| wire_error("RunMat:NativeFFI:HostAuthentication", error.to_string()))?;
         Ok(Self {
-            child,
-            reader,
-            writer,
+            child: HostOwner::Process(Box::new(child)),
+            reader: HostReader::Process(reader),
+            writer: HostWriter::Process(writer),
             limits: session.limits,
             next_request_id: 1,
             next_callback_id: 1,
@@ -350,7 +424,7 @@ impl IsolatedNativeFfiClient {
             match tokio::time::timeout(timeout, wait).await {
                 Ok(outcome) => outcome,
                 Err(_) => {
-                    let _ = self.child.terminate_contained_child().await;
+                    let _ = self.abort_host().await;
                     return Err(runtime_error(wire_error(
                         "RunMat:NativeFFI:Timeout",
                         format!(
@@ -373,7 +447,7 @@ impl IsolatedNativeFfiClient {
                 )
             )
         }) {
-            let _ = self.child.terminate_contained_child().await;
+            let _ = self.abort_host().await;
         }
         outcome
     }
@@ -386,6 +460,10 @@ impl IsolatedNativeFfiClient {
         handles: &ForeignHandleRegistry,
         host_identity: &str,
     ) -> Result<RootedValues, RuntimeError> {
+        // The wire transports the failure to C, not ownership of the
+        // originating exception. Keep its diagnostic/source owner here until
+        // the exact native invocation settles.
+        let mut callback_failure = None;
         loop {
             if runtime.is_cancelled() {
                 return Err(runtime_error(wire_error(
@@ -393,9 +471,42 @@ impl IsolatedNativeFfiClient {
                     "isolated native-library invocation was cancelled",
                 )));
             }
-            let message = tokio::select! {
-                message = read_message(&mut self.reader, self.limits) => message,
-                _ = tokio::time::sleep(Duration::from_millis(25)) => continue,
+            // A frame read owns partial header/payload progress. Retain it
+            // across cancellation polls instead of restarting read_exact on
+            // the middle of a slowly delivered frame.
+            let message = {
+                let read = read_message(&mut self.reader, self.limits);
+                tokio::pin!(read);
+                if tokio::runtime::Handle::try_current().is_err() {
+                    // The in-memory transport also supports plain Future
+                    // embedders. Generation cancellation has its own waker;
+                    // no Tokio reactor is needed for reading this transport.
+                    let cancellation = runtime.cancellation();
+                    let cancelled = cancellation.cancelled();
+                    tokio::pin!(cancelled);
+                    match futures::future::select(read, cancelled).await {
+                        futures::future::Either::Left((message, _)) => message,
+                        futures::future::Either::Right(_) => {
+                            return Err(runtime_error(wire_error(
+                                "RunMat:NativeFFI:Cancelled",
+                                "native-library invocation was cancelled",
+                            )))
+                        }
+                    }
+                } else {
+                    loop {
+                        if runtime.is_cancelled() {
+                            return Err(runtime_error(wire_error(
+                                "RunMat:NativeFFI:Cancelled",
+                                "native-library invocation was cancelled",
+                            )));
+                        }
+                        tokio::select! {
+                            message = &mut read => break message,
+                            _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+                        }
+                    }
+                }
             };
             let message = match message {
                 Ok(message) => message,
@@ -407,6 +518,9 @@ impl IsolatedNativeFfiClient {
                     // cannot be executing when another command is sent.
                     self.shutdown_progress = ShutdownProgress::Open;
                     self.user_state = NativeUserState::Known(result.user_state_present);
+                    if let Some(error) = callback_failure {
+                        return Err(error);
+                    }
                     let values = result.outcome.map_err(runtime_error)?;
                     return self
                         .decode_driver_outputs(values, handles, host_identity)
@@ -414,7 +528,12 @@ impl IsolatedNativeFfiClient {
                 }
                 NativeHostMessage::Callback(callback) if callback.request_id == request_id => {
                     let response = self
-                        .handle_callback(callback, runtime.clone(), &callbacks)
+                        .handle_callback(
+                            callback,
+                            runtime.clone(),
+                            &callbacks,
+                            &mut callback_failure,
+                        )
                         .await;
                     self.write(&NativeDriverMessage::CallbackResult(response))
                         .await
@@ -435,6 +554,7 @@ impl IsolatedNativeFfiClient {
         callback: NativeCallbackRequest,
         runtime: RuntimeContext,
         callbacks: &BTreeMap<u64, crate::call::RetainedCallableTarget>,
+        originating_failure: &mut Option<RuntimeError>,
     ) -> NativeCallbackResult {
         let outcome = async {
             let callable = callbacks
@@ -465,14 +585,10 @@ impl IsolatedNativeFfiClient {
                 .map_err(|error| wire_error("RunMat:NativeFFI:ValueDecode", error.to_string()))?;
             let request =
                 crate::foreign::foreign_callback_request_rooted(&runtime, &callable, arguments, 1)
-                    .map_err(|error| {
-                        wire_error("RunMat:NativeFFI:CallbackFailed", error.to_string())
-                    })?;
+                    .map_err(|error| retain_callback_failure(error, originating_failure))?;
             let sequence = crate::foreign::invoke_foreign_callback(runtime.clone(), request)
                 .await
-                .map_err(|error| {
-                    wire_error("RunMat:NativeFFI:CallbackFailed", error.to_string())
-                })?;
+                .map_err(|error| retain_callback_failure(error, originating_failure))?;
             let result = sequence
                 .value()
                 .as_slice()
@@ -657,7 +773,7 @@ impl IsolatedNativeFfiClient {
             let result = self.shutdown_protocol(released_local_handles).await;
             self.shutdown_progress = ShutdownProgress::Protocol(result);
         }
-        match self.child.terminate_contained_child().await {
+        match self.abort_host().await {
             Ok(scope) => {
                 match std::mem::replace(&mut self.shutdown_progress, ShutdownProgress::Attempted) {
                     ShutdownProgress::Protocol(result) => {
@@ -703,17 +819,11 @@ impl IsolatedNativeFfiClient {
             releases,
         })
         .await?;
-        let outcome = tokio::time::timeout(
-            DEFAULT_SHUTDOWN_TIMEOUT,
+        let outcome = shutdown_step(
             read_message(&mut self.reader, self.limits),
+            "native-library shutdown",
         )
-        .await
-        .map_err(|_| {
-            wire_error(
-                "RunMat:NativeFFI:Timeout",
-                "isolated native-library shutdown timed out",
-            )
-        })??;
+        .await??;
         let NativeHostMessage::Shutdown(NativeShutdownResult {
             request_id: response_id,
             outcome,
@@ -731,14 +841,8 @@ impl IsolatedNativeFfiClient {
             ));
         }
         outcome?;
-        let exit = tokio::time::timeout(DEFAULT_SHUTDOWN_TIMEOUT, self.child.wait())
-            .await
-            .map_err(|_| {
-                wire_error(
-                    "RunMat:NativeFFI:Timeout",
-                    "isolated native-library host exit timed out",
-                )
-            })?
+        let exit = shutdown_step(self.child.wait(), "native-library host exit")
+            .await?
             .map_err(|error| wire_error("RunMat:NativeFFI:HostExit", error.to_string()))?;
         if !exit.success {
             return Err(self.crash_error(exit.code));
@@ -762,7 +866,7 @@ impl IsolatedNativeFfiClient {
     }
 
     fn crash_error(&self, code: Option<i32>) -> NativeWireError {
-        let detail = self.child.captured_stderr().text();
+        let detail = self.child.stderr();
         wire_error(
             "RunMat:NativeFFI:HostCrashed",
             format!(
@@ -780,7 +884,10 @@ impl IsolatedNativeFfiClient {
         for _ in 0..10 {
             match self.child.try_wait() {
                 Ok(Some(exit)) => return self.crash_error(exit.code),
-                Ok(None) => tokio::time::sleep(Duration::from_millis(10)).await,
+                Ok(None) if tokio::runtime::Handle::try_current().is_ok() => {
+                    tokio::time::sleep(Duration::from_millis(10)).await
+                }
+                Ok(None) => return transport,
                 Err(_) => return transport,
             }
         }
@@ -830,8 +937,5 @@ async fn write_message(
 }
 
 fn runtime_error(error: NativeWireError) -> RuntimeError {
-    build_runtime_error(error.message)
-        .with_builtin("native_ffi")
-        .with_identifier(error.identifier)
-        .build()
+    error.into_runtime()
 }

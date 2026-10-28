@@ -127,10 +127,7 @@ impl HostState {
         roots.values.clear();
         self.visit_roots(|root| roots.values.push(root));
         self.roots = roots;
-        Ok(NativeRootSet {
-            roots: self.roots.as_ptr(),
-            count: self.roots.len(),
-        })
+        Ok(self.roots.abi_view())
     }
 
     fn visit_roots(&self, mut visit: impl FnMut(NativeRoot)) {

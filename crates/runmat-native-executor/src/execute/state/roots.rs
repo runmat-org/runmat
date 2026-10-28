@@ -16,6 +16,17 @@ pub(in crate::execute) struct NativeRoots {
 }
 
 impl NativeRoots {
+    pub(super) fn abi_view(&self) -> NativeRootSet {
+        NativeRootSet {
+            roots: if self.values.is_empty() {
+                std::ptr::null()
+            } else {
+                self.values.as_ptr()
+            },
+            count: self.values.len(),
+        }
+    }
+
     pub(super) fn reserve(
         &mut self,
         runtime: &RuntimeContext,
@@ -75,5 +86,30 @@ impl std::ops::Deref for NativeRoots {
 
     fn deref(&self) -> &Self::Target {
         &self.values
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abi_view_preserves_empty_and_retained_capacity_invariants() {
+        let mut roots = NativeRoots::default();
+        roots.abi_view().validate().unwrap();
+        roots.values.push(NativeRoot {
+            value: NativeValueRef::NULL,
+            kind: NativeRootKind::LOCAL,
+            slot: 0,
+        });
+        let view = roots.abi_view();
+        view.validate().unwrap();
+        assert_eq!(view.roots, roots.values.as_ptr());
+        assert_eq!(view.count, 1);
+        roots.values.clear();
+        assert!(roots.values.capacity() > 0);
+        let view = roots.abi_view();
+        view.validate().unwrap();
+        assert!(view.roots.is_null());
     }
 }

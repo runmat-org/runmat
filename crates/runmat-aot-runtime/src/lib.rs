@@ -15,6 +15,7 @@ mod mex_artifacts;
 mod native_interfaces;
 mod network_service;
 mod output;
+mod process_mode;
 mod program;
 mod python_artifacts;
 #[cfg(feature = "source-evaluation")]
@@ -79,28 +80,8 @@ pub unsafe extern "C" fn runmat_aot_main(
         // SAFETY: the generated launcher forwards the process argument vector
         // received by its C `main` entrypoint.
         let arguments = unsafe { input::copy_process_arguments(argc, argv) }?;
-        match runmat_process_host::HiddenModeRegistry::standard()
-            .detect(arguments)
-            .map_err(|error| error.to_string())?
-        {
-            Some(runmat_process_host::HiddenMode::ExtensionHost) => {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|error| {
-                        format!("standalone extension-host runtime failed to start: {error}")
-                    })?;
-                return runtime
-                    .block_on(runmat_runtime::foreign::run_extension_host())
-                    .map_err(|error| format!("standalone extension host failed: {error}"));
-            }
-            Some(mode) => {
-                return Err(format!(
-                    "standalone executable does not provide private host mode '{}'",
-                    mode.marker()
-                ));
-            }
-            None => {}
+        if process_mode::run_if_requested(arguments)? {
+            return Ok(());
         }
         // SAFETY: validation and bounded copies happen before any payload is
         // decoded or retained. The generated launcher supplies these symbols.
@@ -153,8 +134,8 @@ pub unsafe extern "C" fn runmat_aot_main(
     match result {
         Ok(Ok(())) => EXIT_SUCCESS,
         Ok(Err(error)) => {
-            output::error(&error);
-            EXIT_INVALID_PROGRAM
+            output::error(&error.to_string());
+            error.exit_code()
         }
         Err(_) => {
             output::error("standalone runtime aborted after an internal panic");
@@ -200,6 +181,11 @@ pub unsafe extern "C" fn runmat_aot_test_main(
     paired_header_len: u64,
 ) -> i32 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: the generated test launcher forwards its C main arguments.
+        let arguments = unsafe { input::copy_process_arguments(argc, argv) }?;
+        if process_mode::run_if_requested(arguments)? {
+            return Ok(());
+        }
         let image = input::LinkedProcessImage {
             argc,
             argv,
@@ -254,13 +240,13 @@ pub unsafe extern "C" fn runmat_aot_test_main(
                 },
             )
         };
-        target_test::run(linked, header)
+        target_test::run(linked, header).map_err(execute::ProcessFailure::from)
     }));
     match result {
         Ok(Ok(())) => EXIT_SUCCESS,
         Ok(Err(error)) => {
-            output::error(&error);
-            EXIT_INVALID_PROGRAM
+            output::error(&error.to_string());
+            error.exit_code()
         }
         Err(_) => {
             output::error("standalone target-test runtime aborted after an internal panic");

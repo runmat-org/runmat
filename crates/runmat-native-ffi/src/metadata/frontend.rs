@@ -582,6 +582,18 @@ fn required_type(
     declaration: &str,
     typedefs: &BTreeMap<String, String>,
 ) -> Result<NativeType, HeaderPreparationError> {
+    // Preserve supported declared types (notably fixed-width integers) just
+    // as function returns and callback signatures do. Clang's desugared type
+    // can erase int32_t to int on a parameter while retaining int32_t in the
+    // enclosing function signature. Unknown external typedefs still use the
+    // compiler's underlying type below.
+    if let Some(Ok(ty)) = node
+        .pointer("/type/qualType")
+        .and_then(Value::as_str)
+        .map(|spelling| parse_type(spelling, typedefs))
+    {
+        return Ok(ty);
+    }
     let spelling = type_spelling(node).ok_or_else(|| HeaderPreparationError::Unsupported {
         declaration: declaration.into(),
         message: "missing type".into(),

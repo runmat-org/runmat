@@ -74,6 +74,9 @@ impl NativeFfiAdapter {
         }
 
         let callback_results = Rc::new(RefCell::new(Vec::<crate::execution::RootedValue>::new()));
+        // The scalar C ABI cannot carry an exception. Retain its typed owner
+        // until native invocation returns instead of reconstructing it from text.
+        let callback_error = RefCell::new(None);
         let callback_dispatches = callback_entries
             .iter()
             .map(|(_, callable)| {
@@ -81,11 +84,12 @@ impl NativeFfiAdapter {
                 let callable = *callable;
                 let callback_router = self.callback_router.clone();
                 let callback_results = Rc::clone(&callback_results);
+                let callback_error = &callback_error;
                 Box::new(move |callback_arguments: &[Value]| {
                     let rooted = if let (Some(router), Some(callback_id)) =
                         (callback_router.as_ref(), isolated_callback_id(callable))
                     {
-                        router.dispatch(callback_id, callback_arguments)?
+                        router.dispatch(callback_id, callback_arguments)
                     } else {
                         pollster::block_on(crate::call_feval_async_with_outputs_in_context(
                             &context,
@@ -93,8 +97,17 @@ impl NativeFfiAdapter {
                             callback_arguments,
                             1,
                         ))
-                        .map_err(|error| error.to_string())?
-                    };
+                    }
+                    .map_err(|error| {
+                        let message = error.to_string();
+                        // Preserve the first originating failure if C invokes
+                        // a callback again before returning to the runtime.
+                        let mut retained = callback_error.borrow_mut();
+                        if retained.is_none() {
+                            *retained = Some(error);
+                        }
+                        message
+                    })?;
                     let value = match rooted.value() {
                         value @ (Value::Num(_)
                         | Value::Int(_)
@@ -134,8 +147,13 @@ impl NativeFfiAdapter {
             &entry.metadata,
             &callback_bindings,
             &pointer_bindings,
-        )
-        .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvocationFailed, error))?;
+        );
+        if let Some(error) = callback_error.borrow_mut().take() {
+            return Err(error);
+        }
+        let result = result.map_err(|error| {
+            foreign_error_with_source(ForeignErrorKind::InvocationFailed, error)
+        })?;
         let mut outputs = Vec::new();
         if let Some(return_value) = result.return_value {
             outputs.push(match return_value {

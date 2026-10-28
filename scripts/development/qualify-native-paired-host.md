@@ -217,8 +217,9 @@ come from that independent operator review. The tool does not derive them from
 the persisted pair and turn them into permission. Operator JSON may be formatted;
 issued transport records use the canonical Rust codec.
 
-Run a second fresh selected link in a different empty output directory, using
-the same qualified build inputs and independently expected image digests:
+The hosted profile does not promise byte-identical independent links. Use `--await-installation-review` in place of `--issue-installation` when the completed image must be reviewed after linking. Supply new, absent intent paths and otherwise the same arguments. The witness links and executes both roles, writes the product and qualification records, then retains the original completed-link owners for up to ten minutes while awaiting the two operator intents. Independently review those actual images, receipts, loader references, storage grant and layout; publish each intent atomically without replacing an existing file. The witness does not generate its own grants, reconstruct completed-link authority from persisted metadata, relink the image after review, or relax expected image hashes. Missing or mismatched intents fail without successful admission. Reopen the resulting admitted pair in a separate process as below.
+
+When the selected tools reproduce identical image bytes, run a second fresh selected link in a different empty output directory, using the same qualified build inputs and independently expected image digests:
 
 ```sh
 /absolute/matching-build/examples/native_paired \

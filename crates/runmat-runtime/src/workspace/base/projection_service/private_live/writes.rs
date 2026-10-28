@@ -11,6 +11,20 @@ use super::super::{workspace_admission_error, BaseWorkspaceProjectionService};
 use super::{begin_private_operation, prepare_private_name, private_storage_error};
 
 impl BaseWorkspaceProjectionService {
+    /// Move an owned input into its retained generation before publishing it.
+    /// Borrowed writes cannot take this path: cloning an arbitrary aggregate
+    /// would lose its allocation provenance and duplicate its owner.
+    pub(in crate::workspace::base) fn private_assign_owned(
+        &self,
+        context: &RuntimeContext,
+        name: &str,
+        value: runmat_value::Value,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_mutation_context(context)?;
+        let value = WorkspaceSlotReadLease::prepare_owned(value, context)?;
+        self.private_assign_lease(context, name, value)
+    }
+
     pub(in crate::workspace::base) fn private_assign_unbounded(
         &self,
         name: &str,
