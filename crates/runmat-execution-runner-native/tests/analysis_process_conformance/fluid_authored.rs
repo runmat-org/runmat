@@ -560,6 +560,19 @@ pub(super) async fn run() {
             assert!(publish(&wrong, &options).is_err());
         }
         previous_receipt = Some(actual.numerical_receipt.clone());
+        // Live, replayed, accuracy and published validations of the catalog share one
+        // (catalog, step, mesh) validation; a repeat is accepted, a foreign step is not.
+        let catalog = actual.observation_catalog.as_ref().expect("authored catalog");
+        let step = &actual.workload.model.sequence.steps[0];
+        let context =
+            runmat_analysis_fea::execution::ObservationHistorySourceContext::VolumeMesh {
+                mesh: &mesh,
+            };
+        catalog.validate_for(step, context).unwrap();
+        catalog.validate_for(step, context).unwrap();
+        let mut foreign = step.clone();
+        foreign.step_id = runmat_analysis_core::ProcedureStepId("foreign".into());
+        assert!(catalog.validate_for(&foreign, context).is_err());
     }
 }
 

@@ -3,6 +3,7 @@
 mod boundary;
 mod contract;
 mod derive;
+pub(crate) use derive::ProjectionCancellation;
 mod edge_space;
 mod element;
 mod finite_volume;
@@ -74,7 +75,13 @@ pub(crate) fn projection_element_map(
 > {
     let mut offsets = Vec::with_capacity(projection.elements.len() + 1);
     offsets.push(0);
-    let mut dofs = Vec::with_capacity(projection.elements.iter().map(|e| e.node_indices.len()).sum());
+    let mut dofs = Vec::with_capacity(
+        projection
+            .elements
+            .iter()
+            .map(|e| e.node_indices.len())
+            .sum(),
+    );
     for element in &projection.elements {
         for &node in &element.node_indices {
             dofs.push(u32::try_from(node).map_err(|_| {

@@ -4,7 +4,7 @@ use crate::*;
 use runmat_analysis_core::StateOutput;
 use runmat_analysis_fea::{
     execution::{
-        fluid_state_publication_profiles, fluid_state_publication_requests,
+        fluid_state_publication_profile, fluid_state_publication_requests,
         AnalysisNumericalObjectKind as K, AnalysisWorkKind, FluidSteadySolverResult,
         FluidSteadyWorkload, SemanticStatePublicationRequest,
     },
@@ -201,7 +201,8 @@ fn derive_prepared_fluid_state_publication_resource_plan(
     }
     let (w, m, r) = decode_source(numerical, policy)?;
     let source = unique(numerical, K::SolverResult)?;
-    let catalog = fluid_state_publication_profiles(&w, &m, &r, source.manifest.payload_digest)?;
+    let catalog =
+        fluid_state_publication_profile(request, &w, &m, &r, source.manifest.payload_digest)?;
     let profile = catalog.entry(request)?.profile();
     Ok(build_fluid_state_publication_resource_plan(
         request,
@@ -209,6 +210,7 @@ fn derive_prepared_fluid_state_publication_resource_plan(
         &m,
         &r,
         source.manifest.payload_digest,
+        &catalog,
         PreparedPhaseResourceFacts {
             inputs: prepared_input_resource_facts(numerical)?,
             output:

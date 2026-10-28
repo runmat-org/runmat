@@ -65,6 +65,7 @@ pub(crate) struct StructuralFrequencyObservationExecution<'a> {
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 pub(crate) async fn execute_structural_frequency_observations(
@@ -122,6 +123,7 @@ pub(crate) async fn execute_structural_frequency_observations(
                 program_revision: execution.program_revision.clone(),
                 chunk_bytes: execution.chunk_bytes,
                 inventory_limits: execution.inventory_limits,
+                local_execution: execution.local_execution,
             },
             sample,
             None,

@@ -56,6 +56,7 @@ pub use distributed::{
     evaluate_solid_observation_partition, evaluate_structural_observation_partition,
     prepare_solid_observation_field_partition, prepare_structural_observation_field_partition,
     reduce_observation_partitions, solid_observation_partition_source_indices,
+    SolidObservationSourceSelection,
     structural_observation_partition_source_indices, ObservationPartitionCombination,
     ObservationPartitionContribution, ObservationPartitionContributionIdentity,
     ObservationPartitionEvidence, ObservationPartitionEvidenceIdentity,

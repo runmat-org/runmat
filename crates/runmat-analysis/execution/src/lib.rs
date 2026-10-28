@@ -171,6 +171,7 @@ mod magnetic_study;
 mod maxwell_study;
 pub use fluid_study::{
     import_fluid_study_completion, import_fluid_study_root, prepare_fluid_study_root,
+    prepare_fluid_study_root_for,
     CompletedFluidStudy, FluidStudyCoordinator, FluidStudyPhase, FluidStudyPreparation,
     FluidStudyResultClosure, FluidStudyResultPhase, PreparedFluidStudyRoot,
 };

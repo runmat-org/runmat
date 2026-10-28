@@ -25,6 +25,30 @@ pub fn validate_admitted_accuracy_source(
     inputs: &[PreparedAnalysisObjects],
     admitted: &FeaResourcePlan,
 ) -> AnalysisBridgeResult<()> {
+    validate_accuracy_source(request, receipt, observations, inputs, admitted, true)
+}
+
+/// As `validate_admitted_accuracy_source` for a plan the caller has just derived with
+/// `build_prepared_accuracy_resource_plan(request, receipt, inputs)` from these exact inputs:
+/// the plan is its own rederivation, so it is not derived a second time.
+pub(crate) fn validate_derived_accuracy_source(
+    request: &AccuracyEvaluationRequest,
+    receipt: &AccuracySourceReceipt,
+    observations: Option<&ObservationPublicationCatalog>,
+    inputs: &[PreparedAnalysisObjects],
+    derived: &FeaResourcePlan,
+) -> AnalysisBridgeResult<()> {
+    validate_accuracy_source(request, receipt, observations, inputs, derived, false)
+}
+
+fn validate_accuracy_source(
+    request: &AccuracyEvaluationRequest,
+    receipt: &AccuracySourceReceipt,
+    observations: Option<&ObservationPublicationCatalog>,
+    inputs: &[PreparedAnalysisObjects],
+    admitted: &FeaResourcePlan,
+    rederive: bool,
+) -> AnalysisBridgeResult<()> {
     admitted.validate_identity()?;
     let mut phase_seen = [false; 4];
     for input in inputs {
@@ -51,7 +75,7 @@ pub fn validate_admitted_accuracy_source(
             "accuracy phase input inventory differs",
         ));
     }
-    if build_prepared_accuracy_resource_plan(request, receipt, inputs)? != *admitted {
+    if rederive && build_prepared_accuracy_resource_plan(request, receipt, inputs)? != *admitted {
         return Err(AnalysisBridgeError::Identity(
             "accuracy original-source resource rederivation differs",
         ));

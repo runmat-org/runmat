@@ -160,6 +160,7 @@ fn verify_original_publication(
             program_revision: task.program.request.recipe.program_revision.clone(),
             chunk_bytes: policy.chunk_bytes(),
             inventory_limits: limits,
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
         RecoveredFieldSample::Final,
         None,

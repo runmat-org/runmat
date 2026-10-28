@@ -7,16 +7,16 @@ use runmat_analysis_fea::execution::{
 };
 use runmat_analysis_fea::planning::resource::{
     build_observation_partition_resource_plan, build_observation_reduction_resource_plan,
-    observation_partition_payload_bytes_upper_bound,
-    observation_reduction_payload_bytes_upper_bound, FeaResourcePlan,
-    ObservationPartitionResourcePlanning,
+    execute_scoped_chunks, observation_partition_payload_bytes_upper_bound,
+    observation_reduction_payload_bytes_upper_bound, FeaResourcePlan, LocalExecutionPlan,
+    ObservationPartitionResourcePlanning, ScopedLocalExecutionError,
 };
 use runmat_analysis_fea::results::field::{RecoveredFieldPartitionSet, RecoveredFieldSample};
 use runmat_analysis_fea::results::observation::{
     classify_observation_partition_acceleration, resolved_observation_accepts_sample,
-    solid_observation_partition_source_indices, structural_observation_partition_source_indices,
-    ObservationAccelerationEligibility, ObservationEventAttribution, ObservationPartition,
-    ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
+    structural_observation_partition_source_indices, ObservationAccelerationEligibility,
+    ObservationEventAttribution, ObservationPartition, ObservationPartitionContribution,
+    ObservationPartitionPlan, ObservationResult, SolidObservationSourceSelection,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_execution::resource::AcceleratorRequest;
@@ -173,7 +173,19 @@ pub fn prepare_observation_fanout(
             ));
         }
     }
-    let mut prepared = Vec::new();
+    let solid = matches!(
+        &admitted.workload,
+        super::observation_source::AdmittedObservationWorkload::Thermal(_)
+    ) || matches!(
+        &preparation.source,
+        crate::ObservationPublishedSource::VolumeMeshRecovery { .. }
+    );
+    let sampling = match &preparation.source {
+        crate::ObservationPublishedSource::SampledRecovery { sampling, .. } => Some(sampling),
+        _ => None,
+    };
+    // Every accepted (observation, partition) pair, in canonical plan order.
+    let mut items = Vec::new();
     for observation in &admitted.request.plan.observations {
         if !resolved_observation_accepts_sample(
             &admitted.request.plan,
@@ -209,87 +221,145 @@ pub fn prepare_observation_fanout(
                     "observation fan-out source sample is absent from recovered fields".into(),
                 )
             })?;
-        for partition in &plan.partitions {
-            let sampled = match &preparation.source {
-                crate::ObservationPublishedSource::SampledRecovery { sampling, .. } => {
-                    Some(sampling)
-                }
-                _ => None,
-            };
-            let required_indices = if let Some(sampling) = sampled {
-                let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
-                    "sampled observation mesh absent",
-                ))?;
-                runmat_analysis_fea::results::observation::sampled_observation_partition_source_indices(
-                    &admitted.request.plan,
-                    &plan,
-                    partition,
-                    sampling,
-                    mesh,
-                )
-            } else if matches!(
-                &admitted.workload,
-                super::observation_source::AdmittedObservationWorkload::Thermal(_)
-            ) || matches!(
-                &preparation.source,
-                crate::ObservationPublishedSource::VolumeMeshRecovery { .. }
-            ) {
-                let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
-                    "solid-projection observation requires exact mesh",
-                ))?;
-                let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
-                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-                solid_observation_partition_source_indices(
-                    &admitted.request.plan,
-                    &plan,
-                    partition,
-                    &projection,
-                )
-            } else {
-                structural_observation_partition_source_indices(
-                    &admitted.request.plan,
-                    &plan,
-                    partition,
-                    admitted.workload.model()?,
-                    admitted.mesh.as_ref(),
-                )
-            }
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-            let source_fields = import_required_field_partitions(
-                source,
-                RequiredFieldPartitionImport {
-                    source_kind: preparation.source.output().kind,
-                    root: &preparation.source.output().root,
-                    source_logical_identity: preparation.source.output().logical_identity,
-                    source_payload_digest: preparation.source.output().payload_digest,
-                    access: preparation.source.access(&preparation.source_host),
-                    limits: preparation.inventory_limits,
-                    entry: field_entry,
-                    required_indices: &required_indices,
-                },
-            )?;
-            if required_indices
-                .iter()
-                .any(|index| source_fields.value(*index).is_none())
-            {
-                return Err(AnalysisBridgeError::Identity(
-                    "selected storage partitions do not cover the observation partition",
-                ));
-            }
-            prepared.push(prepare_partition_workload(
-                &preparation,
-                &admitted,
-                plan.clone(),
-                partition.clone(),
-                source_fields,
-                event_attribution,
-            )?);
+        let plan = std::sync::Arc::new(plan);
+        for ordinal in 0..plan.partitions.len() {
+            items.push((plan.clone(), ordinal, field_entry));
         }
     }
+    let local_execution = preparation.local_execution;
+    // A solid or volume plan selects every partition from one projection of the exact mesh and
+    // one observation topology of the plan, both derived once per fan-out.
+    let volume_projection = if !items.is_empty() && sampling.is_none() && solid {
+        let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+            "solid-projection observation requires exact mesh",
+        ))?;
+        Some(
+            runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let solid_selection = volume_projection
+        .as_ref()
+        .map(|projection| SolidObservationSourceSelection::new(&admitted.request.plan, projection))
+        .transpose()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let required_indices = fan_out(local_execution, &items, |(plan, ordinal, _)| {
+        let partition = &plan.partitions[*ordinal];
+        if let Some(sampling) = sampling {
+            let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+                "sampled observation mesh absent",
+            ))?;
+            runmat_analysis_fea::results::observation::sampled_observation_partition_source_indices(
+                &admitted.request.plan,
+                plan,
+                partition,
+                sampling,
+                mesh,
+            )
+        } else if solid {
+            solid_selection
+                .as_ref()
+                .ok_or(AnalysisBridgeError::Identity(
+                    "solid-projection observation requires exact mesh",
+                ))?
+                .partition_source_indices(plan, partition)
+        } else {
+            structural_observation_partition_source_indices(
+                &admitted.request.plan,
+                plan,
+                partition,
+                admitted.workload.model()?,
+                admitted.mesh.as_ref(),
+            )
+        }
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+    })?;
+    drop(solid_selection);
+    // Field partitions are read from the cache in canonical order on this thread.
+    let mut imported = Vec::with_capacity(items.len());
+    for ((plan, ordinal, field_entry), required_indices) in items.into_iter().zip(required_indices)
+    {
+        let source_fields = import_required_field_partitions(
+            source,
+            RequiredFieldPartitionImport {
+                source_kind: preparation.source.output().kind,
+                root: &preparation.source.output().root,
+                source_logical_identity: preparation.source.output().logical_identity,
+                source_payload_digest: preparation.source.output().payload_digest,
+                access: preparation.source.access(&preparation.source_host),
+                limits: preparation.inventory_limits,
+                entry: field_entry,
+                required_indices: &required_indices,
+            },
+        )?;
+        if required_indices
+            .iter()
+            .any(|index| source_fields.value(*index).is_none())
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "selected storage partitions do not cover the observation partition",
+            ));
+        }
+        imported.push((plan, ordinal, source_fields));
+    }
+    let source_request_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ObservationEvaluationRequest,
+        admitted.request.identity().digest(),
+        &admitted.request.canonical_bytes()?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    let prepared = fan_out(
+        local_execution,
+        &imported,
+        |(plan, ordinal, source_fields)| {
+            prepare_partition_workload(
+                &preparation,
+                &admitted,
+                &source_request_objects,
+                plan.as_ref().clone(),
+                plan.partitions[*ordinal].clone(),
+                source_fields.clone(),
+                event_attribution,
+            )
+        },
+    )?;
     Ok(PreparedObservationFanout {
         source_request: admitted.request,
         partitions: prepared,
     })
+}
+
+/// Maps independent fan-out items on the admitted local CPU plan. Each item is computed exactly
+/// as on one thread; results return in canonical item order, so the fan-out is identical for
+/// every plan.
+fn fan_out<I, T, F>(
+    local_execution: LocalExecutionPlan,
+    items: &[I],
+    work: F,
+) -> AnalysisBridgeResult<Vec<T>>
+where
+    I: Sync,
+    T: Send,
+    F: Fn(&I) -> AnalysisBridgeResult<T> + Sync,
+{
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let chunks = execute_scoped_chunks(local_execution, items.len() as u64, |chunk| {
+        items[chunk.start() as usize..chunk.end_exclusive() as usize]
+            .iter()
+            .map(&work)
+            .collect::<AnalysisBridgeResult<Vec<_>>>()
+    })
+    .map_err(|error| match error {
+        ScopedLocalExecutionError::Work { source, .. } => source,
+        other => AnalysisBridgeError::Invalid(other.to_string()),
+    })?;
+    Ok(chunks.into_iter().flatten().collect())
 }
 
 pub fn import_observation_partition_contribution(
@@ -571,6 +641,7 @@ pub fn import_reduced_observation(
 fn prepare_partition_workload(
     preparation: &ObservationPreparation,
     admitted: &AdmittedObservation,
+    source_request_objects: &PreparedAnalysisObjects,
     partition_plan: ObservationPartitionPlan,
     partition: ObservationPartition,
     source_fields: RecoveredFieldPartitionSet,
@@ -590,14 +661,6 @@ fn prepare_partition_workload(
         &partition,
         &source_fields,
         event_attribution,
-    )?;
-    let source_request_objects = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ObservationEvaluationRequest,
-        admitted.request.identity().digest(),
-        &admitted.request.canonical_bytes()?,
-        preparation.chunk_bytes,
-        ObjectNamespace::InputValue,
-        preparation.inventory_limits,
     )?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationPartitionEvaluationRequest,
@@ -629,7 +692,7 @@ fn prepare_partition_workload(
     )?;
     let mut inputs = vec![
         request_objects,
-        source_request_objects,
+        source_request_objects.clone(),
         plan_objects,
         field_objects,
         admitted.field_catalog.clone(),

@@ -35,7 +35,10 @@ pub(crate) mod tests;
 pub use completion::{
     import_fluid_study_completion, FluidStudyResultClosure, FluidStudyResultPhase,
 };
-pub use root::{import_fluid_study_root, prepare_fluid_study_root, PreparedFluidStudyRoot};
+pub use root::{
+    import_fluid_study_root, prepare_fluid_study_root, prepare_fluid_study_root_for,
+    PreparedFluidStudyRoot,
+};
 
 /// Owned terminal artifacts for the exact standalone authored steady envelope.
 /// Consuming the coordinator does not clone numerical storage.
@@ -56,6 +59,7 @@ pub struct CompletedFluidStudy {
     pub publication: ImportedPublishedResult,
 }
 
+#[derive(Clone)]
 pub struct FluidStudyPreparation {
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: FluidStudyPlanningPolicy,
@@ -134,7 +138,8 @@ impl FluidStudyCoordinator {
             tail: None,
             recovery_task: None,
             fields: None,
-            observation_state: crate::sampled_history_observations::SampledHistoryWorkflow::default(),
+            observation_state: crate::sampled_history_observations::SampledHistoryWorkflow::default(
+            ),
             usage: None,
         })
     }

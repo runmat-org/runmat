@@ -223,7 +223,7 @@ pub fn prepare_accuracy(
         crate::build_prepared_accuracy_resource_plan(&request, &numerical_receipt, &inputs)?;
     // Reject an inadmissible task before source verification reconstructs constraints and
     // observation topology. Input serialization above is not covered by this boundary.
-    crate::validate_admitted_accuracy_source(
+    crate::accuracy_resource::validate_derived_accuracy_source(
         &request,
         &numerical_receipt,
         preparation.source_observations.as_ref(),
