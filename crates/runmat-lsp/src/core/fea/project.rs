@@ -170,6 +170,7 @@ fn function_facts(
             .map(operation_pattern_from_value_fact)
             .collect(),
         effects: semantic.effects.clone(),
+        cooperative_suspension: semantic.cooperative_suspension,
         capabilities: semantic.capabilities.clone(),
     })
 }
