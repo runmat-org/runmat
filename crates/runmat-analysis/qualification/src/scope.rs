@@ -188,7 +188,7 @@ pub fn trace(row: &ScopeRow, cells: &[Cell]) -> Trace {
         {
             for cell in cells {
                 if cell.requirement == requirement
-                    && obligation.as_deref().map_or(true, |o| o == cell.obligation)
+                    && obligation.as_deref().is_none_or(|o| o == cell.obligation)
                 {
                     selected.insert(
                         (

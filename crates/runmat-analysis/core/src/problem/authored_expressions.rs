@@ -351,6 +351,30 @@ pub enum AuthoredExpressionError {
     NonFiniteResult,
 }
 
+/// Source-expression arithmetic retains descriptors until the consuming field supplies a kind.
+fn evaluate_binary_quantity(
+    operator: AuthoredNumericOperator,
+    left: runmat_types::physical::DimensionedScalar,
+    right: runmat_types::physical::DimensionedScalar,
+) -> Result<runmat_types::physical::DimensionedScalar, AuthoredExpressionError> {
+    use runmat_types::physical::{QuantityArithmeticError as E, QuantityBinaryOperator as O};
+    let operator = match operator {
+        AuthoredNumericOperator::Add => O::Add,
+        AuthoredNumericOperator::Subtract => O::Subtract,
+        AuthoredNumericOperator::Multiply => O::Multiply,
+        AuthoredNumericOperator::Divide => O::Divide,
+    };
+    runmat_types::physical::evaluate_quantity_binary(operator, left, right).map_err(|error| {
+        match error {
+            E::ResultTypeMismatch => AuthoredExpressionError::ResultTypeMismatch,
+            E::WrongQuantityKind => AuthoredExpressionError::WrongQuantityKind,
+            E::UnsupportedTypeCombination => AuthoredExpressionError::UnsupportedTypeCombination,
+            E::DivisionByZero => AuthoredExpressionError::DivisionByZero,
+            E::NonFiniteResult => AuthoredExpressionError::NonFiniteResult,
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,28 +418,4 @@ mod tests {
         )]);
         assert_eq!(expression.evaluate(&inputs).unwrap(), -125.0);
     }
-}
-
-/// Source-expression arithmetic retains descriptors until the consuming field supplies a kind.
-fn evaluate_binary_quantity(
-    operator: AuthoredNumericOperator,
-    left: runmat_types::physical::DimensionedScalar,
-    right: runmat_types::physical::DimensionedScalar,
-) -> Result<runmat_types::physical::DimensionedScalar, AuthoredExpressionError> {
-    use runmat_types::physical::{QuantityArithmeticError as E, QuantityBinaryOperator as O};
-    let operator = match operator {
-        AuthoredNumericOperator::Add => O::Add,
-        AuthoredNumericOperator::Subtract => O::Subtract,
-        AuthoredNumericOperator::Multiply => O::Multiply,
-        AuthoredNumericOperator::Divide => O::Divide,
-    };
-    runmat_types::physical::evaluate_quantity_binary(operator, left, right).map_err(|error| {
-        match error {
-            E::ResultTypeMismatch => AuthoredExpressionError::ResultTypeMismatch,
-            E::WrongQuantityKind => AuthoredExpressionError::WrongQuantityKind,
-            E::UnsupportedTypeCombination => AuthoredExpressionError::UnsupportedTypeCombination,
-            E::DivisionByZero => AuthoredExpressionError::DivisionByZero,
-            E::NonFiniteResult => AuthoredExpressionError::NonFiniteResult,
-        }
-    })
 }

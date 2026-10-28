@@ -58,7 +58,7 @@ fn waveform() -> Signal<BodyForceDensity> {
             offset: Some(body(2, 3)),
             start_seconds: runmat_types::physical::Time::new(0.0),
             duration_seconds: (None).map(runmat_types::physical::Time::new),
-            frequency_hz: (Some(2.0)).map(runmat_types::physical::Frequency::new),
+            frequency_hz: Some(runmat_types::physical::Frequency::new(2.0)),
             phase_radians: runmat_types::physical::Angle::new(0.0),
             duty_cycle: None,
         }),

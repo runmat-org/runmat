@@ -512,7 +512,7 @@ mod tests {
             material_id: "steel".to_string(),
             name: "Steel".to_string(),
             provenance: crate::MaterialProvenance::Authored,
-            mass_density_kg_per_m3: (Some(7850.0)).map(runmat_types::physical::MassDensity::new),
+            mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(7850.0)),
             elasticity: Some(MaterialElasticityModel::IsotropicLinear(
                 MaterialMechanicalModel {
                     youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),

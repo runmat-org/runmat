@@ -19,9 +19,7 @@ pub enum MaterialFluidModel {
     },
     /// A porous zone the surrounding fluid flows through (filter media, packed bed): its
     /// resistance, not a second fluid.
-    PorousMedium {
-        law: PorousMediumLaw,
-    },
+    PorousMedium { law: PorousMediumLaw },
 }
 
 /// Darcy–Forchheimer resistance of a porous zone, superficial-velocity form: the momentum
@@ -533,7 +531,7 @@ mod tests {
             material_id: "fluid".into(),
             name: "Fluid".into(),
             provenance: MaterialProvenance::Authored,
-            mass_density_kg_per_m3: (Some(997.0)).map(runmat_types::physical::MassDensity::new),
+            mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(997.0)),
             elasticity: None,
             damping: None,
             thermal: None,
@@ -609,8 +607,7 @@ mod tests {
         );
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let mut invalid = material.clone();
-            invalid.mass_density_kg_per_m3 =
-                (Some(bad)).map(runmat_types::physical::MassDensity::new);
+            invalid.mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(bad));
             assert!(invalid.require_incompressible_newtonian().is_err());
             assert!(crate::validate_material_definitions(&[invalid]).is_err());
             let mut invalid = material.clone();

@@ -366,8 +366,9 @@ mod tests {
             interpolation: RandomSpectrumInterpolation::LinearFrequency,
             extrapolation: RandomSpectrumExtrapolation::Reject,
             evidence: RandomSpectrumEvidence {
-                max_absolute_density_error: (Some(0.0))
-                    .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
+                max_absolute_density_error: Some(
+                    runmat_types::physical::AccelerationPowerSpectralDensity::new(0.0),
+                ),
                 equivalent_degrees_of_freedom: None,
             },
         }
