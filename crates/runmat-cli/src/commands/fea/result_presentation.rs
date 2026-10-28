@@ -284,6 +284,16 @@ pub(crate) fn print_fea_sweep_result(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    let unsuccessful = result
+        .entries
+        .iter()
+        .filter(|entry| {
+            !matches!(
+                entry.terminal,
+                super::remote::MaterializedFeaSweepTerminal::Succeeded(_)
+            )
+        })
+        .count();
     if json {
         println!(
             "{}",
@@ -292,12 +302,17 @@ pub(crate) fn print_fea_sweep_result(
                 "cases": cases,
             }))?
         );
-        return Ok(());
+        return sweep_outcome(sweep_id, unsuccessful, case_ids.len());
     }
     let styles = presentation::stdout();
+    let heading = if unsuccessful == 0 {
+        styles.success("FEA sweep complete")
+    } else {
+        styles.error("FEA sweep finished with unsuccessful cases")
+    };
     println!(
         "{} {} ({} cases)",
-        styles.success("FEA sweep complete"),
+        heading,
         styles.identifier(sweep_id),
         cases.len()
     );
@@ -316,6 +331,16 @@ pub(crate) fn print_fea_sweep_result(
                 None => println!("  {id}: {status}"),
             },
         }
+    }
+    sweep_outcome(sweep_id, unsuccessful, case_ids.len())
+}
+
+/// A sweep succeeds only when every case succeeds. The full per-case report is printed first;
+/// any failed, cancelled or indeterminate case then fails the command (exit status 1), the same
+/// convention `runmat test` uses for a run with failing tests.
+fn sweep_outcome(sweep_id: &str, unsuccessful: usize, total: usize) -> Result<()> {
+    if unsuccessful > 0 {
+        bail!("FEA sweep {sweep_id}: {unsuccessful} of {total} cases did not succeed");
     }
     Ok(())
 }
@@ -346,5 +371,46 @@ fn numerical_kind(
         }
         StructuralStudyNumericalResult::StructuralTransient(_) => "structural_transient",
         StructuralStudyNumericalResult::StructuralFrequency(_) => "structural_frequency",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::remote::{
+        MaterializedFeaSweep, MaterializedFeaSweepEntry, MaterializedFeaSweepTerminal,
+    };
+
+    fn sweep(terminals: Vec<MaterializedFeaSweepTerminal>) -> MaterializedFeaSweep {
+        MaterializedFeaSweep {
+            entries: terminals
+                .into_iter()
+                .enumerate()
+                .map(|(study_index, terminal)| MaterializedFeaSweepEntry {
+                    study_index,
+                    terminal,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn sweep_with_any_unsuccessful_case_fails_the_command() {
+        let case_ids = vec!["a".to_string(), "b".to_string()];
+        for json in [false, true] {
+            let all_failed = sweep(vec![
+                MaterializedFeaSweepTerminal::Failed("solver diverged".into()),
+                MaterializedFeaSweepTerminal::Failed("solver diverged".into()),
+            ]);
+            let error = super::print_fea_sweep_result("s", &case_ids, &all_failed, json)
+                .expect_err("a sweep whose cases all failed must fail the command");
+            assert!(error.to_string().contains("2 of 2 cases did not succeed"));
+            let partial = sweep(vec![
+                MaterializedFeaSweepTerminal::Cancelled,
+                MaterializedFeaSweepTerminal::Indeterminate("lost worker".into()),
+            ]);
+            assert!(super::print_fea_sweep_result("s", &case_ids, &partial, json).is_err());
+        }
+        assert!(super::sweep_outcome("s", 0, 2).is_ok());
+        assert!(super::sweep_outcome("s", 1, 2).is_err());
     }
 }
