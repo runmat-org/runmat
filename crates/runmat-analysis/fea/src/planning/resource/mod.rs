@@ -195,7 +195,7 @@ pub use contract::{
     PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, PreparedPhaseResourceFacts,
     PreparedStructuralModalResourceFacts, ResourceAdmission, ResourceBreakdown,
     ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy, SparseResourceFacts,
-    StaticSolvePath, StaticSolveSelection,
+    StaticSolvePath, StaticSolveSelection, RESIDENT_MEMORY_RESOURCE,
     StructuralBucklingResourceDemand, StructuralFrequencyOperatorResourceDemand,
     StructuralFrequencyResultAssemblyResourceDemand, StructuralModalResourceDemand,
     StructuralModalResponseSpectrumAssemblyResourceDemand,

@@ -49,7 +49,7 @@ use super::contract::{
     ObservationHistoryCheckpointResourceDemand, ObservationPartitionResourceDemand,
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
     PreparedInputResourceFacts, PreparedOutputResourceFacts, ResourceBreakdown,
-    ResourcePlanningError, SparseResourceFacts, StructuralFrequencyResultAssemblyResourceDemand,
+    ResourcePlanningError, SparseResourceFacts, StructuralFrequencyResultAssemblyResourceDemand, RESIDENT_MEMORY_RESOURCE,
     StructuralModalResponseSpectrumAssemblyResourceDemand, StructuralOperatorResourceDemand,
     StructuralRandomResponseAssemblyResourceDemand,
     StructuralTransientResultAssemblyResourceDemand, RESOURCE_ESTIMATION_MODEL_REVISION,
@@ -392,7 +392,7 @@ fn partition_facts(
         PartitioningPolicy::Monolithic => {
             if total_memory > input.accuracy_ceiling.resident_byte_budget() {
                 return Err(ResourcePlanningError::AccuracyCeiling {
-                    resource: "resident memory bytes",
+                    resource: RESIDENT_MEMORY_RESOURCE,
                     required: total_memory,
                     maximum: input.accuracy_ceiling.resident_byte_budget(),
                 });

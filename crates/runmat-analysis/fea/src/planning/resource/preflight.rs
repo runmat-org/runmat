@@ -38,6 +38,8 @@ use super::{
     RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
+use super::RESIDENT_MEMORY_RESOURCE;
+
 const STRUCTURAL_FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 const STRUCTURAL_ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
@@ -136,47 +138,78 @@ pub(crate) fn build_static_resource_plan_selecting(
     input: StaticResourcePreflight<'_>,
     selection: StaticSolveSelection,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    let path = match selection {
-        StaticSolveSelection::Recorded(path) => path,
+    match selection {
+        StaticSolveSelection::Recorded(path) => {
+            build_resource_plan(build_static_resource_input(input, path)?)
+        }
         StaticSolveSelection::WithinCeiling {
             machine_memory_bytes,
-        } => select_static_solve_path(input, machine_memory_bytes)?,
-    };
-    build_resource_plan(build_static_resource_input(input, path)?)
+        } => plan_static_solve_within_ceiling(input, machine_memory_bytes),
+    }
 }
 
 /// The proving factorization when its plan fits the effective ceiling; otherwise the elastic
-/// rigidity path for a model it admits. An explicit AMG request takes the elastic path whenever
-/// the model admits it (the factor is never needed); direct, Jacobi and ILU requests keep the
-/// factor proof.
-fn select_static_solve_path(
+/// rigidity path for a model it admits, whose plan must fit the same ceiling. An explicit AMG
+/// request takes the elastic path whenever the model admits it (the factor is never needed);
+/// direct, Jacobi and ILU requests keep the factor proof.
+///
+/// The effective ceiling is min(authored, machine), where the machine figure is the resident
+/// memory the placement grants one worker. A plan is admitted when both its resident memory and
+/// its scratch fit that ceiling, the limits the worker pool enforces. When neither path fits,
+/// the error names both paths' requirements and the ceiling.
+fn plan_static_solve_within_ceiling(
     input: StaticResourcePreflight<'_>,
     machine_memory_bytes: Option<u64>,
-) -> Result<StaticSolvePath, ResourcePlanningError> {
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let plan_path =
+        |path: StaticSolvePath| build_resource_plan(build_static_resource_input(input, path)?);
     if !elastic_rigidity_admits(&input) {
-        return Ok(StaticSolvePath::ProvingFactorization);
+        return plan_path(StaticSolvePath::ProvingFactorization);
     }
     match input.preconditioner {
-        SpdPreconditionerKind::Amg => return Ok(StaticSolvePath::ElasticRigidityMultigrid),
+        SpdPreconditionerKind::Amg => return plan_path(StaticSolvePath::ElasticRigidityMultigrid),
         SpdPreconditionerKind::Auto => {}
         SpdPreconditionerKind::Direct
         | SpdPreconditionerKind::Jacobi
-        | SpdPreconditionerKind::Ilu0 => return Ok(StaticSolvePath::ProvingFactorization),
+        | SpdPreconditionerKind::Ilu0 => {
+            return plan_path(StaticSolvePath::ProvingFactorization)
+        }
     }
     let authored = input.step.accuracy.resources.resident_byte_budget();
     let ceiling = machine_memory_bytes.map_or(authored, |machine| machine.min(authored));
-    match build_resource_plan(build_static_resource_input(
-        input,
-        StaticSolvePath::ProvingFactorization,
-    )?) {
-        Ok(plan) if plan.request.memory_bytes <= ceiling => {
-            Ok(StaticSolvePath::ProvingFactorization)
-        }
-        Ok(_) | Err(ResourcePlanningError::AccuracyCeiling { .. }) => {
-            Ok(StaticSolvePath::ElasticRigidityMultigrid)
-        }
-        Err(error) => Err(error),
-    }
+    let fits = |plan: &FeaResourcePlan| {
+        plan.request.memory_bytes <= ceiling && plan.request.scratch_bytes <= ceiling
+    };
+    let factorization_resident_bytes = match plan_path(StaticSolvePath::ProvingFactorization) {
+        Ok(plan) if fits(&plan) => return Ok(plan),
+        Ok(plan) => Some(plan.request.memory_bytes),
+        Err(ResourcePlanningError::AccuracyCeiling {
+            resource: RESIDENT_MEMORY_RESOURCE,
+            required,
+            ..
+        }) => Some(required),
+        // Another authored limit (samples, cycles) binds the factor plan; the elastic plan
+        // answers to the same limit and reports it below if it binds there too.
+        Err(ResourcePlanningError::AccuracyCeiling { .. }) => None,
+        Err(error) => return Err(error),
+    };
+    let (multigrid_resident_bytes, multigrid_scratch_bytes) =
+        match plan_path(StaticSolvePath::ElasticRigidityMultigrid) {
+            Ok(plan) if fits(&plan) => return Ok(plan),
+            Ok(plan) => (plan.request.memory_bytes, Some(plan.request.scratch_bytes)),
+            Err(ResourcePlanningError::AccuracyCeiling {
+                resource: RESIDENT_MEMORY_RESOURCE,
+                required,
+                ..
+            }) => (required, None),
+            Err(error) => return Err(error),
+        };
+    Err(ResourcePlanningError::StaticSolveCeiling {
+        factorization_resident_bytes,
+        multigrid_resident_bytes,
+        multigrid_scratch_bytes,
+        maximum: ceiling,
+    })
 }
 
 /// The elastic rigidity proof covers a linear static solid continuum: a solver mesh of

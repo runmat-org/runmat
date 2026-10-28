@@ -49,6 +49,12 @@ fn effective_ceiling_selects_the_static_solve_path() {
     elastic_static_path::ceiling_selects_the_static_path();
 }
 
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @ shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial; boundary: The elastic rigidity fallback is admitted only when its resident memory and scratch fit the effective ceiling; below both plans the planner fails with a resource error naming both paths' requirements and the ceiling.
+#[test]
+fn static_solve_fallback_is_admitted_against_the_effective_ceiling() {
+    elastic_static_path::fallback_is_admitted_against_the_ceiling();
+}
+
 #[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
     cantilever_refinement::qualify();
