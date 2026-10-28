@@ -755,12 +755,8 @@ async fn registry_output(
             &runmat_builtins::WINQUERYREG_ERROR_INSUFFICIENT_RESOURCE,
         ));
     }
-    // Explicitly clear ambient environment and publish only the selected
-    // session's snapshot. Missing context never grants ambient process access.
-    command.environment = runtime
-        .map(|runtime| runtime.environment_snapshot().into_iter().collect())
-        .unwrap_or_default();
-    command.environment_policy = runmat_process_host::environment::EnvironmentPolicy::Clear;
+    // The shared invocation boundary resolves inheritance against the session.
+    command.environment_policy = runmat_process_host::environment::EnvironmentPolicy::Inherit;
     output_complete(runtime, command, None, None)
         .await
         .map_err(|source| {

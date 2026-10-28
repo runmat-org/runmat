@@ -33,7 +33,7 @@ const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &[LIFECYCLE_ERROR],
 };
 const AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: Some("gpuDevice"),
+    kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None,
     notes: "The input is an issued GPUDevice handle, never a numeric resource identifier; properties retain their canonical logical, character or double class.",
 };
 fn infer_member(

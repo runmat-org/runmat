@@ -112,6 +112,22 @@ pub(crate) async fn invoke(
             .get(&selected_function)
             .and_then(|metadata| metadata.class_method_owner.as_ref()),
     )?;
+    let runtime = if let Some(owner) = selected_body
+        .and_then(|body| body.class_method_owner.as_ref())
+        .filter(|owner| owner.role == runmat_types::ClassMethodRole::Constructor)
+    {
+        let binding = runtime_functions
+            .exact_bound_binding(function)
+            .ok_or_else(|| {
+                super::error::stage(
+                    "NativeClassProduct",
+                    "constructor frame lacks its exact entered binding",
+                )
+            })?;
+        runtime.with_admitted_constructor_frame(owner, binding)?
+    } else {
+        runtime
+    };
     let registry = Rc::new(runtime_functions.clone());
     let runtime = if runtime.has_selected_graph_function_resolver() {
         runtime
@@ -174,6 +190,39 @@ pub(crate) async fn invoke(
             let admission_runtime = runtime.clone();
             let runtime = runtime.with_constructor_receiver_for_method(method_owner.as_ref());
             let is_native = semantic_native_functions.contains(&FunctionId(function));
+            if same_owner
+                && registry
+                    .requires_selected_constructor_admission(runmat_hir::FunctionId(function))
+            {
+                return user_functions::admit_user_function_with(
+                    Some(&admission_runtime),
+                    move || async move {
+                        let runtime = runtime?;
+                        let binding = registry
+                            .exact_bound_binding(runmat_hir::FunctionId(function))
+                            .ok_or_else(|| {
+                                super::error::stage(
+                                "ConstructorOwnerInvalid",
+                                "selected semantic constructor lacks its exact definition lease",
+                            )
+                            })?;
+                        user_functions::try_call_rooted_bound_function_with_environment_in_context(
+                            &runtime,
+                            binding,
+                            arguments,
+                            requested_outputs,
+                            lexical_environment,
+                        )
+                        .await
+                        .ok_or_else(|| {
+                            super::error::stage(
+                                "UnavailableBoundFunction",
+                                "selected semantic constructor has no bound executor",
+                            )
+                        })?
+                    },
+                );
+            }
             user_functions::admit_user_function_with(Some(&admission_runtime), move || async move {
                 if !same_owner {
                     return Err(super::error::stage(
@@ -370,6 +419,16 @@ pub(crate) async fn invoke(
                     if current_definition {
                         let runtime = isolated_procedure_runtime(runtime);
                         if native_selected_body {
+                            // This binding is owned here. Admit its one-shot
+                            // receiver intent before entering native code;
+                            // ordinary siblings must not inherit caller proof.
+                            let (runtime, selected_method) =
+                                registry.prepare_selected_receiver_method(runtime, &binding)?;
+                            let runtime = if selected_method {
+                                runtime
+                            } else {
+                                runtime.without_selected_object_class()
+                            };
                             let method_owner = unit
                                 .mir()
                                 .functions

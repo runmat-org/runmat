@@ -120,6 +120,7 @@ fn prepared_region_keeps_contextual_end_validation_distinct() {
             MirRvalue::Index {
                 base: MirOperand::Constant(crate::MirConstant::EmptyArray),
                 indexing: crate::MirIndexing {
+                    argument_spans: None,
                     kind: runmat_hir::IndexKind::Paren,
                     plan: crate::MirIndexPlan::Scalar,
                     components: vec![crate::MirIndexComponent::ContextualExpr(nested_contextual)],

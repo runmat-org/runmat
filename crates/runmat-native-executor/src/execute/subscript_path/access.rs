@@ -13,6 +13,15 @@ pub(in crate::execute) fn frame_access_runtime(
 ) -> Result<runmat_runtime::object::protocol::ObjectAccessContext, Box<runmat_runtime::RuntimeError>>
 {
     let _scope = state.runtime.enter();
+    if let Some(owner) = state.function.class_method_owner.as_ref() {
+        if let Some(access) = state
+            .runtime
+            .selected_method_frame_access(owner, state.function.id)
+            .map_err(Box::new)?
+        {
+            return Ok(access);
+        }
+    }
     if let (Some(owner), Some(facts)) = (
         state.function.class_method_owner.as_ref(),
         state.runtime.selected_object_class(),

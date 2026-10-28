@@ -50,6 +50,7 @@ export class BrowserTestSnapshotPreparer {
     }
     const revision = revisionFields(request.projectRevision);
     const snapshot = await this.native.freezeTestSnapshot({
+      compatibilityMode: layout.compatibilityMode,
       graphDigest: revision.graphDigest,
       baseSourceDigest: revision.sourceRevision,
       testConfigDigest: layout.testConfigDigest,

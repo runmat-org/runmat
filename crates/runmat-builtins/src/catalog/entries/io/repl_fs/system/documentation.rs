@@ -28,6 +28,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
             paragraphs: &[
                 "The command and optional `'-echo'` control must be host string scalars or character rows. Numeric and GPU-resident controls reject before child creation. Zero, one, and two requested outputs are supported; zero outputs writes collected command text to the console.",
                 "On native Windows the command uses `cmd /C`; on Unix-like hosts it uses `/bin/sh -c`. The active filesystem provider must issue a real native working-directory grant. Virtual filesystem paths are not used as operating-system paths.",
+                "The child inherits the RunMat session's environment, including changes made with `setenv`. A frozen session exposes only its installed environment; neither session changes nor child execution modify the embedding process's environment.",
                 "Both output pipes are drained concurrently without truncation. The result groups stdout before stderr; it does not preserve cross-stream interleaving. `'-echo'` writes that same collected result to the RunMat console after the command finishes.",
             ],
         },

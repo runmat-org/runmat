@@ -33,6 +33,7 @@ pub(super) fn result<'a, E: LeastSquaresEvaluator + 'a>(
 pub(super) enum DerivativeResult {
     Workspace(Vec<f64>),
     Retained(Jacobian),
+    RetainedWithWorkspace(Jacobian, Vec<f64>),
 }
 pub(super) async fn finish<E: LeastSquaresEvaluator>(
     evaluator: &mut E,
@@ -48,11 +49,19 @@ pub(super) async fn finish<E: LeastSquaresEvaluator>(
     step_size: f64,
     message: &str,
 ) -> BuiltinResult<LeastSquaresResult> {
+    let mut numerical = None;
     let derivative = match jacobian {
         DerivativeResult::Workspace(values) => match evaluator.take_jacobian() {
-            Some(source) => DerivativeResult::Retained(source),
+            Some(source) => {
+                numerical = Some(values);
+                DerivativeResult::Retained(source)
+            }
             None => DerivativeResult::Workspace(values),
         },
+        DerivativeResult::RetainedWithWorkspace(source, values) => {
+            numerical = Some(values);
+            DerivativeResult::Retained(source)
+        }
         source => source,
     };
     let (jacobian, gradient, first_order_optimality, jacobian_source) = match derivative {
@@ -99,11 +108,14 @@ pub(super) async fn finish<E: LeastSquaresEvaluator>(
                 None => first_order_optimality,
             };
             let values = if options.final_jacobian {
-                source.into_published(c).await?
+                source.into_published(numerical, c).await?
             } else {
                 PublishedJacobian::RowMajor(Vec::new())
             };
             (values, gradient, optimality, JacobianSource::Supplied)
+        }
+        DerivativeResult::RetainedWithWorkspace(_, _) => {
+            unreachable!("normalized retained derivative")
         }
         DerivativeResult::Workspace(jacobian) => {
             if let Some(current) = evaluator.take_analytic_jacobian() {

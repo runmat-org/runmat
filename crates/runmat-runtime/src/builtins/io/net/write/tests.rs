@@ -391,8 +391,8 @@ fn borrowed_codec_preserves_column_major_pages_and_text_classes() {
         ByteOrder::Little,
     )
     .expect("byte-oriented char payload");
-    assert_eq!(payload.elements, 3);
-    assert_eq!(payload.bytes, [b'A', 0xe9, 0]);
+    assert_eq!(payload.elements, 4);
+    assert_eq!(payload.bytes, [b'A', 0xe9, 0, 0]);
     let payload = prepare_payload(
         &Value::CharArray(chars),
         DataType::String,

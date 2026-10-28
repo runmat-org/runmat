@@ -197,13 +197,16 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
     pub(super) async fn new<C: PcgOperations<T>>(
         rhs: &'a [T],
         initial: Option<&[T]>,
-        tolerance: f64,
-        maximum_iterations: usize,
+        parameters: super::PcgParameters,
         work: PcgWork<'a, T>,
-        preconditioners: (bool, bool),
         previous: Option<&'a mut [T]>,
         checkpoint: &mut C,
     ) -> Result<Self, KrylovFailure<C::Error>> {
+        let super::PcgParameters {
+            tolerance,
+            maximum_iterations,
+            preconditioners,
+        } = parameters;
         let (first_preconditioner, second_preconditioner) = preconditioners;
         let mut work = work;
         if let Some(coefficients) = work.coefficients.as_deref_mut() {
@@ -268,7 +271,11 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
         output: &[T],
         checkpoint: &mut C,
     ) -> Result<(), KrylovFailure<C::Error>> {
-        if checkpoint.native_residual(self.rhs, &output[..self.rhs.len()], &mut *self.work.residual) {
+        if checkpoint.native_residual(
+            self.rhs,
+            &output[..self.rhs.len()],
+            &mut *self.work.residual,
+        ) {
             checkpoint
                 .cooperate(self.rhs.len() as u64)
                 .await
@@ -389,7 +396,11 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                         .await;
                 };
                 self.record_beta(beta);
-                if checkpoint.native_direction(&mut *self.work.direction, &output[..self.rhs.len()], beta) {
+                if checkpoint.native_direction(
+                    &mut *self.work.direction,
+                    &output[..self.rhs.len()],
+                    beta,
+                ) {
                     checkpoint
                         .cooperate(self.rhs.len() as u64)
                         .await

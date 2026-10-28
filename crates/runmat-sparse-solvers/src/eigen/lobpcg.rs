@@ -3,7 +3,7 @@
 //! Gram matrix to drop numerically dependent directions, which makes the method robust without
 //! explicit orthogonalization of `W` and `P`.
 
-use super::blas::{gemm_nn, gemm_tn, spmm};
+use super::blas::{gemm_nn, gemm_tn, spmm, ProductScale};
 use super::{true_residuals, EigenResult};
 use crate::control::{Progress, ProgressPhase, SolveControl};
 use crate::csr::CsrRef;
@@ -35,7 +35,9 @@ impl Default for LobpcgOptions {
 /// Solves the projected problem `Sᵀ K S y = θ Sᵀ M S y` after removing dependent directions.
 fn rayleigh_ritz(gk: &[f64], gm: &[f64], s: usize) -> SolverResult<(Vec<f64>, Vec<f64>)> {
     // Scale to unit diagonal of Gm, eigen-decompose Gm, keep well-conditioned directions.
-    let d: Vec<f64> = (0..s).map(|i| gm[i * s + i].max(f64::MIN_POSITIVE).sqrt().recip()).collect();
+    let d: Vec<f64> = (0..s)
+        .map(|i| gm[i * s + i].max(f64::MIN_POSITIVE).sqrt().recip())
+        .collect();
     let scaled_m: Vec<f64> = (0..s * s).map(|e| gm[e] * d[e / s] * d[e % s]).collect();
     let (mu, u) = symmetric_eigen(&scaled_m, s)?;
     let top = mu.iter().fold(0.0f64, |a, &b| a.max(b));
@@ -100,7 +102,9 @@ pub fn lobpcg(
     control: SolveControl<'_>,
 ) -> SolverResult<EigenResult> {
     let n = k.nrows();
-    let block = (options.count + options.guard).min(n / 3).max(options.count.min(n));
+    let block = (options.count + options.guard)
+        .min(n / 3)
+        .max(options.count.min(n));
     if block == 0 {
         return Err(SolverError::Dimension("empty eigenproblem".into()));
     }
@@ -121,10 +125,23 @@ pub fn lobpcg(
         let (t, y) = rayleigh_ritz(&gk, &gm, block)?;
         let r = t.len();
         if r < block {
-            return Err(SolverError::Breakdown("dependent LOBPCG start block".into()));
+            return Err(SolverError::Breakdown(
+                "dependent LOBPCG start block".into(),
+            ));
         }
         let mut xn = vec![0.0; n * block];
-        gemm_nn(&mut xn, block, 1.0, &x, block, &y[..block * block], 0.0, n);
+        gemm_nn(
+            &mut xn,
+            block,
+            ProductScale {
+                alpha: 1.0,
+                beta: 0.0,
+            },
+            &x,
+            block,
+            &y[..block * block],
+            n,
+        );
         x = xn;
         theta.copy_from_slice(&t[..block]);
     }
@@ -143,18 +160,27 @@ pub fn lobpcg(
             let mn = par::norm2(mc);
             norms[c] = par::norm2(rc) / (kn + theta[c].abs() * mn).max(f64::MIN_POSITIVE);
         }
-        converged_count = norms.iter().take(options.count).take_while(|&&e| e <= options.tolerance).count();
+        converged_count = norms
+            .iter()
+            .take(options.count)
+            .take_while(|&&e| e <= options.tolerance)
+            .count();
         control.report(Progress {
             phase: ProgressPhase::Eigen,
             iteration: iterations,
-            residual: norms.iter().take(options.count).fold(0.0f64, |a, &b| a.max(b)),
+            residual: norms
+                .iter()
+                .take(options.count)
+                .fold(0.0f64, |a, &b| a.max(b)),
             converged: converged_count,
         });
         if converged_count >= options.count || iterations >= options.max_iterations {
             break;
         }
         // Active (unconverged) columns get preconditioned residuals.
-        let active: Vec<usize> = (0..block).filter(|&c| norms[c] > options.tolerance).collect();
+        let active: Vec<usize> = (0..block)
+            .filter(|&c| norms[c] > options.tolerance)
+            .collect();
         let a = active.len();
         let mut w = vec![0.0; n * a];
         for (j, &c) in active.iter().enumerate() {
@@ -193,7 +219,18 @@ pub fn lobpcg(
         // X_new = S Y[:, :block]; P_new = (S without X) Y_rest-part.
         let ycols = &y[..s * block];
         let mut x_new = vec![0.0; n * block];
-        gemm_nn(&mut x_new, block, 1.0, &basis, s, ycols, 0.0, n);
+        gemm_nn(
+            &mut x_new,
+            block,
+            ProductScale {
+                alpha: 1.0,
+                beta: 0.0,
+            },
+            &basis,
+            s,
+            ycols,
+            n,
+        );
         let mut y_tail = vec![0.0; (s - block) * block];
         for c in 0..block {
             for row in block..s {
@@ -201,7 +238,18 @@ pub fn lobpcg(
             }
         }
         let mut p_new = vec![0.0; n * block];
-        gemm_nn(&mut p_new, block, 1.0, &basis[n * block..], s - block, &y_tail, 0.0, n);
+        gemm_nn(
+            &mut p_new,
+            block,
+            ProductScale {
+                alpha: 1.0,
+                beta: 0.0,
+            },
+            &basis[n * block..],
+            s - block,
+            &y_tail,
+            n,
+        );
         x = x_new;
         p_block = Some(p_new);
         theta.copy_from_slice(&t[..block]);

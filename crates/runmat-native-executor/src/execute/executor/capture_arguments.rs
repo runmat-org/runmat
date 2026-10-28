@@ -30,7 +30,7 @@ impl NativeExecutor {
                 ));
             }
         }
-        let actual_capture_count = arguments.capture_count();
+        let actual_capture_count = arguments.lexical_capture_count();
         if body.closure_captures.len() != actual_capture_count {
             let carrier = match arguments.callable().map(|owner| owner.value()) {
                 Some(Value::Closure(closure)) => format!(

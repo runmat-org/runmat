@@ -21,9 +21,9 @@ pub(super) async fn try_power(base: &Value, exponent: &Value) -> BuiltinResult<O
         return Ok(None);
     };
     if exponent < 0 {
-        return Err(super::errors::invalid_argument(
-            "Negative matrix powers not supported yet",
-        ));
+        // The shared inverse kernel owns negative integer powers. The ordinary
+        // fallback preserves the selected provider owner when restoring output.
+        return Ok(None);
     }
     let [rows, columns] = base.shape() else {
         return Ok(None);

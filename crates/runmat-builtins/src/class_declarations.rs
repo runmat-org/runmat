@@ -7,7 +7,7 @@ use runmat_types::{
 mod arrays;
 mod equation_problem;
 mod layers;
-mod lsqlin_warm_start;
+mod optim_warm_start;
 mod optimization_exitflag;
 mod optimization_model;
 mod optimization_problem;
@@ -30,7 +30,7 @@ pub fn standard_class_array_shape(
 /// Mutable runtime registrations and static property values are intentionally
 /// not visible through this interface.
 pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalClassDeclaration> {
-    if let Some(declaration) = lsqlin_warm_start::declaration(identity) {
+    if let Some(declaration) = optim_warm_start::declaration(identity) {
         return Some(declaration);
     }
     if let Some(declaration) = optimization_exitflag::declaration(identity) {

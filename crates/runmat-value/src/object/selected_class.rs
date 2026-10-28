@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use runmat_types::{
     ClassIdentity, ClassMethodOwner, ClassMethodRole, EventDeclaration, MemberAccess, MemberName,
@@ -46,6 +46,7 @@ pub struct SelectedReceiverDeclarations {
     ancestry: Vec<ClassIdentity>,
     classes: HashMap<ClassIdentity, SelectedReceiverClassDeclaration>,
     methods: HashMap<MethodName, Arc<SelectedReceiverMethodDeclaration>>,
+    owner_methods: HashMap<ClassMethodOwner, Arc<SelectedReceiverMethodDeclaration>>,
 }
 
 impl SelectedReceiverDeclarations {
@@ -54,7 +55,7 @@ impl SelectedReceiverDeclarations {
         is_handle_class: bool,
         ancestry: Vec<ClassIdentity>,
         classes: HashMap<ClassIdentity, SelectedReceiverClassDeclaration>,
-        methods: HashMap<MethodName, Arc<SelectedReceiverMethodDeclaration>>,
+        owner_methods: HashMap<ClassMethodOwner, Arc<SelectedReceiverMethodDeclaration>>,
     ) -> Option<Self> {
         let mut cursor = Some(&class);
         for name in &ancestry {
@@ -67,13 +68,30 @@ impl SelectedReceiverDeclarations {
         if ancestry.first() != Some(&class)
             || (cursor.is_some() && !ends_at_handle)
             || ends_at_handle != is_handle_class
-            || methods.iter().any(|(name, method)| {
-                name != &method.owner.method
+            || owner_methods.iter().any(|(owner, method)| {
+                owner != &method.owner
                     || method.owner.role != ClassMethodRole::Ordinary
                     || !ancestry.contains(&method.owner.declaring_class)
             })
         {
             return None;
+        }
+        let mut signatures = HashSet::new();
+        if owner_methods
+            .keys()
+            .any(|owner| !signatures.insert((&owner.declaring_class, &owner.method)))
+        {
+            return None;
+        }
+        let mut methods = HashMap::new();
+        for class in &ancestry {
+            for (owner, declaration) in &owner_methods {
+                if &owner.declaring_class == class {
+                    methods
+                        .entry(owner.method.clone())
+                        .or_insert_with(|| Arc::clone(declaration));
+                }
+            }
         }
         Some(Self {
             class,
@@ -81,6 +99,7 @@ impl SelectedReceiverDeclarations {
             ancestry,
             classes,
             methods,
+            owner_methods,
         })
     }
 
@@ -98,6 +117,11 @@ impl SelectedReceiverDeclarations {
     }
     pub fn methods(&self) -> &HashMap<MethodName, Arc<SelectedReceiverMethodDeclaration>> {
         &self.methods
+    }
+    pub fn owner_methods(
+        &self,
+    ) -> &HashMap<ClassMethodOwner, Arc<SelectedReceiverMethodDeclaration>> {
+        &self.owner_methods
     }
     pub fn class_declarations(&self) -> &HashMap<ClassIdentity, SelectedReceiverClassDeclaration> {
         &self.classes
@@ -127,14 +151,14 @@ impl Deref for SelectedObjectMethod {
 pub struct SelectedObjectClassFacts {
     declarations: Arc<SelectedReceiverDeclarations>,
     constructor: BoundFunctionBinding,
-    methods: HashMap<MethodName, SelectedObjectMethod>,
+    methods: HashMap<ClassMethodOwner, SelectedObjectMethod>,
 }
 
 impl SelectedObjectClassFacts {
     pub fn new(
         declarations: Arc<SelectedReceiverDeclarations>,
         constructor: BoundFunctionBinding,
-        method_bindings: HashMap<MethodName, Option<BoundFunctionBinding>>,
+        method_bindings: HashMap<ClassMethodOwner, Option<BoundFunctionBinding>>,
     ) -> Option<Self> {
         if constructor
             .authority
@@ -145,9 +169,9 @@ impl SelectedObjectClassFacts {
                     .selected_receiver_declarations()
                     .is_none_or(|admitted| !Arc::ptr_eq(admitted, &declarations))
             })
-            || method_bindings.len() != declarations.methods().len()
-            || method_bindings.iter().any(|(name, binding)| {
-                !declarations.methods().contains_key(name)
+            || method_bindings.len() != declarations.owner_methods().len()
+            || method_bindings.iter().any(|(owner, binding)| {
+                !declarations.owner_methods().contains_key(owner)
                     || binding.as_ref().is_some_and(|binding| {
                         binding.authority.local_lease(binding.function).is_none()
                             && binding.authority.portable_origin().is_none()
@@ -158,10 +182,15 @@ impl SelectedObjectClassFacts {
         }
         let methods = method_bindings
             .into_iter()
-            .map(|(name, binding)| {
-                let declaration = Arc::clone(declarations.method(&name).expect("checked method"));
+            .map(|(owner, binding)| {
+                let declaration = Arc::clone(
+                    declarations
+                        .owner_methods()
+                        .get(&owner)
+                        .expect("checked method"),
+                );
                 (
-                    name,
+                    owner,
                     SelectedObjectMethod {
                         declaration,
                         binding,
@@ -197,15 +226,47 @@ impl SelectedObjectClassFacts {
     }
 
     pub fn method(&self, name: &MethodName) -> Option<&SelectedObjectMethod> {
-        self.methods.get(name)
+        self.methods.get(&self.declarations.method(name)?.owner)
     }
 
     pub fn methods(&self) -> impl Iterator<Item = &SelectedObjectMethod> {
+        self.declarations
+            .methods()
+            .values()
+            .filter_map(|method| self.methods.get(&method.owner))
+    }
+
+    pub fn owner_methods(&self) -> impl Iterator<Item = &SelectedObjectMethod> {
         self.methods.values()
     }
 
+    pub fn method_by_owner(&self, owner: &ClassMethodOwner) -> Option<&SelectedObjectMethod> {
+        self.methods.get(owner)
+    }
+
+    /// Explicit superclass lookup starts at a strict ancestor of the caller,
+    /// independently of the dynamic receiver's virtual method winner.
+    pub fn super_method(
+        &self,
+        caller: &ClassIdentity,
+        superclass: &ClassIdentity,
+        method: &MethodName,
+    ) -> Option<&SelectedObjectMethod> {
+        let ancestry = self.ancestry();
+        let caller_position = ancestry.iter().position(|class| class == caller)?;
+        let super_position = ancestry.iter().position(|class| class == superclass)?;
+        if super_position <= caller_position {
+            return None;
+        }
+        ancestry[super_position..].iter().find_map(|class| {
+            self.methods.values().find(|entry| {
+                &entry.owner.declaring_class == class && &entry.owner.method == method
+            })
+        })
+    }
+
     pub fn method_binding(&self, name: &MethodName) -> Option<BoundFunctionBinding> {
-        self.methods.get(name)?.binding.clone()
+        self.method(name)?.binding.clone()
     }
 }
 
@@ -219,6 +280,95 @@ mod tests {
         FunctionDefinitionOwner, LocalExport, ObjectInstance, ObjectPersistencePayloadKind,
         SelectedReceiverDeclarationSeal,
     };
+
+    #[test]
+    fn virtual_winners_and_explicit_super_methods_share_exact_owner_declarations() {
+        let base = ClassIdentity::new("FrozenBase").unwrap();
+        let derived = ClassIdentity::new("FrozenDerived").unwrap();
+        let name = MethodName::from("evaluate");
+        let owner = |class: &ClassIdentity| ClassMethodOwner {
+            declaring_class: class.clone(),
+            method: name.clone(),
+            is_static: false,
+            role: ClassMethodRole::Ordinary,
+        };
+        let base_owner = owner(&base);
+        let derived_owner = owner(&derived);
+        let declaration = |owner| {
+            Arc::new(SelectedReceiverMethodDeclaration {
+                owner,
+                is_abstract: false,
+                access: MemberAccess::Public,
+                standard_substruct: false,
+            })
+        };
+        let declarations = Arc::new(
+            SelectedReceiverDeclarations::new(
+                derived.clone(),
+                false,
+                vec![derived.clone(), base.clone()],
+                HashMap::from([
+                    (
+                        derived.clone(),
+                        SelectedReceiverClassDeclaration {
+                            parent: Some(base.clone()),
+                            properties: HashMap::new(),
+                            events: HashMap::new(),
+                        },
+                    ),
+                    (
+                        base.clone(),
+                        SelectedReceiverClassDeclaration {
+                            parent: None,
+                            properties: HashMap::new(),
+                            events: HashMap::new(),
+                        },
+                    ),
+                ]),
+                HashMap::from([
+                    (base_owner.clone(), declaration(base_owner.clone())),
+                    (derived_owner.clone(), declaration(derived_owner.clone())),
+                ]),
+            )
+            .unwrap(),
+        );
+        let issuer = Arc::new(());
+        let definition = Arc::new(FunctionDefinitionOwner::default());
+        let (seal, key) = SelectedReceiverDeclarationSeal::issue();
+        assert!(definition.admit_selected_receiver_seal(Arc::clone(&seal)));
+        assert!(seal.fill(&key, Arc::clone(&declarations)));
+        let binding = |function| {
+            BoundFunctionBinding::local(
+                function,
+                Arc::downgrade(&issuer),
+                FunctionDefinitionOwner::issue(&definition, function),
+                Vec::new(),
+                LocalExport::Ephemeral,
+            )
+        };
+        let base_binding = binding(2);
+        let derived_binding = binding(3);
+        let facts = SelectedObjectClassFacts::new(
+            Arc::clone(&declarations),
+            binding(1),
+            HashMap::from([
+                (base_owner.clone(), Some(base_binding.clone())),
+                (derived_owner.clone(), Some(derived_binding.clone())),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(facts.method_binding(&name), Some(derived_binding));
+        assert_eq!(facts.methods().count(), 1);
+        assert_eq!(facts.owner_methods().count(), 2);
+        let selected = facts.super_method(&derived, &base, &name).unwrap();
+        assert_eq!(selected.binding.as_ref(), Some(&base_binding));
+        assert!(Arc::ptr_eq(
+            &selected.declaration,
+            declarations.owner_methods().get(&base_owner).unwrap()
+        ));
+        assert!(facts.super_method(&derived, &derived, &name).is_none());
+        assert!(facts.super_method(&base, &derived, &name).is_none());
+    }
 
     #[test]
     fn selected_receiver_copies_share_facts_without_reclassifying_plain_objects() {

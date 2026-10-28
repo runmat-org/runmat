@@ -37,6 +37,43 @@ impl RuntimeProcessService for CountedProcess {
 
 struct Finite;
 
+#[test]
+fn process_environment_policies_select_session_values_and_explicit_overrides() {
+    use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
+
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
+    runtime
+        .install_environment_snapshot(vec![
+            ("KEPT".into(), "session".into()),
+            ("OVERRIDE".into(), "original".into()),
+        ])
+        .unwrap();
+    for (policy, inherits_kept) in [
+        (EnvironmentPolicy::Inherit, true),
+        (EnvironmentPolicy::InheritExcept(vec!["KEPT".into()]), false),
+        (EnvironmentPolicy::Clear, false),
+        (
+            EnvironmentPolicy::Allow(EnvironmentAllowlist::new(["KEPT".into()])),
+            true,
+        ),
+    ] {
+        let mut command = HostCommand::new("unused");
+        command.environment_policy = policy;
+        command
+            .environment
+            .insert("OVERRIDE".into(), "explicit".into());
+        select_environment(&runtime, &mut command);
+        assert_eq!(command.environment_policy, EnvironmentPolicy::Clear);
+        assert_eq!(command.environment.get("OVERRIDE").unwrap(), "explicit");
+        assert_eq!(
+            command.environment.get("KEPT").map(String::as_str),
+            inherits_kept.then_some("session")
+        );
+        assert_eq!(command.environment.len(), 1 + usize::from(inherits_kept));
+    }
+    assert_eq!(runtime.environment_snapshot()[1].1, "original");
+}
+
 impl RuntimeParallelService for Finite {
     fn supports(&self, _: ParallelCapability) -> bool {
         false

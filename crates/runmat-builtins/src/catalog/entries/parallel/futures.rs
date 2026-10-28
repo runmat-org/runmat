@@ -276,7 +276,10 @@ parallel_entry!(
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::MaySuspend,
     BuiltinPurity::Impure,
-    &SCHEDULE_EFFECTS
+    &SCHEDULE_EFFECTS,
+    BuiltinSemanticKind::ExecutorIntrinsic(crate::BuiltinExecutorIntrinsic::Parallel(
+        crate::ParallelExecutorIntrinsic::ScheduleFeval
+    ))
 );
 parallel_entry!(
     PARFEVAL_ON_ALL_CATALOG_ENTRY,
@@ -289,7 +292,10 @@ parallel_entry!(
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::MaySuspend,
     BuiltinPurity::Impure,
-    &SCHEDULE_EFFECTS
+    &SCHEDULE_EFFECTS,
+    BuiltinSemanticKind::ExecutorIntrinsic(crate::BuiltinExecutorIntrinsic::Parallel(
+        crate::ParallelExecutorIntrinsic::ScheduleFevalOnAll
+    ))
 );
 parallel_entry!(
     FETCH_OUTPUTS_CATALOG_ENTRY,
@@ -302,7 +308,10 @@ parallel_entry!(
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::RequiresAsyncRuntime,
     BuiltinPurity::Impure,
-    &FETCH_EFFECTS
+    &FETCH_EFFECTS,
+    BuiltinSemanticKind::ExecutorIntrinsic(crate::BuiltinExecutorIntrinsic::Parallel(
+        crate::ParallelExecutorIntrinsic::FetchOutputs
+    ))
 );
 parallel_entry!(
     FETCH_NEXT_CATALOG_ENTRY,
@@ -315,7 +324,10 @@ parallel_entry!(
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::RequiresAsyncRuntime,
     BuiltinPurity::Impure,
-    &FETCH_EFFECTS
+    &FETCH_EFFECTS,
+    BuiltinSemanticKind::ExecutorIntrinsic(crate::BuiltinExecutorIntrinsic::Parallel(
+        crate::ParallelExecutorIntrinsic::FetchNext
+    ))
 );
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[

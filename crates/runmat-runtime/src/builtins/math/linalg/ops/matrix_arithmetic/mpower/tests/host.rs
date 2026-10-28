@@ -54,17 +54,69 @@ fn non_integer_exponent_errors() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn negative_exponent_errors() {
-    let matrix = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-    let err = unwrap_error(
-        mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(-1))).unwrap_err(),
-    );
-    assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
-    assert!(
-        err.message()
-            .contains("Negative matrix powers not supported yet"),
-        "{err}"
-    );
+fn negative_matrix_powers_share_inverse_precision_shape_and_errors() {
+    for dtype in [
+        runmat_value::NumericDType::F64,
+        runmat_value::NumericDType::F32,
+    ] {
+        for (power, expected) in [
+            (-1, vec![0.5, 0., -0.125, 0.25]),
+            (-2, vec![0.25, 0., -0.09375, 0.0625]),
+        ] {
+            let matrix = Tensor::new_with_dtype(vec![2., 0., 1., 4.], vec![2, 2], dtype).unwrap();
+            let result =
+                mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(power))).unwrap();
+            let Value::Tensor(result) = result else {
+                panic!("matrix output");
+            };
+            assert_eq!(result.numeric_dtype(), dtype);
+            assert_eq!(result.shape(), [2, 2]);
+            assert_eq!(result.materialize_f64(), expected);
+        }
+        for (power, expected) in [
+            (-1, vec![(0., -1.), (0., 0.), (0., 0.), (0., -0.5)]),
+            (-2, vec![(-1., 0.), (0., 0.), (0., 0.), (-0.25, 0.)]),
+        ] {
+            let matrix = runmat_value::ComplexTensor::from_f64_values_with_dtype(
+                vec![(0., 1.), (0., 0.), (0., 0.), (0., 2.)],
+                vec![2, 2],
+                dtype,
+            )
+            .unwrap();
+            let result =
+                mpower_builtin(Value::ComplexTensor(matrix), Value::Num(f64::from(power))).unwrap();
+            let Value::ComplexTensor(result) = result else {
+                panic!("complex matrix output");
+            };
+            assert_eq!(result.numeric_dtype(), dtype);
+            assert_eq!(result.materialize_f64(), expected);
+        }
+        let empty = Tensor::new_with_dtype(Vec::new(), vec![0, 0], dtype).unwrap();
+        let Value::Tensor(empty) = mpower_builtin(Value::Tensor(empty), Value::Num(-1.)).unwrap()
+        else {
+            panic!("empty output");
+        };
+        assert_eq!(empty.shape(), [0, 0]);
+        assert_eq!(empty.numeric_dtype(), dtype);
+    }
+    let identity = Tensor::new(vec![1., 0., 0., 1.], vec![2, 2]).unwrap();
+    let Value::Tensor(result) =
+        mpower_builtin(Value::Tensor(identity), Value::Int(IntValue::I32(i32::MIN))).unwrap()
+    else {
+        panic!("wide exponent output");
+    };
+    assert_eq!(result.materialize_f64(), vec![1., 0., 0., 1.]);
+    let singular = Tensor::new(vec![1., 2., 2., 4.], vec![2, 2]).unwrap();
+    let error = mpower_builtin(Value::Tensor(singular), Value::Num(-1.)).unwrap_err();
+    assert_eq!(error.identifier(), MPOWER_ERROR_INVALID_INPUT.identifier);
+    assert!(std::error::Error::source(&error).is_some());
+    let integers = Tensor::new_integer(
+        runmat_value::IntegerStorage::I32(vec![1, 0, 0, 1]),
+        vec![2, 2],
+    )
+    .unwrap();
+    let error = mpower_builtin(Value::Tensor(integers), Value::Num(-1.)).unwrap_err();
+    assert_eq!(error.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

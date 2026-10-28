@@ -27,6 +27,7 @@ fn generic_native_executes_complete_workspace_beyond_profile_value_bound() {
         assert!(result.error.is_none(), "{:?}", result.error);
         assert!(session.get_variables().unwrap().len() >= 65);
         session.set_native_tiering_config_for_testing(config(64 * 1024));
+        session.use_generic_ready_route_for_testing();
         let source = "v0 = v0 + 1; assert(v64 == 64);";
         let mut native = 0;
         for _ in 0..4 {
@@ -56,6 +57,7 @@ fn invoke_function_without_profile(argument_count: usize, max_profile_bytes: usi
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(true, false).unwrap();
         session.set_native_tiering_config_for_testing(config(max_profile_bytes));
+        session.use_generic_ready_route_for_testing();
         let names = (0..argument_count)
             .map(|index| format!("x{index}"))
             .collect::<Vec<_>>();
@@ -116,6 +118,7 @@ fn profile_byte_bound_does_not_disable_empty_argument_entrypoint() {
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(true, false).unwrap();
         session.set_native_tiering_config_for_testing(config(1));
+        session.use_generic_ready_route_for_testing();
         let unit = block_on(session.compile_executable_unit(
             ExecutableSource::new(
                 "optional-profile-entry@1",

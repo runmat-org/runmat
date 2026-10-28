@@ -40,6 +40,7 @@ fn body_with_region(region: MirExpressionRegion) -> crate::MirBody {
                     value: MirRvalue::Index {
                         base: MirOperand::Constant(crate::MirConstant::EmptyArray),
                         indexing: MirIndexing {
+                            argument_spans: None,
                             kind: IndexKind::Paren,
                             plan: MirIndexPlan::Slice,
                             components: vec![crate::MirIndexComponent::ContextualExpr(region)],

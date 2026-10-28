@@ -37,6 +37,46 @@ function controlledSession(): {
 }
 
 describe("browser test worker backend", () => {
+  it.each(["session", "none"] as const)(
+    "awaits submission project installation and retires rejected %s sessions",
+    async (isolation) => {
+      let finish!: () => void;
+      const installed = new Promise<void>((resolve) => { finish = resolve; });
+      const first = controlledSession();
+      const rejected = controlledSession();
+      const replacement = controlledSession();
+      const handoff = { graph: "frozen" };
+      const install = vi.fn(() => installed);
+      first.session.installProjectHandoff = install;
+      rejected.session.installProjectHandoff = vi.fn(async () => {
+        throw new Error("project rejected");
+      });
+      const factory = vi.fn()
+        .mockReturnValueOnce(first.session)
+        .mockReturnValueOnce(rejected.session)
+        .mockReturnValueOnce(replacement.session);
+      const backend = new BrowserWorkerBackend({ sessionFactory: factory });
+      const input = { isolation, plan: {}, snapshot: {}, projectHandoff: handoff };
+      let ready = false;
+      const pending = backend.spawn(input).then((handle) => { ready = true; return handle; });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(install).toHaveBeenCalledWith(handoff);
+      expect(ready).toBe(false);
+      finish();
+      const handle = await pending;
+      await backend.dispose();
+      expect(first.disposed).toHaveBeenCalledOnce();
+      await expect(backend.spawn(input)).rejects.toThrow("project rejected");
+      expect(rejected.disposed).toHaveBeenCalledOnce();
+      const next = await backend.spawn(input);
+      expect(factory).toHaveBeenCalledTimes(3);
+      expect(next.id).not.toBe(handle.id);
+      await backend.dispose();
+      expect(replacement.disposed).toHaveBeenCalledOnce();
+    }
+  );
+
   it("reports strongest available isolation without claiming process support", () => {
     const backend = new BrowserWorkerBackend({
       sessionFactory: () => controlledSession().session,

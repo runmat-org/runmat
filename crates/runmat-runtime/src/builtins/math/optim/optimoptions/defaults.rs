@@ -341,7 +341,7 @@ pub(super) fn default_options(
             out.set(OptimOptionField::UseParallel, Value::Bool(false));
             for field in OptimOptionField::ALL
                 .into_iter()
-                .filter(|field| field.trust_region_only())
+                .filter(|field| field.trust_region_only() && solver.accepts(*field))
             {
                 let value = match field {
                     OptimOptionField::FunctionTolerance => Value::Num(1e-6),
@@ -421,6 +421,10 @@ pub(super) fn default_options(
                 Value::Num(f64::INFINITY),
             );
             out.set(OptimOptionField::TolPCG, Value::Num(0.1));
+            out.set(
+                OptimOptionField::JacobianMultiplyFcn,
+                crate::builtins::math::optim::common::output_callback::empty(runtime)?,
+            );
             out.set(
                 OptimOptionField::MaxPCGIter,
                 crate::builtins::math::optim::common::output_callback::empty(runtime)?,

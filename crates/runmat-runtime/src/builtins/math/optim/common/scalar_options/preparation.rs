@@ -174,6 +174,17 @@ async fn prepare_with_inputs(
             ));
         }
     }
+    if solver != OptimSolver::Lsqnonlin
+        && options.fields.iter().any(|(name, value)| {
+            OptimOptionField::parse(name) == Some(OptimOptionField::JacobianMultiplyFcn)
+                && !matches!(value,Value::Tensor(value) if value.is_empty())
+        })
+    {
+        return Err(optim_error(
+            solver.name(),
+            "JacobianMultiplyFcn is unavailable for this solver profile",
+        ));
+    }
     // Preserve solver-specific public spelling semantics before canonical
     // scalar-field selection loses aliases (and before any control gather).
     for (name, value) in &options.fields {
@@ -422,6 +433,14 @@ async fn prepare_with_inputs(
                     super::super::output_callback::validate(value)?;
                 }
             }
+            JacobianMultiplyFcn => {
+                if !value.is_function_handle() {
+                    return Err(optim_error(
+                        solver.name(),
+                        "JacobianMultiplyFcn must be a single function handle or []",
+                    ));
+                }
+            }
             HessianMultiplyFcn => validate_hessian_multiply(solver.name(), value)?,
             HessianFcn => {
                 hessian_source(solver.name(), value)?;
@@ -598,8 +617,9 @@ async fn prepare_with_inputs(
                     .await?
                 }
                 Diagnostics | FunValCheck | Display | Algorithm | FiniteDifferenceType
-                | MeritFunction | OutputFcn | PlotFcn | HessianMultiplyFcn | HessianFcn
-                | SubproblemAlgorithm | HessianApproximation | HessUpdate => {
+                | MeritFunction | OutputFcn | PlotFcn | JacobianMultiplyFcn
+                | HessianMultiplyFcn | HessianFcn | SubproblemAlgorithm | HessianApproximation
+                | HessUpdate => {
                     unreachable!("text controls were admitted before provider access")
                 }
             }

@@ -1,50 +1,70 @@
 //! One shared Nelder-Mead controller; the original oracle owns all effects.
 use super::geometry::*;
 use super::*;
-pub(in crate::builtins::math::optim) async fn minimize(
+mod initial;
+mod publication;
+
+struct Invocation<'a, O, E> {
+    policy: Policy,
+    oracle: &'a mut O,
+    options: &'a Controls,
+    events: &'a mut E,
+}
+
+struct Initialized {
+    n: usize,
+    count: usize,
+    vertices: Vec<Point>,
+    reason: Option<Reason>,
+}
+
+struct Completed {
+    vertices: Vec<Point>,
+    order: Vec<usize>,
+    iterations: usize,
+    procedure: Procedure,
+    reason: Reason,
+}
+
+pub(in crate::builtins::math::optim) fn minimize<'a, O: Oracle + 'a, E: Events + 'a>(
     policy: Policy,
     initial: Initial,
-    oracle: &mut impl Oracle,
-    options: &Controls,
-    events: &mut impl Events,
-) -> BuiltinResult<Outcome> {
-    let n = match &initial {
-        Initial::Evaluate(x) => x.len(),
-        Initial::Known(point) => point.x.len(),
+    oracle: &'a mut O,
+    options: &'a Controls,
+    events: &'a mut E,
+) -> impl std::future::Future<Output = BuiltinResult<Outcome>> + 'a {
+    let invocation = Invocation {
+        policy,
+        oracle,
+        options,
+        events,
     };
-    let count = if options.max_iter == 0 {
-        1
-    } else {
-        geometry(policy, n)?
-    };
-    let mut vertices = policy.buffer(count)?;
-    let initial = match initial {
-        Initial::Known(point) => point,
-        Initial::Evaluate(x) => evaluate(x, oracle)
-            .await?
-            .map_err(|_| policy.invalid("initial evaluation budget is empty"))?,
-    };
-    vertices.push(initial);
+    crate::execution::after_result(
+        initial::prepare(invocation, initial),
+        |(state, invocation)| {
+            crate::execution::after_result(iterate(state, invocation), publication::finish)
+        },
+    )
+}
+
+async fn iterate<O: Oracle, E: Events>(
+    state: Initialized,
+    invocation: Invocation<'_, O, E>,
+) -> BuiltinResult<(Completed, Invocation<'_, O, E>)> {
+    let Initialized {
+        n,
+        count,
+        mut vertices,
+        mut reason,
+    } = state;
+    let Invocation {
+        policy,
+        oracle,
+        options,
+        events,
+    } = invocation;
     let mut iterations = 0;
     let mut procedure = Procedure::Initial;
-    let mut reason = if events
-        .notify(
-            OutputState::Init,
-            &vertices[0],
-            0,
-            oracle.calls(),
-            procedure,
-            oracle.cooperation(),
-        )
-        .await?
-    {
-        Some(Reason::Observer)
-    } else {
-        None
-    };
-    if reason.is_none() && options.max_iter == 0 {
-        reason = Some(Reason::Iterations);
-    }
     if reason.is_none() {
         for coordinate in 0..n {
             if oracle.remaining() == 0 {
@@ -245,24 +265,21 @@ pub(in crate::builtins::math::optim) async fn minimize(
         }
     }
     let reason = reason.expect("terminal reason");
-    let best = order[0];
-    events
-        .notify(
-            OutputState::Done,
-            &vertices[best],
+    Ok((
+        Completed {
+            vertices,
+            order,
             iterations,
-            oracle.calls(),
             procedure,
-            oracle.cooperation(),
-        )
-        .await?;
-    let point = vertices.swap_remove(best);
-    Ok(Outcome {
-        point,
-        reason,
-        iterations,
-        func_count: oracle.calls(),
-    })
+            reason,
+        },
+        Invocation {
+            policy,
+            oracle,
+            options,
+            events,
+        },
+    ))
 }
 
 fn reason_for(stop: OracleStop) -> Reason {

@@ -32,7 +32,7 @@ impl RuntimeServicePorts {
         {
             return Err(mismatch());
         }
-        self.timing = RuntimeTimingPort::Selected {
+        Rc::make_mut(&mut self.shared).timing = RuntimeTimingPort::Selected {
             service,
             issuer,
             invocation,
@@ -45,7 +45,7 @@ impl RuntimeServicePorts {
         issuer: &VerifiedNativeServiceIssuer,
         invocation: &NativeClockInvocationIdentity,
     ) -> Result<&Rc<dyn RuntimeTimingService>, crate::RuntimeError> {
-        match &self.timing {
+        match &self.shared.timing {
             RuntimeTimingPort::Selected {
                 service,
                 issuer: actual,

@@ -12,6 +12,10 @@ pub(crate) mod native_task;
 mod owned_builtin;
 mod phases;
 pub use phases::after_result;
+mod result_loop;
+pub(crate) use result_loop::loop_result;
+mod retaining;
+pub(crate) use retaining::with_retained_owner;
 mod program_capture;
 mod retained_value;
 pub(crate) mod rooted_continuation;
@@ -62,10 +66,11 @@ pub use retained_value::RetainedValueReadLease;
 pub use rooted_continuation::{
     admit_domain_continuation_with, admit_dynamic_function_load_with,
     admit_dynamic_workspace_sequence, admit_executable_sequence, admit_executable_sequence_with,
-    admit_executable_sequence_with_error, admit_native_continuation_with,
-    admit_native_hostcall_with, admit_native_hostcall_with_contextual_error,
-    admit_optional_hostcall_with, admit_optional_rooted_result_with, admit_rooted_result_with,
-    admit_stack_mutation, RuntimeContinuationFuture,
+    admit_executable_sequence_with_error, admit_execution_supervisor_with,
+    admit_native_continuation_with, admit_native_hostcall_with,
+    admit_native_hostcall_with_contextual_error, admit_optional_hostcall_with,
+    admit_optional_rooted_result_with, admit_rooted_result_with, admit_stack_mutation,
+    AdmittedExecutionSupervisor, RuntimeContinuationFuture,
 };
 // Numerical phases borrow their domain's original roots and mutable owners.
 pub(crate) use rooted_continuation::admit_optional_hostcall_with_contextual_error as admit_borrowed_operation_with_contextual_error;

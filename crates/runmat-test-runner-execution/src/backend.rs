@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+
+use runmat_time::Instant;
 
 use runmat_execution::identity::WorkerId;
 use runmat_execution::state::PoolState;
@@ -150,16 +151,15 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                     message: error.to_string(),
                 },
             };
-            let active = session
+            let mut active = session
                 .active
                 .lock()
-                .expect("test attempt registry poisoned")
-                .take();
+                .expect("test attempt registry poisoned");
             // Cancellation may already have committed the terminal scheduler
             // report while the underlying backend was unwinding. In that
             // case the test-owned completion still returns to the coordinator,
             // but the fenced attempt must not be reported a second time.
-            if active.is_some() {
+            if active.as_ref().is_some_and(|active| active.id == launch.id) {
                 session
                     .driver
                     .lock()
@@ -168,6 +168,7 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                         &launch, report,
                     )))
                     .map_err(runner_error)?;
+                *active = None;
             }
             execution
         })
@@ -179,38 +180,46 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
         request: CancelRequest,
     ) -> BackendFuture<'a, Option<WorkerExecution>> {
         Box::pin(async move {
-            session
-                .driver
-                .lock()
-                .expect("test execution driver poisoned")
-                .handle(DriverCommand::CancelScope {
-                    scope_id: session.scope_id,
-                    reason: CancellationReason::User,
-                    now_millis: request.grace_deadline_ms,
-                })
-                .map_err(runner_error)?;
-            let execution = self.inner.cancel(&session.inner, request).await?;
             if let Some(active) = session
                 .active
                 .lock()
                 .expect("test attempt registry poisoned")
-                .take()
+                .as_ref()
             {
-                let report = if execution.is_some() {
-                    AttemptReport::Succeeded {
-                        result: metered_success(&active, 1),
-                    }
-                } else {
-                    AttemptReport::Cancelled
-                };
-                session
+                let mut driver = session
                     .driver
                     .lock()
-                    .expect("test execution driver poisoned")
-                    .handle(DriverCommand::BackendReport(BackendReport::for_request(
-                        &active, report,
-                    )))
+                    .expect("test execution driver poisoned");
+                // Cancel this attempt, not the reusable worker's scope. The
+                // coordinator's grace deadline is not the driver's clock.
+                let now_millis = driver.snapshot_ref().now_millis;
+                driver
+                    .handle(DriverCommand::CancelTask {
+                        task_id: active.task_id,
+                        reason: CancellationReason::User,
+                        now_millis,
+                    })
                     .map_err(runner_error)?;
+            }
+            let execution = self.inner.cancel(&session.inner, request).await?;
+            if let Some(completed) = &execution {
+                let active = session
+                    .active
+                    .lock()
+                    .expect("test attempt registry poisoned");
+                if active.as_ref().is_some_and(|active| {
+                    active.task_id
+                        != session
+                            .task_id(completed.result.test_id.as_str(), completed.result.attempt)
+                }) {
+                    return Err(rejected(
+                        "cancellation completion differs from the active test attempt",
+                    ));
+                }
+                drop(active);
+                // A returned completed attempt certifies cooperative teardown;
+                // an absent response does not certify physical retirement.
+                retire_active(session)?;
             }
             Ok(execution)
         })
@@ -224,6 +233,8 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                 .expect("test execution driver poisoned")
                 .handle(DriverCommand::WorkerLost(session.worker_id))
                 .map_err(runner_error)?;
+            // Some in-process hosts can only request cancellation. Their
+            // transport acknowledgment is not a retirement certificate.
             self.inner.terminate(&session.inner).await
         })
     }
@@ -239,6 +250,26 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
             self.inner.shutdown(&session.inner).await
         })
     }
+}
+
+fn retire_active<S>(session: &ExecutionWorkerSession<S>) -> Result<(), BackendError> {
+    let mut active = session
+        .active
+        .lock()
+        .expect("test attempt registry poisoned");
+    if let Some(request) = active.as_ref() {
+        session
+            .driver
+            .lock()
+            .expect("test execution driver poisoned")
+            .handle(DriverCommand::BackendReport(BackendReport::for_request(
+                request,
+                AttemptReport::Retired,
+            )))
+            .map_err(runner_error)?;
+        *active = None;
+    }
+    Ok(())
 }
 
 fn metered_success(

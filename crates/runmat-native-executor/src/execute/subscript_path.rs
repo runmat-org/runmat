@@ -132,7 +132,8 @@ fn read_inner(
                     [match indexing.kind {
                         runmat_types::IndexKind::Paren => ObjectSubscript::parentheses(selector),
                         runmat_types::IndexKind::Brace => ObjectSubscript::braces(selector),
-                    }],
+                    }
+                    .with_input_callsite(super::indexing::index_callsite(state, indexing)?)],
                 )?;
             }
             MirSubscriptStep::DottedInvoke {
@@ -161,8 +162,8 @@ fn read_inner(
                 )?;
                 root = prepared.receiver().clone();
                 let components = arguments::materialize(state, arguments, &prepared)?;
-                append_steps(
-                    &mut steps,
+                let input_callsite = arguments::input_callsite(state, arguments)?;
+                let [member_step, paren_step] =
                     ObjectSubscript::dotted_invoke_retained_with_fallback(
                         runmat_runtime::call::argument_text::copy_str(
                             &member.0,
@@ -170,7 +171,10 @@ fn read_inner(
                         )?,
                         components,
                         semantic_fallback.clone(),
-                    ),
+                    );
+                append_steps(
+                    &mut steps,
+                    [member_step, paren_step.with_input_callsite(input_callsite)],
                 )?;
             }
         }

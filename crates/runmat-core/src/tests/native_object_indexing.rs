@@ -65,8 +65,8 @@ fn native_class_reference_method_errors_keep_their_owning_identifiers() {
         "__register_test_classes();",
         "missing = ''; nonstatic = '';\ntry\nclassref('Point').definitely_missing(1);\ncatch err\nmissing = err.identifier;\nend\ntry\nclassref('Point').move(1, 2);\ncatch err\nnonstatic = err.identifier;\nend",
         &[
-            ("missing", Value::String("RunMat:UndefinedFunction".into())),
-            ("nonstatic", Value::String("RunMat:MethodNotStatic".into())),
+            ("missing", Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))),
+            ("nonstatic", Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodNotStatic"))),
         ],
     );
 }
@@ -90,8 +90,8 @@ fn native_public_subscript_rejects_malformed_selector_with_owning_identifier() {
         "",
         "S = struct('type', '()', 'subs', 42); read_id = ''; write_id = ''; try\nselected = subsref([10,20], S);\ncatch err\nread_id = err.identifier;\nend\ntry\nchanged = subsasgn([10,20], S, 99);\ncatch err\nwrite_id = err.identifier;\nend",
         &[
-            ("read_id", Value::String("RunMat:InvalidObjectSubscriptPath".into())),
-            ("write_id", Value::String("RunMat:InvalidObjectSubscriptPath".into())),
+            ("read_id", Value::CharArray(runmat_value::CharArray::new_row("RunMat:InvalidObjectSubscriptPath"))),
+            ("write_id", Value::CharArray(runmat_value::CharArray::new_row("RunMat:InvalidObjectSubscriptPath"))),
         ],
     );
 }

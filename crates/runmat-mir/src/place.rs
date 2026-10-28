@@ -199,6 +199,7 @@ mod tests {
         let indexed = MirPlace::Index(
             Box::new(local),
             MirIndexing {
+                argument_spans: None,
                 kind: IndexKind::Paren,
                 plan: MirIndexPlan::Slice,
                 components: Vec::new(),
@@ -235,6 +236,7 @@ mod tests {
         );
 
         let paren_indexing = MirIndexing {
+            argument_spans: None,
             kind: IndexKind::Paren,
             plan: MirIndexPlan::Slice,
             components: Vec::new(),
@@ -242,6 +244,7 @@ mod tests {
             cell_expand_all: false,
         };
         let brace_indexing = MirIndexing {
+            argument_spans: None,
             kind: IndexKind::Brace,
             ..paren_indexing.clone()
         };

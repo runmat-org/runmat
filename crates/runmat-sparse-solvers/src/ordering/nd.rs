@@ -58,8 +58,8 @@ fn dissect(graph: Graph, ids: Vec<usize>) -> Vec<usize> {
     }
     let part = separator(&graph);
     let (mut left, mut right, mut sep) = (Vec::new(), Vec::new(), Vec::new());
-    for v in 0..n {
-        match part[v] {
+    for (v, &side) in part.iter().enumerate() {
+        match side {
             0 => left.push(v),
             1 => right.push(v),
             _ => sep.push(v),
@@ -81,7 +81,10 @@ fn dissect(graph: Graph, ids: Vec<usize>) -> Vec<usize> {
             || dissect(right_graph, right_ids),
         )
     } else {
-        (dissect(left_graph, left_ids), dissect(right_graph, right_ids))
+        (
+            dissect(left_graph, left_ids),
+            dissect(right_graph, right_ids),
+        )
     };
     let mut order = left_order;
     order.extend(right_order);
@@ -128,7 +131,8 @@ pub(crate) fn edge_bisection(graph: &Graph) -> Vec<u8> {
     let mut levels: Vec<Graph> = Vec::new();
     let mut maps: Vec<Vec<usize>> = Vec::new();
     let mut current = graph.clone();
-    let max_vertex_weight = ((graph.total_weight() as f64 / COARSEST_SIZE as f64) * 1.5).ceil() as u64;
+    let max_vertex_weight =
+        ((graph.total_weight() as f64 / COARSEST_SIZE as f64) * 1.5).ceil() as u64;
     while current.vertex_count() > COARSEST_SIZE {
         let (coarse, cmap) = coarsen(&current, max_vertex_weight.max(1));
         if coarse.vertex_count() as f64 > 0.9 * current.vertex_count() as f64 {
@@ -183,7 +187,8 @@ fn coarsen(graph: &Graph, max_vertex_weight: u64) -> (Graph, Vec<usize>) {
             if mate[u] == usize::MAX
                 && u != v
                 && (graph.vwgt[v] as u64 + graph.vwgt[u] as u64) <= max_vertex_weight
-                && (w > best_weight || (w == best_weight && best != usize::MAX && graph.vwgt[u] < graph.vwgt[best]))
+                && (w > best_weight
+                    || (w == best_weight && best != usize::MAX && graph.vwgt[u] < graph.vwgt[best]))
             {
                 best = u;
                 best_weight = w;
@@ -216,7 +221,11 @@ fn coarsen(graph: &Graph, max_vertex_weight: u64) -> (Graph, Vec<usize>) {
             continue;
         }
         let start = adjncy.len();
-        let members = if mate[v] == v { [v, usize::MAX] } else { [v, mate[v]] };
+        let members = if mate[v] == v {
+            [v, usize::MAX]
+        } else {
+            [v, mate[v]]
+        };
         for &m in members.iter().filter(|&&m| m != usize::MAX) {
             vwgt[c] += graph.vwgt[m];
             for (&u, &w) in graph.neighbors(m).iter().zip(graph.edge_weights(m)) {
@@ -332,7 +341,11 @@ fn initial_bisection(graph: &Graph) -> Vec<u8> {
                         // Initialize: -(external degree)
                         let mut g0 = 0i64;
                         for (&x, &wx) in graph.neighbors(u).iter().zip(graph.edge_weights(u)) {
-                            g0 += if part[x] == 0 { wx as i64 } else { -(wx as i64) };
+                            g0 += if part[x] == 0 {
+                                wx as i64
+                            } else {
+                                -(wx as i64)
+                            };
                         }
                         gain[u] = g0;
                         in_heap[u] = true;
@@ -366,12 +379,16 @@ fn refine(graph: &Graph, part: &mut [u8]) {
     let compute_gain = |v: usize, part: &[u8]| -> i64 {
         let mut g = 0i64;
         for (&u, &w) in graph.neighbors(v).iter().zip(graph.edge_weights(v)) {
-            g += if part[u] != part[v] { w as i64 } else { -(w as i64) };
+            g += if part[u] != part[v] {
+                w as i64
+            } else {
+                -(w as i64)
+            };
         }
         g
     };
-    for v in 0..n {
-        gain[v] = compute_gain(v, part);
+    for (v, gain) in gain.iter_mut().enumerate() {
+        *gain = compute_gain(v, part);
     }
     // Rebalance first if needed: move best-gain vertices off the heavy side.
     for _ in 0..n {
@@ -398,11 +415,7 @@ fn refine(graph: &Graph, part: &mut [u8]) {
     for _pass in 0..8 {
         let mut heap: BinaryHeap<(i64, std::cmp::Reverse<usize>)> = BinaryHeap::new();
         for v in 0..n {
-            if graph
-                .neighbors(v)
-                .iter()
-                .any(|&u| part[u] != part[v])
-            {
+            if graph.neighbors(v).iter().any(|&u| part[u] != part[v]) {
                 heap.push((gain[v], std::cmp::Reverse(v)));
             }
         }

@@ -43,6 +43,16 @@ async fn invoke(
     let receiver = args.first().expect("instance method has a receiver");
     for route in selected.routes {
         match route {
+            selection::InstanceMethodRoute::Selected(method) => {
+                return crate::object::protocol::invoke_resolved_object_method_retained(
+                    context,
+                    &method,
+                    args.fork(),
+                    output_count.unwrap_or(1),
+                )
+                .await
+                .map(Some);
+            }
             selection::InstanceMethodRoute::Bound(binding) => {
                 let requested = output_count.unwrap_or(1);
                 let invoked = match context {

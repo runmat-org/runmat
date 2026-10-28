@@ -88,11 +88,10 @@ pub(super) async fn execute(
     // boundary, rather than in this caller's poll frame. The original runtime
     // quotes that concrete allocation and owns cancellation; no workspace is copied.
     let runtime = session.runtime_context.clone();
-    let execution =
-        runmat_runtime::execution::admit_native_hostcall_with_contextual_error(&runtime, || {
-            session.execute_internal(input, true)
-        })?
-        .await?;
+    let execution = runmat_runtime::execution::admit_execution_supervisor_with(&runtime, || {
+        session.execute_internal(input, true)
+    })?
+    .await?;
     let workspace_names = execution
         .workspace_snapshot
         .values

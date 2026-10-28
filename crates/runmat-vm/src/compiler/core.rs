@@ -128,17 +128,6 @@ const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
 const IDENT_MIR_METHOD_CALL_CALLEE_INVALID: &str = "RunMat:MirMethodCallCalleeInvalid";
 const IDENT_MIR_METHOD_CALL_RECEIVER_MISSING: &str = "RunMat:MirMethodCallReceiverMissing";
 
-pub(super) fn call_name(call: &MirCall) -> Option<&str> {
-    match &call.callee {
-        MirCallee::Static(CallableIdentity::Builtin(id)) => Some(id.0.as_str()),
-        MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
-            Some(name.0[0].0.as_str())
-        }
-        MirCallee::Static(CallableIdentity::DynamicName(name)) => Some(name.0.as_str()),
-        _ => None,
-    }
-}
-
 fn imported_handle_runtime_name(path: &runmat_hir::DefPath) -> Option<String> {
     let item_name = path.item.last().map(|item| item.display_name())?;
     let item_name = item_name.trim();

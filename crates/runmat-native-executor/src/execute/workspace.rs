@@ -295,18 +295,11 @@ fn snapshot_admission_error(
     context: &runmat_runtime::context::RuntimeContext,
     cause: HostAllocationError,
 ) -> NativeExecutorError {
-    NativeExecutorError::from(
-        runmat_runtime::build_runtime_error(format!(
-            "native workspace snapshot admission failed: {cause}"
-        ))
-        .with_identifier(format!(
-            "{}:{}",
-            context.error_namespace(),
-            cause.runtime_identifier_suffix()
-        ))
-        .with_source(cause)
-        .build(),
-    )
+    NativeExecutorError::from(crate::error::allocation_error(
+        Some(context),
+        format!("native workspace snapshot admission failed: {cause}"),
+        cause,
+    ))
 }
 
 struct NativeWorkspaceFrame {

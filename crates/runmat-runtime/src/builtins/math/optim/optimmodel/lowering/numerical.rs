@@ -42,6 +42,7 @@ impl Point {
         let mut evaluated = match evaluation::evaluate_trial(
             source,
             selected,
+            roots,
             solution.value(),
             policy,
             cooperation,

@@ -25,10 +25,9 @@ pub use source_selection::ProgramSourceSelectionError;
 
 static NEXT_RUNTIME_CONTEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-pub type SelectedMethodBodyOwner = (
-    Rc<runmat_value::SelectedObjectClassFacts>,
-    runmat_types::ClassMethodOwner,
-);
+mod selected_method;
+use selected_method::AdmittedSelectedMethodFrame;
+pub use selected_method::SelectedMethodDispatch;
 
 pub type SelectedStaticSiteResolver =
     dyn Fn(
@@ -191,7 +190,9 @@ pub struct RuntimeContext {
         Rc<runmat_value::SelectedObjectClassFacts>,
         runmat_types::ClassMethodOwner,
         runmat_value::BoundFunctionBinding,
+        SelectedMethodDispatch,
     )>,
+    selected_method_frame: Option<AdmittedSelectedMethodFrame>,
     retained_super_constructors: Option<Rc<[super::RetainedSuperConstructorBinding]>>,
     retained_super_caller_origin: Option<runmat_execution::FunctionBindingOrigin>,
     // One exact superclass-body dispatch, never an ambient constructor mode.
@@ -332,6 +333,7 @@ impl RuntimeContext {
             selected_classes: None,
             selected_object_class: None,
             selected_method_body: None,
+            selected_method_frame: None,
             retained_super_constructors: None,
             retained_super_caller_origin: None,
             retained_super_body: None,
@@ -582,36 +584,8 @@ impl RuntimeContext {
         self.selected_classes = None;
         self.selected_object_class = None;
         self.selected_method_body = None;
+        self.selected_method_frame = None;
         self
-    }
-
-    pub(crate) fn with_selected_method_body(
-        mut self,
-        facts: Rc<runmat_value::SelectedObjectClassFacts>,
-        owner: runmat_types::ClassMethodOwner,
-        binding: runmat_value::BoundFunctionBinding,
-    ) -> Self {
-        self.selected_method_body = Some((facts, owner, binding));
-        self
-    }
-
-    /// One selected receiver's call intent. The exact executable body still
-    /// has to prove this typed owner at the bound-invoker admission boundary.
-    pub fn take_selected_method_body_for(
-        mut self,
-        binding: &runmat_value::BoundFunctionBinding,
-    ) -> Result<(Self, Option<SelectedMethodBodyOwner>), crate::RuntimeError> {
-        match self.selected_method_body.take() {
-            None => Ok((self, None)),
-            Some((facts, owner, expected)) if &expected == binding => {
-                Ok((self, Some((facts, owner))))
-            }
-            Some(_) => Err(crate::build_runtime_error(
-                "selected object method dispatch selected a different definition",
-            )
-            .with_identifier("RunMat:MethodOwnerInvalid")
-            .build()),
-        }
     }
 
     pub(crate) fn selected_class_projection(
@@ -1138,6 +1112,10 @@ impl RuntimeContext {
         };
         self.execution = Rc::clone(&parent.execution);
         self.cancellation = Rc::clone(&parent.cancellation);
+        // Code and binding owners belong to the retained target; the live
+        // environment and debug ancestry belong to its physical caller.
+        self.environment = Rc::clone(&parent.environment);
+        self.debug_projection = parent.debug_projection.clone();
         self.command_profiling = parent.command_profiling.clone();
         // Differentiation belongs to the physical callback invocation. A
         // retained target must neither reuse a completed tape nor lose the

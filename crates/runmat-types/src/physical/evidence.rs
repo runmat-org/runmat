@@ -182,7 +182,7 @@ impl LengthUnitEvidence {
     /// `ExplicitFallback`; callers that require a file declaration (STEP, IGES) refuse that
     /// state. Unsupported or conflicting declarations cannot be reinterpreted and are returned
     /// unchanged as the error.
-    pub fn apply_authored(self, unit: LengthUnit, source: &str) -> Result<Self, Self> {
+    pub fn apply_authored(self, unit: LengthUnit, source: &str) -> Result<Self, Box<Self>> {
         let declaration = LengthUnitDeclaration {
             context: "authored geometry units".into(),
             source_symbol: unit.symbol().into(),
@@ -201,14 +201,14 @@ impl LengthUnitEvidence {
                         })
                     }
                 }
-                _ => Err(Self::Declared { contexts }),
+                _ => Err(Box::new(Self::Declared { contexts })),
             },
             Self::Missing { .. } => Ok(Self::ExplicitFallback {
                 declaration,
                 source: source.into(),
             }),
             Self::ExplicitFallback { .. } | Self::AuthoredOverride { .. } => Ok(self),
-            other => Err(other),
+            other => Err(Box::new(other)),
         }
     }
     /// The file-declared unit an authored unit overrode, when it did.

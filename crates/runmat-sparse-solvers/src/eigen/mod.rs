@@ -158,7 +158,12 @@ fn dense_generalized(a: CsrRef<'_, f64>, b: CsrRef<'_, f64>) -> SolverResult<(Ve
     Ok((values, x))
 }
 
-fn true_residuals(a: CsrRef<'_, f64>, b: CsrRef<'_, f64>, values: &[f64], vectors: &[f64]) -> Vec<f64> {
+fn true_residuals(
+    a: CsrRef<'_, f64>,
+    b: CsrRef<'_, f64>,
+    values: &[f64],
+    vectors: &[f64],
+) -> Vec<f64> {
     let n = a.nrows();
     let mut ax = vec![0.0; n];
     let mut bx = vec![0.0; n];
@@ -185,7 +190,9 @@ pub fn modal(
 ) -> SolverResult<EigenResult> {
     let n = k.nrows();
     if k.ncols() != n || m.nrows() != n || m.ncols() != n {
-        return Err(SolverError::Dimension("modal operators must be square and equal".into()));
+        return Err(SolverError::Dimension(
+            "modal operators must be square and equal".into(),
+        ));
     }
     let count = options.count.min(n);
     let p = options.block_size.max(1);
@@ -197,11 +204,18 @@ pub fn modal(
     let diagonal_ratio = {
         let (dk, dm) = (k.diagonal(), m.diagonal());
         let sk: f64 = dk.iter().map(|v| v.abs()).sum();
-        let sm: f64 = dm.iter().map(|v| v.abs()).sum::<f64>().max(f64::MIN_POSITIVE);
+        let sm: f64 = dm
+            .iter()
+            .map(|v| v.abs())
+            .sum::<f64>()
+            .max(f64::MIN_POSITIVE);
         sk / sm
     };
     let candidates: Vec<(f64, FactorKind)> = match options.shift {
-        Some(shift) => vec![(shift, FactorKind::Cholesky), (shift, FactorKind::BunchKaufman)],
+        Some(shift) => vec![
+            (shift, FactorKind::Cholesky),
+            (shift, FactorKind::BunchKaufman),
+        ],
         None => {
             let mut c = vec![(0.0, FactorKind::Cholesky)];
             for e in [-6, -5, -4, -3] {
@@ -224,7 +238,9 @@ pub fn modal(
                 chosen = Some((shift, solver));
                 break;
             }
-            Err(error @ (SolverError::NotPositiveDefinite { .. } | SolverError::Singular { .. })) => {
+            Err(
+                error @ (SolverError::NotPositiveDefinite { .. } | SolverError::Singular { .. }),
+            ) => {
                 last_error = Some(error);
             }
             Err(error) => return Err(error),
@@ -248,7 +264,9 @@ pub fn modal_with_factor(
 ) -> SolverResult<EigenResult> {
     let n = k.nrows();
     if solver.dimension() != n || m.nrows() != n {
-        return Err(SolverError::Dimension("factorization does not match the pencil".into()));
+        return Err(SolverError::Dimension(
+            "factorization does not match the pencil".into(),
+        ));
     }
     let count = options.count.min(n);
     if n <= 400 || n < count + 4 * options.block_size.max(1) {
@@ -303,7 +321,6 @@ pub fn modal_with_factor(
     })
 }
 
-
 /// Dense generalized solve for small pencils (all eigenvalues, then the `count` nearest above
 /// `shift`).
 fn dense_modal(
@@ -318,7 +335,8 @@ fn dense_modal(
     // (K - σM) x = (λ - σ) M x  ⇔  M x = μ (K - σM) x with μ = 1/(λ-σ).
     let (mu, x) = dense_generalized(m, shifted.as_ref()).or_else(|_| {
         // M singular: use the SPD shifted stiffness as the B-matrix instead.
-        dense_generalized(shifted.as_ref(), m).map(|(lam, x)| (lam.iter().map(|l| 1.0 / l).collect(), x))
+        dense_generalized(shifted.as_ref(), m)
+            .map(|(lam, x)| (lam.iter().map(|l| 1.0 / l).collect(), x))
     })?;
     let mut pairs: Vec<(f64, usize)> = mu
         .iter()
@@ -327,7 +345,12 @@ fn dense_modal(
         .map(|(i, &v)| (shift + 1.0 / v, i))
         .filter(|(lambda, _)| *lambda >= shift || options.shift.is_some())
         .collect();
-    pairs.sort_by(|a, b| (a.0 - shift).abs().partial_cmp(&(b.0 - shift).abs()).unwrap());
+    pairs.sort_by(|a, b| {
+        (a.0 - shift)
+            .abs()
+            .partial_cmp(&(b.0 - shift).abs())
+            .unwrap()
+    });
     pairs.truncate(count);
     pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     let values: Vec<f64> = pairs.iter().map(|p| p.0).collect();
@@ -342,7 +365,7 @@ fn dense_modal(
         }
     }
     let residuals = true_residuals(k, m, &values, &vectors);
-    return Ok(EigenResult {
+    Ok(EigenResult {
         converged: values.len() == count,
         values,
         vectors,
@@ -353,8 +376,7 @@ fn dense_modal(
         factorization: None,
         factor_kind: None,
         sturm: None,
-    });
-
+    })
 }
 
 fn sturm_count(
@@ -392,7 +414,9 @@ pub fn buckling(
 ) -> SolverResult<EigenResult> {
     let n = k.nrows();
     if k.ncols() != n || kg.nrows() != n || kg.ncols() != n {
-        return Err(SolverError::Dimension("buckling operators must be square and equal".into()));
+        return Err(SolverError::Dimension(
+            "buckling operators must be square and equal".into(),
+        ));
     }
     let count = options.count.min(n);
     let p = options.block_size.max(1);
@@ -421,7 +445,9 @@ pub fn buckling_with_factor(
 ) -> SolverResult<EigenResult> {
     let n = k.nrows();
     if solver.dimension() != n || kg.nrows() != n {
-        return Err(SolverError::Dimension("factorization does not match the pencil".into()));
+        return Err(SolverError::Dimension(
+            "factorization does not match the pencil".into(),
+        ));
     }
     let count = options.count.min(n);
     let p = options.block_size.max(1);
@@ -474,8 +500,11 @@ pub fn buckling_with_factor(
     })
 }
 
-
-fn dense_buckling(k: CsrRef<'_, f64>, negative_kg: CsrRef<'_, f64>, count: usize) -> SolverResult<EigenResult> {
+fn dense_buckling(
+    k: CsrRef<'_, f64>,
+    negative_kg: CsrRef<'_, f64>,
+    count: usize,
+) -> SolverResult<EigenResult> {
     let n = k.nrows();
     // −K_G φ = θ K φ with θ = 1/λ.
     let (theta, x) = dense_generalized(negative_kg, k)?;
@@ -493,7 +522,7 @@ fn dense_buckling(k: CsrRef<'_, f64>, negative_kg: CsrRef<'_, f64>, count: usize
         vectors[c * n..(c + 1) * n].copy_from_slice(&x[i * n..(i + 1) * n]);
     }
     let residuals = true_residuals(k, negative_kg, &values, &vectors);
-    return Ok(EigenResult {
+    Ok(EigenResult {
         converged: values.len() == count,
         values,
         vectors,
@@ -504,7 +533,7 @@ fn dense_buckling(k: CsrRef<'_, f64>, negative_kg: CsrRef<'_, f64>, count: usize
         factorization: None,
         factor_kind: None,
         sturm: None,
-    });
+    })
 }
 
 /// Extreme eigenpairs of a real symmetric `A` without shift-invert (`eigs` with `'largestabs'`
@@ -517,7 +546,9 @@ pub fn symmetric_extreme(
 ) -> SolverResult<EigenResult> {
     let n = a.nrows();
     if a.ncols() != n {
-        return Err(SolverError::Dimension("eigenvalue operator must be square".into()));
+        return Err(SolverError::Dimension(
+            "eigenvalue operator must be square".into(),
+        ));
     }
     let count = options.count.min(n);
     let p = options.block_size.max(1);
@@ -526,8 +557,12 @@ pub fn symmetric_extreme(
         let (values, vectors) = dense_generalized(a, identity.as_ref())?;
         let mut order: Vec<usize> = (0..n).collect();
         match selection {
-            Selection::LargestAlgebraic => order.sort_by(|&x, &y| values[y].partial_cmp(&values[x]).unwrap()),
-            Selection::LargestMagnitude => order.sort_by(|&x, &y| values[y].abs().partial_cmp(&values[x].abs()).unwrap()),
+            Selection::LargestAlgebraic => {
+                order.sort_by(|&x, &y| values[y].partial_cmp(&values[x]).unwrap())
+            }
+            Selection::LargestMagnitude => {
+                order.sort_by(|&x, &y| values[y].abs().partial_cmp(&values[x].abs()).unwrap())
+            }
         }
         order.truncate(count);
         let picked: Vec<f64> = order.iter().map(|&i| values[i]).collect();

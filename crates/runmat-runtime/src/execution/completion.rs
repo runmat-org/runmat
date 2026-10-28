@@ -5,6 +5,8 @@ use super::ExecutionServiceError;
 
 #[path = "completion/initialization.rs"]
 mod initialization;
+#[path = "completion/pair.rs"]
+mod pair;
 #[path = "completion/iteration.rs"]
 mod iteration;
 #[path = "completion/publication.rs"]
@@ -1402,6 +1404,28 @@ mod tests {
                     crate::sequence::SequenceResolutionContext::destination_cardinality(1),
                 )
                 .unwrap();
+            let mut residual_backing = runmat_value::Tensor::new(vec![1., 2.], vec![2, 1]).unwrap();
+            let pair = RootedValueSequence::new(
+                ValueSequence::comma_separated(vec![
+                    Value::Tensor(residual_backing.clone()),
+                    Value::HandleObject(HandleRef {
+                        class_name: "CompletionHandle".into(),
+                        target: handle,
+                        valid: true,
+                    }),
+                ])
+                .unwrap(),
+            )
+            .unwrap();
+            let (first, second) = pair.try_into_pair().unwrap();
+            assert!(residual_backing.try_as_f64_slice_mut_unique().is_none());
+            drop(first);
+            assert!(
+                residual_backing.try_as_f64_slice_mut_unique().is_some(),
+                "accepted second output retains neither retired first payload nor tuple"
+            );
+            runmat_gc::gc_collect_major().expect("second output retains original registrations");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
             drop(backing_alias);
             runmat_gc::gc_collect_major().expect("selection retains original roots");
             assert!(runmat_gc::gc_clone_value(&handle).is_ok());
@@ -1409,6 +1433,9 @@ mod tests {
             runmat_gc::gc_collect_major().expect("exhausted iterator retains its roots until drop");
             assert!(runmat_gc::gc_clone_value(&handle).is_ok());
             drop(selected);
+            runmat_gc::gc_collect_major().expect("projected second output is now the only root");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            drop(second);
             runmat_gc::gc_collect_major().expect("collect after completion discard");
             assert!(runmat_gc::gc_clone_value(&handle).is_err());
         });

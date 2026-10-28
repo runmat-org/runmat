@@ -1,8 +1,8 @@
 //! A scaled normal product over one accepted rectangular Jacobian session.
 //! O(m+n) vectors are numerical work, not a second coefficient/Jacobian tree.
 use super::*;
-use crate::builtins::math::linalg::ops::linear_operator::ProductOrientation;
 use trust_quadratic::Operator;
+mod factor;
 pub(super) struct Normal<'a> {
     geometry: &'a Geometry,
     metric: &'a trust_quadratic::bounds::Metric,
@@ -83,6 +83,9 @@ impl Operator for Normal<'_> {
         output: &mut [f64],
         c: &mut ScalarCooperation,
     ) -> BuiltinResult<trust_quadratic::Materialization> {
+        if self.products.is_opaque() {
+            return Ok(trust_quadratic::Materialization::Unavailable);
+        }
         let stride = bandwidth
             .checked_add(1)
             .ok_or_else(|| invalid("Jacobian preconditioner extent overflow".into()))?;
@@ -131,24 +134,9 @@ impl Operator for Normal<'_> {
         }
         if self
             .products
-            .apply(
-                ProductOrientation::Normal,
-                &self.input,
-                &mut self.residual,
-                c,
-            )
+            .apply_normal(&self.input, &mut self.residual, &mut self.transpose, c)
             .await?
             .is_none()
-            || self
-                .products
-                .apply(
-                    ProductOrientation::Adjoint,
-                    &self.residual,
-                    &mut self.transpose,
-                    c,
-                )
-                .await?
-                .is_none()
         {
             return Ok(None);
         }

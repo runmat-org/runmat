@@ -63,7 +63,8 @@ pub(super) fn prepared_option_value(
                 | Solver::Fseminf
                 | Solver::Fminimax
                 | Solver::Fgoalattain
-        ) || field.trust_region_only()
+        ) || (solver == Solver::Lsqnonlin && field == OptimOptionField::MaxFunEvals)
+            || field.trust_region_only()
             || field == OptimOptionField::OptimalityTolerance)
     {
         return Ok(PreparedOptionValue::Callback(value));
@@ -287,6 +288,15 @@ pub(super) fn prepared_option_value(
                 )
             })?;
             Ok(PreparedOptionValue::Hessian(source))
+        }
+        OptimOptionField::JacobianMultiplyFcn => {
+            if !value.is_function_handle() {
+                return Err(optimoptions_error_with(
+                    &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                    "optimoptions: JacobianMultiplyFcn must be a single function handle or []",
+                ));
+            }
+            Ok(PreparedOptionValue::Callback(value))
         }
         OptimOptionField::HessianMultiplyFcn => {
             if !matches!(

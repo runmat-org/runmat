@@ -689,6 +689,23 @@ pub fn call_feval_retained_sequence_async_with_outputs_in_context<'a>(
     requested_outputs: usize,
 ) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'a
 {
+    call_feval_retained_sequence_async_with_outputs_and_callsite_in_context(
+        runtime,
+        func_value,
+        args,
+        requested_outputs,
+        None,
+    )
+}
+
+pub fn call_feval_retained_sequence_async_with_outputs_and_callsite_in_context<'a>(
+    runtime: &'a crate::context::RuntimeContext,
+    func_value: Value,
+    args: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
+) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'a
+{
     let invocation = runmat_value::validate_output_count(requested_outputs)
         .map_err(crate::sequence::sequence_error_to_runtime)
         .map(|()| {
@@ -697,7 +714,7 @@ pub fn call_feval_retained_sequence_async_with_outputs_in_context<'a>(
                 func_value,
                 args,
                 requested_outputs,
-                None,
+                input_callsite,
             )
         });
     async move {
@@ -1370,6 +1387,22 @@ async fn call_super_method_with_selected_runtime(
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let _argument_roots = crate::execution::RootedValueLease::for_values(args.iter())
         .map_err(|error| error.into_runtime_error())?;
+    if let Some(facts) = args
+        .first()
+        .map(crate::object::protocol::selected_graph_receiver_facts)
+        .transpose()?
+        .flatten()
+    {
+        return crate::object::dispatch::call_selected_super_method(
+            runtime,
+            &class_identity,
+            &super_class_identity,
+            &method_name,
+            args,
+            facts,
+        )
+        .await;
+    }
     let Some((method, owner)) =
         crate::class_registry::lookup_method(&super_class_identity, &method_name)
     else {

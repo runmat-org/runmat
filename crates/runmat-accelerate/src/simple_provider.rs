@@ -6424,14 +6424,11 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_predicate_impl(
+            self.binary_predicate_execution(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::NotEqual),
             )
-            .map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
         })
     }
     fn elem_ge<'a>(
@@ -6440,16 +6437,13 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_predicate_impl(
+            self.binary_predicate_execution(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(
                     runmat_builtins::RelationalOperator::GreaterThanOrEqual,
                 ),
             )
-            .map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
         })
     }
 
@@ -6459,16 +6453,13 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_predicate_impl(
+            self.binary_predicate_execution(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(
                     runmat_builtins::RelationalOperator::LessThanOrEqual,
                 ),
             )
-            .map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
         })
     }
 
@@ -6478,14 +6469,11 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_predicate_impl(
+            self.binary_predicate_execution(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::LessThan),
             )
-            .map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
         })
     }
 
@@ -6495,14 +6483,11 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_predicate_impl(
+            self.binary_predicate_execution(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::GreaterThan),
             )
-            .map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
         })
     }
 
@@ -6512,14 +6497,11 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_predicate_impl(
+            self.binary_predicate_execution(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::Equal),
             )
-            .map_err(|error| {
-                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-            })
         })
     }
     fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {

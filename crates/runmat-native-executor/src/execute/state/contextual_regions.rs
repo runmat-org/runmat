@@ -214,18 +214,11 @@ fn continuation_admission_error(
     runtime: &runmat_runtime::context::RuntimeContext,
     cause: HostAllocationError,
 ) -> NativeExecutorError {
-    NativeExecutorError::from(
-        runmat_runtime::build_runtime_error(format!(
-            "native expression continuation could not be admitted: {cause}"
-        ))
-        .with_identifier(format!(
-            "{}:{}",
-            runtime.error_namespace(),
-            cause.runtime_identifier_suffix()
-        ))
-        .with_source(cause)
-        .build(),
-    )
+    NativeExecutorError::from(crate::error::allocation_error(
+        Some(runtime),
+        format!("native expression continuation could not be admitted: {cause}"),
+        cause,
+    ))
 }
 
 impl HostState {

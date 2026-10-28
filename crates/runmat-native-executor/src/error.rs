@@ -39,3 +39,74 @@ impl From<Box<runmat_runtime::RuntimeError>> for NativeExecutorError {
         Self::Runtime(error)
     }
 }
+
+/// Native metadata uses its original runtime for both control provenance and
+/// ordinary admission diagnostics, even if another session is currently entered.
+pub(crate) fn allocation_error(
+    runtime: Option<&runmat_runtime::context::RuntimeContext>,
+    message: impl Into<String>,
+    cause: runmat_runtime::context::host_allocation::HostAllocationError,
+) -> runmat_runtime::RuntimeError {
+    let _scope = runtime.map(runmat_runtime::context::RuntimeContext::enter);
+    let namespace = runtime.map_or_else(
+        || "RunMat".to_owned(),
+        runmat_runtime::context::RuntimeContext::error_namespace,
+    );
+    runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+        runtime,
+        &format!("{namespace}:{}", cause.runtime_identifier_suffix()),
+        message,
+        cause,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn allocation_errors_keep_original_control_and_namespace() {
+        use runmat_runtime::context::{host_allocation::HostAllocationError, RuntimeContext};
+        use std::rc::Rc;
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        runtime.set_error_namespace("OriginalNative");
+        let other = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        other.set_error_namespace("OtherNative");
+        let _foreign = other.enter();
+        let cancelled = super::allocation_error(
+            Some(&runtime),
+            "completion admission",
+            HostAllocationError::Cancelled,
+        );
+        assert_eq!(cancelled.identifier(), Some("OriginalNative:Cancelled"));
+        assert!(runmat_runtime::runtime_error::error_has_control_cancellation_origin(&cancelled));
+        assert_eq!(
+            cancelled.gpu_gather_retry(),
+            runmat_runtime::GpuGatherRetry::Never
+        );
+        let ordinary = super::allocation_error(
+            Some(&runtime),
+            "completion admission",
+            HostAllocationError::Overflow,
+        );
+        assert_eq!(
+            ordinary.identifier(),
+            Some(
+                format!(
+                    "OriginalNative:{}",
+                    HostAllocationError::Overflow.runtime_identifier_suffix()
+                )
+                .as_str()
+            )
+        );
+        assert!(!runmat_runtime::runtime_error::error_has_control_cancellation_origin(&ordinary));
+        assert_eq!(
+            runmat_runtime::context::legacy::active()
+                .unwrap()
+                .local_identity(),
+            other.local_identity()
+        );
+    }
+}

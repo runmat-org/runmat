@@ -147,8 +147,15 @@ async fn execute(
         nonlinear: input.constraints.is_some(),
         policy: OPTIONS,
     };
+    // Admit the actual solver invocation before constructing its large
+    // controller future. This is one boundary per solve, not per trial point.
+    let selected_runtime = cooperation.runtime().cloned();
     let (outcome, rng, options) =
-        run::solve(&input, prepared, options, domain, NUMERIC, &mut cooperation).await?;
+        crate::execution::rooted_continuation::admit_optional_hostcall_with_contextual_error(
+            selected_runtime.as_ref(),
+            || run::solve(&input, prepared, options, domain, NUMERIC, &mut cooperation),
+        )?
+        .await?;
     publication::finalize(
         outcome,
         rng,

@@ -239,6 +239,14 @@ pub(super) async fn controls(runtime: &RuntimeContext) {
     )
     .await;
     rejected(runtime, &false_identity, Stop::UnsupportedFunction).await;
+    let error = crate::call_builtin_async_in_context(
+        runtime,
+        "optim.problemdef.OptimizationExpression.power",
+        &[Value::Num(2.), cancelled.value().clone()],
+    )
+    .await
+    .expect_err("numerical cancellation does not make a variable-backed exponent constant");
+    assert_eq!(error.identifier(), Some("RunMat:OptimModel:InvalidInput"));
     // Identity powers keep the original immutable numeric owner, not a
     // new count-sized destination that happens to have the same values.
     let backing = runmat_value::Tensor::new(vec![2., 4.], vec![2, 1]).unwrap();

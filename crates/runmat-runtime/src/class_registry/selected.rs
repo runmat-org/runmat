@@ -211,15 +211,45 @@ impl SelectedClassProjection {
         if let Some(existing) = self.receiver_declarations.borrow().get(class) {
             return Ok(Arc::clone(existing));
         }
-        let (ancestry, methods) = self.receiver_method_declarations(class)?;
+        let (ancestry, _) = self.receiver_method_declarations(class)?;
         let is_handle = self.receiver_is_handle_class(class)?;
         let mut classes = HashMap::with_capacity(ancestry.len());
+        let mut methods = HashMap::new();
         for name in &ancestry {
             let selected = self.classes.get(name).ok_or_else(|| {
                 crate::build_runtime_error("selected receiver declaration is incomplete")
                     .with_identifier("RunMat:ClassProductInvalid")
                     .build()
             })?;
+            for method in selected
+                .methods
+                .values()
+                .filter(|method| method.role == ClassMethodRole::Ordinary)
+            {
+                let owner = ClassMethodOwner {
+                    declaring_class: name.clone(),
+                    method: method.name.clone(),
+                    is_static: method.is_static,
+                    role: method.role,
+                };
+                let standard_substruct =
+                    self.receiver_method_convention(&owner)
+                        .is_some_and(|convention| {
+                            matches!(
+                                convention,
+                                super::RuntimeMethodCallingConvention::StandardSubstruct
+                            )
+                        });
+                methods.insert(
+                    owner.clone(),
+                    Arc::new(runmat_value::SelectedReceiverMethodDeclaration {
+                        owner,
+                        is_abstract: method.is_abstract,
+                        access: method.access,
+                        standard_substruct,
+                    }),
+                );
+            }
             classes.insert(
                 name.clone(),
                 runmat_value::SelectedReceiverClassDeclaration {
@@ -244,28 +274,6 @@ impl SelectedClassProjection {
                 },
             );
         }
-        let methods = methods
-            .into_iter()
-            .map(|(name, method)| {
-                let standard_substruct = self
-                    .receiver_method_convention(&method.owner)
-                    .is_some_and(|convention| {
-                        matches!(
-                            convention,
-                            super::RuntimeMethodCallingConvention::StandardSubstruct
-                        )
-                    });
-                (
-                    name,
-                    Arc::new(runmat_value::SelectedReceiverMethodDeclaration {
-                        owner: method.owner,
-                        is_abstract: method.is_abstract,
-                        access: method.access,
-                        standard_substruct,
-                    }),
-                )
-            })
-            .collect();
         let declarations = runmat_value::SelectedReceiverDeclarations::new(
             class.clone(),
             is_handle,

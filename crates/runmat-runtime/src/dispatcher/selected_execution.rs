@@ -1,6 +1,7 @@
 //! Execution after implementation selection, shared by normal and admitted calls.
 use super::*;
 use crate::call::BuiltinArguments;
+use futures::{future::Either, FutureExt};
 
 /// Legacy inventory remains an explicit ordinary-only adapter.
 #[derive(Clone, Copy)]
@@ -69,25 +70,31 @@ pub(super) async fn execute(
     .await
 }
 
-pub(super) async fn execute_retained(
+pub(super) fn execute_retained<'a>(
     implementation: SelectedImplementation,
     execution: BuiltinArguments,
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    observation: Option<&direct_call_observation::CallObservation>,
+    observation: Option<&'a direct_call_observation::CallObservation>,
     authority: Option<direct_call_observation::RegistrationAuthority>,
-) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
-    let sink = match (observation, implementation, authority) {
-        (Some(observation), SelectedImplementation::Canonical(binding), Some(authority)) => {
-            observation.sink(binding, authority, requested_outputs)
-        }
-        _ => None,
-    };
-    match implementation
-        .invoke_retained(execution.fork(), context.clone(), requested_outputs, sink)
-        .await
-    {
-        Ok(result) => Ok(result),
+) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'a
+{
+    // Selection/admission remains lazy. Retire ordinary invocation before
+    // constructing a gather retry, so its cold preparation frame does not
+    // surround every nested CPU call. Both phases retain the original roots.
+    let first_execution = execution.fork();
+    let first_context = context.clone();
+    let first = futures::future::lazy(move |_| {
+        let sink = match (observation, implementation, authority) {
+            (Some(observation), SelectedImplementation::Canonical(binding), Some(authority)) => {
+                observation.sink(binding, authority, requested_outputs)
+            }
+            _ => None,
+        };
+        implementation.invoke_retained(first_execution, first_context, requested_outputs, sink)
+    })
+    .flatten();
+    crate::execution::after_result(first.map(Ok), move |result| match result {
         Err(error) if should_retry_with_gpu_gather_values(&error, execution.iter()) => {
             if let Some(observation) = observation {
                 observation.invalidate_retry();
@@ -97,33 +104,39 @@ pub(super) async fn execute_retained(
             {
                 recorder.execution_disposition(runmat_accelerate_api::observation::ProviderExecutionDisposition::SharedRuntimeFallback);
             }
-            // Gather changes numeric backings, not GC identities. Build each
-            // successor directly in its final admitted slot and retain the
-            // original registration forest through all suspended downloads.
-            let preparation = execution.try_map_preserving_roots_async(
-                execution.len(),
-                context.as_ref(),
-                |index| {
-                    let value = &execution[index];
-                    async move {
-                        if value_contains_gpu(value) {
-                            gather_if_needed_async(value).await
-                        } else {
-                            Ok(value.clone())
-                        }
-                    }
-                },
-            );
-            let gathered = match &context {
-                Some(context) => context.scope(preparation).await?,
-                None => preparation.await?,
-            };
-            implementation
-                .invoke_retained(gathered, context, requested_outputs, None)
-                .await
+            Either::Right(retry(implementation, execution, context, requested_outputs))
         }
-        Err(error) => Err(error),
-    }
+        result => Either::Left(std::future::ready(result)),
+    })
+}
+
+async fn retry(
+    implementation: SelectedImplementation,
+    execution: BuiltinArguments,
+    context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    // Gather changes numeric backings, not GC identities. Build each
+    // successor directly in its final admitted slot and retain the
+    // original registration forest through all suspended downloads.
+    let preparation =
+        execution.try_map_preserving_roots_async(execution.len(), context.as_ref(), |index| {
+            let value = &execution[index];
+            async move {
+                if value_contains_gpu(value) {
+                    gather_if_needed_async(value).await
+                } else {
+                    Ok(value.clone())
+                }
+            }
+        });
+    let gathered = match &context {
+        Some(context) => context.scope(preparation).await?,
+        None => preparation.await?,
+    };
+    implementation
+        .invoke_retained(gathered, context, requested_outputs, None)
+        .await
 }
 
 #[cfg(test)]

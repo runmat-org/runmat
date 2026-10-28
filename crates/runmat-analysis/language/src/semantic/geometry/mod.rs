@@ -205,7 +205,7 @@ fn imported_source(
                     .unit_evidence
                     .clone()
                     .apply_authored(authored, "authored geometry units")
-                    .unwrap_or_else(|unresolved| unresolved),
+                    .unwrap_or_else(|unresolved| *unresolved),
                 None => inspection.facts.unit_evidence.clone(),
             },
             logical_path: inspection.source_path.as_str().to_string(),
@@ -255,9 +255,24 @@ fn check_authored_names(
         let GeometryRegionSelector::Name(name) = &region.selector else {
             continue;
         };
-        if let Some(metadata) = inspection.facts.named_selections.as_ref().filter(|metadata| metadata.regions.iter().any(|region| region.region_id == *name)) {
+        if let Some(metadata) = inspection
+            .facts
+            .named_selections
+            .as_ref()
+            .filter(|metadata| {
+                metadata
+                    .regions
+                    .iter()
+                    .any(|region| region.region_id == *name)
+            })
+        {
             if let Err(reason) = metadata.selection(name, region.role) {
-                error(declaration, declaration.span, reason.to_string(), diagnostics);
+                error(
+                    declaration,
+                    declaration.span,
+                    reason.to_string(),
+                    diagnostics,
+                );
             }
             continue;
         }

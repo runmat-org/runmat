@@ -232,10 +232,8 @@ impl MirRvalue {
             }
             MirRvalue::ShortCircuit { right_temps, .. } => {
                 for statement in right_temps {
+                    statement.kind.visit_statement_expression_steps_dyn(visitor);
                     match &statement.kind {
-                        crate::MirStmtKind::PrepareFixedAssignment(owner) => {
-                            owner.visit_preparation_steps_dyn(visitor);
-                        }
                         crate::MirStmtKind::PreparedAssign { value, .. }
                         | crate::MirStmtKind::Assign { value, .. }
                         | crate::MirStmtKind::MultiAssign { value, .. }
@@ -243,10 +241,9 @@ impl MirRvalue {
                         | crate::MirStmtKind::Expr(value) => {
                             value.visit_direct_expression_steps_dyn(visitor);
                         }
-                        crate::MirStmtKind::CaptureSequence { source, .. } => {
-                            source.visit_direct_expression_steps_dyn(visitor);
-                        }
-                        crate::MirStmtKind::PlaceMutation(_)
+                        crate::MirStmtKind::PrepareFixedAssignment(_)
+                        | crate::MirStmtKind::CaptureSequence { .. }
+                        | crate::MirStmtKind::PlaceMutation(_)
                         | crate::MirStmtKind::StatementOutput(_)
                         | crate::MirStmtKind::WorkspaceEffect { .. }
                         | crate::MirStmtKind::EnvironmentEffect(_) => {}

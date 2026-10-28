@@ -6,7 +6,7 @@
 //! eigenvalues (symmetric structures) reliably and turn the expensive part — applying `S⁻¹` —
 //! into multi-right-hand-side triangular solves.
 
-use super::blas::{gemm_nn, gemm_tn};
+use super::blas::{gemm_nn, gemm_tn, ProductScale};
 use crate::control::{Progress, ProgressPhase, SolveControl};
 use crate::dense::symmetric_eigen;
 use crate::error::{SolverError, SolverResult};
@@ -41,10 +41,13 @@ pub(crate) struct LanczosOutput {
 }
 
 /// `apply_op(x, y, p)`: `y = Op x` for `p` columns; `apply_b(x, y, p)`: `y = B x`.
+type ApplyOperator<'a> = dyn FnMut(&[f64], &mut [f64], usize) -> SolverResult<()> + 'a;
+type ApplyMetric<'a> = dyn Fn(&[f64], &mut [f64], usize) + 'a;
+
 pub(crate) fn thick_restart_block_lanczos(
     config: &LanczosConfig,
-    apply_op: &mut dyn FnMut(&[f64], &mut [f64], usize) -> SolverResult<()>,
-    apply_b: &dyn Fn(&[f64], &mut [f64], usize),
+    apply_op: &mut ApplyOperator<'_>,
+    apply_b: &ApplyMetric<'_>,
     control: SolveControl<'_>,
 ) -> SolverResult<LanczosOutput> {
     let n = config.n;
@@ -120,7 +123,9 @@ pub(crate) fn thick_restart_block_lanczos(
         let (theta, y) = symmetric_eigen(&projected, k)?;
         let mut order: Vec<usize> = (0..k).collect();
         match config.selection {
-            Selection::LargestAlgebraic => order.sort_by(|&a, &b| theta[b].partial_cmp(&theta[a]).unwrap()),
+            Selection::LargestAlgebraic => {
+                order.sort_by(|&a, &b| theta[b].partial_cmp(&theta[a]).unwrap())
+            }
             Selection::LargestMagnitude => {
                 order.sort_by(|&a, &b| theta[b].abs().partial_cmp(&theta[a].abs()).unwrap())
             }
@@ -156,7 +161,18 @@ pub(crate) fn thick_restart_block_lanczos(
                 selected_y[c * k..(c + 1) * k].copy_from_slice(&y[index * k..(index + 1) * k]);
             }
             let mut vectors = vec![0.0; n * count];
-            gemm_nn(&mut vectors, count, 1.0, &v[..k * n], k, &selected_y, 0.0, n);
+            gemm_nn(
+                &mut vectors,
+                count,
+                ProductScale {
+                    alpha: 1.0,
+                    beta: 0.0,
+                },
+                &v[..k * n],
+                k,
+                &selected_y,
+                n,
+            );
             return Ok(LanczosOutput {
                 theta: order.iter().take(count).map(|&i| theta[i]).collect(),
                 vectors,
@@ -167,13 +183,27 @@ pub(crate) fn thick_restart_block_lanczos(
         }
         // Thick restart: keep the best Ritz vectors and the residual block.
         restarts += 1;
-        let keep = (config.nev + p).max(k / 2).min(k - p).max(config.nev.min(k - p));
+        let keep = (config.nev + p)
+            .max(k / 2)
+            .min(k - p)
+            .max(config.nev.min(k - p));
         let mut kept_y = vec![0.0; k * keep];
         for (c, &index) in order.iter().take(keep).enumerate() {
             kept_y[c * k..(c + 1) * k].copy_from_slice(&y[index * k..(index + 1) * k]);
         }
         let mut new_basis = vec![0.0; n * keep];
-        gemm_nn(&mut new_basis, keep, 1.0, &v[..k * n], k, &kept_y, 0.0, n);
+        gemm_nn(
+            &mut new_basis,
+            keep,
+            ProductScale {
+                alpha: 1.0,
+                beta: 0.0,
+            },
+            &v[..k * n],
+            k,
+            &kept_y,
+            n,
+        );
         // Coupling C·Y (p × keep).
         let mut coupling = vec![0.0; p * keep];
         for c in 0..keep {
@@ -217,7 +247,7 @@ pub(crate) fn orthonormalize_block(
     basis: &[f64],
     existing: usize,
     n: usize,
-    apply_b: &dyn Fn(&[f64], &mut [f64], usize),
+    apply_b: &ApplyMetric<'_>,
     seed: &mut u64,
 ) -> SolverResult<(Vec<f64>, Vec<f64>)> {
     let mut h = vec![0.0; existing * p];
@@ -226,7 +256,11 @@ pub(crate) fn orthonormalize_block(
     let initial_norms: Vec<f64> = {
         apply_b(w, &mut bw, p);
         (0..p)
-            .map(|c| par::dot(&w[c * n..(c + 1) * n], &bw[c * n..(c + 1) * n]).max(0.0).sqrt())
+            .map(|c| {
+                par::dot(&w[c * n..(c + 1) * n], &bw[c * n..(c + 1) * n])
+                    .max(0.0)
+                    .sqrt()
+            })
             .collect()
     };
     for _pass in 0..2 {
@@ -235,7 +269,18 @@ pub(crate) fn orthonormalize_block(
         }
         apply_b(w, &mut bw, p);
         let coefficients = gemm_tn(&basis[..existing * n], existing, &bw, p, n);
-        gemm_nn(w, p, -1.0, &basis[..existing * n], existing, &coefficients, 1.0, n);
+        gemm_nn(
+            w,
+            p,
+            ProductScale {
+                alpha: -1.0,
+                beta: 1.0,
+            },
+            &basis[..existing * n],
+            existing,
+            &coefficients,
+            n,
+        );
         for (target, value) in h.iter_mut().zip(&coefficients) {
             *target += value;
         }
@@ -283,7 +328,18 @@ pub(crate) fn orthonormalize_block(
                 for _pass in 0..2 {
                     apply_b(&w[j * n..(j + 1) * n], &mut column_b, 1);
                     let coefficients = gemm_tn(&basis[..existing * n], existing, &column_b, 1, n);
-                    gemm_nn(&mut w[j * n..(j + 1) * n], 1, -1.0, &basis[..existing * n], existing, &coefficients, 1.0, n);
+                    gemm_nn(
+                        &mut w[j * n..(j + 1) * n],
+                        1,
+                        ProductScale {
+                            alpha: -1.0,
+                            beta: 1.0,
+                        },
+                        &basis[..existing * n],
+                        existing,
+                        &coefficients,
+                        n,
+                    );
                 }
             }
         }

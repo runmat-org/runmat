@@ -27,6 +27,9 @@ use generation::{
     CallableArtifactIndex, CallableArtifactSelectionError, FunctionRegistryGeneration,
     GenerationRetirement, PreparedGenerationImport,
 };
+#[path = "source_evaluation/publication.rs"]
+mod publication;
+pub(super) use publication::FunctionRegistryPublication;
 #[path = "source_evaluation/callable_artifacts.rs"]
 mod callable_artifacts;
 #[path = "source_evaluation/dynamic_identity.rs"]
@@ -61,6 +64,7 @@ pub(super) struct SessionSourceEvaluator {
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
     runtime_owner: runmat_runtime::context::RuntimeContextLocalId,
     generation: RefCell<Rc<FunctionRegistryGeneration>>,
+    publication_head: RefCell<Option<Rc<publication::PublicationFrame>>>,
     project_sources: RefCell<Option<Rc<ProjectSourceIdentityIndex>>>,
     foreign_preparation: RefCell<Option<ForeignPreparation>>,
     foreign_issuance_source: RefCell<Option<ForeignIssuanceSource>>,
@@ -102,62 +106,6 @@ impl SelectedNativeSourceEvaluator {
         self.base_workspace.close()
     }
 }
-
-pub(super) struct FunctionRegistryPublication {
-    evaluator: Rc<SessionSourceEvaluator>,
-    active: Rc<FunctionRegistryGeneration>,
-    restore: Option<Rc<FunctionRegistryGeneration>>,
-    foreign_restore: Option<Option<ForeignPreparation>>,
-    foreign_source_restore: Option<Option<ForeignIssuanceSource>>,
-}
-
-impl FunctionRegistryPublication {
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn set_foreign_preparation(&mut self, prepared: Option<ForeignPreparation>) {
-        let prior = self.evaluator.foreign_preparation.replace(prepared);
-        self.foreign_restore = Some(prior);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn set_foreign_issuance_source(&mut self, source: Option<ForeignIssuanceSource>) {
-        let prior = self.evaluator.foreign_issuance_source.replace(source);
-        self.foreign_source_restore = Some(prior);
-    }
-
-    pub(super) fn attach_selected_declaration(
-        &self,
-        product: Rc<SelectedDeclarationAdmission>,
-    ) -> Result<(), RuntimeError> {
-        self.active.attach_selected_declaration(product)
-    }
-
-    pub(super) fn finish(mut self, committed: runmat_vm::FunctionRegistry) {
-        self.active.commit(committed);
-        self.restore = None;
-        self.foreign_restore = None;
-        self.foreign_source_restore = None;
-    }
-}
-
-impl Drop for FunctionRegistryPublication {
-    fn drop(&mut self) {
-        if let Some(prior) = self.foreign_restore.take() {
-            *self.evaluator.foreign_preparation.borrow_mut() = prior;
-        }
-        if let Some(prior) = self.foreign_source_restore.take() {
-            *self.evaluator.foreign_issuance_source.borrow_mut() = prior;
-        }
-        if let Some(restore) = self.restore.take() {
-            self.active.retain_escaped_into(&restore);
-            self.active.invalidate();
-            self.evaluator.restore_generation(&self.active, restore);
-        } else {
-            self.active.invalidate();
-        }
-    }
-}
-
-impl runmat_vm::DynamicEvalPublication for FunctionRegistryPublication {}
 
 struct CapturedSourceEvaluationAuthority {
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
@@ -326,6 +274,7 @@ impl SessionSourceEvaluator {
             generation: RefCell::new(Rc::new(FunctionRegistryGeneration::committed(
                 runmat_vm::FunctionRegistry::default(),
             ))),
+            publication_head: RefCell::new(None),
             project_sources: RefCell::new(None),
             foreign_preparation: RefCell::new(None),
             foreign_issuance_source: RefCell::new(None),
@@ -510,21 +459,6 @@ impl SessionSourceEvaluator {
         retired
     }
 
-    fn restore_generation(
-        &self,
-        active: &Rc<FunctionRegistryGeneration>,
-        restore: Rc<FunctionRegistryGeneration>,
-    ) {
-        let retired = {
-            let mut current = self.generation.borrow_mut();
-            if !Rc::ptr_eq(&current, active) {
-                return;
-            }
-            std::mem::replace(&mut *current, restore)
-        };
-        drop(retired);
-    }
-
     pub(super) fn publish_for_execution(
         self: &Rc<Self>,
         active: runmat_vm::FunctionRegistry,
@@ -597,13 +531,11 @@ impl SessionSourceEvaluator {
             &inherited,
         ));
         let restore = self.replace_generation(active.clone());
-        Ok(FunctionRegistryPublication {
-            evaluator: self.clone(),
+        Ok(FunctionRegistryPublication::new(
+            self.clone(),
             active,
-            restore: Some(restore),
-            foreign_restore: None,
-            foreign_source_restore: None,
-        })
+            restore,
+        ))
     }
 
     fn capture_with_generation(

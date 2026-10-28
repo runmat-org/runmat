@@ -1,9 +1,19 @@
 //! Warm properties and methods use one canonical class contract.
 use super::*;
 pub(super) fn declaration(identity: &ClassIdentity) -> Option<ExternalClassDeclaration> {
-    if !identity.is(crate::LSQLIN_WARM_START_CLASS) {
+    let methods = if identity.is(crate::LSQLIN_WARM_START_CLASS) {
+        [
+            &crate::LSQLIN_WARM_SUBSREF_CATALOG_ENTRY,
+            &crate::LSQLIN_WARM_SUBSASGN_CATALOG_ENTRY,
+        ]
+    } else if identity.is(crate::QUADPROG_WARM_START_CLASS) {
+        [
+            &crate::QUADPROG_WARM_SUBSREF_CATALOG_ENTRY,
+            &crate::QUADPROG_WARM_SUBSASGN_CATALOG_ENTRY,
+        ]
+    } else {
         return None;
-    }
+    };
     Some(ExternalClassDeclaration {
         name: identity.qualified_name(),
         parent: None,
@@ -24,16 +34,11 @@ pub(super) fn declaration(identity: &ClassIdentity) -> Option<ExternalClassDecla
             })
             .collect(),
         methods: [
-            (
-                StaticMethodName::new("subsref"),
-                &crate::LSQLIN_WARM_SUBSREF_CATALOG_ENTRY,
-            ),
-            (
-                StaticMethodName::new("subsasgn"),
-                &crate::LSQLIN_WARM_SUBSASGN_CATALOG_ENTRY,
-            ),
+            StaticMethodName::new("subsref"),
+            StaticMethodName::new("subsasgn"),
         ]
         .into_iter()
+        .zip(methods)
         .map(|(name, entry)| ExternalMethodDeclaration {
             name: name.owned(),
             attributes: MethodAttributes {

@@ -130,12 +130,22 @@ async fn lsqnonlin_in_runtime(
     let bounds = ParsedProblem::bounds_from_values(lb, ub, n, &mut cooperation)
         .await
         .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_ARGUMENT))?;
+    let fields = crate::builtins::math::optim::common::ScalarOptionFields::from_struct_for_solver(
+        prepared_options.as_ref().map(|options| options.structure()),
+        runmat_builtins::OptimSolver::Lsqnonlin,
+    );
+    let multiply = if options.supplied && options.method == Method::Reflective {
+        fields.exact(runmat_builtins::OptimOptionField::JacobianMultiplyFcn)
+    } else {
+        None
+    };
     let mut evaluator = NonlinEvaluator::new(
         cooperation,
         function,
         guess.shape.clone(),
         guess.scalar,
         options.supplied,
+        multiply,
     )?;
     let mut result = crate::builtins::math::optim::least_squares::solve_controlled(
         NAME,

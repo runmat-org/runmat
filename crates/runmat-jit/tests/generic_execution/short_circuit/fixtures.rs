@@ -22,6 +22,7 @@ pub(super) fn nested_argument_fixture() -> runmat_native_codegen::NativeAssembly
         runmat_mir::MirExpansionSource::CellContents {
             base: MirOperand::Local(MirLocalId(0)),
             indexing: MirIndexing {
+                argument_spans: None,
                 kind: runmat_types::IndexKind::Brace,
                 plan: MirIndexPlan::Cell,
                 components: vec![MirIndexComponent::ContextualExpr(selector)],
@@ -72,6 +73,7 @@ pub(super) fn caught_capture_fixture() -> runmat_native_codegen::NativeAssembly 
             source: runmat_mir::MirExpansionSource::CellContents {
                 base: MirOperand::Local(MirLocalId(0)),
                 indexing: MirIndexing {
+                    argument_spans: None,
                     kind: runmat_types::IndexKind::Brace,
                     plan: MirIndexPlan::Cell,
                     components: vec![MirIndexComponent::Colon],

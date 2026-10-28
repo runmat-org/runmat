@@ -16,18 +16,62 @@ pub(crate) struct CapturedPrimarySource {
     source_revision: runmat_package::ContentDigest,
 }
 
-impl CapturedPrimarySource {
+pub(crate) enum AdmittedProjectPrimary {
+    Indexed {
+        source: runmat_package::StableSourceId,
+        access_path: String,
+    },
+    Captured(CapturedPrimarySource),
+}
+
+impl AdmittedProjectPrimary {
     pub(crate) async fn issue(
         project: &runmat_package::FrozenProject,
         access_path: &Path,
         text: &str,
-    ) -> Result<Option<Self>, String> {
+    ) -> Result<Self, String> {
         let selected = canonical_access_path(access_path).await?;
-        for (_, path) in project.all_sources() {
-            if canonical_access_path(path).await? == selected {
-                return Ok(None);
+        let mut indexed = None;
+        for (descriptor, path) in project.all_sources() {
+            if canonical_access_path(path).await? == selected
+                && indexed.replace((descriptor, path)).is_some()
+            {
+                return Err("primary source has ambiguous indexed project ownership".into());
             }
         }
+        if let Some((descriptor, path)) = indexed {
+            if runmat_package::ContentDigest::sha256(text.as_bytes())
+                != descriptor.id.content_digest
+            {
+                return Err("source text differs from its frozen project descriptor".into());
+            }
+            return Ok(Self::Indexed {
+                source: descriptor.id.clone(),
+                access_path: path.to_string_lossy().replace('\\', "/"),
+            });
+        }
+        CapturedPrimarySource::capture(project, &selected, text)
+            .await
+            .map(Self::Captured)
+    }
+
+    pub(crate) fn into_request_parts(self) -> (Option<CapturedPrimarySource>, String) {
+        match self {
+            Self::Indexed { access_path, .. } => (None, access_path),
+            Self::Captured(source) => {
+                let access_path = source.access_path.clone();
+                (Some(source), access_path)
+            }
+        }
+    }
+}
+
+impl CapturedPrimarySource {
+    async fn capture(
+        project: &runmat_package::FrozenProject,
+        selected: &Path,
+        text: &str,
+    ) -> Result<Self, String> {
         let workspace = canonical_access_path(&project.workspace_root).await?;
         let relative = selected
             .strip_prefix(&workspace)
@@ -37,7 +81,7 @@ impl CapturedPrimarySource {
         if relative.as_str() == "." {
             return Err("explicit primary source has no project-relative file name".into());
         }
-        Ok(Some(Self {
+        Ok(Self {
             owner_identity: project.graph.root.to_string(),
             relative_path: relative.to_string(),
             access_path: selected.to_string_lossy().replace('\\', "/"),
@@ -45,7 +89,7 @@ impl CapturedPrimarySource {
             content_digest: runmat_package::ContentDigest::sha256(text.as_bytes()),
             graph_digest: project.graph.graph_digest.clone(),
             source_revision: project.sources.revision.clone(),
-        }))
+        })
     }
 
     pub(crate) fn validate(
@@ -142,27 +186,14 @@ impl ExecutableSource {
         selected: &Path,
         text: String,
     ) -> Result<Self, String> {
-        let mut indexed = None;
-        for (descriptor, path) in project.all_sources() {
-            if canonical_access_path(path).await?.as_path() == selected
-                && indexed.replace(descriptor).is_some()
-            {
-                return Err("primary source has ambiguous indexed project ownership".into());
+        match AdmittedProjectPrimary::issue(project, selected, &text).await? {
+            AdmittedProjectPrimary::Indexed { source, .. } => {
+                Self::from_project_source(&source, text)
+            }
+            AdmittedProjectPrimary::Captured(captured) => {
+                Self::with_captured_primary(text, captured)
             }
         }
-        if let Some(descriptor) = indexed {
-            return Self::from_project_source(&descriptor.id, text);
-        }
-        let captured = CapturedPrimarySource::issue(project, selected, &text)
-            .await?
-            .ok_or("selected primary unexpectedly resolved to an indexed source")?;
-        Ok(Self {
-            owner_identity: captured.owner_identity.clone(),
-            relative_path: captured.relative_path.clone(),
-            text,
-            lookup_path: None,
-            captured_primary: Some(captured),
-        })
     }
 
     pub(crate) fn with_captured_primary(
@@ -298,7 +329,7 @@ mod tests {
         );
         assert!(captured.validate(&handoff, &altered).is_err());
         let external = tempfile::NamedTempFile::new().expect("external source path");
-        assert!(futures::executor::block_on(CapturedPrimarySource::issue(
+        assert!(futures::executor::block_on(AdmittedProjectPrimary::issue(
             &project,
             external.path(),
             "answer = 1;\n"

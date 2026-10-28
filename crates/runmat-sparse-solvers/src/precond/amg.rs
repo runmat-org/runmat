@@ -43,7 +43,11 @@ pub fn rigid_body_modes(coordinates: &[f64], dim: usize) -> NearNullspace {
     for node in 0..nodes {
         let x = coordinates[node * dim] - center[0];
         let y = coordinates[node * dim + 1] - center[1];
-        let z = if dim == 3 { coordinates[node * dim + 2] - center[2] } else { 0.0 };
+        let z = if dim == 3 {
+            coordinates[node * dim + 2] - center[2]
+        } else {
+            0.0
+        };
         let base = node * dim;
         for d in 0..dim {
             vectors[d * n + base + d] = 1.0;
@@ -168,7 +172,12 @@ struct SmootherScratch {
 
 impl SmootherScratch {
     fn new(n: usize) -> Self {
-        Self { r: vec![0.0; n], ax: vec![0.0; n], d: vec![0.0; n], z: vec![0.0; n] }
+        Self {
+            r: vec![0.0; n],
+            ax: vec![0.0; n],
+            d: vec![0.0; n],
+            z: vec![0.0; n],
+        }
     }
 }
 
@@ -184,11 +193,17 @@ pub struct Amg {
 }
 
 impl Amg {
-    pub fn new(matrix: CsrRef<'_, f64>, options: AmgOptions, control: SolveControl<'_>) -> SolverResult<Self> {
+    pub fn new(
+        matrix: CsrRef<'_, f64>,
+        options: AmgOptions,
+        control: SolveControl<'_>,
+    ) -> SolverResult<Self> {
         let n = matrix.nrows();
         let b = options.block_size.max(1);
-        if n % b != 0 {
-            return Err(SolverError::Dimension(format!("block size {b} does not divide {n}")));
+        if !n.is_multiple_of(b) {
+            return Err(SolverError::Dimension(format!(
+                "block size {b} does not divide {n}"
+            )));
         }
         let mut candidates = match &options.near_nullspace {
             Some(ns) => {
@@ -243,8 +258,16 @@ impl Amg {
                 });
                 break;
             }
-            let (tentative, coarse_candidates) = tentative_prolongator(&aggregates, block, &candidates, rows)?;
-            let p = smooth_prolongator(&a, block, &inverse_blocks, lambda_max, &tentative, options.prolongator_damping)?;
+            let (tentative, coarse_candidates) =
+                tentative_prolongator(&aggregates, block, &candidates, rows)?;
+            let p = smooth_prolongator(
+                &a,
+                block,
+                &inverse_blocks,
+                lambda_max,
+                &tentative,
+                options.prolongator_damping,
+            )?;
             let r = p.as_ref().transpose(false);
             let ap = spgemm::multiply(a.as_ref(), p.as_ref())?;
             let mut coarse = spgemm::multiply(r.as_ref(), ap.as_ref())?;
@@ -341,7 +364,13 @@ impl Amg {
             .collect()
     }
 
-    fn cycle(&self, level: usize, b: &[f64], x: &mut [f64], scratch: &mut [LevelScratch]) -> SolverResult<()> {
+    fn cycle(
+        &self,
+        level: usize,
+        b: &[f64],
+        x: &mut [f64],
+        scratch: &mut [LevelScratch],
+    ) -> SolverResult<()> {
         let l = &self.levels[level];
         if level + 1 == self.levels.len() {
             match &self.coarse {
@@ -372,7 +401,14 @@ impl Amg {
         x.iter_mut().for_each(|v| *v = 0.0);
         // `scratch[0]` belongs to this level, the rest to the coarser ones.
         let (here, below) = scratch.split_first_mut().expect("scratch for every level");
-        chebyshev(l, b, x, self.options.smoother_degree, self.options.chebyshev_ratio, &mut here.smoother);
+        chebyshev(
+            l,
+            b,
+            x,
+            self.options.smoother_degree,
+            self.options.chebyshev_ratio,
+            &mut here.smoother,
+        );
         l.a.spmv(x, &mut here.ax);
         par::sub_into(b, &here.ax, &mut here.residual);
         let r = l.r.as_ref().unwrap();
@@ -381,7 +417,14 @@ impl Amg {
         // The coarse level zeroes (or overwrites) its iterate before use.
         self.cycle(level + 1, &here.coarse_b, &mut here.coarse_x, below)?;
         p.as_ref().spmv_scaled(1.0, &here.coarse_x, 1.0, x);
-        chebyshev(l, b, x, self.options.smoother_degree, self.options.chebyshev_ratio, &mut here.smoother);
+        chebyshev(
+            l,
+            b,
+            x,
+            self.options.smoother_degree,
+            self.options.chebyshev_ratio,
+            &mut here.smoother,
+        );
         Ok(())
     }
 }
@@ -503,7 +546,11 @@ fn build_coarse_solver(a: &CsrMatrix<f64>) -> SolverResult<CoarseSolver> {
         }
         return Ok(CoarseSolver::Smoothing);
     }
-    match DirectSolver::<f64>::new(a.as_ref().into(), DirectOptions::new(FactorKind::Cholesky), SolveControl::NONE) {
+    match DirectSolver::<f64>::new(
+        a.as_ref().into(),
+        DirectOptions::new(FactorKind::Cholesky),
+        SolveControl::NONE,
+    ) {
         Ok(solver) => Ok(CoarseSolver::Sparse(solver)),
         Err(SolverError::NotPositiveDefinite { .. }) => Ok(CoarseSolver::Smoothing),
         Err(error) => Err(error),
@@ -529,7 +576,12 @@ fn repair_empty_rows(a: CsrMatrix<f64>) -> CsrMatrix<f64> {
             } else if vals.iter().all(|v| *v == 0.0) {
                 (vec![row], vec![1.0])
             } else {
-                let mut entries: Vec<(usize, f64)> = cols.iter().copied().zip(vals.iter().copied()).filter(|e| e.0 != row).collect();
+                let mut entries: Vec<(usize, f64)> = cols
+                    .iter()
+                    .copied()
+                    .zip(vals.iter().copied())
+                    .filter(|e| e.0 != row)
+                    .collect();
                 let scale = entries.iter().map(|e| e.1.abs()).sum::<f64>().max(1.0);
                 entries.push((row, scale));
                 entries.sort_by_key(|e| e.0);
@@ -645,7 +697,14 @@ fn spectral_radius(a: &CsrMatrix<f64>, block: usize, inverse: &[f64]) -> f64 {
     estimate * 1.1
 }
 
-fn chebyshev(level: &Level, b: &[f64], x: &mut [f64], degree: usize, ratio: f64, scratch: &mut SmootherScratch) {
+fn chebyshev(
+    level: &Level,
+    b: &[f64],
+    x: &mut [f64],
+    degree: usize,
+    ratio: f64,
+    scratch: &mut SmootherScratch,
+) {
     let n = level.a.nrows();
     let upper = level.lambda_max;
     let lower = upper / ratio;
@@ -653,27 +712,32 @@ fn chebyshev(level: &Level, b: &[f64], x: &mut [f64], degree: usize, ratio: f64,
     let delta = 0.5 * (upper - lower);
     let sigma = theta / delta;
     let mut rho = 1.0 / sigma;
-    let (mut r, mut ax, mut d, mut z) = (&mut scratch.r, &mut scratch.ax, &mut scratch.d, &mut scratch.z);
+    let (r, ax, d, z) = (
+        &mut scratch.r,
+        &mut scratch.ax,
+        &mut scratch.d,
+        &mut scratch.z,
+    );
     debug_assert_eq!(r.len(), n);
-    level.a.spmv(x, &mut ax);
-    par::sub_into(b, &ax, &mut r);
-    apply_inverse_blocks(level.block, &level.inverse_blocks, &r, &mut z);
-    par::for_each_chunk_mut(&mut d, |start, chunk| {
+    level.a.spmv(x, ax);
+    par::sub_into(b, ax, r);
+    apply_inverse_blocks(level.block, &level.inverse_blocks, r, z);
+    par::for_each_chunk_mut(d, |start, chunk| {
         for (offset, value) in chunk.iter_mut().enumerate() {
             *value = z[start + offset] / theta;
         }
     });
     for k in 0..degree.max(1) {
-        par::axpy(1.0, &d, x);
+        par::axpy(1.0, d, x);
         if k + 1 == degree.max(1) {
             break;
         }
-        level.a.spmv(&d, &mut ax);
-        par::axpy(-1.0, &ax, &mut r);
-        apply_inverse_blocks(level.block, &level.inverse_blocks, &r, &mut z);
+        level.a.spmv(d, ax);
+        par::axpy(-1.0, ax, r);
+        apply_inverse_blocks(level.block, &level.inverse_blocks, r, z);
         let rho_next = 1.0 / (2.0 * sigma - rho);
         let (c1, c2) = (rho_next * rho, 2.0 * rho_next / delta);
-        par::axpby(c2, &z, c1, &mut d);
+        par::axpby(c2, z, c1, d);
         rho = rho_next;
     }
 }
@@ -714,7 +778,11 @@ fn aggregate(a: &CsrMatrix<f64>, block: usize, theta: f64) -> Aggregates {
                 norms.push(value);
             }
         }
-        (ids, norms.into_iter().map(f64::sqrt).collect(), diagonal.sqrt())
+        (
+            ids,
+            norms.into_iter().map(f64::sqrt).collect(),
+            diagonal.sqrt(),
+        )
     });
     let strong = |node: usize| -> Vec<usize> {
         let (ids, norms, d) = &node_graph[node];
@@ -749,7 +817,10 @@ fn aggregate(a: &CsrMatrix<f64>, block: usize, theta: f64) -> Aggregates {
         let (ids, norms, _) = &node_graph[node];
         let mut best = (usize::MAX, -1.0f64);
         for (&j, &v) in ids.iter().zip(norms) {
-            if snapshot[j] != usize::MAX && strong_lists[node].binary_search(&j).is_ok() && v > best.1 {
+            if snapshot[j] != usize::MAX
+                && strong_lists[node].binary_search(&j).is_ok()
+                && v > best.1
+            {
                 best = (snapshot[j], v);
             }
         }
@@ -915,7 +986,11 @@ fn smooth_prolongator(
         }
         out
     });
-    Ok(CsrMatrix::from_rows(a.nrows(), t.ncols(), rows.into_iter().flatten().collect()))
+    Ok(CsrMatrix::from_rows(
+        a.nrows(),
+        t.ncols(),
+        rows.into_iter().flatten().collect(),
+    ))
 }
 
 #[cfg(test)]
@@ -927,11 +1002,31 @@ mod tests {
     #[test]
     fn amg_pcg_converges_in_few_iterations_on_poisson() {
         let a = poisson3d::<f64>(30, 30, 30);
-        let amg = Amg::new(a.as_ref(), AmgOptions { coarse_size: 500, ..Default::default() }, SolveControl::NONE).unwrap();
+        let amg = Amg::new(
+            a.as_ref(),
+            AmgOptions {
+                coarse_size: 500,
+                ..Default::default()
+            },
+            SolveControl::NONE,
+        )
+        .unwrap();
         assert!(amg.statistics().level_rows.len() >= 2);
         let b = par::seeded_vector::<f64>(a.nrows(), 1);
         let mut x = vec![0.0; a.nrows()];
-        let report = pcg(&a, Some(&amg), &b, &mut x, &KrylovOptions { rtol: 1e-8, max_iterations: 200, ..Default::default() }, SolveControl::NONE).unwrap();
+        let report = pcg(
+            &a,
+            Some(&amg),
+            &b,
+            &mut x,
+            &KrylovOptions {
+                rtol: 1e-8,
+                max_iterations: 200,
+                ..Default::default()
+            },
+            SolveControl::NONE,
+        )
+        .unwrap();
         assert!(report.converged(), "{report:?}");
         assert!(report.iterations < 40, "{report:?} {:?}", amg.statistics());
     }
@@ -966,13 +1061,17 @@ mod tests {
                 apply_inverse_blocks(l.block, &l.inverse_blocks, &r, &mut z);
                 let rho_next = 1.0 / (2.0 * sigma - rho);
                 let (c1, c2) = (rho_next * rho, 2.0 * rho_next / delta);
-                d.iter_mut().zip(&z).for_each(|(d, z)| *d = c2 * z + c1 * *d);
+                d.iter_mut()
+                    .zip(&z)
+                    .for_each(|(d, z)| *d = c2 * z + c1 * *d);
                 rho = rho_next;
             }
         };
         if level + 1 == export.levels.len() {
             return match &export.coarse_inverse {
-                Some(inverse) => (0..n).map(|r| (0..n).map(|c| inverse[r * n + c] * b[c]).sum()).collect(),
+                Some(inverse) => (0..n)
+                    .map(|r| (0..n).map(|c| inverse[r * n + c] * b[c]).sum())
+                    .collect(),
                 None => {
                     let mut x = vec![0.0; n];
                     for _ in 0..10 {
@@ -999,7 +1098,12 @@ mod tests {
         let p = crate::testutil::elasticity::elasticity3d(8, 7, 6);
         let amg = Amg::new(
             p.matrix.as_ref(),
-            AmgOptions { block_size: 3, near_nullspace: Some(rigid_body_modes(&p.coordinates, 3)), coarse_size: 200, ..Default::default() },
+            AmgOptions {
+                block_size: 3,
+                near_nullspace: Some(rigid_body_modes(&p.coordinates, 3)),
+                coarse_size: 200,
+                ..Default::default()
+            },
             SolveControl::NONE,
         )
         .unwrap();
@@ -1010,23 +1114,47 @@ mod tests {
         amg.apply(&r, &mut z).unwrap();
         let replayed = replay(&export, 0, &r);
         let scale = z.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        let worst = z.iter().zip(&replayed).fold(0.0f64, |m, (a, b)| m.max((a - b).abs()));
-        assert!(worst <= 1e-9 * scale, "replay differs by {worst} (scale {scale})");
+        let worst = z
+            .iter()
+            .zip(&replayed)
+            .fold(0.0f64, |m, (a, b)| m.max((a - b).abs()));
+        assert!(
+            worst <= 1e-9 * scale,
+            "replay differs by {worst} (scale {scale})"
+        );
     }
 
     #[test]
     fn reused_cycle_scratch_gives_identical_applications() {
         let a = poisson3d::<f64>(20, 20, 20);
-        let amg = Amg::new(a.as_ref(), AmgOptions { coarse_size: 300, ..Default::default() }, SolveControl::NONE).unwrap();
+        let amg = Amg::new(
+            a.as_ref(),
+            AmgOptions {
+                coarse_size: 300,
+                ..Default::default()
+            },
+            SolveControl::NONE,
+        )
+        .unwrap();
         let r = par::seeded_vector::<f64>(a.nrows(), 2);
-        let (mut first, mut second, mut fresh) = (vec![0.0; a.nrows()], vec![0.0; a.nrows()], vec![0.0; a.nrows()]);
+        let (mut first, mut second, mut fresh) = (
+            vec![0.0; a.nrows()],
+            vec![0.0; a.nrows()],
+            vec![0.0; a.nrows()],
+        );
         amg.apply(&r, &mut first).unwrap();
         amg.apply(&r, &mut second).unwrap();
         // A concurrent application (scratch held) uses freshly allocated vectors.
         let guard = amg.scratch.lock().unwrap();
         amg.apply(&r, &mut fresh).unwrap();
         drop(guard);
-        assert!(first.iter().zip(&second).all(|(p, q)| p.to_bits() == q.to_bits()));
-        assert!(first.iter().zip(&fresh).all(|(p, q)| p.to_bits() == q.to_bits()));
+        assert!(first
+            .iter()
+            .zip(&second)
+            .all(|(p, q)| p.to_bits() == q.to_bits()));
+        assert!(first
+            .iter()
+            .zip(&fresh)
+            .all(|(p, q)| p.to_bits() == q.to_bits()));
     }
 }

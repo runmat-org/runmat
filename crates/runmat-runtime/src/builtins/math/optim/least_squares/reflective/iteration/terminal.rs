@@ -66,7 +66,7 @@ impl Terminal<'_> {
         } = state;
         let source = jacobian.or_else(|| evaluator.take_jacobian());
         let mut result = match source {
-            Some(source @ Jacobian::Matrix { .. }) => {
+            Some(source @ (Jacobian::Matrix { .. } | Jacobian::Opaque(_))) => {
                 finish(
                     evaluator,
                     bounds,
@@ -87,7 +87,9 @@ impl Terminal<'_> {
                 let values = match source {
                     Some(Jacobian::RowMajor { values, .. }) => values,
                     None => Vec::new(),
-                    Some(Jacobian::Matrix { .. }) => unreachable!("retained matrix selected"),
+                    Some(Jacobian::Matrix { .. } | Jacobian::Opaque(_)) => {
+                        unreachable!("retained source selected")
+                    }
                 };
                 if matches!(stop, Stop::Step | Stop::Function) {
                     final_result(

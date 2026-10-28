@@ -38,6 +38,7 @@ fn native_metadata_includes_hidden_region_constructs_and_requirements() {
     let value = MirRvalue::Index {
         base: MirOperand::Constant(crate::MirConstant::EmptyArray),
         indexing: crate::MirIndexing {
+            argument_spans: None,
             kind: runmat_hir::IndexKind::Paren,
             plan: crate::MirIndexPlan::Slice,
             components: vec![crate::MirIndexComponent::ContextualExpr(region)],

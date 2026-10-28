@@ -257,7 +257,7 @@ async fn norm(
     super::super::super::functions::builtin(
         runmat_builtins::BuiltinCatalogIdentity { name: "norm" },
         1,
-        super::super::super::functions::FunctionRole::EuclideanNorm,
+        super::super::super::functions::FunctionRole::TwoNorm,
         args.view(),
         policy,
         &mut cooperation,

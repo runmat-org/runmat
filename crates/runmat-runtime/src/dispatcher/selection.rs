@@ -155,6 +155,7 @@ pub fn observe_builtin_dispatch_target(
 }
 
 pub(super) enum InstanceMethodRoute {
+    Selected(crate::object::protocol::ResolvedObjectMethod),
     Bound(runmat_value::BoundFunctionBinding),
     SemanticName(String),
     BuiltinName(String),
@@ -169,6 +170,7 @@ pub(super) struct SelectedInstanceMethod {
 impl SelectedInstanceMethod {
     fn has_executable_route(&self) -> bool {
         self.routes.iter().any(|route| match route {
+            InstanceMethodRoute::Selected(_) => true,
             InstanceMethodRoute::Bound(_) => true,
             InstanceMethodRoute::SemanticName(name) => semantic_name_is_executable(name),
             InstanceMethodRoute::BuiltinName(_) => true,
@@ -191,6 +193,24 @@ pub(super) fn select_instance_method(
         _ => return Ok(None),
     };
     let method_identity = runmat_types::MethodName::from(method_name);
+    if crate::object::protocol::selected_receiver_has_authority(receiver)? {
+        let access = crate::object::protocol::ObjectAccessContext {
+            caller_class: current_class_access_context().as_deref().cloned(),
+            ..Default::default()
+        };
+        return crate::object::protocol::resolve_declared_object_method(
+            receiver,
+            &method_identity,
+            &access,
+        )
+        .map(|method| {
+            method.map(|method| SelectedInstanceMethod {
+                owner: method.declaring_class.clone(),
+                method: method_identity,
+                routes: vec![InstanceMethodRoute::Selected(method)],
+            })
+        });
+    }
     let Some((method, owner)) = crate::class_registry::lookup_method(class_name, &method_identity)
     else {
         return Ok(None);

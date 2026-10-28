@@ -29,6 +29,20 @@ fn one_auxiliary_capability_remains_live_for_all_later_user_event_kinds_then_ret
         let token = runtime.cancellation();
         let mut scope = Scope::new(Some(&runtime), Some(&token)).unwrap();
         let retained = scope.handle();
+        let retained_header = crate::execution::RetainedValueReadLease::prepare_callable_rooted(
+            crate::execution::RootedValue::new(Value::ScopedFunctionHandle(retained.clone()))
+                .unwrap(),
+            Some(&runtime),
+        )
+        .expect("a parked live scope can prepare its child callable header");
+        assert_eq!(
+            validate_target(Some(&runtime), &retained)
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:ScopedCallable:Unavailable"),
+            "retention does not grant invocation or cached-result access"
+        );
+        drop(retained_header);
         let mut calls = 0;
         for _event in ["creation", "iteration", "output", "plot", "hybrid"] {
             assert!(retained.is_live());

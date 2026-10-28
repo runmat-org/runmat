@@ -9,18 +9,34 @@ pub(super) fn uses_builtin_indexing(
     access: &ObjectAccessContext,
     selected: Option<&SelectedObjectClassFacts>,
 ) -> Result<bool, RuntimeError> {
-    if !matches!(protocol, ObjectProtocol::Subsref | ObjectProtocol::Subsasgn)
-        || access.caller_class.as_ref() != Some(receiver)
-    {
+    if !matches!(protocol, ObjectProtocol::Subsref | ObjectProtocol::Subsasgn) {
         return Ok(false);
     }
     if let Some(owner) = &access.selected_active_owner {
         if &owner.declaring_class != receiver
+            && selected.is_none_or(|facts| !facts.ancestry().contains(&owner.declaring_class))
+        {
+            return Ok(false);
+        }
+        if access.caller_class.as_ref() != Some(&owner.declaring_class)
             || access.caller_method.as_ref() != Some(&owner.method)
             || !selected.is_some_and(|facts| {
-                ObjectAccessContext::selected_method_frame_is_admitted(owner, facts)
-                    && selected_binding(facts, owner.role, &owner.method)
-                        == access.selected_active_binding.as_ref()
+                facts.class() == receiver
+                    && match access.selected_method_dispatch {
+                        crate::context::SelectedMethodDispatch::Virtual => {
+                            ObjectAccessContext::selected_method_frame_is_admitted(owner, facts)
+                                && selected_binding(facts, owner.role, &owner.method)
+                                    == access.selected_active_binding.as_ref()
+                        }
+                        crate::context::SelectedMethodDispatch::Superclass => {
+                            facts.method_by_owner(owner).is_some_and(|method| {
+                                !owner.is_static
+                                    && !method.is_abstract
+                                    && method.binding.as_ref()
+                                        == access.selected_active_binding.as_ref()
+                            })
+                        }
+                    }
                     && access.selected_active_binding.is_some()
             })
         {
@@ -30,6 +46,9 @@ pub(super) fn uses_builtin_indexing(
             ));
         }
         return Ok(true);
+    }
+    if access.caller_class.as_ref() != Some(receiver) {
+        return Ok(false);
     }
     let Some(active) = &access.active_method else {
         return Ok(false);

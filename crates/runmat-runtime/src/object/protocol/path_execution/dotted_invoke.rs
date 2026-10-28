@@ -8,6 +8,28 @@ use crate::object::indexing::{
 };
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
+use futures::{future::Either, FutureExt};
+
+enum SelectedCall {
+    Declared {
+        method: super::super::ResolvedObjectMethod,
+        arguments: crate::call::BuiltinArguments,
+    },
+    Fallback {
+        base: Value,
+        member: runmat_value::Utf8Text,
+        arguments: crate::call::BuiltinArguments,
+        semantic: Option<std::sync::Arc<runmat_types::CallableIdentity>>,
+    },
+    Stored(StoredMemberSelection),
+}
+
+struct StoredMemberSelection {
+    base: Value,
+    member: runmat_value::Utf8Text,
+    components: ExactArrayStorage<ObjectIndexComponent>,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
+}
 
 pub(super) fn try_execute<'a, A: std::borrow::Borrow<super::super::ObjectAccessContext> + 'a>(
     runtime: Option<&'a crate::context::RuntimeContext>,
@@ -28,125 +50,194 @@ pub(super) fn try_execute<'a, A: std::borrow::Borrow<super::super::ObjectAccessC
     // consumption, resolution, arguments, and effects remain poll-deferred.
     futures::future::Either::Right(super::super::context::admit_future_with(
         runtime,
-        move || async move {
-            let member_step = steps.next().ok_or_else(|| {
-                semantic_error(
-                    "InvalidObjectSubscriptPath",
-                    "dotted invocation has no member",
-                )
-            })?;
-            let (ObjectIndexSelector::Member(member), semantic_fallback) = member_step.into_parts()
-            else {
-                unreachable!("validated dotted invocation has a member selector")
-            };
-            let paren_step = steps.next().ok_or_else(|| {
-                semantic_error(
-                    "InvalidObjectSubscriptPath",
-                    "dotted invocation has no arguments",
-                )
-            })?;
-            let (ObjectIndexSelector::IndexValues { components }, _) = paren_step.into_parts()
-            else {
-                unreachable!("validated dotted invocation has index-value arguments")
-            };
-            let requested_outputs = if steps.len() == 0 {
-                request.known_requested_outputs()?.ok_or_else(|| {
-                    semantic_error(
-                        "SequenceOutputContextUnavailable",
-                        "dotted invocation requires an explicit output count",
-                    )
-                })?
-            } else {
-                1
-            };
-            let result = if let Some(method) =
-                crate::object::protocol::resolve_declared_object_method(
-                    &base,
-                    &runmat_types::MethodName::from(member.as_str()),
-                    request.access(),
-                )? {
-                let arguments: crate::call::BuiltinArguments =
-                    call_arguments(runtime, components)?.into();
-                let arguments = arguments.try_insert(
-                    0,
-                    crate::execution::RootedValue::in_optional_context(base, runtime)?,
-                    runtime,
-                )?;
-                crate::object::protocol::invoke_resolved_object_method_retained(
-                    runtime,
-                    &method,
-                    arguments,
-                    requested_outputs,
-                )
-                .await?
-            } else if crate::object::resolve::has_stored_member(&base, &member.as_str().into())?
-                == crate::object::resolve::MemberPresence::Absent
-                && (matches!(
-                    &base,
-                    Value::Object(_)
-                        | Value::ObjectArray(_)
-                        | Value::HandleObject(_)
-                        | Value::ClassRef(_)
-                ) || semantic_fallback.is_some())
-            {
-                if crate::object::protocol::selected_receiver_has_authority(&base)? {
-                    return Err(semantic_error(
-                        "UndefinedFunction",
-                        "selected class has no admitted method for this member",
-                    ));
-                }
-                // This is a structural decision, not an exception-driven retry: a
-                // missing member may use the established method-style callable route.
-                let arguments = call_arguments(runtime, components)?;
-                crate::object::dispatch::call_method_or_member_index_retained_with_context(
-                    runtime,
-                    base,
-                    member,
-                    arguments.into(),
-                    requested_outputs,
-                    caller_function_name,
-                    semantic_fallback,
-                )
-                .await?
-            } else {
-                let member_sequence =
-                    crate::object::resolve::read_member_sequence_text_with_optional_access(
-                        runtime,
+        move || {
+            crate::execution::after_result(
+                async move {
+                    let member_step = steps.next().ok_or_else(|| {
+                        semantic_error(
+                            "InvalidObjectSubscriptPath",
+                            "dotted invocation has no member",
+                        )
+                    })?;
+                    let (ObjectIndexSelector::Member(member), semantic_fallback) =
+                        member_step.into_parts()
+                    else {
+                        unreachable!("validated dotted invocation has a member selector")
+                    };
+                    let paren_step = steps.next().ok_or_else(|| {
+                        semantic_error(
+                            "InvalidObjectSubscriptPath",
+                            "dotted invocation has no arguments",
+                        )
+                    })?;
+                    let input_callsite = paren_step.input_callsite().cloned();
+                    let (ObjectIndexSelector::IndexValues { components }, _) =
+                        paren_step.into_parts()
+                    else {
+                        unreachable!("validated dotted invocation has index-value arguments")
+                    };
+                    let requested_outputs = if steps.len() == 0 {
+                        request.known_requested_outputs()?.ok_or_else(|| {
+                            semantic_error(
+                                "SequenceOutputContextUnavailable",
+                                "dotted invocation requires an explicit output count",
+                            )
+                        })?
+                    } else {
+                        1
+                    };
+                    let selected = if let Some(method) =
+                        crate::object::protocol::resolve_declared_object_method(
+                            &base,
+                            &runmat_types::MethodName::from(member.as_str()),
+                            request.access(),
+                        )? {
+                        let arguments: crate::call::BuiltinArguments =
+                            call_arguments(runtime, components)?.into();
+                        let arguments = arguments.try_insert(
+                            0,
+                            crate::execution::RootedValue::in_optional_context(base, runtime)?,
+                            runtime,
+                        )?;
+                        SelectedCall::Declared { method, arguments }
+                    } else if crate::object::resolve::has_stored_member(
+                        &base,
+                        &member.as_str().into(),
+                    )? == crate::object::resolve::MemberPresence::Absent
+                        && (matches!(
+                            &base,
+                            Value::Object(_)
+                                | Value::ObjectArray(_)
+                                | Value::HandleObject(_)
+                                | Value::ClassRef(_)
+                        ) || semantic_fallback.is_some())
+                    {
+                        if crate::object::protocol::selected_receiver_has_authority(&base)? {
+                            return Err(semantic_error(
+                                "UndefinedFunction",
+                                "selected class has no admitted method for this member",
+                            ));
+                        }
+                        // This is a structural decision, not an exception-driven retry: a
+                        // missing member may use the established method-style callable route.
+                        let arguments = call_arguments(runtime, components)?;
+                        SelectedCall::Fallback {
+                            base,
+                            member,
+                            arguments: arguments.into(),
+                            semantic: semantic_fallback,
+                        }
+                    } else {
+                        SelectedCall::Stored(StoredMemberSelection {
+                            base,
+                            member,
+                            components,
+                            input_callsite,
+                        })
+                    };
+                    Ok((selected, requested_outputs))
+                },
+                move |(selected, requested_outputs)| match selected {
+                    SelectedCall::Declared { method, arguments } => Either::Left(async move {
+                        crate::object::protocol::invoke_resolved_object_method_retained(
+                            runtime,
+                            &method,
+                            arguments,
+                            requested_outputs,
+                        )
+                        .await
+                        .map(Some)
+                    }),
+                    SelectedCall::Fallback {
                         base,
                         member,
-                        false,
-                        caller_function_name,
-                        Some(request.access()),
-                    )
-                    .await?;
-                let member_value = resolve_single(member_sequence)?;
-                if super::callable::is_callable_value(&member_value) {
-                    let arguments = call_arguments(runtime, components)?;
-                    super::callable::invoke(
+                        arguments,
+                        semantic,
+                    } => Either::Right(Either::Left(
+                        crate::object::dispatch::call_method_or_member_index_retained_with_context(
+                            runtime,
+                            base,
+                            member,
+                            arguments,
+                            requested_outputs,
+                            caller_function_name,
+                            semantic,
+                        )
+                        .map(|result| result.map(Some)),
+                    )),
+                    SelectedCall::Stored(selected) => Either::Right(Either::Right(stored(
                         runtime,
-                        member_value.value().clone(),
-                        arguments.into(),
+                        selected,
+                        request,
                         requested_outputs,
-                    )
-                    .await?
-                } else {
-                    let step = ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-                        components,
-                    });
-                    super::read_default_step(
-                        runtime,
-                        member_value.value().clone(),
-                        &step,
                         caller_function_name,
-                        Some(request.access()),
-                    )
-                    .await?
-                    .try_into_sequence()?
-                }
-            };
-            Ok(Some(result))
+                    ))),
+                },
+            )
         },
     ))
+}
+
+async fn stored<A: std::borrow::Borrow<super::super::ObjectAccessContext>>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    selected: StoredMemberSelection,
+    request: &SubscriptReadRequest<A>,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+) -> Result<Option<RootedValueSequence>, RuntimeError> {
+    let StoredMemberSelection {
+        base,
+        member,
+        components,
+        input_callsite,
+    } = selected;
+    let member_sequence =
+        crate::object::resolve::read_default_member_sequence_text_with_optional_access(
+            runtime,
+            base,
+            member,
+            false,
+            caller_function_name,
+            Some(request.access()),
+        )
+        .await?;
+    let member_value = resolve_single(member_sequence)?;
+    let result = if super::callable::is_callable_value(&member_value) {
+        let arguments = call_arguments(runtime, components)?;
+        super::callable::invoke(
+            runtime,
+            member_value.value().clone(),
+            arguments.into(),
+            requested_outputs,
+            input_callsite,
+        )
+        .await?
+    } else {
+        let step = ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components })
+            .with_input_callsite(input_callsite);
+        let path = crate::object::indexing::ObjectSubscriptPath::single_in_context(runtime, step)?;
+        let child_request = SubscriptReadRequest {
+            sequence_use: if requested_outputs == 0 {
+                runmat_types::SequenceUse::Discard
+            } else {
+                runmat_types::SequenceUse::SelectPrefix {
+                    count: requested_outputs,
+                }
+            },
+            sequence_context: crate::sequence::SequenceResolutionContext::default(),
+            indexing_context: request.indexing_context,
+            access: request.access(),
+        };
+        super::read_subscript_path_sequence(
+            runtime.cloned(),
+            member_value.value().clone(),
+            path,
+            child_request,
+            caller_function_name,
+        )
+        .await?
+    };
+    Ok(Some(result))
 }
 
 fn is_prefix(steps: &ExactArrayIntoIter<ObjectSubscript>) -> bool {
@@ -161,8 +252,16 @@ fn is_prefix(steps: &ExactArrayIntoIter<ObjectSubscript>) -> bool {
     };
     member_step.kind() == ObjectIndexKind::Member
         && paren_step.kind() == ObjectIndexKind::Paren
-        && member_step.origin() == ObjectSubscriptOrigin::DottedInvokeMember
-        && paren_step.origin() == ObjectSubscriptOrigin::DottedInvokeArguments
+        && matches!(
+            (member_step.origin(), paren_step.origin()),
+            (
+                ObjectSubscriptOrigin::DottedInvokeMember,
+                ObjectSubscriptOrigin::DottedInvokeArguments
+            ) | (
+                ObjectSubscriptOrigin::Ordinary,
+                ObjectSubscriptOrigin::Ordinary
+            )
+        )
 }
 
 // The syntax is ambiguous until member resolution: `obj.data(:)` indexes a

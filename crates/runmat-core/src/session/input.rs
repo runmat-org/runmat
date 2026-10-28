@@ -2,6 +2,14 @@ use super::*;
 use std::sync::Mutex;
 
 impl RunMatSession {
+    /// Keep session input available through the outer lifecycle drain. The
+    /// source-command recorder temporarily replaces this adapter and restores
+    /// it before callbacks retained past that command are driven.
+    pub(super) fn install_lifecycle_input(&self) -> runmat_runtime::interaction::AsyncHandlerGuard {
+        let _scope = self.runtime_context.enter();
+        self.install_execution_input().0
+    }
+
     /// Install session input in the currently entered runtime context. Both
     /// interactive source and immutable executable invocation use this adapter;
     /// dropping the guard restores the previous context-owned handler.

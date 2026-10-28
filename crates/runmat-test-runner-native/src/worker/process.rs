@@ -177,7 +177,10 @@ impl WorkerBackend for ProcessBackend {
             };
             if let Err(error) = write_bootstrap(
                 &mut writer,
-                &NativeWorkerBootstrap::new(self.config.project_handoff.clone()),
+                &NativeWorkerBootstrap::new(
+                    self.config.project_handoff.clone(),
+                    self.config.execution.clone(),
+                ),
                 limits,
             )
             .await

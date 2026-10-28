@@ -5,7 +5,40 @@ use super::selection::{Branch, Pair, Request, Selected};
 use super::*;
 use crate::builtins::math::host_route::NumericHostRoute;
 use futures::{future::Either, FutureExt};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
+pin_project_lite::pin_project! {
+    #[project = SelectedFutureProjection]
+    enum SelectedFuture<Ordinary, Host, Admitted> {
+        Ordinary { #[pin] future: Ordinary },
+        Host { #[pin] future: Host },
+        Admitted { #[pin] future: Admitted },
+    }
+}
+
+impl<A, B, C, O> Future for SelectedFuture<A, B, C>
+where
+    A: Future<Output = O>,
+    B: Future<Output = O>,
+    C: Future<Output = O>,
+{
+    type Output = O;
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<O> {
+        match self.project() {
+            SelectedFutureProjection::Ordinary { future } => future.poll(context),
+            SelectedFutureProjection::Host { future } => future.poll(context),
+            SelectedFutureProjection::Admitted { future } => future.poll(context),
+        }
+    }
+}
+
+// Construct this selected state directly at the existing phase destination,
+// rather than adding a future-sized ABI return frame during nested evaluation.
+#[inline(always)]
 pub(super) fn execute<'a, F, Fut, P, Published>(
     runtime: Option<&'a RuntimeContext>,
     selected: Selected,
@@ -24,47 +57,44 @@ where
         inputs,
     } = selected;
     let future = match branch {
-        Branch::Ordinary => Either::Left(Either::Left(crate::execution::after_result(
-            body(pair.left, pair.right),
-            move |base| publication::publish(runtime, base, publish, None),
-        ))),
-        Branch::Host(route) => Either::Left(Either::Right(host(
-            runtime.expect("host route runtime"),
-            pair,
-            route,
-            body,
-            publish,
-        ))),
-        Branch::Admitted(admission) => Either::Right(crate::execution::after_result(
-            futures::future::lazy(move |_| selection::request(runtime, admission, pair)),
-            move |Request { request, direct }| {
-                execute_request_numerical(
-                    runtime,
-                    request,
-                    move |values, compound, numerical_output| {
-                        prepared::execute(
-                            runtime,
-                            values,
-                            compound,
-                            numerical_output,
-                            direct,
-                            body,
-                            publish,
-                        )
-                    },
-                )
-            },
-        )),
-    };
-    // Preserve roots on error as well as success, through service adoption,
-    // output-template publication and final numerical confirmation.
-    crate::execution::after_result(
-        future.map(Ok::<_, crate::RuntimeError>),
-        move |result| async move {
-            drop(inputs);
-            result
+        Branch::Ordinary => SelectedFuture::Ordinary {
+            future: crate::execution::after_result(body(pair.left, pair.right), move |base| {
+                publication::publish(runtime, base, publish, None)
+            }),
         },
-    )
+        Branch::Host(route) => SelectedFuture::Host {
+            future: host(
+                runtime.expect("host route runtime"),
+                pair,
+                route,
+                body,
+                publish,
+            ),
+        },
+        Branch::Admitted(admission) => SelectedFuture::Admitted {
+            future: crate::execution::after_result(
+                futures::future::lazy(move |_| selection::request(runtime, admission, pair)),
+                move |Request { request, direct }| {
+                    execute_request_numerical(
+                        runtime,
+                        request,
+                        move |values, compound, numerical_output| {
+                            prepared::execute(
+                                runtime,
+                                values,
+                                compound,
+                                numerical_output,
+                                direct,
+                                body,
+                                publish,
+                            )
+                        },
+                    )
+                },
+            ),
+        },
+    };
+    crate::execution::with_retained_owner(future, inputs)
 }
 fn host<'a, F, Fut, P, Published>(
     runtime: &'a RuntimeContext,

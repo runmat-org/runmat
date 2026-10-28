@@ -20,6 +20,9 @@ pub trait SubdomainSolver<T>: Send + Sync {
     fn solve(&self, r: &[T], z: &mut [T]) -> SolverResult<()>;
 }
 
+/// Caller-owned subdomain indices, owned-row mask, and shared solve owner.
+pub type SubdomainInput<T> = (Vec<usize>, Vec<bool>, Arc<dyn SubdomainSolver<T>>);
+
 /// Local sparse direct factorization of the subdomain matrix.
 pub struct DirectSubdomainSolver<T: FactorScalar>(pub DirectSolver<T>);
 
@@ -79,7 +82,13 @@ pub fn graph_partition(graph: &Graph, parts: usize) -> Vec<usize> {
         let left_ids: Vec<usize> = left.iter().map(|&v| ids[v]).collect();
         let right_ids: Vec<usize> = right.iter().map(|&v| ids[v]).collect();
         recurse(&left_graph, &left_ids, left_parts, first, assignment);
-        recurse(&right_graph, &right_ids, parts - left_parts, first + left_parts, assignment);
+        recurse(
+            &right_graph,
+            &right_ids,
+            parts - left_parts,
+            first + left_parts,
+            assignment,
+        );
     }
     let ids: Vec<usize> = (0..n).collect();
     recurse(graph, &ids, parts.max(1), 0, &mut assignment);
@@ -103,7 +112,11 @@ pub struct AdditiveSchwarz<T> {
 
 impl<T: FactorScalar> AdditiveSchwarz<T> {
     /// Partitions the matrix graph and factors every overlapping subdomain matrix directly.
-    pub fn new(matrix: CsrRef<'_, T>, options: &SchwarzOptions, control: SolveControl<'_>) -> SolverResult<Self> {
+    pub fn new(
+        matrix: CsrRef<'_, T>,
+        options: &SchwarzOptions,
+        control: SolveControl<'_>,
+    ) -> SolverResult<Self> {
         let graph = Graph::from_matrix(matrix);
         let assignment = graph_partition(&graph, options.subdomains);
         let sets = overlapping_sets(&graph, &assignment, options.subdomains, options.overlap);
@@ -111,7 +124,11 @@ impl<T: FactorScalar> AdditiveSchwarz<T> {
             control.check()?;
             let (indices, owned) = &sets[part];
             let sub: CsrMatrix<T> = matrix.submatrix(indices, indices);
-            let solver = DirectSolver::new(sub.as_ref().into(), DirectOptions::new(options.local_kind), SolveControl::NONE)?;
+            let solver = DirectSolver::new(
+                sub.as_ref().into(),
+                DirectOptions::new(options.local_kind),
+                SolveControl::NONE,
+            )?;
             Ok(Subdomain {
                 indices: indices.clone(),
                 owned: owned.clone(),
@@ -131,7 +148,7 @@ impl<T: crate::scalar::Scalar> AdditiveSchwarz<T> {
     /// Uses caller-supplied subdomain index sets and solvers (e.g. remote workers).
     pub fn from_subdomains(
         n: usize,
-        subdomains: Vec<(Vec<usize>, Vec<bool>, Arc<dyn SubdomainSolver<T>>)>,
+        subdomains: Vec<SubdomainInput<T>>,
         restricted: bool,
     ) -> SolverResult<Self> {
         let mut covered = vec![false; n];
@@ -143,10 +160,16 @@ impl<T: crate::scalar::Scalar> AdditiveSchwarz<T> {
             for &i in &indices {
                 covered[i] = true;
             }
-            out.push(Subdomain { indices, owned, solver });
+            out.push(Subdomain {
+                indices,
+                owned,
+                solver,
+            });
         }
         if let Some(missing) = covered.iter().position(|c| !c) {
-            return Err(SolverError::InvalidStructure(format!("row {missing} is in no subdomain")));
+            return Err(SolverError::InvalidStructure(format!(
+                "row {missing} is in no subdomain"
+            )));
         }
         Ok(Self {
             n,
@@ -161,7 +184,12 @@ impl<T: crate::scalar::Scalar> AdditiveSchwarz<T> {
 }
 
 /// Owned parts plus `overlap` layers of neighbors.
-fn overlapping_sets(graph: &Graph, assignment: &[usize], parts: usize, overlap: usize) -> Vec<(Vec<usize>, Vec<bool>)> {
+fn overlapping_sets(
+    graph: &Graph,
+    assignment: &[usize],
+    parts: usize,
+    overlap: usize,
+) -> Vec<(Vec<usize>, Vec<bool>)> {
     let n = graph.vertex_count();
     (0..parts)
         .map(|part| {

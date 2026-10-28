@@ -95,7 +95,7 @@ impl Drop for ChildExit {
     }
 }
 impl Port {
-    pub fn validate(
+    fn validate_capability(
         &self,
         runtime: Option<&RuntimeContext>,
         handle: &ScopedFunctionHandle,
@@ -107,24 +107,60 @@ impl Port {
             return Err(failure(Failure::Foreign));
         }
         check_original_cancellation(self.origin.runtime(), self.origin.token())?;
+        Ok(())
+    }
+
+    fn validate_retention(
+        &self,
+        runtime: Option<&RuntimeContext>,
+        handle: &ScopedFunctionHandle,
+    ) -> BuiltinResult<()> {
+        self.validate_capability(runtime, handle)?;
+        require_ordinary_queue(runtime)
+    }
+
+    pub fn validate(
+        &self,
+        runtime: Option<&RuntimeContext>,
+        handle: &ScopedFunctionHandle,
+    ) -> BuiltinResult<()> {
+        self.validate_capability(runtime, handle)?;
         if !self.driving.get() {
             return Err(failure(Failure::Unavailable));
         }
-        crate::context::host_allocation::require_unbounded_workspace(
-            runtime,
-            "scoped callable",
-            "finite host-memory scoped-callable invocation is unsupported",
-        )?;
+        require_ordinary_queue(runtime)?;
         if self.busy.get() {
             return Err(failure(Failure::Busy));
         }
         Ok(())
     }
 }
+
+fn require_ordinary_queue(runtime: Option<&RuntimeContext>) -> BuiltinResult<()> {
+    crate::context::host_allocation::require_unbounded_workspace(
+        runtime,
+        "scoped callable",
+        "finite host-memory scoped-callable invocation is unsupported",
+    )
+}
+
 pub(super) fn lookup(
     runtime: Option<&RuntimeContext>,
     handle: &ScopedFunctionHandle,
 ) -> BuiltinResult<Rc<Port>> {
+    let port = registered(handle)?;
+    port.validate(runtime, handle)?;
+    Ok(port)
+}
+
+pub(super) fn validate_retention(
+    runtime: Option<&RuntimeContext>,
+    handle: &ScopedFunctionHandle,
+) -> BuiltinResult<()> {
+    registered(handle)?.validate_retention(runtime, handle)
+}
+
+fn registered(handle: &ScopedFunctionHandle) -> BuiltinResult<Rc<Port>> {
     if !handle.is_live() {
         return Err(failure(Failure::Expired));
     }
@@ -136,7 +172,6 @@ pub(super) fn lookup(
                 .and_then(Weak::upgrade)
         })
         .ok_or_else(|| failure(Failure::Unavailable))?;
-    port.validate(runtime, handle)?;
     Ok(port)
 }
 

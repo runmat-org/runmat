@@ -27,6 +27,8 @@ pin_project_lite::pin_project! {
 /// Run a fallible preparation and then its selected successor without retaining
 /// the completed preparation in the successor's poll chain. This composition
 /// adds no allocation, task, execution scope or admission authority.
+/// Inline construction avoids another by-value future-sized call frame.
+#[inline(always)]
 pub fn after_result<F, G, M, T, O, E>(first: F, next: M) -> impl Future<Output = Result<O, E>>
 where
     F: Future<Output = Result<T, E>>,

@@ -401,11 +401,33 @@ fn outcome_has_named_upsert(
     name: &str,
     expected: &runmat_value::Value,
 ) -> bool {
-    outcome
+    let matched = outcome
         .workspace_delta
         .upserts
         .iter()
-        .any(|upsert| upsert.name.0 == name && upsert.value == *expected)
+        .any(|upsert| upsert.name.0 == name && upsert.value == *expected);
+    if !matched {
+        let actual = outcome
+            .workspace_delta
+            .upserts
+            .iter()
+            .find(|upsert| upsert.name.0 == name);
+        eprintln!(
+            "workspace assertion for {name}: expected {expected}, actual {:?}; diagnostics {:?}",
+            actual.map(|upsert| upsert.value.to_string()),
+            outcome
+                .diagnostics
+                .iter()
+                .map(|diagnostic| (
+                    &diagnostic.code,
+                    &diagnostic.message,
+                    &diagnostic.span,
+                    &diagnostic.callstack,
+                ))
+                .collect::<Vec<_>>()
+        );
+    }
+    matched
 }
 
 fn stdout_text(outcome: &abi::ExecutionOutcome) -> String {
@@ -1482,7 +1504,7 @@ fn execute_text_request_supports_cell_brace_range_assignment_from_multi_output_c
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         c = {0, 0};
-        c{1:2} = pair(10);
+        [c{1:2}] = pair(10);
         a = c{1};
         b = c{2};
         function varargout = pair(x)
@@ -1501,6 +1523,15 @@ fn execute_text_request_supports_cell_brace_range_assignment_from_multi_output_c
         "b",
         &runmat_value::Value::Num(12.0)
     ));
+    let bare = execute_text_request(&mut session, "c{1:2} = pair(20);")
+        .expect("bare assignment reports its language error");
+    assert!(
+        bare.diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "RunMat:CellAssignmentArityMismatch" }),
+        "bare assignment must not request multiple outputs: {:?}",
+        bare.diagnostics
+    );
 }
 
 #[test]
@@ -3567,7 +3598,7 @@ classdef CB
     Count = 0;
   end
   methods(Static)
-    function on_tick(src)
+    function on_tick(src, eventData)
       CB.Count = CB.Count + 1;
     end
   end
@@ -3671,7 +3702,7 @@ classdef CB
     Count = 0;
   end
   methods(Static)
-    function on_tick(src)
+    function on_tick(src, eventData)
       CB.Count = CB.Count + 1;
     end
   end
@@ -3773,7 +3804,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:UndefinedFunction"
+        ))
     ));
 }
 
@@ -3860,7 +3893,7 @@ end
     .expect("write class source");
     std::fs::write(
         tmp.path().join("main.m"),
-        "a = H(); a.x = 1; b = a; a = call_method(a, 'subsasgn', '.', 'x', 9); y = b.x;",
+        "a = H(); a.x = 1; b = a; s = struct('type', '.', 'subs', 'x'); a = call_method(a, 'subsasgn', s, 9); y = b.x;",
     )
     .expect("write script source");
 
@@ -3893,7 +3926,7 @@ end
     .expect("write class source");
     std::fs::write(
         tmp.path().join("main.m"),
-        "a = H(); a.x = 11; y = call_method(a, 'subsref', '.', 'x');",
+        "a = H(); a.x = 11; s = struct('type', '.', 'subs', 'x'); y = call_method(a, 'subsref', s);",
     )
     .expect("write script source");
 
@@ -4904,7 +4937,8 @@ classdef A
       obj.x = v;
     end
     function y = f(obj, n)
-      y = obj.x + n;
+      peer = SuperCallPeer(0);
+      y = obj.x + n + peer.x;
     end
   end
 end
@@ -4912,12 +4946,17 @@ end
     )
     .expect("write class source");
     std::fs::write(
+        tmp.path().join("SuperCallPeer.m"),
+        "classdef SuperCallPeer\nproperties\nx\nend\nmethods\nfunction obj = SuperCallPeer(v)\nobj.x = v;\nend\nend\nend\n",
+    ).expect("write independent receiver class");
+    std::fs::write(
         tmp.path().join("B.m"),
         r#"
 classdef B < pkg.sub.A
   methods
     function obj = B(v)
       obj@pkg.sub.A(v + 1);
+      obj.x = f@pkg.sub.A(obj, 0);
     end
     function y = f(obj, n)
       y = f@pkg.sub.A(obj, n + 2);
@@ -4929,35 +4968,95 @@ end
     .expect("write class source");
     std::fs::write(
         tmp.path().join("main.m"),
-        "b = B(4); x = b.x; y = b.f(3); cls = class(b); isaA = isa(b,'pkg.sub.A');",
+        "b = B(4); x = b.x; y = b.f(3); cls = class(b); isaA = isa(b,'pkg.sub.A'); pending = parfeval(@(receiver) receiver.f(3), 1, b); workerY = fetchOutputs(pending);",
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
-    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
-        .expect("execute script");
+    let native_path = tmp.path().join("native_main.m");
+    std::fs::write(
+        &native_path,
+        "b = B(4); x = b.x; y = b.f(3); cls = class(b); isaA = isa(b,'pkg.sub.A');",
+    )
+    .expect("write native method witness");
+    for enable_jit in [false, true] {
+        if enable_jit && !cfg!(all(feature = "jit", not(target_arch = "wasm32"))) {
+            continue;
+        }
+        let mut session = RunMatSession::with_options(enable_jit, false).expect("session init");
+        #[cfg(not(target_arch = "wasm32"))]
+        session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+            generic_hot_threshold: 1,
+            specialized_hot_threshold: 100,
+            deterministic: true,
+            ..Default::default()
+        });
+        let mut used_native = false;
+        for _ in 0..if enable_jit { 5 } else { 1 } {
+            let selected_path = if enable_jit {
+                &native_path
+            } else {
+                &source_path
+            };
+            let outcome =
+                execute_path_request(&mut session, selected_path.to_string_lossy().as_ref())
+                    .expect("execute script");
+            used_native |= outcome.used_jit;
+            for (name, expected) in [
+                ("x", runmat_value::Value::Num(5.0)),
+                ("y", runmat_value::Value::Num(10.0)),
+                ("cls", runmat_value::Value::String("B".to_string().into())),
+                ("isaA", runmat_value::Value::Bool(true)),
+            ] {
+                assert!(outcome_has_named_upsert(&outcome, name, &expected));
+            }
+            if !enable_jit {
+                assert!(outcome_has_named_upsert(
+                    &outcome,
+                    "workerY",
+                    &runmat_value::Value::Num(10.0)
+                ));
+            }
+        }
+        assert_eq!(
+            used_native, enable_jit,
+            "exercise the selected execution tier"
+        );
+    }
+}
 
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "x",
-        &runmat_value::Value::Num(5.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "y",
-        &runmat_value::Value::Num(10.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "cls",
-        &runmat_value::Value::String("B".to_string().into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "isaA",
-        &runmat_value::Value::Bool(true)
-    ));
+#[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
+#[test]
+fn adaptive_native_future_calls_decline_before_prefix_effects() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..Default::default()
+    });
+    execute_text_request(&mut session, "runs = 0;").expect("seed prefix counter");
+    for attempt in 1..=3 {
+        let outcome = execute_text_request(
+            &mut session,
+            "runs = runs + 1; pending = parfeval(@(n) n + 1, 1, runs); answer = fetchOutputs(pending);",
+        )
+        .expect("adaptive future execution");
+        assert!(outcome.diagnostics.is_empty(), "{outcome:#?}");
+        assert!(
+            !outcome.used_jit,
+            "executor-only calls decline before native entry"
+        );
+        let workspace = session.get_variables().expect("workspace");
+        assert_eq!(
+            workspace.get("runs"),
+            Some(&runmat_value::Value::Num(f64::from(attempt)))
+        );
+        assert_eq!(
+            workspace.get("answer"),
+            Some(&runmat_value::Value::Num(f64::from(attempt + 1)))
+        );
+    }
 }
 
 #[test]
@@ -5781,7 +5880,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "m",
-        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodProtected"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -6970,12 +7069,18 @@ fn execute_path_request_supports_imported_static_listener_callback_dispatch() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
+        tmp.path().join("EventPoint.m"),
+        "classdef EventPoint < handle\n properties\n x = 0\n end\n events\n changed\n end\nend",
+    )
+    .expect("write event source");
+    std::fs::write(
         tmp.path().join("+pkg").join("CB.m"),
         r#"
 classdef CB
   methods(Static)
-    function k(src, v)
-      src.x = v + 1;
+    function k(src, eventData)
+      assert(isa(eventData, 'event.EventData'));
+      src.x = src.x + 1;
     end
   end
 end
@@ -6984,7 +7089,7 @@ end
     .expect("write class source");
     std::fs::write(
         tmp.path().join("main.m"),
-        "import pkg.CB; __register_test_classes(); h = new_handle_object('Point'); addlistener(h, 'changed', @CB.k); notify(h, 'changed', 42); y = h.x;",
+        "import pkg.CB; h = EventPoint(); h.x = 42; addlistener(h, 'changed', @CB.k); notify(h, 'changed'); y = h.x;",
     )
     .expect("write script source");
 
@@ -12344,7 +12449,7 @@ fn local_function_call_uses_semantic_vm() {
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -12718,18 +12823,18 @@ fn feval_anonymous_handle_uses_semantic_vm() {
 }
 
 #[test]
-fn feval_string_local_function_uses_semantic_handle() {
+fn feval_string_local_function_uses_semantic_registry() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "y = feval('inc', 2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
         .expect("compile feval string local function call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "local feval string callee should lower to a semantic function handle"
+        "textual feval keeps runtime name selection instead of freezing a handle"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -12986,20 +13091,13 @@ fn try_catch_binding_uses_semantic_vm() {
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
-    let y_message = outcome
-        .workspace_delta
-        .upserts
-        .iter()
-        .find_map(|upsert| match &upsert.key {
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y" => {
-                Some(upsert.value.to_string())
-            }
-            _ => None,
-        })
-        .expect("try/catch binding should materialize y");
     assert!(
-        y_message == "'boom'",
-        "unexpected catch message payload: {y_message:?}"
+        outcome_has_named_upsert(
+            &outcome,
+            "y",
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("boom")),
+        ),
+        "try/catch binding should materialize the exact exception text"
     );
 }
 
@@ -13019,8 +13117,8 @@ fn indexed_member_slice_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSlice(..)) }),
-        "indexed member slice assignment should lower to typed slice store bytecode"
+            .any(|instr| { matches!(instr, runmat_vm::Instr::BeginFixedAssignment { .. }) }),
+        "indexed member slice assignment should retain its typed prepared destination"
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
@@ -13044,19 +13142,17 @@ fn dotted_member_index_call_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallMethodOrMemberIndexMulti {
-                identity,
-                arg_count: 1,
-                out_count: 1,
+            runmat_vm::Instr::ReadSubscriptPath {
+                selection: runmat_types::SequenceUse::RequireSingle,
                 ..
-            } if identity.display_name().as_deref() == Some("a")
+            }
         )),
         "dotted member index call should lower to typed method/member-index bytecode"
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "2"
     }));
 }
@@ -13075,15 +13171,17 @@ fn dotted_member_index_expansion_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { identity, out_count: 1, .. }
-                if identity.display_name().as_deref() == Some("a")
+            runmat_vm::Instr::ReadSubscriptPath {
+                selection: runmat_types::SequenceUse::RequireSingle,
+                ..
+            }
         )),
         "expanded dotted member index call should lower to typed expansion bytecode"
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "20"
     }));
 }
@@ -13162,7 +13260,7 @@ fn local_function_with_cell_expansion_uses_semantic_vm() {
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -13188,15 +13286,15 @@ fn cellfun_named_local_function_uses_semantic_callback() {
         "local callback target should be available as semantic function bytecode"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "local string callback should be bound to a semantic function handle"
+        "textual callbacks retain runtime name selection rather than freezing a handle"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -13264,11 +13362,11 @@ fn cellfun_session_function_uses_semantic_registry() {
         "session semantic callback target should be indexed by source ownership"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "session string callback should be bound to a semantic function handle"
+        "textual session callbacks retain runtime name selection"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -13280,21 +13378,22 @@ fn cellfun_session_function_uses_semantic_registry() {
 #[test]
 fn arrayfun_named_local_function_uses_semantic_callback() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let source =
         "A = [2, 3]; B = arrayfun('inc', A); y = B(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
         .expect("compile named local arrayfun callback");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "local arrayfun string callback should be bound to a semantic function handle"
+        "textual arrayfun callbacks retain runtime name selection"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "4"
     }));
 }
@@ -13302,6 +13401,7 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
 #[test]
 fn arrayfun_session_function_uses_semantic_registry() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
@@ -13313,15 +13413,15 @@ fn arrayfun_session_function_uses_semantic_registry() {
         .compile_input(source)
         .expect("compile session arrayfun callback");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "session arrayfun string callback should be bound to a semantic function handle"
+        "textual session arrayfun callbacks retain runtime name selection"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "4"
     }));
 }
@@ -14044,11 +14144,11 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
         .compile_input("[a, b] = feval('pair', 2);")
         .expect("compile feval string multi-output session call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
         )),
-        "session feval string callee should carry semantic identity"
+        "textual feval must not freeze a session definition into a handle"
     );
     assert!(
         prepared
@@ -14061,11 +14161,11 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
     let outcome =
         execute_text_request(&mut session, "[a, b] = feval('pair', 2);").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "a")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
     }));
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "b")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -14111,11 +14211,11 @@ fn session_feval_string_expansion_uses_semantic_registry() {
         .compile_input("C = {2, 3}; y = feval('add2', C{:});")
         .expect("compile feval string expansion session call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "add2"
         )),
-        "session feval string expansion callee should carry semantic identity"
+        "textual feval expansion must not freeze a session definition into a handle"
     );
     assert!(
         prepared
@@ -14128,7 +14228,7 @@ fn session_feval_string_expansion_uses_semantic_registry() {
     let outcome = execute_text_request(&mut session, "C = {2, 3}; y = feval('add2', C{:});")
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "5"
     }));
 }
@@ -14179,11 +14279,11 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
         .compile_input("C = {2}; [a, b] = feval('pair', C{:});")
         .expect("compile feval string expansion multi-output session call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
         )),
-        "session feval string expansion multi-output callee should carry semantic identity"
+        "textual feval expansion must not freeze a session definition into a handle"
     );
     assert!(
         prepared
@@ -14196,11 +14296,11 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
     let outcome = execute_text_request(&mut session, "C = {2}; [a, b] = feval('pair', C{:});")
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "a")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
     }));
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "b")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -14376,9 +14476,9 @@ fn indexed_cell_member_assignment_uses_semantic_vm() {
 }
 
 #[test]
-fn cell_member_access_uses_semantic_vm() {
+fn cell_member_access_requires_indexing_the_cell_contents() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = "C = {struct(), struct()}; C{1}.a = 5; C{2}.a = 6; D = C.a; y = D{2};";
+    let source = "C = {struct(), struct()}; C{1}.a = 5; C{2}.a = 6; D = C.a;";
     let prepared = session
         .compile_input(source)
         .expect("compile cell member access");
@@ -14388,16 +14488,20 @@ fn cell_member_access_uses_semantic_vm() {
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
-            && upsert.value.to_string() == "6"
-    }));
+    assert_eq!(outcome.diagnostics.len(), 1);
+    assert_eq!(outcome.diagnostics[0].code, "RunMat:LoadMember");
+    let verification = execute_text_request(
+        &mut session,
+        "assert(iscell(C)); assert(C{1}.a == 5); assert(C{2}.a == 6);",
+    )
+    .expect("inspect the preserved cells after rejection");
+    assert!(!verification.has_errors(), "{:?}", verification.diagnostics);
 }
 
 #[test]
-fn cell_member_assignment_uses_semantic_vm() {
+fn cell_member_assignment_does_not_reclassify_cells_as_structure_arrays() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = "C = {struct(), struct()}; C.a = 9; y = C{2}.a;";
+    let source = "C = {struct(), struct()}; C.a = 9;";
     let prepared = session
         .compile_input(source)
         .expect("compile cell member assignment");
@@ -14407,10 +14511,14 @@ fn cell_member_assignment_uses_semantic_vm() {
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
-            && upsert.value.to_string() == "9"
-    }));
+    assert_eq!(outcome.diagnostics.len(), 1);
+    assert_eq!(outcome.diagnostics[0].code, "RunMat:StoreMember");
+    let verification = execute_text_request(
+        &mut session,
+        "assert(iscell(C)); assert(isempty(fieldnames(C{1}))); assert(isempty(fieldnames(C{2})));",
+    )
+    .expect("inspect the unchanged cells after rejection");
+    assert!(!verification.has_errors(), "{:?}", verification.diagnostics);
 }
 
 #[test]
@@ -14446,7 +14554,7 @@ fn scalar_struct_paren_member_assignment_uses_semantic_vm() {
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "5"
     }));
 }
@@ -15947,14 +16055,13 @@ fn testing_diagnostic_log_resolves_function_and_instance_method_calls() {
         let source = format!(
             "testCase = matlab.unittest.TestCase(); diagnostic = matlab.unittest.diagnostics.StringDiagnostic('ready'); {invocation};"
         );
-        let error = execute_text_request(&mut session, &source)
-            .expect_err("logging without an active test lifecycle must fail");
-        let RunError::Runtime(error) = error else {
-            panic!("{invocation} should reach the runtime method implementation: {error}");
-        };
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:Testing:InvalidDiagnostic"),
+        let outcome = execute_text_request(&mut session, &source)
+            .expect("language errors are published in the execution outcome");
+        assert!(
+            outcome.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "RunMat:Testing:InvalidDiagnostic"
+                    && diagnostic.message.contains("active test lifecycle")
+            }),
             "{invocation} must dispatch to the testing log method"
         );
     }
@@ -16380,12 +16487,15 @@ fn deterministic_interactive_tiering_invalidates_redefined_session_functions() {
     assert!(used_native);
     let compilations_before_redefinition = session.generic_native_cache_counts().0;
 
-    execute_text_request(
+    let redefinition = execute_text_request(
         &mut session,
         "definition_epoch = 2;\nfunction y = hotHelper(x)\ny = x + 10;\nend",
     )
     .expect("redefine helper");
-    execute_text_request(&mut session, "answer = hotHelper(1);").expect("invoke redefined helper");
+    assert!(!redefinition.has_errors(), "{redefinition:#?}");
+    let invocation = execute_text_request(&mut session, "answer = hotHelper(1);")
+        .expect("invoke redefined helper");
+    assert!(!invocation.has_errors(), "{invocation:#?}");
     assert_eq!(
         session.get_variables().unwrap().get("answer"),
         Some(&runmat_value::Value::Num(11.0))

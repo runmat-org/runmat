@@ -1673,47 +1673,18 @@ pub trait RuntimeProgramService {
 /// Narrow, typed ports composed by the host. An absent port is meaningful and
 /// produces a stable capability error through the corresponding `require_*`
 /// accessor; there is no string-keyed service locator.
+/// Invocation clones share the immutable composition. Explicit service
+/// reconfiguration creates a successor snapshot; caller-workspace projection
+/// remains inline and does not allocate or copy the service table.
 #[derive(Clone)]
 pub struct RuntimeServicePorts {
-    call: Option<Rc<dyn RuntimeCallService>>,
-    builtin: Option<Rc<dyn RuntimeBuiltinService>>,
     workspace: Option<Rc<dyn RuntimeWorkspaceService>>,
-    base_workspace: Option<Rc<dyn RuntimeBaseWorkspaceService>>,
-    object: Option<Rc<dyn RuntimeObjectService>>,
-    host: Option<Rc<dyn RuntimeHostService>>,
-    graphics_presentation: Option<Rc<dyn RuntimeGraphicsPresentationService>>,
-    graphics_callbacks: Option<super::WeakRuntimeGraphicsCallbackQueue>,
-    http: Option<Rc<dyn RuntimeHttpService>>,
-    preferences: Option<Rc<dyn RuntimePreferenceService>>,
-    user_path: Option<Rc<dyn RuntimeUserPathService>>,
-    #[cfg(not(target_arch = "wasm32"))]
-    process: Option<Rc<dyn RuntimeProcessService>>,
-    tcp: Option<Rc<dyn RuntimeTcpService>>,
-    error: Option<Rc<dyn RuntimeErrorService>>,
-    acceleration: Option<Rc<dyn RuntimeAccelerationService>>,
-    placement: Option<Rc<dyn RuntimePlacementService>>,
-    host_effect_resources: Option<Rc<dyn RuntimeHostEffectResourceService>>,
-    native: Option<Rc<dyn RuntimeNativeService>>,
-    foreign: Option<Rc<dyn RuntimeForeignService>>,
-    parallel: Option<Rc<dyn RuntimeParallelService>>,
-    spmd: Option<Rc<dyn RuntimeSpmdService>>,
-    distributed: Option<Rc<dyn RuntimeDistributedService>>,
-    collective: Option<Rc<dyn RuntimeCollectiveService>>,
-    timing: RuntimeTimingPort,
-    local_tasks: Option<Rc<dyn super::RuntimeLocalTaskService>>,
-    source_evaluation: Option<Rc<dyn super::RuntimeSourceEvaluationService>>,
-    selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
-    selected_local: Option<Rc<RuntimeSelectedLocalServices>>,
-    selected_network: Option<selected_network::RuntimeSelectedNetworkService>,
-    selected_ui: Option<selected_external::SelectedHostPort>,
-    selected_callback: Option<selected_external::SelectedCallbackPort>,
-    selected_dynamic: Option<selected_external::SelectedDynamicPort>,
-    blocking_cpu: Option<Rc<dyn crate::execution::RuntimeBlockingCpuService>>,
-    owned_builtin_work: Option<Rc<dyn crate::execution::RuntimeOwnedBuiltinWorkService>>,
-    callable_artifacts: Option<Rc<dyn super::RuntimeCallableArtifactService>>,
-    program: Option<Rc<dyn RuntimeProgramService>>,
-    analysis: Option<Rc<dyn RuntimeAnalysisService>>,
+    shared: Rc<ServicePortSnapshot>,
 }
+
+#[path = "services/snapshot.rs"]
+mod snapshot;
+use snapshot::ServicePortSnapshot;
 
 impl Default for RuntimeServicePorts {
     fn default() -> Self {
@@ -1736,47 +1707,49 @@ impl RuntimeServicePorts {
 
     fn with_initial_timing(timing: RuntimeTimingPort) -> Self {
         Self {
-            call: None,
-            builtin: None,
             workspace: None,
-            base_workspace: None,
-            object: None,
-            host: None,
-            graphics_presentation: None,
-            graphics_callbacks: None,
-            http: None,
-            preferences: None,
-            user_path: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            process: None,
-            tcp: None,
-            error: None,
-            acceleration: None,
-            placement: None,
-            host_effect_resources: None,
-            native: None,
-            foreign: None,
-            parallel: None,
-            spmd: None,
-            distributed: None,
-            collective: None,
-            timing,
-            local_tasks: None,
-            source_evaluation: None,
-            selected_source_evaluation: None,
-            selected_local: None,
-            selected_network: None,
-            selected_ui: None,
-            selected_callback: None,
-            selected_dynamic: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            blocking_cpu: Some(crate::execution::native_default_blocking_cpu_service()),
-            #[cfg(target_arch = "wasm32")]
-            blocking_cpu: None,
-            owned_builtin_work: None,
-            callable_artifacts: None,
-            program: None,
-            analysis: None,
+            shared: Rc::new(ServicePortSnapshot {
+                call: None,
+                builtin: None,
+                base_workspace: None,
+                object: None,
+                host: None,
+                graphics_presentation: None,
+                graphics_callbacks: None,
+                http: None,
+                preferences: None,
+                user_path: None,
+                #[cfg(not(target_arch = "wasm32"))]
+                process: None,
+                tcp: None,
+                error: None,
+                acceleration: None,
+                placement: None,
+                host_effect_resources: None,
+                native: None,
+                foreign: None,
+                parallel: None,
+                spmd: None,
+                distributed: None,
+                collective: None,
+                timing,
+                local_tasks: None,
+                source_evaluation: None,
+                selected_source_evaluation: None,
+                selected_local: None,
+                selected_network: None,
+                selected_ui: None,
+                selected_callback: None,
+                selected_dynamic: None,
+                #[cfg(not(target_arch = "wasm32"))]
+                blocking_cpu: Some(crate::execution::native_default_blocking_cpu_service()),
+                #[cfg(target_arch = "wasm32")]
+                blocking_cpu: None,
+                owned_builtin_work: None,
+                callable_artifacts: None,
+                program: None,
+                analysis: None,
+            }),
         }
     }
 }
@@ -1785,53 +1758,68 @@ impl std::fmt::Debug for RuntimeServicePorts {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = formatter.debug_struct("RuntimeServicePorts");
         debug
-            .field("call", &self.call.is_some())
-            .field("builtin", &self.builtin.is_some())
+            .field("call", &self.shared.call.is_some())
+            .field("builtin", &self.shared.builtin.is_some())
             .field("workspace", &self.workspace.is_some())
-            .field("base_workspace", &self.base_workspace.is_some())
-            .field("object", &self.object.is_some())
-            .field("host", &self.host.is_some())
+            .field("base_workspace", &self.shared.base_workspace.is_some())
+            .field("object", &self.shared.object.is_some())
+            .field("host", &self.shared.host.is_some())
             .field(
                 "graphics_presentation",
-                &self.graphics_presentation.is_some(),
+                &self.shared.graphics_presentation.is_some(),
             )
-            .field("graphics_callbacks", &self.graphics_callbacks.is_some())
-            .field("http", &self.http.is_some())
-            .field("preferences", &self.preferences.is_some())
-            .field("user_path", &self.user_path.is_some())
-            .field("tcp", &self.tcp.is_some())
-            .field("error", &self.error.is_some())
-            .field("acceleration", &self.acceleration.is_some())
-            .field("placement", &self.placement.is_some())
+            .field(
+                "graphics_callbacks",
+                &self.shared.graphics_callbacks.is_some(),
+            )
+            .field("http", &self.shared.http.is_some())
+            .field("preferences", &self.shared.preferences.is_some())
+            .field("user_path", &self.shared.user_path.is_some())
+            .field("tcp", &self.shared.tcp.is_some())
+            .field("error", &self.shared.error.is_some())
+            .field("acceleration", &self.shared.acceleration.is_some())
+            .field("placement", &self.shared.placement.is_some())
             .field(
                 "host_effect_resources",
-                &self.host_effect_resources.is_some(),
+                &self.shared.host_effect_resources.is_some(),
             )
-            .field("native", &self.native.is_some())
-            .field("foreign", &self.foreign.is_some())
-            .field("parallel", &self.parallel.is_some())
-            .field("spmd", &self.spmd.is_some())
-            .field("distributed", &self.distributed.is_some())
-            .field("collective", &self.collective.is_some());
+            .field("native", &self.shared.native.is_some())
+            .field("foreign", &self.shared.foreign.is_some())
+            .field("parallel", &self.shared.parallel.is_some())
+            .field("spmd", &self.shared.spmd.is_some())
+            .field("distributed", &self.shared.distributed.is_some())
+            .field("collective", &self.shared.collective.is_some());
         debug.field("timing", &"installed");
-        debug.field("local_tasks", &self.local_tasks.is_some());
-        debug.field("source_evaluation", &self.source_evaluation.is_some());
+        debug.field("local_tasks", &self.shared.local_tasks.is_some());
+        debug.field(
+            "source_evaluation",
+            &self.shared.source_evaluation.is_some(),
+        );
         debug.field(
             "selected_source_evaluation",
-            &self.selected_source_evaluation.is_some(),
+            &self.shared.selected_source_evaluation.is_some(),
         );
-        debug.field("selected_local", &self.selected_local.is_some());
-        debug.field("selected_network", &self.selected_network.is_some());
-        debug.field("selected_ui", &self.selected_ui.is_some());
-        debug.field("selected_callback", &self.selected_callback.is_some());
-        debug.field("selected_dynamic", &self.selected_dynamic.is_some());
-        debug.field("blocking_cpu", &self.blocking_cpu.is_some());
-        debug.field("owned_builtin_work", &self.owned_builtin_work.is_some());
-        debug.field("callable_artifacts", &self.callable_artifacts.is_some());
-        debug.field("program", &self.program.is_some());
-        debug.field("analysis", &self.analysis.is_some());
+        debug.field("selected_local", &self.shared.selected_local.is_some());
+        debug.field("selected_network", &self.shared.selected_network.is_some());
+        debug.field("selected_ui", &self.shared.selected_ui.is_some());
+        debug.field(
+            "selected_callback",
+            &self.shared.selected_callback.is_some(),
+        );
+        debug.field("selected_dynamic", &self.shared.selected_dynamic.is_some());
+        debug.field("blocking_cpu", &self.shared.blocking_cpu.is_some());
+        debug.field(
+            "owned_builtin_work",
+            &self.shared.owned_builtin_work.is_some(),
+        );
+        debug.field(
+            "callable_artifacts",
+            &self.shared.callable_artifacts.is_some(),
+        );
+        debug.field("program", &self.shared.program.is_some());
+        debug.field("analysis", &self.shared.analysis.is_some());
         #[cfg(not(target_arch = "wasm32"))]
-        debug.field("process", &self.process.is_some());
+        debug.field("process", &self.shared.process.is_some());
         debug.finish()
     }
 }
@@ -1839,19 +1827,20 @@ impl std::fmt::Debug for RuntimeServicePorts {
 macro_rules! port_accessors {
     ($with:ident, $get:ident, $require:ident, $field:ident, $trait_name:ident, $cap:ident) => {
         pub fn $with(mut self, service: Rc<dyn $trait_name>) -> Self {
-            self.$field = Some(service);
+            Rc::make_mut(&mut self.shared).$field = Some(service);
             self
         }
 
         pub fn $get(&self) -> Option<&Rc<dyn $trait_name>> {
-            self.$field.as_ref()
+            self.shared.$field.as_ref()
         }
 
         pub fn $require(
             &self,
             operation: impl Into<String>,
         ) -> Result<&Rc<dyn $trait_name>, RuntimeCapabilityError> {
-            self.$field
+            self.shared
+                .$field
                 .as_ref()
                 .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::$cap, operation))
         }
@@ -1862,7 +1851,7 @@ impl RuntimeServicePorts {
     /// Omit the physical owned-CPU service. NeverYield embeddings execute
     /// supported kernels inline; cooperative native hosts require a CPU service.
     pub fn without_blocking_cpu(mut self) -> Self {
-        self.blocking_cpu = None;
+        Rc::make_mut(&mut self.shared).blocking_cpu = None;
         self
     }
 
@@ -1870,26 +1859,26 @@ impl RuntimeServicePorts {
         mut self,
         service: Rc<dyn crate::execution::RuntimeBlockingCpuService>,
     ) -> Self {
-        self.blocking_cpu = Some(service);
+        Rc::make_mut(&mut self.shared).blocking_cpu = Some(service);
         self
     }
 
     pub fn blocking_cpu(&self) -> Option<&Rc<dyn crate::execution::RuntimeBlockingCpuService>> {
-        self.blocking_cpu.as_ref()
+        self.shared.blocking_cpu.as_ref()
     }
 
     pub fn with_owned_builtin_work(
         mut self,
         service: Rc<dyn crate::execution::RuntimeOwnedBuiltinWorkService>,
     ) -> Self {
-        self.owned_builtin_work = Some(service);
+        Rc::make_mut(&mut self.shared).owned_builtin_work = Some(service);
         self
     }
 
     pub fn owned_builtin_work(
         &self,
     ) -> Option<&Rc<dyn crate::execution::RuntimeOwnedBuiltinWorkService>> {
-        self.owned_builtin_work.as_ref()
+        self.shared.owned_builtin_work.as_ref()
     }
 
     /// Only effect-routing ports affect the command's device-route proof.
@@ -1903,31 +1892,35 @@ impl RuntimeServicePorts {
                 _ => false,
             }
         }
-        same(self.call.as_ref(), other.call.as_ref())
-            && same(self.acceleration.as_ref(), other.acceleration.as_ref())
-            && same(self.foreign.as_ref(), other.foreign.as_ref())
+        same(self.shared.call.as_ref(), other.shared.call.as_ref())
+            && same(
+                self.shared.acceleration.as_ref(),
+                other.shared.acceleration.as_ref(),
+            )
+            && same(self.shared.foreign.as_ref(), other.shared.foreign.as_ref())
     }
 
     pub fn with_local_tasks(mut self, service: Rc<dyn super::RuntimeLocalTaskService>) -> Self {
-        self.local_tasks = Some(service);
+        Rc::make_mut(&mut self.shared).local_tasks = Some(service);
         self
     }
 
     pub fn local_tasks(&self) -> Option<&Rc<dyn super::RuntimeLocalTaskService>> {
-        self.local_tasks.as_ref()
+        self.shared.local_tasks.as_ref()
     }
 
     pub fn require_local_tasks(
         &self,
         operation: impl Into<String>,
     ) -> Result<&Rc<dyn super::RuntimeLocalTaskService>, RuntimeCapabilityError> {
-        self.local_tasks
+        self.shared
+            .local_tasks
             .as_ref()
             .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::LocalTasks, operation))
     }
 
     pub fn with_timing(mut self, service: Rc<dyn RuntimeTimingService>) -> Self {
-        self.timing = match self.timing {
+        Rc::make_mut(&mut self.shared).timing = match self.shared.timing.clone() {
             RuntimeTimingPort::Hosted(_) => RuntimeTimingPort::Hosted(service),
             RuntimeTimingPort::SelectedUnavailable | RuntimeTimingPort::Selected { .. } => {
                 RuntimeTimingPort::SelectedUnavailable
@@ -1939,12 +1932,12 @@ impl RuntimeServicePorts {
     /// Restrict a selected invocation before its exact Clock is installed.
     /// Generic timing injection cannot remove this restriction.
     pub fn without_timing(mut self) -> Self {
-        self.timing = RuntimeTimingPort::SelectedUnavailable;
+        Rc::make_mut(&mut self.shared).timing = RuntimeTimingPort::SelectedUnavailable;
         self
     }
 
     pub fn timing(&self) -> Result<&Rc<dyn RuntimeTimingService>, crate::RuntimeError> {
-        match &self.timing {
+        match &self.shared.timing {
             RuntimeTimingPort::Hosted(service) | RuntimeTimingPort::Selected { service, .. } => {
                 Ok(service)
             }
@@ -1956,15 +1949,16 @@ impl RuntimeServicePorts {
         }
     }
     pub fn with_call(mut self, service: Rc<dyn RuntimeCallService>) -> Self {
-        self.call = Some(service);
+        Rc::make_mut(&mut self.shared).call = Some(service);
         self
     }
 
     pub fn call(&self) -> Option<&Rc<dyn RuntimeCallService>> {
-        self.selected_callback
+        self.shared
+            .selected_callback
             .as_ref()
             .map(|selected| &selected.call)
-            .or(self.call.as_ref())
+            .or(self.shared.call.as_ref())
     }
 
     pub fn require_call(
@@ -1975,15 +1969,16 @@ impl RuntimeServicePorts {
             .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Call, operation))
     }
     pub fn with_builtin(mut self, service: Rc<dyn RuntimeBuiltinService>) -> Self {
-        self.builtin = Some(service);
+        Rc::make_mut(&mut self.shared).builtin = Some(service);
         self
     }
 
     pub fn builtin(&self) -> Option<&Rc<dyn RuntimeBuiltinService>> {
-        self.selected_dynamic
+        self.shared
+            .selected_dynamic
             .as_ref()
             .map(|selected| &selected.service)
-            .or(self.builtin.as_ref())
+            .or(self.shared.builtin.as_ref())
     }
 
     pub fn require_builtin(
@@ -1993,14 +1988,22 @@ impl RuntimeServicePorts {
         self.builtin()
             .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Builtin, operation))
     }
-    port_accessors!(
-        with_workspace,
-        workspace,
-        require_workspace,
-        workspace,
-        RuntimeWorkspaceService,
-        Workspace
-    );
+    /// Caller-frame projection; changing it never copies the immutable ports.
+    pub fn with_workspace(mut self, service: Rc<dyn RuntimeWorkspaceService>) -> Self {
+        self.workspace = Some(service);
+        self
+    }
+    pub fn workspace(&self) -> Option<&Rc<dyn RuntimeWorkspaceService>> {
+        self.workspace.as_ref()
+    }
+    pub fn require_workspace(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn RuntimeWorkspaceService>, RuntimeCapabilityError> {
+        self.workspace
+            .as_ref()
+            .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Workspace, operation))
+    }
     port_accessors!(
         with_base_workspace,
         base_workspace,
@@ -2013,8 +2016,8 @@ impl RuntimeServicePorts {
         mut self,
         service: Rc<dyn super::RuntimeSourceEvaluationService>,
     ) -> Self {
-        self.source_evaluation = Some(service);
-        self.selected_source_evaluation = None;
+        Rc::make_mut(&mut self.shared).source_evaluation = Some(service);
+        Rc::make_mut(&mut self.shared).selected_source_evaluation = None;
         self
     }
 
@@ -2032,20 +2035,20 @@ impl RuntimeServicePorts {
             .with_identifier("RunMat:SourceEvaluation:SelectedServiceMismatch")
             .build());
         }
-        self.source_evaluation = Some(service);
-        self.selected_source_evaluation = Some(issuer);
+        Rc::make_mut(&mut self.shared).source_evaluation = Some(service);
+        Rc::make_mut(&mut self.shared).selected_source_evaluation = Some(issuer);
         Ok(self)
     }
 
     pub fn source_evaluation(&self) -> Option<&Rc<dyn super::RuntimeSourceEvaluationService>> {
-        self.source_evaluation.as_ref()
+        self.shared.source_evaluation.as_ref()
     }
 
     pub fn require_source_evaluation(
         &self,
         operation: impl Into<String>,
     ) -> Result<&Rc<dyn super::RuntimeSourceEvaluationService>, super::RuntimeCapabilityError> {
-        self.source_evaluation.as_ref().ok_or_else(|| {
+        self.shared.source_evaluation.as_ref().ok_or_else(|| {
             super::RuntimeCapabilityError::new(
                 super::RuntimeCapability::SourceEvaluation,
                 operation,
@@ -2060,7 +2063,7 @@ impl RuntimeServicePorts {
         let service = self
             .require_source_evaluation("execute selected native source evaluation")
             .map_err(super::RuntimeCapabilityError::into_runtime_error)?;
-        if self.selected_source_evaluation.as_ref() != Some(expected) {
+        if self.shared.selected_source_evaluation.as_ref() != Some(expected) {
             return Err(crate::build_runtime_error(
                 "live source-evaluation port differs from the verified selected service issuer",
             )
@@ -2090,16 +2093,16 @@ impl RuntimeServicePorts {
     /// runtime such as a parallel lab. Ordinary procedure frames use
     /// [`Self::without_workspace`] and retain this separate session authority.
     pub fn without_base_workspace(mut self) -> Self {
-        self.base_workspace = None;
+        Rc::make_mut(&mut self.shared).base_workspace = None;
         self
     }
 
     /// Parallel labs cannot borrow their parent's window, surface, or event
     /// queue authority merely because their service ports were cloned.
     pub fn without_graphics_presentation(mut self) -> Self {
-        self.graphics_presentation = None;
-        self.graphics_callbacks = None;
-        if let Some(selected) = &mut self.selected_ui {
+        Rc::make_mut(&mut self.shared).graphics_presentation = None;
+        Rc::make_mut(&mut self.shared).graphics_callbacks = None;
+        if let Some(selected) = &mut Rc::make_mut(&mut self.shared).selected_ui {
             selected.graphics = None;
             selected.callbacks = None;
         }
@@ -2109,7 +2112,7 @@ impl RuntimeServicePorts {
     /// Parallel labs do not inherit the parent session's definition
     /// publication authority. A worker must install its own artifact owner.
     pub fn without_callable_artifacts(mut self) -> Self {
-        self.callable_artifacts = None;
+        Rc::make_mut(&mut self.shared).callable_artifacts = None;
         self
     }
     /// Session-local callback registration authority. The port is weak so a
@@ -2119,15 +2122,15 @@ impl RuntimeServicePorts {
         mut self,
         queue: super::WeakRuntimeGraphicsCallbackQueue,
     ) -> Self {
-        self.graphics_callbacks = Some(queue);
+        Rc::make_mut(&mut self.shared).graphics_callbacks = Some(queue);
         self
     }
 
     pub fn graphics_callback_queue(&self) -> Option<&super::WeakRuntimeGraphicsCallbackQueue> {
-        if let Some(selected) = &self.selected_ui {
+        if let Some(selected) = &self.shared.selected_ui {
             selected.callbacks.as_ref()
         } else {
-            self.graphics_callbacks.as_ref()
+            self.shared.graphics_callbacks.as_ref()
         }
     }
     port_accessors!(
@@ -2139,15 +2142,16 @@ impl RuntimeServicePorts {
         Object
     );
     pub fn with_host(mut self, service: Rc<dyn RuntimeHostService>) -> Self {
-        self.host = Some(service);
+        Rc::make_mut(&mut self.shared).host = Some(service);
         self
     }
 
     pub fn host(&self) -> Option<&Rc<dyn RuntimeHostService>> {
-        self.selected_ui
+        self.shared
+            .selected_ui
             .as_ref()
             .map(|selected| &selected.host)
-            .or(self.host.as_ref())
+            .or(self.shared.host.as_ref())
     }
 
     pub fn require_host(
@@ -2162,15 +2166,15 @@ impl RuntimeServicePorts {
         mut self,
         service: Rc<dyn RuntimeGraphicsPresentationService>,
     ) -> Self {
-        self.graphics_presentation = Some(service);
+        Rc::make_mut(&mut self.shared).graphics_presentation = Some(service);
         self
     }
 
     pub fn graphics_presentation(&self) -> Option<&Rc<dyn RuntimeGraphicsPresentationService>> {
-        if let Some(selected) = &self.selected_ui {
+        if let Some(selected) = &self.shared.selected_ui {
             selected.graphics.as_ref()
         } else {
-            self.graphics_presentation.as_ref()
+            self.shared.graphics_presentation.as_ref()
         }
     }
 
@@ -2183,12 +2187,12 @@ impl RuntimeServicePorts {
         })
     }
     pub fn with_http(mut self, service: Rc<dyn RuntimeHttpService>) -> Self {
-        self.http = Some(service);
+        Rc::make_mut(&mut self.shared).http = Some(service);
         self
     }
 
     pub fn http(&self) -> Option<&Rc<dyn RuntimeHttpService>> {
-        self.http.as_ref()
+        self.shared.http.as_ref()
     }
 
     pub fn require_http(
@@ -2202,7 +2206,8 @@ impl RuntimeServicePorts {
                 operation,
             ));
         }
-        self.http
+        self.shared
+            .http
             .as_ref()
             .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Http, operation))
     }
@@ -2232,12 +2237,12 @@ impl RuntimeServicePorts {
         UserPath
     );
     pub fn with_tcp(mut self, service: Rc<dyn RuntimeTcpService>) -> Self {
-        self.tcp = Some(service);
+        Rc::make_mut(&mut self.shared).tcp = Some(service);
         self
     }
 
     pub fn tcp(&self) -> Option<&Rc<dyn RuntimeTcpService>> {
-        self.tcp.as_ref()
+        self.shared.tcp.as_ref()
     }
 
     pub fn require_tcp(
@@ -2251,7 +2256,8 @@ impl RuntimeServicePorts {
                 operation,
             ));
         }
-        self.tcp
+        self.shared
+            .tcp
             .as_ref()
             .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Tcp, operation))
     }
@@ -2309,7 +2315,7 @@ impl RuntimeServicePorts {
     /// context and restore the foreign port from a weak reference while it
     /// executes without creating a host/session ownership cycle.
     pub fn without_foreign(mut self) -> Self {
-        self.foreign = None;
+        Rc::make_mut(&mut self.shared).foreign = None;
         self
     }
     port_accessors!(
@@ -2365,6 +2371,32 @@ impl RuntimeServicePorts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloned_ports_share_composition_without_sharing_workspace_projection() {
+        let original = RuntimeServicePorts::default();
+        let workspace: Rc<dyn RuntimeWorkspaceService> = Rc::new(ValueOnlyWorkspace::default());
+        let caller = original.clone().with_workspace(Rc::clone(&workspace));
+        assert!(Rc::ptr_eq(&original.shared, &caller.shared));
+        assert!(original.workspace().is_none());
+        assert!(Rc::ptr_eq(caller.workspace().unwrap(), &workspace));
+
+        let cleared = caller.clone().without_workspace();
+        assert!(Rc::ptr_eq(&caller.shared, &cleared.shared));
+        assert!(cleared.workspace().is_none());
+        assert!(caller.workspace().is_some());
+
+        let successor = caller.clone().without_timing();
+        assert!(!Rc::ptr_eq(&caller.shared, &successor.shared));
+        assert!(successor.timing().is_err());
+        assert!(caller.timing().is_ok());
+        assert!(Rc::ptr_eq(successor.workspace().unwrap(), &workspace));
+        assert_eq!(
+            std::mem::size_of::<RuntimeServicePorts>(),
+            std::mem::size_of::<Rc<ServicePortSnapshot>>()
+                + std::mem::size_of::<Option<Rc<dyn RuntimeWorkspaceService>>>(),
+        );
+    }
 
     #[test]
     fn optional_whole_work_defaults_are_typed_and_do_not_hide_spoofed_errors() {

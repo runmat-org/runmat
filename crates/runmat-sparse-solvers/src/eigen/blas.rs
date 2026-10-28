@@ -39,7 +39,21 @@ pub(crate) fn gemm_tn(v: &[f64], k: usize, w: &[f64], p: usize, n: usize) -> Vec
 }
 
 /// `W ← β W + α V H` for `V` (`n × k`), `H` (`k × p`), `W` (`n × p`), all column-major.
-pub(crate) fn gemm_nn(w: &mut [f64], p: usize, alpha: f64, v: &[f64], k: usize, h: &[f64], beta: f64, n: usize) {
+pub(crate) struct ProductScale {
+    pub alpha: f64,
+    pub beta: f64,
+}
+
+pub(crate) fn gemm_nn(
+    w: &mut [f64],
+    p: usize,
+    scale: ProductScale,
+    v: &[f64],
+    k: usize,
+    h: &[f64],
+    n: usize,
+) {
+    let ProductScale { alpha, beta } = scale;
     if p == 0 {
         return;
     }

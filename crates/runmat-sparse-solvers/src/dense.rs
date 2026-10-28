@@ -16,15 +16,21 @@ pub fn symmetric_eigen(a: &[f64], n: usize) -> SolverResult<(Vec<f64>, Vec<f64>)
     if n == 0 {
         return Ok((values, vectors));
     }
-    let parallelism = if n >= 512 { par::faer_par() } else { faer::Par::Seq };
+    let parallelism = if n >= 512 {
+        par::faer_par()
+    } else {
+        faer::Par::Seq
+    };
     let req = faer::linalg::evd::self_adjoint_evd_scratch::<f64>(
         n,
         faer::linalg::evd::ComputeEigenvectors::Yes,
         parallelism,
         Default::default(),
     );
-    let mut buffer = faer::dyn_stack::MemBuffer::try_new(req)
-        .map_err(|_| SolverError::OutOfMemory { bytes: req.size_bytes() as u64 })?;
+    let mut buffer =
+        faer::dyn_stack::MemBuffer::try_new(req).map_err(|_| SolverError::OutOfMemory {
+            bytes: req.size_bytes() as u64,
+        })?;
     faer::linalg::evd::self_adjoint_evd(
         MatRef::from_column_major_slice(a, n, n),
         faer::diag::DiagMut::from_slice_mut(&mut values),
@@ -45,8 +51,10 @@ pub fn cholesky_in_place(a: &mut [f64], n: usize) -> SolverResult<()> {
         faer::Par::Seq,
         Default::default(),
     );
-    let mut buffer = faer::dyn_stack::MemBuffer::try_new(req)
-        .map_err(|_| SolverError::OutOfMemory { bytes: req.size_bytes() as u64 })?;
+    let mut buffer =
+        faer::dyn_stack::MemBuffer::try_new(req).map_err(|_| SolverError::OutOfMemory {
+            bytes: req.size_bytes() as u64,
+        })?;
     faer::linalg::cholesky::llt::factor::cholesky_in_place(
         MatMut::from_column_major_slice_mut(a, n, n),
         Default::default(),
@@ -128,7 +136,7 @@ impl<T: Scalar> DenseLu<T> {
             }
             let pivot = a[k * n + k];
             for i in k + 1..n {
-                a[k * n + i] = a[k * n + i] / pivot;
+                a[k * n + i] /= pivot;
             }
             for c in k + 1..n {
                 let factor = a[c * n + k];
@@ -150,15 +158,15 @@ impl<T: Scalar> DenseLu<T> {
         }
         for c in 0..n {
             let value = b[c];
-            for i in c + 1..n {
-                b[i] -= self.lu[c * n + i] * value;
+            for (i, target) in b.iter_mut().enumerate().take(n).skip(c + 1) {
+                *target -= self.lu[c * n + i] * value;
             }
         }
         for c in (0..n).rev() {
-            b[c] = b[c] / self.lu[c * n + c];
+            b[c] /= self.lu[c * n + c];
             let value = b[c];
-            for i in 0..c {
-                b[i] -= self.lu[c * n + i] * value;
+            for (i, target) in b.iter_mut().enumerate().take(c) {
+                *target -= self.lu[c * n + i] * value;
             }
         }
     }

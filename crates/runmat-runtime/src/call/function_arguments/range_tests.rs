@@ -20,6 +20,44 @@ fn captured(supplied: Vec<Value>) -> RootedFunctionArguments {
     .unwrap();
     RootedFunctionArguments::captured(callable, RootedValues::new(supplied).unwrap()).unwrap()
 }
+
+#[test]
+fn method_receivers_are_function_inputs_not_lexical_slots() {
+    for (role, lexical_count, input_count) in [
+        (runmat_types::FunctionSourceRole::Anonymous, 1, 1),
+        (runmat_types::FunctionSourceRole::Method, 0, 2),
+    ] {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let callable = RetainedValueReadLease::prepare_owned(
+            Value::Closure(Closure::new(
+                "input_owner_fixture".into(),
+                None,
+                role,
+                None,
+                vec![Value::Num(7.)],
+                None,
+            )),
+            &runtime,
+        )
+        .unwrap();
+        let args = RootedFunctionArguments::captured(
+            callable,
+            RootedValues::new(vec![Value::Num(11.)]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(args.lexical_capture_count(), lexical_count);
+        let original = args.get(lexical_count).unwrap() as *const Value;
+        assert_eq!(args.function_inputs().len(), input_count);
+        assert_eq!(
+            args.function_inputs().get(0).unwrap() as *const Value,
+            original
+        );
+        let inputs = args.into_function_inputs();
+        assert_eq!(inputs.len(), input_count);
+        assert_eq!(inputs.get(0).unwrap() as *const Value, original);
+    }
+}
+
 #[test]
 fn borrowed_and_owning_ranges_keep_original_segments_and_exact_iterators() {
     let args = captured(vec![Value::Num(3.), Value::Num(4.)]);

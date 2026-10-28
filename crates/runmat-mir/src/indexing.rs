@@ -58,6 +58,7 @@ pub enum MirSubscriptChainError {
     InvalidCellExpandAll,
     InvalidDottedArgumentRegion,
     InvalidPreparedRegion,
+    InvalidArgumentSpans,
 }
 
 impl fmt::Display for MirSubscriptChainError {
@@ -76,6 +77,9 @@ impl fmt::Display for MirSubscriptChainError {
                 "dotted invocation argument preparation is invalid"
             }
             Self::InvalidPreparedRegion => "subscript preparation is invalid",
+            Self::InvalidArgumentSpans => {
+                "subscript argument spans do not match its syntactic selectors"
+            }
         })
     }
 }
@@ -325,6 +329,13 @@ fn validate_index_step(indexing: &MirIndexing) -> Result<(), MirSubscriptChainEr
 }
 
 fn validate_selector_regions(indexing: &MirIndexing) -> Result<(), MirSubscriptChainError> {
+    if indexing
+        .argument_spans
+        .as_ref()
+        .is_some_and(|spans| spans.len() != indexing.components.len())
+    {
+        return Err(MirSubscriptChainError::InvalidArgumentSpans);
+    }
     validate_index_plan(indexing)?;
     let expanding = indexing
         .components
@@ -373,6 +384,10 @@ fn validate_index_plan(indexing: &MirIndexing) -> Result<(), MirSubscriptChainEr
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirIndexing {
+    /// Original syntactic selector spans, before lowering or expansion. None
+    /// denotes synthetic indexing with no caller-expression provenance.
+    #[serde(default)]
+    pub argument_spans: Option<Vec<runmat_types::Span>>,
     pub kind: IndexKind,
     pub plan: MirIndexPlan,
     pub components: Vec<MirIndexComponent>,

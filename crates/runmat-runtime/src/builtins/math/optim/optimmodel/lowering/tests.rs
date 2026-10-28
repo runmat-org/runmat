@@ -285,14 +285,26 @@ async fn tiny_affine(runtime: &RuntimeContext, x: &RootedValue) -> RootedValue {
 }
 #[test]
 fn terminal_candidates_use_original_affine_law_not_rounded_coefficients() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    // Independent controls share the original runtime, not a single coroutine
+    // containing every control's cold construction frame. Construct each
+    // pinned fixture before entering its executor; retain every assertion.
+    #[inline(never)]
+    fn control<'a, F>(
+        make: impl FnOnce() -> F,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>
+    where
+        F: std::future::Future<Output = ()> + 'a,
+    {
+        Box::pin(make())
+    }
+    block_on(control(|| linear_function_controls(&runtime)));
+    block_on(control(|| products::controls(&runtime)));
+    block_on(control(|| quadratic::controls(&runtime)));
+    block_on(control(|| integer::controls(&runtime)));
+    block_on(control(|| residual::controls(&runtime)));
+    block_on(control(|| equation::controls(&runtime)));
     block_on(async {
-        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
-        linear_function_controls(&runtime).await;
-        products::controls(&runtime).await;
-        quadratic::controls(&runtime).await;
-        integer::controls(&runtime).await;
-        residual::controls(&runtime).await;
-        equation::controls(&runtime).await;
         let policy = policy();
         crate::builtins::math::optim::common::proof_rational::check_arithmetic(policy).await;
         let mut cooperation = policy.cooperation(Some(&runtime)).await.unwrap();

@@ -6,6 +6,7 @@ use runmat_types::{
     NumericFact, OperatorKind, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
     ValueFact, ValueKindFact,
 };
+mod coefficient;
 pub(super) fn shape(
     operator: OperatorKind,
     nodes: &[&Node],
@@ -163,20 +164,20 @@ pub(super) async fn binary(
             return Ok(left_root);
         }
     }
-    let scalar_constant = |node: &Node| {
-        matches!(&node.kind, Kind::Constant(Value::Num(_)))
-            || matches!(&node.kind, Kind::Zero) && node.shape.iter().product::<usize>() == 1
-            || matches!(&node.kind,Kind::Constant(Value::Tensor(value)) if value.len()==1)
+    use coefficient::Shape;
+    let coefficient = match operator {
+        Op::MatrixPower | Op::ElementwisePower | Op::Mrdivide => {
+            Some((right, right_node.node(), Shape::Scalar))
+        }
+        Op::Mldivide => Some((left, left_node.node(), Shape::Scalar)),
+        Op::ElementwiseDivide => Some((right, right_node.node(), Shape::Array)),
+        Op::ElementwiseLeftDivide => Some((left, left_node.node(), Shape::Array)),
+        _ => None,
     };
-    let constant = |node: &Node| matches!(&node.kind, Kind::Constant(_) | Kind::Zero);
-    if (matches!(operator, Op::MatrixPower | Op::ElementwisePower)
-        && !scalar_constant(right_node.node()))
-        || (operator == Op::Mrdivide && !scalar_constant(right_node.node()))
-        || (operator == Op::Mldivide && !scalar_constant(left_node.node()))
-        || (operator == Op::ElementwiseDivide && !constant(right_node.node()))
-        || (operator == Op::ElementwiseLeftDivide && !constant(left_node.node()))
-    {
-        return Err(policy.invalid("this operator requires the documented constant coefficient/exponent; use fcn2optimexpr for unsupported functions"));
+    if let Some((root, node, shape)) = coefficient {
+        if !coefficient::is_constant(root, node, shape, policy, cooperation).await? {
+            return Err(policy.invalid("this operator requires the documented constant coefficient/exponent; use fcn2optimexpr for unsupported functions"));
+        }
     }
     let shape = shape(operator, &[left_node.node(), right_node.node()], policy)?;
     let index_names = construct::unnamed(shape.len(), policy)?;

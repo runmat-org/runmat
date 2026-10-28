@@ -48,12 +48,31 @@ await session.executeRequest({
 | `enableGpu` | Request WebGPU acceleration. Defaults to GPU when WebGPU is available, with CPU fallback otherwise. |
 | `enableJit` | Enable the JIT tier where supported. |
 | `fsProvider` | Provide file I/O for `load`, `save`, scripts, datasets, and path execution. |
+| `applicationSettings` | Set `"isolatedMemory"` for session-local preferences and user-path settings. Omit it for application-owned browser IndexedDB persistence. This setting is separate from file and package storage. |
 | `plotCanvas` | Attach a default plotting canvas during startup. |
 | `telemetryConsent`, `telemetryId`, `telemetryEmitter` | Configure telemetry before the runtime starts. |
 | `logLevel`, `emitFusionPlan`, `callstackLimit`, `errorNamespace` | Configure diagnostics and execution metadata. |
 | `language.compat` | Choose `"runmat"` (the default), `"matlab"`, or `"strict"` language policy. |
 
 GPU initialization is opportunistic in browser contexts. If WebGPU is unavailable, RunMat logs a warning and continues on CPU.
+
+### Node initialization
+
+Node hosts supply the Wasm bytes and select session-isolated application settings rather than browser persistence. An in-memory filesystem keeps script files and outputs separate from application settings:
+
+```ts
+import { readFile } from "node:fs/promises";
+import { createInMemoryFsProvider, initRunMat } from "runmat";
+
+const session = await initRunMat({
+  wasmModule: await readFile(new URL("./pkg-web/runmat_wasm_web_bg.wasm", import.meta.resolve("runmat"))),
+  applicationSettings: "isolatedMemory",
+  fsProvider: createInMemoryFsProvider(),
+  enableGpu: false
+});
+```
+
+Use the Wasm file distributed with the same SDK build. Session-isolated preferences and user-path changes survive `resetSession()` and are discarded when the session is disposed; they do not provide persistent Node application settings.
 
 ### Building the exact CAD browser host
 

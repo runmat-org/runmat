@@ -14,11 +14,11 @@ use std::{
     },
 };
 
-pub(crate) mod scope;
 mod bounded;
 mod handle_commit;
 mod mapped;
 mod rename;
+pub(crate) mod scope;
 mod staged;
 
 #[derive(Clone, Debug)]
@@ -110,7 +110,11 @@ impl MemoryFsProvider {
         ensure_dirs(&mut guard, &self.default_current_dir).expect("default cwd must be valid");
     }
 
-    fn atomic_create_project_path(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+    fn atomic_create_project_path(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+    ) -> io::Result<AtomicCreateResult> {
         let path = normalize_path(path)?;
         let mut guard = self.inner.lock().expect("memory filesystem lock poisoned");
         match guard.entries.get(&path) {
@@ -334,8 +338,15 @@ impl MemoryFsProvider {
 
 #[async_trait(?Send)]
 impl FsProvider for MemoryFsProvider {
-    fn supports_workspace_transactions(&self) -> bool { true }
-    fn workspace_access(&self, root: &Path, writable: bool, maximum: u64) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
+    fn supports_workspace_transactions(&self) -> bool {
+        true
+    }
+    fn workspace_access(
+        &self,
+        root: &Path,
+        writable: bool,
+        maximum: u64,
+    ) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
         scope::open(self, root, writable, maximum)
     }
     async fn transition_execution(

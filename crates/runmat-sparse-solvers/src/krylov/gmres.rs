@@ -240,7 +240,7 @@ fn h_index(row: usize, column: usize, restart: usize) -> usize {
 
 mod algebra;
 pub use algebra::rotation;
-use algebra::{apply_previous_rotations, candidate_from_basis, Candidate};
+use algebra::{apply_previous_rotations, candidate_from_basis, BasisProjection, Candidate};
 
 /// The caller has checked every length and owns the exact physical workspaces.
 /// A callback error is terminal; only numerical breakdown is a solver flag.
@@ -332,27 +332,27 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 })
             }
             None => {
-        for (index, (destination, (&b, &ax))) in work
-            .residual
-            .iter_mut()
-            .zip(rhs.iter().zip(&*work.product))
-            .enumerate()
-        {
-            if index % 1024 == 0 {
-                operations.cooperate((n - index).min(1024) as u64).await?;
-            }
-            let Some(value) = A::from_complex(A::to_complex(b) - A::to_complex(ax)) else {
-                return Ok(GmresOutcome {
-                    flag: 4,
-                    relres: best_residual.relative(denominator),
-                    outer: best_iteration.0,
-                    inner: best_iteration.1,
-                    residual_count,
-                    steps,
-                });
-            };
-            *destination = value;
-        }
+                for (index, (destination, (&b, &ax))) in work
+                    .residual
+                    .iter_mut()
+                    .zip(rhs.iter().zip(&*work.product))
+                    .enumerate()
+                {
+                    if index % 1024 == 0 {
+                        operations.cooperate((n - index).min(1024) as u64).await?;
+                    }
+                    let Some(value) = A::from_complex(A::to_complex(b) - A::to_complex(ax)) else {
+                        return Ok(GmresOutcome {
+                            flag: 4,
+                            relres: best_residual.relative(denominator),
+                            outer: best_iteration.0,
+                            inner: best_iteration.1,
+                            residual_count,
+                            steps,
+                        });
+                    };
+                    *destination = value;
+                }
             }
         }
         if side == PreconditionerSide::Left {
@@ -636,9 +636,11 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             }
             match candidate_from_basis::<T, A, O>(
                 work,
-                inner + 1,
-                restart,
-                n,
+                BasisProjection {
+                    completed: inner + 1,
+                    restart,
+                    dimension: n,
+                },
                 correction_scale,
                 side,
                 flexible_basis,
@@ -713,27 +715,28 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                     })
                 }
                 None => {
-            for (index, (destination, (&b, &ax))) in work
-                .residual
-                .iter_mut()
-                .zip(rhs.iter().zip(&*work.product))
-                .enumerate()
-            {
-                if index % 1024 == 0 {
-                    operations.cooperate((n - index).min(1024) as u64).await?;
-                }
-                let Some(value) = A::from_complex(A::to_complex(b) - A::to_complex(ax)) else {
-                    return Ok(GmresOutcome {
-                        flag: 4,
-                        relres: best_residual.relative(denominator),
-                        outer: best_iteration.0,
-                        inner: best_iteration.1,
-                        residual_count,
-                        steps,
-                    });
-                };
-                *destination = value;
-            }
+                    for (index, (destination, (&b, &ax))) in work
+                        .residual
+                        .iter_mut()
+                        .zip(rhs.iter().zip(&*work.product))
+                        .enumerate()
+                    {
+                        if index % 1024 == 0 {
+                            operations.cooperate((n - index).min(1024) as u64).await?;
+                        }
+                        let Some(value) = A::from_complex(A::to_complex(b) - A::to_complex(ax))
+                        else {
+                            return Ok(GmresOutcome {
+                                flag: 4,
+                                relres: best_residual.relative(denominator),
+                                outer: best_iteration.0,
+                                inner: best_iteration.1,
+                                residual_count,
+                                steps,
+                            });
+                        };
+                        *destination = value;
+                    }
                 }
             }
             let checked: &[T] = if side == PreconditionerSide::Left {

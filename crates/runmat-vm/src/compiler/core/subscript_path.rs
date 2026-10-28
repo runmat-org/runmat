@@ -48,6 +48,7 @@ impl Compiler {
                     IDENT_MIR_CELL_EXPAND_PLAN_INVALID
                 }
                 runmat_mir::MirSubscriptChainError::Empty
+                | runmat_mir::MirSubscriptChainError::InvalidArgumentSpans
                 | runmat_mir::MirSubscriptChainError::InvalidDottedArgumentRegion
                 | runmat_mir::MirSubscriptChainError::InvalidPreparedRegion => {
                     IDENT_MIR_SUBSCRIPT_CHAIN_INVALID

@@ -22,8 +22,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod cooperation;
 mod publication;
-pub(crate) use publication::create_array_revision;
 pub(crate) use cooperation::cooperate_data_work;
+pub(crate) use publication::create_array_revision;
 pub(crate) mod authority;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -11,7 +11,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Dispatch and output count", paragraphs: &[
             "`name` is a scalar builtin name. Positional arguments after it are forwarded unchanged. The caller's requested output count is forwarded, including multiple outputs. The selected target determines valid arity, options, output class and shape, and failure identifiers; a source-known name alone does not prove those runtime facts for arbitrary arguments.",
-            "The dispatcher has an object-member path for `subsref`: with a scalar substruct `type` and `subs`, dot member reads use the shared member accessor, and a property error can resolve a method through `call_method`. Other paths use the registered `subsref` builtin. The analogous dot `subsasgn` form delegates to `setfield`; other assignments dispatch to the registered `subsasgn` builtin.",
+            "For `subsref` and `subsasgn`, the registered implementation executes the standard subscript descriptor, including chained member, parentheses, and brace steps. It bypasses the original receiver's indexing override while preserving member visibility, dependent-property accessors, and ordinary dispatch on nested receivers. Assignments use the shared indexing implementation rather than the public `setfield` extension.",
             "Method and target calls may execute user code, mutate objects, suspend, throw, or use ambient services. An unknown or dynamically resolved target remains effectful. This wrapper is not a replay boundary for post-effect failures.",
         ] },
         BuiltinDocumentationSection { heading: "Integer and device behavior", paragraphs: &[

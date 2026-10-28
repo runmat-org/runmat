@@ -47,13 +47,16 @@ fn option_spellings_decode_once_to_shared_identities() {
         OptimSolver::Coneprog,
         OptimSolver::Fsolve,
         OptimSolver::Lsqcurvefit,
-        OptimSolver::Lsqnonlin,
     ] {
         assert_eq!(
             OptimOptionField::parse_for_solver("FunctionTolerance", solver),
             Some(OptimOptionField::TolFun)
         );
     }
+    assert_eq!(
+        OptimOptionField::parse_for_solver("FunctionTolerance", OptimSolver::Lsqnonlin),
+        Some(OptimOptionField::FunctionTolerance)
+    );
 }
 
 #[test]

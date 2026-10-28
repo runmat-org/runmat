@@ -36,6 +36,7 @@ export type {
   CoverageReportFormat,
   CoverageSite,
   FrozenTestSubmission,
+  FreezeTestSnapshotInput,
   RenderedTestReport,
   RunMatTestNative,
   RunMatTestPreparationNative,

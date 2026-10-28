@@ -3,6 +3,8 @@ use runmat_value::{ComplexTensor, Tensor, Value};
 use super::tensor;
 
 pub(crate) mod one_norm;
+pub(crate) mod inverse;
+pub use inverse::InverseError;
 
 /// Perform column-major matrix multiplication for real tensors.
 pub(crate) fn matmul_real(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
@@ -78,20 +80,29 @@ pub(crate) fn matmul_complex(
     let cols = b.cols();
     let kdim = a.cols();
     let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); rows * cols];
+    let a_values = a.materialize_f64();
+    let b_values = b.materialize_f64();
     for j in 0..cols {
         for i in 0..rows {
             let mut acc_re = 0.0;
             let mut acc_im = 0.0;
             for k in 0..kdim {
-                let (ar, ai) = a.materialize_f64()[i + k * rows];
-                let (br, bi) = b.materialize_f64()[k + j * b.rows()];
+                let (ar, ai) = a_values[i + k * rows];
+                let (br, bi) = b_values[k + j * b.rows()];
                 acc_re += ar * br - ai * bi;
                 acc_im += ar * bi + ai * br;
             }
             data[i + j * rows] = (acc_re, acc_im);
         }
     }
-    ComplexTensor::new_2d(data, rows, cols)
+    let dtype = if a.numeric_dtype() == runmat_value::NumericDType::F32
+        && b.numeric_dtype() == runmat_value::NumericDType::F32
+    {
+        runmat_value::NumericDType::F32
+    } else {
+        runmat_value::NumericDType::F64
+    };
+    ComplexTensor::from_f64_values_with_dtype(data, vec![rows, cols], dtype)
 }
 
 /// Multiply a complex tensor by a real tensor.

@@ -122,10 +122,17 @@ impl ShiftedResidual for Augmented<'_> {
         }
         if !self
             .normal
-            .qualifies(
+            .qualifies_direct(
+                qr::BorrowedProblem {
+                    rows: self.rows,
+                    columns: self.columns,
+                    pointers: &self.pointers,
+                    indices: &self.indices,
+                    values: &self.values,
+                    rhs: &self.rhs,
+                },
                 &solution.values,
                 &self.product,
-                &self.rhs[self.columns..],
                 shift,
                 c,
             )

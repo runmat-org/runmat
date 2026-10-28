@@ -15,6 +15,17 @@ fn request(arguments: Vec<ValueFact>) -> CallRequest {
 
 #[test]
 fn device_is_a_host_typed_handle_with_read_only_provider_property_types() {
+    for entry in ENTRIES {
+        assert_eq!(
+            entry.placement.accelerator,
+            BuiltinAcceleratorPolicy::Forbidden
+        );
+        assert_eq!(entry.placement.residency, BuiltinResidencyPolicy::Host);
+        assert!(entry
+            .contract
+            .capabilities
+            .contains(&CapabilityRequirement::Accelerator));
+    }
     let result = inference::infer(&request(vec![]), &GPU_DEVICE_CATALOG_ENTRY);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(result.outputs[0].residency, ResidencyFact::Host);

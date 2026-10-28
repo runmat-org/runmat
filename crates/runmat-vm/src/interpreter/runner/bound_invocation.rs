@@ -19,6 +19,9 @@ pub(super) struct Invocation {
     pub lexical_environment: Option<LexicalEnvironment>,
 }
 
+// Construct at the admitted destination rather than adding a future-sized
+// by-value return frame beneath an active numerical callback.
+#[inline(always)]
 pub(super) fn prepare(
     invocation: Invocation,
     registry: Rc<FunctionRegistry>,
@@ -29,7 +32,9 @@ pub(super) fn prepare(
         BoundFunctionAuthority::Portable { origin } => registry
             .get_current(function)
             .is_some_and(|body| body.binding_origin == Some(*origin)),
-        BoundFunctionAuthority::Local { .. } | BoundFunctionAuthority::SelectedNative { .. } => false,
+        BoundFunctionAuthority::Local { .. } | BoundFunctionAuthority::SelectedNative { .. } => {
+            false
+        }
     };
     let selected = if current_portable {
         Some(registry.as_ref().clone())

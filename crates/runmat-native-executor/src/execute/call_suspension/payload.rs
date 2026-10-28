@@ -120,15 +120,10 @@ impl PayloadAllocator {
 }
 
 pub(super) fn error(runtime: &RuntimeContext, cause: HostAllocationError) -> NativeExecutorError {
-    runmat_runtime::build_runtime_error(format!(
-        "native completion payload admission failed: {cause}"
-    ))
-    .with_identifier(format!(
-        "{}:{}",
-        runtime.error_namespace(),
-        cause.runtime_identifier_suffix()
-    ))
-    .with_source(cause)
-    .build()
+    crate::error::allocation_error(
+        Some(runtime),
+        format!("native completion payload admission failed: {cause}"),
+        cause,
+    )
     .into()
 }

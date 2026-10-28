@@ -447,6 +447,7 @@ fn lower_chain_indexing(
         });
     }
     Ok(MirIndexing {
+        argument_spans: index_argument_spans(indexing),
         kind: indexing.kind,
         plan: classify_mir_index_plan(indexing),
         components,
@@ -1070,6 +1071,7 @@ pub(crate) fn lower_indexing_with_replacements(
         components.push(lowered);
     }
     Ok(MirIndexing {
+        argument_spans: index_argument_spans(indexing),
         kind: indexing.kind,
         plan: classify_mir_index_plan(indexing),
         components,
@@ -1080,6 +1082,21 @@ pub(crate) fn lower_indexing_with_replacements(
                 .iter()
                 .all(|component| matches!(component, IndexComponent::Colon)),
     })
+}
+
+pub(super) fn index_argument_spans(
+    indexing: &IndexingSemantics,
+) -> Option<Vec<runmat_types::Span>> {
+    indexing
+        .components
+        .iter()
+        .map(|component| match component {
+            IndexComponent::Expr(expression) | IndexComponent::Logical(expression) => {
+                Some(expression.span)
+            }
+            IndexComponent::Colon | IndexComponent::End { .. } => None,
+        })
+        .collect()
 }
 
 pub(super) fn classify_mir_index_plan(indexing: &IndexingSemantics) -> MirIndexPlan {

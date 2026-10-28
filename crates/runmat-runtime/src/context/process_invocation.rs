@@ -90,6 +90,7 @@ pub(crate) async fn output_complete(
         .service_ports()
         .require_process("execute complete native process call")
         .map_err(ProcessInvocationError::Capability)?;
+    select_environment(runtime, &mut command);
 
     let execute = async {
         let request = match input {
@@ -144,6 +145,38 @@ pub(crate) async fn output_complete(
             .map_err(ProcessInvocationError::StaleExecutable)?;
     }
     Ok(output)
+}
+
+/// Inheritance at a language process boundary refers to the selected session,
+/// never the embedding process. Explicit command values retain precedence.
+fn select_environment(runtime: &RuntimeContext, command: &mut HostCommand) {
+    use runmat_process_host::environment::EnvironmentPolicy;
+
+    if command.environment_policy == EnvironmentPolicy::Clear {
+        return;
+    }
+    let mut selected = runtime
+        .environment_snapshot()
+        .into_iter()
+        .filter(|(name, _)| match &command.environment_policy {
+            EnvironmentPolicy::Inherit => true,
+            EnvironmentPolicy::InheritExcept(excluded) => !excluded.iter().any(|excluded| {
+                #[cfg(windows)]
+                {
+                    excluded.eq_ignore_ascii_case(name)
+                }
+                #[cfg(not(windows))]
+                {
+                    excluded == name
+                }
+            }),
+            EnvironmentPolicy::Clear => false,
+            EnvironmentPolicy::Allow(allowed) => allowed.contains(name),
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    selected.append(&mut command.environment);
+    command.environment = selected;
+    command.environment_policy = EnvironmentPolicy::Clear;
 }
 
 fn missing_service() -> ProcessInvocationError {

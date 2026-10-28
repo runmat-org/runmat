@@ -192,13 +192,13 @@ fn dispatch_lexical(
     };
     let _call_roots = runmat_runtime::execution::RootedValueLease::for_traced(&lexical_call)
         .map_err(|error| error.into_runtime_error())?;
-    let mut future = invoker(Some(runtime.clone()), lexical_call)?;
+    let selected_runtime = runtime.clone();
     let future =
         runmat_runtime::execution::admit_rooted_result_with(&runtime, move || async move {
             let _call_roots = _call_roots;
-            runmat_runtime::callsite::with_function_input_callsite_pinned(
+            runmat_runtime::callsite::with_function_input_callsite(
                 Some(input_callsite),
-                future.as_mut(),
+                async move { invoker(Some(selected_runtime), lexical_call)?.await },
             )
             .await?
         })?;
@@ -221,7 +221,7 @@ fn dispatch_descriptor(
     input_callsite: CallsiteInfo,
     fallback_policy: runmat_types::CallableFallbackPolicy,
 ) -> NativeExecutorResult<OutputListStorage> {
-    let descriptor = CallableDescriptor::resolved(
+    let mut descriptor = CallableDescriptor::resolved(
         identity.clone(),
         arguments,
         requested_outputs,
@@ -229,6 +229,13 @@ fn dispatch_descriptor(
         CallableCallKind::Direct,
     )
     .with_function_input_callsite(input_callsite);
+    if let Some(selected) = state
+        .runtime
+        .selected_graph_function_binding(state.function.id, identity)
+    {
+        descriptor.target =
+            runmat_runtime::call::descriptor::CallableTarget::Bound(selected.binding);
+    }
     let runtime = state.runtime.clone();
     complete_rooted_call(
         state,

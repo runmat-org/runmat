@@ -764,6 +764,7 @@ pub enum RegistrationKind {
 pub mod semantics;
 pub mod shape_rules;
 
+pub use semantics::executor::{BuiltinExecutorIntrinsic, ParallelExecutorIntrinsic};
 pub use semantics::{
     builtin_semantics_for, builtin_semantics_for_name, BuiltinAsyncBehavior, BuiltinCompatibility,
     BuiltinEffects, BuiltinEnvironmentEffect, BuiltinPurity, BuiltinSemanticKind, BuiltinSemantics,

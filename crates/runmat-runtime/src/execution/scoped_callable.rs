@@ -69,6 +69,16 @@ pub(crate) fn validate_target(
     port::lookup(runtime, handle).map(|_| ())
 }
 
+/// Retain a live capability during child preparation, while its owner is
+/// parked. This confers no permission to invoke or read a cached result:
+/// those paths still require an actively driven target via validate_target.
+pub(crate) fn validate_retention(
+    runtime: Option<&RuntimeContext>,
+    handle: &ScopedFunctionHandle,
+) -> BuiltinResult<()> {
+    port::validate_retention(runtime, handle)
+}
+
 fn check_original_cancellation(
     runtime: Option<&RuntimeContext>,
     token: Option<&CancellationToken>,

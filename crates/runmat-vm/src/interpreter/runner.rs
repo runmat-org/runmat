@@ -157,14 +157,15 @@ pub async fn invoke_semantic_function_value_with_environment_in_context(
 /// access, and output policy as a local bound handle. The graph dispatcher
 /// supplies its exact unit registry and issued runtime; this function never
 /// resolves an origin or name from ambient state.
-pub(crate) async fn invoke_selected_graph_bound_in_context(
+#[inline(always)]
+pub(crate) fn invoke_selected_graph_bound_in_context(
     runtime: runmat_runtime::context::RuntimeContext,
     binding: runmat_value::BoundFunctionBinding,
     arguments: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     registry: FunctionRegistry,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
-) -> VmResult<runmat_runtime::execution::RootedValueSequence> {
+) -> impl std::future::Future<Output = VmResult<runmat_runtime::execution::RootedValueSequence>> {
     super_constructor::invoke_selected_bound(
         runtime,
         binding,
@@ -174,7 +175,6 @@ pub(crate) async fn invoke_selected_graph_bound_in_context(
         None,
         lexical_environment,
     )
-    .await
 }
 
 /// Host-selected source admission remains invocation-local across queued
@@ -419,7 +419,16 @@ async fn invoke_semantic_function_with_captures_inner(
                     "selected frame has no exact definition graph",
                 )
             })?;
-        function_registry.bind_selected_body_sites(runtime, &binding, func)?
+        let runtime = function_registry.bind_selected_body_sites(runtime, &binding, func)?;
+        if let Some(owner) = func
+            .class_method_owner
+            .as_ref()
+            .filter(|owner| owner.role == runmat_types::ClassMethodRole::Constructor)
+        {
+            runtime.with_admitted_constructor_frame(owner, binding)?
+        } else {
+            runtime
+        }
     } else {
         runtime
     };
@@ -433,14 +442,16 @@ async fn invoke_semantic_function_with_captures_inner(
         );
         return Err(mex("SemanticFunctionArity", &message));
     }
-    if arguments.capture_count() != 0 && arguments.capture_count() != func.capture_slots.len() {
+    if arguments.lexical_capture_count() != 0
+        && arguments.lexical_capture_count() != func.capture_slots.len()
+    {
         return Err(mex(
             "SemanticFunctionArity",
             "selected callable capture count does not match its function frame",
         ));
     }
     if has_callable
-        && arguments.capture_count() == 0
+        && arguments.lexical_capture_count() == 0
         && !func.captures_owned_without_copies(lexical_environment.is_some())
     {
         return Err(mex(
@@ -448,7 +459,7 @@ async fn invoke_semantic_function_with_captures_inner(
             "selected callable omits captures without an admitted alternative owner",
         ));
     }
-    let mut vars = if arguments.capture_count() == 0 {
+    let mut vars = if arguments.lexical_capture_count() == 0 {
         InterpreterVars::from_owned(vec![Value::Num(0.0); func.var_count])
     } else {
         InterpreterVars::prepare_captured_frame(&runtime, func.var_count).map_err(|error| {
@@ -466,7 +477,7 @@ async fn invoke_semantic_function_with_captures_inner(
             ));
         }
     }
-    let mut supplied = arguments.into_supplied_arguments();
+    let mut supplied = arguments.into_function_inputs();
     if !has_callable {
         for slot in func.capture_slots.iter().copied() {
             let value = supplied.pop_front().expect("validated capture prefix");
@@ -1763,8 +1774,8 @@ async fn run_interpreter_inner(
     // bound body's static edges are routed through the distinct typed bound
     // invoker below; an overlay must never shadow a dynamic name lookup.
     let registry_for_function_invoker = std::rc::Rc::new(function_registry.current_view());
-    let _semantic_function_guard =
-        user_functions::install_local_semantic_function_invoker(std::rc::Rc::new(
+    let _semantic_function_guard = user_functions::install_local_semantic_function_invoker(
+        std::rc::Rc::new(
             move |selected,
                   function: usize,
                   args: runmat_runtime::call::RootedFunctionArguments,
@@ -1797,6 +1808,28 @@ async fn run_interpreter_inner(
                 };
                 let driver = nested_driver.clone();
                 let admission_runtime = runtime.clone();
+                if same_owner
+                    && function_registry
+                        .requires_selected_constructor_admission(runmat_hir::FunctionId(function))
+                {
+                    return user_functions::admit_user_function_with(
+                        Some(&admission_runtime),
+                        move || async move {
+                            let binding = function_registry
+                                .exact_bound_binding(runmat_hir::FunctionId(function))
+                                .ok_or_else(|| mex(
+                                    "ConstructorOwnerInvalid",
+                                    "selected semantic constructor lacks its exact definition lease",
+                                ))?;
+                            user_functions::try_call_rooted_bound_function_with_environment_in_context(
+                                &runtime, binding, args, requested_outputs, lexical_environment,
+                            ).await.ok_or_else(|| mex(
+                                "UnavailableBoundFunction",
+                                "selected semantic constructor has no bound executor",
+                            ))?
+                        },
+                    );
+                }
                 user_functions::admit_user_function_with(
                     Some(&admission_runtime),
                     move || async move {
@@ -1835,7 +1868,8 @@ async fn run_interpreter_inner(
                     },
                 )
             },
-        ))?;
+        ),
+    )?;
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
     let registry_for_bound_invoker = std::rc::Rc::clone(&function_registry);
     let bound_driver = context.process_driver.clone();

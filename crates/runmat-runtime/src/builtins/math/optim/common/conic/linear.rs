@@ -8,6 +8,8 @@ use num_rational::BigRational;
 use num_traits::{Signed, Zero};
 #[cfg(test)]
 mod tests;
+mod contradiction;
+use contradiction::Contradiction;
 
 #[derive(Clone)]
 pub(crate) struct ExactLowerBound(BigRational);
@@ -25,6 +27,8 @@ impl ExactLowerBound {
 struct Interval {
     lower: Option<BigRational>,
     upper: Option<BigRational>,
+    lower_entry: Option<usize>,
+    upper_entry: Option<usize>,
 }
 #[derive(Clone, Copy)]
 enum Singleton {
@@ -39,6 +43,7 @@ pub(crate) struct LinearCertificates<'view, 'data> {
     equalities: Vec<bool>,
     bounds: Vec<Interval>,
     consistent: bool,
+    contradiction: Option<Contradiction>,
 }
 fn allocation(
     source: runmat_value::ExactHostNumericAllocationError,
@@ -122,12 +127,14 @@ impl<'view, 'data> LinearCertificates<'view, 'data> {
         let mut bounds = runmat_value::exact_capacity_vec(n).map_err(|e| allocation(e, model))?;
         bounds.resize_with(n, Interval::default);
         let mut consistent = true;
+        let mut contradiction = None;
         for (row, singleton) in singletons.into_iter().enumerate() {
             let rhs = BigRational::from_float(model.b[row]).expect("finite RHS checked");
             match singleton {
                 Singleton::Empty => {
                     if equalities[row] && !rhs.is_zero() || !equalities[row] && rhs.is_negative() {
                         consistent = false;
+                        contradiction.get_or_insert(Contradiction::EmptyRow(row));
                     }
                 }
                 Singleton::One { column, entry } => {
@@ -140,11 +147,13 @@ impl<'view, 'data> LinearCertificates<'view, 'data> {
                         && interval.lower.as_ref().is_none_or(|bound| bound < &value)
                     {
                         interval.lower = Some(value.clone());
+                        interval.lower_entry = Some(entry);
                     }
                     if (equalities[row] || positive)
                         && interval.upper.as_ref().is_none_or(|bound| bound > &value)
                     {
                         interval.upper = Some(value);
+                        interval.upper_entry = Some(entry);
                     }
                     if interval
                         .lower
@@ -153,6 +162,10 @@ impl<'view, 'data> LinearCertificates<'view, 'data> {
                         .is_some_and(|(l, u)| l > u)
                     {
                         consistent = false;
+                        contradiction.get_or_insert(Contradiction::SingletonBounds {
+                            lower_entry: interval.lower_entry.expect("retained lower bound"),
+                            upper_entry: interval.upper_entry.expect("retained upper bound"),
+                        });
                     }
                 }
                 Singleton::Many => {}
@@ -164,6 +177,7 @@ impl<'view, 'data> LinearCertificates<'view, 'data> {
             equalities,
             bounds,
             consistent,
+            contradiction,
         }))
     }
     /// Exact contradictions from zero rows or intersected singleton bounds.

@@ -261,9 +261,10 @@ async fn deferred_capture_preserves_original_complete_product_in_both_executors(
         assert_eq!(service.take_original().envelope(), call.envelope());
         assert_eq!(call.call.invocation.arguments(), &[Value::Num(5.0)]);
         assert_eq!(call.call.invocation.requested_outputs(), 1);
-        assert!(
-            call.call.program_revision.is_none(),
-            "selected graph owns the revision, not an ambient hint"
+        assert_eq!(
+            call.call.program_revision.as_ref(),
+            Some(&unit.revision().program_revision),
+            "the observation belongs to the selected primary, not the ambient caller"
         );
         assert_eq!(
             call.origin().program,
@@ -397,7 +398,10 @@ async fn raw_script_capture_has_original_product_and_restores_session_context() 
     assert_eq!(call.call.invocation.arguments(), &[Value::Num(5.0)]);
     assert_eq!(call.call.invocation.requested_outputs(), 1);
     let envelope = call.envelope();
-    assert!(call.call.program_revision.is_none());
+    assert_eq!(
+        call.call.program_revision.as_ref(),
+        Some(&envelope.manifest.identity.program)
+    );
     assert_eq!(
         call.request.recipe.program_revision,
         envelope.manifest.identity.program

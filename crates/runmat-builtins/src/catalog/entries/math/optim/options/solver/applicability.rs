@@ -248,7 +248,8 @@ impl OptimSolver {
         if matches!(self, Self::Lsqnonlin) {
             return matches!(
                 field,
-                Field::TolX
+                Field::JacobianMultiplyFcn
+                    | Field::TolX
                     | Field::TolFun
                     | Field::FunctionTolerance
                     | Field::OptimalityTolerance
@@ -383,6 +384,7 @@ impl OptimSolver {
             Field::SpecifyObjectiveGradient => {
                 matches!(self, Self::Fminunc | Self::Fsolve | Self::Generic)
             }
+            Field::JacobianMultiplyFcn => matches!(self, Self::Generic),
             Field::SpecifyConstraintGradient => matches!(self, Self::Generic),
             Field::FiniteDifferenceType => matches!(self, Self::Generic),
             Field::OutputFcn => matches!(self, Self::Fminunc | Self::Generic),

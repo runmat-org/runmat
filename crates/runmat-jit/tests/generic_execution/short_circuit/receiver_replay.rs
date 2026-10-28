@@ -4,6 +4,7 @@ fn fixture() -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 9 };
     let index = |local| {
         MirSubscriptStep::Index(MirIndexing {
+            argument_spans: None,
             kind: runmat_types::IndexKind::Paren,
             plan: MirIndexPlan::Slice,
             components: vec![MirIndexComponent::ContextualExpr(

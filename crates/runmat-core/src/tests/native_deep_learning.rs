@@ -102,6 +102,7 @@ fn hot_native_deep_learning_preserves_precision_axes_and_nested_adjoint_targets(
         for jit in [false, true] {
             let mut session = RunMatSession::with_options(jit, false).unwrap();
             if jit {
+                session.use_generic_ready_route_for_testing();
                 session.set_native_tiering_config_for_testing(TieringConfig {
                     generic_hot_threshold: 1,
                     specialized_hot_threshold: 2,

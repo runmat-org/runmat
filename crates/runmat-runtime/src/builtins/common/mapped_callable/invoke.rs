@@ -2,6 +2,7 @@
 use super::{CallableCallError, MappedCallable};
 use crate::execution::RootedValue;
 use runmat_value::Value;
+mod selected;
 
 impl MappedCallable {
     #[cfg(test)]
@@ -53,7 +54,7 @@ impl MappedCallable {
         }
     }
 
-    async fn invoke_prepared<'a>(
+    fn invoke_prepared<'a>(
         &'a self,
         context: Option<&'a crate::context::RuntimeContext>,
         prepared: Result<
@@ -64,85 +65,13 @@ impl MappedCallable {
             crate::RuntimeError,
         >,
         requested_outputs: usize,
-    ) -> Result<RootedValue, CallableCallError> {
-        let (arguments, closure_owner) = prepared.map_err(CallableCallError::Runtime)?;
-        let result = match self {
-            Self::Scoped(handle) => crate::call::feval::invoke_retained(
-                context,
-                Value::ScopedFunctionHandle(handle.clone()),
-                arguments,
-                requested_outputs,
-                None,
-            )
-            .await
-            .map_err(CallableCallError::Runtime)?,
-            Self::Closure(closure) => {
-                let owner = closure_owner.expect("selected closure owner");
-                crate::call::descriptor::invoke_selected_retained_closure(
-                    context,
-                    closure,
-                    owner,
-                    arguments,
-                    requested_outputs,
-                )
-                .await
-                .map_err(CallableCallError::Runtime)?
-                .ok_or_else(|| CallableCallError::SemanticUnavailable {
-                    function_name: closure.as_closure().function_name.clone(),
-                    function: closure
-                        .as_closure()
-                        .binding
-                        .as_ref()
-                        .expect("only a bound closure can decline")
-                        .function
-                        .to_string(),
-                })?
-            }
-            Self::ExternalName { name } => {
-                let identity = crate::external_callable_identity_for_name(name);
-                let request = crate::user_functions::CallableRequest::rooted_resolved(
-                    identity.clone(),
-                    runmat_types::CallableFallbackPolicy::ExternalBoundary,
-                    arguments
-                        .into_supplied_function_arguments(context)
-                        .map_err(CallableCallError::Runtime)?,
-                    requested_outputs,
-                )
-                .with_selected_runtime(context);
-                match crate::user_functions::try_call_semantic_descriptor_owned(request).await {
-                    std::ops::ControlFlow::Break(result) => {
-                        result.map_err(CallableCallError::Runtime)?
-                    }
-                    std::ops::ControlFlow::Continue(_) => {
-                        return Err(CallableCallError::UndefinedExternal { identity })
-                    }
-                }
-            }
-            Self::Builtin { identity } => crate::dispatch_retained_callable_with_policy_in_runtime(
-                context,
-                runmat_types::CallableIdentity::Builtin(runmat_types::BuiltinId(
-                    identity.name.into(),
-                )),
-                runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
-                arguments,
-                requested_outputs,
-                None,
-            )
-            .await
-            .map_err(CallableCallError::Runtime)?,
-            Self::DynamicName { name } => crate::dispatch_retained_callable_with_policy_in_runtime(
-                context,
-                runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(name.clone())),
-                runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
-                arguments,
-                requested_outputs,
-                None,
-            )
-            .await
-            .map_err(CallableCallError::Runtime)?,
-        };
-        crate::call::arguments::project_rooted_legacy_builtin_value_abi(result)
-            .map_err(CallableCallError::Runtime)
+    ) -> impl std::future::Future<Output = Result<RootedValue, CallableCallError>> + 'a {
+        crate::execution::after_result(
+            std::future::ready(prepared.map_err(CallableCallError::Runtime)),
+            move |(arguments, closure_owner)| {
+                selected::execute(self, context, arguments, closure_owner, requested_outputs)
+            },
+        )
     }
 }
 pub(crate) async fn prepend_rooted_argument(

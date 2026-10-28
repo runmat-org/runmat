@@ -67,8 +67,12 @@ impl<'a> SolveControl<'a> {
         if self.progress.is_none() {
             return;
         }
-        let stride = if self.progress_stride == 0 { 256 } else { self.progress_stride };
-        if iteration <= 1 || iteration % stride == 0 {
+        let stride = if self.progress_stride == 0 {
+            256
+        } else {
+            self.progress_stride
+        };
+        if iteration <= 1 || iteration.is_multiple_of(stride) {
             self.report(Progress {
                 phase,
                 iteration,

@@ -274,11 +274,9 @@ impl CallbackBatch {
             let program = self
                 .selected
                 .deferred_program(&invocation, &program, runtime)?;
-            let revision = if matches!(program, DeferredProgram::SelectedGraph(_)) {
-                None
-            } else {
-                runtime.program_revision().cloned()
-            };
+            let revision = program
+                .program_revision(runtime.program_revision())
+                .cloned();
             wave.calls.push(DeferredCall {
                 invocation,
                 retry: RetryPolicy::Never,

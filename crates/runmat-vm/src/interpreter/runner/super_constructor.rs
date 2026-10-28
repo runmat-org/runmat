@@ -2,6 +2,7 @@
 
 use super::{mex, Bytecode, FunctionRegistry, ProcessDriverHandle, VmResult};
 
+#[inline(always)]
 pub(super) fn invoke_selected_bound(
     runtime: runmat_runtime::context::RuntimeContext,
     binding: runmat_value::BoundFunctionBinding,
@@ -98,7 +99,13 @@ fn select_bound(
     let body = registry
         .get(function)
         .ok_or_else(|| mex("UnavailableBoundFunction", "selected bound body is absent"))?;
+    let (runtime, selected_method) = registry.prepare_selected_receiver_method(runtime, binding)?;
     let (runtime, super_body) = consume_super_body(runtime, binding, body)?;
+    let runtime = if selected_method || super_body {
+        runtime
+    } else {
+        runtime.without_selected_object_class()
+    };
     // A compiled direct constructor can enter its retained parent without
     // inherited receiver facts. Authenticate this entered local body's own
     // product instead of comparing it to a later registered numeric callable.

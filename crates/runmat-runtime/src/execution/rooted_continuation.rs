@@ -18,6 +18,9 @@ use crate::RuntimeError;
 
 use super::RootedValueSequence;
 
+mod supervision;
+pub use supervision::{admit_execution_supervisor_with, AdmittedExecutionSupervisor};
+
 #[cfg(test)]
 #[path = "rooted_continuation/native_metadata_tests.rs"]
 mod native_metadata_tests;

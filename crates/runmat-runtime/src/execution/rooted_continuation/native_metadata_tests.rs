@@ -77,6 +77,52 @@ impl Drop for FundingProbe {
 }
 
 #[test]
+fn command_supervisor_retains_funding_through_cancelled_completion_or_abandonment() {
+    for finish in [false, true] {
+        let (selected, ledger, cancellation) = cancellable_runtime(1_000_000);
+        let polls = Rc::new(Cell::new(0));
+        let mut future = admit_execution_supervisor_with(&selected, || {
+            let supervised = selected.clone();
+            let probe = FundingProbe {
+                ledger: ledger.clone(),
+                polls: Rc::clone(&polls),
+                ready: false,
+                failure: false,
+            };
+            async move {
+                let _probe = probe;
+                futures::future::poll_fn(|_| {
+                    let previous = polls.replace(polls.get() + 1);
+                    if previous == 0 {
+                        Poll::Pending
+                    } else {
+                        assert!(supervised.is_cancelled());
+                        // A supervisor publishes the child's terminal response,
+                        // rather than having that response intercepted outside.
+                        Poll::Ready(Ok::<_, RuntimeError>(()))
+                    }
+                })
+                .await
+            }
+        })
+        .unwrap();
+        assert!(ledger.snapshot().live_reserved_bytes > 0);
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(Pin::new(&mut future).poll(&mut context).is_pending());
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        if finish {
+            assert!(matches!(
+                Pin::new(&mut future).poll(&mut context),
+                Poll::Ready(Ok(()))
+            ));
+        }
+        drop(future);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+}
+
+#[test]
 fn native_concrete_future_is_admitted_before_factory_and_refunded_on_abandonment() {
     optional::check();
     // Opaque embedding futures are not evidence of their concrete layout.

@@ -35,11 +35,18 @@ impl<T: Scalar> BsrMatrix<T> {
     /// Converts a CSR matrix whose dimensions are multiples of `block`; missing entries inside a
     /// touched block are stored as zeros.
     pub fn from_csr(matrix: CsrRef<'_, T>, block: usize) -> SolverResult<Self> {
-        if block == 0 || matrix.nrows() % block != 0 || matrix.ncols() % block != 0 {
-            return Err(SolverError::Dimension(format!("block size {block} does not divide the matrix")));
+        if block == 0
+            || !matrix.nrows().is_multiple_of(block)
+            || !matrix.ncols().is_multiple_of(block)
+        {
+            return Err(SolverError::Dimension(format!(
+                "block size {block} does not divide the matrix"
+            )));
         }
         if block > MAX_MERGE {
-            return Err(SolverError::Unsupported(format!("block size {block} exceeds {MAX_MERGE}")));
+            return Err(SolverError::Unsupported(format!(
+                "block size {block} exceeds {MAX_MERGE}"
+            )));
         }
         let node_rows = matrix.nrows() / block;
         let node_cols = matrix.ncols() / block;
@@ -50,7 +57,11 @@ impl<T: Scalar> BsrMatrix<T> {
                 *row = matrix.row(node * block + r).0;
             }
             loop {
-                let Some(next) = rows[..block].iter().filter_map(|row| row.first()).map(|&c| c / block).min()
+                let Some(next) = rows[..block]
+                    .iter()
+                    .filter_map(|row| row.first())
+                    .map(|&c| c / block)
+                    .min()
                 else {
                     break;
                 };
@@ -94,8 +105,8 @@ impl<T: Scalar> BsrMatrix<T> {
         }
         runmat_cpu_execution::for_each_mut(&mut tasks, |(first, last, cols, vals)| {
             let base = row_ptr[*first];
-            for node in *first..*last {
-                let start = row_ptr[node] - base;
+            for (node, &row_start) in row_ptr.iter().enumerate().take(*last).skip(*first) {
+                let start = row_start - base;
                 let mut written = start;
                 block_columns(node, &mut |c| {
                     cols[written] = c;
@@ -282,12 +293,21 @@ mod fixed_block_tests {
         let mut serial = vec![0.0; a.nrows()];
         bsr.spmv(&x, &mut serial);
         let scale = reference.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        assert!(reference.iter().zip(&serial).all(|(p, q)| (p - q).abs() <= 1e-13 * scale));
+        assert!(reference
+            .iter()
+            .zip(&serial)
+            .all(|(p, q)| (p - q).abs() <= 1e-13 * scale));
         let mut general = vec![0.0; a.nrows()];
         bsr.spmv_general(&x, &mut general);
-        assert!(general.iter().zip(&serial).all(|(p, q)| p.to_bits() == q.to_bits()));
+        assert!(general
+            .iter()
+            .zip(&serial)
+            .all(|(p, q)| p.to_bits() == q.to_bits()));
         let mut threaded = vec![0.0; a.nrows()];
         par::with_threads(4, || bsr.spmv(&x, &mut threaded));
-        assert!(threaded.iter().zip(&serial).all(|(p, q)| p.to_bits() == q.to_bits()));
+        assert!(threaded
+            .iter()
+            .zip(&serial)
+            .all(|(p, q)| p.to_bits() == q.to_bits()));
     }
 }

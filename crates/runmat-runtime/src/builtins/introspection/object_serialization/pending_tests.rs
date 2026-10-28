@@ -154,6 +154,12 @@ fn typed_mat_object_preparation_retains_pending_callback_receiver_and_retires_on
 fn selected_load_product(runtime: &crate::context::RuntimeContext) -> Rc<SelectedObjectClassFacts> {
     let class = runmat_types::ClassIdentity::new("PendingMatLoad").expect("class identity");
     let method = LOADOBJ_METHOD.owned();
+    let owner = runmat_types::ClassMethodOwner {
+        declaring_class: class.clone(),
+        method: method.clone(),
+        is_static: true,
+        role: runmat_types::ClassMethodRole::Ordinary,
+    };
     let declarations = Arc::new(
         SelectedReceiverDeclarations::new(
             class.clone(),
@@ -177,14 +183,9 @@ fn selected_load_product(runtime: &crate::context::RuntimeContext) -> Rc<Selecte
                 },
             )]),
             HashMap::from([(
-                method.clone(),
+                owner.clone(),
                 Arc::new(SelectedReceiverMethodDeclaration {
-                    owner: runmat_types::ClassMethodOwner {
-                        declaring_class: class,
-                        method: method.clone(),
-                        is_static: true,
-                        role: runmat_types::ClassMethodRole::Ordinary,
-                    },
+                    owner: owner.clone(),
                     is_abstract: false,
                     access: runmat_types::MemberAccess::Public,
                     standard_substruct: false,
@@ -210,7 +211,7 @@ fn selected_load_product(runtime: &crate::context::RuntimeContext) -> Rc<Selecte
         SelectedObjectClassFacts::new(
             declarations,
             binding(LOAD_METHOD_ID + 1),
-            HashMap::from([(method, Some(binding(LOAD_METHOD_ID)))]),
+            HashMap::from([(owner, Some(binding(LOAD_METHOD_ID)))]),
         )
         .expect("selected class product"),
     )

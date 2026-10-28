@@ -113,7 +113,7 @@ mod tests {
             Box::pin(async move {
                 calls.set(calls.get() + 1);
                 assert_eq!(command.arguments, ["-t", "-oi"]);
-                assert_eq!(command.environment_policy, EnvironmentPolicy::Inherit);
+                assert_eq!(command.environment_policy, EnvironmentPolicy::Clear);
                 assert!(command.working_directory.unwrap().is_absolute());
                 assert_eq!(input, b"mail body");
                 Ok(CompleteProcessOutput {

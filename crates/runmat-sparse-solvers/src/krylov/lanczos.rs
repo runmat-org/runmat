@@ -37,7 +37,9 @@ fn ritz_extremes(alpha: &[f64], beta: &[f64]) -> Option<(f64, f64)> {
     let k = alpha.len();
     if k == 0
         || beta.len() + 1 < k
-        || alpha.iter().any(|value| !(value.is_finite() && *value > 0.0))
+        || alpha
+            .iter()
+            .any(|value| !(value.is_finite() && *value > 0.0))
         || beta[..k - 1]
             .iter()
             .any(|value| !(value.is_finite() && *value >= 0.0))
@@ -47,18 +49,26 @@ fn ritz_extremes(alpha: &[f64], beta: &[f64]) -> Option<(f64, f64)> {
     let mut diagonal = Vec::with_capacity(k);
     let mut off_squared = Vec::with_capacity(k - 1);
     for j in 0..k {
-        let shift = if j > 0 { beta[j - 1] / alpha[j - 1] } else { 0.0 };
+        let shift = if j > 0 {
+            beta[j - 1] / alpha[j - 1]
+        } else {
+            0.0
+        };
         diagonal.push(1.0 / alpha[j] + shift);
         if j + 1 < k {
             off_squared.push(beta[j] / (alpha[j] * alpha[j]));
         }
     }
-    let off = |index: usize| off_squared.get(index).map_or(0.0, |value: &f64| value.sqrt());
+    let off = |index: usize| {
+        off_squared
+            .get(index)
+            .map_or(0.0, |value: &f64| value.sqrt())
+    };
     let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
-    for j in 0..k {
+    for (j, &value) in diagonal.iter().enumerate() {
         let radius = off(j) + if j > 0 { off(j - 1) } else { 0.0 };
-        low = low.min(diagonal[j] - radius);
-        high = high.max(diagonal[j] + radius);
+        low = low.min(value - radius);
+        high = high.max(value + radius);
     }
     if !(low.is_finite() && high.is_finite()) {
         return None;
@@ -69,7 +79,11 @@ fn ritz_extremes(alpha: &[f64], beta: &[f64]) -> Option<(f64, f64)> {
         let mut count = 0;
         let mut pivot = 1.0_f64;
         for j in 0..k {
-            let coupling = if j > 0 { off_squared[j - 1] / pivot } else { 0.0 };
+            let coupling = if j > 0 {
+                off_squared[j - 1] / pivot
+            } else {
+                0.0
+            };
             pivot = diagonal[j] - x - coupling;
             if pivot == 0.0 {
                 pivot = -tiny;

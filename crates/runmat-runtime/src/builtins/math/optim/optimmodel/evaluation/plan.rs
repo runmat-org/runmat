@@ -10,6 +10,7 @@ enum Visit {
     Leave(GcHandle),
 }
 pub(in crate::builtins::math::optim::optimmodel) struct Plan {
+    pub roots: Vec<GcHandle>,
     pub order: Vec<GcHandle>,
     pub nodes: HashMap<GcHandle, owner::OwnedNode>,
     pub uses: HashMap<GcHandle, usize>,
@@ -28,6 +29,7 @@ impl Plan {
         cooperation: &mut ScalarCooperation,
     ) -> BuiltinResult<Self> {
         let mut out = Self {
+            roots: runmat_value::exact_capacity_vec(roots.len()).map_err(|e| policy.storage(e))?,
             order: Vec::new(),
             nodes: HashMap::new(),
             uses: HashMap::new(),
@@ -44,6 +46,7 @@ impl Plan {
             .map_err(|e| policy.reserve(e))?;
         // Retain every requested output root before traversal can yield.
         for &root in roots {
+            out.roots.push(root);
             if let std::collections::hash_map::Entry::Vacant(entry) = out.nodes.entry(root) {
                 entry.insert(owner::OwnedNode::read(root, policy)?);
             }

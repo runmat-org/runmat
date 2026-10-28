@@ -11,7 +11,7 @@ use super::{
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValueSequence, RootedValues};
 use crate::RuntimeError;
-use futures::TryFutureExt;
+use futures::{FutureExt, TryFutureExt};
 use runmat_value::{BoundFunctionBinding, Value};
 use std::future::Future;
 
@@ -88,13 +88,16 @@ fn captured_resolved(
     };
     admit_future(runtime, async move {
         if let runmat_types::CallableIdentity::BoundFunction(function) = identity.as_identity() {
-            let Some(result) = crate::user_functions::try_call_rooted_semantic_function_in_context(
-                runtime,
-                function.0,
-                arguments,
-                requested_outputs,
+            let Some(result) = crate::callsite::with_function_input_callsite(
+                metadata.function_input_callsite.clone(),
+                crate::user_functions::try_call_rooted_semantic_function_in_context(
+                    runtime,
+                    function.0,
+                    arguments,
+                    requested_outputs,
+                ),
             )
-            .await
+            .await?
             else {
                 return Err(function_unavailable_error(function.0, &metadata));
             };
@@ -387,14 +390,14 @@ fn try_bound(
     )
 }
 
-pub(super) async fn invoke_bound(
-    runtime: Option<&RuntimeContext>,
+pub(super) fn invoke_bound<'a>(
+    runtime: Option<&'a RuntimeContext>,
     binding: BoundFunctionBinding,
     args: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
     metadata: CallableMetadata,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
-) -> Result<RootedValueSequence, RuntimeError> {
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a {
     let function = binding.function;
     try_invoke_bound(
         runtime,
@@ -404,20 +407,21 @@ pub(super) async fn invoke_bound(
         metadata.clone(),
         lexical_environment,
     )
-    .await?
-    .ok_or_else(|| function_unavailable_error(function, &metadata))
+    .map(move |result| result?.ok_or_else(|| function_unavailable_error(function, &metadata)))
 }
 
-async fn try_invoke_bound(
-    runtime: Option<&RuntimeContext>,
+fn try_invoke_bound<'a>(
+    runtime: Option<&'a RuntimeContext>,
     binding: BoundFunctionBinding,
     args: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
     metadata: CallableMetadata,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
-) -> Result<Option<RootedValueSequence>, RuntimeError> {
-    crate::callsite::with_function_input_callsite(metadata.function_input_callsite.clone(), async {
-        match runtime {
+) -> impl Future<Output = Result<Option<RootedValueSequence>, RuntimeError>> + 'a {
+    crate::callsite::with_function_input_callsite(
+        metadata.function_input_callsite.clone(),
+        async move {
+            match runtime {
             Some(runtime) => {
                 crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
                     runtime,
@@ -443,9 +447,12 @@ async fn try_invoke_bound(
                 .await
             }
         }
+        },
+    )
+    .map(move |result| {
+        drop(metadata);
+        result?.transpose()
     })
-    .await?
-    .transpose()
 }
 
 #[inline(never)]

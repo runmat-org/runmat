@@ -51,7 +51,9 @@ pub(super) async fn controls(runtime: &RuntimeContext, options: &RootedValue) {
         assert_eq!(numbers(&values[1]), vec![expected]);
         assert_eq!(
             call(runtime, "double", &[values[2].clone()]).await.value(),
-            &Value::Num(1.)
+            &Value::Num(1.),
+            "{domain}: {:?}",
+            values[3]
         );
         assert_eq!(field(&values[3], "Solver"), &Value::from("intlinprog"));
         if domain == "semi-continuous" {

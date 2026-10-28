@@ -9,6 +9,20 @@ use super::FunctionRegistry;
 mod selected_sites;
 
 impl FunctionRegistry {
+    /// A source-admitted constructor enters the canonical bound constructor
+    /// policy even when its compiler call site carries a local function ID.
+    /// Bare VM embeddings retain their separate unselected metadata path.
+    pub fn requires_selected_constructor_admission(&self, function: FunctionId) -> bool {
+        self.get(function).is_some_and(|body| {
+            body.class_method_owner
+                .as_ref()
+                .is_some_and(|owner| owner.role == runmat_types::ClassMethodRole::Constructor)
+                && (body.selected_source_owner.is_some()
+                    || body.selected_executable_product.is_some()
+                    || body.selected_class_product.is_some())
+        })
+    }
+
     /// Bind a selected body's proved imports once at frame admission. The
     /// resulting invocation map retains only code/source/definition leases.
     pub fn bind_selected_body_sites(

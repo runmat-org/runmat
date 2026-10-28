@@ -54,6 +54,9 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
     let bootstrap = read_bootstrap(&mut input, limits)
         .await
         .map_err(|error| protocol_error("failed to read native worker bootstrap", error))?;
+    runmat_accelerate::initialize_acceleration_provider_with(
+        &(&bootstrap.execution.accelerate).into(),
+    );
 
     let mut installed: Option<InstalledRun> = None;
     loop {
@@ -88,11 +91,16 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                             protocol_error("failed to shut down the previous worker session", error)
                         })?;
                 }
-                let enable_jit = std::env::var("RUNMAT_TEST_JIT").as_deref() != Ok("0");
                 let mut session =
-                    RunMatSession::with_options(enable_jit, false).map_err(|error| {
-                        protocol_error("failed to initialize worker session", error)
-                    })?;
+                    RunMatSession::with_options(bootstrap.execution.enable_jit, false).map_err(
+                        |error| protocol_error("failed to initialize worker session", error),
+                    )?;
+                session
+                    .configure_test_snapshot(&snapshot)
+                    .map_err(|error| protocol_error("invalid frozen test environment", error))?;
+                session
+                    .set_foreign_config(&bootstrap.execution.foreign)
+                    .map_err(|error| protocol_error("invalid worker foreign policy", error))?;
                 if let Some(project) = bootstrap.project.clone() {
                     let project = issue_local_project_paths(project)?;
                     session

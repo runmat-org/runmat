@@ -85,9 +85,7 @@ fn cancelled_chunk_write_never_publishes_index() {
                     entry.path(),
                 ))
                 .unwrap();
-                assert!(chunks
-                    .iter()
-                    .all(|chunk| chunk.file_name() != "index.json"));
+                assert!(chunks.iter().all(|chunk| chunk.file_name() != "index.json"));
             }
         }
     }

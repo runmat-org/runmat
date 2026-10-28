@@ -375,6 +375,8 @@ mod tests {
 
     #[path = "metadata_view.rs"]
     mod metadata_view;
+    #[path = "reviewed_cutover.rs"]
+    mod reviewed_cutover;
 
     #[test]
     fn documented_compatibility_version_pin_matches_runtime_queries() {
@@ -512,7 +514,7 @@ mod tests {
                     .map(move |extension| (builtin.name, extension.id))
             })
             .collect::<std::collections::BTreeSet<_>>();
-        let expected = std::collections::BTreeSet::from([
+        let mut expected = std::collections::BTreeSet::from([
             ("axis", "axis-state-output"),
             ("box", "box-state-output"),
             ("cla", "cla-state-output"),
@@ -1185,7 +1187,6 @@ mod tests {
             ("gpuArray", "gpuarray-size-arguments"),
             ("gpuArray", "gpuarray-text-upload"),
             ("gpuDevice", "gpudevice-logical-selector"),
-            ("gpuDevice", "gpudevice-provider-info"),
             ("fread", "fread-integer-fileid"),
             ("fread", "fread-integer-size"),
             ("fread", "fread-integer-skip"),
@@ -2291,6 +2292,12 @@ mod tests {
             ("tfdata", "tf-integer-sample-time"),
             ("tfdata", "tf-logical-coefficients"),
         ]);
+        for pair in reviewed_cutover::extensions() {
+            assert!(
+                expected.insert(pair),
+                "reviewed extension duplicates the baseline: {pair:?}"
+            );
+        }
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
             Vec::<(&str, &str)>::new(),
@@ -2679,6 +2686,33 @@ mod tests {
                 assert_eq!(previous, audit, "{} duplicate integer audit", builtin.name);
             }
         }
+        // Validate live contracts before comparing the independently reviewed
+        // inventory, so inventory drift cannot conceal malformed declarations.
+        for (name, audit) in audited {
+            assert!(!audit.notes.is_empty(), "{name} integer audit notes");
+            match audit.kind {
+                runmat_builtins::BuiltinIntegerAuditKind::AliasOf => {
+                    let canonical = audit
+                        .canonical_builtin
+                        .unwrap_or_else(|| panic!("{name} alias target"));
+                    assert_ne!(canonical, name, "{name} cannot alias itself");
+                    let target = registered
+                        .iter()
+                        .find(|builtin| builtin.name == canonical)
+                        .unwrap_or_else(|| panic!("{name} registered alias target {canonical}"));
+                    assert!(
+                        !target.integer_capabilities.is_empty(),
+                        "{name} alias target {canonical} must carry integer capabilities"
+                    );
+                }
+                runmat_builtins::BuiltinIntegerAuditKind::NotApplicable => {
+                    assert_eq!(
+                        audit.canonical_builtin, None,
+                        "{name} inapplicable audit cannot name a canonical builtin"
+                    );
+                }
+            }
+        }
         // The native FFI calllib/libpointer/libstruct/setdatatype entries now
         // declare positive typed integer capabilities instead of audit-only
         // dispositions; retain this as the independently reviewed audit set.
@@ -2751,15 +2785,12 @@ mod tests {
                 "eraseURLs",
                 "exist",
                 "extractHTMLText",
-                "fea.authorStudy",
                 "fea.compare",
                 "fea.field",
                 "fea.materialAssignment",
                 "fea.model",
                 "fea.plan",
-                "fea.plot",
                 "fea.run",
-                "fea.step",
                 "fea.study",
                 "fea.sweep",
                 "fea.validate",
@@ -2954,32 +2985,12 @@ mod tests {
                 "yticklabels",
                 "zero",
             ]
+            .into_iter()
+            .chain(reviewed_cutover::audited_names())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
         );
-        for (name, audit) in audited {
-            assert!(!audit.notes.is_empty(), "{name} integer audit notes");
-            match audit.kind {
-                runmat_builtins::BuiltinIntegerAuditKind::AliasOf => {
-                    let canonical = audit
-                        .canonical_builtin
-                        .unwrap_or_else(|| panic!("{name} alias target"));
-                    assert_ne!(canonical, name, "{name} cannot alias itself");
-                    let target = registered
-                        .iter()
-                        .find(|builtin| builtin.name == canonical)
-                        .unwrap_or_else(|| panic!("{name} registered alias target {canonical}"));
-                    assert!(
-                        !target.integer_capabilities.is_empty(),
-                        "{name} alias target {canonical} must carry integer capabilities"
-                    );
-                }
-                runmat_builtins::BuiltinIntegerAuditKind::NotApplicable => {
-                    assert_eq!(
-                        audit.canonical_builtin, None,
-                        "{name} inapplicable audit cannot name a canonical builtin"
-                    );
-                }
-            }
-        }
     }
 
     #[test]

@@ -21,6 +21,28 @@ pub enum ObjectProtocol {
     End,
 }
 
+/// Default work follows an already selected or explicitly bypassed indexing
+/// protocol. It still performs ordinary visibility and accessor admission.
+#[derive(Clone, Copy)]
+pub(crate) enum ProtocolDispatch {
+    Resolve,
+    Default,
+}
+
+impl ProtocolDispatch {
+    pub(crate) fn resolve(
+        self,
+        base: &runmat_value::Value,
+        protocol: ObjectProtocol,
+        access: &ObjectAccessContext,
+    ) -> Result<ProtocolResolution, crate::RuntimeError> {
+        match self {
+            Self::Resolve => resolve_object_protocol(base, protocol, access),
+            Self::Default => Ok(None),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ObjectAccessContext {
     pub caller_class: Option<runmat_types::ClassIdentity>,
@@ -29,6 +51,7 @@ pub struct ObjectAccessContext {
     pub active_method: Option<ActiveObjectMethodIdentity>,
     pub selected_active_owner: Option<runmat_types::ClassMethodOwner>,
     pub selected_active_binding: Option<runmat_value::BoundFunctionBinding>,
+    pub selected_method_dispatch: crate::context::SelectedMethodDispatch,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +106,36 @@ impl ObjectAccessContext {
             active_method: None,
             selected_active_owner: Some(owner.clone()),
             selected_active_binding,
+            selected_method_dispatch: crate::context::SelectedMethodDispatch::Virtual,
+        })
+    }
+
+    pub fn from_selected_super_method_frame(
+        owner: &runmat_types::ClassMethodOwner,
+        facts: &runmat_value::SelectedObjectClassFacts,
+    ) -> Result<Self, crate::RuntimeError> {
+        let method = facts
+            .method_by_owner(owner)
+            .filter(|method| {
+                owner.role == runmat_types::ClassMethodRole::Ordinary
+                    && !owner.is_static
+                    && !method.is_abstract
+                    && method.binding.is_some()
+            })
+            .ok_or_else(|| {
+                crate::runtime_error::semantic_error(
+                    "ObjectMethodFrameIdentityMismatch",
+                    "superclass method frame has no exact receiver-owned body",
+                )
+            })?;
+        Ok(Self {
+            caller_class: Some(owner.declaring_class.clone()),
+            caller_method: Some(owner.method.clone()),
+            active_protocol: ObjectProtocol::from_method(&owner.method),
+            selected_active_owner: Some(owner.clone()),
+            selected_active_binding: method.binding.clone(),
+            selected_method_dispatch: crate::context::SelectedMethodDispatch::Superclass,
+            ..Default::default()
         })
     }
 
@@ -108,8 +161,8 @@ impl ObjectAccessContext {
             return Err(crate::runtime_error::semantic_error(
                 "ObjectMethodFrameIdentityMismatch",
                 format!(
-                    "executable identity does not match registered method '{}.{}'",
-                    owner.declaring_class, owner.method.0
+                    "executable identity does not match registered method '{}.{}': executing {executable:?}, registered {:?}",
+                    owner.declaring_class, owner.method.0, bound.callable
                 ),
             ));
         }
@@ -128,6 +181,7 @@ impl ObjectAccessContext {
             active_method,
             selected_active_owner: None,
             selected_active_binding: None,
+            selected_method_dispatch: crate::context::SelectedMethodDispatch::Virtual,
         })
     }
 
@@ -155,6 +209,7 @@ impl ObjectAccessContext {
             active_method,
             selected_active_owner: None,
             selected_active_binding: None,
+            selected_method_dispatch: crate::context::SelectedMethodDispatch::Virtual,
         }
     }
 }

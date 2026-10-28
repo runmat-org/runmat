@@ -101,6 +101,7 @@ where
             base,
             field,
             rhs,
+            dispatch: ProtocolDispatch::Resolve,
             _roots: roots,
         },
         caller_function_name,
@@ -153,13 +154,37 @@ where
     }
 }
 
-pub(super) async fn store_member_text_with_caller_scope<'a, M, OnWrite>(
+pub(super) fn store_member_text_with_caller_scope<'a, M, OnWrite>(
     scope: M,
     base: Value,
     field: runmat_value::Utf8Text,
     rhs: Value,
     caller_function_name: MemberCaller<'a>,
     on_write: OnWrite,
+) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a
+where
+    M: MemberStoreScope<'a> + 'a,
+    OnWrite: FnMut(&Value, &Value) + 'a,
+{
+    store_member_text_with_dispatch_scope(
+        scope,
+        base,
+        field,
+        rhs,
+        caller_function_name,
+        on_write,
+        ProtocolDispatch::Resolve,
+    )
+}
+
+pub(super) async fn store_member_text_with_dispatch_scope<'a, M, OnWrite>(
+    scope: M,
+    base: Value,
+    field: runmat_value::Utf8Text,
+    rhs: Value,
+    caller_function_name: MemberCaller<'a>,
+    on_write: OnWrite,
+    dispatch: ProtocolDispatch,
 ) -> Result<RootedValue, RuntimeError>
 where
     M: MemberStoreScope<'a> + 'a,
@@ -173,6 +198,7 @@ where
             base,
             field,
             rhs,
+            dispatch,
             _roots: roots,
         },
         caller_function_name,
@@ -185,6 +211,7 @@ struct MemberStore {
     base: Value,
     field: runmat_value::Utf8Text,
     rhs: Value,
+    dispatch: ProtocolDispatch,
     _roots: RootedValueLease,
 }
 
@@ -234,6 +261,7 @@ where
         base,
         field,
         rhs,
+        dispatch,
         _roots,
     } = request;
     match base {
@@ -241,7 +269,7 @@ where
             let base = Value::Object(obj.clone());
             let access = caller_function_name.protocol_access();
             if let Some(method) =
-                crate::object::protocol::resolve_object_protocol(
+                dispatch.resolve(
                     &base,
                     crate::object::protocol::ObjectProtocol::Subsasgn,
                     &access,
@@ -307,7 +335,7 @@ where
             property_store::require_valid_handle(&handle)?;
             let access = caller_function_name.protocol_access();
             if let Some(method) =
-                crate::object::protocol::resolve_object_protocol(
+                dispatch.resolve(
                     &base,
                     crate::object::protocol::ObjectProtocol::Subsasgn,
                     &access,

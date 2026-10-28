@@ -35,7 +35,12 @@ impl Plan {
         if self.residual
             && matches!(
                 field,
-                OptimalityTolerance | SubproblemAlgorithm | PrecondBandWidth | MaxPCGIter | TolPCG
+                JacobianMultiplyFcn
+                    | OptimalityTolerance
+                    | SubproblemAlgorithm
+                    | PrecondBandWidth
+                    | MaxPCGIter
+                    | TolPCG
             )
         {
             // Residual extent determines the actual controller. These original

@@ -2,10 +2,12 @@
 //! Only caller-owned output is mutated; yielding never holds a GC or RefCell
 //! borrow and never publishes a partial result.
 mod work;
+mod policy;
 use super::LinearOperatorError;
 use super::{scalar::LinearOperatorScalar, TypedLinearOperator};
 use crate::context::{host_allocation::HostAllocationReceipt, RuntimeContext};
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
+pub(in crate::builtins::math::linalg) use policy::{BorrowedWork, ProductWork, UnmanagedWork};
 use runmat_value::ComplexElement;
 pub(in crate::builtins::math::linalg) use work::OperatorWork;
 
@@ -180,5 +182,118 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(count.get(), 16);
+        // A facade cannot reset a partially consumed original quantum.
+        let source = CancellationSource::new();
+        let partial_runtime = runtime.clone().with_cancellation_token(source.token());
+        let turns = Rc::new(Cell::new(0));
+        let seen = turns.clone();
+        let mut partial = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(8).unwrap()),
+            source.token(),
+            move || {
+                seen.set(seen.get() + 1);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        futures::executor::block_on(partial.checkpoint(3)).unwrap();
+        assert_eq!(partial.remaining_until_turn().unwrap().get(), 5);
+        let mut work = BorrowedWork::new(&partial_runtime, &mut partial).unwrap();
+        assert_eq!(ProductWork::capacity(&work), 5);
+        futures::executor::block_on(ProductWork::charge(&mut work, 3)).unwrap();
+        assert_eq!(ProductWork::capacity(&work), 2);
+        assert_eq!(
+            turns.get(),
+            0,
+            "buffered work does not request an early turn"
+        );
+        futures::executor::block_on(ProductWork::charge(&mut work, 2)).unwrap();
+        assert_eq!(turns.get(), 1);
+        assert_eq!(ProductWork::capacity(&work), 8);
+        futures::executor::block_on(ProductWork::charge(&mut work, 4)).unwrap();
+        futures::executor::block_on(ProductWork::flush(&mut work)).unwrap();
+        assert_eq!(turns.get(), 1);
+        assert_eq!(ProductWork::capacity(&work), 4);
+        drop(work);
+        assert_eq!(partial.remaining_until_turn().unwrap().get(), 4);
+        let mut next = BorrowedWork::new(&partial_runtime, &mut partial).unwrap();
+        assert_eq!(ProductWork::capacity(&next), 4);
+        futures::executor::block_on(ProductWork::charge(&mut next, 4)).unwrap();
+        assert_eq!(
+            turns.get(),
+            2,
+            "same budget crosses exactly two original turns"
+        );
+        drop(next);
+        assert_eq!(partial.remaining_until_turn().unwrap().get(), 8);
+
+        // The same canonical CSC cursor can borrow the actual original
+        // quantum/token rather than manufacture a budget for each result.
+        let source = CancellationSource::new();
+        let runtime = runtime.with_cancellation_token(source.token());
+        let sparse = runmat_value::Value::SparseTensor(
+            runmat_value::SparseTensor::new(
+                4096,
+                1,
+                vec![0, 4096],
+                (0..4096).collect::<Vec<_>>(),
+                vec![2.; 4096],
+            )
+            .unwrap(),
+        );
+        let turns = Rc::new(Cell::new(0));
+        let seen = turns.clone();
+        let trigger = source.clone();
+        let mut budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                seen.set(seen.get() + 1);
+                if seen.get() == 5 {
+                    trigger.cancel(CancellationReason::User);
+                }
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let borrowed = futures::executor::block_on(LinearOperator::borrow_with_budget(
+            &sparse,
+            Some(&runtime),
+            Some(&mut budget),
+        ));
+        assert!(matches!(
+            borrowed,
+            Err(CooperativeOperatorError::Execution(
+                ExecutionServiceError::Cancelled
+            ))
+        ));
+        assert_eq!(turns.get(), 5);
+        let runmat_value::Value::SparseTensor(matrix) = &sparse else {
+            unreachable!();
+        };
+        assert_eq!(matrix.as_f64_slice().unwrap()[4095], 2.);
+        let foreign = CancellationSource::new();
+        let effects = Rc::new(Cell::new(0));
+        let seen = effects.clone();
+        let mut wrong = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            foreign.token(),
+            move || {
+                seen.set(seen.get() + 1);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let refused = futures::executor::block_on(LinearOperator::borrow_with_budget(
+            &sparse,
+            Some(&runtime),
+            Some(&mut wrong),
+        ));
+        assert!(matches!(
+            refused,
+            Err(CooperativeOperatorError::Operator(
+                LinearOperatorError::Admission(
+                    crate::context::host_allocation::HostAllocationError::StaleAuthority
+                )
+            ))
+        ));
+        assert_eq!(effects.get(), 0);
     }
 }

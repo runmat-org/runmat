@@ -85,15 +85,26 @@ export class BrowserWorkerBackend implements BrowserWorkerBackendPort {
         throw new Error("dedicated Web Worker isolation is unavailable");
       }
       const client = new WorkerClient(this.options.workerFactory());
-      await client.request("install", submission);
+      try {
+        await client.request("install", submission);
+      } catch (error) {
+        client.terminate();
+        throw error;
+      }
       handle = { id, kind: "worker", client };
     } else {
       const session =
         input.isolation === "none"
           ? await this.noneSession(submission)
           : await this.options.sessionFactory(submission);
-      if (this.options.projectHandoff !== undefined) {
-        session.installProjectHandoff?.(this.options.projectHandoff);
+      if (submission.projectHandoff !== undefined) {
+        try {
+          await session.installProjectHandoff?.(submission.projectHandoff);
+        } catch (error) {
+          if (this.sharedSession === session) this.sharedSession = undefined;
+          session.dispose?.();
+          throw error;
+        }
       }
       handle = {
         id,

@@ -99,13 +99,15 @@ pub(super) async fn invoke(
     target: Value,
     arguments: crate::call::BuiltinArguments,
     requested_outputs: usize,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Result<RootedValueSequence, RuntimeError> {
     let target = crate::execution::RootedValue::in_optional_context(target, runtime)?;
     let selected = crate::call::descriptor::RepeatableCallable::select_rooted(
         runtime,
         target,
         &RuntimeFunctionResolver,
-    )?;
+    )?
+    .with_callsite(input_callsite);
     selected
         .invoke_retained(runtime, arguments, requested_outputs)
         .await

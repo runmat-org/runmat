@@ -46,7 +46,9 @@ impl<T: Scalar> Preconditioner<T> for Jacobi<T> {
         "jacobi"
     }
     fn is_symmetric_positive_definite(&self) -> bool {
-        self.inverse_diagonal.iter().all(|d| d.re() > 0.0 && d.im() == 0.0)
+        self.inverse_diagonal
+            .iter()
+            .all(|d| d.re() > 0.0 && d.im() == 0.0)
     }
 }
 
@@ -61,7 +63,7 @@ pub struct BlockJacobi<T> {
 impl<T: Scalar> BlockJacobi<T> {
     pub fn new(matrix: CsrRef<'_, T>, block: usize) -> SolverResult<Self> {
         let n = matrix.nrows();
-        if block == 0 || n % block != 0 {
+        if block == 0 || !n.is_multiple_of(block) {
             return Err(SolverError::Dimension(format!(
                 "block size {block} does not divide {n}"
             )));
@@ -90,7 +92,9 @@ impl<T: Scalar> BlockJacobi<T> {
         });
         let mut inverses = Vec::with_capacity(n * block);
         for (node, b) in blocks.into_iter().enumerate() {
-            inverses.extend(b.map_err(|_| SolverError::Singular { pivot: node * block })?);
+            inverses.extend(b.map_err(|_| SolverError::Singular {
+                pivot: node * block,
+            })?);
         }
         Ok(Self { block, inverses })
     }

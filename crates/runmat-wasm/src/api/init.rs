@@ -87,16 +87,11 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     if let Some(host) = dialog_host.clone() {
         session.install_host_service(host);
     }
-    if matches!(
+    let application_settings = matches!(
         parsed_opts.application_settings,
         Some(ApplicationSettingsMode::IsolatedMemory)
-    ) {
-        session
-            .install_application_settings(std::rc::Rc::new(
-                runmat_runtime::context::IsolatedMemoryPreferenceService::new(),
-            ))
-            .map_err(|err| init_error(InitErrorCode::SessionCreation, err.to_string()))?;
-    }
+    )
+    .then(|| std::rc::Rc::new(runmat_runtime::context::IsolatedMemoryPreferenceService::new()));
     session.set_telemetry_consent(config.telemetry_consent);
     if let Some(cid) = config.telemetry_client_id.clone() {
         session.set_telemetry_client_id(Some(cid));
@@ -206,7 +201,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         session.set_telemetry_sink(telemetry_sink.clone());
     }
 
-    Ok(RunMatWasm::new(
+    let handle = RunMatWasm::new(
         session,
         config,
         gpu_status,
@@ -214,7 +209,13 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         package_cache,
         execution_service,
         dialog_host,
-    ))
+    );
+    match application_settings {
+        Some(settings) => handle
+            .with_application_settings(settings)
+            .map_err(|err| init_error(InitErrorCode::SessionCreation, err)),
+        None => Ok(handle),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

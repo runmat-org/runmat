@@ -576,6 +576,23 @@ fn call_arg_spans_preserve_plain_call_argument_text() {
 }
 
 #[test]
+fn callable_indexing_retains_original_selector_spans() {
+    let source = "h = @probe; alpha = 1; y = h(alpha, alpha + 1);";
+    let mir = lower_mir(source);
+    let indexing = first_indexing(mir.bodies.values().next().unwrap());
+    let spans = indexing
+        .argument_spans
+        .as_ref()
+        .expect("source selector provenance");
+    let text = spans
+        .iter()
+        .map(|span| &source[span.start..span.end])
+        .collect::<Vec<_>>();
+    assert_eq!(text, ["alpha", "alpha + 1"]);
+    assert_eq!(spans.len(), indexing.components.len());
+}
+
+#[test]
 fn call_arg_spans_exclude_feval_handle_argument() {
     let source = "alpha = 1; y = feval(@f, alpha, alpha + 1);";
     let mir = lower_mir(source);
@@ -4605,7 +4622,7 @@ fn every_mir_construct_has_one_explicit_native_lowering_class() {
     use std::collections::HashSet;
 
     // StatementOutput is a distinct construct from expression evaluation.
-    assert_eq!(MirConstructKind::ALL.len(), 61);
+    assert_eq!(MirConstructKind::ALL.len(), 62);
     assert_eq!(
         MirConstructKind::ALL
             .into_iter()

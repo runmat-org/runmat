@@ -33,6 +33,7 @@ impl OptionSpelling {
             "typicalx" => Self::Field(Field::TypicalX),
             "outputfcn" | "outputfcns" => Self::Field(Field::OutputFcn),
             "hessianfcn" => Self::Field(Field::HessianFcn),
+            "jacobianmultiplyfcn" | "jacobmult" => Self::Field(Field::JacobianMultiplyFcn),
             "hessianmultiplyfcn" => Self::Field(Field::HessianMultiplyFcn),
             "hesspattern" => Self::Field(Field::HessPattern),
             "maxpcgiter" => Self::Field(Field::MaxPCGIter),

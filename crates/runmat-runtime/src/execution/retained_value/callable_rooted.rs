@@ -23,7 +23,7 @@ impl RetainedValueReadLease {
             )
         })?;
         let quote = if let Value::ScopedFunctionHandle(handle) = &value {
-            crate::execution::scoped_callable::validate_target(context, handle)?;
+            crate::execution::scoped_callable::validate_retention(context, handle)?;
             // The scope's queue/capability metadata has no finite allocation
             // certificate. Preserve the original rooted header only after the
             // invocation owner has admitted the unmanaged path.

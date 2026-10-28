@@ -44,6 +44,13 @@ impl ControlledReadyPlacement {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl RunMatSession {
+    pub(crate) fn use_generic_ready_route_for_testing(&mut self) -> Rc<ControlledReadyPlacement> {
+        ControlledReadyPlacement::install(
+            self,
+            runmat_execution::ExecutionCandidateKind::GenericNativeCpu,
+        )
+    }
+
     pub(crate) fn use_specialized_ready_route_for_testing(
         &mut self,
     ) -> Rc<ControlledReadyPlacement> {

@@ -25,7 +25,7 @@ pub(super) async fn read_default_step_sequence(
             let ObjectIndexSelector::Member(member) = step.selector() else {
                 return Err(invalid_selector());
             };
-            crate::object::resolve::read_member_sequence_text_with_optional_access(
+            crate::object::resolve::read_default_member_sequence_text_with_optional_access(
                 runtime,
                 base,
                 member.clone(),
@@ -53,6 +53,7 @@ pub(super) fn assign_default_steps<'a>(
     mut steps: ExactArrayIntoIter<ObjectSubscript>,
     values: Vec<Value>,
     caller: Option<&'a str>,
+    access: &'a crate::object::protocol::ObjectAccessContext,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
     let Some(step) = steps.next() else {
         return super::super::context::admit_future_with(runtime, move || async move {
@@ -66,32 +67,33 @@ pub(super) fn assign_default_steps<'a>(
     if steps.len() == 0 {
         // The selected write already has the canonical admitted owner. Do
         // not wrap it in another all-branches path continuation.
-        return write_default_step(runtime, base, step, values, caller);
+        return write_default_step(runtime, base, step, values, caller, access);
     }
     super::super::context::admit_future_with(runtime, move || async move {
         let _inputs_root = crate::execution::RootedValueLease::for_values(
             std::iter::once(&base).chain(values.iter()),
         )
         .map_err(|error| error.into_runtime_error())?;
-        let child = read_default_step(runtime, base.clone(), &step, caller, None).await?;
+        let child = read_default_step(runtime, base.clone(), &step, caller, Some(access)).await?;
         let remaining = ObjectSubscriptPath::from_remaining_in_context(runtime, steps)?;
-        let updated = match runtime {
-            Some(runtime) => {
-                super::assign_subscript_path_in_context(
-                    runtime,
-                    child.value().clone(),
-                    remaining,
-                    values,
-                    caller,
-                )
-                .await?
-            }
-            None => {
-                super::assign_subscript_path(child.value().clone(), remaining, values, caller)
-                    .await?
-            }
-        };
-        write_default_step(runtime, base, step, vec![updated.value().clone()], caller).await
+        let updated = super::assign_subscript_path_with_access(
+            runtime,
+            child.value().clone(),
+            remaining,
+            values,
+            caller,
+            access,
+        )
+        .await?;
+        write_default_step(
+            runtime,
+            base,
+            step,
+            vec![updated.value().clone()],
+            caller,
+            access,
+        )
+        .await
     })
 }
 
@@ -107,7 +109,7 @@ pub(super) async fn read_default_step(
             let ObjectIndexSelector::Member(member) = step.selector() else {
                 return Err(invalid_selector());
             };
-            crate::object::resolve::read_member_sequence_text_with_optional_access(
+            crate::object::resolve::read_default_member_sequence_text_with_optional_access(
                 runtime,
                 base,
                 member.clone(),
@@ -194,6 +196,7 @@ fn write_default_step<'a>(
     step: ObjectSubscript,
     values: Vec<Value>,
     caller: Option<&'a str>,
+    access: &'a crate::object::protocol::ObjectAccessContext,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
     match step.kind() {
         ObjectIndexKind::Member => admit_write(
@@ -205,29 +208,16 @@ fn write_default_step<'a>(
                 let ObjectIndexSelector::Member(member) = step.selector() else {
                     return Err(invalid_selector());
                 };
-                match runtime {
-                    Some(runtime) => {
-                        crate::object::resolve::store_member_sequence_values_in_context(
-                            runtime,
-                            base,
-                            member.clone(),
-                            ValueSequence::comma_separated(values)
-                                .map_err(crate::sequence::sequence_error_to_runtime)?,
-                            caller,
-                        )
-                        .await
-                    }
-                    None => {
-                        crate::object::resolve::store_member_sequence_values(
-                            base,
-                            member.clone(),
-                            ValueSequence::comma_separated(values)
-                                .map_err(crate::sequence::sequence_error_to_runtime)?,
-                            caller,
-                        )
-                        .await
-                    }
-                }
+                crate::object::resolve::store_default_member_sequence_values(
+                    runtime,
+                    base,
+                    member.clone(),
+                    ValueSequence::comma_separated(values)
+                        .map_err(crate::sequence::sequence_error_to_runtime)?,
+                    caller,
+                    access,
+                )
+                .await
             },
         ),
         ObjectIndexKind::Paren => admit_write(

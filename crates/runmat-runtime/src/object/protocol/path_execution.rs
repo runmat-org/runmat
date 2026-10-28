@@ -2,7 +2,7 @@ use runmat_value::ExactArrayIntoIter;
 
 use runmat_value::Value;
 
-use super::{resolve_object_protocol, ObjectProtocol};
+use super::{resolve_object_protocol, ObjectProtocol, ProtocolDispatch};
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueSequence};
 use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
@@ -11,6 +11,8 @@ use crate::sequence::ValueSequence;
 use crate::RuntimeError;
 
 mod callable;
+mod builtin;
+pub(crate) use builtin::{assign_builtin_subscript_path, read_builtin_subscript_path};
 mod default_indexing;
 mod dotted_invoke;
 mod owned;
@@ -160,6 +162,7 @@ fn read_subscript_path_sequence<'a, A: std::borrow::Borrow<super::ObjectAccessCo
                     path.into_steps_in_context(runtime)?.into_iter(),
                     request,
                     caller_function_name,
+                    ProtocolDispatch::Resolve,
                 )
                 .await
             }
@@ -205,13 +208,33 @@ pub(crate) fn assign_subscript_path_with_runtime<'a>(
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
     let admission = runtime.clone();
     super::context::admit_future_with(admission.as_ref(), move || async move {
-        let runtime = runtime.as_ref();
+        let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
+        assign_subscript_path_with_access(
+            runtime.as_ref(),
+            base,
+            path,
+            values,
+            caller_function_name,
+            &access,
+        )
+        .await
+    })
+}
+
+fn assign_subscript_path_with_access<'a>(
+    runtime: Option<&'a RuntimeContext>,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: Vec<Value>,
+    caller_function_name: Option<&'a str>,
+    access: &'a super::ObjectAccessContext,
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
+    super::context::admit_future_with(runtime, move || async move {
         let _inputs_root = crate::execution::RootedValueLease::for_values(
             std::iter::once(&base).chain(values.iter()),
         )
         .map_err(|error| error.into_runtime_error())?;
-        let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
-        match resolve_object_protocol(&base, ObjectProtocol::Subsasgn, &access)? {
+        match resolve_object_protocol(&base, ObjectProtocol::Subsasgn, access)? {
             Some(method) => match runtime {
                 Some(runtime) => {
                     super::invoke_resolved_object_assignment_in_context(
@@ -228,6 +251,7 @@ pub(crate) fn assign_subscript_path_with_runtime<'a>(
                     path.into_steps_in_context(runtime)?.into_iter(),
                     values,
                     caller_function_name,
+                    access,
                 )
                 .await
             }
@@ -241,12 +265,13 @@ fn read_default_steps<'a, A: std::borrow::Borrow<super::ObjectAccessContext> + '
     mut steps: ExactArrayIntoIter<ObjectSubscript>,
     request: SubscriptReadRequest<A>,
     caller_function_name: Option<&'a str>,
+    mut dispatch: ProtocolDispatch,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValueSequence> {
     super::context::admit_future_with(runtime, move || async move {
         let mut base = RootedValue::new(base).map_err(|error| error.into_runtime_error())?;
         while steps.len() != 0 {
-            if let Some(method) =
-                resolve_object_protocol(base.value(), ObjectProtocol::Subsref, request.access())?
+            if let Some(method) = std::mem::replace(&mut dispatch, ProtocolDispatch::Resolve)
+                .resolve(base.value(), ObjectProtocol::Subsref, request.access())?
             {
                 let remaining = ObjectSubscriptPath::from_remaining_in_context(runtime, steps)?;
                 return invoke_prepared_subsref(
@@ -298,10 +323,17 @@ fn read_default_steps<'a, A: std::borrow::Borrow<super::ObjectAccessContext> + '
                 } else {
                     1
                 };
+                let input_callsite = step.input_callsite().cloned();
                 let arguments = callable::paren_arguments(runtime, step)?;
                 let sequence = base
                     .with_owned_async(|target| {
-                        callable::invoke(runtime, target, arguments.into(), requested_outputs)
+                        callable::invoke(
+                            runtime,
+                            target,
+                            arguments.into(),
+                            requested_outputs,
+                            input_callsite,
+                        )
                     })
                     .await?;
                 if steps.len() == 0 {

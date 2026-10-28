@@ -49,14 +49,7 @@ impl<'a> OperatorWork<'a> {
         Self::build(runtime, budget, quantum.get())
     }
     fn check(&self) -> Result<(), CooperativeOperatorError> {
-        if let Some(owner) = &self.owner {
-            owner.check(self.runtime)?;
-        } else if HostAllocationReceipt::policy(Some(self.runtime))?
-            != HostAllocationPolicy::Unbounded
-        {
-            return Err(HostAllocationError::StaleAuthority.into());
-        }
-        Ok(())
+        check_owner(self.runtime, self.owner.as_ref())
     }
     /// Never process past the next real execution quantum or authority fence.
     pub(in crate::builtins::math::linalg) fn capacity(&self) -> usize {
@@ -97,4 +90,17 @@ impl<'a> OperatorWork<'a> {
         self.pending = 0;
         Ok(())
     }
+}
+
+/// The same captured issuer/generation check for owned and borrowed work.
+pub(super) fn check_owner(
+    runtime: &RuntimeContext,
+    owner: Option<&HostAllocationCheckpoint>,
+) -> Result<(), CooperativeOperatorError> {
+    if let Some(owner) = owner {
+        owner.check(runtime)?;
+    } else if HostAllocationReceipt::policy(Some(runtime))? != HostAllocationPolicy::Unbounded {
+        return Err(HostAllocationError::StaleAuthority.into());
+    }
+    Ok(())
 }

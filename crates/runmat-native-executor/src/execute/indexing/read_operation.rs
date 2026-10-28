@@ -29,6 +29,7 @@ pub(super) fn read_paren(
     selectors: MaterializedSelectors,
     requested_outputs: usize,
     embedded: Option<&EmbeddedOperationIdentity>,
+    indexing: &runmat_mir::MirIndexing,
 ) -> NativeExecutorResult<IndexedReadOutcome> {
     if is_function_value(&base) {
         if selectors.colon_mask != 0 || selectors.end_mask != 0 {
@@ -42,6 +43,7 @@ pub(super) fn read_paren(
             &state.runtime,
         )?;
         let runtime = state.runtime.clone();
+        let input_callsite = super::index_callsite(state, indexing)?;
         let arguments = selectors.numeric;
         return call_suspension::begin_rooted_arguments(
             state,
@@ -50,11 +52,12 @@ pub(super) fn read_paren(
                 let _roots = roots;
                 let sequence = runtime
                     .scope(
-                        runmat_runtime::call_feval_retained_sequence_async_with_outputs_in_context(
+                        runmat_runtime::call_feval_retained_sequence_async_with_outputs_and_callsite_in_context(
                             &runtime,
                             base,
                             arguments.into(),
                             requested_outputs,
+                            input_callsite,
                         ),
                     )
                     .await?;

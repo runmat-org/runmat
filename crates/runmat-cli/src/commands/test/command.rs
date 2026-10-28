@@ -20,7 +20,8 @@ use runmat_test_runner_native::artifact::{export_reports, FilesystemArtifactStor
 use runmat_test_runner_native::host::{NativeCancellation, NativeClock};
 use runmat_test_runner_native::telemetry::NativeTelemetry;
 use runmat_test_runner_native::{
-    LocalBackend, LocalBackendConfig, ProcessBackend, ProcessBackendConfig,
+    LocalBackend, LocalBackendConfig, NativeWorkerExecutionConfig, ProcessBackend,
+    ProcessBackendConfig,
 };
 
 use crate::cli::{Cli, TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
@@ -42,9 +43,16 @@ pub async fn execute(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -
 }
 
 async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
-    let prepared = prepare(&args, cli).await?;
-    let mut session = runmat_core::RunMatSession::with_options(!cli.no_jit, false)
+    let prepared = prepare(
+        &args,
+        cli,
+        crate::diagnostics::parser_compat(runtime.language.compat),
+    )
+    .await?;
+    let enable_jit = runtime.jit.enabled;
+    let mut session = runmat_core::RunMatSession::with_options(enable_jit, false)
         .context("failed to initialize test discovery session")?;
+    session.configure_test_snapshot(&prepared.snapshot)?;
     if let Some(project) = prepared.project_handoff.clone() {
         session
             .install_project_handoff(project)
@@ -215,10 +223,11 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
                     std::env::current_exe().context("failed to locate the runmat executable")?,
                 );
                 backend_config.project_handoff = prepared.project_handoff.clone();
-                backend_config.environment.insert(
-                    "RUNMAT_TEST_JIT".into(),
-                    if cli.no_jit { "0" } else { "1" }.into(),
-                );
+                backend_config.execution = NativeWorkerExecutionConfig {
+                    enable_jit,
+                    accelerate: runtime.accelerate.clone(),
+                    foreign: runtime.foreign.clone(),
+                };
                 for name in allowed_environment {
                     if let Ok(value) = std::env::var(&name) {
                         backend_config.environment.insert(name, value);
@@ -243,7 +252,11 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
             }
             IsolationMode::Session | IsolationMode::None => {
                 let mut backend_config = LocalBackendConfig::new(isolation);
-                backend_config.enable_jit = !cli.no_jit;
+                backend_config.execution = NativeWorkerExecutionConfig {
+                    enable_jit,
+                    accelerate: runtime.accelerate.clone(),
+                    foreign: runtime.foreign.clone(),
+                };
                 backend_config.max_workers = jobs;
                 backend_config.project_handoff = prepared.project_handoff.clone();
                 let backend = LocalBackend::new(backend_config).map_err(|error| {

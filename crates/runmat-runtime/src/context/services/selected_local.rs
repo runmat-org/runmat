@@ -256,24 +256,26 @@ impl RuntimeSelectedLocalServices {
 
 impl RuntimeServicePorts {
     pub(crate) fn has_selected_local_services(&self) -> bool {
-        self.selected_local.is_some()
+        self.shared.selected_local.is_some()
     }
 
     pub(crate) fn selected_local_matches(&self, product: Digest, invocation: Digest) -> bool {
-        self.selected_local
+        self.shared
+            .selected_local
             .as_ref()
             .is_some_and(|selected| selected.matches_product_invocation(product, invocation))
     }
 
     pub(crate) fn selected_temporary_directory(&self) -> Option<PathBuf> {
-        self.selected_local
+        self.shared
+            .selected_local
             .as_ref()
             .and_then(|selected| selected.temporary_directory())
             .map(Path::to_path_buf)
     }
 
     pub fn with_selected_local_services(mut self, selected: RuntimeSelectedLocalServices) -> Self {
-        self.selected_local = Some(Rc::new(selected));
+        Rc::make_mut(&mut self.shared).selected_local = Some(Rc::new(selected));
         self
     }
 
@@ -282,7 +284,8 @@ impl RuntimeServicePorts {
         issuer: &VerifiedNativeServiceIssuer,
         invocation: Digest,
     ) -> Result<(), crate::RuntimeError> {
-        self.selected_local
+        self.shared
+            .selected_local
             .as_ref()
             .ok_or_else(|| mismatch("selected local services were not installed"))?
             .require(issuer, invocation)
@@ -306,7 +309,7 @@ impl RuntimeServicePorts {
         &self,
         effect: EffectKind,
     ) -> Result<(), SelectedLocalEffectDenied> {
-        if let Some(selected) = &self.selected_local {
+        if let Some(selected) = &self.shared.selected_local {
             if !selected.has(effect) {
                 return Err(SelectedLocalEffectDenied { effect });
             }
@@ -317,7 +320,8 @@ impl RuntimeServicePorts {
     pub(crate) fn selected_filesystem_for_active_context(
         &self,
     ) -> Option<InvocationFilesystemSelection> {
-        self.selected_local
+        self.shared
+            .selected_local
             .as_ref()
             .map(|selected| selected.filesystem_selection())
     }

@@ -214,6 +214,10 @@ exercises fresh invocation state. A modeled CPU variant supplies
 `"process_cpu":{"initial_nanos":2000000000,"read_step_nanos":25000000}`.
 These commands describe the witness; they do not assert it has been qualified.
 
+## Executor-specific operations
+
+Canonical builtin contracts distinguish ordinary runtime calls from operations that require executor lowering. Direct calls to `parfeval`, `parfevalOnAll`, `fetchOutputs`, and `fetchNext` use VM lowering. Adaptive JIT leaves programs containing these calls in the VM; native compilation reports a capability diagnostic before publishing executable code. Pool creation and lookup (`parpool` and `gcp`) have shared runtime implementations and remain available to native code.
+
 ## Inspect the link plan
 
 Use `--explain-link` to print the program and runtime nodes retained by compilation:
