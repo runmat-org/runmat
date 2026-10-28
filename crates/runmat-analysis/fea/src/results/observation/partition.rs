@@ -193,6 +193,16 @@ impl ObservationPartitionPlan {
         policy: ObservationExecutionPolicy,
     ) -> Result<Self, ObservationError> {
         plan.validate_identity()?;
+        Self::derive_for_validated_plan(plan, observation_id, policy)
+    }
+
+    /// As `derive`, for a resolved plan whose identity the caller validated in the same
+    /// operation (for example through `ObservationEvaluationRequest::validate`).
+    pub(crate) fn derive_for_validated_plan(
+        plan: &ResolvedObservationPlan,
+        observation_id: &ObservationId,
+        policy: ObservationExecutionPolicy,
+    ) -> Result<Self, ObservationError> {
         let observation = plan
             .observations
             .iter()
@@ -237,57 +247,33 @@ impl ObservationPartitionPlan {
             resource_cost: partitioned_resource_cost(observation, partition_count, policy)?,
         };
         partition_plan.identity = partition_plan.derive_identity()?;
-        partition_plan.validate_structure()?;
+        // Identities were just derived from this content; check only the shape.
+        partition_plan.validate_shape()?;
         Ok(partition_plan)
     }
 
+    /// The canonical derivation validates the resolved plan identity once and owns every
+    /// partition target, identity and cost; equality with it is the whole check, so neither
+    /// the stored identities nor the resolved plan are hashed a second time.
     pub fn validate_for(&self, plan: &ResolvedObservationPlan) -> Result<(), ObservationError> {
-        self.validate_structure()?;
-        plan.validate_identity()?;
         if self.observation_plan != plan.identity || self.topology_digest != plan.topology_digest {
             return Err(ObservationError::Identity(
                 "observation partition plan names a different resolved plan",
             ));
         }
-        let observation = plan
-            .observations
-            .iter()
-            .find(|candidate| candidate.spec.observation_id == self.observation_id)
-            .ok_or_else(|| {
-                ObservationError::Invalid(
-                    "observation partition plan names an absent observation".into(),
-                )
-            })?;
+        let partitions = NonZeroU32::new(
+            u32::try_from(self.partitions.len())
+                .map_err(|_| ObservationError::Limit("observation partition count"))?,
+        )
+        .ok_or_else(|| ObservationError::Invalid("observation partition plan is empty".into()))?;
         let expected = ObservationPartitionPlan::derive(
             plan,
             &self.observation_id,
-            ObservationExecutionPolicy::canonical(
-                NonZeroU32::new(
-                    u32::try_from(self.partitions.len())
-                        .map_err(|_| ObservationError::Limit("observation partition count"))?,
-                )
-                .ok_or_else(|| {
-                    ObservationError::Invalid("observation partition plan is empty".into())
-                })?,
-            ),
+            ObservationExecutionPolicy::canonical(partitions),
         )?;
-        if expected.partitions != self.partitions
-            || expected.resource_cost != self.resource_cost
-            || expected.identity != self.identity
-        {
+        if *self != expected {
             return Err(ObservationError::Identity(
                 "observation partition ownership does not cover the canonical target exactly",
-            ));
-        }
-        if self
-            .partitions
-            .iter()
-            .map(|partition| partition.target.entity_count())
-            .sum::<usize>()
-            != observation.target.selected_entity_count()
-        {
-            return Err(ObservationError::Identity(
-                "observation partitions do not cover the resolved target",
             ));
         }
         Ok(())
@@ -312,7 +298,8 @@ impl ObservationPartitionPlan {
         )?)
     }
 
-    fn validate_structure(&self) -> Result<(), ObservationError> {
+    /// Metadata and per-partition shape, without hashing any identity.
+    fn validate_shape(&self) -> Result<(), ObservationError> {
         if self.schema_version != 1
             || self.observation_id.0.trim().is_empty()
             || self.partitions.is_empty()
@@ -320,7 +307,6 @@ impl ObservationPartitionPlan {
             || self.resource_cost.peak_resident_bytes == 0
             || self.resource_cost.stored_bytes == 0
             || self.resource_cost.transfer_bytes == 0
-            || self.identity != self.derive_identity()?
         {
             return Err(ObservationError::Invalid(
                 "observation partition plan metadata or identity is invalid".into(),
@@ -330,7 +316,24 @@ impl ObservationPartitionPlan {
             if partition.ordinal as usize != ordinal
                 || partition.target.entity_count() == 0
                 || partition.target.entity_count() != partition.target.identities().len()
-                || partition.identity
+            {
+                return Err(ObservationError::Invalid(
+                    "observation partition metadata or identity is invalid".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_structure(&self) -> Result<(), ObservationError> {
+        self.validate_shape()?;
+        if self.identity != self.derive_identity()? {
+            return Err(ObservationError::Invalid(
+                "observation partition plan metadata or identity is invalid".into(),
+            ));
+        }
+        for partition in &self.partitions {
+            if partition.identity
                     != derive_partition_identity(
                         self.observation_plan,
                         self.topology_digest,
