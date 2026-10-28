@@ -56,6 +56,7 @@ pub struct CompletedFluidStudy {
     pub publication: ImportedPublishedResult,
 }
 
+#[derive(Clone)]
 pub struct FluidStudyPreparation {
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: FluidStudyPlanningPolicy,

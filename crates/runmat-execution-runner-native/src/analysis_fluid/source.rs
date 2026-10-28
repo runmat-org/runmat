@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 
 use runmat_analysis_execution::{
     import_fluid_study_completion, prepare_fluid_study_root, CompletedFluidStudy,
+    FluidStudyPreparation,
 };
 use runmat_execution::{
     value::{PublishedObjectSource, ValueRef},
@@ -15,6 +16,9 @@ use runmat_runtime::analysis::{FluidStudyCompletion, FluidStudyObjectSource, Flu
 struct RetainedFluidSource<S> {
     artifact_access: runmat_execution_artifact::ArtifactAccess,
     completed: CompletedFluidStudy,
+    /// `completed.preparation()`, validated and re-planned once: the retained study is
+    /// immutable, so every replay, field materialization and DTO build shares it.
+    preparation: FluidStudyPreparation,
     store: S,
     objects: BTreeMap<Digest, Vec<u8>>,
     /// The completion that one cold replay of `completed` over this source's immutable
@@ -91,7 +95,7 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
         self.authenticate(candidate)?;
         let plan = self
             .completed
-            .field_recovery_resource_plan(self)
+            .field_recovery_resource_plan_for(self.preparation.clone(), self)
             .map_err(|e| e.to_string())?;
         let runmat_analysis_fea::planning::resource::FeaResourceDemand::FluidFieldRecovery(demand) =
             &plan.input.demand
@@ -100,7 +104,7 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
                 "fluid native field materialization lacks original recovery authority".into(),
             );
         };
-        let preparation = self.completed.preparation().map_err(|e| e.to_string())?;
+        let preparation = &self.preparation;
         let mut limits = preparation.output_policy.inventory_limits();
         limits.max_total_bytes = limits
             .max_total_bytes
@@ -188,11 +192,12 @@ impl<S: CacheImport + Send + Sync> RetainedFluidSource<S> {
         }
         let replay = import_fluid_study_completion(
             self,
-            self.completed.preparation().map_err(|e| e.to_string())?,
+            self.preparation.clone(),
             self.completed.result_closures().to_vec(),
         )
         .map_err(|error| error.to_string())?;
-        let expected = completion(&replay, self)?;
+        // The replay was imported from exactly this preparation.
+        let expected = completion(&replay, &self.preparation, self)?;
         for reference in &expected.catalog.objects {
             PublishedObjectSource::read_verified(self, reference)?;
         }
@@ -202,10 +207,10 @@ impl<S: CacheImport + Send + Sync> RetainedFluidSource<S> {
 
 fn completion(
     completed: &CompletedFluidStudy,
+    preparation: &FluidStudyPreparation,
     source: &impl CacheImport,
 ) -> Result<FluidStudyCompletion, String> {
     let root = prepare_fluid_study_root(completed).map_err(|error| error.to_string())?;
-    let preparation = completed.preparation().map_err(|error| error.to_string())?;
     Ok(FluidStudyCompletion {
         host_workload_digest: completed
             .result_closures()
@@ -274,11 +279,10 @@ pub(crate) fn convert(
     store: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(FluidStudyCompletion, FluidStudyObjectSource), String> {
     let root = prepare_fluid_study_root(&completed).map_err(|error| error.to_string())?;
+    let preparation = completed.preparation().map_err(|e| e.to_string())?;
     let source = RetainedFluidSource {
-        artifact_access: completed
-            .preparation()
-            .map_err(|e| e.to_string())?
-            .artifact_access,
+        artifact_access: preparation.artifact_access.clone(),
+        preparation,
         objects: root
             .objects
             .into_iter()
@@ -288,7 +292,7 @@ pub(crate) fn convert(
         store,
         replayed: OnceLock::new(),
     };
-    let dto = completion(&source.completed, &source)?;
+    let dto = completion(&source.completed, &source.preparation, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, FluidStudyObjectSource::new(source)))
 }
@@ -299,17 +303,16 @@ pub fn fluid_study_completion_from_source(
     completed: CompletedFluidStudy,
     source: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(FluidStudyCompletion, FluidStudyObjectSource), String> {
+    let preparation = completed.preparation().map_err(|e| e.to_string())?;
     let source = RetainedFluidSource {
-        artifact_access: completed
-            .preparation()
-            .map_err(|e| e.to_string())?
-            .artifact_access,
+        artifact_access: preparation.artifact_access.clone(),
+        preparation,
         completed,
         store: source,
         objects: BTreeMap::new(),
         replayed: OnceLock::new(),
     };
-    let dto = completion(&source.completed, &source)?;
+    let dto = completion(&source.completed, &source.preparation, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, FluidStudyObjectSource::new(source)))
 }
