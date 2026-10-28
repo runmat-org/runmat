@@ -104,7 +104,8 @@ impl ObservationPartitionEvaluationRequest {
         }
         let request = Self {
             schema_version: 1,
-            identity: Self::published_identity(
+            // `source.validate()` and `partition_plan.validate_for` succeeded above.
+            identity: Self::published_identity_validated(
                 source,
                 partition_plan,
                 partition,
@@ -262,7 +263,12 @@ impl ObservationPartitionReductionRequest {
             .collect::<Vec<_>>();
         let request = Self {
             schema_version: 1,
-            identity: Self::published_identity(source, partition_plan, &contribution_identities)?,
+            // `source.validate()` and `partition_plan.validate_for` succeeded above.
+            identity: Self::published_identity_validated(
+                source,
+                partition_plan,
+                &contribution_identities,
+            )?,
             producer: source.producer,
             source_request: source.identity(),
             partition_plan: partition_plan.identity,

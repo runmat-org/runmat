@@ -93,6 +93,7 @@ impl SampledHistorySource for Context<'_> {
                 program_revision: self.setup.program_revision.clone(),
                 chunk_bytes: policy.chunk_bytes(),
                 inventory_limits: policy.inventory_limits(),
+                local_execution: self.setup.local_execution,
             },
             coordinate,
         ))

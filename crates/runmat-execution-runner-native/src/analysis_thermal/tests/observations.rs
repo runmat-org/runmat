@@ -164,6 +164,7 @@ fn check_equilibrium_observations(order: ElementOrder, transient: bool) {
         program_revision: revision.clone(),
         chunk_bytes,
         inventory_limits: limits,
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     };
     assert_eq!(result.manifest.fields.len(), if transient { 4 } else { 1 });
     assert!(prepare_observation_fanout(

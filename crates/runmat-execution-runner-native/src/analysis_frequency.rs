@@ -327,6 +327,7 @@ pub(crate) async fn execute_with_pool(
             program_revision: preparation.program_revision.clone(),
             chunk_bytes: preparation.chunk_bytes,
             inventory_limits: preparation.inventory_limits,
+            local_execution: preparation.local_execution,
         },
         &policy,
     )

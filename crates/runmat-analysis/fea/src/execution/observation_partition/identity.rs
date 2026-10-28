@@ -42,6 +42,7 @@ impl ObservationPartitionEvaluationRequest {
     /// Reconstruct the canonical task identity without loading numerical field blocks.
     /// The caller must authenticate the selected block-set identity and event attribution
     /// against the authoritative source catalog; an opaque identity cannot prove coverage.
+    #[cfg(test)]
     pub(crate) fn published_identity(
         source: &ObservationEvaluationRequest,
         plan: &ObservationPartitionPlan,
@@ -86,6 +87,7 @@ impl ObservationPartitionEvaluationRequest {
 impl ObservationPartitionReductionRequest {
     /// Contributions must come in canonical partition order from validated full evidence.
     /// Identities alone establish neither numerical payload integrity nor partition ownership.
+    #[cfg(test)]
     pub(crate) fn published_identity(
         source: &ObservationEvaluationRequest,
         plan: &ObservationPartitionPlan,

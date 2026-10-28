@@ -42,6 +42,7 @@ impl NonlinearSolidStudyCoordinator {
                 program_revision: self.preparation.program_revision.clone(),
                 chunk_bytes: policy.chunk_bytes(),
                 inventory_limits: policy.inventory_limits(),
+                local_execution: self.preparation.local_execution,
             },
         )?;
         if task.partitions.is_empty() {

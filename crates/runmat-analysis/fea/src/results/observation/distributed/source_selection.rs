@@ -17,8 +17,36 @@ pub fn solid_observation_partition_source_indices(
     partition: &ObservationPartition,
     projection: &AnalysisProjection,
 ) -> Result<Vec<usize>, ObservationError> {
-    let topology = solid_observation_topology(plan, projection)?;
-    observation_partition_source_indices(plan, partition_plan, partition, &topology)
+    SolidObservationSourceSelection::new(plan, projection)?
+        .partition_source_indices(partition_plan, partition)
+}
+
+/// Source-index selection for every partition of one resolved plan over a solid or volume
+/// projection. The observation topology is derived once here and shared, read-only, by every
+/// partition of every observation of the plan (including partitions selected concurrently).
+pub struct SolidObservationSourceSelection<'a> {
+    plan: &'a ResolvedObservationPlan,
+    topology: ObservationTopology<'a>,
+}
+
+impl<'a> SolidObservationSourceSelection<'a> {
+    pub fn new(
+        plan: &'a ResolvedObservationPlan,
+        projection: &'a AnalysisProjection,
+    ) -> Result<Self, ObservationError> {
+        Ok(Self {
+            plan,
+            topology: solid_observation_topology(plan, projection)?,
+        })
+    }
+
+    pub fn partition_source_indices(
+        &self,
+        partition_plan: &ObservationPartitionPlan,
+        partition: &ObservationPartition,
+    ) -> Result<Vec<usize>, ObservationError> {
+        observation_partition_source_indices(self.plan, partition_plan, partition, &self.topology)
+    }
 }
 
 /// The observation topology every partition of `plan` over a solid or volume projection
