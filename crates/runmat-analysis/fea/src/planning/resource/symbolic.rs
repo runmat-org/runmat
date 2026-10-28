@@ -81,29 +81,19 @@ impl StructuralSymbolicOperators {
             ));
         }
 
-        let mut stiffness_rows = (0..total_dofs)
-            .map(|_| BTreeSet::<usize>::new())
-            .collect::<Vec<_>>();
-        let mut mass_rows = (0..total_dofs)
-            .map(|row| BTreeSet::from([row]))
-            .collect::<Vec<_>>();
-        for element in &projection.elements {
-            for &row_node in &element.node_indices {
-                let row_offset = checked_dof_offset(row_node, projection.nodes.len())?;
-                for &column_node in &element.node_indices {
-                    let column_offset = checked_dof_offset(column_node, projection.nodes.len())?;
-                    for row_axis in 0..TRANSLATIONAL_DOF_COUNT {
-                        for column_axis in 0..TRANSLATIONAL_DOF_COUNT {
-                            stiffness_rows[row_offset + row_axis]
-                                .insert(column_offset + column_axis);
-                        }
-                        mass_rows[row_offset + row_axis].insert(column_offset + row_axis);
-                    }
-                }
-            }
-        }
-        let mass = pattern_from_rows(mass_rows, total_dofs)?;
-        if !model.connectors.is_empty() {
+        // Node coupling of the solid elements; every node carries the same translational block.
+        let nodes = CliqueAdjacency::derive(
+            projection.nodes.len(),
+            projection
+                .elements
+                .iter()
+                .map(|element| element.node_indices.as_slice()),
+            "projected element references an absent node",
+        )?;
+        let mass = solid_mass_pattern(&nodes, mesh_dofs, total_dofs)?;
+        let connectors = if model.connectors.is_empty() {
+            None
+        } else {
             let topology = CanonicalStructuralNodeSpace::derive_solid(mesh)
                 .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
             let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
@@ -115,9 +105,15 @@ impl StructuralSymbolicOperators {
             let plan =
                 compile_model_connector_plan(model, Some(mesh), constraints.reference_points.len())
                     .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-            add_connector_plan_pattern(&mut stiffness_rows, &plan, constraints.topology, &layout)?;
-        }
-        let stiffness_upper_bound = pattern_from_rows(stiffness_rows, total_dofs)?;
+            let cliques = connector_dof_cliques(&plan, constraints.topology, &layout)?;
+            Some(CliqueAdjacency::derive(
+                total_dofs,
+                cliques.iter().map(Vec::as_slice),
+                "connector DOF lies outside the structural layout",
+            )?)
+        };
+        let stiffness_upper_bound =
+            solid_stiffness_pattern(&nodes, mesh_dofs, total_dofs, connectors.as_ref())?;
         Self::from_patterns(stiffness_upper_bound.clone(), mass, stiffness_upper_bound)
     }
 
@@ -139,9 +135,7 @@ impl StructuralSymbolicOperators {
         }
         let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
         let total_dofs = layout.total_dof_count();
-        let mut rows = (0..total_dofs)
-            .map(|_| BTreeSet::<usize>::new())
-            .collect::<Vec<_>>();
+        let mut cliques = Vec::new();
         for element in &structural.elements {
             let explicit_nodes = match &element.kind {
                 StructuralElementKind::Beam(beam) => beam.node_ids.as_slice(),
@@ -166,18 +160,15 @@ impl StructuralSymbolicOperators {
                         .filter_map(|dof| layout.index(canonical, dof)),
                 );
             }
-            add_dense_element_pattern(&mut rows, &element_dofs);
+            cliques.push(element_dofs);
         }
         if !model.connectors.is_empty() {
             let plan =
                 compile_model_connector_plan(model, None, constraints.reference_points.len())
                     .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-            add_connector_plan_pattern(&mut rows, &plan, constraints.topology, &layout)?;
+            cliques.extend(connector_dof_cliques(&plan, constraints.topology, &layout)?);
         }
-        for (row, columns) in rows.iter_mut().enumerate() {
-            columns.insert(row);
-        }
-        let stiffness_upper_bound = pattern_from_rows(rows, total_dofs)?;
+        let stiffness_upper_bound = dof_clique_pattern(total_dofs, &cliques)?;
         Self::from_patterns(
             stiffness_upper_bound.clone(),
             stiffness_upper_bound.clone(),
@@ -205,9 +196,7 @@ impl StructuralSymbolicOperators {
         }
         let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
         let total_dofs = layout.total_dof_count();
-        let mut rows = (0..total_dofs)
-            .map(|_| BTreeSet::<usize>::new())
-            .collect::<Vec<_>>();
+        let mut cliques = Vec::new();
         for element in &projection.elements {
             let element_dofs = element
                 .node_indices
@@ -222,7 +211,7 @@ impl StructuralSymbolicOperators {
                     .filter_map(|dof| layout.index(*node, dof))
                 })
                 .collect::<Vec<_>>();
-            add_dense_element_pattern(&mut rows, &element_dofs);
+            cliques.push(element_dofs);
         }
         for element in &structural.elements {
             let explicit_nodes = match &element.kind {
@@ -248,18 +237,15 @@ impl StructuralSymbolicOperators {
                         .filter_map(|dof| layout.index(canonical, dof)),
                 );
             }
-            add_dense_element_pattern(&mut rows, &element_dofs);
+            cliques.push(element_dofs);
         }
         if !model.connectors.is_empty() {
             let plan =
                 compile_model_connector_plan(model, Some(mesh), constraints.reference_points.len())
                     .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-            add_connector_plan_pattern(&mut rows, &plan, constraints.topology, &layout)?;
+            cliques.extend(connector_dof_cliques(&plan, constraints.topology, &layout)?);
         }
-        for (row, columns) in rows.iter_mut().enumerate() {
-            columns.insert(row);
-        }
-        let stiffness_upper_bound = pattern_from_rows(rows, total_dofs)?;
+        let stiffness_upper_bound = dof_clique_pattern(total_dofs, &cliques)?;
         let mass = stiffness_upper_bound.clone();
         let damping = stiffness_upper_bound.clone();
         Self::from_patterns(stiffness_upper_bound, mass, damping)
@@ -349,17 +335,18 @@ impl StructuralSymbolicOperators {
     }
 }
 
-fn add_connector_plan_pattern(
-    rows: &mut [BTreeSet<usize>],
+/// The DOFs each connector couples densely.
+fn connector_dof_cliques(
     plan: &CanonicalStructuralConnectorPlan,
     topology: CanonicalStructuralTopologyIdentity,
     layout: &StructuralDofLayout,
-) -> Result<(), ResourcePlanningError> {
+) -> Result<Vec<Vec<usize>>, ResourcePlanningError> {
     if plan.topology != topology || plan.node_count != layout.node_count() {
         return Err(ResourcePlanningError::Invalid(
             "connector plan and symbolic topology differ".into(),
         ));
     }
+    let mut cliques = Vec::with_capacity(plan.entries.len());
     for connector in &plan.entries {
         let mut connector_nodes = Vec::new();
         match connector {
@@ -408,29 +395,180 @@ fn add_connector_plan_pattern(
                 .collect::<Result<Vec<_>, _>>()?,
             );
         }
-        add_dense_element_pattern(rows, &connector_dofs);
+        cliques.push(connector_dofs);
     }
-    Ok(())
+    Ok(cliques)
 }
 
-fn add_dense_element_pattern(rows: &mut [BTreeSet<usize>], element_dofs: &[usize]) {
-    for &row in element_dofs {
-        rows[row].extend(element_dofs.iter().copied());
+/// Consistent-mass pattern of solid elements: each translational DOF couples the same axis of
+/// every node it shares an element with; every DOF keeps its diagonal.
+fn solid_mass_pattern(
+    nodes: &CliqueAdjacency,
+    mesh_dofs: usize,
+    total_dofs: usize,
+) -> Result<SparsePattern, ResourcePlanningError> {
+    pattern_from_row_builder(total_dofs, |row, columns| {
+        columns.push(row);
+        if row < mesh_dofs {
+            let axis = row % TRANSLATIONAL_DOF_COUNT;
+            columns.extend(
+                nodes
+                    .row(row / TRANSLATIONAL_DOF_COUNT)
+                    .iter()
+                    .map(|node| node * TRANSLATIONAL_DOF_COUNT + axis),
+            );
+        }
+    })
+}
+
+/// Stiffness pattern of solid elements (full translational blocks between nodes that share an
+/// element) plus the DOF cliques of connectors.
+fn solid_stiffness_pattern(
+    nodes: &CliqueAdjacency,
+    mesh_dofs: usize,
+    total_dofs: usize,
+    connectors: Option<&CliqueAdjacency>,
+) -> Result<SparsePattern, ResourcePlanningError> {
+    pattern_from_row_builder(total_dofs, |row, columns| {
+        if row < mesh_dofs {
+            for node in nodes.row(row / TRANSLATIONAL_DOF_COUNT) {
+                let offset = node * TRANSLATIONAL_DOF_COUNT;
+                columns.extend(offset..offset + TRANSLATIONAL_DOF_COUNT);
+            }
+        }
+        if let Some(connectors) = connectors {
+            columns.extend_from_slice(connectors.row(row));
+        }
+    })
+}
+
+/// Pattern of densely coupled DOF cliques with a full diagonal.
+fn dof_clique_pattern(
+    dimension: usize,
+    cliques: &[Vec<usize>],
+) -> Result<SparsePattern, ResourcePlanningError> {
+    let adjacency = CliqueAdjacency::derive(
+        dimension,
+        cliques.iter().map(Vec::as_slice),
+        "element DOF lies outside the structural layout",
+    )?;
+    pattern_from_row_builder(dimension, |row, columns| {
+        columns.push(row);
+        columns.extend_from_slice(adjacency.row(row));
+    })
+}
+
+/// Sorted, duplicate-free neighbor lists of indices coupled by cliques: an index neighbors
+/// every index it shares a clique with, itself included; an index in no clique has none.
+///
+/// Flat storage: an ordered set per row costs one small allocation per few entries, which on
+/// a large mesh churns gigabytes through the allocator during planning and leaves the
+/// planning process holding that freed memory while its solve worker runs.
+pub(super) struct CliqueAdjacency {
+    offsets: Vec<usize>,
+    neighbors: Vec<usize>,
+}
+
+impl CliqueAdjacency {
+    pub(super) fn derive<'a>(
+        dimension: usize,
+        cliques: impl Iterator<Item = &'a [usize]>,
+        out_of_range: &'static str,
+    ) -> Result<Self, ResourcePlanningError> {
+        let mut clique_offsets = vec![0_usize];
+        let mut members = Vec::new();
+        let mut incidence_offsets = vec![0_usize; dimension + 1];
+        for clique in cliques {
+            for &index in clique {
+                if index >= dimension {
+                    return Err(ResourcePlanningError::Invalid(out_of_range.into()));
+                }
+                incidence_offsets[index + 1] += 1;
+                members.push(index);
+            }
+            clique_offsets.push(members.len());
+        }
+        for index in 0..dimension {
+            incidence_offsets[index + 1] += incidence_offsets[index];
+        }
+        let mut cursor = incidence_offsets[..dimension].to_vec();
+        let mut incidence = vec![0_usize; members.len()];
+        for clique in 0..clique_offsets.len() - 1 {
+            for &index in &members[clique_offsets[clique]..clique_offsets[clique + 1]] {
+                incidence[cursor[index]] = clique;
+                cursor[index] += 1;
+            }
+        }
+        drop(cursor);
+        let gather = |index: usize, scratch: &mut Vec<usize>| {
+            scratch.clear();
+            for &clique in &incidence[incidence_offsets[index]..incidence_offsets[index + 1]] {
+                scratch.extend_from_slice(&members[clique_offsets[clique]..clique_offsets[clique + 1]]);
+            }
+            scratch.sort_unstable();
+            scratch.dedup();
+        };
+        let mut scratch = Vec::new();
+        let mut total = 0_usize;
+        for index in 0..dimension {
+            gather(index, &mut scratch);
+            total += scratch.len();
+        }
+        let mut offsets = Vec::with_capacity(dimension + 1);
+        let mut neighbors = Vec::with_capacity(total);
+        offsets.push(0);
+        for index in 0..dimension {
+            gather(index, &mut scratch);
+            neighbors.extend_from_slice(&scratch);
+            offsets.push(neighbors.len());
+        }
+        Ok(Self { offsets, neighbors })
+    }
+
+    pub(super) fn row(&self, index: usize) -> &[usize] {
+        &self.neighbors[self.offsets[index]..self.offsets[index + 1]]
     }
 }
 
-fn checked_dof_offset(
-    node_index: usize,
-    node_count: usize,
-) -> Result<usize, ResourcePlanningError> {
-    if node_index >= node_count {
-        return Err(ResourcePlanningError::Invalid(
-            "projected element references an absent node".into(),
-        ));
+/// Square pattern whose row `r` holds the columns `row(r, columns)` writes (any order,
+/// duplicates allowed). Rows are produced twice so the column storage is allocated once at its
+/// exact size.
+fn pattern_from_row_builder(
+    dimension: usize,
+    row: impl Fn(usize, &mut Vec<usize>),
+) -> Result<SparsePattern, ResourcePlanningError> {
+    let build = |index: usize, scratch: &mut Vec<usize>| {
+        scratch.clear();
+        row(index, scratch);
+        scratch.sort_unstable();
+        scratch.dedup();
+    };
+    let mut scratch = Vec::new();
+    let mut total = 0_usize;
+    for index in 0..dimension {
+        build(index, &mut scratch);
+        total += scratch.len();
     }
-    node_index
-        .checked_mul(TRANSLATIONAL_DOF_COUNT)
-        .ok_or(ResourcePlanningError::Overflow("structural DOF offset"))
+    let mut offsets = Vec::with_capacity(dimension + 1);
+    let mut column_indices = Vec::with_capacity(total);
+    offsets.push(0_u64);
+    for index in 0..dimension {
+        build(index, &mut scratch);
+        for &column in &scratch {
+            column_indices.push(
+                u64::try_from(column)
+                    .map_err(|_| ResourcePlanningError::Overflow("sparse column index"))?,
+            );
+        }
+        offsets.push(
+            u64::try_from(column_indices.len())
+                .map_err(|_| ResourcePlanningError::Overflow("sparse row offset"))?,
+        );
+    }
+    let size = u64::try_from(dimension)
+        .map_err(|_| ResourcePlanningError::Overflow("sparse row count"))?;
+    SparsePattern::try_new(size, size, offsets, column_indices)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
 }
 
 pub(super) fn pattern_from_rows(
@@ -467,6 +605,98 @@ pub(super) fn pattern_from_rows(
 mod tests {
     use super::*;
     use crate::algebra::{MatrixProperties, OperatorRole, RealSparseMatrix};
+
+    /// Deterministic pseudo-random cliques over `dimension` indices.
+    fn cliques(dimension: usize, count: usize, size: usize, seed: u64) -> Vec<Vec<usize>> {
+        let mut state = seed;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as usize % dimension
+        };
+        (0..count)
+            .map(|_| (0..size).map(|_| next()).collect())
+            .collect()
+    }
+
+    fn set_rows_pattern(rows: Vec<BTreeSet<usize>>, dimension: usize) -> SparsePattern {
+        pattern_from_rows(rows, dimension).unwrap()
+    }
+
+    #[test]
+    fn flat_solid_patterns_equal_the_per_row_set_construction() {
+        let node_count = 40;
+        let reference_dofs = 6;
+        let mesh_dofs = node_count * TRANSLATIONAL_DOF_COUNT;
+        let total_dofs = mesh_dofs + reference_dofs;
+        let elements = cliques(node_count, 25, 10, 7);
+        let connector_cliques = cliques(total_dofs, 3, 9, 11);
+        let nodes = CliqueAdjacency::derive(
+            node_count,
+            elements.iter().map(Vec::as_slice),
+            "absent node",
+        )
+        .unwrap();
+        let connectors = CliqueAdjacency::derive(
+            total_dofs,
+            connector_cliques.iter().map(Vec::as_slice),
+            "absent dof",
+        )
+        .unwrap();
+
+        let mut stiffness_rows = vec![BTreeSet::new(); total_dofs];
+        let mut mass_rows = (0..total_dofs)
+            .map(|row| BTreeSet::from([row]))
+            .collect::<Vec<_>>();
+        for element in &elements {
+            for &row_node in element {
+                for &column_node in element {
+                    for row_axis in 0..TRANSLATIONAL_DOF_COUNT {
+                        for column_axis in 0..TRANSLATIONAL_DOF_COUNT {
+                            stiffness_rows[row_node * 3 + row_axis]
+                                .insert(column_node * 3 + column_axis);
+                        }
+                        mass_rows[row_node * 3 + row_axis].insert(column_node * 3 + row_axis);
+                    }
+                }
+            }
+        }
+        for clique in &connector_cliques {
+            for &row in clique {
+                stiffness_rows[row].extend(clique.iter().copied());
+            }
+        }
+        assert_eq!(
+            solid_mass_pattern(&nodes, mesh_dofs, total_dofs).unwrap(),
+            set_rows_pattern(mass_rows, total_dofs)
+        );
+        assert_eq!(
+            solid_stiffness_pattern(&nodes, mesh_dofs, total_dofs, Some(&connectors)).unwrap(),
+            set_rows_pattern(stiffness_rows, total_dofs)
+        );
+    }
+
+    #[test]
+    fn flat_dof_clique_pattern_equals_the_per_row_set_construction() {
+        let dimension = 90;
+        let element_cliques = cliques(dimension, 30, 12, 3);
+        let mut rows = vec![BTreeSet::new(); dimension];
+        for clique in &element_cliques {
+            for &row in clique {
+                rows[row].extend(clique.iter().copied());
+            }
+        }
+        for (row, columns) in rows.iter_mut().enumerate() {
+            columns.insert(row);
+        }
+        assert_eq!(
+            dof_clique_pattern(dimension, &element_cliques).unwrap(),
+            set_rows_pattern(rows, dimension)
+        );
+        assert!(matches!(
+            dof_clique_pattern(4, &[vec![1, 4]]),
+            Err(ResourcePlanningError::Invalid(_))
+        ));
+    }
 
     #[test]
     fn assembled_operator_reconciliation_rejects_each_unplanned_role() {

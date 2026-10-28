@@ -17,9 +17,6 @@ mod admission;
 pub struct PreparedFeaStudy {
     pub root: crate::StructuralStudyRootPreparation,
     pub workers: u32,
-    /// The execution policy's `memory_per_worker` ceiling, when authored. It bounds placement
-    /// and solve-path selection and never enters the study-definition identity.
-    pub memory_per_worker_bytes: Option<u64>,
     pub revision: ProgramRevision,
     pub realized: RealizedStudy,
 }
@@ -264,19 +261,20 @@ pub async fn prepare_study_with_role(
         materials: resolved.material_catalog,
         planning,
         local_execution,
+        // Execution policy, not study definition: it travels with the root so every
+        // placement plans each worker within it, and never enters the authored study digest.
+        memory_per_worker_bytes: resolved
+            .execution_policy
+            .as_ref()
+            .and_then(|policy| policy.resources.maximum_memory_bytes_per_worker),
         analysis_accelerator_requests: options.accelerators.clone(),
         initial_fields,
         input_materializations,
         geometry_meshing,
     };
-    let memory_per_worker_bytes = resolved
-        .execution_policy
-        .as_ref()
-        .and_then(|policy| policy.resources.maximum_memory_bytes_per_worker);
     Ok(PreparedFeaStudy {
         root,
         workers,
-        memory_per_worker_bytes,
         revision,
         realized,
     })

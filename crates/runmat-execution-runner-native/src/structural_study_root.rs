@@ -212,6 +212,8 @@ pub struct DecodedStructuralStudyRoot {
     pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
     pub planning: StudyRootPlanning,
     pub local_execution: LocalExecutionPlan,
+    /// The execution policy's `memory_per_worker`, when authored.
+    pub memory_per_worker_bytes: Option<u64>,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<InputMaterializationPlan>,
     pub initial_fields: Vec<runmat_analysis_fea::execution::InitialFieldBinding>,
@@ -338,6 +340,7 @@ pub fn decode_structural_study_root(
             .collect(),
         planning: root.planning,
         local_execution: root.local_execution,
+        memory_per_worker_bytes: root.memory_per_worker_bytes,
         analysis_accelerator_requests: root.analysis_accelerator_requests,
         input_materializations,
         initial_fields,

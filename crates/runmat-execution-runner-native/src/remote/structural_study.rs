@@ -155,6 +155,7 @@ pub(super) async fn execute_for_composition(
         workloads: product.workloads,
         analysis_accelerator_requests: decoded.analysis_accelerator_requests,
         local_execution: decoded.local_execution,
+        memory_per_worker_bytes: decoded.memory_per_worker_bytes,
         input_materializations,
         exact_meshing: decoded.geometry_meshing,
         meshing_request: geometry_contract.request.meshing_request,
