@@ -24,6 +24,8 @@ async fn spawn_internal(
     evidence: Option<&ProcessSpawnEvidence>,
 ) -> ProcessHostResult<ChildProcess> {
     super::process_tree::validate_join_parent(spec.process_group_placement)?;
+    // The child does the heavy work; give it the pages this parent freed while preparing it.
+    crate::heap::release_retained_heap_pages();
     let mut command = Command::new(&spec.executable);
     command
         .args(&spec.arguments)

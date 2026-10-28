@@ -5,6 +5,7 @@ pub mod child;
 pub mod command;
 pub mod environment;
 pub mod error;
+pub mod heap;
 pub mod ipc;
 pub mod private_bytes;
 pub mod shared_memory;
