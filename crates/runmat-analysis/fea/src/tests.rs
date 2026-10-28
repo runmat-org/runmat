@@ -1449,6 +1449,37 @@ fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
 }
 
 #[test]
+fn linear_static_rejects_structural_step_that_would_drop_a_terminal_voltage() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    append_fixture_terminal_voltage(
+        &mut model,
+        "uncoupled_terminal_voltage",
+        36.0,
+        runmat_analysis_core::ExcitationTarget::WholeModel,
+    );
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let error = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            ..baseline_linear_static_options()
+        },
+    )
+    .expect_err("a structural step must not silently drop an authored terminal voltage");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("terminal-voltage coupling (uncoupled_terminal_voltage)"),
+        "{message}"
+    );
+    assert!(
+        message.contains("realizes Coupled(Electrothermal)"),
+        "{message}"
+    );
+}
+
+#[test]
 fn linear_static_rejects_thermomechanical_step_on_explicit_connectivity() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);

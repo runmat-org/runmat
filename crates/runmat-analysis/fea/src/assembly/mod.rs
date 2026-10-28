@@ -707,6 +707,24 @@ pub(super) fn assemble_linear_system_impl(
             )));
         }
     }
+    // Terminal voltages are electro-thermal coupling inputs, never structural loads: with
+    // neither an electro-thermal context nor a solved thermal state to consume them, assembling
+    // would silently drop the authored voltage.
+    if electro_thermal_context.is_none() && solved_nodal_temperature_k.is_none() {
+        let unrealized = excitations
+            .iter()
+            .filter(|excitation| {
+                matches!(excitation.kind, RealizedExcitationKind::TerminalVoltage(_))
+            })
+            .map(|excitation| excitation.excitation_id.0.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        if !unrealized.is_empty() {
+            return Err(LinearAssemblyError::CouplingRealization(format!(
+                "assembly requests Structural, but the active terminal-voltage coupling ({}) realizes Coupled(Electrothermal); a terminal voltage must be applied by an electro-thermal step",
+                unrealized.into_iter().collect::<Vec<_>>().join(", ")
+            )));
+        }
+    }
     if solved_nodal_temperature_k.is_some()
         && (solver_mesh.is_none()
             || structural_requirement
