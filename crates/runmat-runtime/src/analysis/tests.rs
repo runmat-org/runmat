@@ -371,7 +371,7 @@ pub(super) fn sample_solid_model() -> AnalysisModel {
     append_constant_excitation(
         &mut model,
         "load_tip",
-        "tip",
+        runmat_meshing_core::fixtures::fixture_face("tip"),
         ConstantExcitation::Force([0.0, -1000.0, 0.0]),
     );
     model
@@ -736,7 +736,7 @@ fn test_model_for_geometry(
             append_constant_excitation(
                 &mut model,
                 "excitation_default_acoustic_pressure",
-                "tip",
+                runmat_meshing_core::fixtures::fixture_face("tip"),
                 ConstantExcitation::AcousticPressure(1.0),
             );
         }
@@ -938,7 +938,10 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo:closed_cube".to_string(),
         source: GeometrySource {
-            unit_evidence: Default::default(),
+            unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                runmat_geometry_core::LengthUnit::Meter,
+                "canonical solver fixture",
+            ),
             path: "/fixtures/closed_cube.step".to_string(),
             sha256: "hash-closed-cube".to_string(),
             importer_version: "test".to_string(),
@@ -2942,15 +2945,20 @@ fn native_sparse_fea_cancellation_is_terminal_and_releases_resources() {
 
     assert!(!result.converged);
     assert!(result.solution.iter().all(|value| *value == 0.0));
-    let evidence = result
-        .accelerator_evidence
-        .expect("cancelled provider evidence");
-    assert!(matches!(
-        evidence,
-        runmat_analysis_fea::solve::accelerator::AcceleratorSolveEvidence::Cancelled { .. }
-    ));
-    assert!(evidence.provider().cancellation_observed);
-    assert_eq!(evidence.terminal_solution_readbacks(), 0);
+    // The coercivity proof runs on the host before any provider dispatch and observes the
+    // cancellation first: the solve is terminal, the provider is never engaged, and no
+    // provider evidence or resources exist for it.
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "FEA_SOLVER_CANCELLED"),
+        "diagnostics={:?}",
+        result.diagnostics
+    );
+    assert!(result.accelerator_evidence.is_none());
+    assert_eq!(result.host_sync_count, 0);
+    assert_eq!(result.device_apply_k_count, 0);
     assert_eq!(provider.placement_resources().live_bytes, 0);
 }
 
