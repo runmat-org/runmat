@@ -243,16 +243,12 @@ pub fn import_published_result(
     let admitted = FeaResourcePlan::from_canonical_bytes(
         &unique(AnalysisNumericalObjectKind::ResourcePlan)?.payload(),
     )?;
-    let expected_plan = crate::build_prepared_result_publication_resource_plan(
-        &prepared.request,
-        &accuracy,
-        &usage,
-        &prepared.inputs,
-    )?;
-    if request != prepared.request
-        || admitted != prepared.resource_plan
-        || expected_plan != prepared.resource_plan
-    {
+    // `prepared` is this coordinator's own task: `prepare_result_publication` derived its
+    // resource plan from exactly these accuracy, usage and catalog inputs (decoded here for
+    // the published result's source check). The transported
+    // request and plan must be those; the plan is not derived a second time.
+    let expected_plan = &prepared.resource_plan;
+    if request != prepared.request || admitted != *expected_plan {
         return Err(AnalysisBridgeError::Identity(
             "publication import admission differs from its exact prepared sources",
         ));

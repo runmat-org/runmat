@@ -67,38 +67,13 @@ pub(super) struct FluidStudyReplayContext {
 }
 
 impl CompletedFluidStudy {
-    /// Reconstruct the original recovery admission from the saved solve closure.
-    /// This imports and validates retained results; it never dispatches or re-solves.
+    /// The original field-recovery admission. The coordinator that completed this study
+    /// (live, or replaying a decoded one) derived it from the validated solve; it is kept,
+    /// never re-derived by replaying the solve import.
     pub fn field_recovery_resource_plan(
         &self,
-        source: &impl CacheImport,
-    ) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::FeaResourcePlan> {
-        self.field_recovery_resource_plan_for(self.preparation()?, source)
-    }
-
-    /// As `field_recovery_resource_plan`, from this study's already validated preparation.
-    pub fn field_recovery_resource_plan_for(
-        &self,
-        preparation: FluidStudyPreparation,
-        source: &impl CacheImport,
-    ) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::FeaResourcePlan> {
-        let mut coordinator = FluidStudyCoordinator::new(preparation)?;
-        let solve = self
-            .closures
-            .first()
-            .ok_or_else(|| invalid("fluid completion omits original solve"))?;
-        solve.validate_for(
-            FluidStudyResultPhase::Solve,
-            &coordinator.prepare_solve()?.host,
-        )?;
-        coordinator.complete_solve(source, solve.response.clone(), solve.execution.clone())?;
-        let recovery = self
-            .closures
-            .get(1)
-            .ok_or_else(|| invalid("fluid completion omits original recovery"))?;
-        let task = coordinator.prepare_field_recovery()?;
-        recovery.validate_for(FluidStudyResultPhase::FieldRecovery, &task.host)?;
-        Ok(task.resource_plan.clone())
+    ) -> &runmat_analysis_fea::planning::resource::FeaResourcePlan {
+        &self.field_recovery_plan
     }
 
     pub fn policy(&self) -> FluidStudyPlanningPolicy {
@@ -128,7 +103,15 @@ impl CompletedFluidStudy {
                 "completed fluid workload differs from authored plan",
             ));
         }
-        Ok(FluidStudyPreparation {
+        Ok(self.assemble_preparation(workload))
+    }
+
+    /// The preparation from this study's retained parts, without validating them.
+    pub(super) fn assemble_preparation(
+        &self,
+        workload: runmat_analysis_fea::execution::FluidSteadyWorkload,
+    ) -> FluidStudyPreparation {
+        FluidStudyPreparation {
             local_execution: self.replay.local_execution,
             policy: self.replay.policy,
             product: FluidStudyProduct {
@@ -141,7 +124,7 @@ impl CompletedFluidStudy {
             program_revision: self.replay.program_revision.clone(),
             output_policy: self.replay.output_policy,
             required_capabilities: self.replay.required_capabilities.clone(),
-        })
+        }
     }
 }
 
