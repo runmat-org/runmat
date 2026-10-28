@@ -30,7 +30,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = "0.9"
 target-lexicon = { workspace = true }
-tempfile = "3.12"
+tempfile = "3.27"
 thiserror = { workspace = true }
 zstd = "0.13"
 object = { version = "0.37.3", default-features = false, features = ["read", "std"] }

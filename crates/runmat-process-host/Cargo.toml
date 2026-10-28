@@ -17,7 +17,7 @@ rand = "0.8"
 hmac = { workspace = true }
 sha2 = { workspace = true }
 zeroize = { workspace = true }
-tempfile = "3.12"
+tempfile = "3.20"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -33,5 +33,5 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [dev-dependencies]
-tempfile = "3.12"
+tempfile = "3.20"
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }
