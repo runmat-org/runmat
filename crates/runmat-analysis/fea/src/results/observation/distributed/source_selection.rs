@@ -27,14 +27,18 @@ pub(in super::super) fn solid_observation_topology<'a>(
     plan: &ResolvedObservationPlan,
     projection: &'a AnalysisProjection,
 ) -> Result<ObservationTopology<'a>, ObservationError> {
-    // Cell- and face-located observations address the mesh's owner-oriented faces too.
-    let faces = plan.observations.iter().any(|observation| {
+    ObservationTopology::from_projection_for(projection, observation_topology_faces(plan))
+}
+
+/// Cell- and face-located observations address the mesh's owner-oriented faces too; the
+/// solid observation topology of a plan depends on the projection and this flag only.
+pub(in super::super) fn observation_topology_faces(plan: &ResolvedObservationPlan) -> bool {
+    plan.observations.iter().any(|observation| {
         matches!(
             observation.spec.source_location,
             runmat_analysis_core::FieldLocation::Cell | runmat_analysis_core::FieldLocation::Face
         )
-    });
-    ObservationTopology::from_projection_for(projection, faces)
+    })
 }
 
 pub(in super::super) fn observation_partition_source_indices(

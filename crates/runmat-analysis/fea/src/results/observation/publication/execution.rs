@@ -143,6 +143,11 @@ impl ObservationPublicationCatalog {
         mut visit: impl FnMut(ObservationResultExecution) -> AnalysisExecutionResult<()>,
     ) -> AnalysisExecutionResult<()> {
         context.validate()?;
+        // Every result of one catalog selects over the same mesh: derive its projection once,
+        // and the observation topology once per face flag, not once per published result.
+        let projection = std::cell::OnceCell::new();
+        let topologies: [std::cell::OnceCell<crate::results::observation::ObservationTopology<'_>>; 2] =
+            Default::default();
         self.visit_results(|source, observation_id, result, evidence| {
             let plan = self.execution_plan(source, observation_id, evidence)?;
             let field = source_field(source, &plan, evidence)?;
@@ -150,26 +155,33 @@ impl ObservationPublicationCatalog {
             groups
                 .try_reserve_exact(plan.partitions.len())
                 .map_err(invalid)?;
-            // One projection and observation topology serve every partition of a volume plan.
-            let volume_projection = match context {
+            let volume_topology = match context {
                 ObservationHistorySourceContext::Thermal { mesh, .. }
                 | ObservationHistorySourceContext::VolumeMesh { mesh }
                     if !plan.partitions.is_empty() =>
                 {
-                    Some(crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?)
+                    if projection.get().is_none() {
+                        let derived =
+                            crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
+                        let _ = projection.set(derived);
+                    }
+                    let projection = projection.get().expect("derived projection");
+                    let faces = crate::results::observation::distributed::source_selection::observation_topology_faces(
+                        &source.plan,
+                    );
+                    let slot = &topologies[usize::from(faces)];
+                    if slot.get().is_none() {
+                        let derived =
+                            crate::results::observation::ObservationTopology::from_projection_for(
+                                projection, faces,
+                            )
+                            .map_err(invalid)?;
+                        let _ = slot.set(derived);
+                    }
+                    slot.get()
                 }
                 _ => None,
             };
-            let volume_topology = volume_projection
-                .as_ref()
-                .map(|projection| {
-                    crate::results::observation::distributed::source_selection::solid_observation_topology(
-                        &source.plan,
-                        projection,
-                    )
-                })
-                .transpose()
-                .map_err(invalid)?;
             for partition in &plan.partitions {
                 let indices = match context {
                     ObservationHistorySourceContext::Magnetostatic { mesh, .. }
@@ -204,7 +216,6 @@ impl ObservationPublicationCatalog {
                     ObservationHistorySourceContext::Thermal { .. }
                     | ObservationHistorySourceContext::VolumeMesh { .. } => {
                         let topology = volume_topology
-                            .as_ref()
                             .ok_or_else(|| invalid("volume observation topology absent"))?;
                         crate::results::observation::distributed::source_selection::observation_partition_source_indices(
                             &source.plan,

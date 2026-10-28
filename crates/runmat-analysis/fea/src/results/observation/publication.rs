@@ -123,6 +123,37 @@ impl TryFrom<CatalogWire> for ObservationPublicationCatalog {
         Ok(value)
     }
 }
+/// Whether `validate_for_context` re-derives the execution grouping, or the caller derived it
+/// from the same context in the same construction.
+#[derive(Clone, Copy)]
+enum ExecutionCheck {
+    Rederive,
+    Derived,
+}
+
+/// Successful (catalog, step, volume-mesh context) validations retained per process. One study
+/// validates its catalog when it is built, and again in accuracy preparation, accuracy import
+/// and publication; each is the same pure function of the keyed content, so the process runs
+/// it once. Only successes are retained; a different catalog, step or mesh misses.
+const VALIDATED_CONTEXT_CAPACITY: usize = 8;
+static VALIDATED_CONTEXTS: std::sync::Mutex<Vec<Digest>> = std::sync::Mutex::new(Vec::new());
+
+fn validated_context_seen(key: Digest) -> bool {
+    VALIDATED_CONTEXTS
+        .lock()
+        .is_ok_and(|seen| seen.contains(&key))
+}
+
+fn remember_validated_context(key: Digest) {
+    if let Ok(mut seen) = VALIDATED_CONTEXTS.lock() {
+        seen.retain(|k| *k != key);
+        if seen.len() == VALIDATED_CONTEXT_CAPACITY {
+            seen.remove(0);
+        }
+        seen.push(key);
+    }
+}
+
 impl ObservationPublicationCatalog {
     pub fn new(
         producer: StepIdentity,
@@ -153,7 +184,12 @@ impl ObservationPublicationCatalog {
         };
         value.execution = value.derive_execution(context)?;
         value.identity = value.derive_identity()?;
-        value.validate_for(step, context)?;
+        // The execution grouping was just derived from this context; validate the rest.
+        context.validate()?;
+        value.validate_for_context(step, context, ExecutionCheck::Derived)?;
+        if let Some(key) = value.validated_context_key(step, context)? {
+            remember_validated_context(key);
+        }
         Ok(value)
     }
     pub const fn identity(&self) -> ObservationPublicationCatalogIdentity {
@@ -193,6 +229,43 @@ impl ObservationPublicationCatalog {
         context: ObservationHistorySourceContext<'_>,
     ) -> AnalysisExecutionResult<()> {
         context.validate()?;
+        let key = self.validated_context_key(step, context)?;
+        if key.is_some_and(validated_context_seen) {
+            return Ok(());
+        }
+        self.validate_for_context(step, context, ExecutionCheck::Rederive)?;
+        if let Some(key) = key {
+            remember_validated_context(key);
+        }
+        Ok(())
+    }
+
+    /// The content key of one (catalog, authored step, source context) validation, when the
+    /// context's identity is content-verified by `context.validate()`. The catalog's identity
+    /// is a digest over its whole content, sealed at construction and decoding (fields are
+    /// private and immutable), and the volume mesh's canonical digest was just checked against
+    /// its payload. Other contexts carry unverified workload references and are not keyed.
+    fn validated_context_key(
+        &self,
+        step: &ProcedureStep,
+        context: ObservationHistorySourceContext<'_>,
+    ) -> AnalysisExecutionResult<Option<Digest>> {
+        let ObservationHistorySourceContext::VolumeMesh { mesh } = context else {
+            return Ok(None);
+        };
+        digest(
+            "validated-volume-mesh-context",
+            &(self.identity, step, mesh.canonical_digest),
+        )
+        .map(Some)
+    }
+
+    fn validate_for_context(
+        &self,
+        step: &ProcedureStep,
+        context: ObservationHistorySourceContext<'_>,
+        execution: ExecutionCheck,
+    ) -> AnalysisExecutionResult<()> {
         self.validate_authored_step(step)?;
         match (self.source.source(), context) {
             (
@@ -325,7 +398,14 @@ impl ObservationPublicationCatalog {
             }
             _ => return Err(invalid("publication source context differs")),
         }
-        self.validate_execution_for(context)?;
+        match execution {
+            ExecutionCheck::Rederive => self.validate_execution_for(context)?,
+            ExecutionCheck::Derived => {
+                if self.execution_policy != context.observation_execution() {
+                    return Err(invalid("execution policy differs from producing workload"));
+                }
+            }
+        }
         Ok(())
     }
     fn derive_identity(&self) -> AnalysisExecutionResult<ObservationPublicationCatalogIdentity> {
