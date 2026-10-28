@@ -128,7 +128,15 @@ impl CompletedFluidStudy {
                 "completed fluid workload differs from authored plan",
             ));
         }
-        Ok(FluidStudyPreparation {
+        Ok(self.assemble_preparation(workload))
+    }
+
+    /// The preparation from this study's retained parts, without validating them.
+    pub(super) fn assemble_preparation(
+        &self,
+        workload: runmat_analysis_fea::execution::FluidSteadyWorkload,
+    ) -> FluidStudyPreparation {
+        FluidStudyPreparation {
             local_execution: self.replay.local_execution,
             policy: self.replay.policy,
             product: FluidStudyProduct {
@@ -141,7 +149,7 @@ impl CompletedFluidStudy {
             program_revision: self.replay.program_revision.clone(),
             output_policy: self.replay.output_policy,
             required_capabilities: self.replay.required_capabilities.clone(),
-        })
+        }
     }
 }
 

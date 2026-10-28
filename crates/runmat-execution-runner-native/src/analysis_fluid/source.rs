@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use runmat_analysis_execution::{
     import_fluid_study_completion, prepare_fluid_study_root_for, CompletedFluidStudy,
-    FluidStudyPreparation,
+    FluidStudyPreparation, VerifiedFluidStudy,
 };
 use runmat_execution::{
     value::{PublishedObjectSource, ValueRef},
@@ -21,11 +21,11 @@ struct RetainedFluidSource<S> {
     preparation: FluidStudyPreparation,
     store: S,
     objects: BTreeMap<Digest, Vec<u8>>,
-    /// The completion that one cold replay of `completed` over this source's immutable
-    /// store and retained objects produced, after every catalog object was read back
-    /// verified. Both inputs are fixed for the source's lifetime, so the replay is keyed
-    /// by this source and its result root digest; later authentications compare against it.
-    replayed: OnceLock<FluidStudyCompletion>,
+    /// The authenticated completion every candidate is compared against. A study this
+    /// process's coordinator verified ([`VerifiedFluidStudy`]) sets it at conversion; a
+    /// decoded study sets it from one cold replay of `completed` over this source's
+    /// immutable store, after every catalog object was read back verified.
+    authenticated: OnceLock<FluidStudyCompletion>,
 }
 
 impl<S: CacheImport> CacheImport for RetainedFluidSource<S> {
@@ -174,7 +174,7 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
     }
 
     fn authenticate(&self, candidate: &FluidStudyCompletion) -> Result<(), String> {
-        let expected = self.replayed()?;
+        let expected = self.authenticated()?;
         if expected.root.logical_digest != candidate.root.logical_digest || expected != candidate {
             return Err("runtime fluid completion differs from authenticated replay".into());
         }
@@ -183,12 +183,13 @@ impl<S: CacheImport + Send + Sync> FluidStudySource for RetainedFluidSource<S> {
 }
 
 impl<S: CacheImport + Send + Sync> RetainedFluidSource<S> {
-    /// Replay the saved study once: import every phase from authored inputs, rebuild the
-    /// completion DTO and read back every catalog object verified. The source is immutable,
-    /// so a later authentication reuses this verified replay instead of importing again.
-    fn replayed(&self) -> Result<&FluidStudyCompletion, String> {
-        if let Some(replayed) = self.replayed.get() {
-            return Ok(replayed);
+    /// The authenticated completion. For a decoded study, replay the saved study once:
+    /// import every phase from authored inputs, rebuild the completion DTO and read back
+    /// every catalog object verified. The source is immutable, so a later authentication
+    /// reuses this verified replay instead of importing again.
+    fn authenticated(&self) -> Result<&FluidStudyCompletion, String> {
+        if let Some(authenticated) = self.authenticated.get() {
+            return Ok(authenticated);
         }
         let replay = import_fluid_study_completion(
             self,
@@ -197,11 +198,13 @@ impl<S: CacheImport + Send + Sync> RetainedFluidSource<S> {
         )
         .map_err(|error| error.to_string())?;
         // The replay was imported from exactly this preparation.
-        let expected = completion(&replay, &self.preparation, self)?;
+        let root = prepare_fluid_study_root_for(&replay, self.preparation.clone())
+            .map_err(|error| error.to_string())?;
+        let expected = completion(&replay, &self.preparation, self, root.root, root.catalog)?;
         for reference in &expected.catalog.objects {
             PublishedObjectSource::read_verified(self, reference)?;
         }
-        Ok(self.replayed.get_or_init(|| expected))
+        Ok(self.authenticated.get_or_init(|| expected))
     }
 }
 
@@ -209,9 +212,9 @@ fn completion(
     completed: &CompletedFluidStudy,
     preparation: &FluidStudyPreparation,
     source: &impl CacheImport,
+    root: ValueRef,
+    catalog: runmat_execution_artifact::PublishedObjectCatalog,
 ) -> Result<FluidStudyCompletion, String> {
-    let root = prepare_fluid_study_root_for(completed, preparation.clone())
-        .map_err(|error| error.to_string())?;
     Ok(FluidStudyCompletion {
         host_workload_digest: completed
             .result_closures()
@@ -270,19 +273,23 @@ fn completion(
         terminal_usage: completed.terminal_usage.evidence.clone(),
         publication: completed.publication.result.clone(),
         frozen_project_digest: preparation.frozen_project_digest,
-        root: root.root,
-        catalog: root.catalog,
+        root,
+        catalog,
     })
 }
 
+/// Convert the study this process's coordinator just verified. It is the same process's
+/// own typed, already-validated result, so its DTO is the authenticated completion: no
+/// replay of the phase import against it.
 pub(crate) fn convert(
-    completed: CompletedFluidStudy,
+    verified: VerifiedFluidStudy,
     store: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(FluidStudyCompletion, FluidStudyObjectSource), String> {
-    let preparation = completed.preparation().map_err(|e| e.to_string())?;
+    let preparation = verified.preparation();
+    let completed = verified.into_completed();
     let root = prepare_fluid_study_root_for(&completed, preparation.clone())
         .map_err(|error| error.to_string())?;
-    let source = RetainedFluidSource {
+    let mut source = RetainedFluidSource {
         artifact_access: preparation.artifact_access.clone(),
         preparation,
         objects: root
@@ -292,10 +299,16 @@ pub(crate) fn convert(
             .collect(),
         completed,
         store,
-        replayed: OnceLock::new(),
+        authenticated: OnceLock::new(),
     };
-    let dto = completion(&source.completed, &source.preparation, &source)?;
-    source.authenticate(&dto)?;
+    let dto = completion(
+        &source.completed,
+        &source.preparation,
+        &source,
+        root.root,
+        root.catalog,
+    )?;
+    source.authenticated = OnceLock::from(dto.clone());
     Ok((dto, FluidStudyObjectSource::new(source)))
 }
 
@@ -312,9 +325,17 @@ pub fn fluid_study_completion_from_source(
         completed,
         store: source,
         objects: BTreeMap::new(),
-        replayed: OnceLock::new(),
+        authenticated: OnceLock::new(),
     };
-    let dto = completion(&source.completed, &source.preparation, &source)?;
+    let root = prepare_fluid_study_root_for(&source.completed, source.preparation.clone())
+        .map_err(|error| error.to_string())?;
+    let dto = completion(
+        &source.completed,
+        &source.preparation,
+        &source,
+        root.root,
+        root.catalog,
+    )?;
     source.authenticate(&dto)?;
     Ok((dto, FluidStudyObjectSource::new(source)))
 }

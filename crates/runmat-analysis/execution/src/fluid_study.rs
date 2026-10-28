@@ -59,6 +59,33 @@ pub struct CompletedFluidStudy {
     pub publication: ImportedPublishedResult,
 }
 
+/// A study this process's own coordinator drove to completion: each phase response was
+/// admitted and validated by `FluidStudyCoordinator` as it arrived, in this process.
+/// Only [`FluidStudyCoordinator::into_verified`] constructs it, so holding one is the proof
+/// that no replay is needed. Completions decoded from bytes stay [`CompletedFluidStudy`]
+/// and are authenticated by a full replay.
+pub struct VerifiedFluidStudy(CompletedFluidStudy);
+
+impl VerifiedFluidStudy {
+    /// The coordinator's own preparation: `FluidStudyCoordinator::new` validated it and
+    /// every phase was admitted against it, so it is not validated or re-planned again.
+    pub fn preparation(&self) -> FluidStudyPreparation {
+        self.0.assemble_preparation(self.0.workload.clone())
+    }
+
+    /// Give up the in-process proof (for example, to treat the study as a cold source).
+    pub fn into_completed(self) -> CompletedFluidStudy {
+        self.0
+    }
+}
+
+impl std::ops::Deref for VerifiedFluidStudy {
+    type Target = CompletedFluidStudy;
+    fn deref(&self) -> &CompletedFluidStudy {
+        &self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct FluidStudyPreparation {
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
@@ -307,6 +334,11 @@ impl FluidStudyCoordinator {
                 SteadyStudyPhase::AwaitingPublication => FluidStudyPhase::AwaitingPublication,
                 SteadyStudyPhase::Complete => FluidStudyPhase::Complete,
             })
+    }
+
+    /// The completed study as this process's own verified result.
+    pub fn into_verified(self) -> AnalysisBridgeResult<VerifiedFluidStudy> {
+        self.into_completed().map(VerifiedFluidStudy)
     }
 
     pub fn into_completed(self) -> AnalysisBridgeResult<CompletedFluidStudy> {
