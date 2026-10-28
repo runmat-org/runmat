@@ -118,9 +118,16 @@ fn extra_local_modes_and_nonfinite_inputs_reject() {
         [1., 1., 1., -1.],
         [1., -1., -1., f64::INFINITY],
     ] {
-        assert!(local::lower_bound(&q, 2).is_err());
+        assert!(!matches!(local::lower_bound(&q, 2), Ok(Some(_))));
     }
-    assert!(local::lower_bound(&[2., -1., -1., -1., 1., 1., -1., 1., 1.], 3).is_err());
+    assert!(local::lower_bound(&[1., -1., -1., f64::INFINITY], 2).is_err());
+    // Nonpositive local modes are uncertified, not invalid: the global proof is undecided.
+    assert_eq!(local::lower_bound(&[0., 0., 0., 0.], 2), Ok(None));
+    assert_eq!(local::lower_bound(&[1., 1., 1., -1.], 2), Ok(None));
+    assert_eq!(
+        local::lower_bound(&[2., -1., -1., -1., 1., 1., -1., 1., 1.], 3),
+        Ok(None)
+    );
 }
 #[test]
 fn missing_anchor_and_uncovered_nodes_reject() {
@@ -162,13 +169,13 @@ fn positive_local_factor_is_verified_even_when_its_candidate_rounds() {
     let q = [
         0., 0., 0., 0., 0., 2., 0.3, 0.2, 0., 0.3, 1., 0.1, 0., 0.2, 0.1, 0.5,
     ];
-    let bound = local::lower_bound(&q, width).unwrap();
+    let bound = local::lower_bound(&q, width).unwrap().unwrap();
     assert!(bound > 0.0 && bound < 0.5);
     for value in [f64::MAX, f64::MIN_POSITIVE] {
         let mut broken = q;
         broken[5] = value;
         // Extreme candidates may be indeterminate; they may never return a nonfinite bound.
-        if let Ok(bound) = local::lower_bound(&broken, width) {
+        if let Ok(Some(bound)) = local::lower_bound(&broken, width) {
             assert!(bound.is_finite() && bound > 0.0);
         }
     }
@@ -190,8 +197,16 @@ fn cached_local_bounds_verify_full_perturbations_and_failed_stream_cannot_finish
     proof.push_block(&[0, 1, 2], &values).unwrap();
     let mut altered = values;
     altered[4] = -2.;
+    // An indefinite element energy is no disproof of the assembled operator: the sufficient
+    // check stops and reports an indeterminate verdict for the factorization proof to decide.
+    proof.push_block(&[0, 1, 2], &altered).unwrap();
+    assert!(matches!(
+        proof.finish().unwrap(),
+        EnergyVerdict::Indeterminate { .. }
+    ));
+    let mut proof = check(&m, &[true, false, false]);
     assert_eq!(
-        proof.push_block(&[0, 1, 2], &altered),
+        proof.push_block(&[0, 1, 1], &values),
         Err(EnergyError::InvalidBlock)
     );
     assert_eq!(proof.finish().unwrap_err(), EnergyError::InvalidBlock);

@@ -184,3 +184,36 @@ fn source_owned_energy_proof_rebinds_rhs_and_invalidates_changed_operator() {
     assert!(reuse.prepare(&corrupt, &[0., 2., 0.], None).is_err());
     assert!(reuse.certificate.is_none() && reuse.local_energy.is_none());
 }
+
+/// Tet10 slivers admitted by the mesher can have element energies whose positivity the local
+/// LDL bound cannot certify. That leaves the local proof undecided, and the sparse Cholesky
+/// proof certifies the assembled operator (ev-busbar: `Coercivity(Energy(InvalidBlock))`).
+#[test]
+fn uncertifiable_local_energy_falls_back_to_the_factorization_proof() {
+    use crate::algebra::anchored_energy::AnchoredEnergySource;
+    let operator = RealSparseMatrix::from_dense(
+        &[1., 0., 0., 0., 1.5, -1., 0., -1., 3.],
+        3,
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    let bytes = AnchoredEnergySource::resident_bytes_for_widths([3, 2].into_iter()).unwrap();
+    let mut source = AnchoredEnergySource::new([3, 2].into_iter(), bytes).unwrap();
+    // Indefinite on its free block; the second element makes the assembled sum positive.
+    source
+        .capture_next(&[0, 1, 2])
+        .unwrap()
+        .copy_from_slice(&[0., 0., 0., 0., -0.5, 0., 0., 0., 1.]);
+    source
+        .capture_next(&[1, 2])
+        .unwrap()
+        .copy_from_slice(&[2., -1., -1., 2.]);
+    let mut reuse = LinearPreparationReuse::with_local_energy(source, vec![true, false, false], 1.);
+    let prepared = reuse.prepare(&operator, &[0., 1., 0.], None).unwrap();
+    assert!(
+        reuse.factor.is_some(),
+        "the Cholesky proof certified the operator"
+    );
+    assert_eq!(reuse.certificate(), Some(prepared.coercivity()));
+}
