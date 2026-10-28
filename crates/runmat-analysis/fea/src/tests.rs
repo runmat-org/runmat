@@ -1455,7 +1455,9 @@ fn linear_static_rejects_structural_step_that_would_drop_a_terminal_voltage() {
         &mut model,
         "uncoupled_terminal_voltage",
         36.0,
-        runmat_analysis_core::ExcitationTarget::WholeModel,
+        runmat_analysis_core::ExcitationTarget::Region(
+            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
+        ),
     );
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
     let error = crate::run_linear_static_with_options(
