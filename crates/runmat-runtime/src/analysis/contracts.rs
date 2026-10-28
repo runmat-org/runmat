@@ -343,66 +343,6 @@ impl Default for AnalysisCfdRunOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisChtRunOptions {
-    pub deterministic_mode: bool,
-    pub precision_mode: PrecisionMode,
-    pub quality_policy: QualityPolicy,
-    #[serde(with = "runmat_types::wire_integer")]
-    pub sample_count: usize,
-    #[serde(with = "runmat_types::wire_integer")]
-    pub max_linear_iters: usize,
-    pub tolerance: f64,
-    pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub solver_mesh_artifact_path: Option<String>,
-}
-
-impl Default for AnalysisChtRunOptions {
-    fn default() -> Self {
-        Self {
-            deterministic_mode: false,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            sample_count: 12,
-            max_linear_iters: 128,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisFsiRunOptions {
-    pub deterministic_mode: bool,
-    pub precision_mode: PrecisionMode,
-    pub quality_policy: QualityPolicy,
-    #[serde(with = "runmat_types::wire_integer")]
-    pub sample_count: usize,
-    #[serde(with = "runmat_types::wire_integer")]
-    pub max_linear_iters: usize,
-    pub tolerance: f64,
-    pub residual_warn_threshold: f64,
-    #[serde(default)]
-    pub solver_mesh_artifact_path: Option<String>,
-}
-
-impl Default for AnalysisFsiRunOptions {
-    fn default() -> Self {
-        Self {
-            deterministic_mode: false,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            sample_count: 12,
-            max_linear_iters: 128,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisThermalRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,

@@ -72,9 +72,6 @@ pub enum TemporalImplementation {
     /// Moving-mesh backward-Euler flow and average-acceleration Newmark structure, iterated
     /// within every interval with Aitken-relaxed interface displacement.
     FluidStructureTransientAitkenPartitioned,
-    CoupledSinglePassProfileTransfer,
-    CoupledFixedPointRelaxation,
-    CoupledScalarResidualIteration,
     PrescribedThermomechanicalProfileApplication,
     SolvedThermalStateApplication,
 }
@@ -105,7 +102,6 @@ pub enum CouplingImplementation {
     OnePassPrescribedThermomechanicalProfile,
     OneWaySolvedThermoelasticState,
     StaggeredElectrothermalConductanceLine,
-    PartitionedConjugateProjection,
     PartitionedFluidStructureRelaxation,
     /// Flow advects heat; fluid and solid energy share one system through declared interfaces.
     FlowAdvectedMonolithicConjugateEnergy,

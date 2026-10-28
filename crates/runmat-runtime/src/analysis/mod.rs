@@ -334,14 +334,14 @@ pub use contracts::{
     analysis_authoring_workflow, analysis_language_reference_paths, analysis_output_operation_ids,
     analysis_procedure_ids, AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData,
     AnalysisAcousticRunOptions, AnalysisBucklingRunOptions, AnalysisCfdRunOptions,
-    AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
+    AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
     AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisExecutionDuration, AnalysisExecutionCandidate, AnalysisExecutionCapability,
     AnalysisExecutionChoices, AnalysisExecutionMode,
     AnalysisExecutionPlan, AnalysisExecutionReadiness, AnalysisExecutionStep, AnalysisFieldBinding,
     AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
-    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
+    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
     AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
     AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
@@ -473,8 +473,7 @@ fn reject_moment_loads_for_run_family(
 
 mod standalone_publication;
 pub use standalone_publication::{
-    analysis_run_acoustic_with_options_op, analysis_run_cht_with_options_op,
-    analysis_run_fsi_with_options_op, analysis_run_modal_with_options_op,
+    analysis_run_acoustic_with_options_op, analysis_run_modal_with_options_op,
     analysis_run_nonlinear_with_options_op, analysis_run_transient_with_options_op,
 };
 use standalone_publication::{persist_fea_run_result_with_progress, publish_standalone_run};
@@ -2431,18 +2430,9 @@ pub fn analysis_run_thermal_op(
     )
 }
 
+/// The reduced partitioned coupled-flow realization is retired; authored studies run coupled flow.
 pub fn analysis_run_cht_op(
     model: &AnalysisModel,
-    backend: ComputeBackend,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_cht_with_options_op(model, backend, AnalysisChtRunOptions::default(), context)
-}
-
-fn execute_cht_with_options(
-    model: &AnalysisModel,
-    _backend: ComputeBackend,
-    _options: AnalysisChtRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     Err(operation_error(
@@ -2460,18 +2450,9 @@ fn execute_cht_with_options(
     ))
 }
 
+/// The reduced partitioned coupled-flow realization is retired; authored studies run coupled flow.
 pub fn analysis_run_fsi_op(
     model: &AnalysisModel,
-    backend: ComputeBackend,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_fsi_with_options_op(model, backend, AnalysisFsiRunOptions::default(), context)
-}
-
-fn execute_fsi_with_options(
-    model: &AnalysisModel,
-    _backend: ComputeBackend,
-    _options: AnalysisFsiRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     Err(operation_error(

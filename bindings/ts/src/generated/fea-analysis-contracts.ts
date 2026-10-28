@@ -406,28 +406,6 @@ export interface FeaFiniteVolumeProjectionPolicy {
   max_traversal_operations: number | null;
 }
 
-export interface FeaConjugateHeatTransferOptions {
-  deterministic_mode: boolean;
-  precision_mode: FeaPrecisionMode;
-  quality_policy: FeaQualityPolicy;
-  sample_count: number;
-  max_linear_iters: number;
-  tolerance: number;
-  residual_warn_threshold: number;
-  solver_mesh_artifact_path: string | null;
-}
-
-export interface FeaFluidStructureInteractionOptions {
-  deterministic_mode: boolean;
-  precision_mode: FeaPrecisionMode;
-  quality_policy: FeaQualityPolicy;
-  sample_count: number;
-  max_linear_iters: number;
-  tolerance: number;
-  residual_warn_threshold: number;
-  solver_mesh_artifact_path: string | null;
-}
-
 export interface FeaContactEnforcementOptions {
   penalty_stiffness_scale: number;
   max_penetration_ratio: number;

@@ -29,18 +29,14 @@ pub(super) fn check(
             let invoke = || {
                 boxed_fixture_run_result(match family {
                     PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => {
-                        analysis_run_cht_with_options_op(
+                        analysis_run_cht_op(
                             model,
-                            backend,
-                            AnalysisChtRunOptions::default(),
                             OperationContext::new(None, None),
                         )
                     }
                     PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => {
-                        analysis_run_fsi_with_options_op(
+                        analysis_run_fsi_op(
                             model,
-                            backend,
-                            AnalysisFsiRunOptions::default(),
                             OperationContext::new(None, None),
                         )
                     }

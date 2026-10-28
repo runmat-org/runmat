@@ -3795,17 +3795,13 @@ fn analysis_trends_omit_rejected_coupled_flow_runs() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     for _ in 0..3 {
-        analysis_run_cht_with_options_op(
+        analysis_run_cht_op(
             &sample_cht_model(),
-            ComputeBackend::Cpu,
-            Default::default(),
             OperationContext::new(None, None),
         )
         .expect_err("rejected CHT runs are not persisted");
-        analysis_run_fsi_with_options_op(
+        analysis_run_fsi_op(
             &sample_fsi_model(),
-            ComputeBackend::Cpu,
-            Default::default(),
             OperationContext::new(None, None),
         )
         .expect_err("rejected FSI runs are not persisted");
@@ -5197,10 +5193,8 @@ fn analysis_run_cht_requires_an_authored_study() {
     let mut moment = sample_cht_model();
     replace_with_moment_excitation(&mut moment, "cht_moment");
     for model in [sample_cht_model(), thermal_only, moment] {
-        let err = analysis_run_cht_with_options_op(
+        let err = analysis_run_cht_op(
             &model,
-            ComputeBackend::Cpu,
-            Default::default(),
             OperationContext::new(None, None),
         )
         .expect_err("the removed reduced CHT endpoint must not fabricate a coupled run");
@@ -5219,10 +5213,8 @@ fn analysis_run_fsi_requires_an_authored_study() {
     let mut moment = sample_fsi_model();
     replace_with_moment_excitation(&mut moment, "fsi_moment");
     for model in [sample_fsi_model(), fluid_only, moment] {
-        let err = analysis_run_fsi_with_options_op(
+        let err = analysis_run_fsi_op(
             &model,
-            ComputeBackend::Cpu,
-            Default::default(),
             OperationContext::new(None, None),
         )
         .expect_err("the removed reduced FSI endpoint must not fabricate a coupled run");

@@ -62,8 +62,6 @@ pub enum SolverPreconditioner {
     SparseCholesky,
     BlockJacobi,
     FiniteVolumePressureBalance,
-    ThermalCfdProjection,
-    InterfaceRelaxation,
 }
 
 impl SolverPreconditioner {
@@ -85,8 +83,6 @@ impl SolverPreconditioner {
             Self::SparseCholesky => "sparse_cholesky",
             Self::BlockJacobi => "block_jacobi",
             Self::FiniteVolumePressureBalance => "finite_volume_pressure_balance",
-            Self::ThermalCfdProjection => "thermal_cfd_projection",
-            Self::InterfaceRelaxation => "interface_relaxation",
         }
     }
 }

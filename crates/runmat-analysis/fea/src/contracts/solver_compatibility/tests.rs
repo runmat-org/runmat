@@ -320,16 +320,6 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
         )
         .is_err());
     }
-    let canonical_cht = nonstructural_identity(
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
-        AnalysisProcedure::Static,
-    );
-    assert!(validate_solver_formulation_compatibility(
-        &canonical_cht,
-        SolverMethod::ChtConjugateProjection,
-        SolverPreconditioner::ThermalCfdProjection,
-    )
-    .is_err());
 }
 
 #[test]

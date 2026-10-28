@@ -33,8 +33,6 @@ pub enum SolverMethod {
     AcousticCanonicalShiftInvertBlockKrylov,
     AcousticCanonicalNewmarkPcg,
     CfdVelocityPressureFiniteVolume,
-    ChtConjugateProjection,
-    FsiPartitionedProjection,
 }
 
 impl SolverMethod {
@@ -71,8 +69,6 @@ impl SolverMethod {
             }
             Self::AcousticCanonicalNewmarkPcg => "acoustic_canonical_newmark_pcg",
             Self::CfdVelocityPressureFiniteVolume => "cfd_velocity_pressure_finite_volume",
-            Self::ChtConjugateProjection => "cht_conjugate_projection",
-            Self::FsiPartitionedProjection => "fsi_partitioned_projection",
         }
     }
 }

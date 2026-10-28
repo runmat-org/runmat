@@ -116,8 +116,6 @@ const analysisStructTypes = [
   ["CanonicalFluidPolicy", "FeaCanonicalFluidPolicy", {}],
   ["AndersonOnePolicy", "FeaAndersonOnePolicy", {}],
   ["FiniteVolumeProjectionPolicy", "FeaFiniteVolumeProjectionPolicy", {}],
-  ["AnalysisChtRunOptions", "FeaConjugateHeatTransferOptions", {}],
-  ["AnalysisFsiRunOptions", "FeaFluidStructureInteractionOptions", {}],
   ["ContactEnforcementOptions", "FeaContactEnforcementOptions", {}],
   ["AnalysisNonlinearRunOptions", "FeaStructuralNonlinearOptions", {}],
   ["AnalysisMaxwellRunOptions", "FeaMaxwellHarmonicOptions", {}],

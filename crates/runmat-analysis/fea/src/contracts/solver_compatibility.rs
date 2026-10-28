@@ -88,12 +88,7 @@ pub fn validate_solver_formulation_compatibility(
     }
     let temporal =
         solver_temporal.ok_or(SolverFormulationCompatibilityError::MissingSolverTemporal)?;
-    if !method_is_compatible(
-        temporal,
-        identity.solution_space(),
-        realization.coupling,
-        method,
-    ) {
+    if !method_is_compatible(temporal, identity.solution_space(), method) {
         return Err(SolverFormulationCompatibilityError::UnsupportedMethod {
             temporal,
             solution_space: identity.solution_space(),
@@ -123,7 +118,6 @@ const fn is_auxiliary_temporal(temporal: TemporalImplementation) -> bool {
 const fn method_is_compatible(
     temporal: TemporalImplementation,
     solution_space: SolutionSpace,
-    coupling: CouplingImplementation,
     method: SolverMethod,
 ) -> bool {
     match temporal {
@@ -189,17 +183,6 @@ const fn method_is_compatible(
         TemporalImplementation::AcousticCanonicalTransientSolve => {
             matches!(method, SolverMethod::AcousticCanonicalNewmarkPcg)
         }
-        TemporalImplementation::CoupledSinglePassProfileTransfer
-        | TemporalImplementation::CoupledFixedPointRelaxation
-        | TemporalImplementation::CoupledScalarResidualIteration => match coupling {
-            CouplingImplementation::PartitionedConjugateProjection => {
-                matches!(method, SolverMethod::ChtConjugateProjection)
-            }
-            CouplingImplementation::PartitionedFluidStructureRelaxation => {
-                matches!(method, SolverMethod::FsiPartitionedProjection)
-            }
-            _ => false,
-        },
         TemporalImplementation::PrescribedThermomechanicalProfileApplication
         | TemporalImplementation::SolvedThermalStateApplication => false,
         TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve => {
@@ -278,12 +261,6 @@ const fn preconditioner_is_compatible(
             preconditioner,
             SolverPreconditioner::FiniteVolumePressureBalance
         ),
-        SolverMethod::ChtConjugateProjection => {
-            matches!(preconditioner, SolverPreconditioner::ThermalCfdProjection)
-        }
-        SolverMethod::FsiPartitionedProjection => {
-            matches!(preconditioner, SolverPreconditioner::InterfaceRelaxation)
-        }
     }
 }
 
