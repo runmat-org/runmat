@@ -55,7 +55,6 @@ struct FixtureSpec {
     expect_run_error: Option<&'static str>,
     /// The GPU placement's rejection when it differs from the CPU placement's. Static GPU
     /// execution fails closed at backend admission before the model reaches assembly.
-    expect_gpu_run_error: Option<&'static str>,
     expected_numerically_acceptable: Option<bool>,
     parity_tolerance: Option<ParityTolerance>,
     gpu_mode: Option<GpuMode>,
@@ -78,7 +77,6 @@ struct FixtureManifestEntry {
     procedure_step: ProcedureStep,
     expect_validate_error: Option<String>,
     expect_run_error: Option<String>,
-    expect_gpu_run_error: Option<String>,
     expected_numerically_acceptable: Option<bool>,
     parity_tolerance_abs: Option<f64>,
     parity_tolerance_rel: Option<f64>,
