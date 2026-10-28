@@ -223,13 +223,26 @@ fn diag_resource_scaling_with_mesh_size() {
     for cells in [2, 4, 6] {
         let (model, mesh, _) = fixture::prepare(cells, true);
         let mut model = model;
-        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(u64::MAX / 4);
+        // The widest authored ceiling the accuracy contract admits (validate_accuracy rejects
+        // anything above the 2^53 - 1 wire bound, so a larger value is not an authored study).
+        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
+            Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
         let options = NonlinearSolveOptions {
             solver_mesh: Some(mesh.clone()),
             ..NonlinearSolveOptions::default()
         };
         for limit in [8usize, 4096] {
-            let plan = prepare_with_output_limit(&model, &model.sequence.steps[0], ComputeBackend::Cpu, &options, limit).unwrap();
+            // Every projected demand is either an admissible plan within the wire bound or a
+            // typed resource rejection (the event history's canonical shape capacity), never
+            // an unrepresentable estimate.
+            let plan = match prepare_with_output_limit(&model, &model.sequence.steps[0], ComputeBackend::Cpu, &options, limit) {
+                Ok(plan) => plan,
+                Err(FeaRunError::Resource(error)) => {
+                    eprintln!("DIAG cells={cells} limit={limit} rejected: {error}");
+                    continue;
+                }
+                Err(error) => panic!("cells={cells} limit={limit}: {error}"),
+            };
             let FeaResourceDemand::StructuralNonlinearPipeline(demand) = &plan.input.demand else { panic!() };
             let integration = crate::topology::CanonicalSolidIntegrationPlan::derive(
                 &mesh,
@@ -248,6 +261,7 @@ fn diag_resource_scaling_with_mesh_size() {
                 options.line_search,
             )
             .unwrap();
+            assert!(plan.request.memory_bytes <= runmat_types::wire_integer::MAX_WIRE_INTEGER);
             eprintln!("DIAG storage cells={cells} limit={limit} points={} {storage:?}", integration.total_point_count());
             eprintln!("DIAG cells={cells} limit={limit} request_memory={} breakdown={:?} persistent={} artifact={} solve={:?}",
                 plan.request.memory_bytes, plan.breakdown, demand.additional_persistent_bytes.0,
