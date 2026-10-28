@@ -159,9 +159,24 @@ fn opposing_physical_transfers_retain_a_scale_before_signed_cancellation() {
                 applied_w: runmat_types::physical::Power::new(0.0),
                 prescribed_w: runmat_types::physical::Power::new(100.0 * factor),
             },
+            ThermalPrescribedHeatFlow {
+                entering_w: runmat_types::physical::Power::new((50.0 - epsilon) * factor),
+                leaving_w: runmat_types::physical::Power::new((50.0 + epsilon) * factor),
+            },
         );
         balance.validate().unwrap();
         assert_eq!(balance.relative_residual, 2.0 * epsilon / 100.0);
+        // The gross flows through the two fixed ends survive the net cancellation.
+        assert_eq!(
+            balance.prescribed_heat_flow.entering_w.canonical_value(),
+            (50.0 - epsilon) * factor
+        );
+        for flow in [-1.0, 101.0, f64::NAN] {
+            let mut invalid = balance;
+            invalid.prescribed_heat_flow.leaving_w =
+                runmat_types::physical::Power::new(flow * factor);
+            assert!(invalid.validate().is_err(), "{flow}");
+        }
         let decoded: ThermalEnergyBalance =
             serde_json::from_slice(&serde_json::to_vec(&balance).unwrap()).unwrap();
         decoded.validate().unwrap();
