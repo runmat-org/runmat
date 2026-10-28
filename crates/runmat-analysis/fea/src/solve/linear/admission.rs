@@ -13,6 +13,20 @@ pub(super) fn invalid_system_result(
     preconditioner: SpdPreconditionerKind,
     error: RealSystemError,
 ) -> LinearSolveResult {
+    if matches!(
+        error,
+        RealSystemError::Coercivity(crate::algebra::CoercivityError::Cancelled)
+    ) {
+        let mut result = rejected_system_result(
+            operator,
+            backend,
+            preconditioner,
+            "FEA_SOLVER_CANCELLED",
+            "linear solve cancelled while proving operator coercivity".into(),
+        );
+        result.diagnostics[0].severity = FeaDiagnosticSeverity::Warning;
+        return result;
+    }
     rejected_system_result(
         operator,
         backend,

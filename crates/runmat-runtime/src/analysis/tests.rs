@@ -2943,15 +2943,20 @@ fn native_sparse_fea_cancellation_is_terminal_and_releases_resources() {
 
     assert!(!result.converged);
     assert!(result.solution.iter().all(|value| *value == 0.0));
-    let evidence = result
-        .accelerator_evidence
-        .expect("cancelled provider evidence");
-    assert!(matches!(
-        evidence,
-        runmat_analysis_fea::solve::accelerator::AcceleratorSolveEvidence::Cancelled { .. }
-    ));
-    assert!(evidence.provider().cancellation_observed);
-    assert_eq!(evidence.terminal_solution_readbacks(), 0);
+    // The coercivity proof runs on the host before any provider dispatch and observes the
+    // cancellation first: the solve is terminal, the provider is never engaged, and no
+    // provider evidence or resources exist for it.
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "FEA_SOLVER_CANCELLED"),
+        "diagnostics={:?}",
+        result.diagnostics
+    );
+    assert!(result.accelerator_evidence.is_none());
+    assert_eq!(result.host_sync_count, 0);
+    assert_eq!(result.device_apply_k_count, 0);
     assert_eq!(provider.placement_resources().live_bytes, 0);
 }
 
