@@ -9,20 +9,48 @@ pub(super) fn check(
 ) -> Option<String> {
     let expected = spec.expect_run_error.expect("rejection fixture contract");
     let run = |mode: Option<GpuMode>| {
-        if fixture_procedure_step(model).family == runmat_analysis_core::PhysicsFamily::Fluid {
-            // Test the removed public endpoint directly. Unsupported transient default
+        use runmat_analysis_core::{CoupledPhysicsFamily, PhysicsFamily};
+        let family = fixture_procedure_step(model).family;
+        if matches!(
+            family,
+            PhysicsFamily::Fluid
+                | PhysicsFamily::Coupled(
+                    CoupledPhysicsFamily::ConjugateHeatTransfer
+                        | CoupledPhysicsFamily::FluidStructureInteraction
+                )
+        ) {
+            // Test each removed public endpoint directly. Unsupported transient default
             // solver selection must not prevent this boundary from being exercised.
+            let backend = if mode.is_some() {
+                ComputeBackend::Gpu
+            } else {
+                ComputeBackend::Cpu
+            };
             let invoke = || {
-                boxed_fixture_run_result(analysis_run_cfd_with_options_op(
-                    model,
-                    if mode.is_some() {
-                        ComputeBackend::Gpu
-                    } else {
-                        ComputeBackend::Cpu
-                    },
-                    AnalysisCfdRunOptions::default(),
-                    OperationContext::new(None, None),
-                ))
+                boxed_fixture_run_result(match family {
+                    PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => {
+                        analysis_run_cht_with_options_op(
+                            model,
+                            backend,
+                            AnalysisChtRunOptions::default(),
+                            OperationContext::new(None, None),
+                        )
+                    }
+                    PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => {
+                        analysis_run_fsi_with_options_op(
+                            model,
+                            backend,
+                            AnalysisFsiRunOptions::default(),
+                            OperationContext::new(None, None),
+                        )
+                    }
+                    _ => analysis_run_cfd_with_options_op(
+                        model,
+                        backend,
+                        AnalysisCfdRunOptions::default(),
+                        OperationContext::new(None, None),
+                    ),
+                })
             };
             return match mode {
                 Some(GpuMode::WithProvider) => with_harness_provider(invoke),
@@ -64,16 +92,47 @@ pub(super) fn check(
 
 #[test]
 fn removed_cfd_endpoint_rejects_all_declared_placements_without_numerical_credit() {
+    assert_removed_endpoint_placements(
+        |id| id.starts_with("cfd_steady_") || id.starts_with("cfd_transient_"),
+        6,
+        "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED",
+    );
+}
+
+// The coupled-flow physics these placements once claimed is qualified on the typed path:
+// runmat-analysis-fea physics::conjugate_heat::tests and physics::fluid_structure::tests
+// (series conduction, contact-resistance jump, plug-flow energy closure, lubrication-theory
+// channel, interface energy; contact interfaces rejected as coupling interfaces).
+#[test]
+fn removed_coupled_flow_endpoints_reject_all_declared_placements_without_numerical_credit() {
+    assert_removed_endpoint_placements(
+        |id| id.starts_with("cht_coupled_") && !id.ends_with("_invalid_cfd_domain"),
+        5,
+        "RM.FEA.RUN_CHT.AUTHORED_STUDY_REQUIRED",
+    );
+    assert_removed_endpoint_placements(
+        |id| id.starts_with("fsi_coupled_") && !id.ends_with("_invalid_cfd_domain"),
+        5,
+        "RM.FEA.RUN_FSI.AUTHORED_STUDY_REQUIRED",
+    );
+}
+
+fn assert_removed_endpoint_placements(
+    select: impl Fn(&str) -> bool,
+    placements: usize,
+    code: &'static str,
+) {
     let specs = super::super::manifest::manifest_specs()
         .into_iter()
-        .filter(|spec| spec.id.starts_with("cfd_steady_") || spec.id.starts_with("cfd_transient_"))
+        .filter(|spec| select(spec.id))
         .collect::<Vec<_>>();
-    assert_eq!(specs.len(), 6, "preserve all original endpoint placements");
+    assert_eq!(
+        specs.len(),
+        placements,
+        "preserve all original endpoint placements"
+    );
     for spec in specs {
-        assert_eq!(
-            spec.expect_run_error,
-            Some("RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED")
-        );
+        assert_eq!(spec.expect_run_error, Some(code));
         assert!(spec.expected_numerically_acceptable.is_none());
         assert!(spec.expected_solver_backend.is_none());
         let record = run_fixture(&spec, None);
