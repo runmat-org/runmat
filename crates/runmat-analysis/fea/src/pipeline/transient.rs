@@ -262,6 +262,12 @@ fn prepare_transient_scope_basis(
 pub fn run_transient_block(
     input: StructuralTransientRunBlockInput<'_>,
 ) -> Result<StructuralTransientSegment, FeaRunError> {
+    // Blocks keep the workload's placement identity; strict placement fails before the block
+    // assembles when admission already knows the device will not run.
+    crate::contracts::accelerator_admission::admit_accelerator(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransient,
+        input.workload.backend,
+    )?;
     input
         .workload
         .validate()
@@ -413,9 +419,17 @@ pub fn run_transient_with_fields(
     options: TransientSolveOptions,
     initial_fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<FeaTransientRunResult, FeaRunError> {
-    let mut result = execute_transient_with_fields(model, backend, options, initial_fields)?;
-    crate::contracts::accelerator_admission::settle_accelerator_execution(
-        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransient,
+    use crate::contracts::accelerator_admission::{
+        admit_accelerator, complete_accelerator_admission, AcceleratorFamily,
+    };
+    // Strict placement fails before any assembly when admission already knows the device
+    // will not run; a solve-time decline is settled after the run.
+    let admission = admit_accelerator(AcceleratorFamily::StructuralTransient, backend)?;
+    let mut result =
+        execute_transient_with_fields(model, admission.effective, options, initial_fields)?;
+    complete_accelerator_admission(
+        AcceleratorFamily::StructuralTransient,
+        admission,
         &mut result.run,
     )?;
     Ok(result)

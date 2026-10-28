@@ -33,6 +33,8 @@ pub enum AcceleratorFamily {
     StructuralTransient,
     StructuralNonlinear,
     Thermal,
+    /// Thermal with radiation boundaries: the damped Newton solve has no device path.
+    ThermalRadiation,
     Acoustic,
     Electromagnetic,
     Fluid,
@@ -50,6 +52,7 @@ impl AcceleratorFamily {
             Self::StructuralTransient => "structural transient",
             Self::StructuralNonlinear => "structural nonlinear",
             Self::Thermal => "thermal",
+            Self::ThermalRadiation => "thermal radiation",
             Self::Acoustic => "acoustic",
             Self::Electromagnetic => "electromagnetic",
             Self::Fluid => "fluid",
@@ -71,6 +74,9 @@ impl AcceleratorFamily {
             ),
             Self::StructuralNonlinear => {
                 Some("the Newton tangent solves run on the shared CPU sparse layer")
+            }
+            Self::ThermalRadiation => {
+                Some("the damped Newton radiation solve runs on the shared CPU sparse layer")
             }
             Self::Acoustic
             | Self::Electromagnetic
@@ -230,7 +236,7 @@ pub fn admit_accelerator_with_policy(
     policy: AcceleratorAdmissionPolicy,
 ) -> Result<AcceleratorAdmission, AcceleratorRequiredError> {
     let unavailable = match (requested, family.unavailable_reason()) {
-        (ComputeBackend::Cpu, _) | (ComputeBackend::Gpu, None) => {
+        (ComputeBackend::Cpu, _) => {
             return Ok(AcceleratorAdmission {
                 requested,
                 effective: requested,
@@ -238,12 +244,51 @@ pub fn admit_accelerator_with_policy(
             })
         }
         (ComputeBackend::Gpu, Some(reason)) => reason,
+        // A device-capable family: what admission can already tell (no provider is assigned to
+        // this worker) decides before the solve; the solve-time decline is settled afterwards.
+        (ComputeBackend::Gpu, None) => match device_unavailable_reason() {
+            Some(reason) => reason,
+            None => {
+                return Ok(AcceleratorAdmission {
+                    requested,
+                    effective: requested,
+                    fallback: None,
+                })
+            }
+        },
     };
     Ok(AcceleratorAdmission {
         requested,
         effective: ComputeBackend::Cpu,
         fallback: Some(fallback_decision(family, unavailable, policy)?),
     })
+}
+
+/// Why no device can run a solve on this worker, when that is known before the solve.
+pub fn device_unavailable_reason() -> Option<&'static str> {
+    runmat_accelerate_api::provider()
+        .is_none()
+        .then_some("no accelerator provider is assigned to this worker")
+}
+
+/// Completes a run admitted by [`admit_accelerator`]: a run executed on `cpu_reference` after a
+/// pre-solve fallback reports the requested placement and carries the one fallback warning; a
+/// run admitted onto the device settles a solve-time decline.
+pub fn complete_accelerator_admission(
+    family: AcceleratorFamily,
+    admission: AcceleratorAdmission,
+    run: &mut super::FeaRunResult,
+) -> Result<(), AcceleratorRequiredError> {
+    match admission.fallback {
+        Some(fallback) => {
+            run.requested_backend = admission.requested;
+            run.diagnostics
+                .retain(|diagnostic| diagnostic.code != ACCELERATOR_ADMISSION_FALLBACK_CODE);
+            run.diagnostics.push(fallback);
+            Ok(())
+        }
+        None => settle_accelerator_execution(family, run),
+    }
 }
 
 /// Confirms the backend a device-capable family actually ran with under the policy in scope.
@@ -273,13 +318,10 @@ pub fn settle_accelerator_execution(
     if let Some(fallback) =
         confirm_accelerator_execution(family, run.requested_backend, run.execution_backend)?
     {
-        if !run
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == ACCELERATOR_ADMISSION_FALLBACK_CODE)
-        {
-            run.diagnostics.push(fallback);
-        }
+        // Linear solves report their own decline once per solve; the run carries one warning.
+        run.diagnostics
+            .retain(|diagnostic| diagnostic.code != ACCELERATOR_ADMISSION_FALLBACK_CODE);
+        run.diagnostics.push(fallback);
     }
     Ok(())
 }
@@ -358,8 +400,22 @@ mod tests {
     fn device_capable_families_keep_the_request_and_confirm_the_backend_that_ran() {
         let admission =
             admit_accelerator(AcceleratorFamily::Thermal, ComputeBackend::Gpu).unwrap();
-        assert_eq!(admission.effective, ComputeBackend::Gpu);
-        assert!(admission.fallback.is_none());
+        let strict = with_accelerator_admission_policy(AcceleratorAdmissionPolicy::Required, || {
+            admit_accelerator(AcceleratorFamily::Thermal, ComputeBackend::Gpu)
+        });
+        if device_unavailable_reason().is_some() {
+            // Known before the solve: fall back now, and strict fails before any solve.
+            assert_eq!(admission.effective, ComputeBackend::Cpu);
+            assert_eq!(
+                admission.fallback.unwrap().code,
+                ACCELERATOR_ADMISSION_FALLBACK_CODE
+            );
+            assert!(strict.is_err());
+        } else {
+            assert_eq!(admission.effective, ComputeBackend::Gpu);
+            assert!(admission.fallback.is_none());
+            assert!(strict.is_ok());
+        }
         assert!(confirm_accelerator_execution(
             AcceleratorFamily::Thermal,
             ComputeBackend::Gpu,

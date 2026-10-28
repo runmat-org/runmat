@@ -247,8 +247,12 @@ impl ThermalResultMetadata<'_> {
             });
         if nonlinear == self.nonlinear_evidence.is_empty()
             || (nonlinear
-                && (self.run.requested_backend != crate::ComputeBackend::Cpu
-                    || self.run.execution_backend != crate::ExecutionBackend::Cpu))
+                && (self.run.execution_backend != crate::ExecutionBackend::Cpu
+                    || (self.run.requested_backend != crate::ComputeBackend::Cpu
+                        && !self.run.diagnostics.iter().any(|diagnostic| {
+                            diagnostic.code
+                                == crate::contracts::accelerator_admission::ACCELERATOR_ADMISSION_FALLBACK_CODE
+                        }))))
         {
             return Err(invalid());
         }

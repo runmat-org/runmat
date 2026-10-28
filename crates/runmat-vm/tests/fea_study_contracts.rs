@@ -27,7 +27,7 @@ fn typed_study_sequence_compiles_and_executes_through_the_vm() {
             "production", {step}, cell(0, 0), cell(0, 0), cell(0, 0));
         backend = fea.ComputeBackend.cpu();
         solverOptions = fea.SolverOptions.defaults(step);
-        executionStep = fea.ExecutionStep.new(step, backend, solverOptions);
+        executionStep = fea.ExecutionStep.new(step, backend, solverOptions, false);
         execution = fea.ExecutionPlan.new(sequence, {executionStep});
         "#,
     )

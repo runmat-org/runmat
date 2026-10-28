@@ -1923,13 +1923,9 @@ pub struct AnalysisExecutionStep {
     pub backend: ComputeBackend,
     /// What happens when `backend` is `gpu` and the accelerator path cannot run the step: fall
     /// back to `cpu_reference` with a fallback diagnostic (default) or fail closed (`required`).
-    #[serde(default, skip_serializing_if = "is_default_accelerator_admission")]
+    #[serde(default)]
     pub accelerator_admission: runmat_analysis_core::AcceleratorAdmissionPolicy,
     pub solver_options: AnalysisSolverOptions,
-}
-
-fn is_default_accelerator_admission(policy: &runmat_analysis_core::AcceleratorAdmissionPolicy) -> bool {
-    *policy == runmat_analysis_core::AcceleratorAdmissionPolicy::default()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

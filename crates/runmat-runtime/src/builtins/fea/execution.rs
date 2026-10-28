@@ -16,7 +16,8 @@ const SOLVER_OPTIONS_CLASS: &str = classes::SOLVER_OPTIONS.display_name();
 const EXECUTION_STEP_CLASS: &str = classes::EXECUTION_STEP.display_name();
 const EXECUTION_PLAN_CLASS: &str = classes::EXECUTION_PLAN.display_name();
 
-const EXECUTION_STEP_FIELDS: &[&str] = &["step_id", "backend", "solver_options"];
+const EXECUTION_STEP_FIELDS: &[&str] =
+    &["step_id", "backend", "accelerator_admission", "solver_options"];
 const EXECUTION_PLAN_FIELDS: &[&str] = &["steps"];
 
 macro_rules! choice {
@@ -71,7 +72,12 @@ pub async fn solver_defaults(step: Value) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::execution"
 )]
-pub async fn execution_step(step: Value, backend: Value, options: Value) -> BuiltinResult<Value> {
+pub async fn execution_step(
+    step: Value,
+    backend: Value,
+    options: Value,
+    strict: Value,
+) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ExecutionStep.new";
     let step = procedure_step(NAME, &step)?;
     let options: AnalysisSolverOptions = from_typed_value(NAME, SOLVER_OPTIONS_CLASS, &options)?;
@@ -85,7 +91,13 @@ pub async fn execution_step(step: Value, backend: Value, options: Value) -> Buil
     let execution = AnalysisExecutionStep {
         step_id: step.step_id,
         backend: from_typed_value(NAME, BACKEND_CLASS, &backend)?,
-        accelerator_admission: Default::default(),
+        // `strict = true` is `accelerators = required`: a GPU step that cannot run on the
+        // accelerator fails closed instead of falling back to cpu_reference.
+        accelerator_admission: if super::logical_from_value(NAME, &strict)? {
+            runmat_analysis_core::AcceleratorAdmissionPolicy::Required
+        } else {
+            runmat_analysis_core::AcceleratorAdmissionPolicy::FallbackToCpu
+        },
         solver_options: options,
     };
     serializable_to_object(NAME, &ERROR_INTERNAL, EXECUTION_STEP_CLASS, &execution)
@@ -214,13 +226,52 @@ mod tests {
             .unwrap();
         let static_options = solver_defaults(static_step).await.unwrap();
 
-        let error = execution_step(modal_step, backend_cpu().await.unwrap(), static_options)
-            .await
-            .unwrap_err();
+        let error = execution_step(
+            modal_step,
+            backend_cpu().await.unwrap(),
+            static_options,
+            Value::Bool(false),
+        )
+        .await
+        .unwrap_err();
 
         assert!(error
             .to_string()
             .contains("solver options do not support the supplied procedure step"));
+    }
+
+    #[tokio::test]
+    async fn execution_step_strict_argument_selects_the_required_admission_policy() {
+        super::super::ensure_value_classes_registered();
+        let step = super::super::steps::structural_static_builtin("static".into())
+            .await
+            .unwrap();
+        let options = solver_defaults(step.clone()).await.unwrap();
+        for (strict, expected) in [
+            (false, runmat_analysis_core::AcceleratorAdmissionPolicy::FallbackToCpu),
+            (true, runmat_analysis_core::AcceleratorAdmissionPolicy::Required),
+        ] {
+            let value = execution_step(
+                step.clone(),
+                backend_gpu().await.unwrap(),
+                options.clone(),
+                Value::Bool(strict),
+            )
+            .await
+            .unwrap();
+            let execution: AnalysisExecutionStep =
+                object_payload("test", &value, EXECUTION_STEP_CLASS).unwrap();
+            assert_eq!(execution.accelerator_admission, expected);
+            assert_eq!(execution.backend, ComputeBackend::Gpu);
+        }
+        assert!(execution_step(
+            step,
+            backend_gpu().await.unwrap(),
+            options,
+            Value::String("yes".into()),
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
@@ -244,9 +295,14 @@ mod tests {
         .await
         .unwrap();
         let first_options = solver_defaults(first.clone()).await.unwrap();
-        let first_execution = execution_step(first, backend_cpu().await.unwrap(), first_options)
-            .await
-            .unwrap();
+        let first_execution = execution_step(
+            first,
+            backend_cpu().await.unwrap(),
+            first_options,
+            Value::Bool(false),
+        )
+        .await
+        .unwrap();
 
         let error = execution_plan(sequence, first_execution).await.unwrap_err();
         assert!(error
