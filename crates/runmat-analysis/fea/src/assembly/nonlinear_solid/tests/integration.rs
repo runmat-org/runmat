@@ -77,7 +77,12 @@ fn cancelled_original_basis_preparation_preserves_typed_cancellation() {
 fn curved_tet10_nonlinear_assembly_integrates_on_the_shared_rule_points() {
     let (model, _, _) = fixture(ElementOrder::Tet10, false);
     let mut mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-    mesh.topology.nodes[4].coordinates_m.canonical_value()[1] -= 0.05;
+    let mut midside = mesh.topology.nodes[4].coordinates_m.canonical_value();
+    midside[1] -= 0.05;
+    mesh.topology.nodes[4].coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new(midside);
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     let initial = assemble_structural_system_borrowed(

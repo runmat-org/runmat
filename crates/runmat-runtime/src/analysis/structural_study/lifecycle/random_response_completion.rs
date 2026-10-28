@@ -3,7 +3,7 @@ use runmat_analysis_fea::admission::{admit_formulation, FormulationAdmissionRequ
 
 pub(super) fn complete_structural_random_response(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     authored_workloads: BTreeMap<
@@ -34,7 +34,7 @@ pub(super) fn complete_structural_random_response(
         &response_step.procedure_step.step_id,
     );
     complete_random_response_study(
-        super::modal_completion::prepared_completion(intent, resolved_model, persisted_mesh),
+        super::modal_completion::prepared_completion(intent, study_model, persisted_mesh),
         solver_mesh,
         authored_workloads,
         numerical,

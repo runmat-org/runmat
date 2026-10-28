@@ -7,7 +7,7 @@ use crate::analysis::study_publication::thermal::materialization as thermal_run;
 
 pub(super) fn complete(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
     mesh: runmat_meshing_core::SolverMeshArtifact,
     mut workloads: BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralStepWorkload>,
@@ -63,7 +63,7 @@ pub(super) fn complete(
                 invalid,
             )
         })?;
-    if thermal.compiled.model != resolved_model {
+    if thermal.compiled.model != study_model {
         return Err(invalid(
             "thermal completion differs from resolved model".to_string(),
         ));
@@ -160,7 +160,7 @@ pub(super) fn complete(
         study_id: intent.study_id,
         study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
         authored_study_digest: intent.authored_study_digest,
-        model: resolved_model,
+        model: study_model,
         steps,
         operation_sequence: intent.operation_sequence,
         solver_mesh_artifact_path: persisted_mesh.artifact_path,

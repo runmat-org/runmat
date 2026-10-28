@@ -4209,7 +4209,7 @@ fn write_fixture_solver_mesh_artifact(
     let boundary_face_count = mesh.topology.boundary_faces.len();
     for (index, region_id) in boundary_regions.into_iter().enumerate() {
         // Canonical fixture selectors name a fixture entity: place that exact entity, matched by
-        // its source name. Other targets (point ids, importer aliases) keep a region identity.
+        // its source name. Other targets (point ids) keep a region identity.
         let fixture_entity = runmat_meshing_core::fixtures::fixture_entity_for_selection(&region_id);
         let source_name = fixture_entity
             .as_ref()

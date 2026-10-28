@@ -4,7 +4,7 @@ use crate::analysis::frequency_result::admit_structural_frequency_result;
 
 pub(super) fn complete_structural_frequency(
     intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
+    study_model: runmat_analysis_core::AnalysisModel,
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     authored_workload: runmat_analysis_fea::execution::StructuralFrequencyWorkload,
@@ -34,7 +34,7 @@ pub(super) fn complete_structural_frequency(
             study_id: intent.study_id,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
             authored_study_digest: intent.authored_study_digest,
-            model: resolved_model,
+            model: study_model,
             steps: vec![crate::analysis::structural_study::PreparedStudyStep {
                 authored_execution: step.authored_execution,
                 procedure_step: step.procedure_step,

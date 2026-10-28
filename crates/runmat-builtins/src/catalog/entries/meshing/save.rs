@@ -97,8 +97,8 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(MeshingDocumentation {
         BuiltinDocumentationSection {
             heading: "Behavior",
             paragraphs: &[
-                "`meshPath` and `evidencePath` are scalar text and must differ. Missing parent directories are created. The two artifacts are the canonical CBOR encodings, identical to the files `runmat mesh` writes for the same mesh, and they can be read back with `meshing.load`. A third file, `<meshPath>.regions.json`, records the importer's region aliases bound to the mesh's canonical digest, so `meshing.load` restores them.",
-                "Existing destinations are protected: if any of the three files exists, the call fails and none is changed, unless the only option, `Force`, is `true`. `Force` must be logical; numeric `1` is rejected.",
+                "`meshPath` and `evidencePath` are scalar text and must differ. Missing parent directories are created. The two artifacts are the canonical CBOR encodings, identical to the files `runmat mesh` writes for the same mesh, and they can be read back with `meshing.load`. Region identity is part of the mesh artifact, so no other file is written.",
+                "Existing destinations are protected: if either file exists, the call fails and none is changed, unless the only option, `Force`, is `true`. `Force` must be logical; numeric `1` is rejected.",
                 "All files are staged before any destination is replaced. If publishing one fails, the files already replaced are rolled back, so the set on disk always matches. The call returns `true` only after every file is in place.",
             ],
         },
@@ -130,8 +130,8 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(MeshingDocumentation {
     verification: &[
         BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,
-            label: "Save and load retain region aliases through the sidecar",
-            location: "crates/runmat-runtime/src/builtins/meshing/mod.rs::save_and_load_retain_region_aliases_through_the_sidecar",
+            label: "Save and load round-trip only the canonical artifacts",
+            location: "crates/runmat-runtime/src/builtins/meshing/mod.rs::save_and_load_round_trip_only_the_canonical_artifacts",
         },
         BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,

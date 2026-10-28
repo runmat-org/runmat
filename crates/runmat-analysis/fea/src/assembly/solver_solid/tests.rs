@@ -190,10 +190,10 @@ fn canonical_solver_assembly_revalidates_digest_and_uses_region_assignment() {
         &artifact,
         &assigned_inventory(
             &artifact,
-            artifact.topology.volume_elements[0]
+            &artifact.topology.volume_elements[0]
                 .region_id
-                .source_topology_id
-                .as_str(),
+                .analysis_selection_id()
+                .unwrap(),
             material(1.0e6, 1_000.0),
             material(2.0e6, 1_000.0),
         ),
@@ -350,8 +350,8 @@ fn region_density_controls_mass_without_changing_topology() {
     let artifact = artifact(ElementOrder::Tet4);
     let region = artifact.topology.volume_elements[0]
         .region_id
-        .source_topology_id
-        .clone();
+        .analysis_selection_id()
+        .unwrap();
     let baseline = assemble_solver_solid_operators(
         &artifact,
         &inventory(&artifact, material(70.0e9, 1_000.0)),

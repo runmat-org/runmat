@@ -45,29 +45,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
         ));
     }
 
-    let aliases =
-        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
-            .map_err(|error| {
-                intent_completion_error(
-                    &intent,
-                    "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
-                    OperationErrorType::Validation,
-                    OperationErrorSeverity::Error,
-                    error.to_string(),
-                )
-            })?;
-    let resolved_model =
-        runmat_analysis_core::resolve_geometry_region_aliases(&intent.model, &aliases).map_err(
-            |error| {
-                intent_completion_error(
-                    &intent,
-                    "RM.FEA.RUN_STUDY.TOPOLOGY_RESOLUTION_FAILED",
-                    OperationErrorType::Validation,
-                    OperationErrorSeverity::Error,
-                    error.to_string(),
-                )
-            },
-        )?;
+    let study_model = intent.model.clone();
     preparation
         .staging
         .admit_mesh_persistence(&meshing_output.artifact, &meshing_output.evidence)
@@ -101,7 +79,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             },
         ) => thermal_completion::complete(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             workloads,
@@ -118,7 +96,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::LinearSequence(result),
         ) => complete_linear_sequence(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             authored_workloads,
@@ -134,7 +112,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralTransient(result),
         ) => complete_direct_transient(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             *workload,
@@ -149,7 +127,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralFrequency(result),
         ) => complete_structural_frequency(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             *workload,
@@ -162,7 +140,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralModal(result),
         ) => complete_structural_modal(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             *workload,
@@ -177,7 +155,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralModalTransient(result),
         ) => complete_structural_modal_transient(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             workloads,
@@ -192,7 +170,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result),
         ) => complete_structural_response_spectrum(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             workloads,
@@ -207,7 +185,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralRandomResponse(result),
         ) => complete_structural_random_response(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             workloads,
@@ -222,7 +200,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralPrestressedModal(result),
         ) => complete_structural_prestressed_modal(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             workloads,
@@ -237,7 +215,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralPrestressedFrequency(result),
         ) => complete_structural_prestressed_frequency(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             workloads,
@@ -252,7 +230,7 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             StructuralStudyNumericalResult::StructuralBuckling(result),
         ) => complete_structural_buckling(
             intent,
-            resolved_model,
+            study_model,
             persisted_mesh,
             meshing_output.artifact,
             workloads,
