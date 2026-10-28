@@ -296,7 +296,8 @@ impl TransientBalanceHistory {
             .zip(&integration_end_reaction)
             .map(|(previous, current)| 0.5 * (previous + current))
             .collect::<Vec<_>>();
-        let support_work_increment = dot(&average_reaction, &displacement_increment)?;
+        let support_work_increment = dot(&average_reaction, &displacement_increment)?
+            + prescribed_kinematics_work_correction(&step, &average_velocity)?;
         let damping_dissipation_increment =
             step.time_step_s * dot(&average_velocity, &average_damping_force)?;
         let damping_scale = step.time_step_s
@@ -448,6 +449,69 @@ impl TransientBalanceHistory {
     pub(super) fn relative_energy_balance_error(&self) -> &[f64] {
         &self.relative_energy_balance_error
     }
+}
+
+/// Support work that the trapezoidal reaction quadrature `avg(R)·Δu` misses when constrained
+/// coordinates follow prescribed kinematics that are not trapezoid-consistent.
+///
+/// The average-acceleration integrator advances every integrated coordinate with
+/// `Δu = Δt·avg(v)` and `Δv = Δt·avg(a)`. Under those relations the step's change in
+/// `½vᵀMv + ½uᵀKu` equals `avg(F + R)·Δu − Δt·avg(v)ᵀC·avg(v)` exactly. A prescribed support
+/// motion is instead reconstructed exactly from its signal (for example the cubic displacement
+/// of a piecewise-linear acceleration), so on its constrained columns the kinematic defects
+/// `δu = Δu − Δt·avg(v)` and `δv = Δv − Δt·avg(a)` are nonzero. The energy the moving support
+/// delivers through that defect is `avg(v)ᵀM·δv − avg(Ma + Cv)ᵀ·δu`; it vanishes for fixed and
+/// trapezoid-consistent supports and converges to zero at O(Δt²) over a fixed interval.
+fn prescribed_kinematics_work_correction(
+    step: &TransientBalanceStep<'_>,
+    average_velocity: &[f64],
+) -> Result<f64, DynamicBalanceError> {
+    let Some(constraints) = step.integration_end_summary.constraint_matrix.as_ref() else {
+        return Ok(0.0);
+    };
+    let start = step.integration_start_state;
+    let end = step.integration_end_state;
+    let dof_count = end.dof_count();
+    let mut displacement_defect = vec![0.0; dof_count];
+    let mut velocity_defect = vec![0.0; dof_count];
+    for dof in constraints.column_indices.iter().copied() {
+        if dof >= dof_count {
+            return Err(DynamicBalanceError::DimensionMismatch);
+        }
+        displacement_defect[dof] = end.displacement()[dof]
+            - start.displacement()[dof]
+            - step.time_step_s * average_velocity[dof];
+        velocity_defect[dof] = end.velocity()[dof]
+            - start.velocity()[dof]
+            - step.time_step_s * 0.5 * (end.acceleration()[dof] + start.acceleration()[dof]);
+    }
+    if displacement_defect
+        .iter()
+        .chain(&velocity_defect)
+        .all(|value| *value == 0.0)
+    {
+        return Ok(0.0);
+    }
+    let operators = step.integration_end_summary.operator.operators();
+    let average_acceleration = end
+        .acceleration()
+        .iter()
+        .zip(start.acceleration())
+        .map(|(current, previous)| 0.5 * (current + previous))
+        .collect::<Vec<_>>();
+    let inertia = spmv(operators.mass(), &average_acceleration)
+        .map_err(|_| DynamicBalanceError::DimensionMismatch)?;
+    let damping = spmv(operators.damping(), average_velocity)
+        .map_err(|_| DynamicBalanceError::DimensionMismatch)?;
+    let mass_velocity_defect = spmv(operators.mass(), &velocity_defect)
+        .map_err(|_| DynamicBalanceError::DimensionMismatch)?;
+    let inertia_and_damping = inertia
+        .iter()
+        .zip(&damping)
+        .map(|(inertia, damping)| inertia + damping)
+        .collect::<Vec<_>>();
+    Ok(dot(average_velocity, &mass_velocity_defect)?
+        - dot(&inertia_and_damping, &displacement_defect)?)
 }
 
 fn constrained_reaction(
