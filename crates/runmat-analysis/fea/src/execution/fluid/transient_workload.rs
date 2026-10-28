@@ -74,10 +74,11 @@ impl FluidTransientWorkload {
         let schedule = super::FluidTransientSchedule::derive(&self.model, step)?;
         let start = schedule.points_s()[0];
         let mut policy = self.policy;
-        policy.maximum_resident_bytes = Some(self
-            .resident_ceiling()?
-            .checked_sub(source.preparation_resident_bytes)
-            .ok_or_else(|| invalid("transient source exhausts initial field ceiling"))?);
+        policy.set_resident_byte_budget(
+            self.resident_ceiling()?
+                .checked_sub(source.preparation_resident_bytes)
+                .ok_or_else(|| invalid("transient source exhausts initial field ceiling"))?,
+        );
         let initial_problem = crate::physics::cfd::canonical::CanonicalFluidProblem::prepare_at(
             source.input(&self.model, policy),
             crate::excitation::ProjectionSample::TimeSeconds {

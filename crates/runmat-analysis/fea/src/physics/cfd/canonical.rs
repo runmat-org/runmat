@@ -108,6 +108,13 @@ impl CanonicalFluidPolicy {
     pub fn operator_work_budget(&self) -> u64 {
         self.maximum_operator_work.unwrap_or(u64::MAX)
     }
+
+    /// Stores a derived saturating resident budget as the cap: the inverse of
+    /// `resident_byte_budget`. A budget above the wire bound (2^53 - 1 bytes) cannot bind any
+    /// placement, so it is stored as no cap instead of an unrepresentable integer.
+    pub fn set_resident_byte_budget(&mut self, budget: u64) {
+        self.maximum_resident_bytes = runmat_types::wire_integer::bounded(budget);
+    }
 }
 
 impl Default for CanonicalFluidPolicy {

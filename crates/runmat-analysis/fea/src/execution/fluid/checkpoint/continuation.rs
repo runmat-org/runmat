@@ -158,7 +158,7 @@ fn block<'a>(
     range: Range<usize>,
 ) -> AnalysisExecutionResult<super::super::FluidTransientBlock<'a>> {
     let mut policy = p.workload.policy;
-    policy.maximum_resident_bytes = Some(profile::require_complete_budget(p, scope)?);
+    policy.set_resident_byte_budget(profile::require_complete_budget(p, scope)?);
     super::super::FluidTransientBlock::prepare(
         &p.workload.model,
         &p.workload.step_id,
