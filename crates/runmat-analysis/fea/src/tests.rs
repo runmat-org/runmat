@@ -1449,6 +1449,28 @@ fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
 }
 
 #[test]
+fn linear_static_rejects_thermomechanical_step_on_explicit_connectivity() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "thermomechanical_explicit_static",
+        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        runmat_analysis_core::AnalysisProcedure::Static,
+    )];
+    let error = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        baseline_linear_static_options(),
+    )
+    .expect_err("explicit connectivity has no temperature-load path to apply the profile");
+    let message = error.to_string();
+    assert!(
+        message.contains("physical solid temperature-load assembly"),
+        "{message}"
+    );
+}
+
+#[test]
 fn transient_rejects_thermomechanical_identity_before_assembly() {
     let mut model = fixture_model(FixtureId::TransientLong);
     model.sequence.steps = vec![ProcedureStep::coupled(
