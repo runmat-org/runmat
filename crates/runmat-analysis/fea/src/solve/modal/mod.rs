@@ -180,12 +180,14 @@ pub(crate) fn solve_modal_system_reusing(
         }
     };
     let mut linear_diagnostics = Vec::new();
-    if backend == ComputeBackend::Gpu {
-        linear_diagnostics.push(FeaDiagnostic {
-            code: "FEA_MODAL_ACCELERATOR_ADMISSION_FALLBACK".to_string(),
-            severity: FeaDiagnosticSeverity::Warning,
-            message: "the modal eigensolver runs on the shared CPU sparse layer (shift-invert block Lanczos); using cpu_reference".to_string(),
-        });
+    // Strict placement fails closed at the modal entry; here the shared admission only supplies
+    // the fallback warning for a GPU request.
+    if let Ok(admission) = crate::contracts::accelerator_admission::admit_accelerator_with_policy(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralModal,
+        backend,
+        crate::contracts::accelerator_admission::AcceleratorAdmissionPolicy::FallbackToCpu,
+    ) {
+        linear_diagnostics.extend(admission.fallback);
     }
     let unconstrained_count = reduced_operator.dof_count();
     let target_mode_count = requested_mode_count.min(unconstrained_count);

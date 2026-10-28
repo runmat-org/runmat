@@ -2696,29 +2696,62 @@ fn deterministic_replay_for_fixture_is_stable() {
 }
 
 #[test]
-fn static_gpu_request_fails_before_assembly_without_native_admission() {
+fn static_gpu_request_falls_back_to_cpu_reference_with_parity_unless_required() {
+    use crate::contracts::accelerator_admission::{
+        with_accelerator_admission_policy, AcceleratorAdmissionPolicy,
+        ACCELERATOR_ADMISSION_FALLBACK_CODE,
+    };
     let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let options = |algebra_backend_kind| LinearStaticSolveOptions {
+        solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
+        algebra_backend_kind,
+        ..baseline_linear_static_options()
+    };
+    let cpu = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        options(crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference),
+    )
+    .expect("CPU reference static solve");
     for algebra_backend_kind in [
         crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         crate::solve::backend::kind::LinearAlgebraBackendKind::Accelerator,
     ] {
-        let mesh = single_tetrahedron_solver_mesh_for_model(&model);
-        let error = crate::run_linear_static_with_options(
+        let fallback = crate::run_linear_static_with_options(
             &model,
             ComputeBackend::Gpu,
-            LinearStaticSolveOptions {
-                solver_mesh: Some(mesh),
-                algebra_backend_kind,
-                ..baseline_linear_static_options()
-            },
+            options(algebra_backend_kind),
         )
-        .expect_err("GPU request must not silently execute a CPU static solve");
+        .expect("GPU placement falls back to the CPU reference static solve");
+        assert_eq!(fallback.requested_backend, ComputeBackend::Gpu);
+        assert_eq!(fallback.execution_backend, crate::ExecutionBackend::Cpu);
+        assert_eq!(
+            fallback.solver_backend,
+            crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference
+        );
+        let warnings = fallback
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == ACCELERATOR_ADMISSION_FALLBACK_CODE)
+            .collect::<Vec<_>>();
+        assert_eq!(warnings.len(), 1, "{:?}", fallback.diagnostics);
+        assert!(warnings[0].message.contains("structural static"));
+        assert_eq!(fallback.fields, cpu.fields, "fallback must be the CPU reference solve");
+
+        let error = with_accelerator_admission_policy(AcceleratorAdmissionPolicy::Required, || {
+            crate::run_linear_static_with_options(
+                &model,
+                ComputeBackend::Gpu,
+                options(algebra_backend_kind),
+            )
+        })
+        .expect_err("required accelerator placement fails closed");
         assert!(matches!(
-            error,
-            crate::contracts::FeaRunError::Resource(
-                crate::planning::resource::ResourcePlanningError::Invalid(message)
-            ) if message.contains("CPU fallback is not a GPU solve")
+            &error,
+            crate::contracts::FeaRunError::AcceleratorRequired(required)
+                if required.family == "structural static"
         ));
+        assert!(error.to_string().starts_with("FEA_ACCELERATOR_REQUIRED"));
     }
 }
 

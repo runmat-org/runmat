@@ -413,6 +413,20 @@ pub fn run_transient_with_fields(
     options: TransientSolveOptions,
     initial_fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<FeaTransientRunResult, FeaRunError> {
+    let mut result = execute_transient_with_fields(model, backend, options, initial_fields)?;
+    crate::contracts::accelerator_admission::settle_accelerator_execution(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransient,
+        &mut result.run,
+    )?;
+    Ok(result)
+}
+
+fn execute_transient_with_fields(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: TransientSolveOptions,
+    initial_fields: &[crate::execution::InitialFieldBinding],
+) -> Result<FeaTransientRunResult, FeaRunError> {
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::RegionResolution,

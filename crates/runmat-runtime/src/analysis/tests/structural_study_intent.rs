@@ -1269,6 +1269,7 @@ fn sample_direct_transient_study_spec(
         steps: vec![AnalysisExecutionStep {
             step_id: step.step_id,
             backend: ComputeBackend::Cpu,
+            accelerator_admission: Default::default(),
             solver_options: AnalysisSolverOptions::StructuralTransient(
                 AnalysisTransientRunOptions {
                     time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count },
@@ -1294,6 +1295,7 @@ fn sample_modal_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
         steps: vec![AnalysisExecutionStep {
             step_id: step.step_id,
             backend: ComputeBackend::Cpu,
+            accelerator_admission: Default::default(),
             solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
                 truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(1),
                 convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
@@ -1345,6 +1347,7 @@ fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySp
             AnalysisExecutionStep {
                 step_id: modal.step_id,
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
                     truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(1),
                     convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
@@ -1354,6 +1357,7 @@ fn sample_modal_transient_study_spec(geometry_sha256: String) -> AnalysisStudySp
             AnalysisExecutionStep {
                 step_id: transient.step_id,
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::StructuralTransient(
                     AnalysisTransientRunOptions {
                         time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed {
@@ -1439,6 +1443,7 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
             AnalysisExecutionStep {
                 step_id: modal.step_id,
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
                     truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(3),
                     convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
@@ -1448,6 +1453,7 @@ fn sample_response_spectrum_study_spec(geometry_sha256: String) -> AnalysisStudy
             AnalysisExecutionStep {
                 step_id: response.step_id,
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::StructuralResponseSpectrum(
                     AnalysisResponseSpectrumRunOptions::default(),
                 ),
@@ -1528,6 +1534,7 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
             AnalysisExecutionStep {
                 step_id: modal.step_id,
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
                     truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(3),
                     convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
@@ -1537,6 +1544,7 @@ fn sample_random_response_study_spec(geometry_sha256: String) -> AnalysisStudySp
             AnalysisExecutionStep {
                 step_id: response.step_id,
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::StructuralRandomResponse(
                     AnalysisRandomResponseRunOptions {
                         integration: runmat_analysis_fea::solve::dynamics::RandomResponseIntegrationPolicy {
@@ -1596,6 +1604,7 @@ fn sample_buckling_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
             AnalysisExecutionStep {
                 step_id: preload.step_id,
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::StructuralLinear(
                     AnalysisRunOptions::default(),
                 ),
@@ -1603,6 +1612,7 @@ fn sample_buckling_study_spec(geometry_sha256: String) -> AnalysisStudySpec {
             AnalysisExecutionStep {
                 step_id: buckling.step_id,
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::StructuralBuckling(
                     AnalysisBucklingRunOptions {
                         solver:
@@ -1652,6 +1662,7 @@ fn sample_prestressed_modal_study_spec(geometry_sha256: String) -> AnalysisStudy
     spec.execution.steps[1] = AnalysisExecutionStep {
         step_id: modal.step_id,
         backend: ComputeBackend::Cpu,
+        accelerator_admission: Default::default(),
         solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
             truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(1),
             convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),
@@ -1694,6 +1705,7 @@ fn sample_prestressed_frequency_study_spec(geometry_sha256: String) -> AnalysisS
     spec.execution.steps[1] = AnalysisExecutionStep {
         step_id: frequency.step_id,
         backend: ComputeBackend::Cpu,
+        accelerator_admission: Default::default(),
         solver_options: AnalysisSolverOptions::StructuralFrequency(
             AnalysisStructuralFrequencyRunOptions::default(),
         ),
@@ -1781,6 +1793,7 @@ fn sample_prestressed_modal_frequency_study_spec(geometry_sha256: String) -> Ana
         AnalysisExecutionStep {
             step_id: modal.step_id,
             backend: ComputeBackend::Cpu,
+            accelerator_admission: Default::default(),
             solver_options: AnalysisSolverOptions::StructuralModes(AnalysisModalRunOptions {
                 truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(3),
                 convergence: runmat_analysis_fea::ModalConvergencePolicy::exploratory(),

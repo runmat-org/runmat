@@ -60,7 +60,11 @@ pub fn run_nonlinear_with_options(
     backend: ComputeBackend,
     options: NonlinearSolveOptions,
 ) -> Result<FeaNonlinearRunResult, FeaRunError> {
-    let prepared = preparation::prepare(model, backend, &options)?;
+    let admission = crate::contracts::accelerator_admission::admit_accelerator(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralNonlinear,
+        backend,
+    )?;
+    let prepared = preparation::prepare(model, admission.effective, &options)?;
     let solver_admission = preflight::tangent_admission(&prepared.resource_plan)?;
     let maximum_resident_bytes = prepared
         .execution_step
@@ -98,7 +102,7 @@ pub fn run_nonlinear_with_options(
         &prepared.summary,
         &options,
         crate::solve::nonlinear::NonlinearExecution {
-            backend,
+            backend: admission.effective,
             contact: contact_execution,
             solver_admission: Some(solver_admission),
         },
@@ -106,6 +110,8 @@ pub fn run_nonlinear_with_options(
         prepared.load_factor_end,
         &prepared.increment_schedule,
     )?;
+    let mut nonlinear = nonlinear;
+    nonlinear.diagnostics.extend(admission.fallback);
     recovery::recover(model, backend, &options, prepared, nonlinear, 0)
 }
 

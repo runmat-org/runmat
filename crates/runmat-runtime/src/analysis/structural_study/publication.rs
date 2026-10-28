@@ -254,6 +254,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
         let resolved_execution = AnalysisExecutionStep {
             step_id: authored.authored_execution.step_id,
             backend: authored.authored_execution.backend,
+            accelerator_admission: authored.authored_execution.accelerator_admission,
             solver_options: completed.resolved_solver_options,
         };
         let evidence_artifact_path = staging

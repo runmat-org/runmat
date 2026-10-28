@@ -14,7 +14,32 @@ use super::{
     ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
+/// Runs one authored step with its accelerator admission policy in scope, so every family solve
+/// it starts admits placement through the shared `accelerator_admission` decision.
 pub(super) fn execute_study_step(
+    model: &AnalysisModel,
+    procedure_step: &ProcedureStep,
+    execution: &AnalysisExecutionStep,
+    solver_mesh_artifact_path: Option<&str>,
+    context: &OperationContext,
+    structural_executor: Option<&dyn StructuralLinearExecutor>,
+) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
+    runmat_analysis_fea::accelerator_admission::with_accelerator_admission_policy(
+        execution.accelerator_admission,
+        || {
+            execute_admitted_study_step(
+                model,
+                procedure_step,
+                execution,
+                solver_mesh_artifact_path,
+                context,
+                structural_executor,
+            )
+        },
+    )
+}
+
+fn execute_admitted_study_step(
     model: &AnalysisModel,
     procedure_step: &ProcedureStep,
     execution: &AnalysisExecutionStep,

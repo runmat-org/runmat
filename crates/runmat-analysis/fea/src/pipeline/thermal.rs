@@ -38,7 +38,12 @@ pub fn run_thermal_with_options(
     let mesh = options.solver_mesh.take().ok_or_else(|| {
         FeaRunError::InvalidModel("thermal solve requires a canonical solver mesh".into())
     })?;
-    execute_validated_model(model, backend, options, &mesh, step)
+    let mut result = execute_validated_model(model, backend, options, &mesh, step)?;
+    crate::contracts::accelerator_admission::settle_accelerator_execution(
+        crate::contracts::accelerator_admission::AcceleratorFamily::Thermal,
+        &mut result.run,
+    )?;
+    Ok(result)
 }
 
 pub(crate) fn prepare_selected<'a>(

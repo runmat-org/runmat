@@ -108,6 +108,7 @@ fn transient_assessment_preserves_sampled_peak_and_store_parity() {
         execution: AnalysisExecutionStep {
             step_id: ProcedureStepId("response".into()),
             backend: ComputeBackend::Cpu,
+            accelerator_admission: Default::default(),
             solver_options: AnalysisSolverOptions::StructuralTransient(options),
         },
         identity: run.run.identity.clone(),

@@ -88,7 +88,7 @@ struct LinearStaticComputation {
 fn run_linear_static_with_constraint_plan(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    options: LinearStaticSolveOptions,
+    mut options: LinearStaticSolveOptions,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     admitted: Option<StaticResourceAdmission<'_>>,
     thermal_source: Option<thermal_state::ThermalStateSelection<'_>>,
@@ -128,11 +128,19 @@ fn run_linear_static_with_constraint_plan(
     );
     check_cancelled("fea.run_linear_static")?;
 
+    let admission = crate::contracts::accelerator_admission::admit_accelerator(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralStatic,
+        backend,
+    )?;
+    if admission.fallback.is_some() {
+        options.algebra_backend_kind =
+            crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference;
+    }
     let phase_clock = crate::progress::phase_timer("structural_static.preflight");
     let preassembly = preflight::prepare_static_preassembly(
         model,
         execution_step,
-        backend,
+        admission.effective,
         &options,
         constraint_plan,
         admitted,
@@ -558,6 +566,7 @@ fn run_linear_static_with_constraint_plan(
     let structural_static_convergence =
         crate::contracts::StructuralStaticConvergence::from_solve(&solve_result, operator_proof);
     diagnostics.extend(solve_result.diagnostics);
+    diagnostics.extend(admission.fallback);
 
     emit_phase(
         "fea.run_linear_static",

@@ -85,6 +85,7 @@ pub async fn execution_step(step: Value, backend: Value, options: Value) -> Buil
     let execution = AnalysisExecutionStep {
         step_id: step.step_id,
         backend: from_typed_value(NAME, BACKEND_CLASS, &backend)?,
+        accelerator_admission: Default::default(),
         solver_options: options,
     };
     serializable_to_object(NAME, &ERROR_INTERNAL, EXECUTION_STEP_CLASS, &execution)
