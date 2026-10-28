@@ -5,7 +5,7 @@ use runmat_analysis_core::{
     SolverMaterialModel,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
-use runmat_execution::Digest;
+use runmat_execution::{Digest, DigestStream};
 use runmat_meshing_core::StableDigest;
 use serde::{Serialize, Serializer};
 
@@ -15,27 +15,63 @@ use super::{
     CompiledPropertyMap, CompiledShellProperty, CompiledShellPropertyOwner,
 };
 
-const SEMANTIC_PREFIX: &[u8] = b"runmat-fea-compiled-properties/v1\0";
-const AUDIT_PREFIX: &[u8] = b"runmat-fea-compiled-property-audit/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64);
+// v2: element collections enter the identity as streamed sequence digests, so the identity of
+// a mesh-sized property map never materializes one mesh-sized encoding (v1 needed a single
+// buffer of ~390 bytes per element, which exceeded its ceiling at 1.4M Tet10 elements).
+const SEMANTIC_PREFIX: &[u8] = b"runmat-fea-compiled-properties/v2\0";
+const AUDIT_PREFIX: &[u8] = b"runmat-fea-compiled-property-audit/v2\0";
+const SEMANTIC_ELEMENT_PREFIX: &[u8] = b"runmat-fea-compiled-property-element/v2\0";
+const AUDIT_ELEMENT_PREFIX: &[u8] = b"runmat-fea-compiled-property-audit-element/v2\0";
+const SEQUENCE_DIGEST_PREFIX: &[u8] = b"runmat-fea-compiled-property-sequence/v2\0";
+/// Header contracts hold scalars, digests and a fixed number of sequence digests: their size
+/// does not grow with the mesh.
+const HEADER_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 64, 4096, 64);
+/// One element's semantics (material, section, laminate plies). Element count never enters
+/// this bound; every element is encoded on its own.
+const ELEMENT_LIMITS: CanonicalLimits = CanonicalLimits::content_bounded(64 * 1024 * 1024, 4096, 64);
+
+/// Identity of an ordered element sequence: its length and the SHA-256 of the
+/// length-delimited canonical encoding of each element, hashed as one stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+struct SequenceDigest {
+    count: u64,
+    digest: Digest,
+}
+
+fn sequence_digest<T: Serialize>(
+    element_prefix: &[u8],
+    domain: &str,
+    elements: impl Iterator<Item = T>,
+) -> Result<SequenceDigest, String> {
+    let mut hash = DigestStream::new();
+    hash.update(SEQUENCE_DIGEST_PREFIX);
+    hash.update(&(domain.len() as u64).to_le_bytes());
+    hash.update(domain.as_bytes());
+    let mut count = 0u64;
+    for element in elements {
+        let bytes = encode_contract(element_prefix, domain, &element, ELEMENT_LIMITS)
+            .map_err(|error| error.to_string())?;
+        hash.update(&(bytes.len() as u64).to_le_bytes());
+        hash.update(&bytes);
+        count += 1;
+    }
+    Ok(SequenceDigest {
+        count,
+        digest: hash.finish(),
+    })
+}
 
 #[derive(Serialize)]
 struct SemanticContract<'a> {
-    #[serde(
-        serialize_with = "serialize_solids",
-        skip_serializing_if = "BTreeMap::is_empty"
-    )]
-    cells: &'a BTreeMap<StableDigest, CompiledElementMaterial>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cells: Option<SequenceDigest>,
     geometry_id: &'a str,
     geometry_revision: u32,
     mesh_digest: Option<StableDigest>,
     explicit_topology_digest: Option<Digest>,
-    #[serde(serialize_with = "serialize_solids")]
-    solids: &'a BTreeMap<StableDigest, CompiledElementMaterial>,
-    #[serde(serialize_with = "serialize_beams")]
-    beams: &'a BTreeMap<StableDigest, CompiledBeamProperty>,
-    #[serde(serialize_with = "serialize_shells")]
-    shells: &'a BTreeMap<StableDigest, CompiledShellProperty>,
+    solids: SequenceDigest,
+    beams: SequenceDigest,
+    shells: SequenceDigest,
 }
 
 #[derive(Serialize)]
@@ -83,20 +119,14 @@ struct LaminatePlySemantic<'a> {
 }
 
 #[derive(Serialize)]
-struct AuditContract<'a> {
-    #[serde(
-        serialize_with = "serialize_values",
-        skip_serializing_if = "BTreeMap::is_empty"
-    )]
-    cells: &'a BTreeMap<StableDigest, CompiledElementMaterial>,
+struct AuditContract {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cells: Option<SequenceDigest>,
     semantic_digest: Digest,
-    #[serde(serialize_with = "serialize_values")]
-    solids: &'a BTreeMap<StableDigest, CompiledElementMaterial>,
-    #[serde(serialize_with = "serialize_values")]
-    beams: &'a BTreeMap<StableDigest, CompiledBeamProperty>,
-    #[serde(serialize_with = "serialize_values")]
-    shells: &'a BTreeMap<StableDigest, CompiledShellProperty>,
-    assignments: &'a [CompiledPropertyAudit],
+    solids: SequenceDigest,
+    beams: SequenceDigest,
+    shells: SequenceDigest,
+    assignments: SequenceDigest,
 }
 
 pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
@@ -196,23 +226,40 @@ pub(super) fn semantic_digest(
     beam_properties: &BTreeMap<StableDigest, CompiledBeamProperty>,
     shell_properties: &BTreeMap<StableDigest, CompiledShellProperty>,
 ) -> Result<Digest, String> {
-    encode_contract(
-        SEMANTIC_PREFIX,
-        "compiled-property-semantics",
-        &SemanticContract {
-            geometry_id: &source.geometry_id,
-            geometry_revision: source.geometry_revision,
-            mesh_digest: source.mesh_digest,
-            explicit_topology_digest: source.explicit_topology_digest,
-            solids: solid_materials,
-            cells: cell_materials,
-            beams: beam_properties,
-            shells: shell_properties,
-        },
-        LIMITS,
-    )
-    .map(Digest::sha256)
-    .map_err(|error| error.to_string())
+    const DOMAIN: &str = "compiled-property-semantics";
+    let contract = SemanticContract {
+        cells: (!cell_materials.is_empty())
+            .then(|| {
+                sequence_digest(
+                    SEMANTIC_ELEMENT_PREFIX,
+                    "compiled-property-semantics.cells",
+                    cell_materials.values().map(solid_semantics),
+                )
+            })
+            .transpose()?,
+        geometry_id: &source.geometry_id,
+        geometry_revision: source.geometry_revision,
+        mesh_digest: source.mesh_digest,
+        explicit_topology_digest: source.explicit_topology_digest,
+        solids: sequence_digest(
+            SEMANTIC_ELEMENT_PREFIX,
+            "compiled-property-semantics.solids",
+            solid_materials.values().map(solid_semantics),
+        )?,
+        beams: sequence_digest(
+            SEMANTIC_ELEMENT_PREFIX,
+            "compiled-property-semantics.beams",
+            beam_properties.values().map(beam_semantics),
+        )?,
+        shells: sequence_digest(
+            SEMANTIC_ELEMENT_PREFIX,
+            "compiled-property-semantics.shells",
+            shell_properties.values().map(shell_semantics),
+        )?,
+    };
+    encode_contract(SEMANTIC_PREFIX, DOMAIN, &contract, HEADER_LIMITS)
+        .map(Digest::sha256)
+        .map_err(|error| error.to_string())
 }
 
 pub(super) fn audit_digest(
@@ -223,21 +270,60 @@ pub(super) fn audit_digest(
     shell_properties: &BTreeMap<StableDigest, CompiledShellProperty>,
     audit: &[CompiledPropertyAudit],
 ) -> Result<Digest, String> {
-    encode_contract(
-        AUDIT_PREFIX,
-        "compiled-property-audit",
-        &AuditContract {
-            semantic_digest,
-            solids: solid_materials,
-            cells: cell_materials,
-            beams: beam_properties,
-            shells: shell_properties,
-            assignments: audit,
-        },
-        LIMITS,
-    )
-    .map(Digest::sha256)
-    .map_err(|error| error.to_string())
+    const DOMAIN: &str = "compiled-property-audit";
+    let contract = AuditContract {
+        cells: (!cell_materials.is_empty())
+            .then(|| {
+                sequence_digest(
+                    AUDIT_ELEMENT_PREFIX,
+                    "compiled-property-audit.cells",
+                    cell_materials.values(),
+                )
+            })
+            .transpose()?,
+        semantic_digest,
+        solids: sequence_digest(
+            AUDIT_ELEMENT_PREFIX,
+            "compiled-property-audit.solids",
+            solid_materials.values(),
+        )?,
+        beams: sequence_digest(
+            AUDIT_ELEMENT_PREFIX,
+            "compiled-property-audit.beams",
+            beam_properties.values(),
+        )?,
+        shells: sequence_digest(
+            AUDIT_ELEMENT_PREFIX,
+            "compiled-property-audit.shells",
+            shell_properties.values(),
+        )?,
+        assignments: sequence_digest(
+            AUDIT_ELEMENT_PREFIX,
+            "compiled-property-audit.assignments",
+            audit.iter(),
+        )?,
+    };
+    encode_contract(AUDIT_PREFIX, DOMAIN, &contract, HEADER_LIMITS)
+        .map(Digest::sha256)
+        .map_err(|error| error.to_string())
+}
+
+fn solid_semantics(entry: &CompiledElementMaterial) -> SolidSemanticElement<'_> {
+    SolidSemanticElement {
+        element_id: entry.element_id,
+        element_identity: entry.element_identity,
+        material: entry.material.solver_identity_contract(),
+    }
+}
+
+fn beam_semantics(entry: &CompiledBeamProperty) -> BeamSemanticElement<'_> {
+    BeamSemanticElement {
+        element_id: &entry.element_id,
+        element_identity: entry.element_identity,
+        material: entry.material.solver_identity_contract(),
+        section: &entry.section,
+        reference_axis: entry.reference_axis,
+    }
 }
 
 fn shell_semantics(entry: &CompiledShellProperty) -> ShellSemanticElement<'_> {
@@ -258,47 +344,6 @@ fn shell_semantics(entry: &CompiledShellProperty) -> ShellSemanticElement<'_> {
         reference_axis: entry.reference_axis,
         owner,
     }
-}
-
-// These views preserve the sequence-of-values identity contract and BTreeMap order without
-// constructing element-sized intermediate vectors. The shared codec still owns canonical
-// value-tree/byte materialization; this does not make canonical encoding allocation-free.
-fn serialize_values<S: Serializer, T: Serialize>(
-    entries: &BTreeMap<StableDigest, T>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(entries.values())
-}
-
-fn serialize_solids<S: Serializer>(
-    entries: &BTreeMap<StableDigest, CompiledElementMaterial>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(entries.values().map(|entry| SolidSemanticElement {
-        element_id: entry.element_id,
-        element_identity: entry.element_identity,
-        material: entry.material.solver_identity_contract(),
-    }))
-}
-
-fn serialize_beams<S: Serializer>(
-    entries: &BTreeMap<StableDigest, CompiledBeamProperty>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(entries.values().map(|entry| BeamSemanticElement {
-        element_id: &entry.element_id,
-        element_identity: entry.element_identity,
-        material: entry.material.solver_identity_contract(),
-        section: &entry.section,
-        reference_axis: entry.reference_axis,
-    }))
-}
-
-fn serialize_shells<S: Serializer>(
-    entries: &BTreeMap<StableDigest, CompiledShellProperty>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(entries.values().map(shell_semantics))
 }
 
 fn serialize_plies<S: Serializer>(
