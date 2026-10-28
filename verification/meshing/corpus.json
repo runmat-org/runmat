@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_revision": 5,
+  "corpus_revision": 6,
   "fixture_root": "crates/runmat-geometry/io/tests/fixtures",
   "entries": [
     {
@@ -422,6 +422,54 @@
       "features": ["solid", "persistent-labels"],
       "expected": { "outcome": "success", "topology": "AP242 exchange metadata with typed parameters and materials", "mass_properties": "declared by the AP242 file", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
       "test": { "source": "crates/runmat-geometry/io/src/ap242/profile.rs", "name": "resolves_typed_parameters_material_properties_and_associations" }
+    },
+    {
+      "id": "iges-authored-unit-override",
+      "path": "box_metre_values_mm_label.igs",
+      "sha256": "a5841d8ef5c215904eee3d1f6ce2dbf5c1798dede752aac7b45a946fcb20b3bd",
+      "tier": "extended",
+      "format": "iges",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored unit-authority regression", "exporter": "Open CASCADE IGES processor", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["solid", "declared-units", "authored-unit-override"],
+      "expected": { "outcome": "success", "topology": "one box solid", "mass_properties": "authored metre authority gives 0.001 m^3; absent authority preserves the millimetre declaration", "regions": 1, "mesh_error_bounds": "import/unit regression only; meshing error bounds are not established by this witness" },
+      "test": { "source": "crates/runmat-geometry/io/tests/external_cad_corpus.rs", "name": "authored_iges_units_override_a_different_declaration_and_record_it" }
+    },
+    {
+      "id": "named-step-edges-vertices",
+      "path": "named-edges-vertices.step",
+      "sha256": "b79b3f896e1c70ef1615b444547177bbfe5ca04ff79332c72478533aa9e8fe91",
+      "tier": "extended",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored named-faces bar with edge and vertex labels", "exporter": "Open CASCADE STEP processor", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["solid", "persistent-labels", "edge-names", "vertex-names"],
+      "expected": { "outcome": "success", "topology": "one 100 by 20 by 10 mm bar; labels preserve the unnamed fixture's topology", "mass_properties": "same body as named-faces.step; this witness checks entity positions and identity, not independent mass integration", "regions": 1, "mesh_error_bounds": "selector/import regression only; meshing error bounds are not established by this witness" },
+      "test": { "source": "crates/runmat-geometry/io/tests/step_edge_vertex_names.rs", "name": "authored_step_edge_and_vertex_names_select_their_entities" }
+    },
+    {
+      "id": "reversed-shell-hole",
+      "path": "reversed_shell_hole.brep",
+      "sha256": "82dd98124aba5ebc6a2196c0df6f76a5cfda2f07144641e8cb03cd06aada3ea3",
+      "tier": "extended",
+      "format": "brep",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored generate_reversed_shell_hole.cc", "exporter": "Open CASCADE BREP", "exporter_version": "Topology V3", "license": "RunMat repository license" },
+      "features": ["solid", "reversed-orientation", "periodic-seam", "through-hole"],
+      "expected": { "outcome": "success", "topology": "10 mm box with a 2 mm radius through-hole and a reversed shell; two distinct seam images on the cylindrical face", "mass_properties": "analytic box minus cylindrical through-hole; mass integration is not asserted by this pcurve witness", "regions": 1, "mesh_error_bounds": "exact pcurve regression only; meshing error bounds are not established by this witness" },
+      "test": { "source": "crates/runmat-geometry/io/src/occt/evaluator/tests.rs", "name": "seam_pcurves_resolve_on_reversed_face_uses" }
+    },
+    {
+      "id": "touching-parts-edge-vertex-names",
+      "path": "touching_parts_named_edges.step",
+      "sha256": "08409baf3013991f06ce9eb3e6c7c382805ab38ba73c88d95253fb09894f26d4",
+      "tier": "extended",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored touching-parts assembly with edge and vertex labels", "exporter": "Open CASCADE STEP processor", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["assembly", "conformal-interface", "edge-names", "vertex-names"],
+      "expected": { "outcome": "success", "topology": "plate and block; authored edge and vertex labels survive both shared and independent interface import", "mass_properties": "same bodies as touching_parts_assembly.step; this witness checks selector positions, not independent mass integration", "regions": 2, "mesh_error_bounds": "selector/import regression only; meshing error bounds are not established by this witness" },
+      "test": { "source": "crates/runmat-geometry/io/tests/step_edge_vertex_names.rs", "name": "edge_and_vertex_names_survive_placement_and_the_shared_interface_join" }
     }
   ]
 }
