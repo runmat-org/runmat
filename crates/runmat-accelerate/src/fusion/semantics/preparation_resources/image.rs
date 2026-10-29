@@ -269,6 +269,10 @@ impl ImageSourceGeometry {
                     .ok_or(PreparationBoundError::Overflow)?,
                 add_sign_operations,
                 max_rank,
+                // This image owner inventories domain proof stages separately
+                // in projected_program_bytes(), not via PureSourceGeometry's
+                // selected-operation admission path.
+                owned_admission_bytes: 0,
             },
             operand_ids,
             source_leaves: source.leaves.len(),

@@ -253,7 +253,11 @@ async fn resolve<'a>(
         let bytes = geometry
             .overlapping_preparation_bytes(None)
             .map_err(ProviderExecutionError::from_source)?;
-        crate::wgsl::host_buffers::claim_bytes(metadata, usize::try_from(bytes)?)?
+        crate::wgsl::host_buffers::claim_bytes(
+            metadata,
+            usize::try_from(bytes).map_err(ProviderExecutionError::from_source)?,
+        )
+        .map_err(ProviderExecutionError::from_source)?
     } else {
         None
     };
@@ -374,14 +378,16 @@ async fn resolve<'a>(
         .len()
         .checked_add(usize::from(widening))
         .ok_or_else(|| anyhow::anyhow!("reduction implementation capacity overflow"))?;
-    let mut producer_implementations = runmat_value::exact_capacity_vec(implementation_capacity)?;
+    let mut producer_implementations = runmat_value::exact_capacity_vec(implementation_capacity)
+        .map_err(ProviderExecutionError::from_source)?;
     producer_implementations.extend_from_slice(producer.implementations());
     if widening {
         producer_implementations.push(crate::wgsl::ieee_words::binary32_widening_implementation(
             mapped.root,
         ));
     }
-    let mut embedded_controls = runmat_value::exact_capacity_vec(mapped.data.len())?;
+    let mut embedded_controls = runmat_value::exact_capacity_vec(mapped.data.len())
+        .map_err(ProviderExecutionError::from_source)?;
     for input in mapped
         .data
         .iter()
@@ -423,7 +429,8 @@ async fn resolve<'a>(
     ))
     .map_err(ProviderExecutionError::from_source)?;
     let identity = bindings.identity(Some(semantic))?;
-    let mut data_classes = runmat_value::exact_capacity_vec(mapped.data.len())?;
+    let mut data_classes = runmat_value::exact_capacity_vec(mapped.data.len())
+        .map_err(ProviderExecutionError::from_source)?;
     for input in mapped
         .data
         .iter()

@@ -113,7 +113,7 @@ impl WgpuProvider {
                 .ok_or_else(|| anyhow::anyhow!("typed reduction completion control size overflow"))?;
             #[cfg(not(target_arch = "wasm32"))]
             let completion_bytes = completion_bytes.checked_add(
-                crate::backend::wgpu::provider::observation_progress::reservation_host_upper_bytes()
+                crate::backend::wgpu::provider::backend::observation_progress::reservation_host_upper_bytes()
                     .ok_or_else(|| anyhow::anyhow!("typed reduction progress control size overflow"))?)
                 .ok_or_else(|| anyhow::anyhow!("typed reduction completion control size overflow"))?;
             resources.retain_completion_claim(crate::wgsl::host_buffers::claim_bytes(

@@ -57,7 +57,7 @@ impl WgpuProvider {
         )?;
         let real = self.preparation_keys_snapshot(
             "wgpu-unary-real-continuation-preparation-v1",
-            recipe.real().physical().pipeline_key.into_iter().collect(),
+            recipe.real().physical().pipeline_key.as_slice(),
             None,
         )?;
         let cold_pipelines = validated.cold_pipelines.checked_add(real.cold_pipelines)?;

@@ -324,7 +324,7 @@ pub(super) fn map<'a>(
             kind: plan.group.kind.clone(),
             nodes: exact_capacity_vec_from_slice(&plan.group.nodes)?,
             shape,
-            span: plan.group.span,
+            span: plan.group.span.clone(),
             pattern: None,
             stack_layout,
         },
