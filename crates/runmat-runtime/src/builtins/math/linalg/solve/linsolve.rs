@@ -28,8 +28,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "linsolve";
 
-mod general;
 mod condition;
+mod general;
 pub use condition::{square_factor_rcond_for_provider, ProviderSquareFactor};
 #[cfg(test)]
 use general::binary_scale_preserves_component;
@@ -860,7 +860,7 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
     let n = lhs.rows();
     let lhs_values = tensor::tensor_values_f64_cow(lhs);
     let mut solution = tensor::tensor_values_f64(rhs);
-    let nrhs = solution.len() / n;
+    let nrhs = rhs.cols();
     let mut min_diag = f64::INFINITY;
     let mut max_diag = 0.0_f64;
 
@@ -884,7 +884,11 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
         }
     }
 
-    let rcond = diagonal_rcond(min_diag, max_diag);
+    let rcond = if n == 0 {
+        1.0
+    } else {
+        diagonal_rcond(min_diag, max_diag)
+    };
     let tensor = real_solution_tensor(
         solution,
         rhs.shape().to_vec(),
@@ -897,7 +901,7 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
     let n = lhs.rows();
     let lhs_values = tensor::tensor_values_f64_cow(lhs);
     let mut solution = tensor::tensor_values_f64(rhs);
-    let nrhs = solution.len() / n;
+    let nrhs = rhs.cols();
     let mut min_diag = f64::INFINITY;
     let mut max_diag = 0.0_f64;
 
@@ -922,7 +926,11 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
         }
     }
 
-    let rcond = diagonal_rcond(min_diag, max_diag);
+    let rcond = if n == 0 {
+        1.0
+    } else {
+        diagonal_rcond(min_diag, max_diag)
+    };
     let tensor = real_solution_tensor(
         solution,
         rhs.shape().to_vec(),
@@ -936,7 +944,7 @@ fn forward_substitution_complex(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
     let n = lhs.rows();
-    let nrhs = rhs.materialize_f64().len() / n;
+    let nrhs = rhs.cols();
     let lhs_data: Vec<Complex64> = lhs
         .materialize_f64()
         .iter()
@@ -970,7 +978,11 @@ fn forward_substitution_complex(
         }
     }
 
-    let rcond = diagonal_rcond(min_diag, max_diag);
+    let rcond = if n == 0 {
+        1.0
+    } else {
+        diagonal_rcond(min_diag, max_diag)
+    };
     let tensor = ComplexTensor::new(
         solution.iter().map(|c| (c.re, c.im)).collect(),
         rhs.shape().to_vec(),
@@ -984,7 +996,7 @@ fn backward_substitution_complex(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
     let n = lhs.rows();
-    let nrhs = rhs.materialize_f64().len() / n;
+    let nrhs = rhs.cols();
     let lhs_data: Vec<Complex64> = lhs
         .materialize_f64()
         .iter()
@@ -1019,7 +1031,11 @@ fn backward_substitution_complex(
         }
     }
 
-    let rcond = diagonal_rcond(min_diag, max_diag);
+    let rcond = if n == 0 {
+        1.0
+    } else {
+        diagonal_rcond(min_diag, max_diag)
+    };
     let tensor = ComplexTensor::new(
         solution.iter().map(|c| (c.re, c.im)).collect(),
         rhs.shape().to_vec(),
@@ -1648,6 +1664,31 @@ pub(crate) mod tests {
             approx_eq(*actual, *expected);
         }
         assert!(tensor.integer_storage().is_none());
+    }
+
+    #[test]
+    fn triangular_empty_systems_preserve_rhs_geometry_and_class() {
+        for columns in [0, 1, 3] {
+            for dtype in [NumericDType::F32, NumericDType::F64] {
+                let lhs = real_solution_tensor(Vec::new(), vec![0, 0], dtype).unwrap();
+                let rhs = real_solution_tensor(Vec::new(), vec![0, columns], dtype).unwrap();
+                for solve in [forward_substitution_real, backward_substitution_real] {
+                    let (solution, rcond) = solve(&lhs, &rhs).unwrap();
+                    assert_eq!(solution.shape(), [0, columns]);
+                    assert_eq!(solution.numeric_dtype(), dtype);
+                    assert!(solution.materialize_f64().is_empty());
+                    assert_eq!(rcond, 1.0);
+                }
+            }
+            let lhs = ComplexTensor::new(Vec::new(), vec![0, 0]).unwrap();
+            let rhs = ComplexTensor::new(Vec::new(), vec![0, columns]).unwrap();
+            for solve in [forward_substitution_complex, backward_substitution_complex] {
+                let (solution, rcond) = solve(&lhs, &rhs).unwrap();
+                assert_eq!(solution.shape(), [0, columns]);
+                assert!(solution.materialize_f64().is_empty());
+                assert_eq!(rcond, 1.0);
+            }
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
