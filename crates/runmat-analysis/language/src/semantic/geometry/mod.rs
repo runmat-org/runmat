@@ -196,7 +196,6 @@ fn imported_source(
     Some(GeometryDefinitionSource::Imported(Box::new(
         ImportedGeometryDefinition {
             preview_extent_m: inspection.facts.preview_extent_m,
-            named_selections: inspection.facts.named_selections.clone(),
             // Authored units are authoritative over a different file declaration, which the
             // evidence keeps as provenance.
             unit_evidence: match units {
@@ -255,27 +254,6 @@ fn check_authored_names(
         let GeometryRegionSelector::Name(name) = &region.selector else {
             continue;
         };
-        if let Some(metadata) = inspection
-            .facts
-            .named_selections
-            .as_ref()
-            .filter(|metadata| {
-                metadata
-                    .regions
-                    .iter()
-                    .any(|region| region.region_id == *name)
-            })
-        {
-            if let Err(reason) = metadata.selection(name, region.role) {
-                error(
-                    declaration,
-                    declaration.span,
-                    reason.to_string(),
-                    diagnostics,
-                );
-            }
-            continue;
-        }
         let role = match region.role {
             GeometryRegionRole::Vertex => "vertex",
             GeometryRegionRole::Edge => "edge",
@@ -293,9 +271,24 @@ fn check_authored_names(
             .get(role)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        if available.iter().any(|candidate| candidate == name) {
+        let matches = available.iter().filter(|candidate| *candidate == name).count();
+        if matches > 1 && region.cardinality == GeometryRegionCardinality::ExactlyOne {
+            error(
+                declaration,
+                declaration.span,
+                format!(
+                    "region `{}` selects {role} name \"{name}\", which {matches} {roles} in `{}` carry; it expects exactly_one (name each entity uniquely in the CAD file, or use expect one_or_more)",
+                    region.region_id, inspection.source_path
+                ),
+                diagnostics,
+            );
             continue;
         }
+        if matches > 0 {
+            continue;
+        }
+        let mut available = available.to_vec();
+        available.dedup();
         let message = if available.is_empty() {
             format!(
                 "region `{}` selects {role} name \"{name}\", but `{}` names no {roles}",

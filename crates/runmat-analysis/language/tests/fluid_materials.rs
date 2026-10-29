@@ -71,7 +71,6 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; a
         "project/part.step",
         GeometryInspection {
             preview_extent_m: None,
-            named_selections: None,
             unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),

@@ -343,14 +343,7 @@ where
     let document = geometry
         .geometry_document()
         .map_err(|error| error.to_string())?;
-    let named = match &request.definition.source {
-        runmat_geometry_core::GeometryDefinitionSource::Imported(imported) => {
-            imported.named_selections.as_ref()
-        }
-        _ => None,
-    };
     let region_evidence = ImportedRegionEvidence {
-        named,
         imported: &geometry,
     };
     let regions = resolve_geometry_regions_with_generated_outputs(
@@ -451,7 +444,6 @@ where
     }
 
     struct ImportedRegionEvidence<'a> {
-        named: Option<&'a runmat_geometry_core::GeometryNamedSelections>,
         /// The exact import, whose authored CAD names and presentation layers select regions.
         imported: &'a runmat_geometry_io::ImportedExactCad,
     }
@@ -464,24 +456,6 @@ where
             role: runmat_geometry_core::GeometryRegionRole,
             name: &str,
         ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
-            if let Some(metadata) = self.named.filter(|metadata| {
-                metadata
-                    .regions
-                    .iter()
-                    .any(|region| region.region_id == name)
-            }) {
-                let id = metadata.selection(name, role).map_err(|e| e.to_string())?;
-                return runmat_geometry_ops::resolve_persistent_region_selection(
-                    &self.imported.topology,
-                    role,
-                    id,
-                    self.imported
-                        .healing_report
-                        .as_ref()
-                        .map(|r| &r.revision_map),
-                )
-                .map_err(|e| e.to_string());
-            }
             self.imported.entities_named(role, name)
         }
         fn by_tag(

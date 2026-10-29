@@ -37,8 +37,6 @@ pub struct ImportedGeometryDefinition {
     /// or part of the exact-kernel materialization wire contract.
     #[serde(skip)]
     pub preview_extent_m: Option<[f64; 3]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub named_selections: Option<super::GeometryNamedSelections>,
     pub logical_path: String,
     pub format: GeometrySourceFormat,
     pub authored_units: Option<LengthUnit>,
@@ -449,9 +447,6 @@ impl ImportedGeometryDefinition {
                 "geometry preview extent",
                 "expected finite positive metres",
             ));
-        }
-        if let Some(selections) = &self.named_selections {
-            selections.validate_source(self.content_digest)?;
         }
         token("geometry import path", &self.logical_path)?;
         if !self.format.is_exact() {

@@ -76,9 +76,6 @@ pub use model::{
     GEOMETRY_HEALING_REPORT_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
     GEOMETRY_REVISION_MAP_SCHEMA_VERSION, KERNEL_REPRESENTATION_MEDIA_TYPE,
 };
-pub use model::{
-    geometry_selection_metadata_path, is_geometry_selection_metadata_path, GeometryNamedSelections,
-};
 pub use selection::{EntityKind, EntityRef};
 
 #[cfg(test)]

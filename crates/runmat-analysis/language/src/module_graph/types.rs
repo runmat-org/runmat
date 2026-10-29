@@ -63,11 +63,6 @@ impl FeaModuleGraph {
                         continue;
                     };
                     let cad = resolve_logical_path(&self.source_root, module_path, relative)?;
-                    if let Ok(metadata) =
-                        runmat_geometry_core::geometry_selection_metadata_path(cad.as_str())
-                    {
-                        paths.insert(LogicalSourcePath::file(metadata)?);
-                    }
                     paths.insert(cad);
                 }
             }

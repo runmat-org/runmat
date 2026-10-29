@@ -171,42 +171,7 @@ impl GeometryInspectionSource for FilesystemFeaHost {
         request: &GeometryInspectionRequest,
     ) -> Result<GeometryInspection, SourceDiagnostic> {
         let path = self.physical_path(&request.logical_path)?;
-        let metadata =
-            runmat_geometry_core::geometry_selection_metadata_path(request.logical_path.as_str())
-                .map_err(|e| {
-                diagnostic(
-                    "fea.geometry.invalid_selections",
-                    e.to_string(),
-                    SourceAvailability::Available,
-                )
-            })?;
-        let logical = LogicalSourcePath::file(metadata).map_err(|e| {
-            diagnostic(
-                "fea.geometry.invalid_selections",
-                e.to_string(),
-                SourceAvailability::Available,
-            )
-        })?;
-        let metadata_path = self.physical_path(&logical)?;
-        let bytes = if let Some(bytes) = self.source_overlays.get(&logical) {
-            Some(bytes.clone())
-        } else {
-            match runmat_filesystem::read(&metadata_path) {
-                Ok(bytes) => Some(bytes),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(e) => {
-                    return Err(diagnostic(
-                        "fea.geometry.selections_unavailable",
-                        format!("Cannot read saved geometry selections: {e}"),
-                        SourceAvailability::Unavailable,
-                    ))
-                }
-            }
-        };
-        super::geometry_resolver::attach_named_selections(
-            inspect_geometry(&path, request)?,
-            bytes.as_deref(),
-        )
+        inspect_geometry(&path, request)
     }
 }
 

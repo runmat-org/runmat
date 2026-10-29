@@ -265,7 +265,6 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
     };
     let source = GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
         preview_extent_m: None,
-        named_selections: None,
         unit_evidence: geometry.source.unit_evidence.clone(),
         logical_path: "tests/acoustic-tetrahedron.step".into(),
         format: geometry.source.format,
