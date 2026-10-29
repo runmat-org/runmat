@@ -286,6 +286,20 @@ impl SampledVolumeFieldTopology {
     }
     /// Decode validation proves internal layout integrity. Source admission must
     /// additionally compare against the original mesh; no numerical field is recovered.
+    /// As [`Self::validate_for_mesh`] against the caller's canonical projection of `mesh`.
+    pub(crate) fn validate_for_projection(
+        &self,
+        mesh: &SolverMeshArtifact,
+        projection: &crate::topology::AnalysisProjection,
+    ) -> Result<(), RecoveredFieldError> {
+        self.validate()?;
+        if self != &Self::derive_from_projection(mesh, projection, self.rule())? {
+            return Err(invalid(
+                "sampled field topology differs from canonical mesh",
+            ));
+        }
+        Ok(())
+    }
     pub fn validate_for_mesh(&self, mesh: &SolverMeshArtifact) -> Result<(), RecoveredFieldError> {
         self.validate()?;
         if self != &Self::derive(mesh, self.rule())? {

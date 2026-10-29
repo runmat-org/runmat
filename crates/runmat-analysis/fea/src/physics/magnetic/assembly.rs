@@ -2,7 +2,8 @@ use super::quantity_layout::{
     MagneticPhysicalOperator, MagneticSaddleOperator, MagneticUnknownLayout,
 };
 use super::{
-    boundary::MagneticBoundarySpace, MagneticSystemPlan, MagneticVolumeData, MagnetostaticError,
+    boundary::MagneticBoundarySpace, plan::DerivedMagneticSystem, MagneticSystemPlan,
+    MagneticVolumeData, MagnetostaticError,
 };
 use crate::{
     algebra::{
@@ -42,8 +43,8 @@ impl<'a> MagneticAssembly<'a> {
         prescribed_potential: &[super::PrescribedVectorPotential],
         volumes: &[MagneticVolumeData],
     ) -> Result<Self, MagnetostaticError> {
-        let plan = MagneticSystemPlan::derive(projection, grounded_faces)?;
-        Self::assemble_with_plan(projection, volumes, prescribed_potential, &plan)
+        let derived = MagneticSystemPlan::derive_with_spaces(projection, grounded_faces)?;
+        Self::assemble_derived(projection, volumes, prescribed_potential, derived)
     }
     pub fn assemble_with_plan(
         projection: &'a AnalysisProjection,
@@ -51,11 +52,33 @@ impl<'a> MagneticAssembly<'a> {
         prescribed_potential: &[super::PrescribedVectorPotential],
         plan: &MagneticSystemPlan,
     ) -> Result<Self, MagnetostaticError> {
-        plan.validate_for(projection)?;
-        let edge_space = TetrahedralEdgeSpace::derive(projection)
-            .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
-        let boundary =
-            MagneticBoundarySpace::derive(projection, &edge_space, plan.grounded_faces())?;
+        // One derivation both proves the supplied plan exact and yields its spaces.
+        let derived = MagneticSystemPlan::derive_with_spaces(projection, plan.grounded_faces())?;
+        plan.validate()?;
+        if &derived.plan != plan {
+            return Err(MagnetostaticError::InvalidInput(
+                "magnetic system plan: plan is not exact canonical magnetic support".into(),
+            ));
+        }
+        Self::assemble_derived(projection, volumes, prescribed_potential, derived)
+    }
+    /// Assemble on a plan derived in this process from this projection: no rederivation.
+    pub(crate) fn assemble_derived(
+        projection: &'a AnalysisProjection,
+        volumes: &[MagneticVolumeData],
+        prescribed_potential: &[super::PrescribedVectorPotential],
+        derived: DerivedMagneticSystem,
+    ) -> Result<Self, MagnetostaticError> {
+        if derived.plan.projection_digest() != projection.projection_digest {
+            return Err(MagnetostaticError::InvalidInput(
+                "magnetic system plan derives from another projection".into(),
+            ));
+        }
+        let DerivedMagneticSystem {
+            plan,
+            edges: edge_space,
+            boundary,
+        } = derived;
         let mut inventory = BTreeMap::new();
         for volume in volumes {
             if !volume.permeability_h_per_m.canonical_value().is_finite()

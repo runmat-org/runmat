@@ -1,10 +1,7 @@
 //! Source-bound retained native coefficients and SI samples. Cold validation does
 //! not assemble an operator, reconstruct a missing field or rerun the solve.
 use super::*;
-use crate::{
-    execution::SolverResultIdentity, physics::magnetic::MagnetostaticResponse,
-    topology::AnalysisProjection,
-};
+use crate::{execution::SolverResultIdentity, physics::magnetic::MagnetostaticResponse};
 use std::collections::BTreeSet;
 
 const PREFIX: &[u8] = b"runmat-magnetostatic-result/v2\0";
@@ -50,25 +47,28 @@ impl<'de> Deserialize<'de> for MagnetostaticSolverResult {
 }
 
 impl MagnetostaticSolverResult {
+    /// `sampling_topology` is the mesh's canonical fifteen-point layout (derived by the caller
+    /// from the solve's projection); it records the projection digest.
     pub(super) fn new(
         workload: &MagnetostaticWorkload,
         mesh: &SolverMeshArtifact,
         formulation: AnalysisRunIdentity,
+        sampling_topology: crate::results::field::SampledVolumeFieldTopology,
         response: MagnetostaticResponse,
     ) -> AnalysisExecutionResult<Self> {
-        let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
+        if sampling_topology.rule()
+            != crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen
+        {
+            return Err(invalid("magnetic results use the fifteen-point layout"));
+        }
         let result = Self {
             data: ResultData {
                 source_workload: workload.identity()?,
                 producer: workload.producer_identity()?,
                 formulation,
                 mesh_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
-                projection_digest: projection.projection_digest,
-                sampling_topology: crate::results::field::SampledVolumeFieldTopology::derive(
-                    mesh,
-                    crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen,
-                )
-                .map_err(invalid)?,
+                projection_digest: sampling_topology.projection_digest(),
+                sampling_topology,
                 publication_declarations: workload.model.sequence.steps[0]
                     .state_outputs
                     .iter()
@@ -178,9 +178,7 @@ impl MagnetostaticSolverResult {
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
         let d = &self.data;
-        d.sampling_topology
-            .validate_for_mesh(mesh)
-            .map_err(invalid)?;
+        // One canonical projection serves the layout, input and edge checks below.
         let compiled = crate::physics::magnetic::compile_canonical_input(
             &workload.model,
             mesh,
@@ -189,9 +187,12 @@ impl MagnetostaticSolverResult {
         )
         .map_err(invalid)?;
         let p = &compiled.projection;
+        d.sampling_topology
+            .validate_for_projection(mesh, p)
+            .map_err(invalid)?;
         if d.source_workload != workload.identity()?
             || d.producer != workload.producer_identity()?
-            || d.formulation != workload.formulation(mesh)?
+            || d.formulation != workload.formulation_with_sampling(mesh, Some(&d.sampling_topology))?
             || d.relative_residual_target != workload.relative_residual_target
             || d.mesh_digest != Digest::from_bytes(*mesh.canonical_digest.bytes())
             || d.projection_digest != p.projection_digest

@@ -52,16 +52,28 @@ pub fn plan_magnetic_study_product(
 ) -> Result<MagneticStudyProduct, MagneticStudyProductError> {
     compiled.validate_against(mesh)?;
     let workload = plan_magnetic_study(&compiled, planning)?;
-    workload
-        .formulation(mesh)
-        .map_err(|error| MagneticStudyProductError::Admission(error.to_string()))?;
+    let admission = |error: &dyn std::fmt::Display| MagneticStudyProductError::Admission(error.to_string());
+    // One canonical projection serves native selections, the input and the edge spaces.
     let input = crate::physics::magnetic::compile_canonical_input(
         &workload.model,
         mesh,
         workload.step_id.as_str(),
         workload.relative_residual_target,
     )
-    .map_err(|error| MagneticStudyProductError::Admission(error.to_string()))?;
+    .map_err(|error| admission(&error))?;
+    if !workload.model.sequence.steps[0].observations.is_empty() {
+        let sampling = crate::results::field::SampledVolumeFieldTopology::derive_from_projection(
+            mesh,
+            &input.projection,
+            crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen,
+        )
+        .map_err(|error| admission(&error))?;
+        workload
+            .formulation_with_sampling(mesh, Some(&sampling))
+            .map_err(|error| admission(&error))?;
+    } else {
+        workload.formulation(mesh).map_err(|error| admission(&error))?;
+    }
     crate::physics::magnetic::validate_projection_envelope(&input.projection, &input.grounded_faces)
         .map_err(|error| MagneticStudyProductError::Admission(error.to_string()))?;
     Ok(MagneticStudyProduct { compiled, workload })
