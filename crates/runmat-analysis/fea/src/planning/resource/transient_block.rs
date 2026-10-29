@@ -114,12 +114,8 @@ pub fn build_structural_transient_block_resource_plan(
         ))?;
     let encoded_inputs = [
         count(workload_bytes.len(), "transient workload payload")?,
-        count(
-            mesh.canonical_encode()
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
-                .len(),
-            "transient mesh payload",
-        )?,
+        mesh.canonical_encoded_len()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
         count(
             request
                 .canonical_bytes()

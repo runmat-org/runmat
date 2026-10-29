@@ -237,6 +237,8 @@ impl SolverMeshArtifact {
             &self.geometry,
             &self.resolved_request,
         ) {
+            // An admitted identity skips the walk, not the execution's cancellation contract.
+            crate::contracts::canonical::artifact::validation_checkpoint(cancellation)?;
             self.validate_header()?;
             return Ok(identity.digest());
         }
