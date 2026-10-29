@@ -39,7 +39,7 @@ fn published_output_retains_exact_submission_and_retires() {
         .unwrap();
     assert_ne!(first_id, exact_id);
     let output = provider
-        .register_reduction_output(buffer, vec![1, 1], 1, NumericElementType::F32)
+        .register_reduction_output(buffer, vec![1, 1], 1, NumericElementType::F32, None)
         .expect("register output once");
     let output = provider
         .publish_reduction_output(output, exact_id)

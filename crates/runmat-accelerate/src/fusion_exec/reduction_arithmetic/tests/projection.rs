@@ -114,6 +114,7 @@ fn exact_product_words_survive_native_single_power_and_reduction_projection() {
                         max_storage_binding_bytes: 1 << 30,
                         max_rank: 8,
                     },
+                    None,
                 )
                 .unwrap();
                 assert_eq!(recipe.physical().descriptor().partial.precision, owner);
@@ -137,7 +138,7 @@ fn exact_product_words_survive_native_single_power_and_reduction_projection() {
                         1
                     );
                 }
-                crate::fusion::reduction_recipe::validate_lowered_sources(recipe.physical())
+                crate::fusion::reduction_recipe::validate_lowered_sources(recipe.physical(), None)
                     .unwrap();
                 let mut descriptor = recipe.physical().descriptor().clone();
                 descriptor.producer_implementations.clear();
@@ -151,7 +152,8 @@ fn exact_product_words_survive_native_single_power_and_reduction_projection() {
                     )
                     .unwrap();
                 assert!(
-                    crate::fusion::reduction_recipe::validate_lowered_sources(&forged).is_err()
+                    crate::fusion::reduction_recipe::validate_lowered_sources(&forged, None)
+                        .is_err()
                 );
                 #[cfg(feature = "wgpu")]
                 for stage in [
@@ -225,13 +227,17 @@ fn certified_controls_are_metadata_in_every_checked_reduction_stage() {
                             max_storage_binding_bytes: 1 << 30,
                             max_rank: 8,
                         },
+                        None,
                     )
                     .unwrap();
                     assert_eq!(recipe.physical().scalar_inputs(), &[0]);
                     assert_eq!(recipe.inputs().len(), 1);
                     assert_eq!(recipe.inputs()[0].bound_precision, ProviderPrecision::F32);
-                    crate::fusion::reduction_recipe::validate_lowered_sources(recipe.physical())
-                        .unwrap();
+                    crate::fusion::reduction_recipe::validate_lowered_sources(
+                        recipe.physical(),
+                        None,
+                    )
+                    .unwrap();
                     assert!(recipe.single_source().contains("rm_exact_power_"));
                     assert!(recipe.single_source().contains("data: array<u32>"));
                     assert_eq!(recipe.physical().descriptor().partial.precision, owner);

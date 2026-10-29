@@ -2,11 +2,12 @@ use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{HostNumericDataOwned, NumericElementType};
 
-const OPERATIONS: [Unary; 7] = [
+const OPERATIONS: [Unary; 8] = [
     Unary::Sin,
     Unary::Cos,
     Unary::Abs,
     Unary::Exp,
+    Unary::Expm1,
     Unary::Log,
     Unary::Sqrt,
     Unary::Conj,
@@ -194,6 +195,7 @@ fn execute(
         Unary::Cos => provider.unary_cos(input),
         Unary::Abs => provider.unary_abs(input),
         Unary::Exp => provider.unary_exp(input),
+        Unary::Expm1 => provider.unary_expm1(input),
         Unary::Log => provider.unary_log(input),
         Unary::Sqrt => provider.unary_sqrt(input),
         Unary::Conj => unreachable!("handled typed optional hook above"),
@@ -250,6 +252,7 @@ fn real_hooks_keep_native_precision_shape_and_exceptional_values() {
                 Unary::Cos => x.cos(),
                 Unary::Abs => x.abs(),
                 Unary::Exp => x.exp(),
+                Unary::Expm1 => x.exp_m1(),
                 Unary::Log => x.ln(),
                 Unary::Conj => x,
                 Unary::Sqrt => {
@@ -279,6 +282,7 @@ fn real_hooks_keep_native_precision_shape_and_exceptional_values() {
                 Unary::Cos => x.cos(),
                 Unary::Abs => x.abs(),
                 Unary::Exp => x.exp(),
+                Unary::Expm1 => x.exp_m1(),
                 Unary::Log => x.ln(),
                 Unary::Conj => x,
                 Unary::Sqrt => {

@@ -39,10 +39,7 @@ impl DynamicPipeline {
 fn dynamic_pipeline_warmth_uses_its_typed_cache_owner() {
     let mut legacy = PipelineCache::default();
     legacy
-        .insert_unbounded(
-            7,
-            &super::super::pipeline_cache::PipelineOwner::unbounded(()),
-        )
+        .insert_unbounded(7, &super::pipeline_cache::PipelineOwner::unbounded(()))
         .unwrap();
     let validated = std::collections::HashMap::from([(8u64, ())]);
     assert_eq!(

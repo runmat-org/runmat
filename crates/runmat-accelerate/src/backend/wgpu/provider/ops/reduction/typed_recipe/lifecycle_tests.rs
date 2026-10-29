@@ -243,23 +243,23 @@ fn authentic_checked_candidate_probe_matches_enabled_limits_without_effects() {
         .unwrap_err()
         .is_unsupported());
     let (preferred, feasible) = provider
-        .typed_reduction_feasible_candidates(recipe.physical())
+        .typed_reduction_feasible_candidates(recipe.physical(), None)
         .unwrap();
     let select = |mode| {
         super::super::typed_selection::select_candidates(mode, preferred, &feasible).unwrap()
     };
     assert_eq!(
         select(runmat_accelerate_api::ReductionTwoPassMode::ForceOff),
-        vec![ReductionStrategy::SinglePass],
+        [Some(ReductionStrategy::SinglePass), None],
     );
     assert_eq!(
         select(runmat_accelerate_api::ReductionTwoPassMode::ForceOn),
-        vec![ReductionStrategy::TwoPass],
+        [Some(ReductionStrategy::TwoPass), None],
     );
     let auto = select(runmat_accelerate_api::ReductionTwoPassMode::Auto);
-    assert_eq!(auto.len(), 2);
-    assert!(auto.contains(&ReductionStrategy::SinglePass));
-    assert!(auto.contains(&ReductionStrategy::TwoPass));
+    assert_eq!(auto.iter().flatten().count(), 2);
+    assert!(auto.contains(&Some(ReductionStrategy::SinglePass)));
+    assert!(auto.contains(&Some(ReductionStrategy::TwoPass)));
     assert_eq!(provider.allocations.record_count().unwrap(), records);
     assert_eq!(
         provider.fused_pipeline_cache.lock().unwrap().len(),
