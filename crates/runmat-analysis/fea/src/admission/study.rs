@@ -1,10 +1,125 @@
+//! Pre-mesh study admission: the static rules every run path enforces, shared by `runmat check`
+//! (through the runtime's checked source) and native preparation. Each rule decides from the
+//! realized study (authored model, sequence and execution policy) alone; nothing here needs
+//! geometry, a mesh or a solve. Kernels keep their canonical-input checks as a backstop and
+//! report the same rule text from [`StaticRule`].
+
 use runmat_analysis_core::{
-    AnalysisProcedure, AnalysisSequence, CoupledPhysicsFamily, ElectromagneticDomain,
-    PhysicsFamily, RestartPolicy, SolutionSpace,
+    analysis_identity_status, family_label, procedure_label, AnalysisIdentityStatus,
+    AnalysisProcedure, AnalysisSequence, AuthoredConstraintKind, AuthoredInitialConditionKind,
+    AuthoredPairingPolicy, AuthoredPeriodicTransform, CoupledPhysicsFamily, ElectromagneticDomain,
+    PhysicsFamily, RealizedStudy, RestartPolicy, SolutionSpace,
 };
 
+/// One static admission rule: a stable diagnostic code, the pending-feature id when the
+/// construct is planned, and the message both `check` and the run report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaticRule {
+    pub code: &'static str,
+    pub pending: Option<&'static str>,
+    pub message: &'static str,
+}
+
+impl StaticRule {
+    pub fn issue(self) -> AdmissionIssue {
+        AdmissionIssue {
+            code: self.code,
+            pending: self.pending,
+            message: self.message.to_string(),
+        }
+    }
+}
+
+/// A static admission failure, reported identically by `runmat check` and `runmat run`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionIssue {
+    pub code: &'static str,
+    pub pending: Option<&'static str>,
+    pub message: String,
+}
+
+impl AdmissionIssue {
+    /// The message with its pending key, e.g. `... [pending:fluid.harmonic]`.
+    pub fn display_message(&self) -> String {
+        match self.pending {
+            Some(id) => format!("{} [pending:{id}]", self.message),
+            None => self.message.clone(),
+        }
+    }
+}
+
+impl std::fmt::Display for AdmissionIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code, self.display_message())
+    }
+}
+
+impl std::error::Error for AdmissionIssue {}
+
+pub const FAMILY_PROCEDURE_CODE: &str = "fea.admission.family_procedure";
+pub const PROCEDURE_GRAPH_CODE: &str = "fea.admission.procedure_graph";
+
+pub const FLUID_PERIODIC: StaticRule = StaticRule {
+    code: "fea.admission.constraint",
+    pending: Some("fluid.periodic"),
+    message: "periodic fluid boundary (fluid.periodic) is not supported by the fluid solver",
+};
+pub const FLUID_INITIAL_CONDITION: StaticRule = StaticRule {
+    code: "fea.admission.initial_condition",
+    pending: None,
+    message: "nonfluid initial condition: a fluid analysis starts from fluid velocity and pressure initial conditions only",
+};
+pub const MAGNETIC_STATIC_CONSTRAINT: StaticRule = StaticRule {
+    code: "fea.admission.constraint",
+    pending: Some("magnetic.periodic"),
+    message: "nonzero, periodic or phase magnetic boundary: magnetostatics admits magnetic.vector_potential_ground and magnetic.coulomb_gauge",
+};
+pub const MAGNETIC_STATIC_GAUGE: StaticRule = StaticRule {
+    code: "fea.admission.gauge",
+    pending: None,
+    message: "the curl-curl operator has no unique vector potential without a gauge: add magnetic.coulomb_gauge",
+};
+pub const MAXWELL_CONSTRAINT: StaticRule = StaticRule {
+    code: "fea.admission.constraint",
+    pending: Some("magnetic.harmonic.vector-potential"),
+    message: "harmonic analysis admits magnetic.vector_potential_ground; conductivity and permittivity fix the gauge, so magnetic.coulomb_gauge, prescribed or periodic vector potentials are not admitted",
+};
+pub const MAXWELL_NONELECTROMAGNETIC_CONSTRAINT: StaticRule = StaticRule {
+    code: "fea.admission.constraint",
+    pending: None,
+    message: "non-electromagnetic constraint in a harmonic analysis",
+};
+pub const MAXWELL_FAR_FIELD: StaticRule = StaticRule {
+    code: "fea.admission.far_field",
+    pending: None,
+    message: "a harmonic analysis needs a far field: model the surrounding air and ground its outer boundary with magnetic.vector_potential_ground",
+};
+pub const ACOUSTIC_ROTATED_PERIODIC: StaticRule = StaticRule {
+    code: "fea.admission.constraint",
+    pending: Some("acoustic.periodic.rotational"),
+    message: "nonmatching or rotated periodic pressure relation",
+};
+pub const ACOUSTIC_TRANSIENT_INITIAL_CONDITION: StaticRule = StaticRule {
+    code: "fea.admission.initial_condition",
+    pending: None,
+    message:
+        "acoustic transients start from rest; drive them with boundary pressure or velocity signals",
+};
+pub const ACOUSTIC_TRANSIENT_CONSTRAINT: StaticRule = StaticRule {
+    code: "fea.admission.constraint",
+    pending: None,
+    message: "periodic or non-acoustic constraints in a pressure transient",
+};
+pub const ELECTROMAGNETIC_INITIAL_CONDITION: StaticRule = StaticRule {
+    code: "fea.admission.initial_condition",
+    pending: None,
+    message: "electromagnetic static and harmonic analyses take no initial conditions",
+};
+pub const OBSERVATION_CODE: &str = "fea.admission.observation";
+pub const ACCELERATOR_REQUIRED_CODE: &str = "fea.admission.accelerator_required";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum PreparedFamily {
+pub enum AdmittedFamily {
     Acoustic,
     AcousticResponse,
     Electrical,
@@ -16,12 +131,238 @@ pub(super) enum PreparedFamily {
     Thermal,
 }
 
-/// Family dispatch only. Exact material/source/mesh/numerical admission stays with
-/// the existing compiled study product and canonical worker, not this pre-mesh gate.
-pub(super) fn select_family(
+/// Every static rule for one realized study, in order: family x procedure and procedure graph,
+/// then the selected family's constraint, initial-condition and observation admission, then
+/// strict accelerator placement. Returns the family the run prepares, or every issue found.
+pub fn admit_study(realized: &RealizedStudy) -> Result<AdmittedFamily, Vec<AdmissionIssue>> {
+    let family = select_family(&realized.sequence, realized.model.electromagnetic.as_ref())
+        .map_err(|issue| vec![issue])?;
+    let mut issues = Vec::new();
+    admit_constraints(realized, family, &mut issues);
+    admit_initial_conditions(realized, family, &mut issues);
+    admit_observations(realized, family, &mut issues);
+    if issues.is_empty() {
+        Ok(family)
+    } else {
+        Err(issues)
+    }
+}
+
+fn admit_constraints(
+    realized: &RealizedStudy,
+    family: AdmittedFamily,
+    issues: &mut Vec<AdmissionIssue>,
+) {
+    let constraints = &realized.model.constraints;
+    let mut push = |rule: StaticRule| {
+        let issue = rule.issue();
+        if !issues.contains(&issue) {
+            issues.push(issue);
+        }
+    };
+    match family {
+        AdmittedFamily::Fluid => {
+            if constraints
+                .iter()
+                .any(|c| matches!(c.kind, AuthoredConstraintKind::FluidPeriodic(_)))
+            {
+                push(FLUID_PERIODIC);
+            }
+        }
+        AdmittedFamily::Magnetic => {
+            let mut gauged = false;
+            for constraint in constraints {
+                match &constraint.kind {
+                    AuthoredConstraintKind::MagneticVectorPotentialGround { .. } => {}
+                    AuthoredConstraintKind::MagneticCoulombGauge { .. } => gauged = true,
+                    _ => push(MAGNETIC_STATIC_CONSTRAINT),
+                }
+            }
+            if !gauged {
+                push(MAGNETIC_STATIC_GAUGE);
+            }
+        }
+        AdmittedFamily::Maxwell => {
+            let mut far_field = false;
+            for constraint in constraints {
+                match &constraint.kind {
+                    AuthoredConstraintKind::MagneticVectorPotentialGround { .. }
+                    | AuthoredConstraintKind::ElectricPerfectConductor { .. } => far_field = true,
+                    AuthoredConstraintKind::MagneticVectorPotential { .. }
+                    | AuthoredConstraintKind::MagneticCoulombGauge { .. }
+                    | AuthoredConstraintKind::MagneticPeriodic(_)
+                    | AuthoredConstraintKind::MagneticPhaseShiftedPeriodic(_) => {
+                        push(MAXWELL_CONSTRAINT)
+                    }
+                    _ => push(MAXWELL_NONELECTROMAGNETIC_CONSTRAINT),
+                }
+            }
+            if !far_field {
+                push(MAXWELL_FAR_FIELD);
+            }
+        }
+        AdmittedFamily::Acoustic | AdmittedFamily::AcousticResponse => {
+            let transient = realized
+                .sequence
+                .steps
+                .iter()
+                .any(|step| step.procedure == AnalysisProcedure::TransientResponse);
+            for constraint in constraints {
+                let periodic = match &constraint.kind {
+                    AuthoredConstraintKind::AcousticPressure { .. } => continue,
+                    AuthoredConstraintKind::AcousticPeriodic(periodic) => periodic,
+                    AuthoredConstraintKind::AcousticPhaseShiftedPeriodic(bloch) => &bloch.periodic,
+                    // Other families' constraints are rejected by family composition checks.
+                    _ => continue,
+                };
+                if transient {
+                    push(ACOUSTIC_TRANSIENT_CONSTRAINT);
+                } else if !matches!(periodic.pair.pairing, AuthoredPairingPolicy::Matching)
+                    || matches!(
+                        periodic.transform,
+                        AuthoredPeriodicTransform::Rotation { .. }
+                    )
+                {
+                    push(ACOUSTIC_ROTATED_PERIODIC);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn admit_initial_conditions(
+    realized: &RealizedStudy,
+    family: AdmittedFamily,
+    issues: &mut Vec<AdmissionIssue>,
+) {
+    let conditions = &realized.model.initial_conditions;
+    if conditions.is_empty() {
+        return;
+    }
+    let rule = match family {
+        AdmittedFamily::Fluid => {
+            // Conjugate heat transfer also starts its solid and fluid temperatures here.
+            let conjugate = realized.sequence.steps.iter().any(|step| {
+                step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+            });
+            conditions
+                .iter()
+                .any(|condition| {
+                    !matches!(
+                        condition.kind,
+                        AuthoredInitialConditionKind::FluidVelocity(_)
+                            | AuthoredInitialConditionKind::FluidPressure(_)
+                    ) && !(conjugate
+                        && matches!(condition.kind, AuthoredInitialConditionKind::Temperature(_)))
+                })
+                .then_some(FLUID_INITIAL_CONDITION)
+        }
+        AdmittedFamily::AcousticResponse
+            if realized
+                .sequence
+                .steps
+                .iter()
+                .any(|step| step.procedure == AnalysisProcedure::TransientResponse) =>
+        {
+            Some(ACOUSTIC_TRANSIENT_INITIAL_CONDITION)
+        }
+        AdmittedFamily::Magnetic | AdmittedFamily::Maxwell => {
+            Some(ELECTROMAGNETIC_INITIAL_CONDITION)
+        }
+        _ => None,
+    };
+    if let Some(rule) = rule {
+        issues.push(rule.issue());
+    }
+}
+
+fn admit_observations(
+    realized: &RealizedStudy,
+    family: AdmittedFamily,
+    issues: &mut Vec<AdmissionIssue>,
+) {
+    // Families that publish sampled native fields select observations from them only.
+    if !matches!(family, AdmittedFamily::Magnetic | AdmittedFamily::Maxwell) {
+        return;
+    }
+    for step in &realized.sequence.steps {
+        if let Err(error) = crate::results::observation::validate_sampled_requests(step) {
+            issues.push(AdmissionIssue {
+                code: OBSERVATION_CODE,
+                pending: None,
+                message: format!("analysis `{}`: {error}", step.step_id.as_str()),
+            });
+        }
+    }
+}
+
+/// Strict accelerator placement (`accelerators = required`) on a study whose families have no
+/// device solve path cannot run anywhere: reported before meshing. Whether a host can allocate
+/// a device stays a run-time decision.
+pub fn admit_accelerator_policy(
+    steps: &[runmat_analysis_core::ProcedureStep],
+    policy: Option<&runmat_analysis_core::AuthoredExecutionPolicy>,
+) -> Result<(), AdmissionIssue> {
+    use crate::contracts::accelerator_admission::{
+        first_family_without_device_path, AcceleratorFamily,
+    };
+    use runmat_analysis_core::{
+        AcceleratorAdmissionPolicy, AcceleratorPreference, BackendPreference,
+    };
+    let Some(policy) = policy else {
+        return Ok(());
+    };
+    if policy.resources.accelerator_admission() != AcceleratorAdmissionPolicy::Required
+        || policy.backend == BackendPreference::Cpu
+        || policy.resources.accelerators == AcceleratorPreference::Disabled
+    {
+        return Ok(());
+    }
+    match first_family_without_device_path(steps.iter().map(AcceleratorFamily::of_step)) {
+        None => Ok(()),
+        Some(family) => Err(AdmissionIssue {
+            code: ACCELERATOR_REQUIRED_CODE,
+            pending: None,
+            message: format!(
+                "the study requires the accelerator (`accelerators = required`), but {} execution has no device path: {}",
+                family.label(),
+                family.unavailable_reason().unwrap_or_default()
+            ),
+        }),
+    }
+}
+
+/// Family dispatch for the native run. Exact material/source/mesh/numerical admission stays with
+/// the compiled study product and canonical worker.
+pub fn select_family(
     sequence: &AnalysisSequence,
     electromagnetic: Option<&ElectromagneticDomain>,
-) -> Result<PreparedFamily, String> {
+) -> Result<AdmittedFamily, AdmissionIssue> {
+    for step in &sequence.steps {
+        match analysis_identity_status(step.family, step.procedure, step.solution_space) {
+            Some(AnalysisIdentityStatus::Runs) => {}
+            status => {
+                return Err(AdmissionIssue {
+                    code: FAMILY_PROCEDURE_CODE,
+                    pending: match status {
+                        Some(AnalysisIdentityStatus::Pending(id)) => Some(id),
+                        _ => None,
+                    },
+                    message: format!(
+                        "analysis `{}`: {} {} ({}) does not run in this release",
+                        step.step_id.as_str(),
+                        family_label(step.family),
+                        procedure_label(step.procedure),
+                        match step.solution_space {
+                            SolutionSpace::Direct => "direct",
+                            SolutionSpace::ModalReduced => "modal reduced",
+                        }
+                    ),
+                });
+            }
+        }
+    }
     if let [step] = sequence.steps.as_slice() {
         if step.family == PhysicsFamily::Structural
             && step.procedure == AnalysisProcedure::Nonlinear
@@ -33,16 +374,20 @@ pub(super) fn select_family(
             && sequence.transitions.is_empty()
             && sequence.branches.is_empty()
         {
-            return Ok(PreparedFamily::Nonlinear);
+            return Ok(AdmittedFamily::Nonlinear);
         }
     }
     if sequence.steps.iter().any(|step| {
         step.family == PhysicsFamily::Structural && step.procedure == AnalysisProcedure::Nonlinear
     }) {
-        return Err(unsupported());
+        return Err(AdmissionIssue {
+            code: PROCEDURE_GRAPH_CODE,
+            pending: Some("structural.nonlinear.sequence"),
+            message: "a structural nonlinear analysis runs as one fresh direct analysis; nonlinear steps inside procedure graphs are not supported".into(),
+        });
     }
     if structural_root_sequence(sequence) {
-        return Ok(PreparedFamily::Structural);
+        return Ok(AdmittedFamily::Structural);
     }
     let [step] = sequence.steps.as_slice() else {
         return Err(unsupported());
@@ -75,7 +420,7 @@ pub(super) fn select_family(
         && sequence.transitions.is_empty()
         && sequence.branches.is_empty()
     {
-        return Ok(PreparedFamily::Fluid);
+        return Ok(AdmittedFamily::Fluid);
     }
     if step.family == PhysicsFamily::Electromagnetic
         && step.procedure == AnalysisProcedure::HarmonicResponse
@@ -93,17 +438,20 @@ pub(super) fn select_family(
         ) {
             return Err(unsupported());
         }
-        // Multi-frequency studies are fanned out into one case per frequency before
-        // preparation, so each prepared harmonic step carries exactly one frequency.
+        // A multi-frequency study runs one case per frequency (fanned out before preparation).
         let runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies) =
             &step.independent_domain
         else {
             return Err(unsupported());
         };
-        if frequencies.len() != 1 || !frequencies[0].is_finite() || frequencies[0] <= 0.0 {
+        if frequencies.is_empty()
+            || frequencies
+                .iter()
+                .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        {
             return Err(unsupported());
         }
-        return Ok(PreparedFamily::Maxwell);
+        return Ok(AdmittedFamily::Maxwell);
     }
     if step.family == PhysicsFamily::Electromagnetic
         && step.procedure == AnalysisProcedure::Static
@@ -116,8 +464,8 @@ pub(super) fn select_family(
         && sequence.branches.is_empty()
     {
         return match electromagnetic {
-            Some(ElectromagneticDomain::Static { .. }) => Ok(PreparedFamily::Electrical),
-            Some(ElectromagneticDomain::Magnetostatic { .. }) => Ok(PreparedFamily::Magnetic),
+            Some(ElectromagneticDomain::Static { .. }) => Ok(AdmittedFamily::Electrical),
+            Some(ElectromagneticDomain::Magnetostatic { .. }) => Ok(AdmittedFamily::Magnetic),
             Some(ElectromagneticDomain::Harmonic { .. }) | None => Err(unsupported()),
         };
     }
@@ -131,10 +479,10 @@ pub(super) fn select_family(
         && sequence.transitions.is_empty()
         && sequence.branches.is_empty()
     {
-        return Ok(PreparedFamily::Acoustic);
+        return Ok(AdmittedFamily::Acoustic);
     }
     if is_electrothermal(sequence) {
-        return Ok(PreparedFamily::Thermal);
+        return Ok(AdmittedFamily::Thermal);
     }
     if step.family == PhysicsFamily::Acoustic
         && matches!(
@@ -149,7 +497,7 @@ pub(super) fn select_family(
         && sequence.transitions.is_empty()
         && sequence.branches.is_empty()
     {
-        return Ok(PreparedFamily::AcousticResponse);
+        return Ok(AdmittedFamily::AcousticResponse);
     }
     if step.family != PhysicsFamily::Thermal
         || !matches!(
@@ -158,18 +506,18 @@ pub(super) fn select_family(
         )
         || step.solution_space != SolutionSpace::Direct
         || step.restart != RestartPolicy::Fresh
-        || !runmat_analysis_fea::study::thermal_step_initial_selection_supported(step)
+        || !crate::study::thermal_step_initial_selection_supported(step)
         || !sequence.dependencies.is_empty()
         || !sequence.transitions.is_empty()
         || !sequence.branches.is_empty()
     {
         return Err(unsupported());
     }
-    Ok(PreparedFamily::Thermal)
+    Ok(AdmittedFamily::Thermal)
 }
 
 /// One fresh electrothermal (Joule heating) analysis, steady or transient.
-pub(in crate::typed_fea) fn is_electrothermal(sequence: &AnalysisSequence) -> bool {
+pub fn is_electrothermal(sequence: &AnalysisSequence) -> bool {
     matches!(sequence.steps.as_slice(), [step]
         if step.family == PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Electrothermal)
             && matches!(step.procedure, AnalysisProcedure::Static | AnalysisProcedure::TransientResponse)
@@ -207,8 +555,12 @@ fn structural_root_sequence(sequence: &AnalysisSequence) -> bool {
         && (thermal == 0 || (thermal == 1 && thermomechanical))
 }
 
-fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady/transient, steady conjugate heat transfer or fluid–structure interaction, equation-selected static electrical/magnetic, Maxwell harmonic, electrothermal steady/transient, or acoustic harmonic, modal or transient step".into()
+fn unsupported() -> AdmissionIssue {
+    AdmissionIssue {
+        code: PROCEDURE_GRAPH_CODE,
+        pending: None,
+        message: "native execution runs structural studies (including a thermal prefix feeding a thermomechanical step), or one fresh independent direct thermal steady/transient, fluid steady/transient, conjugate heat transfer or fluid-structure interaction steady/transient, equation-selected static electrical/magnetic, Maxwell harmonic, electrothermal steady/transient, or acoustic harmonic, modal or transient analysis".into(),
+    }
 }
 
 #[cfg(test)]
@@ -225,7 +577,7 @@ mod tests {
                 None
             )
             .unwrap(),
-            PreparedFamily::Nonlinear
+            AdmittedFamily::Nonlinear
         );
         let mut resumed = step.clone();
         resumed.restart = RestartPolicy::ResumeCheckpoint {
@@ -248,7 +600,7 @@ mod tests {
         let sequence = AnalysisSequence::from_steps("flow", vec![step.clone()]);
         assert_eq!(
             super::select_family(&sequence, None).unwrap(),
-            PreparedFamily::Fluid
+            AdmittedFamily::Fluid
         );
         let mut transient = step.clone();
         transient.procedure = AnalysisProcedure::TransientResponse;
@@ -261,7 +613,7 @@ mod tests {
         };
         assert_eq!(
             super::select_family(&AnalysisSequence::from_steps("flow", vec![timed]), None).unwrap(),
-            PreparedFamily::Fluid
+            AdmittedFamily::Fluid
         );
         let mut resumed = step.clone();
         resumed.restart = RestartPolicy::ResumeCheckpoint {
@@ -282,7 +634,7 @@ mod tests {
         }
     }
 
-    fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamily, String> {
+    fn select_family(sequence: &AnalysisSequence) -> Result<AdmittedFamily, AdmissionIssue> {
         super::select_family(
             sequence,
             Some(&ElectromagneticDomain::Static {
@@ -302,12 +654,12 @@ mod tests {
         let sequence = AnalysisSequence::from_steps("field", vec![step.clone()]);
         assert_eq!(
             super::select_family(&sequence, Some(&domain)).unwrap(),
-            PreparedFamily::Maxwell
+            AdmittedFamily::Maxwell
         );
         // The analysis's own frequencies define a harmonic study; no domain block is needed.
         assert_eq!(
             super::select_family(&sequence, None).unwrap(),
-            PreparedFamily::Maxwell
+            AdmittedFamily::Maxwell
         );
         assert!(super::select_family(
             &sequence,
@@ -317,7 +669,20 @@ mod tests {
             })
         )
         .is_err());
-        for frequencies in [vec![], vec![2000.0, 3000.0], vec![f64::NAN], vec![0.0]] {
+        assert_eq!(
+            {
+                let mut fanned = step.clone();
+                fanned.independent_domain =
+                    runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![2000.0, 3000.0]);
+                super::select_family(
+                    &AnalysisSequence::from_steps("field", vec![fanned]),
+                    Some(&domain),
+                )
+                .unwrap()
+            },
+            AdmittedFamily::Maxwell
+        );
+        for frequencies in [vec![], vec![2000.0, f64::NAN], vec![0.0]] {
             let mut changed = step.clone();
             changed.independent_domain =
                 runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies);
@@ -373,7 +738,7 @@ mod tests {
                 })
             )
             .unwrap(),
-            PreparedFamily::Magnetic
+            AdmittedFamily::Magnetic
         );
         for equation in [
             runmat_analysis_core::StaticElectricalEquation::Electrostatics,
@@ -382,7 +747,7 @@ mod tests {
             assert_eq!(
                 super::select_family(&sequence, Some(&ElectromagneticDomain::Static { equation }))
                     .unwrap(),
-                PreparedFamily::Electrical
+                AdmittedFamily::Electrical
             );
         }
     }
@@ -396,7 +761,7 @@ mod tests {
                 vec![step.clone()]
             ))
             .unwrap(),
-            PreparedFamily::Electrical
+            AdmittedFamily::Electrical
         );
         let mut resumed = step.clone();
         resumed.restart = RestartPolicy::ResumeCheckpoint {
@@ -421,7 +786,7 @@ mod tests {
                 vec![acoustic.clone()]
             ))
             .unwrap(),
-            PreparedFamily::Acoustic
+            AdmittedFamily::Acoustic
         );
         let mut resumed = acoustic.clone();
         resumed.restart = RestartPolicy::ResumeCheckpoint {
@@ -447,7 +812,7 @@ mod tests {
         ] {
             assert_eq!(
                 select_family(&AnalysisSequence::from_steps("heat", vec![step])).unwrap(),
-                PreparedFamily::Thermal
+                AdmittedFamily::Thermal
             );
         }
         assert_eq!(
@@ -456,7 +821,7 @@ mod tests {
                 vec![ProcedureStep::structural_static("solid")]
             ))
             .unwrap(),
-            PreparedFamily::Structural
+            AdmittedFamily::Structural
         );
     }
 
@@ -485,7 +850,8 @@ mod tests {
             assert!(
                 select_family(&AnalysisSequence::from_steps("unsupported", steps))
                     .unwrap_err()
-                    .contains("UNSUPPORTED_PHYSICS_FAMILY")
+                    .code
+                    == super::PROCEDURE_GRAPH_CODE
             );
         }
         let mut wrong = thermal;
@@ -505,7 +871,7 @@ mod tests {
         for steps in [chained, vec![prescribed]] {
             assert_eq!(
                 select_family(&AnalysisSequence::from_steps("thermal_stress", steps)).unwrap(),
-                PreparedFamily::Structural
+                AdmittedFamily::Structural
             );
         }
     }
@@ -534,7 +900,7 @@ mod tests {
                 vec![selected.clone()]
             ))
             .unwrap(),
-            PreparedFamily::Thermal
+            AdmittedFamily::Thermal
         );
         let mut variants = Vec::new();
         let mut wrong = selected.clone();
@@ -578,7 +944,7 @@ mod tests {
         parameter.activations[0].object = StepObjectRef::MaterialParameter("parameter".into());
         assert_eq!(
             select_family(&AnalysisSequence::from_steps("heat", vec![parameter])).unwrap(),
-            PreparedFamily::Thermal
+            AdmittedFamily::Thermal
         );
         for step in variants {
             assert!(select_family(&AnalysisSequence::from_steps("heat", vec![step])).is_err());

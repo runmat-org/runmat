@@ -185,7 +185,7 @@ pub(crate) fn compile_canonical_input(
             }
             _ => {
                 return Err(MagnetostaticError::Unsupported(
-                    "nonzero, periodic or phase magnetic boundary".into(),
+                    crate::admission::MAGNETIC_STATIC_CONSTRAINT.message.into(),
                 ))
             }
         }
@@ -194,7 +194,7 @@ pub(crate) fn compile_canonical_input(
     // gradient part of A everywhere, in air, iron and conductors alike.
     if gauged.is_empty() {
         return Err(MagnetostaticError::Unsupported(
-            "the curl-curl operator has no unique vector potential without a gauge: add magnetic.coulomb_gauge".into(),
+            crate::admission::MAGNETIC_STATIC_GAUGE.message.into(),
         ));
     }
     let properties = crate::properties::compile_solid_property_map(model, mesh)

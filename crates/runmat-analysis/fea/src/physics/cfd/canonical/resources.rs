@@ -65,7 +65,7 @@ pub(super) fn admit_authority_profile(
             | FluidConstraintKind::Symmetry { target }
             | FluidConstraintKind::PressureReference { target, .. } => target,
             FluidConstraintKind::Periodic(_) => {
-                return Err(Error::Unsupported("periodic fluid boundary"))
+                return Err(Error::Unsupported(crate::admission::FLUID_PERIODIC.message))
             }
         };
         profile.target(target)?;

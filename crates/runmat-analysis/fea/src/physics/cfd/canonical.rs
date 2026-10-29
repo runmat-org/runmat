@@ -371,7 +371,7 @@ impl<'a> CanonicalFluidProblem<'a> {
                 | FluidConstraintKind::Symmetry { target }
                 | FluidConstraintKind::PressureReference { target, .. } => target,
                 FluidConstraintKind::Periodic(_) => {
-                    return Err(CanonicalFluidError::Unsupported("periodic fluid boundary"));
+                    return Err(CanonicalFluidError::Unsupported(crate::admission::FLUID_PERIODIC.message));
                 }
             };
             add_entities(target.resolved_entities().len())?;

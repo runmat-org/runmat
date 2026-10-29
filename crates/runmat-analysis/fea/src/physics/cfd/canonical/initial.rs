@@ -121,7 +121,7 @@ impl CanonicalFluidProblem<'_> {
             let target = match condition {
                 InitialCondition::FluidVelocity(c) => &c.target,
                 InitialCondition::FluidPressure(c) => &c.target,
-                _ => return Err(Error::Unsupported("nonfluid initial condition")),
+                _ => return Err(Error::Unsupported(crate::admission::FLUID_INITIAL_CONDITION.message)),
             };
             let nodes = crate::excitation::initial_target_nodes(self.source, target)
                 .map_err(|e| Error::InputRealization(format!("original initial target {e:?}")))?;

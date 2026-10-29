@@ -8,7 +8,7 @@ use runmat_execution_artifact::ArtifactAccess;
 
 use super::LocalFeaExecutionOptions;
 
-mod admission;
+use runmat_analysis_fea::admission;
 
 /// One authored study ready for any placement.
 ///
@@ -76,10 +76,25 @@ pub async fn prepare_study_with_role(
                     "the conduction role requires one fresh electrothermal analysis".into(),
                 );
             }
-            admission::PreparedFamily::Electrical
+            admission::AdmittedFamily::Electrical
         }
-        _ => admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?,
+        // The same static admission `runmat check` reports, before any geometry or mesh work.
+        _ => admission::admit_study(&realized).map_err(|issues| {
+            issues
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?,
     };
+    if family == admission::AdmittedFamily::Maxwell
+        && realized.sequence.steps.iter().any(|step| {
+            !matches!(&step.independent_domain,
+                runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies) if frequencies.len() == 1)
+        })
+    {
+        return Err("a prepared Maxwell harmonic case carries exactly one frequency; multi-frequency studies are fanned out first".into());
+    }
     let (element_heat_source, operating_temperatures) = match role {
         PreparationRole::Heated(source) => (Some(source), None),
         PreparationRole::Authored => (None, None),
@@ -155,26 +170,26 @@ pub async fn prepare_study_with_role(
         .frozen_project()
         .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
     let planning = match family {
-        admission::PreparedFamily::Structural => crate::StudyRootPlanning::Structural(
+        admission::AdmittedFamily::Structural => crate::StudyRootPlanning::Structural(
             runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
                 backend: options.backend,
                 numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(
                 ),
             },
         ),
-        admission::PreparedFamily::Thermal => crate::StudyRootPlanning::Thermal(
+        admission::AdmittedFamily::Thermal => crate::StudyRootPlanning::Thermal(
             runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
                 backend: options.backend,
                 element_heat_source,
             },
         ),
-        admission::PreparedFamily::Acoustic => crate::StudyRootPlanning::Acoustic(
+        admission::AdmittedFamily::Acoustic => crate::StudyRootPlanning::Acoustic(
             runmat_analysis_fea::study::AcousticStudyPlanningPolicy::standard(),
         ),
-        admission::PreparedFamily::AcousticResponse => crate::StudyRootPlanning::AcousticResponse(
+        admission::AdmittedFamily::AcousticResponse => crate::StudyRootPlanning::AcousticResponse(
             runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy::default(),
         ),
-        admission::PreparedFamily::Electrical => {
+        admission::AdmittedFamily::Electrical => {
             let (element_temperature_k, operating_time_s) = match operating_temperatures {
                 Some((temperatures, time)) => (Some(temperatures), time),
                 None => (None, None),
@@ -186,19 +201,19 @@ pub async fn prepare_study_with_role(
                 },
             )
         }
-        admission::PreparedFamily::Magnetic => crate::StudyRootPlanning::Magnetic(
+        admission::AdmittedFamily::Magnetic => crate::StudyRootPlanning::Magnetic(
             runmat_analysis_fea::study::MagneticStudyPlanningPolicy {},
         ),
-        admission::PreparedFamily::Maxwell => crate::StudyRootPlanning::Maxwell(
+        admission::AdmittedFamily::Maxwell => crate::StudyRootPlanning::Maxwell(
             runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {},
         ),
-        admission::PreparedFamily::Fluid => {
+        admission::AdmittedFamily::Fluid => {
             crate::StudyRootPlanning::Fluid(runmat_analysis_fea::study::FluidStudyPlanningPolicy {
                 numerical: Default::default(),
                 geometry: Default::default(),
             })
         }
-        admission::PreparedFamily::Nonlinear => {
+        admission::AdmittedFamily::Nonlinear => {
             crate::StudyRootPlanning::NonlinearSolid(Box::new(crate::NonlinearSolidStudyPlanning {
                 controls: runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
                     ..Default::default()

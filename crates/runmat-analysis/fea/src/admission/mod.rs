@@ -7,6 +7,7 @@ mod nonstructural;
 mod realizations;
 mod registry;
 mod structural;
+mod study;
 
 use std::fmt;
 
@@ -29,6 +30,14 @@ pub use magnetic::admit_canonical_magnetostatic;
 pub(crate) use magnetic::realization as canonical_magnetic_realization;
 pub use maxwell::{admit_canonical_maxwell, canonical_maxwell_realization};
 pub use nonstructural::admit_nonstructural;
+pub use study::{
+    admit_accelerator_policy, admit_study, is_electrothermal, select_family, AdmissionIssue, AdmittedFamily, StaticRule,
+    ACCELERATOR_REQUIRED_CODE, ACOUSTIC_ROTATED_PERIODIC, ACOUSTIC_TRANSIENT_CONSTRAINT,
+    ACOUSTIC_TRANSIENT_INITIAL_CONDITION, ELECTROMAGNETIC_INITIAL_CONDITION,
+    FAMILY_PROCEDURE_CODE, FLUID_INITIAL_CONDITION, FLUID_PERIODIC, MAGNETIC_STATIC_CONSTRAINT,
+    MAGNETIC_STATIC_GAUGE, MAXWELL_CONSTRAINT, MAXWELL_FAR_FIELD,
+    MAXWELL_NONELECTROMAGNETIC_CONSTRAINT, OBSERVATION_CODE, PROCEDURE_GRAPH_CODE,
+};
 pub(crate) use nonstructural::admit_nonstructural_with_temporal;
 pub use realizations::{registered_formulations, RegisteredFormulation};
 pub use structural::{

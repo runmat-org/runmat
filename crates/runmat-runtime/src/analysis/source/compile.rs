@@ -59,7 +59,8 @@ impl PreparedFeaSource {
         }
         let root_module = self.graph.root.clone();
         let bound = bind_program(&host, self.graph);
-        let program = check_program(&host, bound);
+        let mut program = check_program(&host, bound);
+        super::admission::append_admission_diagnostics(&mut program, &root_module);
         Ok(CheckedFeaSource {
             program,
             root_module,
