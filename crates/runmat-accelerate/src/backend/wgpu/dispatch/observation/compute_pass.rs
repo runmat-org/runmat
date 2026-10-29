@@ -205,10 +205,12 @@ impl<'a> ProfiledEncoder<'a> {
         timestamp: Option<TimestampCapability>,
         budget: Option<Arc<ProviderObservationBudget>>,
         #[cfg(not(target_arch = "wasm32"))] progress_port: Option<Arc<dyn WgpuObservationProgress>>,
+        #[cfg(not(target_arch = "wasm32"))] completion_prepared: bool,
     ) -> Self {
         let active = !matches!(&admission, ProviderAdmission::Absent) || command.is_some();
         #[cfg(not(target_arch = "wasm32"))]
-        let provider_progress = matches!(&admission, ProviderAdmission::Prepared(_));
+        let provider_progress =
+            matches!(&admission, ProviderAdmission::Prepared(_)) || completion_prepared;
         let mut profiled = Self {
             device: emission.device(),
             encoder: emission.device().create_command_encoder(descriptor),

@@ -1,6 +1,40 @@
 //! Typed device-progress port. This is not an arbitrary task executor: the only
 //! submitted work is waiting for an exact WGPU submission away from the runtime.
 
+/// Completion and its already-admitted callback backing claim. The claim is
+/// deliberately outside the callback Box: it outlives consuming invocation,
+/// deallocation, and unwind. No new allocation is made by this outer owner.
+pub struct WgpuObservationCompletion {
+    callback: Option<Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>>,
+    _claim: Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
+}
+
+impl WgpuObservationCompletion {
+    pub fn new(
+        callback: Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>,
+        claim: Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
+    ) -> Self {
+        Self {
+            callback: Some(callback),
+            _claim: claim,
+        }
+    }
+
+    pub fn finish(mut self, status: Result<(), WgpuObservationProgressError>) {
+        if let Some(callback) = self.callback.take() {
+            callback(status);
+        }
+    }
+}
+
+impl Drop for WgpuObservationCompletion {
+    fn drop(&mut self) {
+        if let Some(callback) = self.callback.take() {
+            callback(Err(WgpuObservationProgressError::Stopped));
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WgpuObservationProgressError {
     Capacity,
@@ -33,6 +67,6 @@ pub trait WgpuObservationProgressReservation: Send {
     fn submit(
         self: Box<Self>,
         submission: wgpu::SubmissionIndex,
-        completion: Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>,
+        completion: WgpuObservationCompletion,
     ) -> Result<(), WgpuObservationProgressError>;
 }

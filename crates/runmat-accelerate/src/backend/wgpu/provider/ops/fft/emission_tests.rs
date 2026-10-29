@@ -5,6 +5,10 @@ use runmat_accelerate_api::{HostTensorView, WgpuScopeErrors};
 #[path = "emission_pending_tests.rs"]
 mod pending_tests;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "emission_retention_tests.rs"]
+mod retention_tests;
+
 async fn provider() -> WgpuProvider {
     #[cfg(not(target_arch = "wasm32"))]
     let provider = WgpuProvider::new(WgpuProviderOptions::default())
@@ -150,7 +154,12 @@ async fn fft_debug_scope_retains_validation_source_and_balances_scopes() {
                     layout,
                     entries: &[],
                 });
-            Ok((pipeline, bind, workgroups))
+            Ok(FftPreparedDispatch::new(
+                pipeline,
+                bind,
+                workgroups,
+                FftDispatchResources::new(&[], &[])?,
+            ))
         }
     };
     let error = provider
@@ -206,7 +215,12 @@ async fn suspended_browser_fft_scope_can_be_cancelled_before_promise_delivery() 
                 layout: &layout,
                 entries: &[],
             });
-        Ok((&pipeline, bind, 1))
+        Ok(FftPreparedDispatch::new(
+            &pipeline,
+            bind,
+            1,
+            FftDispatchResources::new(&[], &[])?,
+        ))
     };
     let mut pending = Box::pin(provider.fft_dispatch_with_debug(
         true,

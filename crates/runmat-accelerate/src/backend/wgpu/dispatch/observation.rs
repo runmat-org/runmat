@@ -130,6 +130,8 @@ mod inline_slots;
 #[cfg(not(target_arch = "wasm32"))]
 mod scoped_retirement;
 mod submitted_retention;
+#[path = "observation/retention_admission.rs"]
+mod retention_admission;
 #[cfg(target_arch = "wasm32")]
 use completion::map_direct_fence;
 use completion::{
@@ -144,7 +146,7 @@ use inline_slots::InlineSlots;
 pub(crate) use scoped_retirement::{ScopeConfirmation, ScopedRetirement, ScopedRetirementProof};
 
 pub(crate) use submitted_retention::{
-    PreparedSubmittedAllocationRetention, SubmittedAllocationRetention,
+    PreparedSubmittedAllocationRetention, SubmittedAllocationRetention, SubmittedResourceOwners,
 };
 
 /// Construct outside the access closure, borrow through nested emitters, then
@@ -158,7 +160,7 @@ pub(crate) struct PendingSubmissions {
     #[cfg(not(target_arch = "wasm32"))]
     progress_port: Option<Arc<dyn runmat_accelerate_api::observation::WgpuObservationProgress>>,
     observations: InlineSlots<PendingObservation, 1>,
-    direct_observations: Vec<PendingDirectObservation>,
+    direct_observations: InlineSlots<PendingDirectObservation, 1>,
     legacy_poll: Option<wgpu::SubmissionIndex>,
     last_fence_requested_bytes: Option<u64>,
     armed_probe: Option<ProbeFenceTicket>,
@@ -166,6 +168,13 @@ pub(crate) struct PendingSubmissions {
     armed_allocation_retention: Option<SubmittedAllocationRetention>,
     armed_source_transfer_retirement: Option<StochasticEvolutionSourceTransferRetirementNotifier>,
     prepared_allocation_admission: Option<ProviderAdmission>,
+    #[cfg(not(target_arch = "wasm32"))]
+    scoped_retirement: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    prepared_direct_progress:
+        Option<Box<dyn runmat_accelerate_api::observation::WgpuObservationProgressReservation>>,
+    #[cfg(target_arch = "wasm32")]
+    prepared_direct_fence: Option<runmat_accelerate_api::observation::WgpuTailPermit>,
 }
 
 impl PendingSubmissions {
@@ -177,7 +186,7 @@ impl PendingSubmissions {
     pub(crate) fn retire_scoped(mut self, proof: ScopedRetirementProof, confirmed: bool) {
         let confirmed = confirmed && proof.queue_completed();
         self.legacy_poll = None;
-        for observation in self.direct_observations.drain(..) {
+        for observation in self.direct_observations.drain() {
             observation.completion.retire_scoped(confirmed);
         }
         for observation in self.observations.drain() {
@@ -202,7 +211,7 @@ impl PendingSubmissions {
             #[cfg(not(target_arch = "wasm32"))]
             progress_port: None,
             observations: InlineSlots::default(),
-            direct_observations: Vec::new(),
+            direct_observations: InlineSlots::default(),
             legacy_poll: None,
             last_fence_requested_bytes: None,
             armed_probe: None,
@@ -210,6 +219,12 @@ impl PendingSubmissions {
             armed_allocation_retention: None,
             armed_source_transfer_retirement: None,
             prepared_allocation_admission: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            scoped_retirement: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            prepared_direct_progress: None,
+            #[cfg(target_arch = "wasm32")]
+            prepared_direct_fence: None,
         }
     }
 
@@ -257,7 +272,12 @@ impl PendingSubmissions {
                 .flatten(),
             active.then(|| self.budget.clone()).flatten(),
             #[cfg(not(target_arch = "wasm32"))]
-            active.then(|| self.progress_port.clone()).flatten(),
+            (active && !self.scoped_retirement && self.prepared_direct_progress.is_none())
+                .then(|| self.progress_port.clone())
+                .flatten(),
+            #[cfg(not(target_arch = "wasm32"))]
+            self.scoped_retirement
+                || self.prepared_direct_progress.is_some(),
         )
     }
 
@@ -363,6 +383,15 @@ impl PendingSubmissions {
         self.last_fence_requested_bytes = None;
         let mut probe = ProbeSubmitGuard(self.armed_probe.take());
         let submitted_resources = std::mem::take(&mut self.armed_resources);
+        #[cfg(not(target_arch = "wasm32"))]
+        let submitted_allocation_retention = if self.scoped_retirement {
+            // The exact prearmed scoped slot already owns this accumulator;
+            // retain the frame there until its non-indexed physical proof.
+            None
+        } else {
+            self.armed_allocation_retention.take()
+        };
+        #[cfg(target_arch = "wasm32")]
         let submitted_allocation_retention = self.armed_allocation_retention.take();
         let source_transfer_retirement = self
             .armed_source_transfer_retirement
@@ -398,20 +427,32 @@ impl PendingSubmissions {
         // positive evidence, not the device resource's lifetime owner.
         let retires_direct_resources = captured_direct && !admission_matched;
         #[cfg(not(target_arch = "wasm32"))]
-        let direct_progress = if needs_direct_completion {
-            direct_progress.or_else(|| {
-                self.progress_port
-                    .as_ref()
-                    .and_then(|port| port.reserve().ok())
-            })
+        let direct_progress = if self.scoped_retirement {
+            None
+        } else if needs_direct_completion {
+            self.prepared_direct_progress
+                .take()
+                .or(direct_progress)
+                .or_else(|| {
+                    self.progress_port
+                        .as_ref()
+                        .and_then(|port| port.reserve().ok())
+                })
         } else {
             direct_progress
         };
         #[cfg(target_arch = "wasm32")]
+        let direct_tail_permit = self.prepared_direct_fence.take();
+        #[cfg(target_arch = "wasm32")]
         let direct_fence_permit = if needs_direct_completion && readback.is_none() {
-            self.budget
-                .as_ref()
-                .and_then(|budget| budget.try_reserve_wgpu_query(FENCE_REQUESTED_BYTES))
+            direct_tail_permit
+                .is_none()
+                .then(|| {
+                    self.budget
+                        .as_ref()
+                        .and_then(|budget| budget.try_reserve_wgpu_query(FENCE_REQUESTED_BYTES))
+                })
+                .flatten()
         } else {
             None
         };
@@ -419,6 +460,7 @@ impl PendingSubmissions {
         if (submitted_allocation_retention.is_some() || source_transfer_retirement.is_some())
             && observed.is_none()
             && direct_progress.is_none()
+            && !self.scoped_retirement
         {
             return Err(anyhow::anyhow!(
                 "exact submission progress is unavailable for retained allocations"
@@ -429,13 +471,16 @@ impl PendingSubmissions {
             && observed.is_none()
             && readback.is_none()
             && direct_fence_permit.is_none()
+            && direct_tail_permit.is_none()
         {
             return Err(anyhow::anyhow!(
                 "exact submission fence is unavailable for retained allocations"
             ));
         }
         #[cfg(target_arch = "wasm32")]
-        let direct_fence = direct_fence_permit.as_ref().map(|_| {
+        let direct_fence = (readback.is_none()
+            && (direct_fence_permit.is_some() || direct_tail_permit.is_some()))
+        .then(|| {
             let buffer = runmat_accelerate_api::WgpuBufferOwner::new(
                 emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-direct-completion-fence"),
@@ -531,7 +576,7 @@ impl PendingSubmissions {
             submitted_probe.0.take();
         } else if (needs_direct_completion || retires_direct_resources) && has_direct_retirement {
             #[cfg(not(target_arch = "wasm32"))]
-            if let Some(progress) = direct_progress {
+            if direct_progress.is_some() || self.scoped_retirement {
                 let result = readback.as_ref().map(map_timing);
                 self.direct_observations.push(PendingDirectObservation {
                     completion: DirectCompletion {
@@ -546,7 +591,7 @@ impl PendingSubmissions {
                         source_transfer_retirement,
                     },
                     submission: submission.clone(),
-                    progress,
+                    progress: direct_progress,
                 });
             } else {
                 // No exact submission-progress owner: the linear submission
@@ -565,6 +610,7 @@ impl PendingSubmissions {
                         readback,
                         fence: direct_fence,
                         _fence_permit: direct_fence_permit,
+                        _tail_permit: direct_tail_permit,
                         result,
                         physical: physical.take(),
                         measurement,
@@ -600,7 +646,7 @@ impl PendingSubmissions {
     }
 
     fn drain(&mut self, abandoned: bool) {
-        for mut observation in self.direct_observations.drain(..) {
+        for mut observation in self.direct_observations.drain() {
             if abandoned {
                 // The command is abandoned, not the already-submitted device
                 // work. Retire its physical evidence as Missing now, but keep
@@ -614,10 +660,19 @@ impl PendingSubmissions {
                     submission,
                     progress,
                 } = observation;
+                let Some(progress) = progress else {
+                    // Only native scoped owners omit a reservation. Their
+                    // accumulator must be retired by its prearmed proof path.
+                    log::error!("scoped physical completion reached ordinary drain");
+                    continue;
+                };
                 let delivered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     progress.submit(
                         submission,
-                        Box::new(move |status| completion.after_poll(status)),
+                        runmat_accelerate_api::observation::WgpuObservationCompletion::new(
+                            Box::new(move |status| completion.after_poll(status)),
+                            None,
+                        ),
                     )
                 }));
                 match &delivered {
@@ -653,14 +708,28 @@ impl PendingSubmissions {
                     submission,
                     progress,
                 } = observation;
+                let Some(progress) = progress else {
+                    completion
+                        .recorder
+                        .fail(ProviderObservationFailure::ProviderFailed);
+                    log::error!("scoped observed completion reached ordinary drain");
+                    continue;
+                };
                 let recorder = completion.recorder.clone();
+                let claim = recorder.completion_host_metadata_claim();
                 let callback = move |status| completion.after_poll(status);
                 if !observed_completion_callback_fits_bound(&callback) {
                     recorder.fail(ProviderObservationFailure::TrackingOverflow);
                     continue;
                 }
                 let delivered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    progress.submit(submission, Box::new(callback))
+                    progress.submit(
+                        submission,
+                        runmat_accelerate_api::observation::WgpuObservationCompletion::new(
+                            Box::new(callback),
+                            claim,
+                        ),
+                    )
                 }));
                 match &delivered {
                     Ok(Ok(())) => {

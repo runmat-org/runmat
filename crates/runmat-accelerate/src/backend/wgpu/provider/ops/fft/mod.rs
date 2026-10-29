@@ -10,6 +10,31 @@ use crate::backend::wgpu::types::NumericPrecision;
 
 use super::WgpuProvider;
 
+pub(super) use crate::backend::wgpu::dispatch::observation::SubmittedResourceOwners as FftDispatchResources;
+
+pub(super) struct FftPreparedDispatch<'a> {
+    pub(super) pipeline: &'a wgpu::ComputePipeline,
+    pub(super) bind_group: wgpu::BindGroup,
+    pub(super) workgroups: u32,
+    pub(super) resources: FftDispatchResources,
+}
+
+impl<'a> FftPreparedDispatch<'a> {
+    pub(super) fn new(
+        pipeline: &'a wgpu::ComputePipeline,
+        bind_group: wgpu::BindGroup,
+        workgroups: u32,
+        resources: FftDispatchResources,
+    ) -> Self {
+        Self {
+            pipeline,
+            bind_group,
+            workgroups,
+            resources,
+        }
+    }
+}
+
 fn fft_trim_trailing_ones(shape: &mut Vec<usize>, minimum_rank: usize) {
     while shape.len() > minimum_rank && shape.last() == Some(&1) {
         shape.pop();

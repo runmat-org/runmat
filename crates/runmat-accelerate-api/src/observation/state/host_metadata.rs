@@ -2,6 +2,14 @@
 use super::*;
 use runmat_execution::resource::RetainedHostAllocationClaim;
 
+impl ProviderOperationRecorder {
+    /// Clone the already-admitted aggregate funding for an outer callback
+    /// owner. This is lifetime retention, not authority for new allocation.
+    pub fn completion_host_metadata_claim(&self) -> Option<Arc<dyn RetainedHostAllocationClaim>> {
+        self.0.with(|state| state.operation_host_metadata.clone())
+    }
+}
+
 /// Payload, strong/weak counters and alignment padding for an Arc owner.
 /// Handles cloned into callbacks share this allocation.
 pub(super) fn arc_host_upper_bytes<T>() -> Option<u64> {

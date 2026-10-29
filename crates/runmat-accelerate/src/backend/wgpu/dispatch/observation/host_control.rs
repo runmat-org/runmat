@@ -14,6 +14,7 @@ pub(crate) fn observed_submission_dispatch_host_control_upper_bytes() -> Option<
         Option<runmat_accelerate_api::observation::ProviderCompletedSubmission>,
     >()?
     .checked_add(completion_signal::channel_host_upper_bytes::<bool>()?)?
+    // Includes the inline exact-resource frame; FFT adds no owner Box.
     .checked_add(boxed_upper::<FenceCompletion>()?)?;
     #[cfg(not(target_arch = "wasm32"))]
     let bytes =

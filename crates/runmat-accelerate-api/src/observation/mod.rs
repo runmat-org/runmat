@@ -23,7 +23,8 @@ mod wgpu_progress;
 mod wgpu_query;
 #[cfg(feature = "wgpu")]
 pub use wgpu_progress::{
-    WgpuObservationProgress, WgpuObservationProgressError, WgpuObservationProgressReservation,
+    WgpuObservationCompletion, WgpuObservationProgress, WgpuObservationProgressError,
+    WgpuObservationProgressReservation,
 };
 
 pub use activation::{

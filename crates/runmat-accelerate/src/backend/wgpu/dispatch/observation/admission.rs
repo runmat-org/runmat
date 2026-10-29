@@ -13,7 +13,7 @@ pub(super) struct PreparedObservation {
     pub(super) token: ProviderSubmission,
     pub(super) recorder: ProviderOperationRecorder,
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) progress: Box<dyn WgpuObservationProgressReservation>,
+    pub(super) progress: Option<Box<dyn WgpuObservationProgressReservation>>,
 }
 
 pub(super) enum ProviderAdmission {
@@ -60,8 +60,22 @@ pub(super) fn prepare(recorder: ProviderOperationRecorder) -> ProviderAdmission 
         token,
         recorder,
         #[cfg(not(target_arch = "wasm32"))]
-        progress,
+        progress: Some(progress),
     })
+}
+
+/// Native diagnostic scopes already own one bounded physical progress slot.
+/// Their observation token shares that retirement proof, never another index.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn prepare_scoped(recorder: ProviderOperationRecorder) -> ProviderAdmission {
+    match recorder.submission() {
+        Ok(token) => ProviderAdmission::Prepared(PreparedObservation {
+            token,
+            recorder,
+            progress: None,
+        }),
+        Err(_) => ProviderAdmission::Failed(recorder),
+    }
 }
 
 fn same_owner<T>(left: Option<&T>, right: Option<&T>, same: impl Fn(&T, &T) -> bool) -> bool {

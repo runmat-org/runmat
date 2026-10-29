@@ -11,7 +11,7 @@ use std::sync::{
     Arc, Mutex,
 };
 
-type Callback = Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>;
+type Callback = runmat_accelerate_api::observation::WgpuObservationCompletion;
 
 struct Held {
     reservation: Box<dyn WgpuObservationProgressReservation>,

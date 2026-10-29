@@ -1,5 +1,4 @@
 use super::*;
-#[cfg(target_arch = "wasm32")]
 use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::backend::wgpu::dispatch::observation::{ScopeConfirmation, ScopedRetirement};
@@ -37,10 +36,7 @@ impl WgpuProvider {
     pub(super) async fn fft_dispatch_exec<'a>(
         &'a self,
         label: &str,
-        prepare: impl for<'p> FnOnce(
-            &WgpuEmission<'p>,
-        )
-            -> Result<(&'a wgpu::ComputePipeline, wgpu::BindGroup, u32)>,
+        prepare: impl for<'p> FnOnce(&WgpuEmission<'p>) -> Result<FftPreparedDispatch<'a>>,
     ) -> ProviderExecutionResult<()> {
         self.fft_dispatch_with_debug(Self::fft_debug_enabled(), label, prepare)
             .await
@@ -50,14 +46,17 @@ impl WgpuProvider {
         &'a self,
         debug: bool,
         label: &str,
-        prepare: impl for<'p> FnOnce(
-            &WgpuEmission<'p>,
-        )
-            -> Result<(&'a wgpu::ComputePipeline, wgpu::BindGroup, u32)>,
+        prepare: impl for<'p> FnOnce(&WgpuEmission<'p>) -> Result<FftPreparedDispatch<'a>>,
     ) -> ProviderExecutionResult<()> {
         if !debug {
             return Ok(self.with_emission(|emission, pending| {
-                let (pipeline, bind_group, workgroups) = prepare(emission)?;
+                let FftPreparedDispatch {
+                    pipeline,
+                    bind_group,
+                    workgroups,
+                    resources,
+                } = prepare(emission)?;
+                pending.retain_submission_resources(resources.into_retention())?;
                 crate::backend::wgpu::dispatch::fft::run(
                     emission,
                     pending,
@@ -69,8 +68,12 @@ impl WgpuProvider {
             })??);
         }
 
-        let (pipeline, bind_group, workgroups) =
-            self.with_emission(|emission, _| prepare(emission))??;
+        let FftPreparedDispatch {
+            pipeline,
+            bind_group,
+            workgroups,
+            resources,
+        } = self.with_emission(|emission, _| prepare(emission))??;
         // Pre-reserve before the synchronous emission-risk interval; retirement
         // must no longer depend on polling/dropping the logical scope future.
         #[cfg(not(target_arch = "wasm32"))]
@@ -78,6 +81,18 @@ impl WgpuProvider {
         #[cfg(not(target_arch = "wasm32"))]
         let confirmation = ScopeConfirmation(retirement.clone());
         let receipt = {
+            let pending = PendingSubmissions::new(self.access.clone()).with_profiling(
+                self.timestamp_capability,
+                self.observation_budget.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress
+                    .clone()
+                    .map(|progress| progress as _),
+            );
+            #[cfg(not(target_arch = "wasm32"))]
+            let pending = pending.with_scoped_retirement();
+            let mut pending = pending;
+            pending.retain_submission_resources(resources.into_retention())?;
             #[cfg(not(target_arch = "wasm32"))]
             let progress = self.observation_progress.as_ref().ok_or_else(|| {
                 ProviderExecutionError::from(anyhow::anyhow!(
@@ -86,10 +101,8 @@ impl WgpuProvider {
             })?;
             #[cfg(not(target_arch = "wasm32"))]
             let mut gate = progress
-                .scoped_emission_guard(self.access.clone(), retirement.clone())
+                .scoped_emission_guard(pending, retirement.clone())
                 .map_err(ProviderExecutionError::from_source)?;
-            #[cfg(target_arch = "wasm32")]
-            let mut pending = PendingSubmissions::new(self.access.clone());
             let receipt = self
                 .access
                 .with_profiled_scoped(&self.emission_authority, |emission| {

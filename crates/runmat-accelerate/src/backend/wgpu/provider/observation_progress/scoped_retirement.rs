@@ -23,7 +23,7 @@ impl NativeObservationProgress {
     /// Held only across synchronous scoped emission and publication, never await.
     pub(in crate::backend::wgpu::provider::backend) fn scoped_emission_guard(
         &self,
-        access: runmat_accelerate_api::WgpuDeviceAccess,
+        pending: crate::backend::wgpu::dispatch::observation::PendingSubmissions,
         signal: crate::backend::wgpu::dispatch::observation::ScopedRetirement,
     ) -> Result<ScopedEmissionGuard<'_>, WgpuObservationProgressError> {
         let gate = self
@@ -47,9 +47,7 @@ impl NativeObservationProgress {
             .position(Option::is_none)
             .ok_or(WgpuObservationProgressError::Capacity)?;
         work[index] = Some(ScopedWork {
-            pending: Some(
-                crate::backend::wgpu::dispatch::observation::PendingSubmissions::new(access),
-            ),
+            pending: Some(pending),
             #[cfg(test)]
             probe: None,
             signal,

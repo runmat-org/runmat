@@ -401,7 +401,7 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
     };
     use runmat_execution::profiling::{with_command_profiling, CommandProfilingRoot};
 
-    type Callback = Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>;
+    type Callback = runmat_accelerate_api::observation::WgpuObservationCompletion;
     struct Held {
         reservation: Box<dyn WgpuObservationProgressReservation>,
         submission: wgpu::SubmissionIndex,
@@ -612,7 +612,8 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
                 // failure callback must wait for this exact submission before
                 // optional query capacity is recycled, without positive evidence.
                 drop(held.reservation);
-                (held.callback)(Err(WgpuObservationProgressError::Stopped));
+                held.callback
+                    .finish(Err(WgpuObservationProgressError::Stopped));
             } else {
                 held.reservation
                     .submit(held.submission, held.callback)

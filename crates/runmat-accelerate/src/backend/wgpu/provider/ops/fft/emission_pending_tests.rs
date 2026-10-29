@@ -67,14 +67,19 @@ async fn submit_while_receipt_is_outstanding() {
                     resource: entry.buffer.as_entire_binding(),
                 }],
             });
-        Ok((&pipeline, bind, 1))
+        Ok(FftPreparedDispatch::new(
+            &pipeline,
+            bind,
+            1,
+            FftDispatchResources::new(&[&value], &[&entry.buffer])?,
+        ))
     };
 
     #[cfg(not(target_arch = "wasm32"))]
     let outstanding = {
         // Retain the actual detached receipt unconsumed. Pinned native WGPU
         // resolves its scope futures immediately: do not manufacture suspension.
-        let (_, bind, _) = provider
+        let prepared = provider
             .with_emission(|emission, _| prepare(emission))
             .unwrap()
             .unwrap();
@@ -86,7 +91,7 @@ async fn submit_while_receipt_is_outstanding() {
                     emission,
                     &mut submissions,
                     &pipeline,
-                    &bind,
+                    &prepared.bind_group,
                     1,
                     "first-scoped-update",
                 )
@@ -144,6 +149,97 @@ async fn submit_while_receipt_is_outstanding() {
         provider.download_numeric_exec(&value).await.unwrap().data,
         HostNumericDataOwned::F32(vec![31.0])
     );
+
+    #[cfg(target_arch = "wasm32")]
+    browser_callback_retains_final_tensor(&provider, &layout, &pipeline).await;
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn browser_callback_retains_final_tensor(
+    provider: &WgpuProvider,
+    layout: &wgpu::BindGroupLayout,
+    pipeline: &wgpu::ComputePipeline,
+) {
+    use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
+    use wasm_bindgen::prelude::*;
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_name = setTimeout)]
+        fn yield_callback(callback: &js_sys::Function, milliseconds: i32) -> i32;
+    }
+    let baseline = provider.allocations.retained_bytes();
+    let value = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[3.0]),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let entry = provider.get_entry_raw(&value).unwrap();
+    let weak = value.allocation_lease().downgrade();
+    let charged = provider.allocations.retained_bytes();
+    let resources = FftDispatchResources::new(&[&value], &[&entry.buffer]).unwrap();
+    // No recorder must not mean unfunded Browser completion. Refusal occurs
+    // before encoding/submission; the original carrier remains usable.
+    let mut unfunded = PendingSubmissions::new(provider.access.clone());
+    assert!(unfunded
+        .retain_submission_resources(resources.into_retention())
+        .is_err());
+    value.allocation_lease().validate_live().unwrap();
+    drop(unfunded);
+
+    let mut pending = PendingSubmissions::new(provider.access.clone())
+        .with_profiling(None, provider.observation_budget.clone());
+    pending
+        .retain_submission_resources(
+            FftDispatchResources::new(&[&value], &[&entry.buffer])
+                .unwrap()
+                .into_retention(),
+        )
+        .unwrap();
+    provider
+        .access
+        .with_shared(|emission| {
+            let bind = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("browser-fft-retained-final-handle"),
+                    layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_entire_binding(),
+                    }],
+                });
+            crate::backend::wgpu::dispatch::fft::run(
+                emission,
+                &mut pending,
+                pipeline,
+                &bind,
+                1,
+                "browser-fft-retained-final-handle",
+            )
+        })
+        .unwrap()
+        .unwrap();
+    pending.commit();
+    drop(entry);
+    drop(value);
+    // No event-loop yield has delivered the real private map callback yet.
+    assert!(weak.acquire().is_some());
+    assert_eq!(provider.allocations.retained_bytes(), charged);
+    let deadline = js_sys::Date::now() + 10_000.0;
+    while weak.acquire().is_some() {
+        assert!(
+            js_sys::Date::now() < deadline,
+            "real private fence must retire the lease"
+        );
+        provider.access.poll(wgpu::Maintain::Poll);
+        let turn = js_sys::Promise::new(&mut |resolve, _| {
+            yield_callback(&resolve, 0);
+        });
+        wasm_bindgen_futures::JsFuture::from(turn).await.unwrap();
+    }
+    assert_eq!(provider.allocations.retained_bytes(), baseline);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

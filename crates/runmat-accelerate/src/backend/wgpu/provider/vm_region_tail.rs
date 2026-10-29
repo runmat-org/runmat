@@ -131,15 +131,19 @@ impl WgpuProvider {
             .map_err(ProviderExecutionError::from)?
             .map_err(ProviderExecutionError::from)?;
 
+            let callback_claim = completion_claim.clone();
             let completion = super::device_control::FundedCompletion::new(completion_claim)
                 .map_err(ProviderExecutionError::from)?;
             let callback = completion.clone();
             reservation
                 .submit(
                     submission,
-                    Box::new(move |result| {
-                        callback.complete(result);
-                    }),
+                    runmat_accelerate_api::observation::WgpuObservationCompletion::new(
+                        Box::new(move |result| {
+                            callback.complete(result);
+                        }),
+                        callback_claim,
+                    ),
                 )
                 .map_err(ProviderExecutionError::from_source)?;
             completion

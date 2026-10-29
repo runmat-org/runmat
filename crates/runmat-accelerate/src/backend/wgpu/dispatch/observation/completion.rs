@@ -73,6 +73,8 @@ pub(super) struct DirectCompletion {
     pub(super) fence: Option<runmat_accelerate_api::WgpuBufferOwner>,
     #[cfg(target_arch = "wasm32")]
     pub(super) _fence_permit: Option<runmat_accelerate_api::observation::WgpuQueryPermit>,
+    #[cfg(target_arch = "wasm32")]
+    pub(super) _tail_permit: Option<runmat_accelerate_api::observation::WgpuTailPermit>,
     pub(super) result: Option<Receiver<bool>>,
     pub(super) physical: Option<CommandPhysicalSubmission>,
     pub(super) measurement: WgpuSubmissionMeasurement,
@@ -418,7 +420,7 @@ pub(super) struct PendingObservation {
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) submission: wgpu::SubmissionIndex,
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) progress: Box<dyn WgpuObservationProgressReservation>,
+    pub(super) progress: Option<Box<dyn WgpuObservationProgressReservation>>,
 }
 
 pub(super) struct PendingDirectObservation {
@@ -426,7 +428,7 @@ pub(super) struct PendingDirectObservation {
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) submission: wgpu::SubmissionIndex,
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) progress: Box<dyn WgpuObservationProgressReservation>,
+    pub(super) progress: Option<Box<dyn WgpuObservationProgressReservation>>,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

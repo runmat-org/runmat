@@ -9,6 +9,45 @@ use super::{current_provider_observation, prepare, ProviderAdmission};
 mod retirement;
 use retirement::{SubmittedAllocationRetirement, SubmittedAllocationRetirementNotifier};
 
+/// Finite FFT submission frame. Clones retain existing identities and claims;
+/// no tensor, shape or workspace payload is copied or newly charged here.
+pub(crate) struct SubmittedResourceOwners {
+    _leases: [Option<runmat_accelerate_api::allocation::AllocationLease>; 3],
+    _buffers: [Option<runmat_accelerate_api::WgpuBufferOwner>; 4],
+}
+
+impl SubmittedResourceOwners {
+    pub(crate) fn new(
+        handles: &[&runmat_accelerate_api::GpuTensorHandle],
+        buffers: &[&runmat_accelerate_api::WgpuBufferOwner],
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            handles.len() <= 3 && buffers.len() <= 4,
+            "FFT submission owner capacity exceeded"
+        );
+        let mut owner = Self {
+            _leases: std::array::from_fn(|_| None),
+            _buffers: std::array::from_fn(|_| None),
+        };
+        for (slot, handle) in owner._leases.iter_mut().zip(handles) {
+            handle.allocation_lease().validate_live()?;
+            *slot = Some(handle.allocation_lease().clone());
+        }
+        for (slot, buffer) in owner._buffers.iter_mut().zip(buffers) {
+            *slot = Some((*buffer).clone());
+        }
+        Ok(owner)
+    }
+
+    pub(crate) fn into_retention(self) -> SubmittedAllocationRetention {
+        SubmittedAllocationRetention {
+            owner: None,
+            resources: Some(self),
+            retirement: None,
+        }
+    }
+}
+
 /// Exact provider-observation completion reserved before an operation creates
 /// any allocation that must survive submission cancellation.
 pub(crate) struct PreparedSubmittedAllocationRetention {
@@ -52,6 +91,9 @@ impl<T: 'static> RetainedSubmittedAllocations for T {}
 /// is released only after that exact submission has settled.
 pub(crate) struct SubmittedAllocationRetention {
     owner: Option<Box<dyn RetainedSubmittedAllocations>>,
+    // Fixed FFT frame uses the already-existing completion/slot backing; no
+    // extra Box, retirement pair, payload or host-control allocation is made.
+    resources: Option<SubmittedResourceOwners>,
     retirement: Option<SubmittedAllocationRetirementNotifier>,
 }
 
@@ -62,6 +104,7 @@ impl SubmittedAllocationRetention {
     {
         Self {
             owner: Some(Box::new(owner)),
+            resources: None,
             retirement: None,
         }
     }
@@ -94,6 +137,7 @@ impl SubmittedAllocationRetention {
     /// grants permission to continue a bounded sequence.
     pub(super) fn retire(mut self, succeeded: bool) {
         drop(self.owner.take());
+        drop(self.resources.take());
         if let Some(retirement) = self.retirement.take() {
             retirement.finish(succeeded);
         }

@@ -69,6 +69,8 @@ impl WgpuProvider {
         let out_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer(emission, complex_len, "runmat-fft-extract-real-out")
         })??;
+        let output_handle =
+            self.register_existing_buffer(out_buffer.clone(), out_shape, complex_len)?;
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
 
@@ -108,17 +110,21 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_extract_real.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[handle, &output_handle],
+                        &[&entry.buffer, &out_buffer, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, complex_len)?)
+        Ok(output_handle)
     }
 
     async fn try_fft_dim_exec_native(
@@ -205,6 +211,7 @@ impl WgpuProvider {
                     if let Some(digits) = fft_log3_pow3(target_len) {
                         return self
                             .try_fft_dim_exec_native_radix3(
+                                handle,
                                 entry.buffer,
                                 shape,
                                 dim,
@@ -223,6 +230,7 @@ impl WgpuProvider {
                     }
                     return self
                         .try_fft_dim_exec_native_mixed(
+                            handle,
                             entry.buffer,
                             shape,
                             dim,
@@ -242,6 +250,7 @@ impl WgpuProvider {
                     if let Some(digits) = fft_log5_pow5(target_len) {
                         return self
                             .try_fft_dim_exec_native_radix5(
+                                handle,
                                 entry.buffer,
                                 shape,
                                 dim,
@@ -260,6 +269,7 @@ impl WgpuProvider {
                     }
                     return self
                         .try_fft_dim_exec_native_mixed(
+                            handle,
                             entry.buffer,
                             shape,
                             dim,
@@ -278,6 +288,7 @@ impl WgpuProvider {
                 } else {
                     return self
                         .try_fft_dim_exec_native_mixed(
+                            handle,
                             entry.buffer,
                             shape,
                             dim,
@@ -296,6 +307,7 @@ impl WgpuProvider {
                 }
             }
             if let Some(bluestein) = Box::pin(self.try_fft_dim_exec_native_bluestein(
+                handle,
                 entry.buffer.clone(),
                 shape.clone(),
                 dim,
@@ -317,6 +329,7 @@ impl WgpuProvider {
             if let Some(digits) = fft_log3_pow3(target_len) {
                 return self
                     .try_fft_dim_exec_native_radix3(
+                        handle,
                         entry.buffer,
                         shape,
                         dim,
@@ -336,6 +349,7 @@ impl WgpuProvider {
             if let Some(digits) = fft_log5_pow5(target_len) {
                 return self
                     .try_fft_dim_exec_native_radix5(
+                        handle,
                         entry.buffer,
                         shape,
                         dim,
@@ -365,6 +379,19 @@ impl WgpuProvider {
                 "runmat-fft-stage-b",
             )
         })??;
+        fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
+        // Each stage swaps A/B; reorder writes the opposite physical owner.
+        let final_buffer = if log2_len % 2 == 0 {
+            &stage_b
+        } else {
+            &stage_a
+        };
+        let output_handle = self.register_existing_buffer_with_storage(
+            final_buffer.clone(),
+            out_shape,
+            out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        )?;
 
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
@@ -409,10 +436,14 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_init.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[handle, &output_handle],
+                        &[&entry.buffer, &stage_a, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -485,10 +516,14 @@ impl WgpuProvider {
                             "[fft-debug] stage2 dispatch workgroups={workgroups} chunk={chunk_len}"
                         );
                     }
-                    Ok((
+                    Ok(FftPreparedDispatch::new(
                         &self.pipelines.fft_stage.get(emission)?.pipeline,
                         bind_group,
                         workgroups,
+                        FftDispatchResources::new(
+                            &[handle, &output_handle],
+                            &[&stage_a, &stage_b, &params_buffer],
+                        )?,
                     ))
                 })
                 .await?;
@@ -539,10 +574,14 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_reorder.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[handle, &output_handle],
+                        &[&stage_a, &stage_b, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -551,18 +590,13 @@ impl WgpuProvider {
 
         self.fft_debug_dump_scalar_buffer("stage2:after_reorder", &stage_b, out_scalar_len);
 
-        fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-        Ok(Some(self.register_existing_buffer_with_storage(
-            stage_b,
-            out_shape,
-            out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?))
+        Ok(Some(output_handle))
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn try_fft_dim_exec_native_bluestein(
         &self,
+        input_handle: &GpuTensorHandle,
         in_buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         dim: usize,
@@ -638,6 +672,24 @@ impl WgpuProvider {
         let a_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer(emission, m_out_scalar_len, "runmat-fft-bluestein-a")
         })??;
+        let a_handle = self.register_existing_buffer_with_storage(
+            a_buffer.clone(),
+            ext_shape.clone(),
+            m_out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        )?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, out_scalar_len, "runmat-fft-bluestein-out")
+        })??;
+        let mut out_shape = shape;
+        out_shape[dim] = target_len;
+        fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
+        let output_handle = self.register_existing_buffer_with_storage(
+            out_buffer.clone(),
+            out_shape,
+            out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        )?;
         let mut offset = 0usize;
         while offset < m_total {
             let chunk_len = (m_total - offset).min(chunk_capacity);
@@ -682,10 +734,14 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_bluestein_prep.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[input_handle, &a_handle],
+                        &[&in_buffer, &a_buffer, &chirp_buffer, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -698,6 +754,12 @@ impl WgpuProvider {
         let b_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer(emission, b_scalar_len, "runmat-fft-bluestein-b")
         })??;
+        let b_handle = self.register_existing_buffer_with_storage(
+            b_buffer.clone(),
+            vec![m_len],
+            b_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        )?;
         let mut boff = 0usize;
         while boff < m_len {
             let chunk_len = (m_len - boff).min(chunk_capacity);
@@ -738,28 +800,20 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_bluestein_kernel.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[&b_handle],
+                        &[&b_buffer, &chirp_buffer, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
             boff += chunk_len;
         }
 
-        let a_handle = self.register_existing_buffer_with_storage(
-            a_buffer,
-            ext_shape.clone(),
-            m_out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?;
-        let b_handle = self.register_existing_buffer_with_storage(
-            b_buffer,
-            vec![m_len],
-            b_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?;
         let Some(a_fft) = self
             .try_fft_dim_exec_native(&a_handle, Some(m_len), dim, false)
             .await?
@@ -776,6 +830,12 @@ impl WgpuProvider {
         let c_fft_buf = self.with_emission(|emission, _| {
             self.create_storage_buffer(emission, m_out_scalar_len, "runmat-fft-bluestein-cfft")
         })??;
+        let c_fft_handle = self.register_existing_buffer_with_storage(
+            c_fft_buf.clone(),
+            ext_shape.clone(),
+            m_out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        )?;
         let mut poff = 0usize;
         while poff < m_total {
             let chunk_len = (m_total - poff).min(chunk_capacity);
@@ -822,7 +882,7 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self
                         .pipelines
                         .fft_pointwise_broadcast
@@ -830,18 +890,16 @@ impl WgpuProvider {
                         .pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[&a_fft, &b_fft, &c_fft_handle],
+                        &[&a_entry.buffer, &b_entry.buffer, &c_fft_buf, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
             poff += chunk_len;
         }
 
-        let c_fft_handle = self.register_existing_buffer_with_storage(
-            c_fft_buf,
-            ext_shape.clone(),
-            m_out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?;
         let Some(c_time) = self
             .try_fft_dim_exec_native(&c_fft_handle, Some(m_len), dim, true)
             .await?
@@ -849,9 +907,6 @@ impl WgpuProvider {
             return Ok(None);
         };
 
-        let out_buffer = self.with_emission(|emission, _| {
-            self.create_storage_buffer(emission, out_scalar_len, "runmat-fft-bluestein-out")
-        })??;
         let mut foff = 0usize;
         while foff < total_out {
             let chunk_len = (total_out - foff).min(chunk_capacity);
@@ -897,7 +952,7 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self
                         .pipelines
                         .fft_bluestein_finalize
@@ -905,6 +960,10 @@ impl WgpuProvider {
                         .pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[&c_time, &output_handle],
+                        &[&c_entry.buffer, &out_buffer, &chirp_buffer, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -918,20 +977,13 @@ impl WgpuProvider {
         drop(c_fft_handle);
         drop(c_time);
 
-        let mut out_shape = shape;
-        out_shape[dim] = target_len;
-        fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-        Ok(Some(self.register_existing_buffer_with_storage(
-            out_buffer,
-            out_shape,
-            out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?))
+        Ok(Some(output_handle))
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn try_fft_dim_exec_native_mixed(
         &self,
+        input_handle: &GpuTensorHandle,
         in_buffer: runmat_accelerate_api::WgpuBufferOwner,
         mut shape: Vec<usize>,
         dim: usize,
@@ -958,6 +1010,20 @@ impl WgpuProvider {
                 "runmat-fftm-stage-b",
             )
         })??;
+        shape[dim] = target_len;
+        fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
+        // Each stage swaps A/B; reorder writes the opposite physical owner.
+        let final_buffer = if factors.len() % 2 == 0 {
+            &stage_b
+        } else {
+            &stage_a
+        };
+        let output_handle = self.register_existing_buffer_with_storage(
+            final_buffer.clone(),
+            shape,
+            out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        )?;
         let twiddle = self.with_emission(|emission, _| {
             self.fft_twiddle_buffer(emission, target_len, false, "runmat-fftm-twiddles")
         })??;
@@ -1005,10 +1071,14 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_init.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[input_handle, &output_handle],
+                        &[&in_buffer, &stage_a, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -1070,10 +1140,14 @@ impl WgpuProvider {
                             chunk_len as u32,
                             crate::backend::wgpu::config::WORKGROUP_SIZE,
                         );
-                        Ok((
+                        Ok(FftPreparedDispatch::new(
                             &self.pipelines.fft_stage.get(emission)?.pipeline,
                             bind_group,
                             workgroups,
+                            FftDispatchResources::new(
+                                &[input_handle, &output_handle],
+                                &[&stage_a, &stage_b, &params_buffer],
+                            )?,
                         ))
                     })
                     .await?;
@@ -1135,10 +1209,14 @@ impl WgpuProvider {
                             chunk_len as u32,
                             crate::backend::wgpu::config::WORKGROUP_SIZE,
                         );
-                        Ok((
+                        Ok(FftPreparedDispatch::new(
                             &self.pipelines.fft_stage3.get(emission)?.pipeline,
                             bind_group,
                             workgroups,
+                            FftDispatchResources::new(
+                                &[input_handle, &output_handle],
+                                &[&stage_a, &stage_b, &twiddle, &params_buffer],
+                            )?,
                         ))
                     })
                     .await?;
@@ -1200,10 +1278,14 @@ impl WgpuProvider {
                             chunk_len as u32,
                             crate::backend::wgpu::config::WORKGROUP_SIZE,
                         );
-                        Ok((
+                        Ok(FftPreparedDispatch::new(
                             &self.pipelines.fft_stage5.get(emission)?.pipeline,
                             bind_group,
                             workgroups,
+                            FftDispatchResources::new(
+                                &[input_handle, &output_handle],
+                                &[&stage_a, &stage_b, &twiddle, &params_buffer],
+                            )?,
                         ))
                     })
                     .await?;
@@ -1264,10 +1346,14 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_reorder_mixed.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[input_handle, &output_handle],
+                        &[&stage_a, &stage_b, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -1276,19 +1362,13 @@ impl WgpuProvider {
 
         self.fft_debug_dump_scalar_buffer("mixed:after_reorder", &stage_b, out_scalar_len);
 
-        shape[dim] = target_len;
-        fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
-        Ok(Some(self.register_existing_buffer_with_storage(
-            stage_b,
-            shape,
-            out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?))
+        Ok(Some(output_handle))
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn try_fft_dim_exec_native_radix3(
         &self,
+        input_handle: &GpuTensorHandle,
         in_buffer: runmat_accelerate_api::WgpuBufferOwner,
         mut shape: Vec<usize>,
         dim: usize,
@@ -1311,6 +1391,16 @@ impl WgpuProvider {
                 "runmat-fft3-stage-b",
             )
         })??;
+        shape[dim] = target_len;
+        fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
+        // Each stage swaps A/B; reorder writes the opposite physical owner.
+        let final_buffer = if digits % 2 == 0 { &stage_b } else { &stage_a };
+        let output_handle = self.register_existing_buffer_with_storage(
+            final_buffer.clone(),
+            shape,
+            out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        )?;
         let twiddle = self.with_emission(|emission, _| {
             self.fft_twiddle_buffer(emission, target_len, false, "runmat-fft3-twiddles")
         })??;
@@ -1358,10 +1448,14 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_init.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[input_handle, &output_handle],
+                        &[&in_buffer, &stage_a, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -1438,10 +1532,14 @@ impl WgpuProvider {
                             "[fft-debug] stage3 dispatch workgroups={workgroups} chunk={chunk_len}"
                         );
                     }
-                    Ok((
+                    Ok(FftPreparedDispatch::new(
                         &self.pipelines.fft_stage3.get(emission)?.pipeline,
                         bind_group,
                         workgroups,
+                        FftDispatchResources::new(
+                            &[input_handle, &output_handle],
+                            &[&stage_a, &stage_b, &twiddle, &params_buffer],
+                        )?,
                     ))
                 })
                 .await?;
@@ -1492,10 +1590,14 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_reorder3.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[input_handle, &output_handle],
+                        &[&stage_a, &stage_b, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -1504,19 +1606,13 @@ impl WgpuProvider {
 
         self.fft_debug_dump_scalar_buffer("stage3:after_reorder", &stage_b, out_scalar_len);
 
-        shape[dim] = target_len;
-        fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
-        Ok(Some(self.register_existing_buffer_with_storage(
-            stage_b,
-            shape,
-            out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?))
+        Ok(Some(output_handle))
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn try_fft_dim_exec_native_radix5(
         &self,
+        input_handle: &GpuTensorHandle,
         in_buffer: runmat_accelerate_api::WgpuBufferOwner,
         mut shape: Vec<usize>,
         dim: usize,
@@ -1539,6 +1635,16 @@ impl WgpuProvider {
                 "runmat-fft5-stage-b",
             )
         })??;
+        shape[dim] = target_len;
+        fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
+        // Each stage swaps A/B; reorder writes the opposite physical owner.
+        let final_buffer = if digits % 2 == 0 { &stage_b } else { &stage_a };
+        let output_handle = self.register_existing_buffer_with_storage(
+            final_buffer.clone(),
+            shape,
+            out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        )?;
         let twiddle = self.with_emission(|emission, _| {
             self.fft_twiddle_buffer(emission, target_len, false, "runmat-fft5-twiddles")
         })??;
@@ -1586,10 +1692,14 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_init.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[input_handle, &output_handle],
+                        &[&in_buffer, &stage_a, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
@@ -1649,10 +1759,14 @@ impl WgpuProvider {
                         chunk_len as u32,
                         crate::backend::wgpu::config::WORKGROUP_SIZE,
                     );
-                    Ok((
+                    Ok(FftPreparedDispatch::new(
                         &self.pipelines.fft_stage5.get(emission)?.pipeline,
                         bind_group,
                         workgroups,
+                        FftDispatchResources::new(
+                            &[input_handle, &output_handle],
+                            &[&stage_a, &stage_b, &twiddle, &params_buffer],
+                        )?,
                     ))
                 })
                 .await?;
@@ -1702,23 +1816,20 @@ impl WgpuProvider {
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
-                Ok((
+                Ok(FftPreparedDispatch::new(
                     &self.pipelines.fft_reorder5.get(emission)?.pipeline,
                     bind_group,
                     workgroups,
+                    FftDispatchResources::new(
+                        &[input_handle, &output_handle],
+                        &[&stage_a, &stage_b, &params_buffer],
+                    )?,
                 ))
             })
             .await?;
             reorder_offset += chunk_len;
         }
 
-        shape[dim] = target_len;
-        fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
-        Ok(Some(self.register_existing_buffer_with_storage(
-            stage_b,
-            shape,
-            out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?))
+        Ok(Some(output_handle))
     }
 }

@@ -2,7 +2,8 @@
 //! wait or join; process shutdown retires workers before driver finalization.
 //! Timings describe prompt completion delivery, not GPU timestamps.
 use runmat_accelerate_api::observation::{
-    WgpuObservationProgress, WgpuObservationProgressError, WgpuObservationProgressReservation,
+    WgpuObservationCompletion, WgpuObservationProgress, WgpuObservationProgressError,
+    WgpuObservationProgressReservation,
 };
 use runmat_execution::resource::RetainedHostAllocationClaim;
 use std::num::NonZeroU32;
@@ -42,11 +43,8 @@ impl Drop for Slot {
 
 type CompletionCallback = Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>;
 pub(super) struct Completion {
-    callback: Option<CompletionCallback>,
+    callback: Option<WgpuObservationCompletion>,
     scoped: Option<ScopedCompletion>,
-    // The consuming callback deallocates its Box before this external claim
-    // retires. This field is inline in the existing preallocated queue Job.
-    claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
 }
 struct ScopedCompletion {
     owner: Arc<State>,
@@ -62,9 +60,8 @@ impl Completion {
         claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
     ) -> Self {
         Self {
-            callback: Some(callback),
+            callback: Some(WgpuObservationCompletion::new(callback, claim)),
             scoped: None,
-            claim,
         }
     }
 
@@ -72,24 +69,19 @@ impl Completion {
         Self {
             callback: None,
             scoped: Some(ScopedCompletion { owner, index }),
-            claim: None,
         }
     }
 
     pub(super) fn finish(&mut self, status: Result<(), WgpuObservationProgressError>) {
         let completion = self.callback.take();
         let scoped = self.scoped.take();
-        let claim = self.claim.take();
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             if let Some(scoped) = scoped {
                 scoped.owner.finish_scoped(scoped.index);
             }
             if let Some(completion) = completion {
-                completion(status);
+                completion.finish(status);
             }
-            // This unboxed outer guard retires only after the callback Box's
-            // consuming call (or its unwind). Claim-drop panics stay contained.
-            drop(claim);
         }));
     }
 }
@@ -401,12 +393,15 @@ impl WgpuObservationProgressReservation for Reservation {
     fn submit(
         self: Box<Self>,
         submission: wgpu::SubmissionIndex,
-        completion: CompletionCallback,
+        completion: WgpuObservationCompletion,
     ) -> Result<(), WgpuObservationProgressError> {
         let Self { control, slot } = *self;
         let job = Job {
             submission: WaitTarget::Existing(Some(submission)),
-            completion: Completion::ordinary(completion),
+            completion: Completion {
+                callback: Some(completion),
+                scoped: None,
+            },
             _slot: Some(slot),
             retire_after_stop: false,
         };
