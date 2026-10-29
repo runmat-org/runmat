@@ -203,7 +203,11 @@ pub async fn execute_structural_workloads_locally(
             )
         })?
         // The execution policy's `memory_per_worker` bounds every worker of the study.
-        .min(execution_config.authored_worker_memory_bytes.unwrap_or(u64::MAX));
+        .min(
+            execution_config
+                .authored_worker_memory_bytes
+                .unwrap_or(u64::MAX),
+        );
     // The effective ceiling is min(authored, machine): an unbounded authored ceiling runs within
     // the memory this host admits (the same snapshot as the pool's capacity).
     let machine_resident_bytes = match execution_config.local_memory_capacity_bytes {

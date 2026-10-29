@@ -3,7 +3,9 @@ pub use runmat_types::physical::{parse_unit_expression, UnitExpressionError};
 use runmat_types::PhysicalDimension;
 
 /// What a dimension measures and its coherent SI unit, for diagnostics that name the expected unit.
-pub(crate) fn dimension_requirement(dimension: PhysicalDimension) -> Option<(&'static str, &'static str)> {
+pub(crate) fn dimension_requirement(
+    dimension: PhysicalDimension,
+) -> Option<(&'static str, &'static str)> {
     let force_per = |denominator: PhysicalDimension| PhysicalDimension::FORCE.divide(denominator);
     let power_per = |denominator: PhysicalDimension| PhysicalDimension::POWER.divide(denominator);
     let current_time = PhysicalDimension::ELECTRIC_CURRENT.multiply(PhysicalDimension::TIME)?;
@@ -15,30 +17,78 @@ pub(crate) fn dimension_requirement(dimension: PhysicalDimension) -> Option<(&'s
         (Some(PhysicalDimension::TIME), "time", "s"),
         (Some(PhysicalDimension::FREQUENCY), "frequency", "Hz"),
         (Some(PhysicalDimension::MASS), "mass", "kg"),
-        (Some(PhysicalDimension::DENSITY), "mass per volume", "kg/m^3"),
+        (
+            Some(PhysicalDimension::DENSITY),
+            "mass per volume",
+            "kg/m^3",
+        ),
         (Some(PhysicalDimension::TEMPERATURE), "temperature", "K"),
         (Some(PhysicalDimension::VELOCITY), "length per time", "m/s"),
-        (Some(PhysicalDimension::ACCELERATION), "length per time squared", "m/s^2"),
+        (
+            Some(PhysicalDimension::ACCELERATION),
+            "length per time squared",
+            "m/s^2",
+        ),
         (Some(PhysicalDimension::FORCE), "force", "N"),
         (Some(PhysicalDimension::MOMENT), "force times length", "N*m"),
         (Some(PhysicalDimension::PRESSURE), "force per area", "Pa"),
-        (force_per(PhysicalDimension::VOLUME), "force per volume", "N/m^3"),
-        (force_per(PhysicalDimension::LENGTH), "force per length", "N/m"),
+        (
+            force_per(PhysicalDimension::VOLUME),
+            "force per volume",
+            "N/m^3",
+        ),
+        (
+            force_per(PhysicalDimension::LENGTH),
+            "force per length",
+            "N/m",
+        ),
         (Some(PhysicalDimension::POWER), "power", "W"),
-        (Some(PhysicalDimension::HEAT_FLUX), "power per area", "W/m^2"),
-        (power_per(PhysicalDimension::VOLUME), "power per volume", "W/m^3"),
-        (Some(PhysicalDimension::THERMAL_CONDUCTIVITY), "thermal conductivity", "W/(m*K)"),
-        (Some(PhysicalDimension::SPECIFIC_HEAT), "specific heat", "J/(kg*K)"),
-        (Some(PhysicalDimension::ELECTRIC_CURRENT), "electric current", "A"),
-        (Some(PhysicalDimension::ELECTRIC_POTENTIAL), "electric potential", "V"),
+        (
+            Some(PhysicalDimension::HEAT_FLUX),
+            "power per area",
+            "W/m^2",
+        ),
+        (
+            power_per(PhysicalDimension::VOLUME),
+            "power per volume",
+            "W/m^3",
+        ),
+        (
+            Some(PhysicalDimension::THERMAL_CONDUCTIVITY),
+            "thermal conductivity",
+            "W/(m*K)",
+        ),
+        (
+            Some(PhysicalDimension::SPECIFIC_HEAT),
+            "specific heat",
+            "J/(kg*K)",
+        ),
+        (
+            Some(PhysicalDimension::ELECTRIC_CURRENT),
+            "electric current",
+            "A",
+        ),
+        (
+            Some(PhysicalDimension::ELECTRIC_POTENTIAL),
+            "electric potential",
+            "V",
+        ),
         (Some(current_time), "electric charge", "C"),
         (
             PhysicalDimension::ELECTRIC_CURRENT.divide(PhysicalDimension::AREA),
             "current per area",
             "A/m^2",
         ),
-        (current_time.divide(PhysicalDimension::VOLUME), "charge per volume", "C/m^3"),
-        (Some(PhysicalDimension::MAGNETIC_FLUX_DENSITY), "magnetic flux density", "T"),
+        (
+            current_time.divide(PhysicalDimension::VOLUME),
+            "charge per volume",
+            "C/m^3",
+        ),
+        (
+            Some(PhysicalDimension::MAGNETIC_FLUX_DENSITY),
+            "magnetic flux density",
+            "T",
+        ),
         (
             PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH),
             "flux density times length",
@@ -90,7 +140,10 @@ pub(crate) fn unit_mismatch(
     let (description, expected_unit) =
         dimension_requirement(expected).unwrap_or(("a different physical quantity", "SI units"));
     Some((
-        format!("{} must be {description}, found {unit}", subject.replace('_', " ")),
+        format!(
+            "{} must be {description}, found {unit}",
+            subject.replace('_', " ")
+        ),
         format!("expected {expected_unit}"),
     ))
 }

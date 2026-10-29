@@ -37,7 +37,9 @@ pub fn gather_outputs(
         .subdomains
         .first()
         .map(|subdomain| subdomain.results.width as usize)
-        .ok_or_else(|| DistributedError::InvalidProblem("a process returned no subdomain".into()))?;
+        .ok_or_else(|| {
+            DistributedError::InvalidProblem("a process returned no subdomain".into())
+        })?;
     let mut solution = vec![f64::NAN; node_count * dofs_per_node];
     let mut results = vec![f64::NAN; element_count * width];
     let mut timings = RankTimings::default();
@@ -68,7 +70,9 @@ pub fn gather_outputs(
                     .copy_from_slice(&subdomain.results.values[slot * width..(slot + 1) * width]);
             }
         }
-        timings.assembly_seconds = timings.assembly_seconds.max(output.timings.assembly_seconds);
+        timings.assembly_seconds = timings
+            .assembly_seconds
+            .max(output.timings.assembly_seconds);
         timings.factorization_seconds = timings
             .factorization_seconds
             .max(output.timings.factorization_seconds);
@@ -76,7 +80,9 @@ pub fn gather_outputs(
         timings.iteration_seconds = timings
             .iteration_seconds
             .max(output.timings.iteration_seconds);
-        timings.recovery_seconds = timings.recovery_seconds.max(output.timings.recovery_seconds);
+        timings.recovery_seconds = timings
+            .recovery_seconds
+            .max(output.timings.recovery_seconds);
     }
     if solution.iter().any(|value| value.is_nan()) || results.iter().any(|value| value.is_nan()) {
         return Err(DistributedError::InvalidProblem(
@@ -128,9 +134,9 @@ pub fn solve_in_threads(
         handles
             .into_iter()
             .map(|handle| {
-                handle.join().map_err(|_| {
-                    DistributedError::Communication("rank thread panicked".into())
-                })?
+                handle
+                    .join()
+                    .map_err(|_| DistributedError::Communication("rank thread panicked".into()))?
             })
             .collect::<DistributedResult<Vec<_>>>()
     })?;

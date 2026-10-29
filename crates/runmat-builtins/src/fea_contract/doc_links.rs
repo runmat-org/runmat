@@ -23,8 +23,10 @@ pub const STUDY_CONTRACTS: BuiltinDocumentationLink =
 pub const SOLVES: BuiltinDocumentationLink = doc("FEA solves", "/docs/simulation/solves");
 pub const EVIDENCE: BuiltinDocumentationLink = doc("Run evidence", "/docs/simulation/evidence");
 pub const MESHING: BuiltinDocumentationLink = doc("Meshing", "/docs/simulation/meshing");
-pub const OPERATION_REFERENCE: BuiltinDocumentationLink =
-    doc("FEA operation reference", "/docs/simulation/operation-reference");
+pub const OPERATION_REFERENCE: BuiltinDocumentationLink = doc(
+    "FEA operation reference",
+    "/docs/simulation/operation-reference",
+);
 pub const OUTPUTS_AND_FIELDS: BuiltinDocumentationLink = doc(
     "Outputs, fields, and observations",
     "/docs/simulation/language/outputs-fields-and-observations",

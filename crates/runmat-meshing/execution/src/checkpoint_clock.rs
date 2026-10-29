@@ -85,7 +85,8 @@ impl CheckpointClock {
 
     fn sample(&self, elapsed_ns: u64) {
         let (clock, sampled_wall, _) = CPU_SAMPLE.with(Cell::get);
-        if clock == self.identity() && elapsed_ns.saturating_sub(sampled_wall) < CPU_SAMPLE_INTERVAL_NS
+        if clock == self.identity()
+            && elapsed_ns.saturating_sub(sampled_wall) < CPU_SAMPLE_INTERVAL_NS
         {
             return;
         }
@@ -157,6 +158,9 @@ mod tests {
         assert!(latency < 1_000, "charged {latency} ms of idle wall time");
         // Without a sample on this thread the wall time is charged conservatively.
         let other = CheckpointClock::new(origin);
-        assert_eq!(other.latency_ms(origin + Duration::from_millis(2_000)), 2_000);
+        assert_eq!(
+            other.latency_ms(origin + Duration::from_millis(2_000)),
+            2_000
+        );
     }
 }

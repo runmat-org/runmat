@@ -25,7 +25,10 @@ pub(super) fn assert_carried_request_identity(
         workload,
         &[],
         LocalExecutionPlan::serial(),
-        None, crate::planning::resource::StaticSolveSelection::WithinCeiling { machine_memory_bytes: None },
+        None,
+        crate::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None,
+        },
     )
     .unwrap();
     assert_eq!(
@@ -48,7 +51,10 @@ pub(super) fn assert_carried_request_identity(
             &equivalent,
             &[],
             LocalExecutionPlan::serial(),
-            None, crate::planning::resource::StaticSolveSelection::WithinCeiling { machine_memory_bytes: None },
+            None,
+            crate::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None
+            },
         )
         .is_err(),
         "foreign borrowed source cannot reuse construction evidence"
@@ -61,7 +67,10 @@ pub(super) fn assert_carried_request_identity(
         workload,
         &[],
         LocalExecutionPlan::serial(),
-        None, crate::planning::resource::StaticSolveSelection::WithinCeiling { machine_memory_bytes: None },
+        None,
+        crate::planning::resource::StaticSolveSelection::WithinCeiling {
+            machine_memory_bytes: None
+        },
     )
     .is_err());
     let fresh = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
@@ -83,7 +92,10 @@ pub(super) fn assert_carried_request_identity(
             &equivalent,
             &[],
             LocalExecutionPlan::serial(),
-            None, crate::planning::resource::StaticSolveSelection::WithinCeiling { machine_memory_bytes: None },
+            None,
+            crate::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None
+            },
         )
         .unwrap(),
         *plan,
@@ -113,7 +125,8 @@ fn original_compiler_phase_is_mandatory_and_governs_sequential_peak() {
         build_resource_plan(planned.clone()).unwrap().request,
         plan.request
     );
-    planned.accuracy_ceiling.maximum_resident_bytes = Some(planned.accuracy_ceiling.resident_byte_budget() - 1);
+    planned.accuracy_ceiling.maximum_resident_bytes =
+        Some(planned.accuracy_ceiling.resident_byte_budget() - 1);
     assert!(matches!(
         build_resource_plan(planned),
         Err(ResourcePlanningError::AccuracyCeiling { .. })

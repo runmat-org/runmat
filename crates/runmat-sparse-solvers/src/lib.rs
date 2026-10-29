@@ -42,7 +42,6 @@ pub mod bsr;
 pub mod dense;
 pub mod spgemm;
 
-
 pub use bsr::BsrMatrix;
 pub use control::{Progress, ProgressPhase, SolveControl};
 pub use csr::{CsrMatrix, CsrRef, TripletBuilder};

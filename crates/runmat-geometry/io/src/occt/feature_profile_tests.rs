@@ -72,7 +72,10 @@ fn exact_profile_sweeps_are_qualified_with_complete_lineage() {
         "extrusion",
         ResolvedGeometryFeatureOperation::Extrude {
             profile: GeometryFeatureRef("profile".into()),
-            distance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.5),
+            distance_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Length, _>::new(
+                    0.5,
+                ),
             direction: [0.0, 0.0, 1.0],
         },
         &[("profile", &profile)],
@@ -91,12 +94,18 @@ fn exact_profile_sweeps_are_qualified_with_complete_lineage() {
         ResolvedGeometryFeatureOperation::Revolve {
             profile: GeometryFeatureRef("profile".into()),
             axis: [0.0, 1.0, 0.0],
-            origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([
-                properties.centroid_m.canonical_value()[0] - 2.0,
-                properties.centroid_m.canonical_value()[1],
-                properties.centroid_m.canonical_value()[2],
-            ]),
-            angle_rad: runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle,_>::new(2.0 * std::f64::consts::PI),
+            origin_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [
+                        properties.centroid_m.canonical_value()[0] - 2.0,
+                        properties.centroid_m.canonical_value()[1],
+                        properties.centroid_m.canonical_value()[2],
+                    ],
+                ),
+            angle_rad:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle, _>::new(
+                    2.0 * std::f64::consts::PI,
+                ),
         },
         &[("profile", &profile)],
     );
@@ -128,7 +137,10 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
             radius_m: runmat_types::physical::Length::new(0.1),
             depth_m: runmat_types::physical::Length::new(1.0),
             axis: [0.0, 0.0, 1.0],
-            origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.5, 0.5, 0.0]),
+            origin_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.5, 0.5, 0.0],
+                ),
         },
         &[("stock", &stock)],
     );
@@ -143,7 +155,10 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
             radius_m: runmat_types::physical::Length::new(0.1),
             depth_m: runmat_types::physical::Length::new(1.0),
             axis: [0.0, 0.0, 1.0],
-            origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([2.0, 2.0, 0.0]),
+            origin_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [2.0, 2.0, 0.0],
+                ),
         },
         &GeometryFeatureProviderSelection::None,
         &[("stock", &stock)],
@@ -207,7 +222,10 @@ fn exact_removal_and_edge_treatment_features_are_qualified() {
             ResolvedGeometryFeatureOperation::Chamfer {
                 target: GeometryFeatureRef("stock".into()),
                 edges: edge_selection(),
-                distance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.1),
+                distance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.1),
             },
         ),
     ] {

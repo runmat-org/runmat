@@ -7,8 +7,8 @@ use crate::fea_contract::{
 };
 use crate::{BuiltinCatalogProvenance, BuiltinDocumentation};
 use runmat_types::{
-    CellFact, DynamicReason, LiteralContext, LiteralValue, OutputSelection,
-    RequestedOutputCount, ResidencyFact, ShapeFact, ValueFact, ValueKindFact,
+    CellFact, DynamicReason, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
+    ResidencyFact, ShapeFact, ValueFact, ValueKindFact,
 };
 
 fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
@@ -93,8 +93,18 @@ fn model_requires_geometry_and_exactly_one_procedure_source() {
     let geometry = object_fact(GEOMETRY_ASSET_CLASS);
     let steps = infer(
         FeaConstructorKind::Model,
-        vec![text(), geometry.clone(), text(), object_fact(FEA_MODEL_CLASS)],
-        vec![LiteralValue::Unknown, LiteralValue::Unknown, literal("Steps"), LiteralValue::Unknown],
+        vec![
+            text(),
+            geometry.clone(),
+            text(),
+            object_fact(FEA_MODEL_CLASS),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            literal("Steps"),
+            LiteralValue::Unknown,
+        ],
     );
     assert!(steps.diagnostics.is_empty(), "{:?}", steps.diagnostics);
     assert_eq!(output_class(&steps).as_deref(), Some("fea.Model"));
@@ -123,7 +133,12 @@ fn model_requires_geometry_and_exactly_one_procedure_source() {
     let wrong = infer(
         FeaConstructorKind::Model,
         vec![text(), text(), text(), text()],
-        vec![LiteralValue::Unknown, LiteralValue::Unknown, literal("Template"), LiteralValue::Unknown],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            literal("Template"),
+            LiteralValue::Unknown,
+        ],
     );
     assert!(codes(&wrong).contains(&"RM-CATALOG-FEA-GEOMETRY"));
     assert!(codes(&wrong).contains(&"RM-CATALOG-FEA-OPTION"));
@@ -141,7 +156,13 @@ fn study_requires_model_and_typed_options() {
     let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
     let valid = infer(
         FeaConstructorKind::Study,
-        vec![text(), unknown.clone(), unknown.clone(), text(), unknown.clone()],
+        vec![
+            text(),
+            unknown.clone(),
+            unknown.clone(),
+            text(),
+            unknown.clone(),
+        ],
         vec![
             LiteralValue::Unknown,
             LiteralValue::Unknown,
@@ -193,8 +214,18 @@ fn sweep_accepts_study_cells_and_logical_fail_fast() {
     );
     let valid = infer(
         FeaConstructorKind::Sweep,
-        vec![text(), studies, text(), ValueFact::scalar(ValueKindFact::Logical)],
-        vec![LiteralValue::Unknown, LiteralValue::Unknown, literal("Fail_Fast"), LiteralValue::Unknown],
+        vec![
+            text(),
+            studies,
+            text(),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            literal("Fail_Fast"),
+            LiteralValue::Unknown,
+        ],
     );
     assert!(valid.diagnostics.is_empty(), "{:?}", valid.diagnostics);
     assert_eq!(output_class(&valid).as_deref(), Some("fea.Sweep"));
@@ -202,7 +233,12 @@ fn sweep_accepts_study_cells_and_logical_fail_fast() {
     let invalid = infer(
         FeaConstructorKind::Sweep,
         vec![text(), object_fact(FEA_SWEEP_CLASS), text(), text()],
-        vec![LiteralValue::Unknown, LiteralValue::Unknown, literal("FailFast"), LiteralValue::Unknown],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            literal("FailFast"),
+            LiteralValue::Unknown,
+        ],
     );
     assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-STUDIES"));
     assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-OPTION-VALUE"));
@@ -210,7 +246,11 @@ fn sweep_accepts_study_cells_and_logical_fail_fast() {
 
 #[test]
 fn material_requires_a_capability_and_host_values() {
-    let empty = infer(FeaConstructorKind::Material, vec![text()], vec![LiteralValue::Unknown]);
+    let empty = infer(
+        FeaConstructorKind::Material,
+        vec![text()],
+        vec![LiteralValue::Unknown],
+    );
     assert!(codes(&empty).contains(&"RM-CATALOG-FEA-MATERIAL-EMPTY"));
     assert_eq!(output_class(&empty).as_deref(), Some("fea.Material"));
     let mut resident = ValueFact::scalar(ValueKindFact::Unknown);
@@ -218,7 +258,11 @@ fn material_requires_a_capability_and_host_values() {
     let invalid = infer(
         FeaConstructorKind::Material,
         vec![ValueFact::scalar(ValueKindFact::Logical), text(), resident],
-        vec![LiteralValue::Unknown, literal("YoungsModulusPa"), LiteralValue::Unknown],
+        vec![
+            LiteralValue::Unknown,
+            literal("YoungsModulusPa"),
+            LiteralValue::Unknown,
+        ],
     );
     assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-TEXT"));
     assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-RESIDENT"));

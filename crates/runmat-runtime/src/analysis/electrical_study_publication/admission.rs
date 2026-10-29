@@ -47,7 +47,9 @@ pub(super) fn validate(
         || step.procedure != AnalysisProcedure::Static
         || step.independent_domain != IndependentDomain::Static
     {
-        return Err("electrical publication differs from its original authored static workload".into());
+        return Err(
+            "electrical publication differs from its original authored static workload".into(),
+        );
     }
     validate_options(options, completed.workload.relative_residual_target)?;
     let plan = runmat_analysis_fea::study::plan_electrical_study(
@@ -202,7 +204,7 @@ fn validate_observations(
                     .collect::<Vec<_>>();
                 if matching.len() != 1 || !seen.insert(entry.result) {
                     return Err(
-                        "electrical observation result coverage or identity differs".to_string(),
+                        "electrical observation result coverage or identity differs".to_string()
                     );
                 }
                 Ok(matching[0].clone())

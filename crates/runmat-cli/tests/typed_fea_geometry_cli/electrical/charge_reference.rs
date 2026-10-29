@@ -36,9 +36,17 @@ pub(super) fn verify(
     near(source.integrated_source, sign * 2.0 * epsilon, epsilon);
     assert!(source.projection_evidence.iter().all(|e| e.accepted));
     for terminal in &response.terminals {
-        near(terminal.outward_flux.canonical_value(), sign * epsilon, epsilon);
+        near(
+            terminal.outward_flux.canonical_value(),
+            sign * epsilon,
+            epsilon,
+        );
     }
-    near(response.volume_source_work.canonical_value(), epsilon / 3.0, epsilon);
+    near(
+        response.volume_source_work.canonical_value(),
+        epsilon / 3.0,
+        epsilon,
+    );
     near(response.terminal_work.canonical_value(), 0.0, epsilon);
     assert!(response.linear_relative_residual <= 1e-8);
     assert!(response.relative_flux_imbalance <= 1e-8);

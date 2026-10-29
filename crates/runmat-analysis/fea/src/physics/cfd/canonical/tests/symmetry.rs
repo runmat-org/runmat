@@ -12,7 +12,9 @@ fn plane_poiseuille(y: f64) -> f64 {
 }
 
 fn target(id: &str, entities: Vec<runmat_meshing_core::PersistentEntityId>) -> RegionTarget {
-    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(id)));
+    let mut target = RegionTarget::boundary(
+        runmat_meshing_core::fixtures::fixture_boundary_selection(&(id)),
+    );
     target.bind_resolved_entities(entities).unwrap();
     target
 }
@@ -80,7 +82,12 @@ fn error(f: &fixture::Fixture, r: &CanonicalFluidResult) -> (f64, f64) {
     let mut numerator = 0.0;
     let mut denominator = 0.0;
     let mut spanwise = 0.0f64;
-    for (c, u) in f.topology.cells.iter().zip(r.velocity_m_per_s.canonical_values()) {
+    for (c, u) in f
+        .topology
+        .cells
+        .iter()
+        .zip(r.velocity_m_per_s.canonical_values())
+    {
         let exact = [plane_poiseuille(c.centroid_m[1]), 0.0, 0.0];
         numerator += c.volume_m3 * norm(sub(*u, exact)).powi(2);
         denominator += c.volume_m3 * norm(exact).powi(2);
@@ -113,7 +120,10 @@ fn symmetry_planes_reproduce_plane_poiseuille_flow_under_refinement() {
             if matches!(p.boundaries[i], boundary::FaceBoundary::Symmetry { .. }) {
                 assert_eq!(r.face_volume_flux_m3_per_s.canonical_values()[i], 0.0);
                 let shear = r.residual.face_forces.viscous_traction_n.canonical_values()[i];
-                let normal = geometry_ops::scale(face.owner_area_vector_m2, 1.0 / face.area_m2.canonical_value());
+                let normal = geometry_ops::scale(
+                    face.owner_area_vector_m2,
+                    1.0 / face.area_m2.canonical_value(),
+                );
                 let tangential = sub(
                     shear,
                     geometry_ops::scale(normal, geometry_ops::dot(shear, normal)),
@@ -127,7 +137,10 @@ fn symmetry_planes_reproduce_plane_poiseuille_flow_under_refinement() {
             .iter()
             .find(|b| b.authority_id == "spanwise")
             .unwrap();
-        assert_eq!(balance.volume_flow_rate_m3_per_s, runmat_types::physical::Quantity::new(0.0));
+        assert_eq!(
+            balance.volume_flow_rate_m3_per_s,
+            runmat_types::physical::Quantity::new(0.0)
+        );
         previous = relative;
     }
     assert!(
@@ -213,9 +226,8 @@ fn closed_component_with_symmetry_planes_reproduces_couette_flow() {
     let mut by_height = std::collections::BTreeMap::<i64, Vec<_>>::new();
     for face in &f.source.boundary_faces {
         let x = face.centroid_m;
-        let interior_side = (x[1] - 1.0).abs() >= 1e-12
-            && x[2].abs() >= 1e-12
-            && (x[2] - 1.0).abs() >= 1e-12;
+        let interior_side =
+            (x[1] - 1.0).abs() >= 1e-12 && x[2].abs() >= 1e-12 && (x[2] - 1.0).abs() >= 1e-12;
         if interior_side {
             by_height
                 .entry((x[1] * 1e9).round() as i64)
@@ -238,7 +250,12 @@ fn closed_component_with_symmetry_planes_reproduces_couette_flow() {
     let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
     let r = p.solve().unwrap();
     let mut worst = 0.0f64;
-    for (c, u) in f.topology.cells.iter().zip(r.velocity_m_per_s.canonical_values()) {
+    for (c, u) in f
+        .topology
+        .cells
+        .iter()
+        .zip(r.velocity_m_per_s.canonical_values())
+    {
         worst = worst.max(norm(sub(*u, [c.centroid_m[1], 0.0, 0.0])));
     }
     assert!(worst < 0.05, "Couette error {worst}");
@@ -257,7 +274,11 @@ fn thin_cells_on_symmetry_planes_converge_promptly() {
     );
     let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
     let r = p.solve().unwrap();
-    assert!(r.outer_iterations <= 5, "outer iterations {}", r.outer_iterations);
+    assert!(
+        r.outer_iterations <= 5,
+        "outer iterations {}",
+        r.outer_iterations
+    );
     let (relative, _) = error(&f, &r);
     assert!(relative < 0.1, "relative L2 error {relative}");
 }
@@ -279,8 +300,18 @@ fn assembled_momentum_block_matches_the_matrix_free_rows() {
         let [x, y, z] = c.centroid_m;
         [a * (1.0 + x * y), 0.3 * a * (z - y * y), 0.2 * a * (x - z)]
     };
-    let origin = p.topology.cells.iter().map(|c| field(c, 0.7)).collect::<Vec<_>>();
-    let change = p.topology.cells.iter().map(|c| field(c, -0.4)).collect::<Vec<_>>();
+    let origin = p
+        .topology
+        .cells
+        .iter()
+        .map(|c| field(c, 0.7))
+        .collect::<Vec<_>>();
+    let change = p
+        .topology
+        .cells
+        .iter()
+        .map(|c| field(c, -0.4))
+        .collect::<Vec<_>>();
     let pressure = vec![0.0; n];
     let q = super::super::pressure::h_flux(&p, &origin, &vec![[0.0; 3]; n]).unwrap();
     let (assembled, matrix_free) =
@@ -291,7 +322,10 @@ fn assembled_momentum_block_matches_the_matrix_free_rows() {
         .iter()
         .zip(&matrix_free)
         .fold(0.0f64, |m, (a, b)| m.max((a - b).abs()));
-    assert!(worst <= 1e-12 * scale, "difference {worst} against scale {scale}");
+    assert!(
+        worst <= 1e-12 * scale,
+        "difference {worst} against scale {scale}"
+    );
 }
 
 /// Solver-speed benchmark on the graded symmetry slab (not a validation test):
@@ -300,9 +334,14 @@ fn assembled_momentum_block_matches_the_matrix_free_rows() {
 #[test]
 #[ignore = "benchmark"]
 fn graded_slab_solver_benchmark() {
-    let n: usize = std::env::var("RUNMAT_CFD_BENCH_N").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
-    let threads: usize =
-        std::env::var("RUNMAT_CFD_BENCH_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+    let n: usize = std::env::var("RUNMAT_CFD_BENCH_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+    let threads: usize = std::env::var("RUNMAT_CFD_BENCH_THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
     let start = std::time::Instant::now();
     let f = symmetry_case_on(
         fixture::case_mapped(n, ReferenceCase::Duct, false, |[x, y, z]| [x, y, z.powi(4)]),
@@ -317,7 +356,9 @@ fn graded_slab_solver_benchmark() {
     let prepare = start.elapsed().as_secs_f64();
     let cells = p.topology.cells.len();
     let start = std::time::Instant::now();
-    let r = runmat_cpu_execution::with_cpu_pool(threads, || p.solve()).unwrap().unwrap();
+    let r = runmat_cpu_execution::with_cpu_pool(threads, || p.solve())
+        .unwrap()
+        .unwrap();
     let solve = start.elapsed().as_secs_f64();
     let (relative, _) = error(&f, &r);
     println!(

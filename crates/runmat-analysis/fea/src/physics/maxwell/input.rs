@@ -95,7 +95,11 @@ impl MaxwellInput {
     }
     pub fn validate_for_mesh(&self, mesh: &SolverMeshArtifact) -> Result<(), MaxwellError> {
         self.ordered_volumes(mesh)?;
-        if self.grounded_faces.windows(2).any(|pair| pair[0] >= pair[1]) {
+        if self
+            .grounded_faces
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
             return Err(invalid("grounded faces must be sorted and unique"));
         }
         let elements: std::collections::BTreeSet<_> =

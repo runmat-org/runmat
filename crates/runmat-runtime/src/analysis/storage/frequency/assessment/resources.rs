@@ -65,10 +65,8 @@ impl<'a, R: FnMut(Digest, u64) -> Result<Option<Vec<u8>>, Error>> Reader<'a, R> 
     }
     pub(super) fn admit_decode(&self, bytes: &[u8], retained: u64) -> Result<(), Error> {
         let decoded =
-            runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
-                bytes,
-            )
-            .map_err(|error| Error::from(AnalysisPublicationError::from(error)))?;
+            runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(bytes)
+                .map_err(|error| Error::from(AnalysisPublicationError::from(error)))?;
         self.admit(add(retained, decoded)?)
     }
     pub(super) fn manifest(

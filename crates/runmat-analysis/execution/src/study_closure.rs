@@ -22,20 +22,19 @@ pub(crate) fn import_workspace(references: &[ValueRef]) -> AnalysisBridgeResult<
             )
         })
     })?;
-    let decoded =
-        runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
-            encoded,
-            u64::try_from(references.len()).map_err(|_| {
-                runmat_analysis_fea::execution::AnalysisExecutionError::Limit(
-                    "study import count overflow",
-                )
-            })?,
-        )
-        .ok_or(
+    let decoded = runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
+        encoded,
+        u64::try_from(references.len()).map_err(|_| {
             runmat_analysis_fea::execution::AnalysisExecutionError::Limit(
-                "study decode inventory overflow",
-            ),
-        )?;
+                "study import count overflow",
+            )
+        })?,
+    )
+    .ok_or(
+        runmat_analysis_fea::execution::AnalysisExecutionError::Limit(
+            "study decode inventory overflow",
+        ),
+    )?;
     // Keep every object in this phase covered, including partial chunks assembled
     // into logical payloads and simultaneous output/receipt decode work.
     encoded

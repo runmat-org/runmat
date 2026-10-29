@@ -272,7 +272,10 @@ fn a_unit_mismatch_is_located_at_the_value_and_names_expected_and_found_units() 
     );
     let diagnostic = &program.diagnostics[0];
     assert_eq!(diagnostic.code, "fea.semantic.model");
-    assert_eq!(diagnostic.message, "traction must be force per area, found N");
+    assert_eq!(
+        diagnostic.message,
+        "traction must be force per area, found N"
+    );
     assert_eq!(diagnostic.label.as_deref(), Some("expected Pa"));
     let span = diagnostic.location.as_ref().unwrap().span;
     assert_eq!(&source[span.start..span.end], "[0, 0, -100000] N");

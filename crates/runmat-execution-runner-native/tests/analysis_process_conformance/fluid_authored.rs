@@ -85,13 +85,21 @@ pub(super) async fn run() {
             )
             .replace("BOUNDARY", if moving { "velocity" } else { "no_slip_wall" });
         let imported = runmat_geometry_io::import_exact_cad(
-            "box.brep", include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep"),
+            "box.brep",
+            include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep"),
             runmat_geometry_io::GeometryFormat::Brep,
-            &runmat_geometry_io::ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..Default::default() },
+            &runmat_geometry_io::ExactCadImportOptions {
+                source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+                ..Default::default()
+            },
             &runmat_geometry_io::GeometryImportContext::new(),
-        ).unwrap();
+        )
+        .unwrap();
         for (index, face) in &imported.source_face_ids {
-            source = source.replace(&format!("FACE_{}_ID", index + 1), &face.analysis_selection_id().unwrap());
+            source = source.replace(
+                &format!("FACE_{}_ID", index + 1),
+                &face.analysis_selection_id().unwrap(),
+            );
         }
         std::fs::write(&path, source).unwrap();
         let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
@@ -171,7 +179,10 @@ pub(super) async fn run() {
             original.velocity_m_per_s.canonical_values().len(),
             result.mesh.topology.volume_elements.len()
         );
-        assert!(!original.face_volume_flux_m3_per_s.canonical_values().is_empty());
+        assert!(!original
+            .face_volume_flux_m3_per_s
+            .canonical_values()
+            .is_empty());
         assert_eq!(result.completion.fields.fields.len(), 3);
         assert_eq!(
             result.completion.fields.entity_counts.volume_elements,
@@ -289,7 +300,8 @@ pub(super) async fn run() {
         }
         let max_velocity = original
             .velocity_m_per_s
-            .canonical_values().iter()
+            .canonical_values()
+            .iter()
             .flatten()
             .map(|x| x.abs())
             .fold(0.0, f64::max);
@@ -301,7 +313,10 @@ pub(super) async fn run() {
                 result.completion.workload.geometry_policy,
             )
             .unwrap();
-            assert_eq!(topology.cells.len(), original.velocity_m_per_s.canonical_values().len());
+            assert_eq!(
+                topology.cells.len(),
+                original.velocity_m_per_s.canonical_values().len()
+            );
             assert_eq!(
                 topology.faces.len(),
                 original.face_volume_flux_m3_per_s.canonical_values().len()
@@ -320,7 +335,8 @@ pub(super) async fn run() {
             }
             assert!(original
                 .pressure_pa
-                .canonical_values().iter()
+                .canonical_values()
+                .iter()
                 .all(|p| p.abs() <= tolerance * 0.001));
             let flux_scale = topology
                 .faces
@@ -345,7 +361,11 @@ pub(super) async fn run() {
             assert!(max_velocity > 0.0);
         } else {
             assert_eq!(max_velocity, 0.0);
-            assert!(original.pressure_pa.canonical_values().iter().all(|p| *p == 0.0));
+            assert!(original
+                .pressure_pa
+                .canonical_values()
+                .iter()
+                .all(|p| *p == 0.0));
         }
         let expected = result.completion.clone();
         let mesh = result.mesh.clone();
@@ -484,8 +504,18 @@ pub(super) async fn run() {
         }) {
             eprintln!(
                 "authored fluid lifecycle: cells={}, all_faces={}, admitted_state_heap={}B",
-                expected.result.original().velocity_m_per_s.canonical_values().len(),
-                expected.result.original().face_volume_flux_m3_per_s.canonical_values().len(),
+                expected
+                    .result
+                    .original()
+                    .velocity_m_per_s
+                    .canonical_values()
+                    .len(),
+                expected
+                    .result
+                    .original()
+                    .face_volume_flux_m3_per_s
+                    .canonical_values()
+                    .len(),
                 closure
                     .execution
                     .winning_accounting()
@@ -562,12 +592,14 @@ pub(super) async fn run() {
         previous_receipt = Some(actual.numerical_receipt.clone());
         // Live, replayed, accuracy and published validations of the catalog share one
         // (catalog, step, mesh) validation; a repeat is accepted, a foreign step is not.
-        let catalog = actual.observation_catalog.as_ref().expect("authored catalog");
+        let catalog = actual
+            .observation_catalog
+            .as_ref()
+            .expect("authored catalog");
         let step = &actual.workload.model.sequence.steps[0];
-        let context =
-            runmat_analysis_fea::execution::ObservationHistorySourceContext::VolumeMesh {
-                mesh: &mesh,
-            };
+        let context = runmat_analysis_fea::execution::ObservationHistorySourceContext::VolumeMesh {
+            mesh: &mesh,
+        };
         catalog.validate_for(step, context).unwrap();
         catalog.validate_for(step, context).unwrap();
         let mut foreign = step.clone();

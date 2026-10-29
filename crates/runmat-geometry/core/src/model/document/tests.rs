@@ -1,5 +1,5 @@
-use crate::LengthUnit;
 use super::*;
+use crate::LengthUnit;
 
 fn digest(seed: u8) -> GeometryDigest {
     GeometryDigest::from_bytes([seed; 32])

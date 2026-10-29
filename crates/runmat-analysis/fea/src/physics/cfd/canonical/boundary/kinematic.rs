@@ -37,7 +37,9 @@ pub(super) fn compile<'a>(
             .iter()
             .filter(|s| s.signal_id() == &a.signal_id);
         let Some(PhysicalSignal::Velocity(signal)) = matching.next() else {
-            return Err(Error::Invalid("exact velocity signal quantity and identity"));
+            return Err(Error::Invalid(
+                "exact velocity signal quantity and identity",
+            ));
         };
         if matching.next().is_some() {
             return Err(Error::Invalid("duplicate velocity signal identity"));
@@ -59,7 +61,9 @@ pub(super) fn compile<'a>(
         }
         let sampled =
             crate::excitation::sample_signal(signal, input.sample, |v| v.canonical_value())
-                .and_then(|value| crate::excitation::expect_vector3_or_direction(value, a.direction))
+                .and_then(|value| {
+                    crate::excitation::expect_vector3_or_direction(value, a.direction)
+                })
                 .map_err(|e| Error::InputRealization(e.to_string()))?;
         if sampled.imaginary != [0.0; 3] || sampled.real.iter().any(|v| !v.is_finite()) {
             return Err(Error::Unsupported("nonreal or nonfinite fluid velocity"));

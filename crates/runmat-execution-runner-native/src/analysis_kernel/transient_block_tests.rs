@@ -94,8 +94,9 @@ fn transient_fixture() -> (
             rotations: Vec::new(),
         }),
     })];
-    model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")));
+    model.excitations[0].excitation_mut().target = ExcitationTarget::Region(
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")),
+    );
     (
         model,
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4),
@@ -261,7 +262,9 @@ fn authored_modal_support_motion_fixture() -> (
             constraint_id: "moving-root-x".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::PrescribedMotion(PrescribedStructuralMotion {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
                 translations: vec![TranslationDofMotion {
                     dof: StructuralTranslationDof::Ux,
                     history: StructuralKinematicHistory::AccelerationDriven {
@@ -278,7 +281,9 @@ fn authored_modal_support_motion_fixture() -> (
             constraint_id: "fixed-root-yz".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
                 translations: [StructuralTranslationDof::Uy, StructuralTranslationDof::Uz]
                     .into_iter()
                     .map(|dof| TranslationDofValue {

@@ -169,11 +169,7 @@ macro_rules! scalar_signal {
     (
         $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
-        #[runtime_builtin(
-                                    name = $builtin,
-                                    binding_variant = "default",
-                                    builtin_path = "crate::builtins::fea::signals"
-                                )]
+        #[runtime_builtin(name = $builtin, binding_variant = "default", builtin_path = "crate::builtins::fea::signals")]
         pub async fn $function(id: String, value: Value) -> BuiltinResult<Value> {
             let value = finite_numeric_scalar($builtin, &value, "value")?;
             signal_object(
@@ -194,11 +190,7 @@ macro_rules! vector_signal {
     (
         $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
-        #[runtime_builtin(
-                                    name = $builtin,
-                                    binding_variant = "default",
-                                    builtin_path = "crate::builtins::fea::signals"
-                                )]
+        #[runtime_builtin(name = $builtin, binding_variant = "default", builtin_path = "crate::builtins::fea::signals")]
         pub async fn $function(id: String, components: Value) -> BuiltinResult<Value> {
             let components = finite_numeric_vector3($builtin, &components, "components")?;
             signal_object(
@@ -405,7 +397,8 @@ pub(super) fn physical_signal_from_value(
     let payload: SignalObject = super::object_payload_omitting(
         builtin,
         value,
-        signal_class_name(expected_quantity).ok_or_else(|| builtin_error(builtin, &ERROR_INPUT, "unsupported signal quantity"))?,
+        signal_class_name(expected_quantity)
+            .ok_or_else(|| builtin_error(builtin, &ERROR_INPUT, "unsupported signal quantity"))?,
         &[FROZEN_GENERATOR_PROPERTY],
     )?;
     if payload.signal.quantity() != expected_quantity {

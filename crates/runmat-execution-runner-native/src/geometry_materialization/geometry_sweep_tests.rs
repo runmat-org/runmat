@@ -158,15 +158,26 @@ fn derived_geometry_sweep_reuses_its_source_and_invalidates_every_downstream_ide
     let wide_mesh =
         resolve_meshing_request(wide.document.tolerance, MeshingRequestSettings::default())
             .unwrap();
-    let narrow_plan =
-        ExactMeshingDagPlanner::new(&narrow_geometry, narrow_mesh, runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT, access.clone(), None)
-            .unwrap()
-            .initial_curve_pass(&narrow_geometry.geometry_objects().topology, 64)
-            .unwrap();
-    let wide_plan = ExactMeshingDagPlanner::new(&wide_geometry, wide_mesh, runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT, access, None)
-        .unwrap()
-        .initial_curve_pass(&wide_geometry.geometry_objects().topology, 64)
-        .unwrap();
+    let narrow_plan = ExactMeshingDagPlanner::new(
+        &narrow_geometry,
+        narrow_mesh,
+        runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
+        access.clone(),
+        None,
+    )
+    .unwrap()
+    .initial_curve_pass(&narrow_geometry.geometry_objects().topology, 64)
+    .unwrap();
+    let wide_plan = ExactMeshingDagPlanner::new(
+        &wide_geometry,
+        wide_mesh,
+        runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
+        access,
+        None,
+    )
+    .unwrap()
+    .initial_curve_pass(&wide_geometry.geometry_objects().topology, 64)
+    .unwrap();
     assert_ne!(
         narrow_plan.partitions()[0]
             .host()

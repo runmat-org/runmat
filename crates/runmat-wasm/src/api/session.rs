@@ -1187,9 +1187,12 @@ impl RunMatWasm {
             serde_wasm_bindgen::from_value::<FeaFieldRequestPayload>(options_value)
                 .map_err(|err| js_error(&format!("FEA field options parse failed: {err}")))?
         };
-        let payload = runmat_runtime::analysis::storage::with_artifact_access(false, |_| load_fea_field(run_id, field_id, options))
-            .await.map_err(|error| js_error(&error.to_string()))?
-            .map_err(|err| js_error(&err))?;
+        let payload = runmat_runtime::analysis::storage::with_artifact_access(false, |_| {
+            load_fea_field(run_id, field_id, options)
+        })
+        .await
+        .map_err(|error| js_error(&error.to_string()))?
+        .map_err(|err| js_error(&err))?;
         self.ensure_not_disposed()?;
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA field: {err}")))
@@ -1758,15 +1761,18 @@ impl RunMatWasm {
             )
         };
         let (mut scene, deformation_scale, exact) =
-            runmat_runtime::analysis::storage::with_artifact_access(false, |_| runmat_runtime::analysis::field_scene::build_scene_view(
-                run_id,
-                field_id.as_deref(),
-                shape_mode,
-                exaggeration,
-                show_undeformed_outline,
-                view,
-            ))
-            .await.map_err(|error| js_error(&error.to_string()))?
+            runmat_runtime::analysis::storage::with_artifact_access(false, |_| {
+                runmat_runtime::analysis::field_scene::build_scene_view(
+                    run_id,
+                    field_id.as_deref(),
+                    shape_mode,
+                    exaggeration,
+                    show_undeformed_outline,
+                    view,
+                )
+            })
+            .await
+            .map_err(|error| js_error(&error.to_string()))?
             .map_err(|error| JsValue::from_str(&error))?;
         self.ensure_not_disposed()?;
         let handle = if let Some(handle) = replace_handle {
@@ -1857,7 +1863,8 @@ impl RunMatWasm {
             active.cancel(runmat_execution::CancellationReason::Shutdown);
         }
         runmat_runtime::execution::RuntimeExecutionServices::drain_scope(
-            self.execution_service.as_ref(), runmat_execution::CancellationReason::Shutdown,
+            self.execution_service.as_ref(),
+            runmat_execution::CancellationReason::Shutdown,
         );
         #[cfg(target_arch = "wasm32")]
         self.local_tasks.borrow().shutdown();

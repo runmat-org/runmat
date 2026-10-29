@@ -37,7 +37,9 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+                ),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));

@@ -102,10 +102,7 @@ fn canonical_request_rejects_non_finite_and_unbounded_inputs() {
 
     let mut invalid = request();
     invalid.limits.maximum_nodes = 0;
-    assert_eq!(
-        invalid.validate().unwrap_err().field,
-        "meshing size limits"
-    );
+    assert_eq!(invalid.validate().unwrap_err().field, "meshing size limits");
 
     let mut invalid = request();
     invalid.quality.curve.minimum_metric_edge_length = 2.0;

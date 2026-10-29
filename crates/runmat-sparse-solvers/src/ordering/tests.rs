@@ -20,7 +20,9 @@ fn nested_dissection_is_a_valid_deterministic_permutation() {
         assert!(!seen[v]);
         seen[v] = true;
     }
-    let threaded = crate::par::with_threads(4, || order(a.as_ref(), &Ordering::NestedDissection).unwrap());
+    let threaded = crate::par::with_threads(4, || {
+        order(a.as_ref(), &Ordering::NestedDissection).unwrap()
+    });
     assert_eq!(first, threaded);
 }
 

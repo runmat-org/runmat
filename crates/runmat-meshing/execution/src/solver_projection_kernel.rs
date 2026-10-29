@@ -85,10 +85,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                 &codec,
             )
             .map_err(|error| {
-                failure(
-                    MeshingFailureCategory::InvalidGeometry,
-                    &error.to_string(),
-                )
+                failure(MeshingFailureCategory::InvalidGeometry, &error.to_string())
             })?;
             drop(surface);
             drop(surface_storage);
@@ -176,7 +173,10 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             let bytes = projection
                 .retained_storage_bytes(u64::MAX, &mut || Ok(()))
                 .map_err(|error| {
-                    failure(MeshingFailureCategory::MemoryBudgetExceeded, &error.to_string())
+                    failure(
+                        MeshingFailureCategory::MemoryBudgetExceeded,
+                        &error.to_string(),
+                    )
                 })?;
             runmat_geometry_core::GeometryEvaluationControl::consume_allocation_bytes(
                 &retained, bytes,
@@ -253,7 +253,10 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                     "tet10_straightened_elements".into(),
                     elevation.straightened_elements,
                 ),
-                ("tet10_straightened_edges".into(), elevation.straightened_edges),
+                (
+                    "tet10_straightened_edges".into(),
+                    elevation.straightened_edges,
+                ),
                 ("solver_volume_elements".into(), element_count),
                 (
                     "solver_boundary_faces".into(),
@@ -363,7 +366,10 @@ impl<'a> SolverProjectionSources<'a> {
             .manifest
             .prerequisite_manifest_digests;
         let volume_closes = self.volume.is_none_or(|volume| {
-            let volume_prerequisites = &volume.stage_objects().manifest.prerequisite_manifest_digests;
+            let volume_prerequisites = &volume
+                .stage_objects()
+                .manifest
+                .prerequisite_manifest_digests;
             volume_prerequisites.binary_search(&geometry_digest).is_ok()
                 && volume_prerequisites.binary_search(&surface_digest).is_ok()
         });
@@ -411,11 +417,7 @@ impl<'a> SolverProjectionSources<'a> {
                 ),
                 maximum_nodes: invocation.host.resolved_request.limits.maximum_nodes,
                 maximum_triangles: invocation.host.resolved_request.limits.maximum_elements,
-                maximum_boundary_segments: invocation
-                    .host
-                    .resolved_request
-                    .limits
-                    .maximum_elements,
+                maximum_boundary_segments: invocation.host.resolved_request.limits.maximum_elements,
             },
             &codec,
             &codec,

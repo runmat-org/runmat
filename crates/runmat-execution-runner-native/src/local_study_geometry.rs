@@ -111,7 +111,10 @@ pub(crate) async fn execute_local_study_geometry(
 
     let analysis_config = config.clone();
     let meshing_ceilings = match config.local_memory_capacity_bytes {
-        Some(capacity) => crate::machine_capacity::meshing_execution_ceilings_for(capacity, &meshing_request.limits),
+        Some(capacity) => crate::machine_capacity::meshing_execution_ceilings_for(
+            capacity,
+            &meshing_request.limits,
+        ),
         None => crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits),
     };
     // Worker slots advertise the whole machine, while the pool has one aggregate

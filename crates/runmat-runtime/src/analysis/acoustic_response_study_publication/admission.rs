@@ -26,10 +26,14 @@ pub(super) fn validate(
         .map_err(|e| e.to_string())?
         != definition
     {
-        return Err("acoustic response publication differs from authenticated compiled definition".into());
+        return Err(
+            "acoustic response publication differs from authenticated compiled definition".into(),
+        );
     }
     let [step] = completed.compiled.model.sequence.steps.as_slice() else {
-        return Err("acoustic response publication requires one fresh independent authored step".into());
+        return Err(
+            "acoustic response publication requires one fresh independent authored step".into(),
+        );
     };
     if completed.workload.model != completed.compiled.model
         || completed.workload.step_id != step.step_id
@@ -50,7 +54,9 @@ pub(super) fn validate(
     )
     .map_err(|e| e.to_string())?;
     if plan != completed.workload {
-        return Err("acoustic response publication workload differs from exact authored planning".into());
+        return Err(
+            "acoustic response publication workload differs from exact authored planning".into(),
+        );
     }
     completed
         .result
@@ -81,7 +87,8 @@ pub(super) fn validate(
     .map_err(|e| e.to_string())?;
     if expected_accuracy != completed.accuracy {
         return Err(
-            "acoustic response accuracy differs from exact authored plan and accepted receipt".into(),
+            "acoustic response accuracy differs from exact authored plan and accepted receipt"
+                .into(),
         );
     }
     let requests = completed
@@ -116,7 +123,10 @@ pub(super) fn validate(
     Ok(())
 }
 
-fn validate_options(options: &AnalysisAcousticResponseRunOptions, residual: f64) -> Result<(), String> {
+fn validate_options(
+    options: &AnalysisAcousticResponseRunOptions,
+    residual: f64,
+) -> Result<(), String> {
     if options.residual_target != residual
         || options.precision_mode != super::super::PrecisionMode::Fp64
     {

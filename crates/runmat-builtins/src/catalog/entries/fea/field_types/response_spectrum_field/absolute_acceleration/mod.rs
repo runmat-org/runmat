@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const ABSOLUTE_ACCELERATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.ResponseSpectrumField.absoluteAcceleration()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const ABSOLUTE_ACCELERATION_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&ABSOLUTE_ACCELERATION_SIGNATURES);
+const ABSOLUTE_ACCELERATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.ResponseSpectrumField.absoluteAcceleration()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const ABSOLUTE_ACCELERATION_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&ABSOLUTE_ACCELERATION_SIGNATURES);
 const ABSOLUTE_ACCELERATION_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-absolute-acceleration",
     title: "Select the absolute acceleration envelope",

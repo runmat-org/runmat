@@ -4,11 +4,11 @@ use runmat_analysis_core::{
     LaminatePlyModel, LaminateShellSectionModel, MaterialCapability, PlyOrderDirection,
     PropertyRegionTarget, ShellReferenceSurface, ShellSectionModel,
 };
+use runmat_canonical_codec::serialized_materialization_resident_bytes_estimate;
 use runmat_meshing_core::fixtures::{
     canonical_tetrahedron_solver_mesh, three_region_tetrahedron_solver_mesh_with_order,
 };
 use runmat_meshing_core::ElementOrder;
-use runmat_canonical_codec::serialized_materialization_resident_bytes_estimate;
 
 fn solid_model(mesh: &SolverMeshArtifact) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -251,8 +251,14 @@ fn laminate_model() -> AnalysisModel {
             .map(|(ply_id, material_id)| LaminatePlyModel {
                 ply_id: ply_id.into(),
                 material_id: material_id.into(),
-                thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.001),
-                angle_rad: runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle,_>::new(0.0),
+                thickness_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.001),
+                angle_rad:
+                    runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle, _>::new(
+                        0.0,
+                    ),
             })
             .to_vec(),
             shear_correction: Some(5.0 / 6.0),
@@ -490,17 +496,19 @@ fn changed_topology_gets_fresh_cache_and_cannot_use_another_models_identities() 
 //   covered by the occurrence tests above.
 #[test]
 fn single_material_large_model_compiles_within_an_element_proportional_budget() {
-    let mesh = crate::adaptation::structural_recovery::qualification_tests::mesh::structured_cantilever(
-        32,
-        ElementOrder::Tet4,
-    );
+    let mesh =
+        crate::adaptation::structural_recovery::qualification_tests::mesh::structured_cantilever(
+            32,
+            ElementOrder::Tet4,
+        );
     let elements = mesh.topology.volume_elements.len() as u64;
     assert_eq!(elements, 6 * 32 * 32 * 32);
     let model = solid_model(&mesh);
     let prepared = PreparedProperties::prepare(&model, Some(&mesh), u64::MAX).unwrap();
     // The mesh's own canonical-validation scratch is charged alongside; the property-owned part
     // (typed inventory, shared material table and identity encoding) is a few KiB per element.
-    let budget = mesh.validation_resident_bytes_estimate().unwrap() + elements * 4096 + 4 * 1024 * 1024;
+    let budget =
+        mesh.validation_resident_bytes_estimate().unwrap() + elements * 4096 + 4 * 1024 * 1024;
     assert!(
         prepared.estimated_resident_bytes <= budget,
         "{} bytes for {elements} elements (metadata {}, mesh validation {})",
@@ -512,7 +520,10 @@ fn single_material_large_model_compiles_within_an_element_proportional_budget() 
     let retained = compiled
         .retained_storage_bytes_estimate(CanonicalLimits::new(usize::MAX, usize::MAX, 65_536, 64))
         .unwrap();
-    assert!(retained <= elements * 1024 + 1024 * 1024, "{retained} retained bytes");
+    assert!(
+        retained <= elements * 1024 + 1024 * 1024,
+        "{retained} retained bytes"
+    );
     // Every element references the one shared material owner.
     let mut owners = compiled
         .solid_materials()

@@ -139,7 +139,9 @@ pub(crate) fn validate_face_delaunay_topology(
             return Err(invalid(
                 pslg,
                 ExactFaceDelaunayErrorKind::InvalidTopology,
-                format!("Delaunay boundary turns inward at vertex {b}; the convex hull is not covered"),
+                format!(
+                    "Delaunay boundary turns inward at vertex {b}; the convex hull is not covered"
+                ),
             ));
         }
     }

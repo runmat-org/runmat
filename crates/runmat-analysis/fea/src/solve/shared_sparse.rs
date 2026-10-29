@@ -14,7 +14,9 @@ fn as_usize(values: &[u64]) -> Cow<'_, [usize]> {
     {
         // SAFETY: u64 and usize have identical size and alignment on 64-bit targets and every
         // bit pattern is valid for both.
-        Cow::Borrowed(unsafe { std::slice::from_raw_parts(values.as_ptr().cast::<usize>(), values.len()) })
+        Cow::Borrowed(unsafe {
+            std::slice::from_raw_parts(values.as_ptr().cast::<usize>(), values.len())
+        })
     }
     #[cfg(not(target_pointer_width = "64"))]
     {
@@ -44,7 +46,13 @@ impl<'a> CsrArrays<'a> {
     /// Canonical patterns are validated at construction (sorted, in-bounds), so the view needs no
     /// further checks.
     pub(crate) fn view(&self) -> CsrRef<'_, f64> {
-        CsrRef::new_unchecked(self.rows, self.columns, &self.row_ptr, &self.col_idx, self.values)
+        CsrRef::new_unchecked(
+            self.rows,
+            self.columns,
+            &self.row_ptr,
+            &self.col_idx,
+            self.values,
+        )
     }
 }
 
@@ -215,7 +223,9 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                             control(),
                         ) {
                             Ok(solver) => solver,
-                            Err(error) => return failure(format!("sparse Cholesky failed: {error}")),
+                            Err(error) => {
+                                return failure(format!("sparse Cholesky failed: {error}"))
+                            }
                         };
                         &owned
                     }
@@ -231,7 +241,8 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                 let residual: Vec<f64> = rhs.iter().zip(&ax).map(|(b, v)| b - v).collect();
                 let residual_norm = runmat_sparse_solvers::par::norm2(&residual);
                 SpdSolveOutcome {
-                    converged: residual_norm <= relative_tolerance.max(1e-14) * reference || residual_norm == 0.0,
+                    converged: residual_norm <= relative_tolerance.max(1e-14) * reference
+                        || residual_norm == 0.0,
                     solution: x,
                     iterations: 1,
                     residual_norm,
@@ -266,10 +277,14 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                         Ok(ilu) => Box::new(ilu),
                         Err(error) => return failure(format!("ILU(0) setup failed: {error}")),
                     },
-                    PreconditionerChoice::BlockJacobi if block_size > 1 => match BlockJacobi::new(a, block_size) {
-                        Ok(p) => Box::new(p),
-                        Err(error) => return failure(format!("block Jacobi setup failed: {error}")),
-                    },
+                    PreconditionerChoice::BlockJacobi if block_size > 1 => {
+                        match BlockJacobi::new(a, block_size) {
+                            Ok(p) => Box::new(p),
+                            Err(error) => {
+                                return failure(format!("block Jacobi setup failed: {error}"))
+                            }
+                        }
+                    }
                     _ => match Jacobi::new(a) {
                         Ok(p) => Box::new(p),
                         Err(error) => return failure(format!("Jacobi setup failed: {error}")),
@@ -284,7 +299,14 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                     max_iterations: n.saturating_mul(2).clamp(256, 100_000),
                     ..Default::default()
                 };
-                match pcg(&a, Some(preconditioner.as_ref()), rhs, &mut x, &options, control()) {
+                match pcg(
+                    &a,
+                    Some(preconditioner.as_ref()),
+                    rhs,
+                    &mut x,
+                    &options,
+                    control(),
+                ) {
                     Ok(report) => {
                         let reference = reference_norm(rhs, report.residual_norm);
                         let spectral_estimate = report.spectrum.and_then(|spectrum| {
@@ -390,7 +412,9 @@ fn device_multigrid<'a>(
         runmat_sparse_accelerate::DeviceAmg::new(
             provider,
             amg,
-            runmat_sparse_accelerate::DeviceApply::InnerCg { iterations: DEVICE_INNER_CG_STEPS },
+            runmat_sparse_accelerate::DeviceApply::InnerCg {
+                iterations: DEVICE_INNER_CG_STEPS,
+            },
         )
         .ok()
         .map(|device| Box::new(device) as Box<dyn runmat_sparse_solvers::Preconditioner<f64> + 'a>)
@@ -451,11 +475,19 @@ pub(crate) fn resolve_spd_strategy(
 
 impl SpdStrategy {
     /// Provenance labels: (method for generic SPD families, preconditioner).
-    pub(crate) fn provenance(self) -> (crate::contracts::SolverMethod, crate::contracts::SolverPreconditioner) {
+    pub(crate) fn provenance(
+        self,
+    ) -> (
+        crate::contracts::SolverMethod,
+        crate::contracts::SolverPreconditioner,
+    ) {
         use crate::contracts::{SolverMethod, SolverPreconditioner};
         use runmat_sparse_solvers::policy::PreconditionerChoice;
         match self {
-            SpdStrategy::Cholesky => (SolverMethod::SparseDirectCholesky, SolverPreconditioner::None),
+            SpdStrategy::Cholesky => (
+                SolverMethod::SparseDirectCholesky,
+                SolverPreconditioner::None,
+            ),
             SpdStrategy::Pcg(choice) => (
                 SolverMethod::AssembledPcg,
                 match choice {
@@ -519,14 +551,24 @@ pub(crate) fn effective_plan(requested: LocalExecutionPlan) -> LocalExecutionPla
 /// `K − ω²M + iωC`), on the union pattern.
 pub(crate) fn complex_combination(
     terms: &[(runmat_sparse_solvers::c64, &RealSparseMatrix)],
-) -> Result<runmat_sparse_solvers::CsrMatrix<runmat_sparse_solvers::c64>, runmat_sparse_solvers::SolverError> {
+) -> Result<
+    runmat_sparse_solvers::CsrMatrix<runmat_sparse_solvers::c64>,
+    runmat_sparse_solvers::SolverError,
+> {
     use runmat_sparse_solvers::{c64, CsrMatrix};
     let Some((_, first)) = terms.first() else {
-        return Err(runmat_sparse_solvers::SolverError::Dimension("empty combination".into()));
+        return Err(runmat_sparse_solvers::SolverError::Dimension(
+            "empty combination".into(),
+        ));
     };
     let (rows, columns) = (first.rows(), first.columns());
-    if terms.iter().any(|(_, m)| m.rows() != rows || m.columns() != columns) {
-        return Err(runmat_sparse_solvers::SolverError::Dimension("combination shapes differ".into()));
+    if terms
+        .iter()
+        .any(|(_, m)| m.rows() != rows || m.columns() != columns)
+    {
+        return Err(runmat_sparse_solvers::SolverError::Dimension(
+            "combination shapes differ".into(),
+        ));
     }
     let arrays: Vec<CsrArrays<'_>> = terms.iter().map(|(_, m)| CsrArrays::of(m)).collect();
     let mut row_ptr = Vec::with_capacity(rows + 1);
@@ -539,7 +581,11 @@ pub(crate) fn complex_combination(
         for ((coefficient, _), array) in terms.iter().zip(&arrays) {
             let view = array.view();
             let (cols, vals) = view.row(row);
-            merged.extend(cols.iter().zip(vals).map(|(&c, &v)| (c, coefficient.scale(v))));
+            merged.extend(
+                cols.iter()
+                    .zip(vals)
+                    .map(|(&c, &v)| (c, coefficient.scale(v))),
+            );
         }
         merged.sort_by_key(|entry| entry.0);
         for &(c, v) in &merged {
@@ -570,7 +616,11 @@ pub(crate) fn solve_direct_real(
         let a = arrays.view();
         let attempts: Vec<DirectOptions> = match structure {
             DirectStructure::SaddlePoint { primal_count } => {
-                let scale = a.diagonal().iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1.0);
+                let scale = a
+                    .diagonal()
+                    .iter()
+                    .fold(0.0f64, |m, v| m.max(v.abs()))
+                    .max(1.0);
                 let mut signs = vec![1i8; n];
                 for sign in signs.iter_mut().skip(primal_count) {
                     *sign = -1;
@@ -587,7 +637,8 @@ pub(crate) fn solve_direct_real(
                 ]
             }
         };
-        let mut last_error = runmat_sparse_solvers::SolverError::Breakdown("no factorization attempted".into());
+        let mut last_error =
+            runmat_sparse_solvers::SolverError::Breakdown("no factorization attempted".into());
         let b_norm = runmat_sparse_solvers::par::norm2(rhs);
         for options in attempts {
             control().check()?;
@@ -601,8 +652,17 @@ pub(crate) fn solve_direct_real(
             };
             let mut x = vec![0.0; n];
             match solver.solve_refined(a.into(), rhs, &mut x, 1) {
-                Ok(report) if report.relative_residual.is_finite() && report.relative_residual <= 1e-9 => {
-                    return Ok((x, if b_norm > 0.0 { report.relative_residual } else { 0.0 }));
+                Ok(report)
+                    if report.relative_residual.is_finite() && report.relative_residual <= 1e-9 =>
+                {
+                    return Ok((
+                        x,
+                        if b_norm > 0.0 {
+                            report.relative_residual
+                        } else {
+                            0.0
+                        },
+                    ));
                 }
                 Ok(report) => {
                     last_error = runmat_sparse_solvers::SolverError::Breakdown(format!(

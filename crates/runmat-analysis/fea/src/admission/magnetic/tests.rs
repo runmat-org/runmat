@@ -22,7 +22,10 @@ fn magnetic_identity_is_distinct_and_topology_specific() {
         assert!(!identities.contains(&identity));
         identities.push(identity);
         // Re-admission of the same mesh is deterministic.
-        assert_eq!(&admit_canonical_magnetostatic(&mesh).unwrap(), identities.last().unwrap());
+        assert_eq!(
+            &admit_canonical_magnetostatic(&mesh).unwrap(),
+            identities.last().unwrap()
+        );
         assert!(admit_nonstructural(
             PhysicsFamily::Electromagnetic, AnalysisProcedure::Static, Some(&mesh),
             SourceImplementation::CanonicalVolumeProjection,

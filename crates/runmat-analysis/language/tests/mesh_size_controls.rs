@@ -121,9 +121,7 @@ fn meshes_without_controls_lower_to_the_default_settings() {
 #[test]
 fn refine_blocks_reject_unknown_regions_bad_sizes_and_conflicts() {
     // Unknown selector.
-    let unknown = check(
-        "refine a {\n on = geometry.part.region.missing\n target_size = 5 mm\n }",
-    );
+    let unknown = check("refine a {\n on = geometry.part.region.missing\n target_size = 5 mm\n }");
     assert!(!unknown.is_valid());
     // A region of another geometry.
     let foreign = check("refine a {\n on = geometry.other.region.skin\n target_size = 5 mm\n }");
@@ -146,9 +144,8 @@ fn refine_blocks_reject_unknown_regions_bad_sizes_and_conflicts() {
     );
     assert!(codes(&conflict).contains(&"fea.semantic.mesh.control_conflict".to_string()));
     // Unsupported control settings and gap counts.
-    let setting = check(
-        "refine a {\n on = geometry.part.region.wall\n target_size = 5 mm\n growth = 2\n }",
-    );
+    let setting =
+        check("refine a {\n on = geometry.part.region.wall\n target_size = 5 mm\n growth = 2\n }");
     assert!(codes(&setting).contains(&"fea.semantic.mesh.control_setting".to_string()));
     for cells in ["0", "65"] {
         let program = check(&format!("cells_across_gap = {cells}"));

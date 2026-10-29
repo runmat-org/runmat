@@ -178,13 +178,7 @@ pub fn solve_canonical_harmonic(
     residual_target: f64,
     frequency_hz: f64,
 ) -> Result<MaxwellResponse, MaxwellError> {
-    let input = compile_canonical_input(
-        model,
-        mesh,
-        step_id,
-        residual_target,
-        frequency_hz,
-    )?;
+    let input = compile_canonical_input(model, mesh, step_id, residual_target, frequency_hz)?;
     super::solve(mesh, &input, residual_target)
 }
 
@@ -207,7 +201,10 @@ fn frequency_scales(
             permeability: 1.0,
         });
     }
-    if table.iter().any(|point| point.dispersive_loss_scale.is_some()) {
+    if table
+        .iter()
+        .any(|point| point.dispersive_loss_scale.is_some())
+    {
         return Err(MaxwellError::Unsupported(
             "a dispersive loss scale needs a complex permittivity law; give the loss as a conductivity scale".into(),
         ));
@@ -216,7 +213,9 @@ fn frequency_scales(
         .windows(2)
         .any(|pair| !(pair[0].frequency_hz < pair[1].frequency_hz))
     {
-        return Err(invalid("frequency response points must have increasing frequencies"));
+        return Err(invalid(
+            "frequency response points must have increasing frequencies",
+        ));
     }
     let first = &table[0];
     let last = &table[table.len() - 1];
@@ -240,7 +239,10 @@ fn frequency_scales(
             .unwrap_or(table.len() - 1)
             .max(1);
         let (a, b) = (&table[upper - 1], &table[upper]);
-        let (a_hz, b_hz) = (a.frequency_hz.canonical_value(), b.frequency_hz.canonical_value());
+        let (a_hz, b_hz) = (
+            a.frequency_hz.canonical_value(),
+            b.frequency_hz.canonical_value(),
+        );
         let t = (frequency_hz - a_hz) / (b_hz - a_hz);
         pick(a) + t * (pick(b) - pick(a))
     };

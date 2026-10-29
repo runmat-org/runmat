@@ -102,8 +102,14 @@ pub(super) fn diagnostics(
             final_energy.boundary_loss_w.canonical_value(),
             final_energy.applied_power_w.canonical_value(),
             final_energy.prescribed_boundary_power_w.canonical_value(),
-            final_energy.prescribed_heat_flow.entering_w.canonical_value(),
-            final_energy.prescribed_heat_flow.leaving_w.canonical_value(),
+            final_energy
+                .prescribed_heat_flow
+                .entering_w
+                .canonical_value(),
+            final_energy
+                .prescribed_heat_flow
+                .leaving_w
+                .canonical_value(),
             final_energy.residual_w.canonical_value(),
             final_energy.relative_residual,
             maximum_energy_residual,

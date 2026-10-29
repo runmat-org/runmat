@@ -7,8 +7,8 @@ use runmat_analysis_execution::{
     prepare_analysis_objects, rederive_acoustic_response_resource_plan,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AcousticResponseNumericalReceiptArtifact, AcousticResponseWorkload,
-    ExecutionPlanIdentity, NumericalPlanIdentity,
+    AcousticResponseNumericalReceiptArtifact, AcousticResponseWorkload,
+    AnalysisNumericalObjectKind, ExecutionPlanIdentity, NumericalPlanIdentity,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::Digest;
@@ -123,4 +123,3 @@ pub(super) fn execute(
         AnalysisKernelOutput::prepared(profile_objects),
     ])
 }
-

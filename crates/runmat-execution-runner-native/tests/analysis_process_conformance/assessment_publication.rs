@@ -3,8 +3,8 @@ use runmat_analysis_core::AssessmentStatus;
 use runmat_analysis_execution::assessment_program::FrozenAssessmentCallable;
 use runmat_execution_runner_native::{
     complete_frozen_fea_assessments, execute_prepared_structural_study_locally,
-    freeze_fea_assessment_functions, prepare_checked_fea_study, LocalFeaExecutionOptions,
-    prepare_structural_study_root, NativeExecutionConfig,
+    freeze_fea_assessment_functions, prepare_checked_fea_study, prepare_structural_study_root,
+    LocalFeaExecutionOptions, NativeExecutionConfig,
 };
 use runmat_runtime::analysis::{
     prepare_structural_study_publication, AnalysisStudyCompletionIdentity, FeaCheckStatus,
@@ -96,15 +96,17 @@ pub(super) async fn run() {
     )
     .await
     .unwrap();
-    assert!(prepared.root.planning.structural().is_some(), "expected structural root");
+    assert!(
+        prepared.root.planning.structural().is_some(),
+        "expected structural root"
+    );
     let workers = prepared.workers;
     let structural_root = prepare_structural_study_root(prepared.root).unwrap();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.store_root = project_directory.join("numerical-processes");
-    let numerical =
-        execute_prepared_structural_study_locally(config, structural_root, workers)
-            .await
-            .unwrap();
+    let numerical = execute_prepared_structural_study_locally(config, structural_root, workers)
+        .await
+        .unwrap();
     // Completion consumes admitted numerical evidence and submitted executables. No source
     // file remains for an accidental recompilation or second geometry/solve pipeline.
     drop(checked);

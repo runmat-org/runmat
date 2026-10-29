@@ -82,7 +82,10 @@ impl RecoveredFieldSupport {
         Ok(Self::Regions { regions, entities })
     }
 
-    pub(super) fn validate(&self, domain: RecoveredFieldEntityDomain) -> Result<(), RecoveredFieldError> {
+    pub(super) fn validate(
+        &self,
+        domain: RecoveredFieldEntityDomain,
+    ) -> Result<(), RecoveredFieldError> {
         match self {
             Self::Complete => Ok(()),
             Self::Regions { regions, entities } => {
@@ -151,7 +154,8 @@ impl RecoveredFieldSupport {
                     .collect()
             }
             RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
-                const POINTS: usize = crate::topology::quadrature::TETRAHEDRON_FOUR_POINT_RULE.len();
+                const POINTS: usize =
+                    crate::topology::quadrature::TETRAHEDRON_FOUR_POINT_RULE.len();
                 projection
                     .elements
                     .iter()

@@ -67,7 +67,9 @@ pub struct FnOperator<F> {
     pub apply: F,
 }
 
-impl<T: Scalar, F: Fn(&[T], &mut [T]) -> SolverResult<()> + Sync> LinearOperator<T> for FnOperator<F> {
+impl<T: Scalar, F: Fn(&[T], &mut [T]) -> SolverResult<()> + Sync> LinearOperator<T>
+    for FnOperator<F>
+{
     fn nrows(&self) -> usize {
         self.nrows
     }

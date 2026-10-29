@@ -96,7 +96,11 @@ impl AcousticAssembly {
                     let rho = self.density.canonical_values()[*owner];
                     let c = (1.0 / (rho * self.compressibility.canonical_values()[*owner])).sqrt();
                     let (r, x) = law
-                        .evaluate(self.derivative_rate.canonical_value() / std::f64::consts::TAU, rho, c)
+                        .evaluate(
+                            self.derivative_rate.canonical_value() / std::f64::consts::TAU,
+                            rho,
+                            c,
+                        )
                         .ok_or_else(|| {
                             AcousticHarmonicError::Boundary(
                                 "impedance law has no finite passive value at this frequency"
@@ -149,7 +153,8 @@ impl AcousticAssembly {
                                     boundary_stiffness.add(
                                         row,
                                         column,
-                                        point.shape_values()[i] * point.shape_values()[j]
+                                        point.shape_values()[i]
+                                            * point.shape_values()[j]
                                             * point.area_weight_m2
                                             / (rho * radius),
                                     );

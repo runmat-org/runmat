@@ -102,10 +102,16 @@ impl ThermalSolverResultManifest {
                     LinearAlgebraBackendKind::CpuReference,
                     LinearAlgebraBackendKind::Accelerator,
                 ] {
-                    for method in [SolverMethod::AssembledPcg, SolverMethod::SparseDirectCholesky] {
-                        for preconditioner in
-                            [SpdPreconditionerKind::Jacobi, SpdPreconditionerKind::Ilu0, SpdPreconditionerKind::Amg, SpdPreconditionerKind::Auto]
-                        {
+                    for method in [
+                        SolverMethod::AssembledPcg,
+                        SolverMethod::SparseDirectCholesky,
+                    ] {
+                        for preconditioner in [
+                            SpdPreconditionerKind::Jacobi,
+                            SpdPreconditionerKind::Ilu0,
+                            SpdPreconditionerKind::Amg,
+                            SpdPreconditionerKind::Auto,
+                        ] {
                             skeleton.run.requested_backend = requested;
                             skeleton.run.execution_backend = execution;
                             skeleton.run.solver_backend = backend;

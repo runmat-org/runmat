@@ -39,7 +39,9 @@ fn coupled_model() -> AnalysisModel {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: format!("{face}_temperature"),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+                    ),
                     value: PrescribedValue::Constant(Temperature::new(T0)),
                 },
             }));
@@ -54,9 +56,9 @@ fn coupled_model() -> AnalysisModel {
         signal_id: SignalId("supply".into()),
         shape: SignalShape::Scalar,
         frame: None,
-        representation: SignalRepresentation::Constant(SignalValue::Scalar(
-            ElectricCurrent::new(CURRENT),
-        )),
+        representation: SignalRepresentation::Constant(SignalValue::Scalar(ElectricCurrent::new(
+            CURRENT,
+        ))),
         precision: SignalPrecision::Real64,
         provenance: SignalProvenance::Authored,
         evidence: SignalApproximationEvidence {
@@ -66,28 +68,34 @@ fn coupled_model() -> AnalysisModel {
             sample_count: 1,
         },
     }));
-    model.excitations.push(ExcitationAction::ElectricCurrent(AnalysisExcitation {
-        excitation_id: ExcitationId("supply".into()),
-        target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
-        frame: CoordinateFrame::Global,
-        direction: None,
-        distribution: ExcitationDistribution::PreserveResultant,
-        kinematics: ExcitationKinematics::FixedFrame,
-        signal_id: SignalId("supply".into()),
-        active_step_ids: vec!["heat".into()],
-        combination_group: None,
-        projection: ProjectionRequirement {
-            preserve_resultant: true,
-            preserve_moment: false,
-            relative_tolerance: 1e-12,
-        },
-    }));
+    model
+        .excitations
+        .push(ExcitationAction::ElectricCurrent(AnalysisExcitation {
+            excitation_id: ExcitationId("supply".into()),
+            target: ExcitationTarget::Region(RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("slab_left"),
+            )),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::PreserveResultant,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("supply".into()),
+            active_step_ids: vec!["heat".into()],
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1e-12,
+            },
+        }));
     // Every excitation belongs to a declared case.
-    model.excitation_cases.push(runmat_analysis_core::ExcitationCase {
-        case_id: runmat_analysis_core::ExcitationCaseId("supply".into()),
-        action_ids: vec![ExcitationId("supply".into())],
-        activation: runmat_analysis_core::ExcitationCaseActivation::Always,
-    });
+    model
+        .excitation_cases
+        .push(runmat_analysis_core::ExcitationCase {
+            case_id: runmat_analysis_core::ExcitationCaseId("supply".into()),
+            action_ids: vec![ExcitationId("supply".into())],
+            activation: runmat_analysis_core::ExcitationCaseActivation::Always,
+        });
     model
 }
 
@@ -131,7 +139,9 @@ fn two_way_joule_heating_matches_the_closed_form_bar() {
         .unwrap();
         assert!(completion.converged);
         assert!(completion.sweeps.len() >= 3, "two-way coupling iterates");
-        let nodal = completion.thermal.temperature_snapshots[0].as_host_f64().unwrap();
+        let nodal = completion.thermal.temperature_snapshots[0]
+            .as_host_f64()
+            .unwrap();
         let mut worst = 0.0_f64;
         for (node, temperature) in mesh.topology.nodes.iter().zip(nodal) {
             let exact = T0 + exact_rise(node.coordinates_m.canonical_value()[0]);
@@ -147,7 +157,10 @@ fn two_way_joule_heating_matches_the_closed_form_bar() {
         let sample = completion.electrical.last().unwrap();
         let joule = CoupledElectrothermalCompletion::joule_power_w(sample);
         let terminal = CoupledElectrothermalCompletion::terminal_power_w(sample);
-        assert!((joule - terminal).abs() < 1e-8 * joule, "P={joule} VI={terminal}");
+        assert!(
+            (joule - terminal).abs() < 1e-8 * joule,
+            "P={joule} VI={terminal}"
+        );
         // Closed-form resistance R = int rho0 (1 + alpha theta) dx / A on the unit bar.
         let n = 2000;
         let resistance: f64 = (0..n)
@@ -161,5 +174,8 @@ fn two_way_joule_heating_matches_the_closed_form_bar() {
         assert!((joule - exact_power).abs() < 5e-3 * exact_power);
     }
     // Each element's conductivity is taken at its mean temperature: second-order convergence.
-    assert!(errors[2] < errors[1] / 3.0 && errors[2] < 3e-3, "{errors:?}");
+    assert!(
+        errors[2] < errors[1] / 3.0 && errors[2] < 3e-3,
+        "{errors:?}"
+    );
 }

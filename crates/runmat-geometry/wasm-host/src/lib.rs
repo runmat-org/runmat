@@ -99,7 +99,9 @@ pub unsafe extern "C" fn runmat_occt_exact_execute(request: *const c_char) -> *m
     };
     let response = match result {
         Ok(value) => serde_json::json!({"result":value}),
-        Err(error) => serde_json::json!({"error":{"message":error.to_string(),"meshingFailure":error.meshing_failure()}}),
+        Err(error) => {
+            serde_json::json!({"error":{"message":error.to_string(),"meshingFailure":error.meshing_failure()}})
+        }
     };
     CString::new(response.to_string())
         .expect("JSON contains no NUL bytes")

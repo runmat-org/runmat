@@ -83,7 +83,8 @@ pub(crate) fn execute(
     // Validate from the unchanged authored constraints; solver_model only rewrites sequence
     // execution controls. Release the fresh validation result before copying that model.
     drop(phase);
-    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.constraint_compilation");
+    let phase =
+        runmat_analysis_fea::progress::phase_timer("structural_kernel.constraint_compilation");
     let compiled = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
         &solve.model,
         mesh.as_ref(),
@@ -96,7 +97,8 @@ pub(crate) fn execute(
         ));
     }
     drop(phase);
-    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.resource_plan_rederivation");
+    let phase =
+        runmat_analysis_fea::progress::phase_timer("structural_kernel.resource_plan_rederivation");
     let field_definitions = structural_static_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let observations =

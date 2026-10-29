@@ -363,10 +363,12 @@ fn substitute_model_inputs(
         boundary
             .kind
             .realize_model_inputs(inputs)
-            .map_err(|error| AuthoredStudyRealizationError::ParameterizedBoundary {
-                boundary_id: boundary.boundary_id.clone(),
-                detail: error.to_string(),
-            })?;
+            .map_err(
+                |error| AuthoredStudyRealizationError::ParameterizedBoundary {
+                    boundary_id: boundary.boundary_id.clone(),
+                    detail: error.to_string(),
+                },
+            )?;
     }
     for connector in &mut model.connectors {
         let mut error = None;

@@ -379,7 +379,9 @@ mod tests {
         unknown
             .region_temperature_deltas
             .push(crate::FeaThermoRegionTemperatureDelta {
-                target: runmat_analysis_core::RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("missing_region")),
+                target: runmat_analysis_core::RegionTarget::volume(
+                    runmat_meshing_core::fixtures::fixture_region("missing_region"),
+                ),
                 temperature_delta_k: 10.0,
             });
         assert!(matches!(
@@ -453,7 +455,10 @@ mod tests {
         model
             .material_assignments
             .iter_mut()
-            .find(|assignment| assignment.selected_region_id() == Some(runmat_meshing_core::fixtures::fixture_region("mid_aluminum").as_str()))
+            .find(|assignment| {
+                assignment.selected_region_id()
+                    == Some(runmat_meshing_core::fixtures::fixture_region("mid_aluminum").as_str())
+            })
             .unwrap()
             .assigned_material_id = "mat_aluminum".into();
         for (material, coefficient) in model.materials.iter_mut().zip([1.0e-5, 2.0e-5, 4.0e-5]) {
@@ -469,7 +474,9 @@ mod tests {
         prescribed
             .region_temperature_deltas
             .push(crate::FeaThermoRegionTemperatureDelta {
-                target: runmat_analysis_core::RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("mid_aluminum")),
+                target: runmat_analysis_core::RegionTarget::volume(
+                    runmat_meshing_core::fixtures::fixture_region("mid_aluminum"),
+                ),
                 temperature_delta_k: 30.0,
             });
         let load = assemble_prescribed_temperature_load(&mesh, &properties, &prescribed).unwrap();
@@ -545,7 +552,9 @@ mod tests {
         prescribed
             .region_temperature_deltas
             .push(crate::FeaThermoRegionTemperatureDelta {
-                target: runmat_analysis_core::RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("mid_aluminum")),
+                target: runmat_analysis_core::RegionTarget::volume(
+                    runmat_meshing_core::fixtures::fixture_region("mid_aluminum"),
+                ),
                 temperature_delta_k: 40.0,
             });
         assert!(matches!(

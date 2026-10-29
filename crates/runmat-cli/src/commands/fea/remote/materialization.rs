@@ -11,10 +11,9 @@ use runmat_execution_artifact::{
 };
 use runmat_execution_runner_native::{
     import_exact_structural_study_result, import_exact_structural_sweep_result,
-    import_structural_study_result, StudySweepTerminal,
-    ExactStructuralStudyResultExpectation, ExactStructuralSweepResultExpectation,
-    ExactStructuralSweepTerminal, StructuralStudyResultExpectation,
-    StructuralSweepResultExpectation,
+    import_structural_study_result, ExactStructuralStudyResultExpectation,
+    ExactStructuralSweepResultExpectation, ExactStructuralSweepTerminal,
+    StructuralStudyResultExpectation, StructuralSweepResultExpectation, StudySweepTerminal,
 };
 use runmat_runtime::analysis::{
     analysis_complete_study_sweep_op, structural_study_execution_failure, AnalysisStudyRunData,
@@ -94,9 +93,11 @@ fn import_study_result(
         expectation,
         ObjectInventoryLimits::default(),
     )?;
-    Ok(runmat_execution_runner_native::CompletedFeaStudyResult::Structural(Box::new(
-        exact_result(exact, cache.clone())?,
-    )))
+    Ok(
+        runmat_execution_runner_native::CompletedFeaStudyResult::Structural(Box::new(
+            exact_result(exact, cache.clone())?,
+        )),
+    )
 }
 
 pub(crate) async fn materialize_fea_sweep(

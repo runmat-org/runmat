@@ -491,7 +491,9 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
     let mut observation = spec(
         "boundary_average",
         ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector))),
+            runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector)),
+            ),
         )),
     );
     observation.reduction = Some(ReductionPolicy {
@@ -771,7 +773,9 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
     )
     .unwrap();
     let target = ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-        runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
+        runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)),
+        ),
     ));
     let mut resultant = spec("pressure_resultant", target.clone());
     resultant.quantity = ObservationQuantity::ContactPressure;

@@ -39,8 +39,9 @@ pub(super) fn model_and_mesh(
             rotations: Vec::new(),
         }),
     })];
-    model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")));
+    model.excitations[0].excitation_mut().target = ExcitationTarget::Region(
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:3")),
+    );
     (
         model,
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order),

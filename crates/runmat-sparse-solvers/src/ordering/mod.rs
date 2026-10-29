@@ -56,7 +56,9 @@ impl Permutation {
         let mut inverse = vec![usize::MAX; n];
         for (new, &old) in perm.iter().enumerate() {
             if old >= n || inverse[old] != usize::MAX {
-                return Err(SolverError::InvalidStructure("ordering is not a permutation".into()));
+                return Err(SolverError::InvalidStructure(
+                    "ordering is not a permutation".into(),
+                ));
             }
             inverse[old] = new;
         }
@@ -73,7 +75,9 @@ impl Permutation {
 /// Computes a fill-reducing ordering of `A + Aᵀ` (diagonal ignored).
 pub fn order<T: Scalar>(matrix: CsrRef<'_, T>, ordering: &Ordering) -> SolverResult<Permutation> {
     if matrix.nrows() != matrix.ncols() {
-        return Err(SolverError::Dimension("ordering requires a square matrix".into()));
+        return Err(SolverError::Dimension(
+            "ordering requires a square matrix".into(),
+        ));
     }
     let n = matrix.nrows();
     match ordering {

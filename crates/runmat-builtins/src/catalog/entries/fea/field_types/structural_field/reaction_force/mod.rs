@@ -9,7 +9,8 @@ const REACTION_FORCE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSigna
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const REACTION_FORCE_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&REACTION_FORCE_SIGNATURES);
+pub const REACTION_FORCE_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&REACTION_FORCE_SIGNATURES);
 const REACTION_FORCE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-reaction-force",
     title: "Select nodal reaction force",

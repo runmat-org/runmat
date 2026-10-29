@@ -19,7 +19,8 @@ fn fixture(
         slab_mesh(cells)
     };
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     model.signals.push(PhysicalSignal::Pressure(complex_signal(
         Pressure::new(amplitude[0]),
@@ -30,7 +31,9 @@ fn fixture(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "anchor".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Signal(SignalId("drive".into())),
             },
         }));
@@ -41,8 +44,12 @@ fn fixture(
             kind: AcousticConstraintKind::PhaseShiftedPeriodic(PhaseShiftedPeriodicConstraint {
                 periodic: PeriodicConstraint {
                     pair: PairedConstraint {
-                        primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
-                        secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                        primary: RegionTarget::boundary(
+                            runmat_meshing_core::fixtures::fixture_face("slab_left"),
+                        ),
+                        secondary: RegionTarget::boundary(
+                            runmat_meshing_core::fixtures::fixture_face("slab_right"),
+                        ),
                         pairing: PairingPolicy::Matching,
                     },
                     transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),
@@ -138,7 +145,9 @@ fn periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure() {
         let mut overlap = model.clone();
         overlap.boundaries.push(AnalysisBoundary {
             boundary_id: "overlap".into(),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
             operator: BoundaryOperator::AcousticRadiation,
         });
         assert!(solve(&overlap, &mesh).is_err());
@@ -148,7 +157,9 @@ fn periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure() {
             .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                 constraint_id: "wrong_secondary_pressure".into(),
                 kind: AcousticConstraintKind::PrescribedPressure {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "slab_right",
+                    )),
                     value: PrescribedValue::Signal(SignalId("drive".into())),
                 },
             }));

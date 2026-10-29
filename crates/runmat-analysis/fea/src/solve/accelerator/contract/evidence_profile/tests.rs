@@ -69,8 +69,7 @@ fn completed_bound_covers_optional_preconditioner_and_extreme_scalars() {
         *independently_computed_relative_residual = f64::MAX;
         *required_relative_tolerance = f64::MIN_POSITIVE;
         evidence.validate().unwrap();
-        let actual =
-            runmat_canonical_codec::profile_serialized(&evidence, PROFILE_LIMITS).unwrap();
+        let actual = runmat_canonical_codec::profile_serialized(&evidence, PROFILE_LIMITS).unwrap();
         assert!(actual.encoded_bytes_upper_bound <= bound.encoded_bytes_upper_bound);
         assert!(
             actual.materialization_resident_bytes_estimate

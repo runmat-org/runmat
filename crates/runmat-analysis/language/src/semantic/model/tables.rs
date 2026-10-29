@@ -130,7 +130,12 @@ fn samples(
     let mut reactance = Vec::with_capacity(entries.len());
     for entry in entries {
         let CheckedExpressionKind::Record(members) = &entry.kind else {
-            diagnostic(declaration, entry.span, "impedance sample must be a record", diagnostics);
+            diagnostic(
+                declaration,
+                entry.span,
+                "impedance sample must be a record",
+                diagnostics,
+            );
             return None;
         };
         if members.len() != 3 {
@@ -142,21 +147,24 @@ fn samples(
             );
             return None;
         }
-        let member = |name: &str, dimension: PhysicalDimension, diagnostics: &mut Vec<FeaDiagnostic>| {
-            let value = members.get(name);
-            match value.and_then(|value| typed(value, dimension)) {
-                Some(value) => Some(value),
-                None => {
-                    diagnostic(
-                        declaration,
-                        entry.span,
-                        format!("impedance sample `{name}` needs a constant quantity of its dimension"),
-                        diagnostics,
-                    );
-                    None
+        let member =
+            |name: &str, dimension: PhysicalDimension, diagnostics: &mut Vec<FeaDiagnostic>| {
+                let value = members.get(name);
+                match value.and_then(|value| typed(value, dimension)) {
+                    Some(value) => Some(value),
+                    None => {
+                        diagnostic(
+                            declaration,
+                            entry.span,
+                            format!(
+                            "impedance sample `{name}` needs a constant quantity of its dimension"
+                        ),
+                            diagnostics,
+                        );
+                        None
+                    }
                 }
-            }
-        };
+            };
         frequencies.push(member("at", PhysicalDimension::FREQUENCY, diagnostics)?);
         resistance.push(member("resistance", impedance, diagnostics)?);
         reactance.push(member("reactance", impedance, diagnostics)?);
@@ -169,7 +177,9 @@ fn samples(
 }
 
 fn typed(value: &CheckedExpression, dimension: PhysicalDimension) -> Option<f64> {
-    value.value_type.is_quantity(dimension.into())
+    value
+        .value_type
+        .is_quantity(dimension.into())
         .then(|| scalar(value))
         .flatten()
 }

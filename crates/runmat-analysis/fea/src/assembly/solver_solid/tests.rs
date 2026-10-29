@@ -270,7 +270,9 @@ fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
 
     model.material_assignments.pop();
     let mut stale = model.material_assignments[0].clone();
-    stale.target = runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("stale-region"));
+    stale.target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_region("stale-region"),
+    );
     model.material_assignments.push(stale);
     assert!(matches!(
         crate::properties::compile_solid_property_map(&model, &artifact),
@@ -278,8 +280,9 @@ fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
     ));
 
     model.material_assignments.truncate(1);
-    model.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("region"));
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::cell(
+        runmat_meshing_core::fixtures::fixture_region("region"),
+    );
     assert!(matches!(
         crate::properties::compile_solid_property_map(&model, &artifact),
         Err(
@@ -302,7 +305,9 @@ fn explicit_all_solids_scope_covers_every_solid_and_overlaps_fail_closed() {
         .expect("an explicit all-solids scope should cover the canonical solid mesh");
 
     let mut selected = model.material_assignments[0].clone();
-    selected.target = runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("region"));
+    selected.target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_region("region"),
+    );
     model.material_assignments.push(selected);
     assert!(matches!(
         crate::properties::compile_solid_property_map(&model, &artifact),

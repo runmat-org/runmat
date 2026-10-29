@@ -6,7 +6,12 @@ use super::*;
 /// Every authored family travels through the same root contract; only the family planning and
 /// the composition selected from it differ after exact geometry and meshing complete.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "family", content = "policy", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "family",
+    content = "policy",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum StudyRootPlanning {
     Structural(runmat_analysis_fea::study::StructuralStudyPlanningPolicy),
     Thermal(runmat_analysis_fea::study::ThermalStudyPlanningPolicy),
@@ -131,7 +136,10 @@ impl StructuralStudyRootRequest {
             .map(|entry| entry.material.clone())
             .collect::<Vec<_>>();
         runmat_analysis_core::validate_material_definitions(&materials).map_err(protocol)?;
-        validate_accelerator_requests(self.planning.backend(), &self.analysis_accelerator_requests)?;
+        validate_accelerator_requests(
+            self.planning.backend(),
+            &self.analysis_accelerator_requests,
+        )?;
         let materializations = self
             .input_materializations
             .iter()
@@ -281,7 +289,10 @@ impl StructuralStudyResultExpectation {
                 "structural study result source identity differs from its geometry or materials",
             ));
         }
-        validate_accelerator_requests(self.planning.backend(), &self.analysis_accelerator_requests)?;
+        validate_accelerator_requests(
+            self.planning.backend(),
+            &self.analysis_accelerator_requests,
+        )?;
         validate_input_plan_expectation_inventory(
             &self.study,
             &self.input_materializations,

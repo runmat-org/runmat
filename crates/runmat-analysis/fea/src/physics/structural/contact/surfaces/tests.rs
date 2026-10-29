@@ -81,7 +81,8 @@ fn empty_and_overlapping_contact_selections_reject_before_execution() {
         CanonicalContactSurfaces::derive(&projection, &interface),
         Err(ContactSurfaceError::SurfaceConflict)
     ));
-    interface.secondary = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("missing"));
+    interface.secondary =
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("missing"));
     assert!(matches!(
         CanonicalContactSurfaces::derive(&projection, &interface),
         Err(ContactSurfaceError::EmptySurface)

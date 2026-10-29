@@ -67,7 +67,6 @@ impl SolvedTemperatureField {
     }
 }
 
-
 impl BoundThermalStateTransfer {
     pub fn bind(
         model: &AnalysisModel,
@@ -165,11 +164,9 @@ impl BoundThermalStateTransfer {
         } else {
             let projection = crate::topology::AnalysisProjection::derive(target_mesh)
                 .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-            let (_, dofs) = crate::physics::thermal_interface::solid_conduction(
-                &projection,
-                &model.interfaces,
-            )
-            .map_err(AnalysisExecutionError::Invalid)?;
+            let (_, dofs) =
+                crate::physics::thermal_interface::solid_conduction(&projection, &model.interfaces)
+                    .map_err(AnalysisExecutionError::Invalid)?;
             if dofs.second().len() != interface.len()
                 || dofs
                     .second()

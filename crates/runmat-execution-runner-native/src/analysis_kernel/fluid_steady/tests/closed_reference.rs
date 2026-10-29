@@ -57,16 +57,23 @@ fn native_closed_pressure_gauge_retains_original_wall_laws_and_cold_fields() {
     let r =
         FluidSteadySolverResult::from_canonical_bytes_for(&bytes, Digest::sha256(&bytes), &w, &m)
             .unwrap();
-    assert!(r.original().pressure_pa.canonical_values().iter().all(|p| *p == 101325.0));
+    assert!(r
+        .original()
+        .pressure_pa
+        .canonical_values()
+        .iter()
+        .all(|p| *p == 101325.0));
     assert!(r
         .original()
         .pressure_fluctuation_pa
-        .canonical_values().iter()
+        .canonical_values()
+        .iter()
         .all(|p| *p == 0.0));
     assert!(r
         .original()
         .face_volume_flux_m3_per_s
-        .canonical_values().iter()
+        .canonical_values()
+        .iter()
         .all(|q| *q == 0.0));
     let receipt = outputs
         .next()

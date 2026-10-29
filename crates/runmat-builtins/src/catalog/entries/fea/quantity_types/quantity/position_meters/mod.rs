@@ -18,7 +18,8 @@ const POSITION_METERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     inputs: &VECTOR_QUANTITY_INPUTS,
     outputs: &VECTOR_QUANTITY_OUTPUTS,
 }];
-pub const POSITION_METERS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&POSITION_METERS_SIGNATURES);
+pub const POSITION_METERS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&POSITION_METERS_SIGNATURES);
 const POSITION_METERS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "position-meters",
     title: "A point in meters",

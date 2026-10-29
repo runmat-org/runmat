@@ -3,8 +3,16 @@ use crate::results::field::SupportTopology;
 use runmat_meshing_core::fixtures::layered_box_mesh;
 
 /// A solid layer under a fluid layer: the fluid is a region subset of one conformal mesh.
-fn coupled() -> (AnalysisProjection, FiniteVolumeTopology, FiniteVolumeTopology) {
-    let mesh = layered_box_mesh([2, 2, 2], [1.0, 1.0, 1.0], &[(0.5, "solid"), (1.0, "fluid")]);
+fn coupled() -> (
+    AnalysisProjection,
+    FiniteVolumeTopology,
+    FiniteVolumeTopology,
+) {
+    let mesh = layered_box_mesh(
+        [2, 2, 2],
+        [1.0, 1.0, 1.0],
+        &[(0.5, "solid"), (1.0, "fluid")],
+    );
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let fluid_region = projection
         .elements
@@ -89,7 +97,9 @@ fn fluid_subset_is_region_support_on_mesh_elements_and_owner_oriented_faces() {
         reversed += usize::from(flip);
     }
     assert!(reversed > 0, "some interface faces are owned by the solid");
-    let flux = (0..fluid.faces.len()).map(|f| f as f64 + 1.0).collect::<Vec<_>>();
+    let flux = (0..fluid.faces.len())
+        .map(|f| f as f64 + 1.0)
+        .collect::<Vec<_>>();
     for (value, &(face, flip)) in layout.face_values(&flux).iter().zip(&layout.faces) {
         assert_eq!(*value, if flip { -flux[face] } else { flux[face] });
     }

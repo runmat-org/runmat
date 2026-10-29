@@ -197,7 +197,9 @@ impl ElasticStructure {
                 StructuralConstraintKind::Symmetry { target } => {
                     for face in exterior_faces(projection, target)? {
                         let f = &projection.boundary_faces[face];
-                        let normal = f.oriented_area_vector_m2.map(|v| v / f.area_m2.canonical_value());
+                        let normal = f
+                            .oriented_area_vector_m2
+                            .map(|v| v / f.area_m2.canonical_value());
                         let axis = (0..3)
                             .find(|&k| (normal[k].abs() - 1.0).abs() < 1e-9)
                             .ok_or(Error::Unsupported(

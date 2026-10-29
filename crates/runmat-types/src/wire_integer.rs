@@ -67,11 +67,18 @@ fn check<T: WireInteger>(value: T) -> Result<T, String> {
     bounded(value).ok_or_else(|| out_of_range(value))
 }
 
-pub fn serialize<T: WireInteger, S: Serializer>(value: &T, serializer: S) -> Result<S::Ok, S::Error> {
-    check(*value).map_err(S::Error::custom)?.serialize(serializer)
+pub fn serialize<T: WireInteger, S: Serializer>(
+    value: &T,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    check(*value)
+        .map_err(S::Error::custom)?
+        .serialize(serializer)
 }
 
-pub fn deserialize<'de, T: WireInteger, D: Deserializer<'de>>(deserializer: D) -> Result<T, D::Error> {
+pub fn deserialize<'de, T: WireInteger, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<T, D::Error> {
     check(T::deserialize(deserializer)?).map_err(D::Error::custom)
 }
 

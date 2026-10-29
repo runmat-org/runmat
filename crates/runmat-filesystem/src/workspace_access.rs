@@ -1,7 +1,6 @@
 //! Scoped synchronous access shares the native workspace journal and recovery fence.
 mod resource;
 mod transaction;
-pub use transaction::WorkspaceTransaction;
 use crate::workspace::{
     WorkspaceCaptureRequest, WorkspacePublicationOutcome, WorkspacePublicationRequest,
     WorkspaceSnapshot,
@@ -11,6 +10,7 @@ use crate::{AtomicCreateResult, DirEntry, FileHandle, FsMetadata};
 pub(crate) use resource::exceeded as resource_error;
 pub use resource::{resource_limit, WorkspaceResourceLimit};
 use std::{io, path::Path};
+pub use transaction::WorkspaceTransaction;
 
 /// A provider-owned access scope. Paths are relative to the admitted root.
 /// Implementations must make all participating reads/writes coherent with journal recovery.

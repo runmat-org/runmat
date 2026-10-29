@@ -184,7 +184,10 @@ const fn method_is_compatible(
             matches!(method, SolverMethod::AcousticCanonicalHelmholtzCertifiedLu)
         }
         TemporalImplementation::AcousticCanonicalModalSolve => {
-            matches!(method, SolverMethod::AcousticCanonicalShiftInvertBlockKrylov)
+            matches!(
+                method,
+                SolverMethod::AcousticCanonicalShiftInvertBlockKrylov
+            )
         }
         TemporalImplementation::AcousticCanonicalTransientSolve => {
             matches!(method, SolverMethod::AcousticCanonicalNewmarkPcg)
@@ -249,10 +252,9 @@ const fn preconditioner_is_compatible(
                 | SolverPreconditioner::Amg
                 | SolverPreconditioner::SparseCholesky
         ),
-        SolverMethod::ShiftInvertBlockLanczos | SolverMethod::BucklingBlockLanczos => matches!(
-            preconditioner,
-            SolverPreconditioner::SparseCholesky
-        ),
+        SolverMethod::ShiftInvertBlockLanczos | SolverMethod::BucklingBlockLanczos => {
+            matches!(preconditioner, SolverPreconditioner::SparseCholesky)
+        }
         SolverMethod::SparseDirectCholesky
         | SolverMethod::SparseDirectLdlt
         | SolverMethod::SparseDirectLu => matches!(preconditioner, SolverPreconditioner::None),

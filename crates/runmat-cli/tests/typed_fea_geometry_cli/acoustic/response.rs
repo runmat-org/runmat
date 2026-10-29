@@ -29,14 +29,22 @@ fn run(project: &TempDir, study: &str) -> (Value, AnalysisRunResultView) {
     let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
     let run_id = summary["step_run_ids"][0].as_str().unwrap().to_string();
     let store = FilesystemAnalysisArtifactStore::new(project.path().join("artifacts"));
-    let run = store.load_run(&run_id).unwrap().expect("standard run record");
+    let run = store
+        .load_run(&run_id)
+        .unwrap()
+        .expect("standard run record");
     (summary, AnalysisRunResultView(run))
 }
 
 struct AnalysisRunResultView(runmat_runtime::analysis::AnalysisRunResult);
 impl AnalysisRunResultView {
     fn field(&self, id: &str) -> Vec<&runmat_analysis_core::AnalysisField> {
-        self.0.run.fields.iter().filter(|f| f.field_id == id).collect()
+        self.0
+            .run
+            .fields
+            .iter()
+            .filter(|f| f.field_id == id)
+            .collect()
     }
 }
 
@@ -91,9 +99,11 @@ fn pressure_transient_publishes_its_complete_time_history() {
     let at_peak = snapshots[5].as_host_f64().unwrap();
     let peak = at_peak.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     assert!((peak - 1.0).abs() < 1e-9 || peak > 1.0, "{peak}");
-    assert!(snapshots
+    assert!(snapshots.iter().all(|field| field
+        .as_host_f64()
+        .unwrap()
         .iter()
-        .all(|field| field.as_host_f64().unwrap().iter().all(|v| v.is_finite())));
+        .all(|v| v.is_finite())));
     assert!(at_peak.iter().any(|v| (v - 1.0).abs() < 1e-9));
 }
 

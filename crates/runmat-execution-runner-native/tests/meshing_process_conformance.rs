@@ -940,9 +940,11 @@ impl CacheImport for TestStore {
         maximum_bytes: u64,
     ) -> ArtifactResult<Option<Vec<u8>>> {
         match self.0.get(&digest) {
-            Some(bytes) if bytes.len() as u64 > maximum_bytes => Err(
-                runmat_execution_artifact::ArtifactError::Limit("object exceeds its read bound".into()),
-            ),
+            Some(bytes) if bytes.len() as u64 > maximum_bytes => {
+                Err(runmat_execution_artifact::ArtifactError::Limit(
+                    "object exceeds its read bound".into(),
+                ))
+            }
             bytes => Ok(bytes.cloned()),
         }
     }
@@ -1142,7 +1144,15 @@ fn fixture_for(
             },
         ],
     };
-    let host = MeshingHostWorkload::new(workload, identity, request, fixture_ceilings(), access, None).unwrap();
+    let host = MeshingHostWorkload::new(
+        workload,
+        identity,
+        request,
+        fixture_ceilings(),
+        access,
+        None,
+    )
+    .unwrap();
     let program = host
         .prepare_program_request(revision, &[])
         .unwrap()
@@ -1172,7 +1182,8 @@ fn request() -> MeshingRequest {
             requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
             maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
-        metric: MetricFieldRequest { entity_supports: Vec::new(),
+        metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,

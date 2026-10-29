@@ -29,7 +29,8 @@ pub(super) async fn run() {
         }
         assert!(original
             .pressure_fluctuation_pa
-            .canonical_values().iter()
+            .canonical_values()
+            .iter()
             .all(|p| p.abs() < 1e-7));
         assert_eq!(
             original.pressure_reference_pa,
@@ -43,7 +44,11 @@ pub(super) async fn run() {
                 .find(|b| b.authority_id == id)
                 .unwrap();
             let outward = density * speed * if id == "mass-inlet" { -1.0 } else { 1.0 };
-            assert!((balance.mass_flow_rate_kg_per_s - runmat_types::physical::Quantity::new(outward)).abs() < runmat_types::physical::Quantity::new(1e-14));
+            assert!(
+                (balance.mass_flow_rate_kg_per_s - runmat_types::physical::Quantity::new(outward))
+                    .abs()
+                    < runmat_types::physical::Quantity::new(1e-14)
+            );
             assert!((balance.area_m2.canonical_value() - 1.0).abs() < 1e-14);
         }
         eprintln!("scheduled signed mass flow speed={speed}, density={density}, rotated={rotated}: original fields, full state, receipts and cold publication preserved");
@@ -90,7 +95,10 @@ async fn transient() {
         split.intervals().collect::<Vec<_>>(),
         full.intervals().collect::<Vec<_>>()
     );
-    assert_eq!(split.retained_results().last(), full.retained_results().last());
+    assert_eq!(
+        split.retained_results().last(),
+        full.retained_results().last()
+    );
     for (ordinal, result) in split.retained_results() {
         let ordinal = *ordinal;
         let time = 0.3 * ((ordinal + 1) as f64 / 3.0);
@@ -98,7 +106,11 @@ async fn transient() {
         for u in result.velocity_m_per_s.canonical_values() {
             assert!((u[0] - speed).abs() < 1e-8 && u[1].abs() < 1e-8 && u[2].abs() < 1e-8);
         }
-        assert!(result.pressure_reference_pa.canonical_values().iter().all(|p| *p == 1e12));
+        assert!(result
+            .pressure_reference_pa
+            .canonical_values()
+            .iter()
+            .all(|p| *p == 1e12));
         for (cell, fluctuation) in fixture
             .topology
             .cells
@@ -115,7 +127,11 @@ async fn transient() {
                 .find(|b| b.authority_id == id)
                 .unwrap();
             let outward = speed * if id == "mass-inlet" { -1.0 } else { 1.0 };
-            assert!((report.mass_flow_rate_kg_per_s - runmat_types::physical::Quantity::new(outward)).abs() < runmat_types::physical::Quantity::new(1e-14));
+            assert!(
+                (report.mass_flow_rate_kg_per_s - runmat_types::physical::Quantity::new(outward))
+                    .abs()
+                    < runmat_types::physical::Quantity::new(1e-14)
+            );
         }
     }
     eprintln!("scheduled mass-flow histories PASS: three terminated producer sessions, cold continuation, exact split history and independent affine fluctuation pressure");

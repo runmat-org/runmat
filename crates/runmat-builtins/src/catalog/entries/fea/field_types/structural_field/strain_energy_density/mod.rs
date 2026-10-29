@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const STRAIN_ENERGY_DENSITY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.strainEnergyDensity()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const STRAIN_ENERGY_DENSITY_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&STRAIN_ENERGY_DENSITY_SIGNATURES);
+const STRAIN_ENERGY_DENSITY_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.strainEnergyDensity()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const STRAIN_ENERGY_DENSITY_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&STRAIN_ENERGY_DENSITY_SIGNATURES);
 const STRAIN_ENERGY_DENSITY_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-strain-energy-density",
     title: "Select element strain energy density",

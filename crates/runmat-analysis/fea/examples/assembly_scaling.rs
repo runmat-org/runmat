@@ -16,8 +16,7 @@ use runmat_analysis_fea::{
 use runmat_meshing_core::{
     fixtures::{connected_tetrahedron_solver_mesh, elevate_connected_tet4_fixture},
     solver_volume_element_identity, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
-    MeshNeighbor,
-    SolverMeshArtifact, SolverMeshNode, StableDigest,
+    MeshNeighbor, SolverMeshArtifact, SolverMeshNode, StableDigest,
 };
 
 fn face_key(nodes: &[u64], omitted: usize) -> [u64; 3] {
@@ -41,8 +40,7 @@ fn refine(
         let expected_elements =
             (mesh.topology.volume_elements.len() as u64) * 4_u64.pow(levels as u32);
         let added_nodes = (expected_elements - mesh.topology.volume_elements.len() as u64) / 3;
-        mesh.resolved_request.limits.maximum_nodes =
-            mesh.topology.nodes.len() as u64 + added_nodes;
+        mesh.resolved_request.limits.maximum_nodes = mesh.topology.nodes.len() as u64 + added_nodes;
         mesh.resolved_request.limits.maximum_elements = expected_elements;
     }
     for _ in 0..levels {
@@ -173,8 +171,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut best = f64::INFINITY;
         for _ in 0..repetitions {
             let start = Instant::now();
-            let operators = assemble_solver_solid_operators_with_execution(&mesh, &properties, plan)
-                .map_err(|error| format!("{error:?}"))?;
+            let operators =
+                assemble_solver_solid_operators_with_execution(&mesh, &properties, plan)
+                    .map_err(|error| format!("{error:?}"))?;
             best = best.min(start.elapsed().as_secs_f64());
             let digest = (
                 operators.stiffness.values_identity()?,

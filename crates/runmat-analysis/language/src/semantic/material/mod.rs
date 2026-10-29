@@ -555,9 +555,10 @@ fn fluid_law(
             return None;
         }
     };
-    let quantity = |name: &str, dimension: PhysicalDimension, diagnostics: &mut Vec<FeaDiagnostic>| {
-        values::required_quantity(declaration, statements, name, dimension, diagnostics)
-    };
+    let quantity =
+        |name: &str, dimension: PhysicalDimension, diagnostics: &mut Vec<FeaDiagnostic>| {
+            values::required_quantity(declaration, statements, name, dimension, diagnostics)
+        };
     let ratio = |name: &str, diagnostics: &mut Vec<FeaDiagnostic>| {
         values::required_ratio(declaration, statements, name, diagnostics)
     };
@@ -583,7 +584,11 @@ fn fluid_law(
             }
             Some((_, value)) if index == 1.0 => values::typed_quantity(value, viscosity_dimension)
                 .or_else(|| {
-                    error(declaration, "consistency must be in Pa*s^n (SI)", diagnostics);
+                    error(
+                        declaration,
+                        "consistency must be in Pa*s^n (SI)",
+                        diagnostics,
+                    );
                     None
                 }),
             _ => {
@@ -619,7 +624,11 @@ fn fluid_law(
             }
         }
         "carreau" | "carreau_yasuda" => Law::CarreauYasuda {
-            zero_shear_viscosity_pa_s: quantity("zero_shear_viscosity", viscosity_dimension, diagnostics)?,
+            zero_shear_viscosity_pa_s: quantity(
+                "zero_shear_viscosity",
+                viscosity_dimension,
+                diagnostics,
+            )?,
             infinite_shear_viscosity_pa_s: quantity(
                 "infinite_shear_viscosity",
                 viscosity_dimension,
@@ -634,7 +643,11 @@ fn fluid_law(
             },
         },
         "cross" => Law::Cross {
-            zero_shear_viscosity_pa_s: quantity("zero_shear_viscosity", viscosity_dimension, diagnostics)?,
+            zero_shear_viscosity_pa_s: quantity(
+                "zero_shear_viscosity",
+                viscosity_dimension,
+                diagnostics,
+            )?,
             infinite_shear_viscosity_pa_s: quantity(
                 "infinite_shear_viscosity",
                 viscosity_dimension,
@@ -657,7 +670,11 @@ fn fluid_law(
         "herschel_bulkley" => {
             let power_index = ratio("power_index", diagnostics)?;
             Law::HerschelBulkley {
-                yield_stress_pa: quantity("yield_stress", PhysicalDimension::PRESSURE, diagnostics)?,
+                yield_stress_pa: quantity(
+                    "yield_stress",
+                    PhysicalDimension::PRESSURE,
+                    diagnostics,
+                )?,
                 consistency_pa_s_n: consistency(power_index, diagnostics)?,
                 power_index,
                 regularization_s: regularization(diagnostics),
@@ -670,7 +687,11 @@ fn fluid_law(
         }
         "casson" => Law::Casson {
             yield_stress_pa: quantity("yield_stress", PhysicalDimension::PRESSURE, diagnostics)?,
-            plastic_viscosity_pa_s: quantity("plastic_viscosity", viscosity_dimension, diagnostics)?,
+            plastic_viscosity_pa_s: quantity(
+                "plastic_viscosity",
+                viscosity_dimension,
+                diagnostics,
+            )?,
             regularization_s: regularization(diagnostics),
             minimum_shear_rate_per_s: optional_rate(
                 "minimum_shear_rate",
@@ -679,12 +700,20 @@ fn fluid_law(
             ),
         },
         other => {
-            error(declaration, format!("unknown fluid law `{other}`"), diagnostics);
+            error(
+                declaration,
+                format!("unknown fluid law `{other}`"),
+                diagnostics,
+            );
             return None;
         }
     };
     if !law.is_valid() {
-        error(declaration, "fluid viscosity law parameters are out of range", diagnostics);
+        error(
+            declaration,
+            "fluid viscosity law parameters are out of range",
+            diagnostics,
+        );
         return None;
     }
     Some(MaterialFluidModel::GeneralizedNewtonian { law })
@@ -737,7 +766,11 @@ fn porous_law(
             diagnostics,
         )?,
         other => {
-            error(declaration, format!("unknown porous law `{other}`"), diagnostics);
+            error(
+                declaration,
+                format!("unknown porous law `{other}`"),
+                diagnostics,
+            );
             return None;
         }
     };

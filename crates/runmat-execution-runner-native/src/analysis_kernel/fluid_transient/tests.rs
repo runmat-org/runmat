@@ -190,7 +190,10 @@ fn terminated_native_producers_preserve_original_history_and_admission_rejects_s
         split.intervals().collect::<Vec<_>>(),
         full.intervals().collect::<Vec<_>>()
     );
-    assert_eq!(split.retained_results().last(), full.retained_results().last());
+    assert_eq!(
+        split.retained_results().last(),
+        full.retained_results().last()
+    );
     for (_, original) in split.retained_results() {
         // Uniform translation is reproduced to the solver's rounding, not bit-exactly.
         for velocity in original.velocity_m_per_s.canonical_values() {

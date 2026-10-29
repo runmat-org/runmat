@@ -16,14 +16,14 @@ mod prepared_validation;
 mod duration;
 pub use duration::execute_checked_fea_locally_with_timing;
 mod planning;
-pub use execution::{execute_prepared_fea_study_locally, prepare_study_publication};
 use execution::execute_prepared_with_source;
+pub use execution::{execute_prepared_fea_study_locally, prepare_study_publication};
 pub(crate) use family_execution::local_result as local_family_result;
 pub use family_execution::{
     imported_family_result, CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy,
-    CompletedAuthoredElectricalStudy,
-    CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
-    CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy,
+    CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy,
+    CompletedAuthoredMaxwellStudy, CompletedAuthoredNonlinearSolidStudy,
+    CompletedAuthoredThermalStudy,
 };
 pub use planning::{plan_checked_fea_locally, plan_checked_fea_locally_with_timing};
 
@@ -197,10 +197,9 @@ impl CompletedFeaStudyResult {
             Self::Acoustic(result) => serde_json::to_vec(&result.completion.result),
             Self::AcousticResponse(result) => serde_json::to_vec(&result.completion.result),
             Self::Fluid(result) => serde_json::to_vec(&result.completion.result),
-            Self::Nonlinear(result) => serde_json::to_vec(&(
-                &result.completion.terminal_block,
-                &result.completion.states,
-            )),
+            Self::Nonlinear(result) => {
+                serde_json::to_vec(&(&result.completion.terminal_block, &result.completion.states))
+            }
             Self::Structural(result) => serde_json::to_vec(result.numerical()),
         }
         .map_err(|error| error.to_string())?;
@@ -271,41 +270,40 @@ pub async fn execute_checked_fea_locally(
             let available = std::thread::available_parallelism().map_or(1, usize::from);
             let concurrency = available.min(frequencies.len()).max(1);
             let run_group = |(index, frequency): (usize, f64)| {
-                    let case = if frequency.is_nan() {
-                        study.clone()
-                    } else {
-                        single_frequency_study(&study, frequency)
+                let case = if frequency.is_nan() {
+                    study.clone()
+                } else {
+                    single_frequency_study(&study, frequency)
+                };
+                let prefix = if frequency.is_nan() {
+                    String::new()
+                } else {
+                    frequency_case_id(frequency)
+                };
+                let options = &options;
+                let study_id = study_id.clone();
+                async move {
+                    // A failed frequency keeps its place in the sweep and never hides
+                    // the results of its siblings.
+                    let cases = match execute_study_cases(source, case, &prefix, options).await {
+                        Ok(cases) => cases
+                            .into_iter()
+                            .map(|case| LocalSweepCase {
+                                case_id: case.case_id.clone(),
+                                outcome: Ok(case),
+                            })
+                            .collect(),
+                        Err(error) => vec![LocalSweepCase {
+                            case_id: if prefix.is_empty() {
+                                study_id.clone()
+                            } else {
+                                prefix.clone()
+                            },
+                            outcome: Err(error),
+                        }],
                     };
-                    let prefix = if frequency.is_nan() {
-                        String::new()
-                    } else {
-                        frequency_case_id(frequency)
-                    };
-                    let options = &options;
-                    let study_id = study_id.clone();
-                    async move {
-                        // A failed frequency keeps its place in the sweep and never hides
-                        // the results of its siblings.
-                        let cases = match execute_study_cases(source, case, &prefix, options).await
-                        {
-                            Ok(cases) => cases
-                                .into_iter()
-                                .map(|case| LocalSweepCase {
-                                    case_id: case.case_id.clone(),
-                                    outcome: Ok(case),
-                                })
-                                .collect(),
-                            Err(error) => vec![LocalSweepCase {
-                                case_id: if prefix.is_empty() {
-                                    study_id.clone()
-                                } else {
-                                    prefix.clone()
-                                },
-                                outcome: Err(error),
-                            }],
-                        };
-                        (index, cases)
-                    }
+                    (index, cases)
+                }
             };
             // Every frequency shares one geometry and mesh. The first case meshes and fills the
             // accepted-stage meshing cache; the remaining frequencies then reuse that mesh
@@ -354,12 +352,12 @@ pub async fn execute_checked_fea_locally(
                                 value: binding.value,
                             })
                             .collect();
-                        let outcome = execute_case(source, study, inputs, options)
-                            .await
-                            .map(|mut completed| {
+                        let outcome = execute_case(source, study, inputs, options).await.map(
+                            |mut completed| {
                                 completed.case_id = case.case_id.clone();
                                 completed
-                            });
+                            },
+                        );
                         (
                             index,
                             LocalSweepCase {
@@ -447,7 +445,12 @@ fn sweep_concurrency(
         policy.and_then(|policy| policy.resources.cpu_threads_per_worker),
     )
     .unwrap_or(1);
-    crate::machine_capacity::case_concurrency(workers_per_case, threads_per_worker, case_count, requested)
+    crate::machine_capacity::case_concurrency(
+        workers_per_case,
+        threads_per_worker,
+        case_count,
+        requested,
+    )
 }
 
 /// One study case, or the two analyses of a harmonic-heating chain run in order.
@@ -472,7 +475,9 @@ async fn execute_study_cases(
         let mut heat = execute_case(source, study.clone(), Vec::new(), options).await?;
         heat.case_id = label(&analysis);
         let CompletedFeaStudyResult::Thermal(thermal) = &heat.result else {
-            return Err("the heat case of an electrothermal analysis must be a thermal study".into());
+            return Err(
+                "the heat case of an electrothermal analysis must be a thermal study".into(),
+            );
         };
         let state = thermal
             .completion
@@ -519,9 +524,13 @@ async fn execute_study_cases(
         case.case_id = prefix.to_string();
         return Ok(vec![case]);
     };
-    let mut harmonic =
-        execute_case(source, chain::sub_study(&study, &chain.harmonic), Vec::new(), options)
-            .await?;
+    let mut harmonic = execute_case(
+        source,
+        chain::sub_study(&study, &chain.harmonic),
+        Vec::new(),
+        options,
+    )
+    .await?;
     harmonic.case_id = label(&chain.harmonic);
     let CompletedFeaStudyResult::Maxwell(maxwell) = &harmonic.result else {
         return Err("the heat source of a thermal analysis must come from a harmonic electromagnetic analysis".into());

@@ -21,10 +21,12 @@ fn fan_in_preserves_every_original_source_and_rejects_incomplete_inventory() {
         .map(|entry| workload.entry(entry).unwrap().execute(&mesh).unwrap())
         .collect::<Vec<_>>();
     let ordered =
-        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries.clone(), &none(3)).unwrap();
+        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries.clone(), &none(3))
+            .unwrap();
     entries.reverse();
     let reversed =
-        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries.clone(), &none(3)).unwrap();
+        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries.clone(), &none(3))
+            .unwrap();
     assert_eq!(ordered.result, reversed.result);
     assert_eq!(ordered.publication, reversed.publication);
     assert_eq!(ordered.fields, reversed.fields);
@@ -53,12 +55,18 @@ fn fan_in_preserves_every_original_source_and_rejects_incomplete_inventory() {
     .unwrap();
     cold.validate_for(&ordered.result.publication_authority().unwrap())
         .unwrap();
-    assert!(
-        assemble_acoustic_frequency_result(workload.clone(), &mesh, entries[..2].to_vec(), &none(3)).is_err()
-    );
+    assert!(assemble_acoustic_frequency_result(
+        workload.clone(),
+        &mesh,
+        entries[..2].to_vec(),
+        &none(3)
+    )
+    .is_err());
     let mut duplicate = entries.clone();
     duplicate[1] = duplicate[0].clone();
-    assert!(assemble_acoustic_frequency_result(workload.clone(), &mesh, duplicate, &none(3)).is_err());
+    assert!(
+        assemble_acoustic_frequency_result(workload.clone(), &mesh, duplicate, &none(3)).is_err()
+    );
     let mut other = workload
         .entry(workload.plan().entries().unwrap()[0])
         .unwrap();

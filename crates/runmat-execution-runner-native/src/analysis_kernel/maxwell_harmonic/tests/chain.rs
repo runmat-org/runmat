@@ -174,7 +174,8 @@ fn both_orders_native_solve_recovery_complex_observation_state_and_accuracy_cold
                 program_revision: task.program.request.recipe.program_revision.clone(),
                 chunk_bytes: policy.chunk_bytes(),
                 inventory_limits: limits,
-                local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             },
             RecoveredFieldSample::Final,
             None,

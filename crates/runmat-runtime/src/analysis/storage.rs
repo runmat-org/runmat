@@ -745,7 +745,9 @@ pub fn persist_run_result(run: &AnalysisRunResult) -> Result<AnalysisArtifactRec
 
 pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisArtifactStore>, String>
 {
-    if let Some(store) = async_access::scoped_store() { return Ok(store); }
+    if let Some(store) = async_access::scoped_store() {
+        return Ok(store);
+    }
     global_store()
         .read()
         .map(|store| Arc::clone(&store))
@@ -754,8 +756,8 @@ pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisAr
 
 mod source_access;
 mod async_access;
-pub use async_access::with_artifact_access;
 pub(in crate::analysis) use async_access::scoped_artifact_provider;
+pub use async_access::with_artifact_access;
 pub use source_access::{
     load_acoustic_frequency_result, load_assessment_metadata, load_run_metadata, load_run_result,
     load_structural_frequency_result, resolve_run_attempt, run_attempts,

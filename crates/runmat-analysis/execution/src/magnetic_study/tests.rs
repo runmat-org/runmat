@@ -15,7 +15,8 @@ fn preparation(order: ElementOrder) -> MagneticStudyPreparation {
     compiled.model.electromagnetic = Some(ElectromagneticDomain::Magnetostatic {
         formulation: MagnetostaticFormulation::MagneticVectorPotential,
     });
-    compiled.model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
+    compiled.model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     compiled.model.constraints.clear();
     for face in 0..4 {
         compiled
@@ -24,7 +25,11 @@ fn preparation(order: ElementOrder) -> MagneticStudyPreparation {
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: format!("ground:{face}"),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                            &(format!("face:{face}")),
+                        ),
+                    ),
                 },
             }));
     }

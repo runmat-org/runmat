@@ -18,8 +18,10 @@ mod tests;
 pub(super) use cg::execute as execute_krylov;
 pub(super) use contract::{capabilities, cost, feasibility};
 pub(super) use jacobi::{apply as apply_preconditioner, prepare as prepare_preconditioner};
-pub(super) use multigrid::{free as free_multigrid, prepare as prepare_multigrid, solve as solve_multigrid};
 pub(in crate::backend::wgpu::provider) use multigrid::MultigridState;
+pub(super) use multigrid::{
+    free as free_multigrid, prepare as prepare_multigrid, solve as solve_multigrid,
+};
 pub(super) use pipelines::SparsePipelines;
 pub(super) use spmv::execute as execute_spmv;
 pub(super) use storage::SparseState;

@@ -74,7 +74,9 @@ pub fn solve_complex(
     rhs: &[(f64, f64)],
 ) -> Result<ComplexDirectSolution, SparseDirectError> {
     if rhs.len() != dimension {
-        return Err(SparseDirectError::Invalid("rhs length differs from dimension".into()));
+        return Err(SparseDirectError::Invalid(
+            "rhs length differs from dimension".into(),
+        ));
     }
     if dimension == 0 {
         return Ok(ComplexDirectSolution {
@@ -93,17 +95,27 @@ pub fn solve_complex(
                 "entry index out of range or non-finite".into(),
             ));
         }
-        triplets.push(entry.row, entry.column, c64::new(entry.real, entry.imaginary));
+        triplets.push(
+            entry.row,
+            entry.column,
+            c64::new(entry.real, entry.imaginary),
+        );
     }
     if rhs.iter().any(|(a, b)| !a.is_finite() || !b.is_finite()) {
         return Err(SparseDirectError::Invalid("non-finite rhs".into()));
     }
     let values: Vec<c64> = rhs.iter().map(|(a, b)| c64::new(*a, *b)).collect();
     let values = shared_lu(dimension, triplets, &values)?;
-    if values.iter().any(|v| !v.re.is_finite() || !v.im.is_finite()) {
+    if values
+        .iter()
+        .any(|v| !v.re.is_finite() || !v.im.is_finite())
+    {
         return Err(SparseDirectError::Breakdown);
     }
-    let mut residual = rhs.iter().map(|(a, b)| c64::new(-a, -b)).collect::<Vec<_>>();
+    let mut residual = rhs
+        .iter()
+        .map(|(a, b)| c64::new(-a, -b))
+        .collect::<Vec<_>>();
     for entry in entries {
         let x = values[entry.column];
         let a = c64::new(entry.real, entry.imaginary);
@@ -114,7 +126,11 @@ pub fn solve_complex(
     let defect = norm(&residual);
     Ok(ComplexDirectSolution {
         solution: values.into_iter().map(|z| (z.re, z.im)).collect(),
-        relative_residual: if rhs_norm > 0.0 { defect / rhs_norm } else { defect },
+        relative_residual: if rhs_norm > 0.0 {
+            defect / rhs_norm
+        } else {
+            defect
+        },
     })
 }
 
@@ -125,7 +141,9 @@ pub fn solve_real(
     rhs: &[f64],
 ) -> Result<RealDirectSolution, SparseDirectError> {
     if rhs.len() != dimension {
-        return Err(SparseDirectError::Invalid("rhs length differs from dimension".into()));
+        return Err(SparseDirectError::Invalid(
+            "rhs length differs from dimension".into(),
+        ));
     }
     if dimension == 0 {
         return Ok(RealDirectSolution {
@@ -158,7 +176,11 @@ pub fn solve_real(
     let defect = norm(&residual);
     Ok(RealDirectSolution {
         solution: values,
-        relative_residual: if rhs_norm > 0.0 { defect / rhs_norm } else { defect },
+        relative_residual: if rhs_norm > 0.0 {
+            defect / rhs_norm
+        } else {
+            defect
+        },
     })
 }
 
@@ -170,11 +192,36 @@ mod tests {
     fn complex_indefinite_system_is_solved_exactly() {
         // [[1, i], [i, -1+2i]] x = [1, 0]
         let entries = [
-            ComplexEntry { row: 0, column: 0, real: 1.0, imaginary: 0.0 },
-            ComplexEntry { row: 0, column: 1, real: 0.0, imaginary: 1.0 },
-            ComplexEntry { row: 1, column: 0, real: 0.0, imaginary: 1.0 },
-            ComplexEntry { row: 1, column: 1, real: -0.5, imaginary: 1.0 },
-            ComplexEntry { row: 1, column: 1, real: -0.5, imaginary: 1.0 },
+            ComplexEntry {
+                row: 0,
+                column: 0,
+                real: 1.0,
+                imaginary: 0.0,
+            },
+            ComplexEntry {
+                row: 0,
+                column: 1,
+                real: 0.0,
+                imaginary: 1.0,
+            },
+            ComplexEntry {
+                row: 1,
+                column: 0,
+                real: 0.0,
+                imaginary: 1.0,
+            },
+            ComplexEntry {
+                row: 1,
+                column: 1,
+                real: -0.5,
+                imaginary: 1.0,
+            },
+            ComplexEntry {
+                row: 1,
+                column: 1,
+                real: -0.5,
+                imaginary: 1.0,
+            },
         ];
         let solved = solve_complex(2, &entries, &[(1.0, 0.0), (0.0, 0.0)]).unwrap();
         assert!(solved.relative_residual < 1e-14, "{solved:?}");

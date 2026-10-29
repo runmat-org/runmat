@@ -15,7 +15,9 @@ const HOT: f64 = 400.0;
 const COLD: f64 = 300.0;
 
 fn boundary(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
-    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)));
+    let mut target = RegionTarget::boundary(
+        runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),
+    );
     let entities = mesh
         .topology
         .boundary_faces
@@ -53,11 +55,13 @@ fn workload(mesh: &SolverMeshArtifact, transfer: ThermalInterfaceTransfer) -> Th
     model.initial_conditions.clear();
     model.materials = vec![material("lower", K_LOWER), material("upper", K_UPPER)];
     let mut lower = model.material_assignments[0].clone();
-    lower.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("lower"));
+    lower.target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("lower"));
     lower.expected_material_id = "lower".into();
     lower.assigned_material_id = "lower".into();
     let mut upper = lower.clone();
-    upper.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("upper"));
+    upper.target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("upper"));
     upper.expected_material_id = "upper".into();
     upper.assigned_material_id = "upper".into();
     model.material_assignments = vec![lower, upper];
@@ -97,8 +101,11 @@ fn workload(mesh: &SolverMeshArtifact, transfer: ThermalInterfaceTransfer) -> Th
 
 /// The joint as two named faces, one per body, as an imprinted CAD assembly names them.
 fn mesh() -> SolverMeshArtifact {
-    let mut mesh =
-        layered_box_mesh([2, 5, 2], [0.5, 1.0, 0.5], &[(SPLIT, "lower"), (2.0, "upper")]);
+    let mut mesh = layered_box_mesh(
+        [2, 5, 2],
+        [0.5, 1.0, 0.5],
+        &[(SPLIT, "lower"), (2.0, "upper")],
+    );
     for face in &mut mesh.topology.boundary_faces {
         if let Some(lower) = face
             .provenance
@@ -141,16 +148,33 @@ fn contact_conductance_carries_the_series_resistance_flux_and_jump() {
         for (node, &value) in mesh.topology.nodes.iter().zip(temperature) {
             let y = node.coordinates_m.canonical_value()[1];
             // Interface nodes publish the first (lower) side here.
-            let expected = if y <= SPLIT + 1e-12 { lower(y) } else { upper(y) };
-            assert!((value - expected).abs() < 1e-7 * HOT, "y={y} {value} vs {expected}");
+            let expected = if y <= SPLIT + 1e-12 {
+                lower(y)
+            } else {
+                upper(y)
+            };
+            assert!(
+                (value - expected).abs() < 1e-7 * HOT,
+                "y={y} {value} vs {expected}"
+            );
         }
         assert!(!result.interface_node_ids.is_empty());
-        let second = result.interface_temperature_snapshots[0].as_host_f64().unwrap();
+        let second = result.interface_temperature_snapshots[0]
+            .as_host_f64()
+            .unwrap();
         for (&id, &value) in result.interface_node_ids.iter().zip(second) {
-            let node = mesh.topology.nodes.iter().find(|n| n.node_id == id).unwrap();
+            let node = mesh
+                .topology
+                .nodes
+                .iter()
+                .find(|n| n.node_id == id)
+                .unwrap();
             assert!((node.coordinates_m.canonical_value()[1] - SPLIT).abs() < 1e-12);
             let expected = upper(SPLIT);
-            assert!((value - expected).abs() < 1e-7 * HOT, "{value} vs {expected}");
+            assert!(
+                (value - expected).abs() < 1e-7 * HOT,
+                "{value} vs {expected}"
+            );
         }
         // The jump is the flux over the conductance.
         assert!(((lower(SPLIT) - upper(SPLIT)) - q / h).abs() < 1e-9 * HOT);
@@ -179,7 +203,10 @@ fn perfect_contact_shares_the_interface_temperature() {
         } else {
             COLD + q * (1.0 - y) / K_UPPER
         };
-        assert!((value - expected).abs() < 1e-7 * HOT, "y={y} {value} vs {expected}");
+        assert!(
+            (value - expected).abs() < 1e-7 * HOT,
+            "y={y} {value} vs {expected}"
+        );
     }
 }
 
@@ -221,6 +248,9 @@ fn published_state_and_element_means_read_each_side_of_the_joint() {
         } else {
             COLD + q * (1.0 - y) / K_UPPER
         };
-        assert!((value - expected).abs() < 1e-7 * HOT, "y={y} {value} vs {expected}");
+        assert!(
+            (value - expected).abs() < 1e-7 * HOT,
+            "y={y} {value} vs {expected}"
+        );
     }
 }

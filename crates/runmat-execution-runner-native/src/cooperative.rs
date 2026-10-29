@@ -85,7 +85,8 @@ impl CooperativeKernelSpec {
     }
 
     pub fn decode(bytes: &[u8]) -> NativeExecutionResult<Self> {
-        let invalid = || NativeExecutionError::Protocol("cooperative kernel frame is invalid".into());
+        let invalid =
+            || NativeExecutionError::Protocol("cooperative kernel frame is invalid".into());
         if bytes.len() < 10 {
             return Err(invalid());
         }
@@ -105,7 +106,10 @@ impl CooperativeKernelSpec {
         match bytes[0] {
             1 if values.len() % 2 == 0 => Ok(Self::Elastic {
                 order,
-                materials: values.chunks_exact(2).map(|pair| (pair[0], pair[1])).collect(),
+                materials: values
+                    .chunks_exact(2)
+                    .map(|pair| (pair[0], pair[1]))
+                    .collect(),
             }),
             2 => Ok(Self::Conduction {
                 order,
@@ -181,7 +185,9 @@ impl ElementKernel for ElasticKernel {
         let material = self.material(material)?;
         match self.order {
             ElementOrder::Tet4 => {
-                let nodes_m = coordinates.try_into().map_err(|_| "Tet4 needs four nodes")?;
+                let nodes_m = coordinates
+                    .try_into()
+                    .map_err(|_| "Tet4 needs four nodes")?;
                 let stiffness =
                     global_stiffness_matrix(material, Tetrahedron4ElementGeometry { nodes_m })
                         .map_err(|error| error.to_string())?;
@@ -190,7 +196,9 @@ impl ElementKernel for ElasticKernel {
                 }
             }
             ElementOrder::Tet10 => {
-                let nodes_m = coordinates.try_into().map_err(|_| "Tet10 needs ten nodes")?;
+                let nodes_m = coordinates
+                    .try_into()
+                    .map_err(|_| "Tet10 needs ten nodes")?;
                 let stiffness = tetrahedron10_global_stiffness_matrix(
                     material,
                     Tetrahedron10ElementGeometry { nodes_m },
@@ -243,7 +251,10 @@ impl ElementKernel for ElasticKernel {
         )
         .ok_or("element is degenerate or inverted")?;
         for (row, value) in result.iter_mut().enumerate().take(6) {
-            *value = (0..6).map(|column| d[row][column] * strain[column]).sum::<f64>() / volume;
+            *value = (0..6)
+                .map(|column| d[row][column] * strain[column])
+                .sum::<f64>()
+                / volume;
         }
         Ok(())
     }
@@ -452,9 +463,7 @@ pub fn solve_cooperatively(
                         subdomains,
                         launch.threads_per_rank,
                     );
-                    control
-                        .set_read_timeout(Some(launch.timeout))
-                        .map_err(io)?;
+                    control.set_read_timeout(Some(launch.timeout)).map_err(io)?;
                     write_bytes(&mut control, kernel_frame).map_err(distributed)?;
                     write_bytes(&mut control, &plan.encode()).map_err(distributed)?;
                     let local = plan.local_subdomains();
@@ -576,9 +585,9 @@ pub fn run_cooperative_rank_from_env() -> NativeExecutionResult<()> {
     let rank = parse(COOPERATIVE_RANK_ENV)? as usize;
     let ranks = parse(RANKS_ENV)? as usize;
     let token = parse(TOKEN_ENV)?;
-    let coordinator: SocketAddr = variable(COORDINATOR_ENV)?
-        .parse()
-        .map_err(|_| NativeExecutionError::Configuration("coordinator address is invalid".into()))?;
+    let coordinator: SocketAddr = variable(COORDINATOR_ENV)?.parse().map_err(|_| {
+        NativeExecutionError::Configuration("coordinator address is invalid".into())
+    })?;
     let bind: IpAddr = variable(BIND_ENV)?
         .parse()
         .map_err(|_| NativeExecutionError::Configuration("bind address is invalid".into()))?;
@@ -601,7 +610,13 @@ pub fn run_cooperative_rank_from_env() -> NativeExecutionResult<()> {
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let kernel = kernel.kernel();
-    let reply = match run_rank(&inputs, &plan, kernel.as_ref(), &FaerCholeskyFactory, &mut comm) {
+    let reply = match run_rank(
+        &inputs,
+        &plan,
+        kernel.as_ref(),
+        &FaerCholeskyFactory,
+        &mut comm,
+    ) {
         Ok(output) => {
             let mut bytes = vec![0u8];
             bytes.extend(output.encode());

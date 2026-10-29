@@ -89,14 +89,10 @@ pub fn build_maxwell_harmonic_resource_plan(
     // borrowed Serde profiles conservatively reserve maximum-width encodings.
     // Compare the same actual-wire authority; retain the larger profiles below.
     let actual_decode = add(
-        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
-            &workload_bytes,
-        )
-        .map_err(invalid)?,
-        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
-            &mesh_bytes,
-        )
-        .map_err(invalid)?,
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&workload_bytes)
+            .map_err(invalid)?,
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&mesh_bytes)
+            .map_err(invalid)?,
     )?;
     if prepared.inputs.encoded_payload_bytes.0 != input_bytes
         || prepared.result_output.encoded_payload_bytes_upper_bound.0

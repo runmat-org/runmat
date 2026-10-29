@@ -266,8 +266,5 @@ fn mesh_output(order: ElementOrder) -> crate::meshing::MeshingExecutionOutput {
     artifact.canonical_digest = StableDigest::ZERO;
     artifact.seal_canonical_digest().unwrap();
     let evidence = runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&artifact);
-    crate::meshing::MeshingExecutionOutput {
-        artifact,
-        evidence,
-    }
+    crate::meshing::MeshingExecutionOutput { artifact, evidence }
 }

@@ -159,7 +159,9 @@ fn steady_portable_entry_preserves_uniform_temperature_on_both_tetrahedra() {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: "prescribed_temperature".into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+                    ),
                     value: PrescribedValue::Constant(Temperature::new(315.0)),
                 },
             }));

@@ -132,7 +132,11 @@ impl RecoveredFieldPartition {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Self::select_stored(&RecoveredFieldView::from_field(source)?, source_indices, &stored)
+        Self::select_stored(
+            &RecoveredFieldView::from_field(source)?,
+            source_indices,
+            &stored,
+        )
     }
 
     /// Extract from content already validated by the shared borrowed-field identity boundary.

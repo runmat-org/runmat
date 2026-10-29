@@ -266,13 +266,7 @@ pub(crate) fn solve(
     )
     .map_err(|error| format!("reduced operator: {error:?}"))?;
     use crate::solve::shared_sparse;
-    let strategy = shared_sparse::resolve_spd_strategy(
-        strategy,
-        unknowns,
-        nnz,
-        1,
-        false,
-    );
+    let strategy = shared_sparse::resolve_spd_strategy(strategy, unknowns, nnz, 1, false);
     let outcome = shared_sparse::solve_spd(shared_sparse::SpdSolveRequest {
         matrix: &reduced,
         rhs: &reduced_rhs,
@@ -303,7 +297,11 @@ pub(crate) fn solve(
     let solution = (0..count)
         .map(|node| {
             let (terms, constant) = &expansions[node];
-            constant + terms.iter().map(|&(c, w)| w * outcome.solution[c]).sum::<f64>()
+            constant
+                + terms
+                    .iter()
+                    .map(|&(c, w)| w * outcome.solution[c])
+                    .sum::<f64>()
         })
         .collect();
     let (method, preconditioner) = strategy.provenance();

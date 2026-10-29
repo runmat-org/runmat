@@ -102,8 +102,7 @@ fn in_conflict(
                 .expect("boundary index references active tetrahedron")
                 .vertex_indices
                 .map(|vertex| topology.nodes()[vertex as usize]);
-            (super::super::cavity::materialized_relation(corners, node)?
-                == PredicateSign::Positive)
+            (super::super::cavity::materialized_relation(corners, node)? == PredicateSign::Positive)
                 .then_some(FaceSide::Coplanar)
         }
     })

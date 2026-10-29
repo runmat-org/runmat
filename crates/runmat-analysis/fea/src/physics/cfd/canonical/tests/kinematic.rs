@@ -44,7 +44,10 @@ fn action(id: &str, target: RegionTarget, direction: Option<[f64; 3]>) -> Analys
 fn is_top_wall(f: &fixture::Fixture, target: &RegionTarget) -> bool {
     f.source.boundary_faces.iter().any(|face| {
         (face.centroid_m[1] - 1.0).abs() < 1e-12
-            && face.provenance.iter().any(|e| target.matches_persistent_entity(e))
+            && face
+                .provenance
+                .iter()
+                .any(|e| target.matches_persistent_entity(e))
     })
 }
 
@@ -96,8 +99,11 @@ fn inlet_velocity_and_wall_motion_reproduce_the_constraint_driven_couette_flow()
                 SignalValue::Vector3(v.map(Velocity::new)),
                 SignalShape::Vector3,
             ));
-            f.actions
-                .push(ExcitationAction::InletVelocity(action(&id, target.clone(), None)));
+            f.actions.push(ExcitationAction::InletVelocity(action(
+                &id,
+                target.clone(),
+                None,
+            )));
         }
     }
     assert!(moving > 0, "the Couette case drives a wall");
@@ -105,10 +111,20 @@ fn inlet_velocity_and_wall_motion_reproduce_the_constraint_driven_couette_flow()
         .unwrap()
         .solve()
         .unwrap();
-    for (u, v) in actual.velocity_m_per_s.canonical_values().iter().zip(expected.velocity_m_per_s.canonical_values()) {
+    for (u, v) in actual
+        .velocity_m_per_s
+        .canonical_values()
+        .iter()
+        .zip(expected.velocity_m_per_s.canonical_values())
+    {
         assert!(norm(sub(*u, *v)) < 1e-12);
     }
-    for (p, q) in actual.pressure_pa.canonical_values().iter().zip(expected.pressure_pa.canonical_values()) {
+    for (p, q) in actual
+        .pressure_pa
+        .canonical_values()
+        .iter()
+        .zip(expected.pressure_pa.canonical_values())
+    {
         assert!((p - q).abs() < 1e-12);
     }
 }
@@ -120,7 +136,9 @@ fn wall_motion_rejects_normal_motion_and_a_non_unit_direction() {
         f.constraints
             .iter()
             .find_map(|c| match &c.kind {
-                FluidConstraintKind::PrescribedVelocity { target, .. } if is_top_wall(f, target) => {
+                FluidConstraintKind::PrescribedVelocity { target, .. }
+                    if is_top_wall(f, target) =>
+                {
                     Some(target.clone())
                 }
                 _ => None,
@@ -146,7 +164,12 @@ fn wall_motion_rejects_normal_motion_and_a_non_unit_direction() {
         let error = CanonicalFluidProblem::prepare(g.input()).err();
         if direction[0] == 2.0 {
             assert!(
-                matches!(error, Some(CanonicalFluidError::Invalid("fluid kinematic unit direction"))),
+                matches!(
+                    error,
+                    Some(CanonicalFluidError::Invalid(
+                        "fluid kinematic unit direction"
+                    ))
+                ),
                 "{error:?}"
             );
         } else {

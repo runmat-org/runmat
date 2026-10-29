@@ -16,8 +16,7 @@ use wasm_bindgen::{prelude::*, JsCast};
 
 const BROWSER_MEMORY_BYTES: u64 = 1 << 30;
 const ARTIFACT_BYTES: u64 = 128 << 20;
-const PUBLICATION_HOST_REASON: &str =
-    "Result storage is unavailable in this browser workspace.";
+const PUBLICATION_HOST_REASON: &str = "Result storage is unavailable in this browser workspace.";
 
 // Capability metadata does not open or materialize storage while showing choices.
 fn supports_result_publication(provider: &dyn runmat_filesystem::FsProvider) -> bool {
@@ -70,8 +69,12 @@ impl FeaGeometryExecutionHost for BrowserGeometryHost {
 }
 fn preparation_error_from_js(error: JsValue) -> runmat_core::FeaStudyPreparationError {
     if let Ok(value) = js_sys::Reflect::get(&error, &JsValue::from_str("meshingFailure")) {
-        if let Ok(failure) = serde_wasm_bindgen::from_value::<runmat_meshing_core::MeshingFailure>(value) {
-            if failure.validate().is_ok() { return runmat_core::FeaStudyPreparationError::Meshing(Box::new(failure)); }
+        if let Ok(failure) =
+            serde_wasm_bindgen::from_value::<runmat_meshing_core::MeshingFailure>(value)
+        {
+            if failure.validate().is_ok() {
+                return runmat_core::FeaStudyPreparationError::Meshing(Box::new(failure));
+            }
         }
     }
     js_value_to_string(error).into()
@@ -99,43 +102,89 @@ impl RunMatWasm {
         let result_provider = runmat_filesystem::current_provider();
         let _filesystem = pin_inputs(inputs)?;
         let cancellation = runmat_execution::cancellation::CancellationSource::new();
-        let _interrupt = super::session::install_wasm_interrupt(&self.active_interrupt, cancellation.clone());
+        let _interrupt =
+            super::session::install_wasm_interrupt(&self.active_interrupt, cancellation.clone());
         let mut session = self.take_session()?;
         self.fea_selection.borrow_mut().take();
-        let source = session.load_and_check_fea_source_path(Path::new(&path)).await.map_err(|e| js_error(&e))?;
+        let source = session
+            .load_and_check_fea_source_path(Path::new(&path))
+            .await
+            .map_err(|e| js_error(&e))?;
         ensure_not_cancelled(&cancellation)?;
         let preflight = source.fea_execution_preflight().map_err(|e| js_error(&e))?;
         let id = uuid::Uuid::new_v4().to_string();
         let revision = source.check_result().revision.0;
         let publication_supported = supports_result_publication(result_provider.as_ref());
         let resident = resident_bytes();
-        let preparation_fits = resident.saturating_add((512 + 128 + 64) << 20) <= BROWSER_MEMORY_BYTES;
+        let preparation_fits =
+            resident.saturating_add((512 + 128 + 64) << 20) <= BROWSER_MEMORY_BYTES;
         let ready = preflight.browser_supported && publication_supported && preparation_fits;
-        let available = BROWSER_MEMORY_BYTES.saturating_sub(resident).saturating_sub(ARTIFACT_BYTES).saturating_sub(64 << 20);
-        let reason = if !preflight.browser_supported { preflight.desktop_reason }
-            else if !publication_supported { Some(PUBLICATION_HOST_REASON) }
-            else if !preparation_fits { Some("This session needs more memory for geometry preparation. Continue in the desktop app.") }
-            else if preflight.approximate_memory_bytes.is_some_and(|bytes| bytes > available) { Some("Desktop recommended for memory") }
-            else { Some("Runs in this browser") };
-        let duration = ready.then(|| session.fea_execution_timing_profile()
-            .for_source(&source, runmat_core::FeaTimingRoute::BrowserCheckedSource, 1).ok().and_then(|key| key.estimate())).flatten();
+        let available = BROWSER_MEMORY_BYTES
+            .saturating_sub(resident)
+            .saturating_sub(ARTIFACT_BYTES)
+            .saturating_sub(64 << 20);
+        let reason = if !preflight.browser_supported {
+            preflight.desktop_reason
+        } else if !publication_supported {
+            Some(PUBLICATION_HOST_REASON)
+        } else if !preparation_fits {
+            Some("This session needs more memory for geometry preparation. Continue in the desktop app.")
+        } else if preflight
+            .approximate_memory_bytes
+            .is_some_and(|bytes| bytes > available)
+        {
+            Some("Desktop recommended for memory")
+        } else {
+            Some("Runs in this browser")
+        };
+        let duration = ready
+            .then(|| {
+                session
+                    .fea_execution_timing_profile()
+                    .for_source(
+                        &source,
+                        runmat_core::FeaTimingRoute::BrowserCheckedSource,
+                        1,
+                    )
+                    .ok()
+                    .and_then(|key| key.estimate())
+            })
+            .flatten();
         let plan = AnalysisExecutionChoices {
-            schema_version: 1, plan_id: id.clone(), revision,
+            schema_version: 1,
+            plan_id: id.clone(),
+            revision,
             candidates: vec![
-                AnalysisExecutionCandidate { mode: AnalysisExecutionMode::SingleCore, cores: Some(1),
+                AnalysisExecutionCandidate {
+                    mode: AnalysisExecutionMode::SingleCore,
+                    cores: Some(1),
                     memory_bytes: preflight.approximate_memory_bytes,
-                    estimated_millis: duration.as_ref().map(|value| value.0), duration_evidence: duration.map(|value| value.1),
-                    readiness: if ready { AnalysisExecutionReadiness::Ready } else { AnalysisExecutionReadiness::DesktopRequired },
+                    estimated_millis: duration.as_ref().map(|value| value.0),
+                    duration_evidence: duration.map(|value| value.1),
+                    readiness: if ready {
+                        AnalysisExecutionReadiness::Ready
+                    } else {
+                        AnalysisExecutionReadiness::DesktopRequired
+                    },
                     reason: reason.map(str::to_owned),
                 },
-                AnalysisExecutionCandidate { mode: AnalysisExecutionMode::MultiCore, cores: None, memory_bytes: None,
-                    estimated_millis: None, duration_evidence: None, readiness: AnalysisExecutionReadiness::DesktopRequired,
+                AnalysisExecutionCandidate {
+                    mode: AnalysisExecutionMode::MultiCore,
+                    cores: None,
+                    memory_bytes: None,
+                    estimated_millis: None,
+                    duration_evidence: None,
+                    readiness: AnalysisExecutionReadiness::DesktopRequired,
                     reason: Some("Multi-core simulation runs in the desktop app.".into()),
                 },
             ],
         };
         // A choice is bound to checked inputs, not to a prematurely generated mesh.
-        *self.fea_selection.borrow_mut() = ready.then_some(BrowserFeaSelection { id, path, checked_revision: revision });
+        *self.fea_selection.borrow_mut() = ready.then_some(BrowserFeaSelection {
+            id,
+            path,
+            checked_revision: revision,
+        });
         crate::wire::json_contract_to_js(&plan).map_err(|e| js_error(&e.to_string()))
     }
     #[wasm_bindgen(js_name=runFeaSource)]
@@ -182,7 +231,10 @@ impl RunMatWasm {
                 ));
             }
         }
-        self.fea_selection.borrow_mut().take().ok_or_else(|| js_error("The selected execution options are no longer available."))?;
+        self.fea_selection
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| js_error("The selected execution options are no longer available."))?;
         let observation = session
             .fea_execution_timing_profile()
             .for_source(&fresh, runmat_core::FeaTimingRoute::BrowserCheckedSource, 1)
@@ -364,4 +416,3 @@ fn ensure_not_cancelled(
         Ok(())
     }
 }
-

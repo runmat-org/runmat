@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_LENGTH_CLASS, scale: 1.0e-3, offset: 0.0, range: QuantityRange::NonNegative };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_LENGTH_CLASS,
+    scale: 1.0e-3,
+    offset: 0.0,
+    range: QuantityRange::NonNegative,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const LENGTH_MILLIMETERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.Length.millimeters(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const LENGTH_MILLIMETERS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&LENGTH_MILLIMETERS_SIGNATURES);
+const LENGTH_MILLIMETERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.Length.millimeters(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const LENGTH_MILLIMETERS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&LENGTH_MILLIMETERS_SIGNATURES);
 const LENGTH_MILLIMETERS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "length-millimeters",
     title: "A 0.5 mm tolerance",

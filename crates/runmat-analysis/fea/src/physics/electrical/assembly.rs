@@ -33,9 +33,7 @@ impl ElectricalAssembly {
         equation: StaticElectricalEquation,
         conductivity_override: Option<&[f64]>,
     ) -> Result<Self, ElectricalStaticError> {
-        if conductivity_override
-            .is_some_and(|values| values.len() != projection.elements.len())
-        {
+        if conductivity_override.is_some_and(|values| values.len() != projection.elements.len()) {
             return Err(ElectricalStaticError::Material(
                 "one conductivity per element is required".into(),
             ));

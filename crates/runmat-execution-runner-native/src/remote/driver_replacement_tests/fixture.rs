@@ -137,7 +137,10 @@ pub(super) fn exact_study_fixture_with_wall_time(
                 artifact_access: access.clone(),
                 source_name: "box.brep",
                 source_bytes: BOX,
-                import_options: ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+                import_options: ExactCadImportOptions {
+                    source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+                    ..ExactCadImportOptions::default()
+                },
                 contact_definitions: Vec::new(),
                 meshing_request: coarse_box_request(),
                 preferred_edges_per_partition: 64,
@@ -182,7 +185,10 @@ pub(super) fn exact_study_fixture_with_wall_time(
                 artifact_access: access.clone(),
                 source_name: "box.brep",
                 source_bytes: BOX,
-                import_options: ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+                import_options: ExactCadImportOptions {
+                    source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+                    ..ExactCadImportOptions::default()
+                },
                 contact_definitions: Vec::new(),
                 meshing_request,
                 preferred_edges_per_partition: 64,
@@ -375,7 +381,10 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
 
 pub(super) fn coarse_box_request() -> MeshingRequest {
     let mut request = crate::resolve_native_meshing_request(
-        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+        &ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..ExactCadImportOptions::default()
+        },
         runmat_meshing_core::MeshingRequestSettings::default(),
     )
     .unwrap();

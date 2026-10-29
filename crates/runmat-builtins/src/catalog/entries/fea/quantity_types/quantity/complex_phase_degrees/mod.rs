@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_COMPLEX_PHASE_CLASS, scale: std::f64::consts::PI / 180.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_COMPLEX_PHASE_CLASS,
+    scale: std::f64::consts::PI / 180.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const COMPLEX_PHASE_DEGREES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.ComplexPhase.degrees(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const COMPLEX_PHASE_DEGREES_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&COMPLEX_PHASE_DEGREES_SIGNATURES);
+const COMPLEX_PHASE_DEGREES_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.ComplexPhase.degrees(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const COMPLEX_PHASE_DEGREES_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&COMPLEX_PHASE_DEGREES_SIGNATURES);
 const COMPLEX_PHASE_DEGREES_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "complex-phase-degrees",
     title: "A 45 degree phase shift",

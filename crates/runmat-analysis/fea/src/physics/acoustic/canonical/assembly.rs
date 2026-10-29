@@ -3,8 +3,7 @@ use super::AcousticHarmonicError;
 use crate::{
     algebra::{
         element_assembly::{
-            assemble_elements, no_visit, ElementAssemblyError, ElementOutputShape,
-            ElementOutputs,
+            assemble_elements, no_visit, ElementAssemblyError, ElementOutputShape, ElementOutputs,
         },
         spmv, ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties,
         OperatorRole, RealSparseAssembler, RealSparseMatrix,
@@ -211,9 +210,15 @@ impl AcousticAssembly {
                 .with_canonical_storage(|matrix| spmv(matrix, values))
                 .expect("validated pressure shape")
         };
-        let (kr, ki) = (product(&self.stiffness, real), product(&self.stiffness, imaginary));
+        let (kr, ki) = (
+            product(&self.stiffness, real),
+            product(&self.stiffness, imaginary),
+        );
         let (mr, mi) = (product(&self.mass, real), product(&self.mass, imaginary));
-        let (br, bi) = (product(&self.impedance, real), product(&self.impedance, imaginary));
+        let (br, bi) = (
+            product(&self.impedance, real),
+            product(&self.impedance, imaginary),
+        );
         let omega = self.derivative_rate.canonical_value();
         (
             (0..real.len())

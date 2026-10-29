@@ -68,7 +68,11 @@ impl ThermalSolverResultManifest {
             &result.energy_storage_rate_snapshots,
             &result.interface_temperature_snapshots,
         ];
-        let count = if result.interface_node_ids.is_empty() { 4 } else { 5 };
+        let count = if result.interface_node_ids.is_empty() {
+            4
+        } else {
+            5
+        };
         let mut fields = Vec::with_capacity(result.time_points_s.len());
         for (ordinal, &time) in result.time_points_s.iter().enumerate() {
             let entry = |index: usize| -> AnalysisExecutionResult<_> {
@@ -88,7 +92,11 @@ impl ThermalSolverResultManifest {
                     partitions,
                 })
             };
-            fields.push((0..count).map(entry).collect::<AnalysisExecutionResult<Vec<_>>>()?);
+            fields.push(
+                (0..count)
+                    .map(entry)
+                    .collect::<AnalysisExecutionResult<Vec<_>>>()?,
+            );
         }
         let identity =
             result
@@ -195,7 +203,11 @@ impl ThermalSolverResultManifest {
         identities
             .try_reserve_exact(partition_count)
             .map_err(|_| invalid("partition identity scratch allocation failed"))?;
-        let field_count = if self.interface_node_ids.is_empty() { 4 } else { 5 };
+        let field_count = if self.interface_node_ids.is_empty() {
+            4
+        } else {
+            5
+        };
         for (ordinal, entries) in self.fields.iter().enumerate() {
             if entries.len() != field_count {
                 return Err(invalid("thermal sample has the wrong field inventory"));
@@ -270,7 +282,9 @@ impl ThermalSolverResultManifest {
 
     /// The terminal temperature and, with a finite-conductance interface, the terminal
     /// second-side interface temperature: the fields a published thermal state carries.
-    pub fn terminal_state_fields(&self) -> AnalysisExecutionResult<Vec<&RecoveredFieldArtifactEntry>> {
+    pub fn terminal_state_fields(
+        &self,
+    ) -> AnalysisExecutionResult<Vec<&RecoveredFieldArtifactEntry>> {
         let last = self
             .fields
             .last()
@@ -324,7 +338,10 @@ impl ThermalSolverResultManifest {
     ) -> AnalysisExecutionResult<CanonicalSemanticState> {
         self.validate_publication_request(request)?;
         let entries = self.terminal_state_fields()?;
-        let expected = entries.iter().map(|entry| entry.partitions.len()).sum::<usize>();
+        let expected = entries
+            .iter()
+            .map(|entry| entry.partitions.len())
+            .sum::<usize>();
         if partitions.len() != expected
             || partitions
                 .iter()
@@ -360,7 +377,9 @@ impl ThermalSolverResultManifest {
             );
         }
         let mut fields = fields.into_iter();
-        let temperature = fields.next().ok_or_else(|| invalid("missing terminal temperature"))?;
+        let temperature = fields
+            .next()
+            .ok_or_else(|| invalid("missing terminal temperature"))?;
         let interface_temperature = fields.next();
         CanonicalSemanticState::new(CanonicalSemanticStateInput {
             producer: request.producer,

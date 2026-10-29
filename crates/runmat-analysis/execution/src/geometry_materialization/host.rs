@@ -349,7 +349,10 @@ where
         }
         _ => None,
     };
-    let region_evidence = ImportedRegionEvidence { named, imported: &geometry };
+    let region_evidence = ImportedRegionEvidence {
+        named,
+        imported: &geometry,
+    };
     let regions = resolve_geometry_regions_with_generated_outputs(
         &request.definition,
         &geometry.topology,
@@ -461,13 +464,21 @@ where
             role: runmat_geometry_core::GeometryRegionRole,
             name: &str,
         ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
-            if let Some(metadata) = self.named.filter(|metadata| metadata.regions.iter().any(|region| region.region_id == name)) {
+            if let Some(metadata) = self.named.filter(|metadata| {
+                metadata
+                    .regions
+                    .iter()
+                    .any(|region| region.region_id == name)
+            }) {
                 let id = metadata.selection(name, role).map_err(|e| e.to_string())?;
                 return runmat_geometry_ops::resolve_persistent_region_selection(
                     &self.imported.topology,
                     role,
                     id,
-                    self.imported.healing_report.as_ref().map(|r| &r.revision_map),
+                    self.imported
+                        .healing_report
+                        .as_ref()
+                        .map(|r| &r.revision_map),
                 )
                 .map_err(|e| e.to_string());
             }

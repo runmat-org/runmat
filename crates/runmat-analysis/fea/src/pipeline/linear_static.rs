@@ -246,19 +246,18 @@ fn run_linear_static_with_constraint_plan(
     let phase_clock = crate::progress::phase_timer("structural_static.solve");
     let mut elastic_reuse = elastic_capture
         .map(|capture| {
-            capture
-                .into_elastic_reuse()
-                .map_err(|error| FeaRunError::Solve(format!("FEA_ELASTIC_RIGIDITY_REFUSED: {error}")))
+            capture.into_elastic_reuse().map_err(|error| {
+                FeaRunError::Solve(format!("FEA_ELASTIC_RIGIDITY_REFUSED: {error}"))
+            })
         })
         .transpose()?;
-    let solve_result =
-        solve::solve_static_system(
-            &summary,
-            &options,
-            preassembly.solver_admission.as_ref(),
-            planned_reduced_support.as_ref(),
-            elastic_reuse.as_mut(),
-        )?;
+    let solve_result = solve::solve_static_system(
+        &summary,
+        &options,
+        preassembly.solver_admission.as_ref(),
+        planned_reduced_support.as_ref(),
+        elastic_reuse.as_mut(),
+    )?;
     let operator_proof = match elastic_reuse.as_ref().and_then(|reuse| reuse.certificate()) {
         Some(certificate) if certificate.proved_by_elastic_rigidity() => {
             crate::contracts::StaticOperatorProof::ElasticRigidity

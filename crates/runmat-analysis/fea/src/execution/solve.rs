@@ -350,10 +350,8 @@ impl StructuralLinearWorkloadResult {
     /// (every collection item occupies at least one encoded byte).
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate()?;
-        let profile = runmat_canonical_codec::profile_canonical_encoding(
-            self,
-            content_limits(usize::MAX),
-        )?;
+        let profile =
+            runmat_canonical_codec::profile_canonical_encoding(self, content_limits(usize::MAX))?;
         let bytes = usize::try_from(profile.encoded_bytes_upper_bound).map_err(|_| {
             AnalysisExecutionError::Invalid("structural result exceeds the address space".into())
         })?;

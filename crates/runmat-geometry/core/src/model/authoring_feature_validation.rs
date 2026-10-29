@@ -303,8 +303,7 @@ impl super::GeometryFeatureRegionSelection {
                     "must reference an earlier feature",
                 ));
             }
-            GeometryRegionSelector::Result
-            | GeometryRegionSelector::PersistentId(_) => {}
+            GeometryRegionSelector::Result | GeometryRegionSelector::PersistentId(_) => {}
             GeometryRegionSelector::Name(_)
             | GeometryRegionSelector::Tag(_)
             | GeometryRegionSelector::GeneratedOutput(_) => {

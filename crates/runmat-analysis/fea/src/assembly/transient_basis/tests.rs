@@ -174,7 +174,9 @@ fn complete_summaries_match_for_affine_constraints() {
             y_axis: [-c, c, 0.0],
         }),
         kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("free_vertex_y_support")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "free_vertex_y_support",
+            )),
             translations: vec![TranslationDofValue {
                 dof: StructuralTranslationDof::Ux,
                 value: PrescribedValue::Constant(Displacement::new(0.0)),

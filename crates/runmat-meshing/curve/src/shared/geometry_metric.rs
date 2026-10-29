@@ -252,7 +252,8 @@ pub fn derive_curve_geometry_metric(
         for edge in &topology.edges {
             for coedge in relations.edge_coedges(&edge.id) {
                 if let Some(witness) = face_witnesses.get_mut(&coedge.face_id) {
-                    witness.tolerance_m = witness.tolerance_m.max(edge.tolerance_m.canonical_value());
+                    witness.tolerance_m =
+                        witness.tolerance_m.max(edge.tolerance_m.canonical_value());
                     witness.vertex_ids.extend(
                         edge.start_vertex_id
                             .iter()

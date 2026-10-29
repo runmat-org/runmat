@@ -452,7 +452,10 @@ fn authored_history_retains_and_publishes_fields_at_sampled_times() {
         assert!((t - time).abs() < 1e-12, "{t}");
         let values = field.storage().as_host_f64().unwrap();
         for u in values.chunks(3) {
-            assert!((u[0] - (0.001 + 0.01 * time)).abs() < 1e-8, "{u:?} at {time}");
+            assert!(
+                (u[0] - (0.001 + 0.01 * time)).abs() < 1e-8,
+                "{u:?} at {time}"
+            );
         }
     }
     assert!(samples.windows(2).all(|pair| match pair {

@@ -176,23 +176,22 @@ pub async fn prepare_study_with_role(
         .frozen_project()
         .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
     let planning = match family {
-        admission::PreparedFamily::Structural => {
-            crate::StudyRootPlanning::Structural(runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
+        admission::PreparedFamily::Structural => crate::StudyRootPlanning::Structural(
+            runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
                 backend: options.backend,
-                numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
-            })
-        }
-        admission::PreparedFamily::Thermal => {
-            crate::StudyRootPlanning::Thermal(runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
+                numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(
+                ),
+            },
+        ),
+        admission::PreparedFamily::Thermal => crate::StudyRootPlanning::Thermal(
+            runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
                 backend: options.backend,
                 element_heat_source,
-            })
-        }
-        admission::PreparedFamily::Acoustic => {
-            crate::StudyRootPlanning::Acoustic(
-                runmat_analysis_fea::study::AcousticStudyPlanningPolicy::standard(),
-            )
-        }
+            },
+        ),
+        admission::PreparedFamily::Acoustic => crate::StudyRootPlanning::Acoustic(
+            runmat_analysis_fea::study::AcousticStudyPlanningPolicy::standard(),
+        ),
         admission::PreparedFamily::AcousticResponse => crate::StudyRootPlanning::AcousticResponse(
             runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy::default(),
         ),
@@ -201,19 +200,19 @@ pub async fn prepare_study_with_role(
                 Some((temperatures, time)) => (Some(temperatures), time),
                 None => (None, None),
             };
-            crate::StudyRootPlanning::Electrical(runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
-                element_temperature_k,
-                operating_time_s,
-            })
+            crate::StudyRootPlanning::Electrical(
+                runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
+                    element_temperature_k,
+                    operating_time_s,
+                },
+            )
         }
-        admission::PreparedFamily::Magnetic => {
-            crate::StudyRootPlanning::Magnetic(runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
-            })
-        }
-        admission::PreparedFamily::Maxwell => {
-            crate::StudyRootPlanning::Maxwell(runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
-            })
-        }
+        admission::PreparedFamily::Magnetic => crate::StudyRootPlanning::Magnetic(
+            runmat_analysis_fea::study::MagneticStudyPlanningPolicy {},
+        ),
+        admission::PreparedFamily::Maxwell => crate::StudyRootPlanning::Maxwell(
+            runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {},
+        ),
         admission::PreparedFamily::Fluid => {
             crate::StudyRootPlanning::Fluid(runmat_analysis_fea::study::FluidStudyPlanningPolicy {
                 numerical: Default::default(),

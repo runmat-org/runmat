@@ -246,8 +246,11 @@ pub fn prepare_structural_modal_task(
         constraint_identity,
         Vec::new(),
     )?;
-    let discretization =
-        DiscretizationIdentity::new(problem, mesh_digest, contract_digest("modal-formulation", &mesh_digest)?)?;
+    let discretization = DiscretizationIdentity::new(
+        problem,
+        mesh_digest,
+        contract_digest("modal-formulation", &mesh_digest)?,
+    )?;
     let operator_scope = resource_plan
         .input
         .structural_operator()

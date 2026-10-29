@@ -11,7 +11,9 @@ fn compiled(step: ProcedureStep) -> CompiledAnalysisStudy {
         runmat_analysis_core::ThermalConstraint {
             constraint_id: "temperature".into(),
             kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_face("root")),
+                target: runmat_analysis_core::RegionTarget::authored(
+                    runmat_meshing_core::fixtures::fixture_face("root"),
+                ),
                 value: runmat_analysis_core::PrescribedValue::Constant(Temperature::new(293.15)),
             },
         },

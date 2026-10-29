@@ -128,7 +128,9 @@ fn assert_repeated_result_identity(temp: &TempDir, path: &str, first: &Value) {
         repeated["step_run_ids"], first["step_run_ids"],
         "{path} reused an earlier attempt instead of publishing a fresh one"
     );
-    let latest = repeated["step_run_ids"][0].as_str().expect("latest attempt id");
+    let latest = repeated["step_run_ids"][0]
+        .as_str()
+        .expect("latest attempt id");
     let definition = repeated["definition_run_ids"][0]
         .as_str()
         .expect("definition run id");
@@ -967,7 +969,10 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
         &["check", "cantilever.fea"],
         &[
             ("NO_COLOR", "1"),
-            ("RUNMAT_PACKAGE_CACHE_DIR", &temp.path().join("cache").to_string_lossy()),
+            (
+                "RUNMAT_PACKAGE_CACHE_DIR",
+                &temp.path().join("cache").to_string_lossy(),
+            ),
         ],
     );
     assert!(!output.status.success(), "{output:?}");
@@ -996,7 +1001,10 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
         &["check", "cantilever.fea"],
         &[
             ("NO_COLOR", "1"),
-            ("RUNMAT_PACKAGE_CACHE_DIR", &temp.path().join("cache").to_string_lossy()),
+            (
+                "RUNMAT_PACKAGE_CACHE_DIR",
+                &temp.path().join("cache").to_string_lossy(),
+            ),
         ],
     );
     assert!(output.status.success(), "{output:?}");

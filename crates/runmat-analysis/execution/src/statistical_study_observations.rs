@@ -8,8 +8,8 @@ use crate::{
     AnalysisBridgeResult, AnalysisHostWorkload, AnalysisOutputPolicy, ImportedRecoveredFields,
     ObservationPreparation, ObservationPublishedSource, ObservationWorkloadSource,
     PreparedAnalysisObjects, PreparedObservationAssembly, PreparedObservationFanout,
-    PreparedObservationPartition, PreparedObservationReduction,
-    PreparedStatisticalFieldRecovery, StatisticalFieldRecoveryPreparation,
+    PreparedObservationPartition, PreparedObservationReduction, PreparedStatisticalFieldRecovery,
+    StatisticalFieldRecoveryPreparation,
 };
 use runmat_analysis_core::ProcedureStep;
 use runmat_analysis_fea::execution::{
@@ -200,7 +200,9 @@ impl StatisticalStudyObservations {
         ordinal: usize,
     ) -> AnalysisBridgeResult<&PreparedObservationPartition> {
         if self.phase != Phase::AwaitingPartitions {
-            return Err(invalid("statistical observation partitions are not awaited"));
+            return Err(invalid(
+                "statistical observation partitions are not awaited",
+            ));
         }
         self.state.partition(ordinal)
     }
@@ -213,7 +215,9 @@ impl StatisticalStudyObservations {
         response: ProgramExecutionResponse,
     ) -> AnalysisBridgeResult<()> {
         if self.phase != Phase::AwaitingPartitions {
-            return Err(invalid("statistical observation partitions are not awaited"));
+            return Err(invalid(
+                "statistical observation partitions are not awaited",
+            ));
         }
         let contribution =
             self.state

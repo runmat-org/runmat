@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_TEMPERATURE_DIFFERENCE_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_TEMPERATURE_DIFFERENCE_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const TEMPERATURE_DIFFERENCE_KELVIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.TemperatureDifference.kelvin(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const TEMPERATURE_DIFFERENCE_KELVIN_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&TEMPERATURE_DIFFERENCE_KELVIN_SIGNATURES);
+const TEMPERATURE_DIFFERENCE_KELVIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.TemperatureDifference.kelvin(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const TEMPERATURE_DIFFERENCE_KELVIN_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&TEMPERATURE_DIFFERENCE_KELVIN_SIGNATURES);
 const TEMPERATURE_DIFFERENCE_KELVIN_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "temperature-difference-kelvin",
     title: "A 5 K temperature jump",

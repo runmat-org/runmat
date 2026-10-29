@@ -17,8 +17,10 @@ fn workload() -> ThermalWorkload {
         AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_transient("heat")]);
     // The authored ceiling is part of the encoded model, so resident requirements are
     // measured under a non-binding authored ceiling (present, like the ceilings tests author).
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
-        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -335,7 +337,8 @@ fn inventory_counts_all_actions_and_each_case_membership_without_copying_selecti
     entity
         .assembly_path
         .extend((0..100).map(|index| format!("component_{index}_{}", "x".repeat(180))));
-    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("resolved_face"));
+    let mut target =
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("resolved_face"));
     target.bind_resolved_entities(vec![entity]).unwrap();
     let ExcitationAction::Force(action) = &mut workload.model.excitations[0] else {
         panic!("force fixture")
@@ -373,7 +376,8 @@ fn realization_budget_is_composed_and_enforced_for_both_element_orders() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = Some(required - facts.realization.reservation_bytes().unwrap().0);
+            .maximum_resident_bytes =
+            Some(required - facts.realization.reservation_bytes().unwrap().0);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual, .. })) if actual == required)
         );

@@ -186,7 +186,9 @@ fn fixed_constraint(
             constraint_id: id.into(),
             frame: CoordinateFrame::Global,
             kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
-                target: runmat_analysis_core::RegionTarget::authored(runmat_meshing_core::fixtures::fixture_boundary_selection(&region.into())),
+                target: runmat_analysis_core::RegionTarget::authored(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&region.into()),
+                ),
             },
         },
     )
@@ -205,7 +207,9 @@ fn sample_cfd_constraints(
         fluid(
             "bc_cfd_inlet",
             runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_inlet")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_inlet"),
+                ),
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     inlet_velocity_m_per_s.map(runmat_analysis_core::Velocity::new),
                 ),
@@ -214,7 +218,9 @@ fn sample_cfd_constraints(
         fluid(
             "bc_cfd_outlet",
             runmat_analysis_core::FluidConstraintKind::PressureReference {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_outlet")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_outlet"),
+                ),
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::Pressure::new(0.0),
                 ),
@@ -223,13 +229,17 @@ fn sample_cfd_constraints(
         fluid(
             "bc_cfd_wall_upper",
             runmat_analysis_core::FluidConstraintKind::NoSlipWall {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_wall_upper")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_wall_upper"),
+                ),
             },
         ),
         fluid(
             "bc_cfd_wall_lower",
             runmat_analysis_core::FluidConstraintKind::NoSlipWall {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_wall_lower")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_wall_lower"),
+                ),
             },
         ),
     ]
@@ -282,7 +292,9 @@ pub(super) fn sample_model() -> AnalysisModel {
             plastic: None,
         }],
         material_assignments: vec![MaterialAssignment {
-            target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span")),
+            target: runmat_analysis_core::PropertyRegionTarget::beam(
+                runmat_meshing_core::fixtures::fixture_edge("beam_span"),
+            ),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -362,8 +374,9 @@ pub(super) fn sample_solid_model() -> AnalysisModel {
     model.geometry_id = "geo:closed_cube".to_string();
     model.geometry_revision = 1;
     model.structural = None;
-    model.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("region"));
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_region("region"),
+    );
     model.constraints = vec![fixed_constraint("bc_root", "root")];
     model.signals.clear();
     model.excitations.clear();
@@ -404,7 +417,9 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         plastic: None,
     });
     model.material_assignments = vec![MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span")),
+        target: runmat_analysis_core::PropertyRegionTarget::beam(
+            runmat_meshing_core::fixtures::fixture_edge("beam_span"),
+        ),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -566,7 +581,9 @@ fn replace_with_moment_excitation(model: &mut AnalysisModel, excitation_id: &str
     })];
     model.excitations = vec![ExcitationAction::Moment(AnalysisExcitation {
         excitation_id: ExcitationId(excitation_id.to_string()),
-        target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip"))),
+        target: ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("tip"),
+        )),
         frame: CoordinateFrame::Global,
         direction: None,
         distribution: ExcitationDistribution::PreserveResultant,
@@ -650,7 +667,9 @@ fn sample_fsi_model() -> AnalysisModel {
         "fsi_inlet_velocity",
         vec![0.0, 1.0],
         vec![Velocity::new(2.4), Velocity::new(4.0)],
-        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("inlet"))),
+        ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("inlet"),
+        )),
         Some(Direction {
             vector: [1.0, 0.0, 0.0],
         }),
@@ -760,7 +779,9 @@ fn test_model_for_geometry(
                     constraint_id: "bc_default_em_pec".to_string(),
                     kind:
                         runmat_analysis_core::ElectricalConstraintKind::ElectricPerfectConductor {
-                            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
+                            target: RegionTarget::boundary(
+                                runmat_meshing_core::fixtures::fixture_face("root"),
+                            ),
                         },
                 },
             )];
@@ -849,7 +870,9 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: TestElectroTh
         model,
         "electro_thermal_potential",
         ElectricPotential::new(coupling.applied_voltage_v),
-        ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip"))),
+        ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("tip"),
+        )),
         None,
         PhysicalSignal::ElectricPotential,
         ExcitationAction::TerminalVoltage,
@@ -871,8 +894,12 @@ fn set_model_plasticity(
 fn set_model_contact(model: &mut AnalysisModel, friction_coefficient: f64) {
     model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
         interface_id: "contact_1".to_string(),
-        primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
-        secondary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
+        primary: runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("root"),
+        ),
+        secondary: runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("tip"),
+        ),
         kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
             runmat_analysis_core::ContactInterfaceModel {
                 friction: if friction_coefficient == 0.0 {
@@ -2061,7 +2088,9 @@ fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
     model.geometry_revision = spec.geometry.revision;
     model.units = runmat_types::physical::CoordinateUnits::canonical();
     model.material_assignments = vec![MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("region")),
+        target: runmat_analysis_core::PropertyRegionTarget::solid(
+            runmat_meshing_core::fixtures::fixture_region("region"),
+        ),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -4214,8 +4243,9 @@ fn solid_material_quality_uses_resolved_occurrence_provenance() {
     let mut model = sample_solid_model();
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let source_solid = mesh.topology.volume_elements[0].provenance[0].clone();
-    model.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("authored_body"));
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_region("authored_body"),
+    );
     model.material_assignments[0]
         .target
         .bind_resolved_entities(vec![source_solid.clone()])
@@ -4259,7 +4289,9 @@ fn compiled_solid_property_quality_rejects_gaps_and_overlaps() {
     assert!(gap.detail.contains("found 0"));
 
     model.material_assignments = vec![MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("region")),
+        target: runmat_analysis_core::PropertyRegionTarget::solid(
+            runmat_meshing_core::fixtures::fixture_region("region"),
+        ),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -4492,11 +4524,17 @@ fn staged_thermal_steady_run_reads_back_its_streamed_fields() {
     .data;
     assert!(run.run.observations.is_empty() && run.run.series_reductions.is_empty());
     let fields = crate::analysis::operations::collect_analysis_result_fields(&run);
-    assert!(!fields.is_empty(), "a thermal steady run carries temperature fields");
+    assert!(
+        !fields.is_empty(),
+        "a thermal steady run carries temperature fields"
+    );
 
     let (restored, spilled) = storage::publication::stage_and_read_back_for_tests(&run)
         .expect("a staged thermal run reads back with its streamed field chunks");
-    assert!(spilled > 0, "staging streams the thermal field chunks to the spill area");
+    assert!(
+        spilled > 0,
+        "staging streams the thermal field chunks to the spill area"
+    );
     assert_eq!(
         crate::analysis::operations::collect_analysis_result_fields(&restored),
         fields
@@ -5166,7 +5204,9 @@ fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
     model.constraints.clear();
     model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
         boundary_id: "bc_invalid_convection".to_string(),
-        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("thermal_open_wall")),
+        target: runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("thermal_open_wall"),
+        ),
         operator: runmat_analysis_core::BoundaryOperator::ThermalConvection {
             ambient_temperature: runmat_analysis_core::PrescribedValue::Constant(
                 runmat_analysis_core::Temperature::new(293.15),
@@ -6003,7 +6043,9 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
         runmat_analysis_core::FluidConstraint {
             constraint_id: "bc_cfd_inlet_only".to_string(),
             kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fluid_inlet")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_inlet"),
+                ),
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     [4.25, -1.0, 0.0].map(runmat_analysis_core::Velocity::new),
                 ),

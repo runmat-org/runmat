@@ -51,7 +51,10 @@ fn realization(times: &[f64], accelerations: &[f64]) -> CanonicalSignalRealizati
 fn request(response: SpectrumResponse, envelope: SpectrumEnvelope) -> ShockResponseSpectrumRequest {
     ShockResponseSpectrumRequest {
         spectrum_id: ResponseSpectrumId("unit_step".into()),
-        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![1.0])),
+        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![1.0])),
         damping: SpectrumDamping::Ratio(0.0),
         response,
         envelope,

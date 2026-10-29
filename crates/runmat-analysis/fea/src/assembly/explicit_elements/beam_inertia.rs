@@ -31,4 +31,3 @@ pub(super) fn lumped_beam_mass(
     }
     element_mass
 }
-

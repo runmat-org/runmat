@@ -471,7 +471,10 @@ fn prepared_output_set() -> PreparedOutputSetResourceFacts {
 fn spectrum(id: &str, direction: [f64; 3]) -> ResponseSpectrum {
     ResponseSpectrum {
         spectrum_id: ResponseSpectrumId(id.into()),
-        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![1.0e-3, 1.0e8])),
+        abscissa: SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![1.0e-3, 1.0e8])),
         ordinates: runmat_analysis_core::NumericalDataSource::authored(
             vec![1.0e-3, 1.0e-3],
             format!("sha256:{id}"),

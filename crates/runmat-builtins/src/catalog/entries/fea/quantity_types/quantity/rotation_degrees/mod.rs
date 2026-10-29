@@ -9,7 +9,12 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_ROTATION_CLASS, scale: std::f64::consts::PI / 180.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_ROTATION_CLASS,
+    scale: std::f64::consts::PI / 180.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
@@ -20,7 +25,8 @@ const ROTATION_DEGREES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSig
     inputs: &QUANTITY_INPUTS,
     outputs: &QUANTITY_OUTPUTS,
 }];
-pub const ROTATION_DEGREES_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&ROTATION_DEGREES_SIGNATURES);
+pub const ROTATION_DEGREES_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&ROTATION_DEGREES_SIGNATURES);
 const ROTATION_DEGREES_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "rotation-degrees",
     title: "A 90 degree rotation",

@@ -208,13 +208,9 @@ fn render_fea_diagnostic(
         runmat_analysis_language::FeaDiagnosticSeverity::Warning => HirDiagnosticSeverity::Warning,
     };
     let located = diagnostic.location.as_ref().and_then(|location| {
-        sources.source(&location.path).map(|source| {
-            (
-                sources.display_path(&location.path),
-                source,
-                location.span,
-            )
-        })
+        sources
+            .source(&location.path)
+            .map(|source| (sources.display_path(&location.path), source, location.span))
     });
     let mut rendered = match &located {
         Some((path, source, span)) => render_located(

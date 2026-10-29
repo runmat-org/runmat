@@ -139,11 +139,17 @@ fn build_occt_backend() {
 fn is_occt_78(include: &std::path::Path) -> bool {
     let version_header = include.join("Standard_Version.hxx");
     println!("cargo:rerun-if-changed={}", version_header.display());
-    let Ok(header) = std::fs::read_to_string(version_header) else { return false; };
-    let macro_value = |name: &str| header.lines().find_map(|line| {
-        let mut words = line.split_whitespace();
-        (words.next() == Some("#define") && words.next() == Some(name)).then(|| words.next()).flatten()
-    });
+    let Ok(header) = std::fs::read_to_string(version_header) else {
+        return false;
+    };
+    let macro_value = |name: &str| {
+        header.lines().find_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next() == Some("#define") && words.next() == Some(name))
+                .then(|| words.next())
+                .flatten()
+        })
+    };
     macro_value("OCC_VERSION_MAJOR") == Some("7") && macro_value("OCC_VERSION_MINOR") == Some("8")
 }
 

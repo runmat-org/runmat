@@ -95,7 +95,9 @@ fn exact_interval_count(start: f64, end: f64, time_step: f64) -> Option<usize> {
     let count = (end - start) / time_step;
     let rounded = count.round();
     let tolerance = 64.0 * f64::EPSILON * count.abs().max(1.0);
-    if rounded < 1.0 || (count - rounded).abs() > tolerance || rounded > runmat_types::wire_integer::MAX_WIRE_INTEGER as f64
+    if rounded < 1.0
+        || (count - rounded).abs() > tolerance
+        || rounded > runmat_types::wire_integer::MAX_WIRE_INTEGER as f64
     {
         return None;
     }

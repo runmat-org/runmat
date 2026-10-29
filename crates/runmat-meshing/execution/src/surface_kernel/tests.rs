@@ -13,7 +13,8 @@ fn surface_sampling_depth_and_bounds_do_not_depend_on_execution_ceilings() {
     let mut host = crate::MeshingHostWorkload::new(
         fixture.workload,
         fixture.identity,
-        fixture.request, crate::task_tests::ceilings(),
+        fixture.request,
+        crate::task_tests::ceilings(),
         fixture.context.artifact_access,
         None,
     )
@@ -25,7 +26,10 @@ fn surface_sampling_depth_and_bounds_do_not_depend_on_execution_ceilings() {
         host.ceilings.maximum_search_work = budget;
         let options = surface_options(&host).unwrap();
         assert_eq!(options.acceptance.maximum_samples, 1_000_000_000);
-        assert_eq!(options.delaunay.maximum_predicate_evaluations, 1_000_000_000);
+        assert_eq!(
+            options.delaunay.maximum_predicate_evaluations,
+            1_000_000_000
+        );
         assert_eq!(options.delaunay.maximum_edge_flips, 1_000_000_000);
         assert_eq!(
             options.acceptance.minimum_subdivision_depth,
@@ -73,7 +77,8 @@ fn boundary_curve_target_honors_the_shared_surface_normalization_and_stricter_us
     let mut host = crate::MeshingHostWorkload::new(
         fixture.workload,
         fixture.identity,
-        fixture.request, crate::task_tests::ceilings(),
+        fixture.request,
+        crate::task_tests::ceilings(),
         fixture.context.artifact_access,
         None,
     )

@@ -186,12 +186,18 @@ fn structural_beam_model_round_trips() {
         nodes: vec![
             StructuralNode {
                 node_id: 1,
-                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 2,
-                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.0, 0.0, 0.0]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([1.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
         ],
@@ -206,13 +212,33 @@ fn structural_beam_model_round_trips() {
         }],
         beam_sections: vec![BeamSectionModel {
             section_id: "section_1".to_string(),
-            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area,_>::new(2.0e-4),
-            iy_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(1.6e-9),
-            iz_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(6.4e-9),
-            torsion_j_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(2.4e-9),
-            outer_fiber_y_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.01),
-            outer_fiber_z_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.005),
-            torsion_outer_radius_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.011_180_339_887_498_949),
+            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area, _>::new(
+                2.0e-4,
+            ),
+            iy_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(1.6e-9),
+            iz_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(6.4e-9),
+            torsion_j_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(2.4e-9),
+            outer_fiber_y_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.005),
+            torsion_outer_radius_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.011_180_339_887_498_949),
         }],
         shell_sections: Vec::new(),
     });
@@ -234,17 +260,26 @@ fn structural_shell_model_round_trips() {
         nodes: vec![
             StructuralNode {
                 node_id: 1,
-                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 2,
-                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.0, 0.0, 0.0]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([1.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             StructuralNode {
                 node_id: 3,
-                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 1.0, 0.0]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 1.0, 0.0]),
                 solid_attachment: None,
             },
         ],
@@ -261,7 +296,10 @@ fn structural_shell_model_round_trips() {
         shell_sections: vec![ShellSectionModel::Homogeneous(
             HomogeneousShellSectionModel {
                 section_id: "panel_2mm".to_string(),
-                thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.002),
+                thickness_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.002),
                 reference_surface: HomogeneousShellReferenceSurface::MidSurface,
                 shear_correction: 5.0 / 6.0,
             },

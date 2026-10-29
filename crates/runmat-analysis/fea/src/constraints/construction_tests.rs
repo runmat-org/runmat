@@ -25,8 +25,12 @@ fn component(dof: CanonicalStructuralDof) -> usize {
 fn both_order_surface_weights_normals_and_coupling_rows_match_independent_geometry() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
-        let target =
-            resolve_nodal_target(&mesh, &RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")), "surface").unwrap();
+        let target = resolve_nodal_target(
+            &mesh,
+            &RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+            "surface",
+        )
+        .unwrap();
         let normals = normal::boundary_node_normals(&mesh, &target, "surface").unwrap();
         for id in &target.matched_node_identities {
             let normal = normals.get(id).unwrap();
@@ -122,7 +126,9 @@ fn borrowed_reference_point_preparation_preserves_aliases_and_conflict_rejection
             constraint_id: id.into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
                 reference_point: ReferencePoint {
                     reference_point_id: " reference ".into(),
                     position: Position::new(point),
@@ -194,7 +200,9 @@ fn duplicate_reference_points_retain_last_authored_signed_zero_identity() {
                 constraint_id: format!("coupling-{ordinal}"),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "face:0",
+                    )),
                     reference_point: ReferencePoint {
                         reference_point_id: " reference ".into(),
                         position: Position::new([x, 0.3, -1.0]),

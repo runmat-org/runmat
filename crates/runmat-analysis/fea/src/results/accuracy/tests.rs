@@ -95,7 +95,8 @@ fn missing_mandatory_evidence_is_indeterminate_and_blocks_by_default() {
 
     // Publishing an indeterminate result is an explicit authored choice; it stays labeled.
     let mut opted_in = AccuracyPlan::baseline("accuracy");
-    opted_in.unavailable_evidence = runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
+    opted_in.unavailable_evidence =
+        runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
     let evaluation = evaluate_accuracy(&opted_in, &[]).unwrap();
     let gate = publication_gate(&opted_in, &evaluation).unwrap();
     assert_eq!(gate.decision, PublicationDecision::Allow);

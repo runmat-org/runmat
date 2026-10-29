@@ -65,17 +65,23 @@ pub(super) fn recover_segment_cavity(
         || !boundary_vertices.contains(&target[0])
         || !boundary_vertices.contains(&target[1])
     {
-        return Ok(Err("the crossed strip has interior vertices or misses a segment endpoint"));
+        return Ok(Err(
+            "the crossed strip has interior vertices or misses a segment endpoint",
+        ));
     }
 
     let Some(cycle) = boundary_cycle(&boundary_edges, target[0]) else {
         return Ok(Err("the crossed strip boundary is not a single cycle"));
     };
     let Some(target_position) = cycle.iter().position(|vertex| *vertex == target[1]) else {
-        return Ok(Err("the segment endpoint is not on the strip boundary cycle"));
+        return Ok(Err(
+            "the segment endpoint is not on the strip boundary cycle",
+        ));
     };
     if target_position == 0 {
-        return Ok(Err("the segment endpoints coincide on the strip boundary cycle"));
+        return Ok(Err(
+            "the segment endpoints coincide on the strip boundary cycle",
+        ));
     }
 
     let first_chain = cycle[..=target_position].to_vec();
@@ -94,7 +100,9 @@ pub(super) fn recover_segment_cavity(
             .filter(|edge| edge_counts.contains_key(*edge))
             .any(|edge| !replacement_edges.contains_key(edge))
     {
-        return Ok(Err("the strip retriangulation does not restore the segment"));
+        return Ok(Err(
+            "the strip retriangulation does not restore the segment",
+        ));
     }
 
     let retained_count = triangles.len().saturating_sub(selected.len());

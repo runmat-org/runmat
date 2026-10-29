@@ -97,21 +97,27 @@ fn shared_time_breakpoints_include_fluid_gauge_and_exact_outlet_boundaries() {
         AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "gauge".into(),
             kind: FluidConstraintKind::PressureReference {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("gauge-face")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "gauge-face",
+                )),
                 value: PrescribedValue::Signal(SignalId("gauge-source".into())),
             },
         }),
         AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "velocity".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("inlet-face")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "inlet-face",
+                )),
                 value: PrescribedValue::Signal(SignalId("velocity-source".into())),
             },
         }),
         AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "moving-wall".into(),
             kind: FluidConstraintKind::MovingWall {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("wall-face")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "wall-face",
+                )),
                 velocity: PrescribedValue::Signal(SignalId("wall-source".into())),
             },
         }),

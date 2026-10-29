@@ -673,11 +673,7 @@ impl ProcedureStep {
         )
     }
 
-    pub fn acoustic_transient(
-        step_id: impl Into<String>,
-        end: f64,
-        interval_count: usize,
-    ) -> Self {
+    pub fn acoustic_transient(step_id: impl Into<String>, end: f64, interval_count: usize) -> Self {
         Self::new(
             step_id,
             PhysicsFamily::Acoustic,

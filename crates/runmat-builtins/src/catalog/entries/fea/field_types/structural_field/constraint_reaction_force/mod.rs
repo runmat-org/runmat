@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const CONSTRAINT_REACTION_FORCE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.constraintReactionForce()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const CONSTRAINT_REACTION_FORCE_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&CONSTRAINT_REACTION_FORCE_SIGNATURES);
+const CONSTRAINT_REACTION_FORCE_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.constraintReactionForce()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const CONSTRAINT_REACTION_FORCE_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&CONSTRAINT_REACTION_FORCE_SIGNATURES);
 const CONSTRAINT_REACTION_FORCE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-constraint-reaction-force",
     title: "Select total reaction force per constraint",

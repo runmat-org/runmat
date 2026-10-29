@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const PSEUDO_ANGULAR_ACCELERATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.ResponseSpectrumField.pseudoAngularAcceleration()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const PSEUDO_ANGULAR_ACCELERATION_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&PSEUDO_ANGULAR_ACCELERATION_SIGNATURES);
+const PSEUDO_ANGULAR_ACCELERATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.ResponseSpectrumField.pseudoAngularAcceleration()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const PSEUDO_ANGULAR_ACCELERATION_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&PSEUDO_ANGULAR_ACCELERATION_SIGNATURES);
 const PSEUDO_ANGULAR_ACCELERATION_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-pseudo-angular-acceleration",
     title: "Select the pseudo-angular acceleration envelope",

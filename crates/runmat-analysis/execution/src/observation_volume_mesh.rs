@@ -67,8 +67,8 @@ pub(super) fn admit_volume_mesh(
         preparation.step.clone(),
     )?;
     catalog.validate_volume_mesh_plan(&plan, &mesh)?;
-    let selected =
-        catalog.canonical_selected_fields(&plan, ObservationSelectionCoordinate::VolumeMeshRecovery)?;
+    let selected = catalog
+        .canonical_selected_fields(&plan, ObservationSelectionCoordinate::VolumeMeshRecovery)?;
     let selection = ObservationFieldSelection::volume_mesh_recovery(
         source_request,
         fields,

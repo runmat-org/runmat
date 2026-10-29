@@ -274,7 +274,8 @@ fn serial_curve_refinement_consumes_the_surface_restart_pass() {
     let host = MeshingHostWorkload::new(
         workload,
         identity,
-        request, pass_host.ceilings,
+        request,
+        pass_host.ceilings,
         pass_host.artifact_access.clone(),
         pass_host.geometry_document.clone(),
     )

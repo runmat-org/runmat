@@ -113,9 +113,7 @@ fn certified_direct_solve_matches_complex_division_and_closes_power() {
                 -amplitude * k * loss / denominator,
             ];
             assert!((actual.real[i] - expected[0]).abs() / amplitude < 1e-9);
-            assert!(
-                (actual.imaginary[i] - expected[1]).abs() / amplitude < 1e-9
-            );
+            assert!((actual.imaginary[i] - expected[1]).abs() / amplitude < 1e-9);
         }
     }
 }
@@ -135,14 +133,19 @@ fn singular_operator_fails_closed_and_invalid_power_tolerances_are_rejected() {
         1,
     )
     .unwrap();
-    let mut stiffness =
-        RealSparseAssembler::square(4, OperatorRole::Stiffness, MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE);
+    let mut stiffness = RealSparseAssembler::square(
+        4,
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
     for (row, value) in [1., 2., 0., 4.].into_iter().enumerate() {
         stiffness.add(row, row, value);
     }
-    singular.stiffness =
-        crate::physics::acoustic::canonical::quantity_layout::pressure_operator(stiffness.finish().unwrap(), 2)
-            .unwrap();
+    singular.stiffness = crate::physics::acoustic::canonical::quantity_layout::pressure_operator(
+        stiffness.finish().unwrap(),
+        2,
+    )
+    .unwrap();
     assert!(matches!(
         solve(&singular, AcousticHarmonicPolicy::default(), 1e-10),
         Err(AcousticHarmonicError::Certificate(_))

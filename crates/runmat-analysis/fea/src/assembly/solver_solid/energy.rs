@@ -103,17 +103,18 @@ impl SolidEnergyPreparation {
                         Err(()) => {
                             ElasticCapture::Refused(crate::algebra::ElasticRigidityError::Shape)
                         }
-                        Ok(elements) => match crate::algebra::elastic_rigidity::ElasticRigidityCapture::new(
-                            mesh.topology
-                                .nodes
-                                .iter()
-                                .map(|node| (node.node_id, node.coordinates_m.canonical_value())),
-                            elements.into_iter(),
-                            fixed,
-                        ) {
-                            Ok(capture) => ElasticCapture::Capturing(capture),
-                            Err(error) => ElasticCapture::Refused(error),
-                        },
+                        Ok(elements) => {
+                            match crate::algebra::elastic_rigidity::ElasticRigidityCapture::new(
+                                mesh.topology.nodes.iter().map(|node| {
+                                    (node.node_id, node.coordinates_m.canonical_value())
+                                }),
+                                elements.into_iter(),
+                                fixed,
+                            ) {
+                                Ok(capture) => ElasticCapture::Capturing(capture),
+                                Err(error) => ElasticCapture::Refused(error),
+                            }
+                        }
                     }
                 }
             });
@@ -184,9 +185,9 @@ impl SolidEnergyPreparation {
         self,
     ) -> Result<LinearPreparationReuse, crate::algebra::ElasticRigidityError> {
         match self.elastic {
-            Some(ElasticCapture::Capturing(capture)) => {
-                capture.finish().map(LinearPreparationReuse::with_elastic_rigidity)
-            }
+            Some(ElasticCapture::Capturing(capture)) => capture
+                .finish()
+                .map(LinearPreparationReuse::with_elastic_rigidity),
             Some(ElasticCapture::Refused(error)) => Err(error),
             Some(ElasticCapture::Requested) | None => {
                 Err(crate::algebra::ElasticRigidityError::Shape)

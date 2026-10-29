@@ -9,11 +9,11 @@ use runmat_execution_artifact::ArtifactAccess;
 use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 use runmat_runtime::analysis::{
     AcousticResponseStudyCompletion, AcousticResponseStudyObjectSource, AcousticStudyCompletion,
-    AcousticStudyObjectSource, ElectricalStudyCompletion,
-    ElectricalStudyObjectSource, FluidStudyCompletion, FluidStudyObjectSource,
-    MagneticStudyCompletion, MagneticStudyObjectSource, MaxwellStudyCompletion,
-    MaxwellStudyObjectSource, NonlinearSolidStudyCompletion, NonlinearSolidStudyObjectSource,
-    ThermalStudyCompletion, ThermalStudyObjectSource,
+    AcousticStudyObjectSource, ElectricalStudyCompletion, ElectricalStudyObjectSource,
+    FluidStudyCompletion, FluidStudyObjectSource, MagneticStudyCompletion,
+    MagneticStudyObjectSource, MaxwellStudyCompletion, MaxwellStudyObjectSource,
+    NonlinearSolidStudyCompletion, NonlinearSolidStudyObjectSource, ThermalStudyCompletion,
+    ThermalStudyObjectSource,
 };
 
 use super::CompletedFeaStudyResult;

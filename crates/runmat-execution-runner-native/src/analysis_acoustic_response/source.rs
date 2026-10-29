@@ -2,7 +2,8 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_execution::{
-    import_acoustic_response_study_completion, prepare_acoustic_response_study_root, CompletedAcousticResponseStudy,
+    import_acoustic_response_study_completion, prepare_acoustic_response_study_root,
+    CompletedAcousticResponseStudy,
 };
 use runmat_execution::{
     value::{PublishedObjectSource, ValueRef},
@@ -77,7 +78,9 @@ impl<S: CacheImport + Send + Sync> PublishedObjectSource for RetainedAcousticRes
     }
 }
 
-impl<S: CacheImport + Send + Sync> AcousticResponseStudySource for RetainedAcousticResponseSource<S> {
+impl<S: CacheImport + Send + Sync> AcousticResponseStudySource
+    for RetainedAcousticResponseSource<S>
+{
     fn authenticate(&self, candidate: &AcousticResponseStudyCompletion) -> Result<(), String> {
         let replay = import_acoustic_response_study_completion(
             self,
@@ -87,7 +90,9 @@ impl<S: CacheImport + Send + Sync> AcousticResponseStudySource for RetainedAcous
         .map_err(|error| error.to_string())?;
         let expected = completion(&replay)?;
         if &expected != candidate {
-            return Err("runtime acoustic response completion differs from authenticated replay".into());
+            return Err(
+                "runtime acoustic response completion differs from authenticated replay".into(),
+            );
         }
         for reference in &expected.catalog.objects {
             PublishedObjectSource::read_verified(self, reference)?;
@@ -96,8 +101,11 @@ impl<S: CacheImport + Send + Sync> AcousticResponseStudySource for RetainedAcous
     }
 }
 
-fn completion(completed: &CompletedAcousticResponseStudy) -> Result<AcousticResponseStudyCompletion, String> {
-    let root = prepare_acoustic_response_study_root(completed).map_err(|error| error.to_string())?;
+fn completion(
+    completed: &CompletedAcousticResponseStudy,
+) -> Result<AcousticResponseStudyCompletion, String> {
+    let root =
+        prepare_acoustic_response_study_root(completed).map_err(|error| error.to_string())?;
     Ok(AcousticResponseStudyCompletion {
         host_workload_digest: completed
             .result_closures()
@@ -131,8 +139,15 @@ fn completion(completed: &CompletedAcousticResponseStudy) -> Result<AcousticResp
 pub(crate) fn convert(
     completed: CompletedAcousticResponseStudy,
     store: impl CacheImport + Send + Sync + 'static,
-) -> Result<(AcousticResponseStudyCompletion, AcousticResponseStudyObjectSource), String> {
-    let root = prepare_acoustic_response_study_root(&completed).map_err(|error| error.to_string())?;
+) -> Result<
+    (
+        AcousticResponseStudyCompletion,
+        AcousticResponseStudyObjectSource,
+    ),
+    String,
+> {
+    let root =
+        prepare_acoustic_response_study_root(&completed).map_err(|error| error.to_string())?;
     let source = RetainedAcousticResponseSource {
         artifact_access: completed
             .preparation()
@@ -156,7 +171,13 @@ pub(crate) fn convert(
 pub fn acoustic_response_study_completion_from_source(
     completed: CompletedAcousticResponseStudy,
     source: impl CacheImport + Send + Sync + 'static,
-) -> Result<(AcousticResponseStudyCompletion, AcousticResponseStudyObjectSource), String> {
+) -> Result<
+    (
+        AcousticResponseStudyCompletion,
+        AcousticResponseStudyObjectSource,
+    ),
+    String,
+> {
     let source = RetainedAcousticResponseSource {
         artifact_access: completed
             .preparation()

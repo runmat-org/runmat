@@ -25,7 +25,8 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(0.001),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence =
         AnalysisSequence::from_steps("flow", vec![ProcedureStep::fluid_static("steady")]);
     model
@@ -33,7 +34,9 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "signed-inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Constant([1.0, -0.25, 0.125].map(Velocity::new)),
             },
         }));

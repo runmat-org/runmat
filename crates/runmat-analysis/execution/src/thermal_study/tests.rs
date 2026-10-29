@@ -28,7 +28,9 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "insulated-face".into(),
-            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(insulated_face))),
+            target: runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(insulated_face)),
+            ),
             operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::HeatFlux::new(0.0),

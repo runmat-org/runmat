@@ -74,8 +74,19 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
     } else {
         source
     };
-    let source = source.replace("FIRST_FACE_ID", &imported.source_face_ids[&0].analysis_selection_id().unwrap())
-        .replace("SECOND_FACE_ID", &imported.source_face_ids[&1].analysis_selection_id().unwrap());
+    let source = source
+        .replace(
+            "FIRST_FACE_ID",
+            &imported.source_face_ids[&0]
+                .analysis_selection_id()
+                .unwrap(),
+        )
+        .replace(
+            "SECOND_FACE_ID",
+            &imported.source_face_ids[&1]
+                .analysis_selection_id()
+                .unwrap(),
+        );
     fs::write(project.path().join("src/main.fea"), source).unwrap();
     let output = runmat(
         &project,

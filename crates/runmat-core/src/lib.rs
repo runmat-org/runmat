@@ -33,11 +33,11 @@ pub use foreign_unit_host::{ForeignUnitHost, ForeignUnitRetirement};
 pub use fusion::*;
 pub use runmat_parser::CompatMode;
 pub use session::{
-    FeaExecutionTimingKey, FeaExecutionTimingObservation, FeaExecutionTimingProfile, FeaTimingRoute,
-    CheckedFeaSessionSource, FeaCapturedDependency, FeaWorkingCheckRequest, FeaWorkingSource,
-    FeaWorkspaceCapture, FeaWorkspaceCheckRequest, FeaWorkspaceCheckResult,
-    PreparedFeaWorkspacePublication, RunMatSession, SelectedNativeSourceEvaluator,
-    SessionGraphicsHost, SessionRetirement,
+    CheckedFeaSessionSource, FeaCapturedDependency, FeaExecutionTimingKey,
+    FeaExecutionTimingObservation, FeaExecutionTimingProfile, FeaTimingRoute,
+    FeaWorkingCheckRequest, FeaWorkingSource, FeaWorkspaceCapture, FeaWorkspaceCheckRequest,
+    FeaWorkspaceCheckResult, PreparedFeaWorkspacePublication, RunMatSession,
+    SelectedNativeSourceEvaluator, SessionGraphicsHost, SessionRetirement,
 };
 pub use telemetry::{
     TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
@@ -111,4 +111,7 @@ pub fn execute_text_request_for_testing(
     )
 }
 
-pub use session::{FeaExecutionPreflight,PreparedSerialFeaStudy,FeaGeometryExecutionHost,FeaStudyPreparationError};
+pub use session::{
+    FeaExecutionPreflight, FeaGeometryExecutionHost, FeaStudyPreparationError,
+    PreparedSerialFeaStudy,
+};

@@ -352,8 +352,12 @@ fn entity_nodal_weights(
         }
     }
     let total = weights.values().sum::<f64>();
-    (!weights.is_empty() && total.is_finite() && total > 0.0)
-        .then(|| weights.into_iter().map(|(node, w)| (node, w / total)).collect())
+    (!weights.is_empty() && total.is_finite() && total > 0.0).then(|| {
+        weights
+            .into_iter()
+            .map(|(node, w)| (node, w / total))
+            .collect()
+    })
 }
 
 fn apply_entity_force(
@@ -365,7 +369,11 @@ fn apply_entity_force(
     components: [f64; 3],
 ) -> Result<SpatialProjectionEvidence, SolverMeshRegionMappingError> {
     let point = nodal.iter().fold([0.0; 3], |mut total, (node, weight)| {
-        add_scaled(&mut total, projection.nodes[*node].coordinates_m.canonical_value(), *weight);
+        add_scaled(
+            &mut total,
+            projection.nodes[*node].coordinates_m.canonical_value(),
+            *weight,
+        );
         total
     });
     let force = resolve_vector(load, components, point, None)?;

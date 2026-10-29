@@ -50,7 +50,8 @@ impl Encoder {
 
     pub fn bools(&mut self, values: &[bool]) {
         self.len(values.len());
-        self.bytes.extend(values.iter().map(|&value| u8::from(value)));
+        self.bytes
+            .extend(values.iter().map(|&value| u8::from(value)));
     }
 
     pub fn points(&mut self, values: &[[f64; 3]]) {
@@ -104,15 +105,21 @@ impl<'a> Decoder<'a> {
     }
 
     pub fn u32(&mut self) -> DistributedResult<u32> {
-        Ok(u32::from_le_bytes(self.take(4)?.try_into().expect("4 bytes")))
+        Ok(u32::from_le_bytes(
+            self.take(4)?.try_into().expect("4 bytes"),
+        ))
     }
 
     pub fn u64(&mut self) -> DistributedResult<u64> {
-        Ok(u64::from_le_bytes(self.take(8)?.try_into().expect("8 bytes")))
+        Ok(u64::from_le_bytes(
+            self.take(8)?.try_into().expect("8 bytes"),
+        ))
     }
 
     pub fn f64(&mut self) -> DistributedResult<f64> {
-        Ok(f64::from_le_bytes(self.take(8)?.try_into().expect("8 bytes")))
+        Ok(f64::from_le_bytes(
+            self.take(8)?.try_into().expect("8 bytes"),
+        ))
     }
 
     pub fn len(&mut self, element_bytes: usize) -> DistributedResult<usize> {
@@ -157,6 +164,8 @@ impl<'a> Decoder<'a> {
 
     pub fn pairs(&mut self) -> DistributedResult<Vec<(u32, f64)>> {
         let length = self.len(12)?;
-        (0..length).map(|_| Ok((self.u32()?, self.f64()?))).collect()
+        (0..length)
+            .map(|_| Ok((self.u32()?, self.f64()?)))
+            .collect()
     }
 }

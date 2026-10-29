@@ -382,9 +382,12 @@ fn load(
     };
     let target = match coupling_reference_point(target) {
         Some(constraint_id) => AuthoredExcitationTarget::ReferencePoint { constraint_id },
-        None => {
-            AuthoredExcitationTarget::Region(region_source(bound, declaration, target, diagnostics)?)
-        }
+        None => AuthoredExcitationTarget::Region(region_source(
+            bound,
+            declaration,
+            target,
+            diagnostics,
+        )?),
     };
     let frame = match &signal {
         LoweredLoadSignal::Concrete(signal) => signal.frame().cloned(),

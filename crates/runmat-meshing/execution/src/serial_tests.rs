@@ -989,7 +989,8 @@ fn exact_geometry_control_projects_cancellation_and_hard_counters() {
     let stage = MeshingStageControl::new(
         MeshingStageKind::CurveMesh,
         0,
-        &bounded, ceilings,
+        &bounded,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1019,7 +1020,8 @@ fn exact_geometry_control_projects_cancellation_and_hard_counters() {
     let cancelled_stage = MeshingStageControl::new(
         MeshingStageKind::CurveMesh,
         0,
-        &bounded, ceilings,
+        &bounded,
+        ceilings,
         &Cancelled,
         &mut cancelled_progress,
     )
@@ -1043,7 +1045,8 @@ fn exact_geometry_checkpoints_renew_the_enclosing_stage_deadline() {
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &bounded, ceilings,
+        &bounded,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1066,7 +1069,8 @@ fn exact_geometry_checkpoints_publish_search_work_to_the_enclosing_stage() {
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &bounded, ceilings,
+        &bounded,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1096,7 +1100,8 @@ fn stage_control_enforces_wall_time_and_serialization_enforces_artifact_bytes() 
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &timed, ceilings,
+        &timed,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -1230,7 +1235,8 @@ impl Fixture {
                 },
             ],
         };
-        let host = MeshingHostWorkload::new(workload, identity, request, ceilings, access, None).unwrap();
+        let host =
+            MeshingHostWorkload::new(workload, identity, request, ceilings, access, None).unwrap();
         let program = host_program(&host, std::slice::from_ref(&root), &mut store);
         Self {
             host,
@@ -1440,8 +1446,15 @@ impl Fixture {
                 },
             ],
         };
-        let host =
-            MeshingHostWorkload::new(workload, identity, request, ceilings, access, Some(document)).unwrap();
+        let host = MeshingHostWorkload::new(
+            workload,
+            identity,
+            request,
+            ceilings,
+            access,
+            Some(document),
+        )
+        .unwrap();
         let program = host_program(&host, std::slice::from_ref(input.root_input()), &mut store);
         Self {
             host,
@@ -1519,8 +1532,15 @@ impl Fixture {
                 },
             ],
         };
-        let host =
-            MeshingHostWorkload::new(workload, identity, request, ceilings(), access, Some(document)).unwrap();
+        let host = MeshingHostWorkload::new(
+            workload,
+            identity,
+            request,
+            ceilings(),
+            access,
+            Some(document),
+        )
+        .unwrap();
         let program = host_program(&host, std::slice::from_ref(input.root_input()), &mut store);
         Self {
             host,
@@ -1545,7 +1565,8 @@ fn checkpoint_failure(checkpoint: MeshingStageCheckpoint) -> Box<MeshingFailure>
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request, ceilings,
+        &request,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )

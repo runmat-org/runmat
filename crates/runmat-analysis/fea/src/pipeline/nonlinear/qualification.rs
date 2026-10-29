@@ -276,7 +276,9 @@ fn public_nonlinear_does_not_silently_omit_boundary_pressure() {
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "additional-pressure".into(),
-            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("slab_right"),
+            ),
             operator: runmat_analysis_core::BoundaryOperator::StructuralPressure {
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::Pressure::new(1.0),

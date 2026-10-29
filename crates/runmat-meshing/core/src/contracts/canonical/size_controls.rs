@@ -164,9 +164,10 @@ impl MeshingRequest {
                     ),
                 ));
             }
-            let metric = MetricTensor3::isotropic_length_m(control.target_size_m).map_err(
-                |error| MeshingContractError::invalid("mesh size control", error.to_string()),
-            )?;
+            let metric =
+                MetricTensor3::isotropic_length_m(control.target_size_m).map_err(|error| {
+                    MeshingContractError::invalid("mesh size control", error.to_string())
+                })?;
             let mut scope_entities = Vec::with_capacity(region.entity_ids.len());
             for entity in &region.entity_ids {
                 if entity.kind != control.target.entity_kind() {
@@ -217,7 +218,9 @@ impl MeshingRequest {
         resolved.metric = self
             .metric
             .intersect_contributions(contributions)
-            .map_err(|error| MeshingContractError::invalid("mesh size controls", error.to_string()))?;
+            .map_err(|error| {
+                MeshingContractError::invalid("mesh size controls", error.to_string())
+            })?;
         resolved.validate()?;
         Ok((resolved, applied))
     }
@@ -341,7 +344,12 @@ mod tests {
         PersistentEntityId::new(kind, name.into(), Vec::new())
     }
 
-    fn control(name: &str, region: &str, target: MeshSizeControlTarget, size: f64) -> MeshSizeControl {
+    fn control(
+        name: &str,
+        region: &str,
+        target: MeshSizeControlTarget,
+        size: f64,
+    ) -> MeshSizeControl {
         MeshSizeControl {
             control_id: name.into(),
             region_id: region.into(),
@@ -380,18 +388,33 @@ mod tests {
         assert!(value["metric"].get("cells_across_gap").is_none());
         let with = |settings: MeshingRequestSettings| request(settings).canonical_digest().unwrap();
         let face = MeshingRequestSettings {
-            size_controls: vec![control("hole", "hole_wall", MeshSizeControlTarget::Face, 0.002)],
+            size_controls: vec![control(
+                "hole",
+                "hole_wall",
+                MeshSizeControlTarget::Face,
+                0.002,
+            )],
             ..defaults.clone()
         };
         let finer_face = MeshingRequestSettings {
-            size_controls: vec![control("hole", "hole_wall", MeshSizeControlTarget::Face, 0.001)],
+            size_controls: vec![control(
+                "hole",
+                "hole_wall",
+                MeshSizeControlTarget::Face,
+                0.001,
+            )],
             ..defaults.clone()
         };
         let gap = MeshingRequestSettings {
             cells_across_gap: Some(3),
             ..defaults.clone()
         };
-        let digests = [plain.canonical_digest().unwrap(), with(face), with(finer_face), with(gap)];
+        let digests = [
+            plain.canonical_digest().unwrap(),
+            with(face),
+            with(finer_face),
+            with(gap),
+        ];
         for (index, digest) in digests.iter().enumerate() {
             assert!(digests[index + 1..].iter().all(|other| other != digest));
         }
@@ -448,7 +471,10 @@ mod tests {
                 "rim".to_string(),
                 NamedRegionEntities {
                     target: MeshSizeControlTarget::Edge,
-                    entity_ids: vec![id(PersistentEntityKind::Edge, "e1"), id(PersistentEntityKind::Edge, "e2")],
+                    entity_ids: vec![
+                        id(PersistentEntityKind::Edge, "e1"),
+                        id(PersistentEntityKind::Edge, "e2"),
+                    ],
                 },
             ),
             (
@@ -459,7 +485,9 @@ mod tests {
                 },
             ),
         ]);
-        let (resolved, applied) = request.resolve_size_controls(&regions, &topology()).unwrap();
+        let (resolved, applied) = request
+            .resolve_size_controls(&regions, &topology())
+            .unwrap();
         assert_eq!(resolved.metric.contributions.len(), 4);
         assert!(resolved.metric.contributions.iter().any(|contribution| {
             contribution.source == MetricSourceKind::Region
@@ -472,14 +500,20 @@ mod tests {
         assert_eq!(applied.len(), 3);
         assert_eq!(applied[1].scope_entities.len(), 2);
         // Resolution is idempotent: re-resolving adds no new contributions.
-        let (again, _) = resolved.resolve_size_controls(&regions, &topology()).unwrap();
+        let (again, _) = resolved
+            .resolve_size_controls(&regions, &topology())
+            .unwrap();
         assert_eq!(again, resolved);
         // Unknown regions and kind mismatches are refused.
         let mut missing = regions.clone();
         missing.remove("rim");
-        assert!(request.resolve_size_controls(&missing, &topology()).is_err());
+        assert!(request
+            .resolve_size_controls(&missing, &topology())
+            .is_err());
         let mut mismatch = regions.clone();
         mismatch.get_mut("wall").unwrap().target = MeshSizeControlTarget::Edge;
-        assert!(request.resolve_size_controls(&mismatch, &topology()).is_err());
+        assert!(request
+            .resolve_size_controls(&mismatch, &topology())
+            .is_err());
     }
 }

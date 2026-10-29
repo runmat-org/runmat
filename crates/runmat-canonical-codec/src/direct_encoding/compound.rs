@@ -269,7 +269,9 @@ impl<'a, 'control> Map<'a, 'control> {
             return Ok(());
         };
         let tail = self.output.split_off(header_start);
-        let body_start = entries.first().map_or(tail.len(), |(_, start)| start - header_start);
+        let body_start = entries
+            .first()
+            .map_or(tail.len(), |(_, start)| start - header_start);
         self.state.wire_bytes -= body_start;
         let mut held = BTreeMap::new();
         let ends = entries

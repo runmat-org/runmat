@@ -50,8 +50,19 @@ pub(super) fn prepare(
         .replace("EQUATION", equation)
         .replace("LOW_V", &gauge.to_string())
         .replace("HIGH_V", &(gauge + voltage).to_string());
-    let source = source.replace("FIRST_FACE_ID", &imported.source_face_ids[&0].analysis_selection_id().unwrap())
-        .replace("SECOND_FACE_ID", &imported.source_face_ids[&1].analysis_selection_id().unwrap());
+    let source = source
+        .replace(
+            "FIRST_FACE_ID",
+            &imported.source_face_ids[&0]
+                .analysis_selection_id()
+                .unwrap(),
+        )
+        .replace(
+            "SECOND_FACE_ID",
+            &imported.source_face_ids[&1]
+                .analysis_selection_id()
+                .unwrap(),
+        );
     fs::write(project.path().join("src/main.fea"), source).unwrap();
     [
         imported.source_face_ids[&0].clone(),

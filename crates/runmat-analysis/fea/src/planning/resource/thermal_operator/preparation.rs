@@ -20,7 +20,9 @@ impl ThermalOperatorResourceFacts {
             .iter()
             .filter(|f| f.role == runmat_meshing_core::BoundaryFaceRole::ConformalInterface)
             .map(|f| f.node_ids.len());
-        let interface_nodes = interface_widths.clone().try_fold(0, |total, width| add(total, count(width)?))?;
+        let interface_nodes = interface_widths
+            .clone()
+            .try_fold(0, |total, width| add(total, count(width)?))?;
         let interface_entries = interface_widths.clone().try_fold(0, |total, width| {
             let width = count(width)?;
             add(total, mul(mul(2, width)?, mul(2, width)?)?)

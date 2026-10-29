@@ -431,7 +431,8 @@ fn grouped_relocation_mutations(
     moves
         .into_iter()
         .map(|(source, replacement, tetrahedron)| {
-            let tetrahedron = tetrahedron.map(|identity| moved.get(&identity).copied().unwrap_or(identity));
+            let tetrahedron =
+                tetrahedron.map(|identity| moved.get(&identity).copied().unwrap_or(identity));
             moved.insert(source, replacement.identity);
             relocation_mutation(source, replacement, tetrahedron)
         })

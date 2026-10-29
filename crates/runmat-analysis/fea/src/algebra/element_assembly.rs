@@ -297,8 +297,9 @@ impl ElementDofMap {
             }
         }
         drop(cursor);
-        let incidence_rows =
-            |row: usize| -> &[u32] { &incidence[incidence_offsets[row]..incidence_offsets[row + 1]] };
+        let incidence_rows = |row: usize| -> &[u32] {
+            &incidence[incidence_offsets[row]..incidence_offsets[row + 1]]
+        };
         const ROW_BLOCK: usize = 2048;
         let blocks = (0..n.div_ceil(ROW_BLOCK))
             .map(|block| block * ROW_BLOCK..((block + 1) * ROW_BLOCK).min(n))
@@ -341,7 +342,9 @@ impl ElementDofMap {
             }
             columns.extend_from_slice(&block_columns);
         }
-        Ok(SparsePattern::try_new(n as u64, n as u64, offsets, columns)?)
+        Ok(SparsePattern::try_new(
+            n as u64, n as u64, offsets, columns,
+        )?)
     }
 }
 
@@ -504,7 +507,9 @@ where
         boundaries.push(0_usize);
         for part in 1..partitions {
             let target = (nnz as u128 * part as u128 / partitions as u128) as u64;
-            let row = row_offsets.partition_point(|&offset| offset < target).min(n_dofs);
+            let row = row_offsets
+                .partition_point(|&offset| offset < target)
+                .min(n_dofs);
             let row = row.max(*boundaries.last().unwrap());
             boundaries.push(row);
         }
@@ -549,7 +554,8 @@ where
             order.resize(order_len, 0);
 
             // Phase 1: element kernels in parallel.
-            let mut tasks = Vec::with_capacity((batch_end - batch_start).div_ceil(COMPUTE_CHUNK_ELEMENTS));
+            let mut tasks =
+                Vec::with_capacity((batch_end - batch_start).div_ceil(COMPUTE_CHUNK_ELEMENTS));
             {
                 let mut values_rest = buffer.as_mut_slice();
                 let mut order_rest = order.as_mut_slice();
@@ -726,7 +732,8 @@ where
                     }
                     let vector_base = shape.matrices * n * n;
                     for (vector, target) in task.vectors.iter_mut().enumerate() {
-                        target[row - task.rows.start] += values[vector_base + vector * n + local_row];
+                        target[row - task.rows.start] +=
+                            values[vector_base + vector * n + local_row];
                     }
                 }
             });

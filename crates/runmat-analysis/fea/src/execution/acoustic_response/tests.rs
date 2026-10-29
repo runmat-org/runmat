@@ -9,7 +9,9 @@ fn model(step: ProcedureStep) -> AnalysisModel {
     model.constraints.clear();
     model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
         boundary_id: "closed_end".into(),
-        target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+        target: runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("slab_left"),
+        ),
         operator: runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
     }];
     model.materials[0].acoustic = Some(MaterialAcousticModel {
@@ -17,7 +19,8 @@ fn model(step: ProcedureStep) -> AnalysisModel {
         damping_ratio: runmat_types::physical::Quantity::new(0.0),
     });
     model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::Quantity::new(3.0));
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps = vec![step];
     model
 }
@@ -60,13 +63,16 @@ fn cavity_modes_publish_exact_mode_samples_frequencies_and_state() {
     let profiles = result
         .state_publication_profiles(Digest::sha256(result.canonical_bytes().unwrap()))
         .unwrap();
-    let [state_request] = result.state_publication_requests().unwrap().try_into().unwrap();
-    let state =
-        crate::execution::CanonicalSemanticState::from_acoustic_response_publication(
-            &state_request,
-            &result,
-        )
+    let [state_request] = result
+        .state_publication_requests()
+        .unwrap()
+        .try_into()
         .unwrap();
+    let state = crate::execution::CanonicalSemanticState::from_acoustic_response_publication(
+        &state_request,
+        &result,
+    )
+    .unwrap();
     assert_eq!(state.kind, StateKind::AcousticModes);
     assert!(profiles.entry(&state_request).is_ok());
 }
@@ -100,16 +106,16 @@ fn transient_retains_the_final_field_and_energy_at_every_step() {
     assert_eq!(acoustic_energy_j.len(), 11);
     AcousticResponseNumericalReceiptArtifact::new(&workload, &result, &mesh).unwrap();
     let mut with_output = workload.clone();
-    with_output.model.sequence.steps[0]
-        .observations
-        .push(runmat_analysis_core::ObservationRequest::Diagnostic(
+    with_output.model.sequence.steps[0].observations.push(
+        runmat_analysis_core::ObservationRequest::Diagnostic(
             runmat_analysis_core::DiagnosticObservation {
                 observation_id: runmat_analysis_core::ObservationId("balance".into()),
                 diagnostic: runmat_analysis_core::DiagnosticKind::Balance,
                 sampling: runmat_analysis_core::SamplingPolicy::Final,
                 retention: runmat_analysis_core::RetentionPolicy::Canonical,
             },
-        ));
+        ),
+    );
     assert!(with_output
         .validate()
         .unwrap_err()

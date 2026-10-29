@@ -57,9 +57,15 @@ fn run(policy: Option<(u32, u32)>) -> ResultIdentity {
     );
     let run: Value = serde_json::from_slice(&output.stdout).unwrap();
     let mut state_digests = Vec::new();
-    collect_state_digests(&project.path().join(".artifacts/studies"), &mut state_digests);
+    collect_state_digests(
+        &project.path().join(".artifacts/studies"),
+        &mut state_digests,
+    );
     state_digests.sort();
-    assert!(!state_digests.is_empty(), "the run persisted no solver state");
+    assert!(
+        !state_digests.is_empty(),
+        "the run persisted no solver state"
+    );
     ResultIdentity {
         definition: run["study_definition_digest"].as_str().unwrap().to_string(),
         mesh: run["mesh_digest"].as_str().unwrap().to_string(),
@@ -82,7 +88,10 @@ fn collect_state_digests(directory: &Path, digests: &mut Vec<String>) {
         let path = entry.path();
         if path.is_dir() {
             collect_state_digests(&path, digests);
-        } else if path.extension().is_some_and(|extension| extension == "state") {
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "state")
+        {
             // The state header records its numerical content digest; its execution identity
             // also binds the resource plan the step ran under, which is placement evidence.
             let bytes = fs::read(&path).unwrap();
@@ -116,7 +125,15 @@ fn a_study_gives_identical_results_across_runs_workers_and_threads() {
     assert_eq!(reference.assessed.len(), 1);
     assert!(reference.assessed[0] > 0.0);
     // Repeated runs, then explicit worker and thread counts. Placement differs; results do not.
-    for policy in [None, None, None, None, Some((1, 1)), Some((4, 1)), Some((2, 4))] {
+    for policy in [
+        None,
+        None,
+        None,
+        None,
+        Some((1, 1)),
+        Some((4, 1)),
+        Some((2, 4)),
+    ] {
         let identity = run(policy);
         // The definition digest binds the authored execution policy, so compare it only for
         // identical sources; every result identity below must match regardless.
@@ -124,10 +141,21 @@ fn a_study_gives_identical_results_across_runs_workers_and_threads() {
             assert_eq!(identity.definition, reference.definition);
         }
         assert_eq!(identity.mesh, reference.mesh, "{policy:?}");
-        assert_eq!(identity.state_digests, reference.state_digests, "{policy:?}");
         assert_eq!(
-            identity.assessed.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
-            reference.assessed.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
+            identity.state_digests, reference.state_digests,
+            "{policy:?}"
+        );
+        assert_eq!(
+            identity
+                .assessed
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            reference
+                .assessed
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
             "{policy:?}"
         );
         // Every run is a fresh attempt of the same definition: the step run ids share their

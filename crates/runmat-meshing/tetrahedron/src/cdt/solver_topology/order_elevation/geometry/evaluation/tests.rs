@@ -123,8 +123,14 @@ fn periodic_surface_midpoint_crosses_the_seam_without_a_second_seam_image() {
     assert_eq!(left, [0.0, 0.5]);
     assert!((right[0] + 0.2).abs() < 1.0e-12 && right[1] == 0.5);
     let bounds = [
-        runmat_geometry_core::ParameterRange { start: 0.0, end: tau },
-        runmat_geometry_core::ParameterRange { start: 0.0, end: 1.0 },
+        runmat_geometry_core::ParameterRange {
+            start: 0.0,
+            end: tau,
+        },
+        runmat_geometry_core::ParameterRange {
+            start: 0.0,
+            end: 1.0,
+        },
     ];
     let middle = wrap_into_period(interpolate2(left, right, 0.5), [Some(tau), None], bounds);
     assert!((middle[0] - (tau - 0.1)).abs() < 1.0e-12 && middle[1] == 0.5);

@@ -98,7 +98,10 @@ impl InMemoryAnalysisArtifactStore {
         };
         let mut reachable =
             publication::reclamation::memory_reachable(&runs, &observations, &evictions)?;
-        let streamed = self.streamed.read().map_err(|_| "streamed chunk lock poisoned")?;
+        let streamed = self
+            .streamed
+            .read()
+            .map_err(|_| "streamed chunk lock poisoned")?;
         if reachable
             .iter()
             .any(|digest| !chunks.contains_key(digest) && !streamed.contains(digest))

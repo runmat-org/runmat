@@ -61,10 +61,10 @@ fn compliant_surface_with_long_interior_edge_and_thin_collars_converges() {
             );
             assert!(result.quality.worst_refinement_tetrahedron.is_none());
             assert!(result.quality.worst_optimization_tetrahedron.is_none());
-            assert!(result
-                .quality_mutations
-                .iter()
-                .any(|step| matches!(step, super::super::DelaunayVolumeQualityMutation::Optimized(_))));
+            assert!(result.quality_mutations.iter().any(|step| matches!(
+                step,
+                super::super::DelaunayVolumeQualityMutation::Optimized(_)
+            )));
             for node in boundary {
                 let current = result
                     .topology

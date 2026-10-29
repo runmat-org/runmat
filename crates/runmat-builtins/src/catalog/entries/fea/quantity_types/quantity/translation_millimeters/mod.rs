@@ -13,12 +13,14 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_vector(request, entry, identities::FEA_TRANSLATION_CLASS)
 }
 
-const TRANSLATION_MILLIMETERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "translation = fea.Translation.millimeters(components)",
-    inputs: &VECTOR_QUANTITY_INPUTS,
-    outputs: &VECTOR_QUANTITY_OUTPUTS,
-}];
-pub const TRANSLATION_MILLIMETERS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&TRANSLATION_MILLIMETERS_SIGNATURES);
+const TRANSLATION_MILLIMETERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "translation = fea.Translation.millimeters(components)",
+        inputs: &VECTOR_QUANTITY_INPUTS,
+        outputs: &VECTOR_QUANTITY_OUTPUTS,
+    }];
+pub const TRANSLATION_MILLIMETERS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&TRANSLATION_MILLIMETERS_SIGNATURES);
 const TRANSLATION_MILLIMETERS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "translation-millimeters",
     title: "A 50 mm offset along y",

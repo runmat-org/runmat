@@ -257,6 +257,7 @@ fn initial_input_does_not_silently_select_a_history_sample_or_invalid_temperatur
                 shape: vec![4],
                 values: AnalysisFieldValues::HostF64(vec![value; 4]),
             },
-        ).is_err());
+        )
+        .is_err());
     }
 }

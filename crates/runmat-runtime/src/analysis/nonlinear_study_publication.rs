@@ -109,8 +109,7 @@ pub fn prepare_nonlinear_solid_study_publication(
         })?
     };
     let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence)
-            .map_err(invalid)?;
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
         step_id: step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,

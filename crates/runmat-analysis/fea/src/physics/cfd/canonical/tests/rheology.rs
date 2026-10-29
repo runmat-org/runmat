@@ -7,7 +7,9 @@ use runmat_analysis_core::*;
 fn power_law_velocity(y: f64, consistency: f64, index: f64, force: f64) -> f64 {
     let h: f64 = 0.5;
     let e = (index + 1.0) / index;
-    index / (index + 1.0) * (force / consistency).powf(1.0 / index) * (h.powf(e) - (y - h).abs().powf(e))
+    index / (index + 1.0)
+        * (force / consistency).powf(1.0 / index)
+        * (h.powf(e) - (y - h).abs().powf(e))
 }
 
 // witness: FEA-FLUID-MATERIALS-001/generalized_newtonian @ generalized_newtonian_flow/tet4/numerical_kernel;
@@ -38,7 +40,11 @@ fn shear_thinning_power_law_channel_converges_to_the_closed_form_profile() {
                 .source
                 .boundary_faces
                 .iter()
-                .find(|face| face.provenance.iter().any(|e| target.matches_persistent_entity(e)))
+                .find(|face| {
+                    face.provenance
+                        .iter()
+                        .any(|e| target.matches_persistent_entity(e))
+                })
                 .unwrap();
             *value = PrescribedValue::Constant(
                 [
@@ -68,7 +74,10 @@ fn shear_thinning_power_law_channel_converges_to_the_closed_form_profile() {
             / peak;
         errors.push(error);
     }
-    assert!(errors.windows(2).all(|pair| pair[1] < pair[0]), "{errors:?}");
+    assert!(
+        errors.windows(2).all(|pair| pair[1] < pair[0]),
+        "{errors:?}"
+    );
     assert!(errors[2] < 0.05, "{errors:?}");
 }
 
@@ -90,7 +99,12 @@ fn newtonian_limit_of_the_law_reproduces_the_newtonian_solution() {
         .unwrap()
         .solve()
         .unwrap();
-    for (u, v) in actual.velocity_m_per_s.canonical_values().iter().zip(expected.velocity_m_per_s.canonical_values()) {
+    for (u, v) in actual
+        .velocity_m_per_s
+        .canonical_values()
+        .iter()
+        .zip(expected.velocity_m_per_s.canonical_values())
+    {
         assert!(norm(sub(*u, *v)) < 1e-9);
     }
 }

@@ -16,11 +16,11 @@ pub(crate) mod solid;
 #[cfg(test)]
 pub(crate) use driver::solve_nonlinear_system;
 pub(crate) use driver::solve_nonlinear_system_at_boundaries;
-pub(crate) use driver::{ContactBlockExecution, NonlinearExecution};
 pub(crate) use driver::{require_fixed_structural_nonlinear, validate_original_terminal_result};
 pub(crate) use driver::{
     run_nonlinear_load_block, NonlinearLoadBlockRequest, NonlinearLoadBlockStart,
 };
+pub(crate) use driver::{ContactBlockExecution, NonlinearExecution};
 pub use driver::{NonlinearLoadContinuation, NonlinearLoadWork};
 pub(crate) use events::{detect_completed_nonlinear_events, nonlinear_solver_content_digest};
 pub use options::NonlinearSolveOptions;

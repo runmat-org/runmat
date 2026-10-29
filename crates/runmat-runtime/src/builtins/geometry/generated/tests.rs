@@ -445,7 +445,10 @@ fn cylinder_types_lengths_and_positions_and_keeps_the_axis_dimensionless() {
     };
     assert_eq!(length(&radius_m), 0.01);
     assert_eq!(length(&height_m), 0.02);
-    assert_eq!(origin_m.iter().map(length).collect::<Vec<_>>(), vec![0.1, 0.2, 0.3]);
+    assert_eq!(
+        origin_m.iter().map(length).collect::<Vec<_>>(),
+        vec![0.1, 0.2, 0.3]
+    );
     for (component, expected) in axis.iter().zip([0.0, 0.0, 1.0]) {
         assert!(
             matches!(component, GeometryScalarExpression::Literal { value } if *value == expected),

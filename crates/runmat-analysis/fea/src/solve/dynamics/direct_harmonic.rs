@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{
-    algebra::PreparedModalSystem,
-    assembly::AssemblySummary,
-};
+use crate::{algebra::PreparedModalSystem, assembly::AssemblySummary};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -144,7 +141,8 @@ pub fn solve_direct_harmonic(
         .zip(&reduced_imaginary)
         .map(|(&re, &im)| c64::new(re, im))
         .collect();
-    crate::progress::check_cancelled("fea.direct_harmonic").map_err(|_| DirectHarmonicError::Cancelled)?;
+    crate::progress::check_cancelled("fea.direct_harmonic")
+        .map_err(|_| DirectHarmonicError::Cancelled)?;
     let mut solution = vec![c64::new(0.0, 0.0); reduced_size];
     let solved = crate::solve::shared_sparse::with_plan(
         crate::planning::resource::LocalExecutionPlan::serial(),
@@ -162,8 +160,12 @@ pub fn solve_direct_harmonic(
     );
     match solved {
         Ok(_) => {}
-        Err(runmat_sparse_solvers::SolverError::Cancelled) => return Err(DirectHarmonicError::Cancelled),
-        Err(runmat_sparse_solvers::SolverError::Singular { .. }) => return Err(DirectHarmonicError::Breakdown),
+        Err(runmat_sparse_solvers::SolverError::Cancelled) => {
+            return Err(DirectHarmonicError::Cancelled)
+        }
+        Err(runmat_sparse_solvers::SolverError::Singular { .. }) => {
+            return Err(DirectHarmonicError::Breakdown)
+        }
         Err(error) => return Err(DirectHarmonicError::Preconditioning(error.to_string())),
     }
     let mut action = vec![c64::new(0.0, 0.0); reduced_size];
@@ -175,7 +177,11 @@ pub fn solve_direct_harmonic(
         .sum::<f64>()
         .sqrt();
     let load_norm = rhs.iter().map(|b| b.norm_sqr()).sum::<f64>().sqrt();
-    let relative_residual = if load_norm > 0.0 { residual_norm / load_norm } else { 0.0 };
+    let relative_residual = if load_norm > 0.0 {
+        residual_norm / load_norm
+    } else {
+        0.0
+    };
     if !relative_residual.is_finite() || relative_residual > policy.relative_tolerance {
         return Err(DirectHarmonicError::NotConverged {
             iterations: 1,

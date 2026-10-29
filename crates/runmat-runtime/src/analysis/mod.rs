@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
-    AnalysisModel, AnalysisProcedure, BoundaryOperator, CoordinateFrame,
-    CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, ProcedureStepId, StateKind, StateOutput,
+    AnalysisModel, AnalysisProcedure, BoundaryOperator, CoordinateFrame, CoupledPhysicsFamily,
+    ExcitationAction, PhysicsFamily, ProcedureStepId, StateKind, StateOutput,
 };
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
@@ -126,8 +126,8 @@ use structural_study::{
 };
 #[cfg(test)]
 use structural_study::{persist_immutable_study_evidence, run_evidence_stage};
-pub use study_completion_identity::AnalysisStudyCompletionIdentity;
 pub use study_completion_identity::split_attempt_run_id;
+pub use study_completion_identity::AnalysisStudyCompletionIdentity;
 pub use study_contract::analysis_study_content_digest;
 use study_contract::{
     sanitize_study_sweep_id, study_fingerprint, study_fingerprint_from_digest, study_issue_message,
@@ -335,17 +335,17 @@ pub use contracts::{
     analysis_procedure_ids, AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData,
     AnalysisAcousticRunOptions, AnalysisBucklingRunOptions, AnalysisCfdRunOptions,
     AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
-    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisExecutionDuration, AnalysisExecutionCandidate, AnalysisExecutionCapability,
-    AnalysisExecutionChoices, AnalysisExecutionMode,
-    AnalysisExecutionPlan, AnalysisExecutionReadiness, AnalysisExecutionStep, AnalysisFieldBinding,
-    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
-    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
-    AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
-    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
-    AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
-    AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
-    AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
-    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisExecutionCandidate,
+    AnalysisExecutionCapability, AnalysisExecutionChoices, AnalysisExecutionDuration,
+    AnalysisExecutionMode, AnalysisExecutionPlan, AnalysisExecutionReadiness,
+    AnalysisExecutionStep, AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload,
+    AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult,
+    AnalysisFieldPageValues, AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions,
+    AnalysisFieldSelection, AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef,
+    AnalysisFsiRunOptions, AnalysisImmutableValueSpec, AnalysisModalRunOptions,
+    AnalysisModelSourceEvidence, AnalysisModelSourceFileEvidence, AnalysisModelSourceKind,
+    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions,
+    AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
     AnalysisRenderTriangleRange, AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
@@ -362,8 +362,8 @@ pub use contracts::{
     AnalysisValidateResult, BucklingResultsData, ContactEnforcementOptions, FallbackEvent,
     FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
     NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate,
-    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus, StaticSolvePlacement,
-    StructuralFrequencyResultsData, StructuralRandomResponseResultsData,
+    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    StaticSolvePlacement, StructuralFrequencyResultsData, StructuralRandomResponseResultsData,
     StructuralResponseSpectrumResultsData, ThermalResultsData, TransientIntegrationMethod,
     TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
     ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
@@ -2499,7 +2499,7 @@ fn validate_thermal_run_model(
             || thermal.conductivity_w_per_mk <= runmat_types::physical::Quantity::new(0.0)
             || !thermal.specific_heat_j_per_kgk.is_finite()
             || thermal.specific_heat_j_per_kgk <= runmat_types::physical::Quantity::new(0.0))
-            .then_some((material, thermal))
+        .then_some((material, thermal))
     }) {
         return Err(operation_error(
             AnalysisOperation::Thermal.name(),
@@ -2521,7 +2521,10 @@ fn validate_thermal_run_model(
                 ),
                 (
                     "specific_heat_j_per_kgk".to_string(),
-                    thermal.specific_heat_j_per_kgk.canonical_value().to_string(),
+                    thermal
+                        .specific_heat_j_per_kgk
+                        .canonical_value()
+                        .to_string(),
                 ),
             ]),
         ));
@@ -2547,7 +2550,9 @@ fn validate_thermal_run_model(
         };
         (!value
             .study_constant(&model.signals)
-            .is_some_and(|temperature| temperature.is_finite() && temperature.canonical_value() > 0.0))
+            .is_some_and(|temperature| {
+                temperature.is_finite() && temperature.canonical_value() > 0.0
+            }))
         .then_some(constraint.constraint_id.as_str())
     });
     let invalid_boundary = model.boundaries.iter().find_map(|boundary| {
@@ -2561,7 +2566,9 @@ fn validate_thermal_run_model(
             } => {
                 !ambient_temperature
                     .study_constant(&model.signals)
-                    .is_some_and(|temperature| temperature.is_finite() && temperature.canonical_value() > 0.0)
+                    .is_some_and(|temperature| {
+                        temperature.is_finite() && temperature.canonical_value() > 0.0
+                    })
                     || !coefficient.is_finite()
                     || coefficient.canonical_value() < 0.0
             }
@@ -3581,7 +3588,12 @@ fn analysis_complete_linear_static_run_with_id(
     assigned_run_id: Option<&str>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let context = prepared.context.clone();
-    let envelope = analysis_admit_linear_static_run_with_id(prepared, run, assigned_run_id, Default::default())?;
+    let envelope = analysis_admit_linear_static_run_with_id(
+        prepared,
+        run,
+        assigned_run_id,
+        Default::default(),
+    )?;
     persist_linear_static_run(&context, &envelope.data)?;
     Ok(envelope)
 }
@@ -3707,10 +3719,12 @@ fn contact_enforcement(
 ) -> runmat_analysis_fea::FeaContactEnforcement {
     let defaults = runmat_analysis_fea::FeaContactEnforcement::default();
     runmat_analysis_fea::FeaContactEnforcement {
-        penalty_stiffness_scale: enforcement
-            .map_or(defaults.penalty_stiffness_scale, |value| value.penalty_stiffness_scale),
-        max_penetration_ratio: enforcement
-            .map_or(defaults.max_penetration_ratio, |value| value.max_penetration_ratio),
+        penalty_stiffness_scale: enforcement.map_or(defaults.penalty_stiffness_scale, |value| {
+            value.penalty_stiffness_scale
+        }),
+        max_penetration_ratio: enforcement.map_or(defaults.max_penetration_ratio, |value| {
+            value.max_penetration_ratio
+        }),
     }
 }
 

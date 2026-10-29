@@ -39,14 +39,9 @@ fn exact_local_ceiling_and_raw_metadata_are_counted_before_expansion() {
             .resources
             .maximum_resident_bytes = Some(0);
         let step_id = denied.sequence.steps[0].step_id.as_str();
-        let error = crate::physics::maxwell::compile_canonical_input(
-            &denied,
-            &mesh,
-            step_id,
-            1e-8,
-            1.0,
-        )
-        .unwrap_err();
+        let error =
+            crate::physics::maxwell::compile_canonical_input(&denied, &mesh, step_id, 1e-8, 1.0)
+                .unwrap_err();
         assert!(error
             .to_string()
             .contains("Maxwell local resource preflight"));

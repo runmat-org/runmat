@@ -30,9 +30,9 @@ fn sparse_reduction_and_certified_solve_match_independent_phased_solution() {
                 real.extend(imaginary);
                 let expected = prepared.reduction.transpose_apply(&real).unwrap();
                 let sparse = prepared
-            .operator
-            .with_canonical_storage(|operator| crate::algebra::spmv(operator, &basis))
-            .unwrap();
+                    .operator
+                    .with_canonical_storage(|operator| crate::algebra::spmv(operator, &basis))
+                    .unwrap();
                 for (actual, expected) in sparse.iter().zip(expected) {
                     assert!((actual - expected).abs() < 2e-14);
                 }
@@ -42,10 +42,16 @@ fn sparse_reduction_and_certified_solve_match_independent_phased_solution() {
             for (node, expected) in expected.iter().enumerate() {
                 let error = (result.real[node] / amplitude - expected.0)
                     .hypot(result.imaginary[node] / amplitude - expected.1);
-                assert!(error < 2e-11, "phase={phase} amplitude={amplitude} error={error}");
+                assert!(
+                    error < 2e-11,
+                    "phase={phase} amplitude={amplitude} error={error}"
+                );
             }
             assert!(result.relative_residual <= policy.relative_tolerance);
-            assert_eq!(result.certificate.dimension, prepared.rhs.canonical_values().len());
+            assert_eq!(
+                result.certificate.dimension,
+                prepared.rhs.canonical_values().len()
+            );
             assert!(result.certificate.contraction_bound < result.certificate.limit);
         }
     }
@@ -147,7 +153,11 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
                 ..Default::default()
             };
             let prepared = super::PreparedReduced::new(&assembly, policy).unwrap();
-            assert!(prepared.rhs.canonical_values().iter().all(|value| *value == 0.0));
+            assert!(prepared
+                .rhs
+                .canonical_values()
+                .iter()
+                .all(|value| *value == 0.0));
             let physical_reference = if homogeneous {
                 0.0
             } else {
@@ -413,15 +423,10 @@ fn free_phased_helmholtz_pressure_matches_independent_complex_dense_lifting() {
             }
             let phased = multiply(
                 (phase.cos(), phase.sin()),
-                (
-                    real[0] / amplitude,
-                    imaginary[0] / amplitude,
-                ),
+                (real[0] / amplitude, imaginary[0] / amplitude),
             );
             assert!(
-                (real[1] / amplitude - phased.0)
-                    .hypot(imaginary[1] / amplitude - phased.1)
-                    < 2e-12
+                (real[1] / amplitude - phased.0).hypot(imaginary[1] / amplitude - phased.1) < 2e-12
             );
         }
     }

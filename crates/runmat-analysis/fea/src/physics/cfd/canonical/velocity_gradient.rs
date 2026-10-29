@@ -140,7 +140,8 @@ pub(super) fn linear_terms(
                     }
                     Sample::SymmetryFace(i) => {
                         let f = &t.faces[i];
-                        let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
+                        let normal =
+                            scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
                         for k in 0..3 {
                             for j in 0..3 {
                                 add_term(c, k, j, weight, -normal[k] * normal[j]);

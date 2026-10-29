@@ -172,9 +172,8 @@ pub async fn execute_prepared_study_locally_with_observers(
     )
     .await?;
     crate::input_materialization::apply_to_model(&mut compiled.model, completed_inputs)?;
-    let workloads =
-        plan_structural_study_with_fields(&compiled, planning, &decoded.initial_fields)
-            .map_err(protocol)?;
+    let workloads = plan_structural_study_with_fields(&compiled, planning, &decoded.initial_fields)
+        .map_err(protocol)?;
     emit_local_progress(
         &observers,
         OPERATION,

@@ -2,17 +2,16 @@ use super::header::{self, AnalysisHeader, ProcedureHeader};
 use super::{requirements, values};
 use crate::{
     CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement, CheckedFeaStatementKind,
-    FeaDiagnostic,
-    FeaDiagnosticLocation, FeaDiagnosticPhase,
+    FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase,
 };
 use runmat_analysis_core::{
     validate_analysis_sequence, AnalysisProcedure, AnalysisSequence, AuthoredModel,
-    CoupledPhysicsFamily, IndependentDomain, InitialStateConflictPolicy, PhysicsFamily, ProcedureStep, ProcedureStepId,
-    RandomExcitationId, ReferenceStatePolicy, ResponseSpectrumId, SequenceDependency,
-    SequenceDependencyReason, SolutionSpace, StateCompleteness, StateId, StateKind, StateOutput,
-    StateInput, StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
-    StructuralKinematics, StructuralNonlinearSettings, StructuralRandomResponseSettings,
-    TopologyTransitionPolicy, TransitionId,
+    CoupledPhysicsFamily, IndependentDomain, InitialStateConflictPolicy, PhysicsFamily,
+    ProcedureStep, ProcedureStepId, RandomExcitationId, ReferenceStatePolicy, ResponseSpectrumId,
+    SequenceDependency, SequenceDependencyReason, SolutionSpace, StateCompleteness, StateId,
+    StateInput, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,
+    StateTransitionMethod, StateUse, StructuralKinematics, StructuralNonlinearSettings,
+    StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
 };
 use std::collections::BTreeSet;
 
@@ -521,8 +520,13 @@ fn heat_source(
     if values::assignment(statements, "heat_source").is_none() {
         return Some(());
     }
-    let (producer, state) =
-        requirements::state(declaration, procedure, statements, "heat_source", diagnostics)?;
+    let (producer, state) = requirements::state(
+        declaration,
+        procedure,
+        statements,
+        "heat_source",
+        diagnostics,
+    )?;
     step.state_inputs.push(StateInput {
         input_id: "heat_source".into(),
         required_kind: StateKind::ElectromagneticComplex,

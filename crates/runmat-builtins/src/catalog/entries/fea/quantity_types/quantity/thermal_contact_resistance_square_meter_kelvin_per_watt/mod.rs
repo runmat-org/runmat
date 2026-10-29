@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_THERMAL_CONTACT_RESISTANCE_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::NonNegative };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_THERMAL_CONTACT_RESISTANCE_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::NonNegative,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const THERMAL_CONTACT_RESISTANCE_SQUARE_METER_KELVIN_PER_WATT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+const THERMAL_CONTACT_RESISTANCE_SQUARE_METER_KELVIN_PER_WATT_SIGNATURES:
+    [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "value = fea.ThermalContactResistance.squareMeterKelvinPerWatt(value)",
     inputs: &QUANTITY_INPUTS,
     outputs: &QUANTITY_OUTPUTS,
 }];
-pub const THERMAL_CONTACT_RESISTANCE_SQUARE_METER_KELVIN_PER_WATT_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&THERMAL_CONTACT_RESISTANCE_SQUARE_METER_KELVIN_PER_WATT_SIGNATURES);
+pub const THERMAL_CONTACT_RESISTANCE_SQUARE_METER_KELVIN_PER_WATT_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&THERMAL_CONTACT_RESISTANCE_SQUARE_METER_KELVIN_PER_WATT_SIGNATURES);
 const THERMAL_CONTACT_RESISTANCE_SQUARE_METER_KELVIN_PER_WATT_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "thermal-contact-resistance-squaremeterkelvinperwatt",
     title: "A thermal-pad contact resistance",

@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_ELECTRIC_POTENTIAL_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_ELECTRIC_POTENTIAL_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const ELECTRIC_POTENTIAL_VOLTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.ElectricPotential.volts(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const ELECTRIC_POTENTIAL_VOLTS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&ELECTRIC_POTENTIAL_VOLTS_SIGNATURES);
+const ELECTRIC_POTENTIAL_VOLTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.ElectricPotential.volts(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const ELECTRIC_POTENTIAL_VOLTS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&ELECTRIC_POTENTIAL_VOLTS_SIGNATURES);
 const ELECTRIC_POTENTIAL_VOLTS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "electric-potential-volts",
     title: "A 12 V terminal",
@@ -31,7 +38,8 @@ const ELECTRIC_POTENTIAL_VOLTS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     fixture: BuiltinExampleFixture::None,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
-        source: "assert(isa(value, 'fea.ElectricPotential'));\nassert(abs(value.volts - 12) <= 1e-9);",
+        source:
+            "assert(isa(value, 'fea.ElectricPotential'));\nassert(abs(value.volts - 12) <= 1e-9);",
     },
 }];
 pub(super) const ENTRY: BuiltinCatalogEntry = catalog_entry::entry(ConstructorEntryDefinition {

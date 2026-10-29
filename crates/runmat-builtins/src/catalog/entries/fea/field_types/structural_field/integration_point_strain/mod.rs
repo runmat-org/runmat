@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const INTEGRATION_POINT_STRAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.integrationPointStrain()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const INTEGRATION_POINT_STRAIN_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&INTEGRATION_POINT_STRAIN_SIGNATURES);
+const INTEGRATION_POINT_STRAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.integrationPointStrain()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const INTEGRATION_POINT_STRAIN_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&INTEGRATION_POINT_STRAIN_SIGNATURES);
 const INTEGRATION_POINT_STRAIN_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-integration-point-strain",
     title: "Select integration-point strain tensor",

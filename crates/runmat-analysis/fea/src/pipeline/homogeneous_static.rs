@@ -72,7 +72,9 @@ impl HomogeneousStaticSolver {
             .admissibility()
             .and_then(|evidence| evidence.factor())
             .map(|factor| factor.0.clone())
-            .ok_or_else(|| FeaRunError::Solve("homogeneous static stiffness has no Cholesky proof".into()))?;
+            .ok_or_else(|| {
+                FeaRunError::Solve("homogeneous static stiffness has no Cholesky proof".into())
+            })?;
         Ok(Self {
             reduction,
             system,
@@ -100,12 +102,17 @@ impl HomogeneousStaticSolver {
         }
         let arrays = shared_sparse::CsrArrays::of(self.system.operators().stiffness());
         let mut vector = vec![0.0; reduced_load.len()];
-        shared_sparse::with_plan(crate::planning::resource::LocalExecutionPlan::serial(), || {
-            self.factor
-                .solve_refined(arrays.view().into(), &reduced_load, &mut vector, 1)
-                .map(|_| ())
-        })
-        .map_err(|error| FeaRunError::Solve(format!("homogeneous static correction failed: {error}")))?;
+        shared_sparse::with_plan(
+            crate::planning::resource::LocalExecutionPlan::serial(),
+            || {
+                self.factor
+                    .solve_refined(arrays.view().into(), &reduced_load, &mut vector, 1)
+                    .map(|_| ())
+            },
+        )
+        .map_err(|error| {
+            FeaRunError::Solve(format!("homogeneous static correction failed: {error}"))
+        })?;
         let equilibrium_residual = subtract(&apply_k(&self.system, &vector), &reduced_load)?;
         let equilibrium_residual_ratio =
             norm(&equilibrium_residual) / norm(&reduced_load).max(f64::MIN_POSITIVE);
@@ -172,11 +179,35 @@ mod tests {
         // Coercive operator on which zero-fill ILU has a negative final pivot; the direct
         // correction is exact regardless.
         let values = [
-            [2.853656491730362, 0.0, 1.7390443217009306, 1.6154918987303972, 0.6468259897083044],
+            [
+                2.853656491730362,
+                0.0,
+                1.7390443217009306,
+                1.6154918987303972,
+                0.6468259897083044,
+            ],
             [0.0, 4.752237345324829, 0.0, 2.2926174104213715, 0.0],
-            [1.7390443217009306, 0.0, 5.047566675581038, 0.0, -2.5766232535243034],
-            [1.6154918987303972, 2.2926174104213715, 0.0, 3.101011391496286, 1.4569321684539318],
-            [0.6468259897083044, 0.0, -2.5766232535243034, 1.4569321684539318, 3.166770219337195],
+            [
+                1.7390443217009306,
+                0.0,
+                5.047566675581038,
+                0.0,
+                -2.5766232535243034,
+            ],
+            [
+                1.6154918987303972,
+                2.2926174104213715,
+                0.0,
+                3.101011391496286,
+                1.4569321684539318,
+            ],
+            [
+                0.6468259897083044,
+                0.0,
+                -2.5766232535243034,
+                1.4569321684539318,
+                3.166770219337195,
+            ],
         ];
         let mut assembler = RealSparseAssembler::square(
             5,
@@ -194,8 +225,18 @@ mod tests {
         let system = AssembledRealSystem::try_new(
             CanonicalRealOperators::try_new(
                 stiffness,
-                RealSparseMatrix::diagonal(vec![1.0; 5], OperatorRole::Mass, MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE).unwrap(),
-                RealSparseMatrix::diagonal(vec![0.0; 5], OperatorRole::Damping, MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE).unwrap(),
+                RealSparseMatrix::diagonal(
+                    vec![1.0; 5],
+                    OperatorRole::Mass,
+                    MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+                )
+                .unwrap(),
+                RealSparseMatrix::diagonal(
+                    vec![0.0; 5],
+                    OperatorRole::Damping,
+                    MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+                )
+                .unwrap(),
             )
             .unwrap(),
             vec![false; 5],
@@ -203,15 +244,28 @@ mod tests {
         )
         .unwrap();
         let prepared = system.prepare_linear().unwrap();
-        let factor = prepared.admissibility().unwrap().factor().unwrap().0.clone();
+        let factor = prepared
+            .admissibility()
+            .unwrap()
+            .factor()
+            .unwrap()
+            .0
+            .clone();
         let expected = [1.0, -2.0, 0.5, 3.0, -1.0];
         let load = values
             .iter()
-            .map(|row| row.iter().zip(expected).map(|(entry, value)| entry * value).sum())
+            .map(|row| {
+                row.iter()
+                    .zip(expected)
+                    .map(|(entry, value)| entry * value)
+                    .sum()
+            })
             .collect::<Vec<f64>>();
         let arrays = shared_sparse::CsrArrays::of(system.operators().stiffness());
         let mut solved = vec![0.0; 5];
-        factor.solve_refined(arrays.view().into(), &load, &mut solved, 1).unwrap();
+        factor
+            .solve_refined(arrays.view().into(), &load, &mut solved, 1)
+            .unwrap();
         for (actual, expected) in solved.iter().zip(expected) {
             assert!((actual - expected).abs() <= 1.0e-12);
         }

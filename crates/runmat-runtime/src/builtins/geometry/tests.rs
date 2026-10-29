@@ -222,7 +222,11 @@ fn geometry_load_units_option_sets_the_asset_unit() {
         )
         .unwrap_or_else(|error| panic!("{unit}: {error:?}"));
         let asset = geometry_asset_from_value_with_builtin(&value, GEOMETRY_LOAD_NAME).unwrap();
-        assert_eq!(asset.coordinate_units.map(|units| units.unit()), Some(expected), "{unit}");
+        assert_eq!(
+            asset.coordinate_units.map(|units| units.unit()),
+            Some(expected),
+            "{unit}"
+        );
     }
     let default = load_with_options(&path, Vec::new()).unwrap();
     let asset = geometry_asset_from_value_with_builtin(&default, GEOMETRY_LOAD_NAME).unwrap();

@@ -154,11 +154,9 @@ impl SampledHistoryWorkflow {
                     self.pending = Some(PendingObservationTask::Reduction(Box::new(task)));
                     break;
                 }
-                if let Some((id, (sample, host))) = self
-                    .reduced
-                    .iter()
-                    .find(|(id, _)| is_history(context.step(), id) && !self.checkpointed.contains(*id))
-                {
+                if let Some((id, (sample, host))) = self.reduced.iter().find(|(id, _)| {
+                    is_history(context.step(), id) && !self.checkpointed.contains(*id)
+                }) {
                     let task = prepare_observation_history_checkpoint_task(
                         ObservationHistoryCheckpointPreparation {
                             source_host: host.clone(),
@@ -182,7 +180,11 @@ impl SampledHistoryWorkflow {
                     self.pending = Some(PendingObservationTask::Checkpoint(Box::new(task)));
                     break;
                 }
-                if self.reduced.keys().any(|id| !is_history(context.step(), id)) {
+                if self
+                    .reduced
+                    .keys()
+                    .any(|id| !is_history(context.step(), id))
+                {
                     let task = prepare_observation_assembly(ObservationAssemblyPreparation {
                         source_host: context.solve_host().clone(),
                         source_request: self
@@ -256,9 +258,7 @@ impl SampledHistoryWorkflow {
         self.source_request
             .as_ref()
             .map(|request| &request.plan)
-            .ok_or(AnalysisBridgeError::Identity(
-                "observation plan absent",
-            ))
+            .ok_or(AnalysisBridgeError::Identity("observation plan absent"))
     }
 
     fn advance_sample(&mut self) {
@@ -275,7 +275,8 @@ impl SampledHistoryWorkflow {
         context: &C,
     ) -> AnalysisBridgeResult<()> {
         let policy = context.output_policy();
-        let (preparation, coordinate) = context.observation_preparation(source, self.sample_ordinal)?;
+        let (preparation, coordinate) =
+            context.observation_preparation(source, self.sample_ordinal)?;
         let fanout = prepare_observation_fanout(source, preparation, coordinate, None)?;
         let catalog = context.field_catalog()?;
         let catalog_objects = prepare_analysis_objects(

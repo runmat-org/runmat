@@ -155,18 +155,27 @@ pub fn build_structural_transient_block_resource_plan(
         add(sum, bytes, "transient block input payload")
     })?;
     let inputs = match prepared_inputs {
-        Some(facts) if facts.encoded_payload_bytes.0 == encoded_inputs
-            && facts.transport_closure_bytes.0 >= encoded_inputs
-            && facts.decoded_resident_bytes_admission_budget.0 >= encoded_inputs => facts,
-        Some(_) => return Err(ResourcePlanningError::Invalid(
-            "prepared transient block inputs differ from canonical payloads".into(),
-        )),
+        Some(facts)
+            if facts.encoded_payload_bytes.0 == encoded_inputs
+                && facts.transport_closure_bytes.0 >= encoded_inputs
+                && facts.decoded_resident_bytes_admission_budget.0 >= encoded_inputs =>
+        {
+            facts
+        }
+        Some(_) => {
+            return Err(ResourcePlanningError::Invalid(
+                "prepared transient block inputs differ from canonical payloads".into(),
+            ))
+        }
         None => PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(encoded_inputs),
             transport_closure_bytes: ByteCount(encoded_inputs),
             decoded_resident_bytes_admission_budget: ByteCount(
-                runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(encoded_inputs, 3)
-                    .ok_or(ResourcePlanningError::Overflow("transient decoded inputs"))?,
+                runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
+                    encoded_inputs,
+                    3,
+                )
+                .ok_or(ResourcePlanningError::Overflow("transient decoded inputs"))?,
             ),
         },
     };
@@ -211,7 +220,9 @@ pub fn build_structural_transient_block_resource_plan(
     // The output set is the one root manifest listing this phase's output roots. Its bound is
     // the root schema bound, not the numerical payload bound carried by the prepared output.
     let output_set = output_set.unwrap_or(PreparedOutputSetResourceFacts {
-        encoded_bytes_upper_bound: ByteCount(crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES),
+        encoded_bytes_upper_bound: ByteCount(
+            crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES,
+        ),
     });
     if output_set.encoded_bytes_upper_bound.0 == 0
         || output_set.encoded_bytes_upper_bound.0

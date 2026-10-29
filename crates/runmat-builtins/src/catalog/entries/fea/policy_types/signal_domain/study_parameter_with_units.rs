@@ -1,5 +1,7 @@
 use crate::fea_contract::catalog_entry::{self, ConstructorDocumentationDefinition};
-use crate::fea_contract::policy_types::documentation::{example, faq, page, section, source, unit_test};
+use crate::fea_contract::policy_types::documentation::{
+    example, faq, page, section, source, unit_test,
+};
 use crate::fea_contract::policy_types::entry::policy_entry;
 use crate::fea_contract::policy_types::inference::PolicyArg;
 use crate::fea_contract::policy_types::{classes, integer};

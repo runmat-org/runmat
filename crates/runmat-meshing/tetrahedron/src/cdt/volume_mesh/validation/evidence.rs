@@ -85,7 +85,10 @@ pub(super) fn validate_mutations(
     if insertion_count > options.refinement.maximum_insertions
         || treatment_count > maximum_treatments
     {
-        return Err(lineage_failure("mutation counts exceed their admitted budgets", None));
+        return Err(lineage_failure(
+            "mutation counts exceed their admitted budgets",
+            None,
+        ));
     }
 
     // Replay identities backwards from the published topology in the original interleaved order.
@@ -103,7 +106,10 @@ pub(super) fn validate_mutations(
             DelaunayVolumeQualityMutation::Refined(node) => {
                 validate_node(*node)?;
                 if !identities.remove(&node.identity) {
-                    return Err(lineage_failure("refined node is absent from later topology", at));
+                    return Err(lineage_failure(
+                        "refined node is absent from later topology",
+                        at,
+                    ));
                 }
                 continue;
             }
@@ -116,13 +122,18 @@ pub(super) fn validate_mutations(
                     relocation.source_tetrahedron_node_identities,
                     &identities,
                 )
-                .map_err(|_| lineage_failure("relocation source tetrahedron is inconsistent", at))?;
+                .map_err(|_| {
+                    lineage_failure("relocation source tetrahedron is inconsistent", at)
+                })?;
                 validate_node(relocation.replacement_node)?;
                 if !crate::cdt::volume_sliver::relocation_identity_is_valid(relocation) {
                     return Err(lineage_failure("relocation identity is not derived", at));
                 }
                 if !identities.remove(&relocation.replacement_node.identity) {
-                    return Err(lineage_failure("relocated node is absent from later topology", at));
+                    return Err(lineage_failure(
+                        "relocated node is absent from later topology",
+                        at,
+                    ));
                 }
                 if !identities.insert(relocation.source_node_identity) {
                     return Err(lineage_failure("relocation source is still present", at));
@@ -157,16 +168,25 @@ pub(super) fn validate_mutations(
                     )
                     .any(|identity| !identities.contains(identity))
                 {
-                    return Err(lineage_failure("reconnection references an absent node", at));
+                    return Err(lineage_failure(
+                        "reconnection references an absent node",
+                        at,
+                    ));
                 }
             }
             DelaunayVolumeSliverMutation::Inserted(insertion) => {
                 validate_node(insertion.inserted_node)?;
                 if !crate::cdt::volume_sliver::insertion_identity_is_valid(insertion) {
-                    return Err(lineage_failure("optimization insertion identity is not derived", at));
+                    return Err(lineage_failure(
+                        "optimization insertion identity is not derived",
+                        at,
+                    ));
                 }
                 if !identities.remove(&insertion.inserted_node.identity) {
-                    return Err(lineage_failure("optimization insertion is absent from later topology", at));
+                    return Err(lineage_failure(
+                        "optimization insertion is absent from later topology",
+                        at,
+                    ));
                 }
                 if insertion
                     .source_tetrahedron_node_identities
@@ -174,7 +194,10 @@ pub(super) fn validate_mutations(
                     .chain(&insertion.source_edge_node_identities)
                     .any(|identity| !identities.contains(identity))
                 {
-                    return Err(lineage_failure("optimization insertion source is absent", at));
+                    return Err(lineage_failure(
+                        "optimization insertion source is absent",
+                        at,
+                    ));
                 }
             }
         }
@@ -184,7 +207,10 @@ pub(super) fn validate_mutations(
         .iter()
         .any(|node| !identities.contains(&node.identity))
     {
-        return Err(lineage_failure("constraint nodes are not recovered by replay", None));
+        return Err(lineage_failure(
+            "constraint nodes are not recovered by replay",
+            None,
+        ));
     }
     Ok(())
 }

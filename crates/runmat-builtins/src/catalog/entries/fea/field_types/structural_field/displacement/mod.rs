@@ -9,7 +9,8 @@ const DISPLACEMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatu
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const DISPLACEMENT_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&DISPLACEMENT_SIGNATURES);
+pub const DISPLACEMENT_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&DISPLACEMENT_SIGNATURES);
 const DISPLACEMENT_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-displacement",
     title: "Select nodal displacement",

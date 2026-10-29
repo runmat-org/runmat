@@ -55,7 +55,9 @@ fn workload() -> MaxwellHarmonicWorkload {
             AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: id.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(id))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(id)),
+                    ),
                 },
             })
         })
@@ -121,10 +123,7 @@ fn exact_complex_support_codec_and_retained_cold_outputs_fit_both_orders() {
         let system = MaxwellSystemPlan::derive(&m, &grounded).unwrap();
         assert_eq!(d.system_plan_identity, system.identity().unwrap());
         assert_eq!(d.complex_dimension.0, d.free_edge_count.0);
-        assert_eq!(
-            d.nonzeros.0,
-            system.pattern().column_indices().len() as u64
-        );
+        assert_eq!(d.nonzeros.0, system.pattern().column_indices().len() as u64);
         assert!(d.factorization.dimension.0 > 0);
         assert_eq!(
             d.quadrature_sample_count.0,

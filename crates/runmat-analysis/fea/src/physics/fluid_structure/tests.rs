@@ -20,7 +20,9 @@ const VISCOSITY: f64 = 1.0;
 const POISSON: f64 = 0.3;
 
 fn target(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
-    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)));
+    let mut target = RegionTarget::boundary(
+        runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),
+    );
     let entities = mesh
         .topology
         .boundary_faces
@@ -84,11 +86,13 @@ pub(super) fn case(youngs_modulus: f64) -> Case {
     });
     model.materials = vec![solid, fluid];
     let mut plate = model.material_assignments[0].clone();
-    plate.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("plate"));
+    plate.target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("plate"));
     plate.expected_material_id = "elastomer".into();
     plate.assigned_material_id = "elastomer".into();
     let mut channel = plate.clone();
-    channel.target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("channel"));
+    channel.target =
+        PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("channel"));
     channel.expected_material_id = "oil".into();
     channel.assigned_material_id = "oil".into();
     model.material_assignments = vec![plate, channel];

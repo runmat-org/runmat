@@ -4,7 +4,9 @@ use crate::topology::{AnalysisProjection, TetrahedralEdgeSpace};
 use runmat_meshing_core::{BoundaryFaceRole, ElementOrder, StableDigest};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) fn spaces(projection: &AnalysisProjection) -> Result<TetrahedralEdgeSpace, MaxwellError> {
+pub(super) fn spaces(
+    projection: &AnalysisProjection,
+) -> Result<TetrahedralEdgeSpace, MaxwellError> {
     let length = projection.characteristic_length_m;
     if !length.is_finite() || length <= 0.0 || projection.elements.is_empty() {
         return Err(topology("empty or invalid Maxwell geometry"));

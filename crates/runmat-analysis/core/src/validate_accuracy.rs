@@ -473,9 +473,18 @@ mod tests {
         // Validation keeps each field's lower bound: zero bytes or samples are prohibited,
         // zero refinement cycles and solver tightenings are allowed.
         let mut step = ProcedureStep::structural_static("structural");
-        for (bytes, valid) in [(None, true), (Some(max), true), (Some(1), true), (Some(0), false)] {
+        for (bytes, valid) in [
+            (None, true),
+            (Some(max), true),
+            (Some(1), true),
+            (Some(0), false),
+        ] {
             step.accuracy.resources.maximum_resident_bytes = bytes;
-            assert_eq!(validate_accuracy(&step).is_ok(), valid, "resident bytes {bytes:?}");
+            assert_eq!(
+                validate_accuracy(&step).is_ok(),
+                valid,
+                "resident bytes {bytes:?}"
+            );
         }
         step.accuracy.resources.maximum_resident_bytes = None;
         step.accuracy.resources.maximum_refinement_cycles = 0;

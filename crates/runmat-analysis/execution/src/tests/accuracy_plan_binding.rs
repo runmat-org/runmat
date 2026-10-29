@@ -143,7 +143,8 @@ fn acoustic_response_accuracy_context_binds_the_authored_accuracy_plan() {
         damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
     model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::Quantity::new(3.0));
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps = vec![ProcedureStep::acoustic_modal("cavity", 4)];
     let workload = AcousticResponseWorkload {
         model,

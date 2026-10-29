@@ -1,7 +1,7 @@
 //! Publication of authenticated canonical acoustic response fields. No proxy or numerical re-solve.
 use super::{
-    AnalysisAcousticResponseRunOptions, AnalysisStudyCompletionIdentity, AnalysisStudyRunData,
     AcousticResponseStudyCompletion, AcousticResponseStudyObjectSource,
+    AnalysisAcousticResponseRunOptions, AnalysisStudyCompletionIdentity, AnalysisStudyRunData,
 };
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use runmat_execution::Digest;
@@ -98,8 +98,7 @@ pub fn prepare_acoustic_response_study_publication(
             )
         })?;
     let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence)
-            .map_err(invalid)?;
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,

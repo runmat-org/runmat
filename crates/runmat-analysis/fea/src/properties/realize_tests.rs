@@ -26,9 +26,11 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
     let beam_id = definition("rail-section");
     let shell_id = definition("skin-section");
     let orientation_id = definition("rail-axes");
-    let mut beam_target = PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("rail"));
+    let mut beam_target =
+        PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("rail"));
     beam_target.bind_resolved_entities(vec![edge]).unwrap();
-    let mut shell_target = PropertyRegionTarget::shell(runmat_meshing_core::fixtures::fixture_face("skin"));
+    let mut shell_target =
+        PropertyRegionTarget::shell(runmat_meshing_core::fixtures::fixture_face("skin"));
     shell_target.bind_resolved_entities(vec![face]).unwrap();
     let properties = RealizedModelProperties {
         sections: vec![
@@ -36,15 +38,24 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
                 definition_id: beam_id.clone(),
                 definition: AuthoredSectionDefinition::RectangularBeam(RectangularBeamSection {
                     section_id: "rail-section".into(),
-                    width_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.02),
-                    height_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.04),
+                    width_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Length,
+                        _,
+                    >::new(0.02),
+                    height_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Length,
+                        _,
+                    >::new(0.04),
                 }),
             },
             RealizedSectionDefinition {
                 definition_id: shell_id.clone(),
                 definition: AuthoredSectionDefinition::HomogeneousShell(HomogeneousShellSection {
                     section_id: "skin-section".into(),
-                    thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.002),
+                    thickness_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Length,
+                        _,
+                    >::new(0.002),
                     reference_surface: HomogeneousShellReferenceSurface::MidSurface,
                     shear_correction: 5.0 / 6.0,
                 }),
@@ -54,7 +65,10 @@ fn exact_edge_and_face_properties_generate_attached_formulation_topology() {
             definition_id: orientation_id.clone(),
             definition: AuthoredOrientationDefinition::Cartesian(CartesianOrientation {
                 orientation_id: "rail-axes".into(),
-                origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0; 3]),
+                origin_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0; 3]),
                 x_axis: [1.0, 0.0, 0.0],
                 y_axis: [0.0, 1.0, 0.0],
             }),

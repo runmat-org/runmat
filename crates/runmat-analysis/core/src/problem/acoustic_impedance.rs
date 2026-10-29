@@ -56,7 +56,12 @@ impl AcousticImpedanceLaw {
 
     /// Z = (R, X) at `frequency_hz` facing a fluid of density `density` and sound speed
     /// `sound_speed`; `None` for an invalid law or a nonfinite result.
-    pub fn evaluate(&self, frequency_hz: f64, density: f64, sound_speed: f64) -> Option<(f64, f64)> {
+    pub fn evaluate(
+        &self,
+        frequency_hz: f64,
+        density: f64,
+        sound_speed: f64,
+    ) -> Option<(f64, f64)> {
         if !self.is_valid() || !frequency_hz.is_finite() || frequency_hz <= 0.0 {
             return None;
         }

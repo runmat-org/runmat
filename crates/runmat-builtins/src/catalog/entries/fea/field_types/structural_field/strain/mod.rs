@@ -9,7 +9,8 @@ const STRAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const STRAIN_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&STRAIN_SIGNATURES);
+pub const STRAIN_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&STRAIN_SIGNATURES);
 const STRAIN_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-strain",
     title: "Select element strain tensor",

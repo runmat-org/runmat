@@ -44,14 +44,17 @@ pub fn acoustic_response_sample_count(
 ) -> Result<u64, ResourcePlanningError> {
     let step = &workload.model.sequence.steps[0];
     match (&workload.solver, &step.independent_domain) {
-        (AcousticResponseSolver::Modal { .. }, IndependentDomain::Eigenvalue { requested_count }) => {
-            count(*requested_count)
-        }
+        (
+            AcousticResponseSolver::Modal { .. },
+            IndependentDomain::Eigenvalue { requested_count },
+        ) => count(*requested_count),
         (
             AcousticResponseSolver::Transient { .. },
             IndependentDomain::TimeSeconds { interval_count, .. },
         ) => add(count(*interval_count)?, 1),
-        _ => Err(invalid("acoustic response domain differs from its procedure")),
+        _ => Err(invalid(
+            "acoustic response domain differs from its procedure",
+        )),
     }
 }
 
@@ -143,7 +146,10 @@ pub fn build_acoustic_response_resource_plan(
             // blocks of capacity 2m + 6b + 20 with b <= 4, plus Rayleigh-Ritz dense work.
             let capacity = add(mul(samples, 2)?, 44)?;
             let dense = mul(mul(capacity, capacity)?, 24)?;
-            (7, add(mul(mul(capacity, 3)?, nodes)?, add(dense, mul(nodes, 16)?)?)?)
+            (
+                7,
+                add(mul(mul(capacity, 3)?, nodes)?, add(dense, mul(nodes, 16)?)?)?,
+            )
         }
         AcousticResponseSolver::Transient { .. } => {
             // K, M, B, effective, free effective, free mass and two incomplete factors;
@@ -152,7 +158,8 @@ pub fn build_acoustic_response_resource_plan(
         }
     };
     let operators = mul(mul(support, live_operators)?, 160)?;
-    let projection = AnalysisProjection::derivation_resident_bytes_estimate(mesh).map_err(invalid)?;
+    let projection =
+        AnalysisProjection::derivation_resident_bytes_estimate(mesh).map_err(invalid)?;
     let reservation = add(
         add(operators, mul(vectors, 8)?)?,
         add(

@@ -194,8 +194,11 @@ pub fn import_materialized_geometry_preview(
 }
 
 fn import_geometry_with_selection_projection(
-    path: &str, bytes: &[u8], options: GeometryImportOptions,
-    context: &GeometryImportContext, exact_selection: Option<&crate::ExactSelectionProjection>,
+    path: &str,
+    bytes: &[u8],
+    options: GeometryImportOptions,
+    context: &GeometryImportContext,
+    exact_selection: Option<&crate::ExactSelectionProjection>,
 ) -> Result<ImportResult, GeometryImportError> {
     context.check_cancelled()?;
     let format = detect_geometry_format(path, bytes);

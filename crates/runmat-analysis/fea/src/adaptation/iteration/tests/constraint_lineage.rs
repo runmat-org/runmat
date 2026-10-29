@@ -25,12 +25,12 @@ fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliase
     let mut source = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let mut target = connected_quadratic_tetrahedron_solver_mesh();
     for mesh in [&mut source, &mut target] {
-        mesh.topology.boundary_faces[0]
-            .provenance
-            .push(runmat_meshing_core::fixtures::fixture_entity(
+        mesh.topology.boundary_faces[0].provenance.push(
+            runmat_meshing_core::fixtures::fixture_entity(
                 PersistentEntityKind::Face,
                 "adaptive_clamp",
-            ));
+            ),
+        );
         mesh.topology.boundary_faces[0].provenance.sort();
         mesh.seal_canonical_digest().unwrap();
     }
@@ -39,7 +39,9 @@ fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliase
         constraint_id: "persistent_clamp".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Fixed {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("adaptive_clamp")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "adaptive_clamp",
+            )),
         },
     })];
     let source_plan = CanonicalStructuralConstraintPlan::compile(&model, &source).unwrap();

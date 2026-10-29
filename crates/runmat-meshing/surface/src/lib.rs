@@ -67,7 +67,6 @@ pub use face_geometry::{
     ExactFaceGeometryError, ExactFaceGeometryErrorKind, ExactFaceGeometryVertex,
     ExactFaceTriangleGeometry,
 };
-pub use solver_topology::build_surface_solver_topology;
 pub use face_mesh::{
     join_exact_face_charts, validate_exact_face_mesh, ExactFaceJoinContext, ExactFaceJoinError,
     ExactFaceJoinErrorKind, ExactFaceJoinOptions, ExactFaceMesh, ExactFaceMeshBoundarySegment,
@@ -93,6 +92,7 @@ pub use refinement::{
     ExactFaceRefinementOptions, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
     ExactFaceRefinementReason, ExactProtectedSegmentSplit,
 };
+pub use solver_topology::build_surface_solver_topology;
 pub use surface_mesh::{
     build_exact_face_mesh_batch, build_exact_face_partition_result, decide_exact_surface_pass,
     decide_exact_surface_pass_owned, decide_exact_surface_pass_owned_admitted,

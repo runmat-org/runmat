@@ -44,8 +44,8 @@ use validation::{
     validate_numeric_representation, validate_resolved_spatial_reduction, validate_supported_spec,
 };
 pub(crate) use verification::{
-    verify_authored_observations,
-    verify_observation_plan, verify_sampled_observation_plan, verify_structural_observation_plan,
+    verify_authored_observations, verify_observation_plan, verify_sampled_observation_plan,
+    verify_structural_observation_plan,
 };
 
 pub fn resolve_structural_observation_plan(
@@ -533,7 +533,6 @@ fn target_error(spec: &ObservationSpec, reason: impl Into<String>) -> Observatio
     }
 }
 
-
 /// A region-supported field is observed only where it carries values: volume, element and node
 /// targets keep their entities inside the support, and an empty intersection fails closed.
 fn restrict_to_support(
@@ -544,9 +543,11 @@ fn restrict_to_support(
     if field.support().is_complete() {
         return Ok(target);
     }
-    let support_topology = topology.support_topology().ok_or(ObservationError::Identity(
-        "a region-supported field needs a mesh projection topology",
-    ))?;
+    let support_topology = topology
+        .support_topology()
+        .ok_or(ObservationError::Identity(
+            "a region-supported field needs a mesh projection topology",
+        ))?;
     let resolve = |domain| {
         field
             .support()

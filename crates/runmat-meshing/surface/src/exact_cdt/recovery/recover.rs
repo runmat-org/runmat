@@ -74,7 +74,13 @@ pub(crate) fn recover_validated_face_segments(
                 }
             }
             if !flipped {
-                match recover_segment_cavity(&mut triangles, pslg, target, &protected, &mut control)? {
+                match recover_segment_cavity(
+                    &mut triangles,
+                    pslg,
+                    target,
+                    &protected,
+                    &mut control,
+                )? {
                     Ok(()) => {
                         cavity_retriangulation_count =
                             cavity_retriangulation_count.saturating_add(1);
@@ -116,7 +122,9 @@ pub(crate) fn recover_validated_face_segments(
                             triangles
                                 .iter()
                                 .filter(|triangle| triangle.vertex_indices.contains(&vertex))
-                                .map(|triangle| triangle.vertex_indices.map(|corner| (corner, uv(corner))))
+                                .map(|triangle| {
+                                    triangle.vertex_indices.map(|corner| (corner, uv(corner)))
+                                })
                                 .collect::<Vec<_>>()
                         });
                         return Err(control.unsatisfied(&format!(

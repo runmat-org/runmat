@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const SHELL_BENDING_MOMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.shellBendingMoment()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const SHELL_BENDING_MOMENT_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&SHELL_BENDING_MOMENT_SIGNATURES);
+const SHELL_BENDING_MOMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.shellBendingMoment()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const SHELL_BENDING_MOMENT_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&SHELL_BENDING_MOMENT_SIGNATURES);
 const SHELL_BENDING_MOMENT_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-shell-bending-moment",
     title: "Select shell bending moment",

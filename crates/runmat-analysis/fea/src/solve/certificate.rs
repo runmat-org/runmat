@@ -100,29 +100,44 @@ impl std::fmt::Debug for CertifiedFactorization {
 
 impl CertifiedFactorization {
     /// Solves `A x = b` with the certified factor and iterative refinement.
-    pub fn solve(&self, matrix: &RealSparseMatrix, rhs: &[f64]) -> Result<Vec<f64>, CertificateError> {
+    pub fn solve(
+        &self,
+        matrix: &RealSparseMatrix,
+        rhs: &[f64],
+    ) -> Result<Vec<f64>, CertificateError> {
         let arrays = CsrArrays::of(matrix);
         let mut x = vec![0.0; rhs.len()];
-        with_plan(crate::planning::resource::LocalExecutionPlan::serial(), || {
-            self.factor.solve_refined(arrays.view().into(), rhs, &mut x, 1)
-        })
+        with_plan(
+            crate::planning::resource::LocalExecutionPlan::serial(),
+            || {
+                self.factor
+                    .solve_refined(arrays.view().into(), rhs, &mut x, 1)
+            },
+        )
         .map_err(factor_error)?;
         Ok(x)
     }
 
     /// Certifies a new operator on the same sparsity pattern (frequency sweep, Newton step) by
     /// numeric refactorization on the existing symbolic analysis.
-    pub fn recertify(&self, matrix: &RealSparseMatrix, limit: f64) -> Result<Self, CertificateError> {
+    pub fn recertify(
+        &self,
+        matrix: &RealSparseMatrix,
+        limit: f64,
+    ) -> Result<Self, CertificateError> {
         let arrays = CsrArrays::of(matrix);
-        let factor = with_plan(crate::planning::resource::LocalExecutionPlan::serial(), || {
-            DirectSolver::factorize(
-                self.factor.symbolic().clone(),
-                arrays.view().into(),
-                self.factor.options().clone(),
-                None,
-                control(),
-            )
-        });
+        let factor = with_plan(
+            crate::planning::resource::LocalExecutionPlan::serial(),
+            || {
+                DirectSolver::factorize(
+                    self.factor.symbolic().clone(),
+                    arrays.view().into(),
+                    self.factor.options().clone(),
+                    None,
+                    control(),
+                )
+            },
+        );
         match factor {
             Ok(factor) => certify_with_factor(matrix, Arc::new(factor), limit),
             Err(SolverError::PatternMismatch) => certify_nonsingular(matrix, limit),
@@ -132,14 +147,24 @@ impl CertifiedFactorization {
 }
 
 /// Sparse LU of `matrix` plus nonsingularity estimates; fails closed above `limit`.
-pub fn certify_nonsingular(matrix: &RealSparseMatrix, limit: f64) -> Result<CertifiedFactorization, CertificateError> {
+pub fn certify_nonsingular(
+    matrix: &RealSparseMatrix,
+    limit: f64,
+) -> Result<CertifiedFactorization, CertificateError> {
     if matrix.rows() == 0 || matrix.rows() != matrix.columns() {
         return Err(CertificateError::Shape);
     }
     let arrays = CsrArrays::of(matrix);
-    let factor = with_plan(crate::planning::resource::LocalExecutionPlan::serial(), || {
-        DirectSolver::<f64>::new(arrays.view().into(), DirectOptions::new(FactorKind::Lu), control())
-    })
+    let factor = with_plan(
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        || {
+            DirectSolver::<f64>::new(
+                arrays.view().into(),
+                DirectOptions::new(FactorKind::Lu),
+                control(),
+            )
+        },
+    )
     .map_err(factor_error)?;
     certify_with_factor(matrix, Arc::new(factor), limit)
 }
@@ -155,14 +180,16 @@ pub fn certify_with_factor(
         return Err(CertificateError::Shape);
     }
     let arrays = CsrArrays::of(matrix);
-    let (defect, inverse_norm, operator_norm) =
-        with_plan(crate::planning::resource::LocalExecutionPlan::serial(), || {
+    let (defect, inverse_norm, operator_norm) = with_plan(
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        || {
             let a = arrays.view();
             let defect = factor.estimate_right_inverse_defect1(a.into())?;
             let inverse_norm = factor.estimate_inverse_norm1()?;
             Ok::<_, SolverError>((defect, inverse_norm, a.norm_one()))
-        })
-        .map_err(factor_error)?;
+        },
+    )
+    .map_err(factor_error)?;
     let condition = operator_norm * inverse_norm;
     let bound = ESTIMATE_SAFETY * defect.max(dimension as f64 * f64::EPSILON * condition);
     if !bound.is_finite() || !(bound < limit) {
@@ -209,13 +236,23 @@ pub fn certify_inertia(
     expected_negative: usize,
 ) -> Result<(InertiaCertificate, Arc<DirectSolver<f64>>), CertificateError> {
     let dimension = matrix.rows();
-    if dimension == 0 || matrix.columns() != dimension || expected_positive + expected_negative != dimension {
+    if dimension == 0
+        || matrix.columns() != dimension
+        || expected_positive + expected_negative != dimension
+    {
         return Err(CertificateError::Shape);
     }
     let arrays = CsrArrays::of(matrix);
-    let factor = with_plan(crate::planning::resource::LocalExecutionPlan::serial(), || {
-        DirectSolver::<f64>::new(arrays.view().into(), DirectOptions::new(FactorKind::BunchKaufman), control())
-    })
+    let factor = with_plan(
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        || {
+            DirectSolver::<f64>::new(
+                arrays.view().into(),
+                DirectOptions::new(FactorKind::BunchKaufman),
+                control(),
+            )
+        },
+    )
     .map_err(factor_error)?;
     let Inertia {
         positive,
@@ -283,11 +320,17 @@ mod tests {
             );
             let certified = certify_nonsingular(&a, DEFAULT_CONTRACTION_LIMIT).unwrap();
             assert!(certified.certificate.contraction_bound < 1e-10);
-            assert_eq!(certified.certificate.operator_identity, a.numerical_identity().unwrap());
+            assert_eq!(
+                certified.certificate.operator_identity,
+                a.numerical_identity().unwrap()
+            );
             let x = certified.solve(&a, &[5.0 * scale, 11.0 * scale]).unwrap();
             assert!((x[0] - 1.0).abs() < 1e-12 && (x[1] - 2.0).abs() < 1e-12);
             let again = certified.recertify(&a, DEFAULT_CONTRACTION_LIMIT).unwrap();
-            assert_eq!(again.certificate.operator_identity, certified.certificate.operator_identity);
+            assert_eq!(
+                again.certificate.operator_identity,
+                certified.certificate.operator_identity
+            );
         }
     }
 
@@ -295,7 +338,10 @@ mod tests {
     fn singular_and_near_singular_operators_fail_closed() {
         let singular = matrix(&[&[1.0, -1.0], &[-1.0, 1.0]], MatrixProperties::GENERAL);
         assert!(certify_nonsingular(&singular, DEFAULT_CONTRACTION_LIMIT).is_err());
-        let near = matrix(&[&[1.0, 1.0], &[1.0, 1.0 + 1e-15]], MatrixProperties::GENERAL);
+        let near = matrix(
+            &[&[1.0, 1.0], &[1.0, 1.0 + 1e-15]],
+            MatrixProperties::GENERAL,
+        );
         assert!(matches!(
             certify_nonsingular(&near, DEFAULT_CONTRACTION_LIMIT),
             Err(CertificateError::NotContractive { .. } | CertificateError::Factorization(_))

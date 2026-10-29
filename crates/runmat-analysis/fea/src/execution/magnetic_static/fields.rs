@@ -43,7 +43,9 @@ impl<'a> NativeMagneticValues<'a> {
         };
         match self {
             Self::ElementFlux(v) => return average(v, |s| s.flux_density_t.canonical_value()),
-            Self::ElementIntensity(v) => return average(v, |s| s.magnetic_field_a_per_m.canonical_value()),
+            Self::ElementIntensity(v) => {
+                return average(v, |s| s.magnetic_field_a_per_m.canonical_value())
+            }
             _ => {}
         }
         let count = match self {

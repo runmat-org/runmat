@@ -25,7 +25,13 @@ pub(super) fn elevate(
     mut topology: SolverMeshTopology,
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<(SolverMeshTopology, runmat_meshing_core::SolverElevationReport), DelaunaySolverTopologyError> {
+) -> Result<
+    (
+        SolverMeshTopology,
+        runmat_meshing_core::SolverElevationReport,
+    ),
+    DelaunaySolverTopologyError,
+> {
     let mut jacobian_work = 0_u64;
     let mut candidate_work = 0_u64;
     let evaluation = input.exact_evaluation.ok_or_else(|| {
@@ -58,17 +64,20 @@ pub(super) fn elevate(
         .filter(|node| !node.exact_parameters.is_empty())
         .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<std::collections::BTreeMap<_, _>>();
-    let mut invalid_elements = with_folded_faces(&topology, jacobian::invalid_element_indices(
+    let mut invalid_elements = with_folded_faces(
         &topology,
-        jacobian::ELEMENT_SEARCH_WORK,
-        input.request.limits.maximum_recursion_depth,
-        options.cancellation_check_interval,
-        cancellation,
-        jacobian::ValidationWork {
-            counter: &mut jacobian_work,
-            storage: super::storage::Storage(Some(evaluation.control)),
-        },
-    )?)?;
+        jacobian::invalid_element_indices(
+            &topology,
+            jacobian::ELEMENT_SEARCH_WORK,
+            input.request.limits.maximum_recursion_depth,
+            options.cancellation_check_interval,
+            cancellation,
+            jacobian::ValidationWork {
+                counter: &mut jacobian_work,
+                storage: super::storage::Storage(Some(evaluation.control)),
+            },
+        )?,
+    )?;
     if invalid_elements.is_empty()
         && affine::retains_affine_edge_nodes(&topology, &midpoint_by_edge, evaluation.control)?
     {
@@ -79,7 +88,10 @@ pub(super) fn elevate(
             jacobian_work,
             "retained certified affine edge geometry without optional shape search"
         );
-        return Ok((topology, runmat_meshing_core::SolverElevationReport::default()));
+        return Ok((
+            topology,
+            runmat_meshing_core::SolverElevationReport::default(),
+        ));
     }
     let optimization_topology = optimization::OptimizationTopology::prepare(
         input,
@@ -115,19 +127,25 @@ pub(super) fn elevate(
                 "curved-node movement counter overflowed",
             )
         })?;
-        invalid_elements = with_folded_faces(&topology, jacobian::invalid_element_indices(
+        invalid_elements = with_folded_faces(
             &topology,
-            jacobian::ELEMENT_SEARCH_WORK,
-            input.request.limits.maximum_recursion_depth,
-            options.cancellation_check_interval,
-            cancellation,
-            jacobian::ValidationWork {
-                counter: &mut jacobian_work,
-                storage: super::storage::Storage(Some(evaluation.control)),
-            },
-        )?)?;
+            jacobian::invalid_element_indices(
+                &topology,
+                jacobian::ELEMENT_SEARCH_WORK,
+                input.request.limits.maximum_recursion_depth,
+                options.cancellation_check_interval,
+                cancellation,
+                jacobian::ValidationWork {
+                    counter: &mut jacobian_work,
+                    storage: super::storage::Storage(Some(evaluation.control)),
+                },
+            )?,
+        )?;
         if invalid_elements.is_empty() {
-            return Ok((topology, runmat_meshing_core::SolverElevationReport::default()));
+            return Ok((
+                topology,
+                runmat_meshing_core::SolverElevationReport::default(),
+            ));
         }
         if moved == 0 {
             let worst_element =
@@ -158,19 +176,25 @@ pub(super) fn elevate(
                 )
             })?;
             if patch_moved > 0 {
-                invalid_elements = with_folded_faces(&topology, jacobian::invalid_element_indices(
+                invalid_elements = with_folded_faces(
                     &topology,
-                    jacobian::ELEMENT_SEARCH_WORK,
-                    input.request.limits.maximum_recursion_depth,
-                    options.cancellation_check_interval,
-                    cancellation,
-                    jacobian::ValidationWork {
-                        counter: &mut jacobian_work,
-                        storage: super::storage::Storage(Some(evaluation.control)),
-                    },
-                )?)?;
+                    jacobian::invalid_element_indices(
+                        &topology,
+                        jacobian::ELEMENT_SEARCH_WORK,
+                        input.request.limits.maximum_recursion_depth,
+                        options.cancellation_check_interval,
+                        cancellation,
+                        jacobian::ValidationWork {
+                            counter: &mut jacobian_work,
+                            storage: super::storage::Storage(Some(evaluation.control)),
+                        },
+                    )?,
+                )?;
                 if invalid_elements.is_empty() {
-                    return Ok((topology, runmat_meshing_core::SolverElevationReport::default()));
+                    return Ok((
+                        topology,
+                        runmat_meshing_core::SolverElevationReport::default(),
+                    ));
                 }
                 continue;
             }
@@ -195,19 +219,25 @@ pub(super) fn elevate(
                 )
             })?;
             if relocated > 0 {
-                invalid_elements = with_folded_faces(&topology, jacobian::invalid_element_indices(
+                invalid_elements = with_folded_faces(
                     &topology,
-                    jacobian::ELEMENT_SEARCH_WORK,
-                    input.request.limits.maximum_recursion_depth,
-                    options.cancellation_check_interval,
-                    cancellation,
-                    jacobian::ValidationWork {
-                        counter: &mut jacobian_work,
-                        storage: super::storage::Storage(Some(evaluation.control)),
-                    },
-                )?)?;
+                    jacobian::invalid_element_indices(
+                        &topology,
+                        jacobian::ELEMENT_SEARCH_WORK,
+                        input.request.limits.maximum_recursion_depth,
+                        options.cancellation_check_interval,
+                        cancellation,
+                        jacobian::ValidationWork {
+                            counter: &mut jacobian_work,
+                            storage: super::storage::Storage(Some(evaluation.control)),
+                        },
+                    )?,
+                )?;
                 if invalid_elements.is_empty() {
-                    return Ok((topology, runmat_meshing_core::SolverElevationReport::default()));
+                    return Ok((
+                        topology,
+                        runmat_meshing_core::SolverElevationReport::default(),
+                    ));
                 }
                 continue;
             }
@@ -224,7 +254,12 @@ pub(super) fn elevate(
     let remaining_after_curving = invalid_elements.len();
     let mut straightened = 0_u64;
     let mut straightened_elements = std::collections::BTreeSet::new();
-    let maximum_deviation_m = input.request.quality.surface.maximum_chordal_deviation_m.canonical_value();
+    let maximum_deviation_m = input
+        .request
+        .quality
+        .surface
+        .maximum_chordal_deviation_m
+        .canonical_value();
     while !invalid_elements.is_empty() {
         straightened_elements.extend(invalid_elements.iter().copied());
         let mut changed = relax_element_edges(
@@ -265,17 +300,20 @@ pub(super) fn elevate(
             ));
         }
         straightened += changed;
-        invalid_elements = with_folded_faces(&topology, jacobian::invalid_element_indices(
+        invalid_elements = with_folded_faces(
             &topology,
-            jacobian::ELEMENT_SEARCH_WORK,
-            input.request.limits.maximum_recursion_depth,
-            options.cancellation_check_interval,
-            cancellation,
-            jacobian::ValidationWork {
-                counter: &mut jacobian_work,
-                storage: super::storage::Storage(Some(evaluation.control)),
-            },
-        )?)?;
+            jacobian::invalid_element_indices(
+                &topology,
+                jacobian::ELEMENT_SEARCH_WORK,
+                input.request.limits.maximum_recursion_depth,
+                options.cancellation_check_interval,
+                cancellation,
+                jacobian::ValidationWork {
+                    counter: &mut jacobian_work,
+                    storage: super::storage::Storage(Some(evaluation.control)),
+                },
+            )?,
+        )?;
     }
     tracing::info!(
         event_code = "meshing.tet10.straightened_edges",
@@ -371,7 +409,8 @@ fn relax_element_edges(
                 chord
             };
             if topology.nodes[middle].coordinates_m.canonical_value() != target {
-                topology.nodes[middle].coordinates_m = runmat_types::physical::Quantity::new(target);
+                topology.nodes[middle].coordinates_m =
+                    runmat_types::physical::Quantity::new(target);
                 moved += 1;
             }
         }
@@ -391,14 +430,23 @@ fn describe_element(
     let corners = ids[..4]
         .iter()
         .filter_map(|id| node(*id))
-        .map(|node| (node.coordinates_m.canonical_value(), !node.exact_parameters.is_empty()))
+        .map(|node| {
+            (
+                node.coordinates_m.canonical_value(),
+                !node.exact_parameters.is_empty(),
+            )
+        })
         .collect::<Vec<_>>();
     if corners.len() != 4 {
         return format!("element {element} has absent corners");
     }
     let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
     let cross = |a: [f64; 3], b: [f64; 3]| {
-        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
     };
     let norm = |a: [f64; 3]| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
     let p = [corners[0].0, corners[1].0, corners[2].0, corners[3].0];
@@ -411,12 +459,17 @@ fn describe_element(
         .iter()
         .map(|[a, b, c]| norm(cross(sub(p[*b], p[*a]), sub(p[*c], p[*a]))))
         .fold(0.0_f64, f64::max);
-    let altitude = if largest_face > 0.0 { volume6 / largest_face } else { 0.0 };
+    let altitude = if largest_face > 0.0 {
+        volume6 / largest_face
+    } else {
+        0.0
+    };
     let mut sagitta = 0.0_f64;
     let mut worst = String::new();
     for (local_edge, edge) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
         if let Some(curved) = exact_midsides.get(&ids[4 + local_edge]) {
-            let chord: [f64; 3] = std::array::from_fn(|axis| 0.5 * (p[edge[0]][axis] + p[edge[1]][axis]));
+            let chord: [f64; 3] =
+                std::array::from_fn(|axis| 0.5 * (p[edge[0]][axis] + p[edge[1]][axis]));
             let edge_sagitta = norm(sub(*curved, chord));
             if edge_sagitta > sagitta {
                 sagitta = edge_sagitta;
@@ -431,7 +484,12 @@ fn describe_element(
                                         parameter,
                                     } => format!(
                                         "curve {}@{parameter:.6}",
-                                        source_edge_id.source_topology_id.chars().rev().take(6).collect::<String>()
+                                        source_edge_id
+                                            .source_topology_id
+                                            .chars()
+                                            .rev()
+                                            .take(6)
+                                            .collect::<String>()
                                     ),
                                     runmat_meshing_core::SolverNodeExactParameter::Surface {
                                         source_face_id,
@@ -439,7 +497,12 @@ fn describe_element(
                                         ..
                                     } => format!(
                                         "face {}@({:.6},{:.6})",
-                                        source_face_id.source_topology_id.chars().rev().take(6).collect::<String>(),
+                                        source_face_id
+                                            .source_topology_id
+                                            .chars()
+                                            .rev()
+                                            .take(6)
+                                            .collect::<String>(),
                                         evaluator_uv[0],
                                         evaluator_uv[1]
                                     ),
@@ -477,8 +540,14 @@ fn with_folded_faces<'storage>(
     if folded.is_empty() {
         return Ok(invalid);
     }
-    let present = invalid.iter().copied().collect::<std::collections::BTreeSet<_>>();
-    for index in folded.into_iter().collect::<std::collections::BTreeSet<_>>() {
+    let present = invalid
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    for index in folded
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+    {
         if !present.contains(&index) {
             invalid.push(index)?;
         }
@@ -560,13 +629,23 @@ mod relaxation_tests {
         let mut topology = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10).topology;
         let midside = |topology: &SolverMeshTopology, local_edge: usize| {
             let id = topology.volume_elements[0].node_ids[4 + local_edge];
-            topology.nodes.iter().position(|node| node.node_id == id).unwrap()
+            topology
+                .nodes
+                .iter()
+                .position(|node| node.node_id == id)
+                .unwrap()
         };
         let chord = |topology: &SolverMeshTopology, local_edge: usize| -> [f64; 3] {
             let corners = TETRAHEDRON_MIDSIDE_EDGE_CORNERS[local_edge];
             let point = |corner: usize| {
                 let id = topology.volume_elements[0].node_ids[corners[corner]];
-                topology.nodes.iter().find(|node| node.node_id == id).unwrap().coordinates_m.canonical_value()
+                topology
+                    .nodes
+                    .iter()
+                    .find(|node| node.node_id == id)
+                    .unwrap()
+                    .coordinates_m
+                    .canonical_value()
             };
             std::array::from_fn(|axis| 0.5 * (point(0)[axis] + point(1)[axis]))
         };
@@ -574,7 +653,11 @@ mod relaxation_tests {
         let boundary_chord = chord(&topology, 0);
         let interior_chord = chord(&topology, 1);
         // A boundary midside 0.3 m off its chord, and an interior midside moved off its chord.
-        let curved = [boundary_chord[0], boundary_chord[1] - 0.3, boundary_chord[2]];
+        let curved = [
+            boundary_chord[0],
+            boundary_chord[1] - 0.3,
+            boundary_chord[2],
+        ];
         topology.nodes[boundary].coordinates_m = runmat_types::physical::Quantity::new(curved);
         topology.nodes[interior].exact_parameters.clear();
         let mut moved = topology.nodes[interior].coordinates_m.canonical_value();
@@ -582,22 +665,44 @@ mod relaxation_tests {
         topology.nodes[interior].coordinates_m = runmat_types::physical::Quantity::new(moved);
         let exact = std::collections::BTreeMap::from([(topology.nodes[boundary].node_id, curved)]);
         let relax = |topology: &mut SolverMeshTopology, class, deviation| {
-            relax_element_edges(topology, &[0], &exact, deviation, class, &runmat_meshing_core::NeverCancelled)
-                .unwrap()
+            relax_element_edges(
+                topology,
+                &[0],
+                &exact,
+                deviation,
+                class,
+                &runmat_meshing_core::NeverCancelled,
+            )
+            .unwrap()
         };
         assert_eq!(relax(&mut topology, MidsideClass::Interior, 0.1), 1);
-        assert_eq!(topology.nodes[interior].coordinates_m.canonical_value(), interior_chord);
-        assert_eq!(topology.nodes[boundary].coordinates_m.canonical_value(), curved);
+        assert_eq!(
+            topology.nodes[interior].coordinates_m.canonical_value(),
+            interior_chord
+        );
+        assert_eq!(
+            topology.nodes[boundary].coordinates_m.canonical_value(),
+            curved
+        );
         // The sagitta (0.3 m) exceeds the deviation (0.1 m): the node moves 0.1 m toward the chord.
         assert!(relax(&mut topology, MidsideClass::Boundary, 0.1) >= 1);
         let offset = (0..3)
-            .map(|axis| (topology.nodes[boundary].coordinates_m.canonical_value()[axis] - curved[axis]).powi(2))
+            .map(|axis| {
+                (topology.nodes[boundary].coordinates_m.canonical_value()[axis] - curved[axis])
+                    .powi(2)
+            })
             .sum::<f64>()
             .sqrt();
         assert!((offset - 0.1).abs() < 1.0e-12, "{offset}");
-        assert_eq!(topology.nodes[interior].coordinates_m.canonical_value(), interior_chord);
+        assert_eq!(
+            topology.nodes[interior].coordinates_m.canonical_value(),
+            interior_chord
+        );
         // Within the deviation the edge goes fully straight.
         relax(&mut topology, MidsideClass::Boundary, 0.5);
-        assert_eq!(topology.nodes[boundary].coordinates_m.canonical_value(), boundary_chord);
+        assert_eq!(
+            topology.nodes[boundary].coordinates_m.canonical_value(),
+            boundary_chord
+        );
     }
 }

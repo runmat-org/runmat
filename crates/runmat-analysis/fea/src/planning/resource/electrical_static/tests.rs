@@ -94,7 +94,8 @@ fn charged_results_fit_admission_and_cannot_use_source_free_plans() {
                 .execute_with_resource_plan(&mesh, &free_plan)
                 .is_err());
             let mut insufficient = plan.input.clone();
-            insufficient.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
+            insufficient.accuracy_ceiling.maximum_resident_bytes =
+                Some(plan.request.memory_bytes - 1);
             assert!(matches!(
                 build_resource_plan(insufficient),
                 Err(ResourcePlanningError::AccuracyCeiling { .. })
@@ -203,7 +204,8 @@ fn both_equations_orders_results_fit_source_bound_admission() {
                     >= demand.solver_admission.resident_bytes_upper_bound
             );
             let mut insufficient = plan.input.clone();
-            insufficient.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes - 1);
+            insufficient.accuracy_ceiling.maximum_resident_bytes =
+                Some(plan.request.memory_bytes - 1);
             assert!(matches!(
                 build_resource_plan(insufficient),
                 Err(ResourcePlanningError::AccuracyCeiling { .. })
@@ -279,4 +281,3 @@ fn inconsistent_inputs_outputs_and_overflow_fail_closed() {
     assert!(add(u64::MAX, 1).is_err());
     assert!(mul(u64::MAX, 2).is_err());
 }
-

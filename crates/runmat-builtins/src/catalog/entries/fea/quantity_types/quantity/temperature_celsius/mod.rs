@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_TEMPERATURE_CLASS, scale: 1.0, offset: 273.15, range: QuantityRange::NonNegative };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_TEMPERATURE_CLASS,
+    scale: 1.0,
+    offset: 273.15,
+    range: QuantityRange::NonNegative,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const TEMPERATURE_CELSIUS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.Temperature.celsius(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const TEMPERATURE_CELSIUS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&TEMPERATURE_CELSIUS_SIGNATURES);
+const TEMPERATURE_CELSIUS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.Temperature.celsius(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const TEMPERATURE_CELSIUS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&TEMPERATURE_CELSIUS_SIGNATURES);
 const TEMPERATURE_CELSIUS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "temperature-celsius",
     title: "Room temperature in degrees Celsius",
@@ -31,7 +38,8 @@ const TEMPERATURE_CELSIUS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     fixture: BuiltinExampleFixture::None,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
-        source: "assert(isa(value, 'fea.Temperature'));\nassert(abs(value.kelvin - 293.15) <= 1e-9);",
+        source:
+            "assert(isa(value, 'fea.Temperature'));\nassert(abs(value.kelvin - 293.15) <= 1e-9);",
     },
 }];
 pub(super) const ENTRY: BuiltinCatalogEntry = catalog_entry::entry(ConstructorEntryDefinition {

@@ -36,7 +36,8 @@ pub(crate) fn model(equation: StaticElectricalEquation) -> AnalysisModel {
         "electrical",
         vec![ProcedureStep::electromagnetic_static("potential")],
     );
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
@@ -215,9 +216,13 @@ fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux
                 electrical.relative_permittivity.canonical_value() * (4.0),
             );
             model.materials.push(second);
-            model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("layer_left"));
+            model.material_assignments[0].target = PropertyRegionTarget::solid(
+                runmat_meshing_core::fixtures::fixture_solid("layer_left"),
+            );
             let mut second = model.material_assignments[0].clone();
-            second.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("layer_right"));
+            second.target = PropertyRegionTarget::solid(
+                runmat_meshing_core::fixtures::fixture_solid("layer_right"),
+            );
             second.expected_material_id = "second".into();
             second.assigned_material_id = "second".into();
             model.material_assignments.push(second);
@@ -459,7 +464,9 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {
             constraint_id: "floating".into(),
             kind: ElectricalConstraintKind::FloatingConductor {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_right",
+                )),
             },
         }));
     assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
@@ -502,30 +509,44 @@ fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential_on(order
     ] {
         let mesh = mesh(order, 2);
         let mut constrained = model(equation);
-        prescribe(&mut constrained, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
+        prescribe(
+            &mut constrained,
+            "left".into(),
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            0.0,
+        );
         let mut driven = constrained.clone();
-        prescribe(&mut constrained, "right".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")), 2.5);
-        driven.signals.push(PhysicalSignal::ElectricPotential(Signal {
-            signal_id: SignalId("supply".into()),
-            shape: SignalShape::Scalar,
-            frame: None,
-            representation: SignalRepresentation::Constant(SignalValue::Scalar(
-                ElectricPotential::new(2.5),
-            )),
-            precision: SignalPrecision::Real64,
-            provenance: SignalProvenance::Authored,
-            evidence: SignalApproximationEvidence {
-                max_absolute_error: Some(0.0),
-                max_relative_error: Some(0.0),
-                derivative_max_absolute_error: None,
-                sample_count: 1,
-            },
-        }));
+        prescribe(
+            &mut constrained,
+            "right".into(),
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            2.5,
+        );
+        driven
+            .signals
+            .push(PhysicalSignal::ElectricPotential(Signal {
+                signal_id: SignalId("supply".into()),
+                shape: SignalShape::Scalar,
+                frame: None,
+                representation: SignalRepresentation::Constant(SignalValue::Scalar(
+                    ElectricPotential::new(2.5),
+                )),
+                precision: SignalPrecision::Real64,
+                provenance: SignalProvenance::Authored,
+                evidence: SignalApproximationEvidence {
+                    max_absolute_error: Some(0.0),
+                    max_relative_error: Some(0.0),
+                    derivative_max_absolute_error: None,
+                    sample_count: 1,
+                },
+            }));
         driven
             .excitations
             .push(ExcitationAction::TerminalVoltage(AnalysisExcitation {
                 excitation_id: ExcitationId("supply".into()),
-                target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
+                target: ExcitationTarget::Region(RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("slab_right"),
+                )),
                 frame: CoordinateFrame::Global,
                 direction: None,
                 distribution: ExcitationDistribution::PreserveResultant,
@@ -546,7 +567,12 @@ fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential_on(order
         });
         let expected = solve(&constrained, &mesh);
         let actual = solve(&driven, &mesh);
-        for (a, b) in actual.potential_v.canonical_values().iter().zip(expected.potential_v.canonical_values()) {
+        for (a, b) in actual
+            .potential_v
+            .canonical_values()
+            .iter()
+            .zip(expected.potential_v.canonical_values())
+        {
             assert!((a - b).abs() <= 1e-12 * 2.5, "{a} vs {b}");
         }
         assert_relative(
@@ -577,8 +603,18 @@ fn integral_current_and_floating_terminals_find_their_common_potential_on(order:
     let mesh = mesh(order, 2);
     // Reference: 1 V across the slab gives the terminal current I1, so R = 1/I1.
     let mut reference = model(StaticElectricalEquation::SteadyConduction);
-    prescribe(&mut reference, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
-    prescribe(&mut reference, "right".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")), 1.0);
+    prescribe(
+        &mut reference,
+        "left".into(),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+        0.0,
+    );
+    prescribe(
+        &mut reference,
+        "right".into(),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+        1.0,
+    );
     let unit = solve(&reference, &mesh);
     let i1 = unit
         .terminals
@@ -590,13 +626,20 @@ fn integral_current_and_floating_terminals_find_their_common_potential_on(order:
         .abs();
     // A 2.5 A integral current into the right terminal holds it at 2.5 R.
     let mut driven = model(StaticElectricalEquation::SteadyConduction);
-    prescribe(&mut driven, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
+    prescribe(
+        &mut driven,
+        "left".into(),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+        0.0,
+    );
     driven
         .constraints
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {
             constraint_id: "right".into(),
             kind: ElectricalConstraintKind::IntegralCurrent {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_right",
+                )),
                 value: PrescribedValue::Constant(ElectricCurrent::new(2.5)),
             },
         }));
@@ -612,7 +655,11 @@ fn integral_current_and_floating_terminals_find_their_common_potential_on(order:
         .ordered_node_ids
         .iter()
         .map(|id| {
-            let index = projection.nodes.iter().position(|n| n.node_id == *id).unwrap();
+            let index = projection
+                .nodes
+                .iter()
+                .position(|n| n.node_id == *id)
+                .unwrap();
             response.potential_v.canonical_values()[index]
         })
         .collect();
@@ -621,13 +668,20 @@ fn integral_current_and_floating_terminals_find_their_common_potential_on(order:
     }
     // An uncharged floating electrode carries no net flux.
     let mut floating = model(StaticElectricalEquation::Electrostatics);
-    prescribe(&mut floating, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 3.0);
+    prescribe(
+        &mut floating,
+        "left".into(),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+        3.0,
+    );
     floating
         .constraints
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {
             constraint_id: "right".into(),
             kind: ElectricalConstraintKind::FloatingConductor {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_right",
+                )),
             },
         }));
     let response = solve(&floating, &mesh);
@@ -636,9 +690,16 @@ fn integral_current_and_floating_terminals_find_their_common_potential_on(order:
         .iter()
         .find(|t| t.constraint_id == "right")
         .unwrap();
-    assert!(terminal.outward_flux.canonical_value().abs() <= 1e-9 * 3.0 * coefficient(StaticElectricalEquation::Electrostatics));
+    assert!(
+        terminal.outward_flux.canonical_value().abs()
+            <= 1e-9 * 3.0 * coefficient(StaticElectricalEquation::Electrostatics)
+    );
     // With no net flux the whole slab sits at the anchor potential.
-    assert!(response.potential_v.canonical_values().iter().all(|v| (v - 3.0).abs() < 1e-8));
+    assert!(response
+        .potential_v
+        .canonical_values()
+        .iter()
+        .all(|v| (v - 3.0).abs() < 1e-8));
 }
 
 // witness: FEA-EM-INPUT-001/excitation @ electrical_conduction/tet4|tet10/numerical_kernel;
@@ -655,30 +716,39 @@ fn face_current_density_injects_its_normal_flux() {
 fn face_current_density_injects_its_normal_flux_on(order: ElementOrder) {
     let mesh = mesh(order, 2);
     let mut model = model(StaticElectricalEquation::SteadyConduction);
-    prescribe(&mut model, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
-    model.signals.push(PhysicalSignal::ElectricCurrentDensity(Signal {
-        signal_id: SignalId("j".into()),
-        shape: SignalShape::Vector3,
-        frame: Some(CoordinateFrame::Global),
-        representation: SignalRepresentation::Constant(SignalValue::Vector3([
-            ElectricCurrentDensity::new(-4.0),
-            ElectricCurrentDensity::new(0.0),
-            ElectricCurrentDensity::new(0.0),
-        ])),
-        precision: SignalPrecision::Real64,
-        provenance: SignalProvenance::Authored,
-        evidence: SignalApproximationEvidence {
-            max_absolute_error: Some(0.0),
-            max_relative_error: Some(0.0),
-            derivative_max_absolute_error: None,
-            sample_count: 1,
-        },
-    }));
+    prescribe(
+        &mut model,
+        "left".into(),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+        0.0,
+    );
+    model
+        .signals
+        .push(PhysicalSignal::ElectricCurrentDensity(Signal {
+            signal_id: SignalId("j".into()),
+            shape: SignalShape::Vector3,
+            frame: Some(CoordinateFrame::Global),
+            representation: SignalRepresentation::Constant(SignalValue::Vector3([
+                ElectricCurrentDensity::new(-4.0),
+                ElectricCurrentDensity::new(0.0),
+                ElectricCurrentDensity::new(0.0),
+            ])),
+            precision: SignalPrecision::Real64,
+            provenance: SignalProvenance::Authored,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: Some(0.0),
+                max_relative_error: Some(0.0),
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+        }));
     model
         .excitations
         .push(ExcitationAction::CurrentDensity(AnalysisExcitation {
             excitation_id: ExcitationId("j".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
+            target: ExcitationTarget::Region(RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("slab_right"),
+            )),
             frame: CoordinateFrame::Global,
             direction: None,
             distribution: ExcitationDistribution::IntensityPerArea,
@@ -701,7 +771,9 @@ fn face_current_density_injects_its_normal_flux_on(order: ElementOrder) {
     // Flux into the slab through the right face equals the current through the grounded left face.
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let area: f64 = projection
-        .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")))
+        .boundary_faces_for_target(&RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("slab_right"),
+        ))
         .map(|face| face.area_m2.canonical_value())
         .sum();
     let left = response
@@ -732,23 +804,35 @@ fn periodic_faces_share_their_potential_on(order: ElementOrder) {
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let mean_x = |target: &str| {
         let xs: Vec<f64> = projection
-            .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
-            .flat_map(|face| face.node_indices.iter().map(|&n| projection.nodes[n].coordinates_m.canonical_value()[0]))
+            .boundary_faces_for_target(&RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(target)),
+            ))
+            .flat_map(|face| {
+                face.node_indices
+                    .iter()
+                    .map(|&n| projection.nodes[n].coordinates_m.canonical_value()[0])
+            })
             .collect();
         xs.iter().sum::<f64>() / xs.len() as f64
     };
     let shift = mean_x("slab_right") - mean_x("slab_left");
     let both = charge_density::charged_model(1e-6, 0.0);
     let mut periodic = both.clone();
-    periodic.constraints.retain(|c| c.constraint_id() != "right");
+    periodic
+        .constraints
+        .retain(|c| c.constraint_id() != "right");
     periodic
         .constraints
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {
             constraint_id: "periodic".into(),
             kind: ElectricalConstraintKind::Periodic(PeriodicConstraint {
                 pair: PairedConstraint {
-                    primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
-                    secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                    primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "slab_left",
+                    )),
+                    secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "slab_right",
+                    )),
                     pairing: PairingPolicy::GeometricTolerance(Length::new(1e-9)),
                 },
                 transform: PeriodicTransform::Translation(Translation::new([shift, 0.0, 0.0])),
@@ -756,15 +840,32 @@ fn periodic_faces_share_their_potential_on(order: ElementOrder) {
         }));
     let expected = solve(&both, &mesh);
     let actual = solve(&periodic, &mesh);
-    let scale = expected.potential_v.canonical_values().iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+    let scale = expected
+        .potential_v
+        .canonical_values()
+        .iter()
+        .fold(0.0_f64, |m, v| m.max(v.abs()));
     assert!(scale > 0.0);
-    for (a, b) in actual.potential_v.canonical_values().iter().zip(expected.potential_v.canonical_values()) {
+    for (a, b) in actual
+        .potential_v
+        .canonical_values()
+        .iter()
+        .zip(expected.potential_v.canonical_values())
+    {
         assert!((a - b).abs() <= 1e-8 * scale, "{a} vs {b}");
     }
     // All the charge's flux leaves through the grounded face once the periodic face's share
     // is passed on to it.
-    let left = actual.terminals.iter().find(|t| t.constraint_id == "left").unwrap();
-    let total: f64 = expected.terminals.iter().map(|t| t.outward_flux.canonical_value()).sum();
+    let left = actual
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "left")
+        .unwrap();
+    let total: f64 = expected
+        .terminals
+        .iter()
+        .map(|t| t.outward_flux.canonical_value())
+        .sum();
     assert!((left.outward_flux.canonical_value() - total).abs() <= 1e-8 * total.abs());
 }
 
@@ -778,9 +879,23 @@ fn copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r() {
     const VOLTS: f64 = 1e-3;
     let mesh = mesh(ElementOrder::Tet10, 2);
     let mut model = model(StaticElectricalEquation::SteadyConduction);
-    model.materials[0].electrical.as_mut().unwrap().conductivity_s_per_m = runmat_types::physical::Quantity::new(SIGMA);
-    prescribe(&mut model, "left".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 0.0);
-    prescribe(&mut model, "right".into(), RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")), VOLTS);
+    model.materials[0]
+        .electrical
+        .as_mut()
+        .unwrap()
+        .conductivity_s_per_m = runmat_types::physical::Quantity::new(SIGMA);
+    prescribe(
+        &mut model,
+        "left".into(),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+        0.0,
+    );
+    prescribe(
+        &mut model,
+        "right".into(),
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+        VOLTS,
+    );
     let response = solve(&model, &mesh);
     // Unit cube: L = 1 m, A = 1 m^2, R = L / (sigma A).
     let ElectricalConstitutiveResponse::SteadyConduction {
@@ -793,11 +908,16 @@ fn copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r() {
     };
     let expected_j = SIGMA * VOLTS;
     for density in current_density_a_per_m2.canonical_values() {
-        assert!((density[0].abs() - expected_j).abs() <= 1e-9 * expected_j, "{density:?}");
+        assert!(
+            (density[0].abs() - expected_j).abs() <= 1e-9 * expected_j,
+            "{density:?}"
+        );
         assert!(density[1].abs() + density[2].abs() <= 1e-9 * expected_j);
     }
     let expected_power = VOLTS * VOLTS * SIGMA;
-    assert!((total_joule_power_w.canonical_value() - expected_power).abs() <= 1e-9 * expected_power);
+    assert!(
+        (total_joule_power_w.canonical_value() - expected_power).abs() <= 1e-9 * expected_power
+    );
     let current = response
         .terminals
         .iter()
@@ -807,5 +927,8 @@ fn copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r() {
         .canonical_value()
         .abs();
     assert!((current * VOLTS - expected_power).abs() <= 1e-9 * expected_power);
-    assert_eq!(response.operator_proof, ElectricalOperatorProof::LocalEnergy);
+    assert_eq!(
+        response.operator_proof,
+        ElectricalOperatorProof::LocalEnergy
+    );
 }

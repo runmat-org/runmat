@@ -17,8 +17,8 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_model, AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation,
-    PhysicsFamily, ProcedureStep, ProcedureStepId, RestartPolicy,
-    SolutionSpace, SourceImplementation, StateCompleteness, StateKind, StatePersistence,
+    PhysicsFamily, ProcedureStep, ProcedureStepId, RestartPolicy, SolutionSpace,
+    SourceImplementation, StateCompleteness, StateKind, StatePersistence,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;

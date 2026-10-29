@@ -98,7 +98,11 @@ fn gmres_variants_and_bicgstab_solve_nonsymmetric() {
         max_iterations: 3000,
         ..Default::default()
     };
-    for side in [PreconditionerSide::Left, PreconditionerSide::Right, PreconditionerSide::Flexible] {
+    for side in [
+        PreconditionerSide::Left,
+        PreconditionerSide::Right,
+        PreconditionerSide::Flexible,
+    ] {
         let mut applications = Vec::new();
         for residual_check in [ResidualCheck::EveryStep, ResidualCheck::OnEstimate] {
             let mut x = vec![0.0; n];
@@ -108,7 +112,11 @@ fn gmres_variants_and_bicgstab_solve_nonsymmetric() {
                 &b,
                 &mut x,
                 &options,
-                &GmresOptions { restart: 30, side, residual_check },
+                &GmresOptions {
+                    restart: 30,
+                    side,
+                    residual_check,
+                },
                 SolveControl::NONE,
             )
             .unwrap();
@@ -116,7 +124,10 @@ fn gmres_variants_and_bicgstab_solve_nonsymmetric() {
             assert!(residual(&a, &x, &b) <= 1e-9, "{side:?} {residual_check:?}");
             if side != PreconditionerSide::Left {
                 // Right/flexible certify the true relative residual of the returned iterate.
-                assert!((residual(&a, &x, &b) - report.relative_residual).abs() <= 1e-12, "{side:?} {residual_check:?}");
+                assert!(
+                    (residual(&a, &x, &b) - report.relative_residual).abs() <= 1e-12,
+                    "{side:?} {residual_check:?}"
+                );
             }
             applications.push((report.iterations, report.operator_applications));
         }
@@ -138,7 +149,13 @@ fn complex_gmres_and_hermitian_pcg() {
     let (rows, cols, ptr, idx, vals) = real.into_parts();
     let values: Vec<c64> = vals
         .iter()
-        .map(|&v| if v > 0.0 { c64::new(v - 0.5, 0.3) } else { c64::new(v, 0.0) })
+        .map(|&v| {
+            if v > 0.0 {
+                c64::new(v - 0.5, 0.3)
+            } else {
+                c64::new(v, 0.0)
+            }
+        })
         .collect();
     let a = CsrMatrix::try_new(rows, cols, ptr, idx, values).unwrap();
     let b = par::seeded_vector::<c64>(n, 5);
@@ -148,7 +165,16 @@ fn complex_gmres_and_hermitian_pcg() {
         max_iterations: 2000,
         ..Default::default()
     };
-    let report = gmres(&a, None, &b, &mut x, &options, &GmresOptions::default(), SolveControl::NONE).unwrap();
+    let report = gmres(
+        &a,
+        None,
+        &b,
+        &mut x,
+        &options,
+        &GmresOptions::default(),
+        SolveControl::NONE,
+    )
+    .unwrap();
     assert!(report.converged(), "{report:?}");
     assert!(residual(&a, &x, &b) <= 1e-9);
     // Hermitian positive definite: L + i(S - Sᵀ) with small skew part.
@@ -158,7 +184,13 @@ fn complex_gmres_and_hermitian_pcg() {
         for row in 0..base.nrows() {
             let (c, v) = base.as_ref().row(row);
             for (&col, &val) in c.iter().zip(v) {
-                let imag = if col > row { 0.2 } else if col < row { -0.2 } else { 0.0 };
+                let imag = if col > row {
+                    0.2
+                } else if col < row {
+                    -0.2
+                } else {
+                    0.0
+                };
                 t.push(row, col, c64::new(val, imag));
             }
         }
@@ -205,8 +237,19 @@ struct InnerCg<'a> {
 impl Preconditioner<f64> for InnerCg<'_> {
     fn apply(&self, r: &[f64], z: &mut [f64]) -> SolverResult<()> {
         z.iter_mut().for_each(|v| *v = 0.0);
-        let options = KrylovOptions { rtol: 1e-30, max_iterations: self.iterations, ..Default::default() };
-        let _ = pcg(self.a, Some(&self.jacobi), r, z, &options, SolveControl::NONE)?;
+        let options = KrylovOptions {
+            rtol: 1e-30,
+            max_iterations: self.iterations,
+            ..Default::default()
+        };
+        let _ = pcg(
+            self.a,
+            Some(&self.jacobi),
+            r,
+            z,
+            &options,
+            SolveControl::NONE,
+        )?;
         Ok(())
     }
     fn is_variable(&self) -> bool {
@@ -219,14 +262,34 @@ fn variable_preconditioners_select_flexible_cg_and_flexible_gmres() {
     let a = poisson3d::<f64>(14, 13, 12);
     let n = a.nrows();
     let b = par::seeded_vector::<f64>(n, 5);
-    let inner = InnerCg { a: &a, jacobi: Jacobi(a.as_ref().diagonal()), iterations: 4 };
-    let options = KrylovOptions { rtol: 1e-10, max_iterations: 300, ..Default::default() };
+    let inner = InnerCg {
+        a: &a,
+        jacobi: Jacobi(a.as_ref().diagonal()),
+        iterations: 4,
+    };
+    let options = KrylovOptions {
+        rtol: 1e-10,
+        max_iterations: 300,
+        ..Default::default()
+    };
     let mut x = vec![0.0; n];
     let report = pcg(&a, Some(&inner), &b, &mut x, &options, SolveControl::NONE).unwrap();
     assert!(report.converged(), "flexible CG {report:?}");
     assert!(residual(&a, &x, &b) <= 1e-9);
     let mut y = vec![0.0; n];
-    let report = gmres(&a, Some(&inner), &b, &mut y, &options, &GmresOptions { restart: 30, ..Default::default() }, SolveControl::NONE).unwrap();
+    let report = gmres(
+        &a,
+        Some(&inner),
+        &b,
+        &mut y,
+        &options,
+        &GmresOptions {
+            restart: 30,
+            ..Default::default()
+        },
+        SolveControl::NONE,
+    )
+    .unwrap();
     assert!(report.converged(), "flexible GMRES {report:?}");
     assert!(residual(&a, &y, &b) <= 1e-9);
 }

@@ -7,9 +7,9 @@ use crate::{
     AnalysisOutputPolicy, PreparedAnalysisObjects,
 };
 use runmat_analysis_fea::{
-    execution::{AnalysisNumericalObjectKind, AnalysisTransportProfiler, AcousticResponseWorkload},
+    execution::{AcousticResponseWorkload, AnalysisNumericalObjectKind, AnalysisTransportProfiler},
     planning::resource::{
-        build_acoustic_response_resource_plan, acoustic_response_result_payload_bytes_upper_bound,
+        acoustic_response_result_payload_bytes_upper_bound, build_acoustic_response_resource_plan,
         FeaResourcePlan, PreparedAcousticResponseResourceFacts,
     },
 };
@@ -105,7 +105,9 @@ pub fn rederive_acoustic_response_resource_plan(
             _ => return Err(invalid("unexpected acoustic response input")),
         };
         if input.manifest.logical_identity != expected {
-            return Err(invalid("acoustic response imported source identity differs"));
+            return Err(invalid(
+                "acoustic response imported source identity differs",
+            ));
         }
         let canonical = prepare_analysis_objects(
             input.manifest.kind,
@@ -204,4 +206,3 @@ fn projected_output(
 fn invalid(error: impl std::fmt::Display) -> AnalysisBridgeError {
     AnalysisBridgeError::Invalid(error.to_string())
 }
-

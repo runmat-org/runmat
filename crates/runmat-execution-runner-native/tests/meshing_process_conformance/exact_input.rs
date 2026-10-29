@@ -214,8 +214,15 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> E
             },
         ],
     };
-    let host =
-        MeshingHostWorkload::new(workload, identity, request, super::fixture_ceilings(), access, Some(document)).unwrap();
+    let host = MeshingHostWorkload::new(
+        workload,
+        identity,
+        request,
+        super::fixture_ceilings(),
+        access,
+        Some(document),
+    )
+    .unwrap();
     let request = host
         .prepare_program_request(revision, std::slice::from_ref(input.root_input()))
         .unwrap()

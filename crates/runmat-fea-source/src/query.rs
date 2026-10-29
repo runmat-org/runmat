@@ -198,13 +198,17 @@ impl FeaSourceCheckResult {
             FeaQueryDetail::Navigation => Vec::new(),
             FeaQueryDetail::Definition => entries
                 .iter()
-                .map(|entry| self.definition(&entry.identity).map_err(|error| {
-                    if error == FeaQueryError::NotFound {
-                        // The source index already proves the declaration exists.
-                        // Failed semantic lowering must not masquerade as a name mismatch.
-                        FeaQueryError::DefinitionUnavailable
-                    } else { error }
-                }))
+                .map(|entry| {
+                    self.definition(&entry.identity).map_err(|error| {
+                        if error == FeaQueryError::NotFound {
+                            // The source index already proves the declaration exists.
+                            // Failed semantic lowering must not masquerade as a name mismatch.
+                            FeaQueryError::DefinitionUnavailable
+                        } else {
+                            error
+                        }
+                    })
+                })
                 .collect::<Result<Vec<_>, _>>()?,
         };
         let page = FeaBrowsePage {

@@ -48,7 +48,10 @@ pub(super) async fn run() {
         assert_eq!(response.resources.resources.allocation, expected);
         let imported =
             import_magnetostatic_result(&store, response.response, &task, limits).unwrap();
-        assert!(imported.result.response().magnetic_energy_j > runmat_types::physical::Quantity::new(0.0));
+        assert!(
+            imported.result.response().magnetic_energy_j
+                > runmat_types::physical::Quantity::new(0.0)
+        );
         let mut publications = Vec::new();
         for request in imported.result.state_publication_requests().unwrap() {
             let publication =

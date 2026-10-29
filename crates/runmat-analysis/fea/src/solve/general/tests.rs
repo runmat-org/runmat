@@ -100,9 +100,7 @@ fn actual_counts_rederive_admission_and_both_budget_axes_reject() {
         );
     }
     assert!(GeneralSolveEnvelope::for_counts(3, 10, policy()).is_err());
-    assert!(
-        GeneralSolveEnvelope::for_counts(usize::MAX, usize::MAX, policy()).is_err()
-    );
+    assert!(GeneralSolveEnvelope::for_counts(usize::MAX, usize::MAX, policy()).is_err());
 }
 #[test]
 fn original_rhs_and_invalid_policies_fail_closed() {

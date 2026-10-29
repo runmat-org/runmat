@@ -3,9 +3,9 @@
 use crate::{AnalysisBridgeError, AnalysisBridgeResult, PreparedAnalysisObjects};
 use runmat_analysis_fea::{
     execution::{
-        AccuracyEvaluationRequest, AnalysisNumericalObjectKind as Kind,
-        AcousticResponseNumericalReceiptArtifact, AcousticResponseSolverResult, AcousticResponseWorkload,
-        SequenceIdentity, StepIdentity,
+        AccuracyEvaluationRequest, AcousticResponseNumericalReceiptArtifact,
+        AcousticResponseSolverResult, AcousticResponseWorkload,
+        AnalysisNumericalObjectKind as Kind, SequenceIdentity, StepIdentity,
     },
     results::observation::ObservationPublicationCatalog,
 };
@@ -79,4 +79,3 @@ pub(super) fn validate(
     }
     Ok(())
 }
-

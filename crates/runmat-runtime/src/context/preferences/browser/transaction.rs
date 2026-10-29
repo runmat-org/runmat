@@ -253,7 +253,8 @@ struct ActiveWrite {
     request: IdbRequest,
     mutation: Option<BrowserMutation>,
     prepared: Option<Result<BrowserCheckedSource, BrowserPreferenceError>>,
-    completion_sender: Option<oneshot::Sender<Result<BrowserCheckedSource, BrowserPreferenceError>>>,
+    completion_sender:
+        Option<oneshot::Sender<Result<BrowserCheckedSource, BrowserPreferenceError>>>,
     on_get: Option<Closure<dyn FnMut(Event)>>,
     on_complete: Option<Closure<dyn FnMut(Event)>>,
     on_abort: Option<Closure<dyn FnMut(Event)>>,

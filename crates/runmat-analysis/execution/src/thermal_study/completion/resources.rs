@@ -32,31 +32,26 @@ impl CompletedThermalStudy {
         // Retained values are already resident typed Rust data: charge their typed storage,
         // not the JSON value-tree projection that typed code never builds.
         let _ = limits(maximum)?;
-        let mut total = typed(
-            &(
-                &self.compiled,
-                &self.workload,
-                &self.replay.mesh,
-                &self.closures,
-                &self.replay.program_revision,
-                &self.replay.artifact_access,
-                &self.result.host.workload,
-                &self.result.host.artifact_access,
-                &self.result.manifest,
-                &self.result.numerical_receipt,
-                &self.result.state_publication_profiles,
-                &self.result.response,
-                &self.accuracy.artifact,
-                &self.publication.result,
-                &self.baseline_usage.evidence,
-                &self.terminal_usage.evidence,
-            ),
-        )?;
+        let mut total = typed(&(
+            &self.compiled,
+            &self.workload,
+            &self.replay.mesh,
+            &self.closures,
+            &self.replay.program_revision,
+            &self.replay.artifact_access,
+            &self.result.host.workload,
+            &self.result.host.artifact_access,
+            &self.result.manifest,
+            &self.result.numerical_receipt,
+            &self.result.state_publication_profiles,
+            &self.result.response,
+            &self.accuracy.artifact,
+            &self.publication.result,
+            &self.baseline_usage.evidence,
+            &self.terminal_usage.evidence,
+        ))?;
         add(&mut total, std::mem::size_of::<Self>() as u64)?;
-        add(
-            &mut total,
-            typed(&self.replay.field_source)?,
-        )?;
+        add(&mut total, typed(&self.replay.field_source)?)?;
         for objects in [
             &self.result.objects,
             &self.result.numerical_receipt_objects,
@@ -77,15 +72,9 @@ impl CompletedThermalStudy {
         )?;
         for state in &self.states {
             add(&mut total, state.objects.retained_storage_bytes()?)?;
-            add(
-                &mut total,
-                typed(&state.response)?,
-            )?;
+            add(&mut total, typed(&state.response)?)?;
         }
-        add(
-            &mut total,
-            typed(&self.observations.catalog)?,
-        )?;
+        add(&mut total, typed(&self.observations.catalog)?)?;
         for sample in &self.observations.samples {
             add(&mut total, sample.catalog_objects.retained_storage_bytes()?)?;
             add(
@@ -100,10 +89,7 @@ impl CompletedThermalStudy {
                 }
                 crate::ImportedObservationHistoryStorage::Whole { objects, history } => {
                     add(&mut total, objects.retained_storage_bytes()?)?;
-                    add(
-                        &mut total,
-                        typed(history)?,
-                    )?;
+                    add(&mut total, typed(history)?)?;
                 }
             }
             if let Some(objects) = &history.series_objects {

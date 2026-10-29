@@ -5,7 +5,9 @@ use crate::{
 };
 
 use super::{
-    interval::{assemble_described_random_response_intervals, describe_planned, solve_planned_interval},
+    interval::{
+        assemble_described_random_response_intervals, describe_planned, solve_planned_interval,
+    },
     plan::RandomResponsePlan,
     ModalRandomResponseResult, RandomResponseIntegrationPolicy,
 };

@@ -39,9 +39,7 @@ pub use root::{import_thermal_study_root, prepare_thermal_study_root, PreparedTh
 pub use scope::ThermalStudyScope;
 #[cfg(test)]
 pub(crate) mod tests;
-use crate::sampled_history_observations::{
-    CompletedSampledObservations, SampledObservationTask,
-};
+use crate::sampled_history_observations::{CompletedSampledObservations, SampledObservationTask};
 
 /// Owned terminal artifacts for the declared scope, not necessarily the whole authored study.
 /// Consuming the coordinator does not clone numerical storage.

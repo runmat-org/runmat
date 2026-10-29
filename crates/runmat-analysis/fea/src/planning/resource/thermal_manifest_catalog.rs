@@ -62,10 +62,14 @@ impl ThermalManifestCatalogResourceFacts {
                 vector_bytes::<RecoveredFieldIdentity>(counts.len())?
                     .0
                     .checked_mul(samples as u64)
-                    .ok_or(ResourcePlanningError::Overflow("thermal catalog identities"))?,
+                    .ok_or(ResourcePlanningError::Overflow(
+                        "thermal catalog identities",
+                    ))?,
             )
             .map(ByteCount)
-            .ok_or(ResourcePlanningError::Overflow("thermal catalog identities"))?;
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal catalog identities",
+            ))?;
         Ok(Self {
             catalog,
             validation_scratch_bytes,

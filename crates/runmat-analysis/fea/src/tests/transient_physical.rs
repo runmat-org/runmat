@@ -434,7 +434,8 @@ fn execute_transient_workload(
             if identity == result.manifest().identity
     ));
     let mut insufficient = recovery_plan.input.clone();
-    insufficient.accuracy_ceiling.maximum_resident_bytes = Some(recovery_plan.request.memory_bytes - 1);
+    insufficient.accuracy_ceiling.maximum_resident_bytes =
+        Some(recovery_plan.request.memory_bytes - 1);
     assert!(matches!(
         crate::planning::resource::build_resource_plan(insufficient),
         Err(
@@ -1034,7 +1035,10 @@ fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     };
     let history = root_motion.translations[0].history.clone();
     model.constraints = [
-        ("moving_root", RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root"))),
+        (
+            "moving_root",
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
+        ),
         ("moving_free_node", RegionTarget::point("node:4")),
     ]
     .into_iter()
@@ -1579,11 +1583,19 @@ fn acceleration_driven_support_motion_closes_the_work_energy_balance() {
             "intervals={interval_count} maximum_relative_energy_balance_error={maximum_relative_error}"
         );
         final_support_work.push(
-            result.support_work_snapshots.last().unwrap().as_host_f64().unwrap()[0],
+            result
+                .support_work_snapshots
+                .last()
+                .unwrap()
+                .as_host_f64()
+                .unwrap()[0],
         );
     }
     // The support work is a convergent quadrature of the delivered energy, not a closing remainder.
     let first = (final_support_work[0] - final_support_work[1]).abs();
     let second = (final_support_work[1] - final_support_work[2]).abs();
-    assert!(first / second > 3.5, "final_support_work={final_support_work:?}");
+    assert!(
+        first / second > 3.5,
+        "final_support_work={final_support_work:?}"
+    );
 }

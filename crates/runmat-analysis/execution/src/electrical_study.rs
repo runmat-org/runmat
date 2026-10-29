@@ -21,10 +21,10 @@ use runmat_meshing_core::SolverMeshArtifact;
 use crate::{
     import_electrical_static_result, prepare_electrical_static_task, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisOutputPolicy, ImportedAccuracy, ImportedElectricalStaticResult, ImportedPublishedResult,
-    ImportedSemanticState, ElectricalStaticTaskPreparation, PreparedAccuracy,
-    PreparedElectricalStaticTask, PreparedResourceUsage, PreparedResultPublication,
-    PreparedSemanticStatePublication,
+    AnalysisOutputPolicy, ElectricalStaticTaskPreparation, ImportedAccuracy,
+    ImportedElectricalStaticResult, ImportedPublishedResult, ImportedSemanticState,
+    PreparedAccuracy, PreparedElectricalStaticTask, PreparedResourceUsage,
+    PreparedResultPublication, PreparedSemanticStatePublication,
 };
 
 mod completion;
@@ -117,8 +117,9 @@ impl ElectricalStudyCoordinator {
             .compiled
             .validate_against(&preparation.mesh)
             .map_err(|error| invalid(error.to_string()))?;
-        let expected = plan_electrical_study(&preparation.product.compiled, preparation.policy.clone())
-            .map_err(|error| invalid(error.to_string()))?;
+        let expected =
+            plan_electrical_study(&preparation.product.compiled, preparation.policy.clone())
+                .map_err(|error| invalid(error.to_string()))?;
         if expected != preparation.product.workload {
             return Err(AnalysisBridgeError::Identity(
                 "electrical workload differs from the compiled authored study",

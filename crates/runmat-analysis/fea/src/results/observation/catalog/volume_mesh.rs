@@ -20,7 +20,9 @@ impl ObservationFieldCatalog {
     }
 
     /// The producing authored step of a volume-mesh catalog.
-    pub fn volume_mesh_step(&self) -> AnalysisExecutionResult<&runmat_analysis_core::ProcedureStep> {
+    pub fn volume_mesh_step(
+        &self,
+    ) -> AnalysisExecutionResult<&runmat_analysis_core::ProcedureStep> {
         match &self.source {
             ObservationFieldCatalogSource::VolumeMeshRecovery { step, .. } => Ok(step),
             _ => Err(invalid("expected native volume-mesh catalog")),
@@ -84,7 +86,9 @@ impl ObservationFieldCatalog {
             crate::execution::FieldTopologyIdentity::VolumeMesh { mesh_digest }
                 if mesh_digest == mesh.canonical_digest
         ) {
-            return Err(invalid("volume-mesh catalog differs from the canonical mesh"));
+            return Err(invalid(
+                "volume-mesh catalog differs from the canonical mesh",
+            ));
         }
         verify_authored_observations(step, plan).map_err(invalid)?;
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
@@ -101,7 +105,7 @@ impl ObservationFieldCatalog {
             definitions.into_iter(),
             plan,
         )
-            .map_err(invalid)
+        .map_err(invalid)
     }
 }
 

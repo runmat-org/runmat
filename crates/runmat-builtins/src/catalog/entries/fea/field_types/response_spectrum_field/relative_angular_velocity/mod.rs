@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const RELATIVE_ANGULAR_VELOCITY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.ResponseSpectrumField.relativeAngularVelocity()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const RELATIVE_ANGULAR_VELOCITY_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&RELATIVE_ANGULAR_VELOCITY_SIGNATURES);
+const RELATIVE_ANGULAR_VELOCITY_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.ResponseSpectrumField.relativeAngularVelocity()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const RELATIVE_ANGULAR_VELOCITY_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&RELATIVE_ANGULAR_VELOCITY_SIGNATURES);
 const RELATIVE_ANGULAR_VELOCITY_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-relative-angular-velocity",
     title: "Select the relative angular velocity envelope",

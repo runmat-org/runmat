@@ -79,7 +79,6 @@ pub(super) struct PreconditionerEnvelope {
     pub application_scalar_operations: u64,
 }
 
-
 /// AMG for a velocity component's implicit operator. A weak strength threshold keeps the
 /// couplings across thin (graded) cells in the aggregates, which ILU(0) and the default
 /// threshold leave unresolved.
@@ -91,7 +90,10 @@ pub(super) fn momentum_amg_options() -> AmgOptions {
 }
 
 /// An AMG hierarchy must stay inside the admitted per-system preconditioner envelope.
-pub(super) fn within_admission(amg: &Amg, planned: &PreconditionerEnvelope) -> Result<(), SolverError> {
+pub(super) fn within_admission(
+    amg: &Amg,
+    planned: &PreconditionerEnvelope,
+) -> Result<(), SolverError> {
     let required = amg.resident_bytes();
     if required > planned.resident_bytes_upper_bound {
         return Err(SolverError::OverBudget {

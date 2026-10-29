@@ -32,11 +32,24 @@ pub enum SerialGeometryMeshingError {
     #[error("{0}")]
     Meshing(#[from] runmat_meshing_execution::ExactMeshingDagRunError),
 }
-impl From<String> for SerialGeometryMeshingError { fn from(value: String) -> Self { Self::Geometry(value) } }
-impl From<&str> for SerialGeometryMeshingError { fn from(value: &str) -> Self { Self::Geometry(value.into()) } }
+impl From<String> for SerialGeometryMeshingError {
+    fn from(value: String) -> Self {
+        Self::Geometry(value)
+    }
+}
+impl From<&str> for SerialGeometryMeshingError {
+    fn from(value: &str) -> Self {
+        Self::Geometry(value.into())
+    }
+}
 impl SerialGeometryMeshingError {
     pub fn meshing_failure(&self) -> Option<&runmat_meshing_core::MeshingFailure> {
-        match self { Self::Meshing(runmat_meshing_execution::ExactMeshingDagRunError::Stage(error)) => error.failure(), _ => None }
+        match self {
+            Self::Meshing(runmat_meshing_execution::ExactMeshingDagRunError::Stage(error)) => {
+                error.failure()
+            }
+            _ => None,
+        }
     }
 }
 

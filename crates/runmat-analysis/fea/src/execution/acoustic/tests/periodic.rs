@@ -26,8 +26,12 @@ fn cold_bloch_workload_and_result_preserve_full_pressure_and_phase_lineage() {
                     PhaseShiftedPeriodicConstraint {
                         periodic: PeriodicConstraint {
                             pair: PairedConstraint {
-                                primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
-                                secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                                primary: RegionTarget::boundary(
+                                    runmat_meshing_core::fixtures::fixture_face("slab_left"),
+                                ),
+                                secondary: RegionTarget::boundary(
+                                    runmat_meshing_core::fixtures::fixture_face("slab_right"),
+                                ),
                                 pairing: PairingPolicy::Matching,
                             },
                             transform: PeriodicTransform::Translation(Translation::new([

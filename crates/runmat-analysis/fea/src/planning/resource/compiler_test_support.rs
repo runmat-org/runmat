@@ -51,7 +51,8 @@ pub(super) fn assert_compiler_contract(plan: &FeaResourcePlan, original_peak: u6
         build_resource_plan(input.clone()).unwrap().request,
         dominated.request
     );
-    input.accuracy_ceiling.maximum_resident_bytes = Some(input.accuracy_ceiling.resident_byte_budget() - 1);
+    input.accuracy_ceiling.maximum_resident_bytes =
+        Some(input.accuracy_ceiling.resident_byte_budget() - 1);
     assert!(matches!(
         build_resource_plan(input),
         Err(ResourcePlanningError::AccuracyCeiling { .. })

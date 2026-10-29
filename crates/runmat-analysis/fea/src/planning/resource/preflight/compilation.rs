@@ -15,22 +15,25 @@ pub fn build_structural_resource_plan_from_compilation(
     workload
         .validate()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    build_static_resource_plan_selecting(StaticResourcePreflight {
-        compilation: Some(compilation),
-        model: &workload.model,
-        step: workload
-            .procedure_step()
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-        backend: workload.backend,
-        preconditioner: workload.preconditioner,
-        observation_execution: workload.observation_execution,
-        mesh,
-        constraints: compilation.plan(),
-        observations,
-        accelerator_requests,
-        local_execution,
-        prepared_inputs,
-    }, selection)
+    build_static_resource_plan_selecting(
+        StaticResourcePreflight {
+            compilation: Some(compilation),
+            model: &workload.model,
+            step: workload
+                .procedure_step()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            backend: workload.backend,
+            preconditioner: workload.preconditioner,
+            observation_execution: workload.observation_execution,
+            mesh,
+            constraints: compilation.plan(),
+            observations,
+            accelerator_requests,
+            local_execution,
+            prepared_inputs,
+        },
+        selection,
+    )
 }
 
 pub(super) fn original_peak(

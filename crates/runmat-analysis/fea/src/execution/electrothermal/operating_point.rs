@@ -98,7 +98,10 @@ pub fn conduction_operating_temperatures(
     } else {
         side_element_temperatures(&projection, interfaces, &nodal, &second)?
     };
-    Ok((element_temperature_k, transient.then_some(state.sample_time_s.canonical_value())))
+    Ok((
+        element_temperature_k,
+        transient.then_some(state.sample_time_s.canonical_value()),
+    ))
 }
 
 /// Element means where second-side elements of conductance interfaces read that side's
@@ -110,8 +113,8 @@ pub(crate) fn side_element_temperatures(
     second: &[(u64, f64)],
 ) -> AnalysisExecutionResult<Vec<f64>> {
     let invalid = |error: String| AnalysisExecutionError::Invalid(error);
-    let (plans, dofs) =
-        crate::physics::thermal_interface::solid_conduction(projection, interfaces).map_err(invalid)?;
+    let (plans, dofs) = crate::physics::thermal_interface::solid_conduction(projection, interfaces)
+        .map_err(invalid)?;
     if dofs.second().len() != second.len()
         || dofs
             .second()
@@ -182,7 +185,9 @@ fn operating_point(
         .temperature_snapshots
         .len()
         .checked_sub(1)
-        .ok_or_else(|| AnalysisExecutionError::Invalid("electrothermal thermal history is empty".into()))?;
+        .ok_or_else(|| {
+            AnalysisExecutionError::Invalid("electrothermal thermal history is empty".into())
+        })?;
     let element_temperature_k = super::coupled::element_temperatures_of_snapshot(
         &projection,
         &completion.thermal_workload.model.interfaces,

@@ -324,7 +324,9 @@ fn mixed_point_connector_waves_match_serial_authored_order_and_fail_closed() {
         AnalysisConnector {
             connector_id: "interleaved_foundation".into(),
             kind: ConnectorKind::SurfaceNormalFoundation {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:1")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:1",
+                )),
                 modulus: runmat_analysis_core::FoundationModulus::new(12.0),
             },
         },

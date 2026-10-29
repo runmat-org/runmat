@@ -121,10 +121,8 @@ fn grouped_relocations_name_earlier_members_by_their_replacements() {
     };
     let (a, b, c, d) = (id(1), id(2), id(3), id(4));
     // Both cells were captured before the group moved; b's cell contains a.
-    let mutations = grouped_relocation_mutations([
-        (a, node(a), [a, b, c, d]),
-        (b, node(b), [a, b, c, d]),
-    ]);
+    let mutations =
+        grouped_relocation_mutations([(a, node(a), [a, b, c, d]), (b, node(b), [a, b, c, d])]);
     let tetrahedra = mutations
         .iter()
         .map(|mutation| match mutation {

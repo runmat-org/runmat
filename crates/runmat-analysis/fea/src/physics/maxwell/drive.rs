@@ -27,8 +27,8 @@ use crate::excitation::{RealizedExcitationKind, RealizedExcitationTarget};
 use crate::solve::sparse_direct;
 use crate::topology::AnalysisProjection;
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, ElectricalConstraintKind, EntityDimension,
-    ProcedureStep, RegionTarget,
+    AnalysisConstraint, AnalysisModel, ElectricalConstraintKind, EntityDimension, ProcedureStep,
+    RegionTarget,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -74,7 +74,12 @@ pub(super) fn model_length_m(projection: &AnalysisProjection) -> f64 {
 }
 
 pub(super) fn transparent(volume: &MaxwellVolumeData, omega: f64, length_m: f64) -> bool {
-    omega * volume.permeability_h_per_m.canonical_value() * volume.conductivity_s_per_m.canonical_value() * length_m * length_m < 1.0
+    omega
+        * volume.permeability_h_per_m.canonical_value()
+        * volume.conductivity_s_per_m.canonical_value()
+        * length_m
+        * length_m
+        < 1.0
 }
 
 struct Terminal {
@@ -99,7 +104,9 @@ pub(super) struct DriveContext<'a> {
     pub frequency_hz: f64,
 }
 
-pub(super) fn compile(context: &DriveContext<'_>) -> Result<Vec<MaxwellTerminalDrive>, MaxwellError> {
+pub(super) fn compile(
+    context: &DriveContext<'_>,
+) -> Result<Vec<MaxwellTerminalDrive>, MaxwellError> {
     let terminals = terminals(context)?;
     if terminals.is_empty() {
         return Ok(Vec::new());
@@ -284,7 +291,9 @@ fn terminals(context: &DriveContext<'_>) -> Result<Vec<Terminal>, MaxwellError> 
             _ => continue,
         };
         let RealizedExcitationTarget::Region(target) = &load.target else {
-            return Err(invalid("a terminal current or voltage requires a face region"));
+            return Err(invalid(
+                "a terminal current or voltage requires a face region",
+            ));
         };
         terminals.push(Terminal {
             label: load.excitation_id.0.clone(),
@@ -431,9 +440,8 @@ fn build_drive(
             solved.relative_residual
         )));
     }
-    let v0 = |node: usize| -> f64 {
-        prescribed(node).unwrap_or_else(|| solved.solution[free[&node]])
-    };
+    let v0 =
+        |node: usize| -> f64 { prescribed(node).unwrap_or_else(|| solved.solution[free[&node]]) };
     let mut generator = Vec::with_capacity(elements.len());
     let mut conductance = 0.0;
     // reaction[n] = integral over the conductor of sigma grad v0 . grad lambda_n
@@ -538,7 +546,11 @@ fn closure_current(
             };
             for j in 0..4 {
                 if let Some(&column) = free.get(&data.corners[j]) {
-                    entries.push((row, column, data.volume_m3 * dot(data.gradients[i], data.gradients[j])));
+                    entries.push((
+                        row,
+                        column,
+                        data.volume_m3 * dot(data.gradients[i], data.gradients[j]),
+                    ));
                 }
             }
         }

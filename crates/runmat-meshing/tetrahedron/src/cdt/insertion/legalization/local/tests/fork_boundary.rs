@@ -10,7 +10,14 @@ fn fork_coplanar_hull_cavity_recovers_the_strongly_gabriel_edge() {
                 2, 128, 216, 113, 98, 66, 211, 64, 37, 190, 54, 158, 250, 76, 220, 32, 150, 83,
                 204, 129, 151, 81, 5, 139, 200, 171, 214, 70, 229, 151, 147, 91,
             ]),
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.7706721243303036, 0.0491925522510428, 0.34345345944166183]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                0.7706721243303036,
+                0.0491925522510428,
+                0.34345345944166183,
+            ]),
             construction: runmat_meshing_core::quality::predicate::Point3Construction::Segment {
                 endpoints: [
                     [0.7834244556725025, 0.11448448523879051, 0.34345345944166183],
@@ -29,7 +36,14 @@ fn fork_coplanar_hull_cavity_recovers_the_strongly_gabriel_edge() {
                 7, 49, 23, 152, 114, 181, 214, 168, 235, 15, 123, 199, 216, 168, 36, 47, 131, 0,
                 72, 250, 129, 101, 216, 103, 183, 162, 89, 61, 175, 79, 164, 22,
             ]),
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.7625548876821995, 0.11448448523879051, 0.19080747663974762]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                0.7625548876821995,
+                0.11448448523879051,
+                0.19080747663974762,
+            ]),
             construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
         },
         DelaunayVolumeNode {
@@ -37,7 +51,14 @@ fn fork_coplanar_hull_cavity_recovers_the_strongly_gabriel_edge() {
                 73, 188, 43, 154, 220, 120, 250, 84, 214, 164, 40, 111, 8, 183, 84, 62, 76, 110,
                 105, 69, 174, 67, 29, 20, 248, 16, 196, 120, 37, 137, 230, 166,
             ]),
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.7237971164286137, 0.11448448523879051, 0.19080747663974762]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                0.7237971164286137,
+                0.11448448523879051,
+                0.19080747663974762,
+            ]),
             construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
         },
         DelaunayVolumeNode {
@@ -45,7 +66,14 @@ fn fork_coplanar_hull_cavity_recovers_the_strongly_gabriel_edge() {
                 62, 34, 234, 21, 114, 118, 187, 203, 210, 2, 159, 242, 184, 138, 205, 111, 205, 93,
                 233, 51, 223, 41, 118, 162, 131, 241, 59, 10, 73, 187, 145, 140,
             ]),
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.7387039512395859, 0.11448448523879051, 0.34345345944166183]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                0.7387039512395859,
+                0.11448448523879051,
+                0.34345345944166183,
+            ]),
             construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
         },
         DelaunayVolumeNode {
@@ -53,7 +81,10 @@ fn fork_coplanar_hull_cavity_recovers_the_strongly_gabriel_edge() {
                 61, 59, 224, 82, 87, 200, 73, 165, 155, 50, 150, 17, 226, 213, 55, 110, 13, 66, 67,
                 26, 156, 52, 14, 168, 95, 41, 249, 43, 38, 218, 5, 94,
             ]),
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
                 0.7387039512395859,
                 0.041590066903154366,
                 0.34345345944166183,
@@ -76,7 +107,14 @@ fn fork_coplanar_hull_cavity_recovers_the_strongly_gabriel_edge() {
                 189, 97, 142, 162, 113, 179, 169, 218, 116, 98, 247, 189, 204, 29, 18, 147, 217,
                 82, 255, 52, 0, 114, 81, 181, 223, 9, 135, 116, 239, 66, 108, 155,
             ]),
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.6939834505319595, 0.11448448523879051, 0.34345345944166183]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                0.6939834505319595,
+                0.11448448523879051,
+                0.34345345944166183,
+            ]),
             construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
         },
     ];

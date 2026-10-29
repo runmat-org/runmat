@@ -31,7 +31,8 @@ fn workload() -> MagnetostaticWorkload {
         completeness: StateCompleteness::Complete,
         persistence: StatePersistence::Canonical,
     }];
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(0.0),
@@ -46,7 +47,11 @@ fn workload() -> MagnetostaticWorkload {
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: format!("ground:{face}"),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(format!("face:{face}")))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                            &(format!("face:{face}")),
+                        ),
+                    ),
                 },
             }));
     }

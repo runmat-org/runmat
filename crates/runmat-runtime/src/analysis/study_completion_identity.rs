@@ -57,7 +57,10 @@ impl AnalysisStudyCompletionIdentity {
             .map(|elapsed| elapsed.as_nanos() as u64)
             .unwrap_or(0);
         let sequence = COUNTER.fetch_add(1, Ordering::Relaxed) as u32;
-        format!("a{nanos:016x}{:05x}{sequence:03x}", std::process::id() & 0xfffff)
+        format!(
+            "a{nanos:016x}{:05x}{sequence:03x}",
+            std::process::id() & 0xfffff
+        )
     }
 
     pub(super) fn local_run_id(

@@ -6,7 +6,9 @@
 //! solver provenance.
 
 use crate::direct::FactorKind;
-use crate::estimate::{amg_bytes, ilu0_bytes, krylov_workspace_bytes, quick_direct_estimate, KrylovMethod};
+use crate::estimate::{
+    amg_bytes, ilu0_bytes, krylov_workspace_bytes, quick_direct_estimate, KrylovMethod,
+};
 
 /// Algebraic class of the system matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,10 +150,12 @@ fn iterative_strategy(problem: &ProblemDescriptor) -> SolverStrategy {
             method: KrylovMethod::Pcg,
             preconditioner: PreconditionerChoice::Ilu0,
         },
-        ProblemClass::SymmetricIndefinite | ProblemClass::SaddlePoint => SolverStrategy::Iterative {
-            method: KrylovMethod::Gmres { restart: 100 },
-            preconditioner: PreconditionerChoice::Ilut,
-        },
+        ProblemClass::SymmetricIndefinite | ProblemClass::SaddlePoint => {
+            SolverStrategy::Iterative {
+                method: KrylovMethod::Gmres { restart: 100 },
+                preconditioner: PreconditionerChoice::Ilut,
+            }
+        }
         ProblemClass::ComplexSymmetric | ProblemClass::General => SolverStrategy::Iterative {
             method: KrylovMethod::Gmres { restart: 100 },
             preconditioner: PreconditionerChoice::Ilut,
@@ -164,8 +168,13 @@ pub fn estimated_bytes(problem: &ProblemDescriptor, strategy: SolverStrategy) ->
     let scalar = if problem.complex { 16 } else { 8 };
     match strategy {
         SolverStrategy::Direct(kind) => {
-            let (entries, _) = quick_direct_estimate(problem.n, problem.nnz, problem.spatial_dimension);
-            let factor = if kind == FactorKind::Lu { 2.0 * entries } else { entries };
+            let (entries, _) =
+                quick_direct_estimate(problem.n, problem.nnz, problem.spatial_dimension);
+            let factor = if kind == FactorKind::Lu {
+                2.0 * entries
+            } else {
+                entries
+            };
             (factor * (scalar as f64 + 1.0) + (problem.n * 64) as f64) as u64
         }
         SolverStrategy::Iterative {
@@ -176,12 +185,15 @@ pub fn estimated_bytes(problem: &ProblemDescriptor, strategy: SolverStrategy) ->
             let preconditioner = match preconditioner {
                 PreconditionerChoice::None => 0,
                 PreconditionerChoice::Jacobi => (problem.n * scalar) as u64,
-                PreconditionerChoice::BlockJacobi => (problem.n * problem.block_size.max(1) * scalar) as u64,
+                PreconditionerChoice::BlockJacobi => {
+                    (problem.n * problem.block_size.max(1) * scalar) as u64
+                }
                 PreconditionerChoice::Ilu0 => ilu0_bytes(problem.n, problem.nnz, scalar),
                 PreconditionerChoice::Ilut => 3 * ilu0_bytes(problem.n, problem.nnz, scalar),
                 PreconditionerChoice::Amg => amg_bytes(problem.n, problem.nnz, problem.block_size),
                 PreconditionerChoice::AdditiveSchwarz => {
-                    let (entries, _) = quick_direct_estimate(problem.n, problem.nnz, problem.spatial_dimension);
+                    let (entries, _) =
+                        quick_direct_estimate(problem.n, problem.nnz, problem.spatial_dimension);
                     (entries * 0.2 * (scalar as f64 + 8.0)) as u64
                 }
             };
@@ -200,10 +212,17 @@ pub fn choose(problem: &ProblemDescriptor, choice: SolverOverride) -> PolicyDeci
         reason,
     };
     match choice {
-        SolverOverride::Exact(strategy) => return decide(strategy, "requested by the study".into()),
-        SolverOverride::Direct => return decide(direct, "direct solution requested by the study".into()),
+        SolverOverride::Exact(strategy) => {
+            return decide(strategy, "requested by the study".into())
+        }
+        SolverOverride::Direct => {
+            return decide(direct, "direct solution requested by the study".into())
+        }
         SolverOverride::Iterative => {
-            return decide(iterative, "iterative solution requested by the study".into())
+            return decide(
+                iterative,
+                "iterative solution requested by the study".into(),
+            )
         }
         SolverOverride::Auto => {}
     }
@@ -218,14 +237,19 @@ pub fn choose(problem: &ProblemDescriptor, choice: SolverOverride) -> PolicyDeci
         DIRECT_SINGLE_SOLVE_LIMIT
     };
     // Classes without a scalable iterative preconditioner prefer direct whenever it fits.
-    let iterative_is_strong = matches!(problem.class, ProblemClass::SymmetricPositiveDefinite) && !problem.complex;
+    let iterative_is_strong =
+        matches!(problem.class, ProblemClass::SymmetricPositiveDefinite) && !problem.complex;
     if fits && (problem.n <= limit || !iterative_is_strong) {
         return decide(
             direct,
             format!(
                 "direct: n={} within the {} limit {} and estimated factor {} MiB fits the budget",
                 problem.n,
-                if reused { "reused-factorization" } else { "single-solve" },
+                if reused {
+                    "reused-factorization"
+                } else {
+                    "single-solve"
+                },
                 limit,
                 direct_bytes >> 20
             ),
@@ -239,7 +263,10 @@ pub fn choose(problem: &ProblemDescriptor, choice: SolverOverride) -> PolicyDeci
                 direct_bytes >> 20
             )
         } else {
-            format!("iterative: n={} above the direct limit {limit}; multigrid scales linearly", problem.n)
+            format!(
+                "iterative: n={} above the direct limit {limit}; multigrid scales linearly",
+                problem.n
+            )
         },
     )
 }
@@ -264,7 +291,10 @@ mod tests {
 
     #[test]
     fn policy_prefers_direct_for_moderate_and_amg_for_huge_spd() {
-        assert_eq!(choose(&spd(100_000), SolverOverride::Auto).strategy, SolverStrategy::Direct(FactorKind::Cholesky));
+        assert_eq!(
+            choose(&spd(100_000), SolverOverride::Auto).strategy,
+            SolverStrategy::Direct(FactorKind::Cholesky)
+        );
         let huge = choose(&spd(5_000_000), SolverOverride::Auto);
         assert!(!huge.strategy.is_direct(), "{huge:?}");
         let forced = choose(&spd(5_000_000), SolverOverride::Direct);
@@ -274,6 +304,9 @@ mod tests {
             complex: true,
             ..spd(200_000)
         };
-        assert_eq!(choose(&general, SolverOverride::Auto).strategy, SolverStrategy::Direct(FactorKind::Lu));
+        assert_eq!(
+            choose(&general, SolverOverride::Auto).strategy,
+            SolverStrategy::Direct(FactorKind::Lu)
+        );
     }
 }

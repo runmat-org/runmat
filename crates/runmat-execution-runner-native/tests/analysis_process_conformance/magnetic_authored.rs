@@ -117,7 +117,8 @@ pub(super) async fn run() {
         let energy_tail = 8.0 * mu / (3.0 * std::f64::consts::PI.powi(4) * 255.0_f64.powi(3));
         assert!((exact_energy - reference_energy(511)).abs() <= energy_tail);
         assert!(energy_tail / exact_energy < 1e-6);
-        let energy_error = (response.magnetic_energy_j.canonical_value() / exact_energy - 1.0).abs();
+        let energy_error =
+            (response.magnetic_energy_j.canonical_value() / exact_energy - 1.0).abs();
         assert!(
             energy_error < 0.9,
             "independent square-current energy error={energy_error}"
@@ -126,7 +127,12 @@ pub(super) async fn run() {
         let mut squared_reference = 0.0;
         for sample in &response.samples {
             let expected = reference_flux(sample.position_m[0], sample.position_m[1], 1023);
-            for (actual, expected) in sample.flux_density_t.canonical_values().iter().zip(expected) {
+            for (actual, expected) in sample
+                .flux_density_t
+                .canonical_values()
+                .iter()
+                .zip(expected)
+            {
                 squared_error += sample.volume_weight_m3 * (actual - expected).powi(2);
                 squared_reference += sample.volume_weight_m3 * expected.powi(2);
             }

@@ -92,11 +92,13 @@ fn persisted_run_keeps_typed_metadata_as_its_single_content_copy() {
     let artifact = &prepared.persisted;
     assert!(artifact.run.is_null());
     let encoded = serde_json::to_value(artifact).unwrap();
-    assert!(encoded.get("run").is_none(), "no untyped run copy is written");
+    assert!(
+        encoded.get("run").is_none(),
+        "no untyped run copy is written"
+    );
     validate_persisted_run(artifact, &run.run_id).unwrap();
-    let restored = field_reader::materialize_run(artifact, |digest| {
-        Ok(prepared.chunks.get(&digest).cloned())
-    })
-    .unwrap();
+    let restored =
+        field_reader::materialize_run(artifact, |digest| Ok(prepared.chunks.get(&digest).cloned()))
+            .unwrap();
     assert_eq!(restored.run.fields, run.run.fields);
 }

@@ -2,8 +2,7 @@ use super::{
     artifact_workspace::{reserve, unique},
     solver_boundary_edge_identity, solver_boundary_face_identity, solver_volume_element_identity,
     validate_finite, validate_token, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
-    MeshDimension,
-    MeshingCancellationSignal, MeshingContractError, MeshingRequest, NeverCancelled,
+    MeshDimension, MeshingCancellationSignal, MeshingContractError, MeshingRequest, NeverCancelled,
     PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, SolverMeshTopology, StableDigest,
     SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
@@ -257,8 +256,7 @@ impl SolverMeshTopology {
                 || edge.node_ids[0] >= edge.node_ids[1]
                 || !unique(&edge.node_ids)
                 || !all_references_exist(&edge.node_ids, node_ids)
-                || edge.adjacent_boundary_face_ids.is_empty()
-                    != (dimension == MeshDimension::Curve)
+                || edge.adjacent_boundary_face_ids.is_empty() != (dimension == MeshDimension::Curve)
                 || !strictly_increasing(&edge.adjacent_boundary_face_ids)
                 || !all_references_exist(&edge.adjacent_boundary_face_ids, face_ids)
                 || edge.adjacent_boundary_face_ids.iter().any(|face_id| {

@@ -9,7 +9,8 @@ const REACTION_MOMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const REACTION_MOMENT_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&REACTION_MOMENT_SIGNATURES);
+pub const REACTION_MOMENT_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&REACTION_MOMENT_SIGNATURES);
 const REACTION_MOMENT_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-reaction-moment",
     title: "Select nodal reaction moment",

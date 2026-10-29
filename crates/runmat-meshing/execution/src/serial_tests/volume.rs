@@ -162,7 +162,8 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         let stage_control = MeshingStageControl::new(
             MeshingStageKind::OrderElevation,
             0,
-            &host.resolved_request, ceilings,
+            &host.resolved_request,
+            ceilings,
             &NeverCancelled,
             &mut metric_progress,
         )
@@ -191,9 +192,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     )
     .unwrap();
     assert!(!mesh.topology.tetrahedra.is_empty());
-    assert!(
-        mesh.topology.tetrahedra.len() as u64 <= host.resolved_request.limits.maximum_elements
-    );
+    assert!(mesh.topology.tetrahedra.len() as u64 <= host.resolved_request.limits.maximum_elements);
     assert_eq!(mesh.topology.incidence.regions.len(), 1);
     invariants::assert_boundary_conservation(&mesh, &surface);
 
@@ -211,7 +210,8 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let diagnostic_control = MeshingStageControl::new(
         MeshingStageKind::Tetrahedralization,
         0,
-        &host.resolved_request, ceilings,
+        &host.resolved_request,
+        ceilings,
         &NeverCancelled,
         &mut diagnostic_progress,
     )
@@ -514,7 +514,8 @@ fn workflow_chunk_policy(_request: &runmat_meshing_core::MeshingRequest) -> Mesh
 #[test]
 fn execution_ceilings_do_not_change_the_published_mesh() {
     let run = |ceilings: runmat_meshing_core::MeshingExecutionCeilings| {
-        let mut fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
+        let mut fixture =
+            Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
         let policy = workflow_chunk_policy(&fixture.host.resolved_request);
         let exact_root = root(&fixture.program.arguments[1]);
         let exact = import_exact_geometry_input(
@@ -577,7 +578,10 @@ fn execution_ceilings_do_not_change_the_published_mesh() {
     };
     let first = run(portable);
     let second = run(large);
-    assert_eq!(first.artifact.canonical_digest, second.artifact.canonical_digest);
+    assert_eq!(
+        first.artifact.canonical_digest,
+        second.artifact.canonical_digest
+    );
     assert_eq!(first.artifact, second.artifact);
     assert_eq!(first.evidence.ceilings, portable);
     assert_eq!(second.evidence.ceilings, large);

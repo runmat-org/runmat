@@ -75,13 +75,13 @@ fn local_energy_proof_bytes(mesh: &SolverMeshArtifact) -> Result<u64, ResourcePl
 
 /// Element node pairs, with repeats: the sum of squared element widths plus the diagonal.
 fn element_couplings(mesh: &SolverMeshArtifact) -> Result<u64, ResourcePlanningError> {
-    mesh.topology
-        .volume_elements
-        .iter()
-        .try_fold(count(mesh.topology.nodes.len())?, |total, element| {
+    mesh.topology.volume_elements.iter().try_fold(
+        count(mesh.topology.nodes.len())?,
+        |total, element| {
             let width = count(element.node_ids.len())?;
             add(total, mul(width, width)?)
-        })
+        },
+    )
 }
 
 fn require_support_preparation_ceiling(
@@ -320,7 +320,11 @@ pub fn build_electrical_static_resource_plan(
         iterative_solve_flops(nodes, support),
         budget,
     );
-    let solve = if direct { envelope.factor_resident_limit() } else { iterative };
+    let solve = if direct {
+        envelope.factor_resident_limit()
+    } else {
+        iterative
+    };
     tracing::info!(
         nodes,
         elements,
@@ -409,14 +413,16 @@ fn iterative_solve_flops(nodes: u64, entries: u64) -> u64 {
 /// AMG hierarchy (operator complexity, prolongators and level vectors) plus CG workspace for
 /// `entries` couplings, with 25 % headroom over the shared solver's estimate.
 fn iterative_solve_bytes(nodes: u64, entries: u64) -> Result<u64, ResourcePlanningError> {
-    let n = usize::try_from(nodes).map_err(|_| ResourcePlanningError::Overflow("electrical nodes"))?;
-    let nnz =
-        usize::try_from(entries).map_err(|_| ResourcePlanningError::Overflow("electrical couplings"))?;
-    let bytes = runmat_sparse_solvers::estimate::amg_bytes(n, nnz, 1)
-        .saturating_add(runmat_sparse_solvers::estimate::krylov_workspace_bytes(
+    let n =
+        usize::try_from(nodes).map_err(|_| ResourcePlanningError::Overflow("electrical nodes"))?;
+    let nnz = usize::try_from(entries)
+        .map_err(|_| ResourcePlanningError::Overflow("electrical couplings"))?;
+    let bytes = runmat_sparse_solvers::estimate::amg_bytes(n, nnz, 1).saturating_add(
+        runmat_sparse_solvers::estimate::krylov_workspace_bytes(
             runmat_sparse_solvers::estimate::KrylovMethod::Pcg,
             n,
             8,
-        ));
+        ),
+    );
     Ok(bytes.saturating_add(bytes / 4))
 }

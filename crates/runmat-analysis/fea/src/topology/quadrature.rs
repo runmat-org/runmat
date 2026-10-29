@@ -461,7 +461,10 @@ mod face_diagnostic {
             subtract(coordinates[1], coordinates[0]),
             subtract(coordinates[2], coordinates[0]),
         );
-        eprintln!("face {face_id} order {:?} nodes {coordinates:?}", face.order);
+        eprintln!(
+            "face {face_id} order {:?} nodes {coordinates:?}",
+            face.order
+        );
         eprintln!("corner normal norm {:e}", norm(corner_normal));
         if face.order == BoundaryTriangleOrder::Tri6 {
             eprintln!(

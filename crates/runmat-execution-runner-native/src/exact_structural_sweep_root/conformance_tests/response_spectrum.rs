@@ -31,7 +31,10 @@ async fn response_spectrum_fields_reach_an_admitted_result_over_encrypted_quic()
         artifact_access: access.clone(),
         source_name: "box.brep",
         source_bytes: BOX,
-        import_options: ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+        import_options: ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..ExactCadImportOptions::default()
+        },
         contact_definitions: Vec::new(),
         meshing_request: meshing_request.clone(),
         preferred_edges_per_partition: 3,
@@ -77,7 +80,10 @@ async fn response_spectrum_fields_reach_an_admitted_result_over_encrypted_quic()
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+        &ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..ExactCadImportOptions::default()
+        },
         &GeometryImportContext::new(),
     )
     .unwrap();

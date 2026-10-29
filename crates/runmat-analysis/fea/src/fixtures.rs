@@ -320,17 +320,19 @@ fn append_fixture_scalar_action<Q>(
 fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureExcitation) {
     let case_id = ExcitationCaseId(format!("{}.case", specification.id));
     let target = match specification.kind {
-        FixtureExcitationKind::Pressure(_) => {
-            ExcitationTarget::Region(RegionTarget::boundary(fixture_target_selection(&specification.region_id)))
-        }
+        FixtureExcitationKind::Pressure(_) => ExcitationTarget::Region(RegionTarget::boundary(
+            fixture_target_selection(&specification.region_id),
+        )),
         #[cfg(test)]
-        FixtureExcitationKind::Traction(_) => {
-            ExcitationTarget::Region(RegionTarget::boundary(fixture_target_selection(&specification.region_id)))
-        }
-        FixtureExcitationKind::BodyForce(_) => {
-            ExcitationTarget::Region(RegionTarget::volume(fixture_volume_selection(&specification.region_id)))
-        }
-        _ => ExcitationTarget::Region(RegionTarget::authored(fixture_target_selection(&specification.region_id))),
+        FixtureExcitationKind::Traction(_) => ExcitationTarget::Region(RegionTarget::boundary(
+            fixture_target_selection(&specification.region_id),
+        )),
+        FixtureExcitationKind::BodyForce(_) => ExcitationTarget::Region(RegionTarget::volume(
+            fixture_volume_selection(&specification.region_id),
+        )),
+        _ => ExcitationTarget::Region(RegionTarget::authored(fixture_target_selection(
+            &specification.region_id,
+        ))),
     };
     let mut action_ids = Vec::new();
     match specification.kind {
@@ -754,7 +756,9 @@ fn cantilever_linear_static() -> AnalysisModel {
             -2.5e-4,
         )],
         material_assignments: vec![MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("region")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "region",
+            )),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -838,7 +842,9 @@ fn structural_axial_bar_reference() -> AnalysisModel {
         .collect();
     replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
-        target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("bar_span")),
+        target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+            "bar_span",
+        )),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -862,7 +868,9 @@ fn structural_beam_bending_reference() -> AnalysisModel {
         .collect();
     replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
-        target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("beam_span")),
+        target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+            "beam_span",
+        )),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -942,7 +950,9 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
         }],
     );
     model.material_assignments = vec![MaterialAssignment {
-        target: PropertyRegionTarget::shell(runmat_meshing_core::fixtures::fixture_face("shell_panel")),
+        target: PropertyRegionTarget::shell(runmat_meshing_core::fixtures::fixture_face(
+            "shell_panel",
+        )),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -1010,7 +1020,9 @@ fn structural_beam_reference_model(
     model.constraints = vec![fixed_constraint("fixed_root", "node:1")];
     replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
-        target: PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span")),
+        target: PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge(
+            "beam_span",
+        )),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -1139,7 +1151,9 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
         stiffness_coefficient: RayleighStiffnessCoefficient::new(2.0e-4),
     });
     model.material_assignments = vec![MaterialAssignment {
-        target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("dynamic_volume")),
+        target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+            "dynamic_volume",
+        )),
         expected_material_id: "mat_steel".into(),
         assigned_material_id: "mat_steel".into(),
         confidence: EvidenceConfidence::Verified,
@@ -1150,7 +1164,9 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
             constraint_id: "free_vertex_y_support".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("free_vertex_y_support")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "free_vertex_y_support",
+                )),
                 translations: vec![TranslationDofValue {
                     dof: StructuralTranslationDof::Uy,
                     value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -1162,7 +1178,9 @@ fn structural_transient_tet4_reference() -> AnalysisModel {
             constraint_id: "free_vertex_z_support".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("free_vertex_z_support")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "free_vertex_z_support",
+                )),
                 translations: vec![TranslationDofValue {
                     dof: StructuralTranslationDof::Uz,
                     value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -1313,13 +1331,17 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
     ];
     model.material_assignments = vec![
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("nonlinear_soft_region_root")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "nonlinear_soft_region_root",
+            )),
             expected_material_id: "mat_soft_polymer".to_string(),
             assigned_material_id: "mat_soft_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("nonlinear_soft_region_tip")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "nonlinear_soft_region_tip",
+            )),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_aluminum".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -1400,19 +1422,25 @@ fn nonlinear_contact_frictionless_reference_fixture() -> AnalysisModel {
         AnalysisModelId("nonlinear_contact_frictionless_reference_fixture".to_string());
     model.material_assignments = vec![
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("tip_steel")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "tip_steel",
+            )),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("mid_aluminum")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "mid_aluminum",
+            )),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_aluminum".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("polymer_segment")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "polymer_segment",
+            )),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -1456,19 +1484,25 @@ fn nonlinear_plastic_hardening_reference_fixture() -> AnalysisModel {
     model.model_id = AnalysisModelId("nonlinear_plastic_hardening_reference_fixture".to_string());
     model.material_assignments = vec![
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("tip_steel")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "tip_steel",
+            )),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("mid_aluminum")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "mid_aluminum",
+            )),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_aluminum".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("polymer_segment")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "polymer_segment",
+            )),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
@@ -1544,19 +1578,25 @@ fn thermo_gradient_benign_fixture() -> AnalysisModel {
     model.model_id = AnalysisModelId("thermo_gradient_benign_fixture".to_string());
     model.material_assignments = vec![
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("tip_steel")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "tip_steel",
+            )),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("mid_aluminum")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "mid_aluminum",
+            )),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_aluminum".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("polymer_segment")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "polymer_segment",
+            )),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Probable,
@@ -1584,19 +1624,25 @@ fn thermo_gradient_pathological_fixture() -> AnalysisModel {
     model.model_id = AnalysisModelId("thermo_gradient_pathological_fixture".to_string());
     model.material_assignments = vec![
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("tip_steel")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "tip_steel",
+            )),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("mid_aluminum")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "mid_aluminum",
+            )),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("polymer_segment")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "polymer_segment",
+            )),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Inferred,
@@ -1707,19 +1753,25 @@ fn multi_material_assembly() -> AnalysisModel {
 
     model.material_assignments = vec![
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("tip_steel")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "tip_steel",
+            )),
             expected_material_id: "mat_steel".to_string(),
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("mid_aluminum")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "mid_aluminum",
+            )),
             expected_material_id: "mat_aluminum".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Inferred,
         },
         MaterialAssignment {
-            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("polymer_segment")),
+            target: PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+                "polymer_segment",
+            )),
             expected_material_id: "mat_polymer".to_string(),
             assigned_material_id: "mat_polymer".to_string(),
             confidence: EvidenceConfidence::Probable,

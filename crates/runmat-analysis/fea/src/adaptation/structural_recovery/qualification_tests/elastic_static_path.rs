@@ -29,18 +29,30 @@ pub(super) fn qualify() {
         let elastic = solve(&model, &mesh, SpdPreconditionerKind::Amg);
         let direct_convergence = direct.structural_static_convergence.as_ref().unwrap();
         let elastic_convergence = elastic.structural_static_convergence.as_ref().unwrap();
-        assert_eq!(direct_convergence.operator_proof, StaticOperatorProof::SparseCholesky);
-        assert_eq!(elastic_convergence.operator_proof, StaticOperatorProof::ElasticRigidity);
+        assert_eq!(
+            direct_convergence.operator_proof,
+            StaticOperatorProof::SparseCholesky
+        );
+        assert_eq!(
+            elastic_convergence.operator_proof,
+            StaticOperatorProof::ElasticRigidity
+        );
         assert_eq!(elastic.solver_method, crate::SolverMethod::AssembledPcg);
         assert_eq!(elastic.preconditioner, crate::SolverPreconditioner::Amg);
         let relative = elastic_convergence.relative_residual.unwrap();
-        assert!(elastic_convergence.converged && relative <= 1.0e-8, "{relative}");
+        assert!(
+            elastic_convergence.converged && relative <= 1.0e-8,
+            "{relative}"
+        );
         // The Lanczos estimate is recorded as an estimate only; the factor path has none.
         assert!(direct_convergence.spectral_estimate.is_none());
         let estimate = elastic_convergence
             .spectral_estimate
             .expect("the PCG path records its Lanczos estimate");
-        assert!(estimate.lambda_min_estimate > 0.0 && estimate.lanczos_steps > 0, "{estimate:?}");
+        assert!(
+            estimate.lambda_min_estimate > 0.0 && estimate.lanczos_steps > 0,
+            "{estimate:?}"
+        );
         eprintln!("elastic static path {order:?}: spectral estimate {estimate:?}");
         let field = |run: &crate::FeaRunResult| {
             run.field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
@@ -75,7 +87,10 @@ pub(super) fn ceiling_selects_the_static_path() {
         StaticSolveSelection,
     };
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(1 << 40);
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(1 << 40);
     let mesh = structured_cantilever(8, ElementOrder::Tet10);
     let constraints =
         crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
@@ -129,7 +144,10 @@ pub(super) fn ceiling_selects_the_static_path() {
     .request
     .memory_bytes;
     eprintln!("ceiling selection: direct plan {direct} B, elastic plan {elastic} B");
-    assert!(elastic < direct, "elastic {elastic} B must plan below direct {direct} B");
+    assert!(
+        elastic < direct,
+        "elastic {elastic} B must plan below direct {direct} B"
+    );
     let between = elastic + (direct - elastic) / 2;
     let unbounded = StaticSolveSelection::WithinCeiling {
         machine_memory_bytes: None,
@@ -157,7 +175,10 @@ pub(super) fn ceiling_selects_the_static_path() {
         Some(StaticSolvePath::ElasticRigidityMultigrid)
     );
     let mut authored = model.clone();
-    authored.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(between);
+    authored.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(between);
     assert_eq!(
         path(plan(&authored, unbounded)),
         Some(StaticSolvePath::ElasticRigidityMultigrid)
@@ -172,7 +193,10 @@ pub(super) fn ceiling_selects_the_static_path() {
     );
     // An explicit direct request never takes the elastic path, whatever the ceiling.
     let mut direct_request = authored.clone();
-    direct_request.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(1 << 40);
+    direct_request.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(1 << 40);
     assert_eq!(
         path(build_static_resource_plan_selecting(
             StaticResourcePreflight {
@@ -207,7 +231,10 @@ pub(super) fn fallback_is_admitted_against_the_ceiling() {
         ResourcePlanningError, StaticResourcePreflight, StaticSolvePath, StaticSolveSelection,
     };
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = Some(1 << 40);
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(1 << 40);
     let mesh = structured_cantilever(8, ElementOrder::Tet10);
     let constraints =
         crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
@@ -286,14 +313,21 @@ pub(super) fn fallback_is_admitted_against_the_ceiling() {
         }
     );
     let message = error.to_string();
-    for figure in [direct.memory_bytes, elastic.memory_bytes, elastic.scratch_bytes, ceiling] {
+    for figure in [
+        direct.memory_bytes,
+        elastic.memory_bytes,
+        elastic.scratch_bytes,
+        ceiling,
+    ] {
         assert!(message.contains(&figure.to_string()), "{message}");
     }
     // The authored ceiling binds the same way: the elastic plan is refused inside planning and
     // its resident requirement is still named.
     let mut authored = model.clone();
-    authored.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
-        Some(elastic.memory_bytes - 1);
+    authored.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(elastic.memory_bytes - 1);
     match plan(
         &authored,
         StaticSolveSelection::WithinCeiling {

@@ -10,10 +10,9 @@ use crate::{
 };
 use runmat_analysis_fea::execution::{
     AcousticFrequencyAssemblyRequest, AcousticFrequencyResult, AcousticFrequencyWorkload,
-    AcousticHarmonicSolverResult,
-    AnalysisNumericalObjectKind, AnalysisWorkKind, ExecutionPlanIdentity,
-    FrequencySamplePublicationManifest, NumericalPlanIdentity, SequenceIdentity, StepIdentity,
-    StudyIdentity,
+    AcousticHarmonicSolverResult, AnalysisNumericalObjectKind, AnalysisWorkKind,
+    ExecutionPlanIdentity, FrequencySamplePublicationManifest, NumericalPlanIdentity,
+    SequenceIdentity, StepIdentity, StudyIdentity,
 };
 use runmat_analysis_fea::planning::resource::{
     build_acoustic_frequency_assembly_resource_plan, AcousticFrequencyAssemblyResourceDemand,

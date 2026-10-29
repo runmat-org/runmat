@@ -1,8 +1,6 @@
 //! Interface heat balances and global energy closure evaluated from retained temperatures.
 use super::{
-    assembly::{
-        boundary_operator, element_operator, AssembledEnergy, BoundaryTerm, InterfaceLaw,
-    },
+    assembly::{boundary_operator, element_operator, AssembledEnergy, BoundaryTerm, InterfaceLaw},
     ConjugateHeatError as Error, ConjugateHeatInput,
 };
 use crate::algebra::spmv;

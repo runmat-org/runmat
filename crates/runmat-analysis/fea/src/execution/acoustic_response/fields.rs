@@ -55,7 +55,9 @@ fn pressure_definition() -> AnalysisExecutionResult<RecoveredFieldDefinition> {
 
 impl AcousticResponseSolverResult {
     /// Exact publication request for every retained pressure sample, bound to this result.
-    pub fn native_field_request_from_result(&self) -> AnalysisExecutionResult<FieldRecoveryRequest> {
+    pub fn native_field_request_from_result(
+        &self,
+    ) -> AnalysisExecutionResult<FieldRecoveryRequest> {
         self.validate()?;
         FieldRecoveryRequest::new(
             self.producer(),

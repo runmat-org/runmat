@@ -77,7 +77,9 @@ fn reference_inventory_contains_original_identity_workspace_and_retained_copies(
                 constraint_id: format!("original/{ordinal}"),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "face:0",
+                    )),
                     reference_point: ReferencePoint {
                         reference_point_id: id.clone(),
                         position: Position::new(position),

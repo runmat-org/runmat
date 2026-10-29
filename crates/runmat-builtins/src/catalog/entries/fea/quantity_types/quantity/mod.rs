@@ -9,7 +9,8 @@ pub(super) const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "Why use typed values instead of plain numbers?", answer: "The class carries the physical dimension and the constructor name carries the input unit, so a millimeter value cannot be mistaken for meters and a temperature cannot be passed where a pressure is expected. All values are stored in SI." },
     BuiltinDocumentationFaq { question: "Can I pass integer inputs?", answer: "Yes. Any integer class is accepted and converted once to double precision; very large 64-bit integers can round in that conversion." },
 ];
-pub(super) const LINKS: &[BuiltinDocumentationLink] = &[doc_links::TYPES_AND_UNITS, doc_links::MODELS];
+pub(super) const LINKS: &[BuiltinDocumentationLink] =
+    &[doc_links::TYPES_AND_UNITS, doc_links::MODELS];
 pub(super) const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[doc_links::FEA_VALUES_SOURCE];
 pub(super) const VERIFICATION: &[BuiltinEvidenceReference] = &[
     doc_links::QUANTITY_SI_TEST,
@@ -52,7 +53,6 @@ mod translation_meters;
 mod translation_millimeters;
 mod turbulence_intensity_ratio;
 mod velocity_meters_per_second;
-
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &displacement_meters::ENTRY,

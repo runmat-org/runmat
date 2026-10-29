@@ -8,9 +8,12 @@ pub(super) const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "Why use a selector instead of a field-id string?", answer: "Typed selectors are checked when you write them, so a misspelled quantity fails immediately instead of at result lookup. `fea.field` does not accept text field ids." },
     BuiltinDocumentationFaq { question: "What units are structural fields in?", answer: "SI: meters, radians, pascals, newtons, newton-meters, and joules, regardless of the units the geometry was authored in." },
 ];
-pub(super) const LINKS: &[BuiltinDocumentationLink] = &[doc_links::OUTPUTS_AND_FIELDS, doc_links::STRUCTURAL_PHYSICS];
-pub(super) const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[doc_links::FEA_FIELD_SELECTORS_SOURCE];
-pub(super) const VERIFICATION: &[BuiltinEvidenceReference] = &[doc_links::STRUCTURAL_SELECTORS_TEST];
+pub(super) const LINKS: &[BuiltinDocumentationLink] =
+    &[doc_links::OUTPUTS_AND_FIELDS, doc_links::STRUCTURAL_PHYSICS];
+pub(super) const IMPLEMENTATION: &[BuiltinDocumentationLink] =
+    &[doc_links::FEA_FIELD_SELECTORS_SOURCE];
+pub(super) const VERIFICATION: &[BuiltinEvidenceReference] =
+    &[doc_links::STRUCTURAL_SELECTORS_TEST];
 
 mod beam_axial_force;
 mod beam_bending_moment;
@@ -38,7 +41,6 @@ mod strain_energy_density;
 mod stress;
 mod total_strain_energy;
 mod von_mises;
-
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &displacement::ENTRY,

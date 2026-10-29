@@ -194,9 +194,7 @@ pub fn run_rank(
             matrix,
             rhs,
             owned_dofs: (0..dofs).filter(|&dof| owned[dof]).collect(),
-            interior_dofs: (0..dofs)
-                .filter(|&dof| input.interior[dof / d])
-                .collect(),
+            interior_dofs: (0..dofs).filter(|&dof| input.interior[dof / d]).collect(),
             owned,
             prescribed,
             factor: None,
@@ -287,7 +285,9 @@ fn parallel_map<'a, T: Sync, R: Send>(
         return items.iter().map(&map).collect();
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut slots = (0..items.len()).map(|_| None).collect::<Vec<Option<DistributedResult<R>>>>();
+    let mut slots = (0..items.len())
+        .map(|_| None)
+        .collect::<Vec<Option<DistributedResult<R>>>>();
     let results = std::sync::Mutex::new(&mut slots);
     std::thread::scope(|scope| {
         for _ in 0..threads {
@@ -324,7 +324,11 @@ fn validate(
             .subdomain_process
             .iter()
             .any(|&process| process >= plan.processes)
-        || plan.local_subdomains() != inputs.iter().map(|input| input.subdomain).collect::<Vec<_>>()
+        || plan.local_subdomains()
+            != inputs
+                .iter()
+                .map(|input| input.subdomain)
+                .collect::<Vec<_>>()
     {
         return invalid("process plan differs from its communicator or subdomains");
     }
@@ -374,7 +378,10 @@ fn validate(
 
 /// Assemble the local operator over every local element with prescribed dofs eliminated
 /// symmetrically (identity rows and columns) and the right-hand side of owned rows.
-fn assemble(input: &SubdomainInput, kernel: &dyn ElementKernel) -> DistributedResult<(Csr, Vec<f64>)> {
+fn assemble(
+    input: &SubdomainInput,
+    kernel: &dyn ElementKernel,
+) -> DistributedResult<(Csr, Vec<f64>)> {
     let d = input.field.dofs_per_node();
     let n = input.nodes_per_element as usize;
     let nodes = input.coordinates.len();
@@ -418,7 +425,11 @@ fn assemble(input: &SubdomainInput, kernel: &dyn ElementKernel) -> DistributedRe
         }
         element_matrix.iter_mut().for_each(|value| *value = 0.0);
         kernel
-            .element_matrix(input.element_materials[element], &coordinates, &mut element_matrix)
+            .element_matrix(
+                input.element_materials[element],
+                &coordinates,
+                &mut element_matrix,
+            )
             .map_err(DistributedError::Kernel)?;
         for (s, &a) in connectivity.iter().enumerate() {
             for (t, &b) in connectivity.iter().enumerate() {
@@ -686,7 +697,13 @@ impl Process<'_> {
                             Message::Ghost => neighbor.ghost_recv.len(),
                             Message::Correction => neighbor.accum_recv.len(),
                         } * d;
-                        pairs.push((neighbor.subdomain, subdomain.input.subdomain, index, slot, count));
+                        pairs.push((
+                            neighbor.subdomain,
+                            subdomain.input.subdomain,
+                            index,
+                            slot,
+                            count,
+                        ));
                     }
                 }
             }
@@ -804,7 +821,8 @@ impl Process<'_> {
         comm: &mut dyn Communicator,
     ) -> DistributedResult<()> {
         self.exchange_ghosts(vectors, comm)?;
-        for ((subdomain, vector), result) in self.subdomains.iter().zip(vectors.iter()).zip(results) {
+        for ((subdomain, vector), result) in self.subdomains.iter().zip(vectors.iter()).zip(results)
+        {
             subdomain.apply_owned_rows(vector, result);
         }
         Ok(())
@@ -821,7 +839,11 @@ impl Process<'_> {
         self.exchange_ghosts(residuals, comm)?;
         let local = parallel_map(
             self.plan.threads,
-            &self.subdomains.iter().zip(residuals.iter()).collect::<Vec<_>>(),
+            &self
+                .subdomains
+                .iter()
+                .zip(residuals.iter())
+                .collect::<Vec<_>>(),
             |(subdomain, residual)| {
                 let mut values = subdomain
                     .interior_dofs
@@ -836,14 +858,18 @@ impl Process<'_> {
                 Ok(values)
             },
         )?;
-        for ((subdomain, result), values) in self.subdomains.iter().zip(results.iter_mut()).zip(local) {
+        for ((subdomain, result), values) in
+            self.subdomains.iter().zip(results.iter_mut()).zip(local)
+        {
             result.iter_mut().for_each(|value| *value = 0.0);
             for (&dof, value) in subdomain.interior_dofs.iter().zip(values) {
                 result[dof] = value;
             }
         }
         let received = self.exchange(results, Message::Correction, comm)?;
-        for ((subdomain, result), buffers) in self.subdomains.iter().zip(results.iter_mut()).zip(received) {
+        for ((subdomain, result), buffers) in
+            self.subdomains.iter().zip(results.iter_mut()).zip(received)
+        {
             for (dof, value) in result.iter_mut().enumerate() {
                 if !subdomain.owned[dof] {
                     *value = 0.0;
@@ -933,7 +959,13 @@ impl Process<'_> {
         for subdomain in &self.subdomains {
             let own = subdomain.input.subdomain as usize;
             let mut targets = vec![own];
-            targets.extend(subdomain.input.neighbors.iter().map(|plan| plan.subdomain as usize));
+            targets.extend(
+                subdomain
+                    .input
+                    .neighbors
+                    .iter()
+                    .map(|plan| plan.subdomain as usize),
+            );
             targets.sort_unstable();
             let mut blocks = Vec::with_capacity(targets.len() * (1 + modes * modes));
             for &target in &targets {
@@ -991,7 +1023,8 @@ impl Process<'_> {
                     let target = block[0] as usize;
                     for left in 0..modes {
                         for right in 0..modes {
-                            operator[(source * modes + left) * dimension + target * modes + right] +=
+                            operator
+                                [(source * modes + left) * dimension + target * modes + right] +=
                                 block[1 + left * modes + right];
                         }
                     }
@@ -1037,7 +1070,10 @@ impl Process<'_> {
         local: &[usize],
         comm: &mut dyn Communicator,
     ) -> DistributedResult<Vec<usize>> {
-        let values = local.iter().map(|&length| length as f64).collect::<Vec<_>>();
+        let values = local
+            .iter()
+            .map(|&length| length as f64)
+            .collect::<Vec<_>>();
         let gathered = comm.allgather(&values)?;
         let mut lengths = vec![0usize; self.plan.subdomain_process.len()];
         for (process, values) in gathered.iter().enumerate() {

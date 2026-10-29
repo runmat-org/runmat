@@ -9,7 +9,12 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_PRESSURE_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_PRESSURE_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
@@ -20,7 +25,8 @@ const PRESSURE_PASCALS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSig
     inputs: &QUANTITY_INPUTS,
     outputs: &QUANTITY_OUTPUTS,
 }];
-pub const PRESSURE_PASCALS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&PRESSURE_PASCALS_SIGNATURES);
+pub const PRESSURE_PASCALS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&PRESSURE_PASCALS_SIGNATURES);
 const PRESSURE_PASCALS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "pressure-pascals",
     title: "Standard atmospheric pressure",

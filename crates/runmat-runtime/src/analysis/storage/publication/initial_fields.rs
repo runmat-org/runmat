@@ -80,9 +80,7 @@ impl AnalysisPublicationBuilder {
                 if field.shape
                     != entry
                         .definition
-                        .storage_shape(
-                            entry.definition.stored_entities(catalog.entity_counts),
-                        )
+                        .storage_shape(entry.definition.stored_entities(catalog.entity_counts))
                         .map_err(|e| e.to_string())?
                 {
                     return Err("original field shape differs from staged run".into());

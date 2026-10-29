@@ -24,7 +24,11 @@ pub(super) fn solve_policy(
         | SpdPreconditionerKind::Auto
         | SpdPreconditionerKind::Direct => PreconditionerStorage::Diagonal,
         SpdPreconditionerKind::Amg => {
-            let bytes = runmat_sparse_solvers::estimate::amg_bytes(dofs as usize, stiffness_nonzeros as usize, 3);
+            let bytes = runmat_sparse_solvers::estimate::amg_bytes(
+                dofs as usize,
+                stiffness_nonzeros as usize,
+                3,
+            );
             PreconditionerStorage::SparseCsr {
                 nonzero_upper_bound: Count(stiffness_nonzeros.saturating_mul(3)),
                 resident_bytes_upper_bound: ByteCount(bytes),

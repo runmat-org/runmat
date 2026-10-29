@@ -116,8 +116,8 @@ impl<'a> ScalarProjectionAccumulator<'a> {
             .max(self.projected_scale)
             .max(requested.real.hypot(requested.imaginary))
             .max(projected.real.hypot(projected.imaginary));
-        let error = (requested.real - projected.real)
-            .hypot(requested.imaginary - projected.imaginary);
+        let error =
+            (requested.real - projected.real).hypot(requested.imaginary - projected.imaginary);
         let relative_error = if normalization_scale == 0.0 {
             0.0
         } else {

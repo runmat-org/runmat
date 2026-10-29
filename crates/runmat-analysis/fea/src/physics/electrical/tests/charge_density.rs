@@ -165,11 +165,7 @@ fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
         let energy_error = (total_energy_j.canonical_value() / (epsilon / 6.0) - 1.0).abs();
         errors.push((temperature_error.sqrt(), field_error.sqrt(), energy_error));
         assert_relative(
-            response
-                .charge_sources
-                .as_ref()
-                .unwrap()
-                .integrated_source,
+            response.charge_sources.as_ref().unwrap().integrated_source,
             2.0 * epsilon,
             1e-10,
         );
@@ -202,7 +198,9 @@ fn exact_volume_region_and_signed_superposition_preserve_charge_and_fields() {
             .iter()
             .all(|e| e.region_id == region));
         let mut input = charged_model(3.0 * epsilon, 0.0);
-        let mut target = RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("resolved-charge-volume"));
+        let mut target = RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region(
+            "resolved-charge-volume",
+        ));
         target.bind_resolved_entities(vec![region]).unwrap();
         input.excitations[0].excitation_mut().target = ExcitationTarget::Region(target);
         let mut negative = charged_model(-epsilon, 0.0);

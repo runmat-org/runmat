@@ -1,6 +1,6 @@
 //! Desktop uses the same exact evaluator composition as the browser sidecar.
-use runmat_meshing_execution::MeshingKernelDispatcher;
 pub use runmat_analysis_execution::OcctMeshingEvaluatorProvider as NativeMeshingEvaluatorProvider;
+use runmat_meshing_execution::MeshingKernelDispatcher;
 
 pub fn native_meshing_kernel_dispatcher() -> MeshingKernelDispatcher<NativeMeshingEvaluatorProvider>
 {
@@ -81,6 +81,9 @@ mod tests {
         let range = ExactCurveEvaluator::parameter_range(evaluator.as_ref(), curve_id).unwrap();
         let point = ExactCurveEvaluator::point(evaluator.as_ref(), curve_id, range.start, &control)
             .unwrap();
-        assert!(point.canonical_values().iter().all(|value| value.is_finite()));
+        assert!(point
+            .canonical_values()
+            .iter()
+            .all(|value| value.is_finite()));
     }
 }

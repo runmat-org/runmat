@@ -47,7 +47,10 @@ pub enum ElasticRigidityError {
     #[error("element {element}: its nodes do not span the six rigid motions")]
     DegenerateElementGeometry { element: u64 },
     #[error("element {element}: stiffness does not annihilate rigid motions (‖K U‖/‖K‖ = {}, tolerance {RIGID_MODE_RESIDUAL_RATIO})", f64::from_bits(*.residual_ratio_bits))]
-    RigidMotionEnergy { element: u64, residual_ratio_bits: u64 },
+    RigidMotionEnergy {
+        element: u64,
+        residual_ratio_bits: u64,
+    },
     #[error("element {element}: stiffness is not positive definite on the rigid-motion complement beyond rounding (smallest energy ≈ {} ‖K‖, required margin {} ‖K‖)", f64::from_bits(*.smallest_ratio_bits), f64::from_bits(*.margin_ratio_bits))]
     ElementEnergyMargin {
         element: u64,
@@ -120,7 +123,8 @@ impl ElasticRigidityCapture {
         let (elements, entries) = widths.fold((0_u64, 0_u64), |(e, n), w| (e + 1, n + w as u64));
         // Coordinates, ids and fixed flags per node; ids, offsets, union-find and component
         // facts per element; node lists; the face map holds at most four faces per element.
-        nodes.saturating_mul(24 + 8 + 3 + 16)
+        nodes
+            .saturating_mul(24 + 8 + 3 + 16)
             .saturating_add(elements.saturating_mul(8 + 8 + 8 + 4 * 24 + 96))
             .saturating_add(entries.saturating_mul(4))
             .saturating_add(1 << 16)
@@ -140,7 +144,10 @@ impl ElasticRigidityCapture {
         let mut element_offsets = vec![0];
         for (id, nodes) in elements {
             if nodes.len() < 4 {
-                return Err(ElasticRigidityError::UnsupportedElement { element: id, nodes: nodes.len() });
+                return Err(ElasticRigidityError::UnsupportedElement {
+                    element: id,
+                    nodes: nodes.len(),
+                });
             }
             if nodes.iter().any(|&node| node as usize >= coordinates.len()) {
                 return Err(ElasticRigidityError::Shape);
@@ -246,8 +253,14 @@ impl ElasticRigidityCapture {
             covered[node as usize] = true;
         }
         for (node, covered) in covered.iter().enumerate() {
-            if !covered && self.fixed[3 * node..3 * node + 3].iter().any(|fixed| !fixed) {
-                return Err(ElasticRigidityError::UncoveredNode { node: self.node_ids[node] });
+            if !covered
+                && self.fixed[3 * node..3 * node + 3]
+                    .iter()
+                    .any(|fixed| !fixed)
+            {
+                return Err(ElasticRigidityError::UncoveredNode {
+                    node: self.node_ids[node],
+                });
             }
         }
         drop(covered);
@@ -260,7 +273,12 @@ impl ElasticRigidityCapture {
             let next = index.len();
             let component = *index.entry(root).or_insert(next);
             if component == boxes.len() {
-                boxes.push(([f64::INFINITY; 3], [f64::NEG_INFINITY; 3], 0, self.element_ids[element]));
+                boxes.push((
+                    [f64::INFINITY; 3],
+                    [f64::NEG_INFINITY; 3],
+                    0,
+                    self.element_ids[element],
+                ));
             }
             component_of[element] = component as u32;
             let entry = &mut boxes[component];
@@ -283,7 +301,10 @@ impl ElasticRigidityCapture {
             let component = component_of[element] as usize;
             let (low, high, _, _) = boxes[component];
             let center = [0, 1, 2].map(|a| 0.5 * (low[a] + high[a]));
-            let scale = (0..3).map(|a| high[a] - low[a]).fold(0.0_f64, f64::max).max(f64::MIN_POSITIVE);
+            let scale = (0..3)
+                .map(|a| high[a] - low[a])
+                .fold(0.0_f64, f64::max)
+                .max(f64::MIN_POSITIVE);
             for &node in self.nodes_of(element) {
                 let n = node as usize;
                 if !self.fixed[3 * n..3 * n + 3].iter().any(|&fixed| fixed)
@@ -324,7 +345,8 @@ impl ElasticRigidityCapture {
         }
         let resident_bytes = Self::resident_bytes_for(
             self.coordinates.len() as u64,
-            (0..elements).map(|element| self.element_offsets[element + 1] - self.element_offsets[element]),
+            (0..elements)
+                .map(|element| self.element_offsets[element + 1] - self.element_offsets[element]),
         );
         Ok(ElasticRigidityProof {
             elements: elements as u64,
@@ -348,7 +370,9 @@ impl ElasticRigidityCapture {
             u[0] * v[1] - u[1] * v[0],
         ];
         let area = norm(&cross);
-        let longest = [norm(&u), norm(&v), norm(&w)].into_iter().fold(0.0, f64::max);
+        let longest = [norm(&u), norm(&v), norm(&w)]
+            .into_iter()
+            .fold(0.0, f64::max);
         area > FACE_MINIMUM_AREA_RATIO * longest * longest
     }
 }

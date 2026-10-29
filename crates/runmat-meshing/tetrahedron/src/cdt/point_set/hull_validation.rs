@@ -99,12 +99,18 @@ pub(super) fn validate_convex_hull_closure(
                 .into_iter()
                 .find(|vertex| !edge.contains(vertex))
                 .expect("a boundary face has a vertex off each of its edges");
-            let points = face.map(|vertex| topology.nodes[vertex as usize].coordinates_m.canonical_value());
+            let points = face.map(|vertex| {
+                topology.nodes[vertex as usize]
+                    .coordinates_m
+                    .canonical_value()
+            });
             let sign = work.orient3d([
                 points[0],
                 points[1],
                 points[2],
-                topology.nodes[apex as usize].coordinates_m.canonical_value(),
+                topology.nodes[apex as usize]
+                    .coordinates_m
+                    .canonical_value(),
             ])?;
             if sign != PredicateSign::Zero && sign != interior_signs[face_index] {
                 return Err(error(DelaunayPointSetErrorKind::InvalidTopology,

@@ -37,9 +37,11 @@ fn source(
     values: Vec<f64>,
     components: usize,
 ) -> Source {
-    let sequence =
-        SequenceIdentity::from_solver_contract(&AnalysisSequence::from_steps("s", vec![step.clone()]))
-            .unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&AnalysisSequence::from_steps(
+        "s",
+        vec![step.clone()],
+    ))
+    .unwrap();
     let producer = StepIdentity::from_solver_contract(sequence, step).unwrap();
     let nodes = projection.nodes.len();
     let count = nodes as u64;
@@ -60,7 +62,8 @@ fn source(
             },
         }],
     };
-    let result = SolverResultIdentity::from_step_result(producer, Digest::sha256("fields")).unwrap();
+    let result =
+        SolverResultIdentity::from_step_result(producer, Digest::sha256("fields")).unwrap();
     let request = FieldRecoveryRequest::new(
         producer,
         FieldRecoverySource::SolverResult(result),
@@ -159,7 +162,9 @@ fn authority_round_trip(
     let selection = catalog
         .canonical_selection(&plan, ObservationSelectionCoordinate::VolumeMeshRecovery)
         .unwrap();
-    catalog.validate_volume_mesh_selection(&selection, mesh).unwrap();
+    catalog
+        .validate_volume_mesh_selection(&selection, mesh)
+        .unwrap();
     catalog
         .validate_volume_mesh_selection_metadata(&selection, plan.topology_digest)
         .unwrap();
@@ -168,8 +173,8 @@ fn authority_round_trip(
         projection.projection_digest
     );
     // Cold catalog decoding preserves the producing step authority.
-    let cold = ObservationFieldCatalog::from_canonical_bytes(&catalog.canonical_bytes().unwrap())
-        .unwrap();
+    let cold =
+        ObservationFieldCatalog::from_canonical_bytes(&catalog.canonical_bytes().unwrap()).unwrap();
     assert_eq!(cold.volume_mesh_step().unwrap(), step);
     // A step that is not the request's producer cannot be bound to the fields.
     let mut foreign = step.clone();
@@ -181,11 +186,7 @@ fn authority_round_trip(
         foreign,
     )
     .is_err());
-    let fields = RecoveredFieldCatalog::new(
-        projection,
-        source.artifact.fields().to_vec(),
-    )
-    .unwrap();
+    let fields = RecoveredFieldCatalog::new(projection, source.artifact.fields().to_vec()).unwrap();
     let results = evaluate_observations(&plan, projection, &fields).unwrap();
     results[0].field.as_host_f64().unwrap()[0]
 }
@@ -245,7 +246,12 @@ fn complex_acoustic_pressure_peak_magnitude_uses_the_same_authority_at_its_frequ
     let values = projection
         .nodes
         .iter()
-        .flat_map(|node| [3.0 * node.coordinates_m.canonical_value()[0], 4.0 * node.coordinates_m.canonical_value()[0]])
+        .flat_map(|node| {
+            [
+                3.0 * node.coordinates_m.canonical_value()[0],
+                4.0 * node.coordinates_m.canonical_value()[0],
+            ]
+        })
         .collect();
     let source = source(
         &step,

@@ -83,7 +83,10 @@ fn modal_and_directional_combination_policies_have_independent_semantics() {
 #[test]
 fn spectrum_interpolation_respects_axis_and_extrapolation_policy() {
     let mut spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![1.0, 10.0])),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![1.0, 10.0])),
         vec![2.0, 20.0],
         [1.0, 0.0, 0.0],
     );
@@ -92,7 +95,10 @@ fn spectrum_interpolation_respects_axis_and_extrapolation_policy() {
     spectrum.extrapolation = SpectrumExtrapolation::HoldEndpoint;
     assert_eq!(interpolate_spectrum(&spectrum, 0.5).unwrap(), 2.0);
 
-    spectrum.abscissa = SpectrumAbscissa::PeriodSeconds(runmat_types::physical::Quantity::<runmat_types::physical::kind::Time, _>::new(vec![0.1, 1.0]));
+    spectrum.abscissa = SpectrumAbscissa::PeriodSeconds(runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Time,
+        _,
+    >::new(vec![0.1, 1.0]));
     spectrum.ordinates = runmat_analysis_core::NumericalDataSource::authored(
         vec![20.0, 2.0],
         "sha256:period-design",
@@ -137,7 +143,10 @@ fn physical_modal_basis_drives_canonical_response_result() {
         run.basis.modes().last().unwrap().frequency_hz() * 1.5,
     ];
     let spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(frequencies.to_vec())),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(frequencies.to_vec())),
         vec![1.0; frequencies.len()],
         direction,
     );
@@ -186,7 +195,10 @@ fn basis_only_solver_rejects_operator_dependent_corrections() {
     .unwrap();
     let frequency = run.basis.modes()[0].frequency_hz();
     let mut spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![frequency])),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![frequency])),
         vec![1.0],
         [1.0, 0.0, 0.0],
     );
@@ -243,7 +255,10 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
         run.basis.modes().last().unwrap().frequency_hz() * 1.5,
     ];
     let mut spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(frequencies.to_vec())),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(frequencies.to_vec())),
         vec![2.0; frequencies.len()],
         direction,
     );
@@ -366,7 +381,10 @@ fn pseudo_acceleration_missing_mass_recovers_the_independent_static_field() {
     direction[axis] = 1.0;
     let frequency = first_mode.frequency_hz();
     let mut spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![frequency])),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![frequency])),
         vec![3.0],
         direction,
     );
@@ -530,7 +548,10 @@ fn directional_residual_vector_is_generated_in_the_basis_and_combined_as_a_mode(
     basis.validate_for(&summary).unwrap();
 
     let mut spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![
             basis.modes()[0].frequency_hz() * 0.5,
             residual.frequency_hz() * 1.5,
         ])),
@@ -615,7 +636,10 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
     direction[axis] = 1.0;
     let frequency = first_mode.frequency_hz();
     let spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![frequency])),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![frequency])),
         vec![0.002],
         direction,
     );
@@ -755,7 +779,10 @@ fn direct_acceleration_field_is_retained_when_deformation_is_unavailable() {
     let mut direction = [0.0; 3];
     direction[axis] = 1.0;
     let mut spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![first_mode.frequency_hz()])),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![first_mode.frequency_hz()])),
         vec![1.0],
         direction,
     );
@@ -872,7 +899,10 @@ fn rotational_layout_publishes_typed_angular_envelopes() {
     let mut direction = [0.0; 3];
     direction[axis] = 1.0;
     let mut spectrum = spectrum_fixture(
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(vec![first_mode.frequency_hz()])),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(vec![first_mode.frequency_hz()])),
         vec![1.0],
         direction,
     );

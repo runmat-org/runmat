@@ -14,8 +14,8 @@ pub(super) fn execute(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
     use AnalysisNumericalObjectKind::{
-        FieldRecoveryRequest as Request, FluidSteadyWorkload as Workload, Mesh,
-        ResourcePlan, SolverResult,
+        FieldRecoveryRequest as Request, FluidSteadyWorkload as Workload, Mesh, ResourcePlan,
+        SolverResult,
     };
     invocation.host.validate()?;
     if invocation.kind != AnalysisWorkKind::RecoverField

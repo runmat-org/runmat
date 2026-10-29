@@ -3,7 +3,11 @@ use super::*;
 /// Linear-elastic Tet4 stiffness (12 × 12, node-major) from first principles.
 fn tet4_stiffness(points: &[[f64; 3]; 4], young: f64, poisson: f64) -> Vec<f64> {
     let m = |r: usize, c: usize| points[r][c] - points[0][c];
-    let j = [[m(1, 0), m(2, 0), m(3, 0)], [m(1, 1), m(2, 1), m(3, 1)], [m(1, 2), m(2, 2), m(3, 2)]];
+    let j = [
+        [m(1, 0), m(2, 0), m(3, 0)],
+        [m(1, 1), m(2, 1), m(3, 1)],
+        [m(1, 2), m(2, 2), m(3, 2)],
+    ];
     let det = j[0][0] * (j[1][1] * j[2][2] - j[1][2] * j[2][1])
         - j[0][1] * (j[1][0] * j[2][2] - j[1][2] * j[2][0])
         + j[0][2] * (j[1][0] * j[2][1] - j[1][1] * j[2][0]);
@@ -29,7 +33,8 @@ fn tet4_stiffness(points: &[[f64; 3]; 4], young: f64, poisson: f64) -> Vec<f64> 
             let dot = (0..3).map(|i| grad[a][i] * grad[b][i]).sum::<f64>();
             for i in 0..3 {
                 for jx in 0..3 {
-                    let mut value = lambda * grad[a][i] * grad[b][jx] + mu * grad[a][jx] * grad[b][i];
+                    let mut value =
+                        lambda * grad[a][i] * grad[b][jx] + mu * grad[a][jx] * grad[b][i];
                     if i == jx {
                         value += mu * dot;
                     }
@@ -42,7 +47,10 @@ fn tet4_stiffness(points: &[[f64; 3]; 4], young: f64, poisson: f64) -> Vec<f64> 
 }
 
 fn dofs(nodes: &[u32]) -> Vec<u32> {
-    nodes.iter().flat_map(|&n| (0..3).map(move |a| 3 * n + a)).collect()
+    nodes
+        .iter()
+        .flat_map(|&n| (0..3).map(move |a| 3 * n + a))
+        .collect()
 }
 
 /// Streams the given tetrahedra (node lists into `points`) through a capture and finishes it.
@@ -58,7 +66,9 @@ fn prove(
     }
     let mut capture = ElasticRigidityCapture::new(
         points.iter().enumerate().map(|(i, p)| (100 + i as u64, *p)),
-        tets.iter().enumerate().map(|(e, t)| (10 + e as u64, t.to_vec())),
+        tets.iter()
+            .enumerate()
+            .map(|(e, t)| (10 + e as u64, t.to_vec())),
         fixed,
     )?;
     for (e, tet) in tets.iter().enumerate() {
@@ -84,7 +94,13 @@ const POINTS: [[f64; 3]; 6] = [
 //   boundary: Face-glued elastic tetrahedra with a three-node anchor are proved positive definite without a global factor.
 #[test]
 fn face_glued_and_anchored_tetrahedra_are_proved() {
-    let proof = prove(&POINTS[..5], &[[0, 1, 2, 3], [1, 2, 3, 4]], &[0, 1, 2], |_, _| {}).unwrap();
+    let proof = prove(
+        &POINTS[..5],
+        &[[0, 1, 2, 3], [1, 2, 3, 4]],
+        &[0, 1, 2],
+        |_, _| {},
+    )
+    .unwrap();
     assert_eq!((proof.elements(), proof.components()), (2, 1));
     assert!(proof.scalar_operations() > 0 && proof.resident_bytes() > 0);
 }
@@ -95,9 +111,22 @@ fn face_glued_and_anchored_tetrahedra_are_proved() {
 #[test]
 fn hinge_glued_by_two_nodes_is_refused_as_a_mechanism() {
     // Elements share only nodes 0 and 1; the anchor fixes element 10 alone.
-    let error = prove(&POINTS, &[[0, 1, 2, 3], [0, 1, 4, 5]], &[0, 2, 3], |_, _| {}).unwrap_err();
+    let error = prove(
+        &POINTS,
+        &[[0, 1, 2, 3], [0, 1, 4, 5]],
+        &[0, 2, 3],
+        |_, _| {},
+    )
+    .unwrap_err();
     assert!(
-        matches!(error, ElasticRigidityError::UnanchoredComponent { representative_element: 11, elements: 1, .. }),
+        matches!(
+            error,
+            ElasticRigidityError::UnanchoredComponent {
+                representative_element: 11,
+                elements: 1,
+                ..
+            }
+        ),
         "{error:?}"
     );
 }
@@ -110,12 +139,18 @@ fn collinear_or_missing_anchor_is_refused() {
     let free_rotation = prove(&POINTS[..4], &[[0, 1, 2, 3]], &[0, 1], |_, _| {}).unwrap_err();
     assert!(matches!(
         free_rotation,
-        ElasticRigidityError::UnanchoredComponent { constrained_dofs: 6, .. }
+        ElasticRigidityError::UnanchoredComponent {
+            constrained_dofs: 6,
+            ..
+        }
     ));
     let floating = prove(&POINTS[..4], &[[0, 1, 2, 3]], &[], |_, _| {}).unwrap_err();
     assert!(matches!(
         floating,
-        ElasticRigidityError::UnanchoredComponent { constrained_dofs: 0, .. }
+        ElasticRigidityError::UnanchoredComponent {
+            constrained_dofs: 0,
+            ..
+        }
     ));
 }
 
@@ -124,11 +159,16 @@ fn collinear_or_missing_anchor_is_refused() {
 //   boundary: An element block that is indefinite on the rigid-motion complement, or that does not annihilate rigid motions, is refused naming the element.
 #[test]
 fn element_without_energy_margin_or_rigid_kernel_is_refused() {
-    let indefinite = prove(&POINTS[..5], &[[0, 1, 2, 3], [1, 2, 3, 4]], &[0, 1, 2], |e, k| {
-        if e == 1 {
-            k.iter_mut().for_each(|v| *v = -*v);
-        }
-    })
+    let indefinite = prove(
+        &POINTS[..5],
+        &[[0, 1, 2, 3], [1, 2, 3, 4]],
+        &[0, 1, 2],
+        |e, k| {
+            if e == 1 {
+                k.iter_mut().for_each(|v| *v = -*v);
+            }
+        },
+    )
     .unwrap_err();
     assert!(
         matches!(
@@ -138,13 +178,21 @@ fn element_without_energy_margin_or_rigid_kernel_is_refused() {
         ),
         "{indefinite:?}"
     );
-    let grounded = prove(&POINTS[..5], &[[0, 1, 2, 3], [1, 2, 3, 4]], &[0, 1, 2], |e, k| {
-        if e == 0 {
-            k[0] *= 2.0;
-        }
-    })
+    let grounded = prove(
+        &POINTS[..5],
+        &[[0, 1, 2, 3], [1, 2, 3, 4]],
+        &[0, 1, 2],
+        |e, k| {
+            if e == 0 {
+                k[0] *= 2.0;
+            }
+        },
+    )
     .unwrap_err();
-    assert!(matches!(grounded, ElasticRigidityError::RigidMotionEnergy { element: 10, .. }));
+    assert!(matches!(
+        grounded,
+        ElasticRigidityError::RigidMotionEnergy { element: 10, .. }
+    ));
 }
 
 #[test]

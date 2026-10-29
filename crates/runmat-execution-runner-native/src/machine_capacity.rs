@@ -106,7 +106,8 @@ pub(crate) fn case_concurrency(
     authored_limit: Option<usize>,
 ) -> usize {
     let capacity = (cpu_millicores() / 1000).max(1) as usize;
-    let per_case = (workers_per_case.max(1) as usize).saturating_mul(threads_per_worker.max(1) as usize);
+    let per_case =
+        (workers_per_case.max(1) as usize).saturating_mul(threads_per_worker.max(1) as usize);
     (capacity / per_case)
         .max(1)
         .min(authored_limit.unwrap_or(usize::MAX))

@@ -58,7 +58,9 @@ fn bind(mesh: &SolverMeshArtifact, target: &mut RegionTarget) {
 }
 
 fn boundary(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
-    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)));
+    let mut target = RegionTarget::boundary(
+        runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),
+    );
     bind(mesh, &mut target);
     target
 }
@@ -97,11 +99,13 @@ fn case(cells: [usize; 3], transfer: ThermalInterfaceTransfer) -> Case {
         material("water", K_FLUID, 1000.0, 4000.0, true),
     ];
     let mut solid = model.material_assignments[0].clone();
-    solid.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("plate"));
+    solid.target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("plate"));
     solid.expected_material_id = "aluminum".into();
     solid.assigned_material_id = "aluminum".into();
     let mut fluid = solid.clone();
-    fluid.target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("channel"));
+    fluid.target =
+        PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("channel"));
     fluid.expected_material_id = "water".into();
     fluid.assigned_material_id = "water".into();
     model.material_assignments = vec![solid, fluid];

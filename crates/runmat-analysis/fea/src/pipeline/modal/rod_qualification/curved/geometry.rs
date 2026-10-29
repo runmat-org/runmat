@@ -77,7 +77,9 @@ fn analytic_curved_geometry_moments_and_affine_axial_recovery_are_exact() {
         }
         for end in ["slab_left", "slab_right"] {
             let selector = runmat_meshing_core::fixtures::fixture_face(end);
-            let faces = projection.boundary_faces_matching(&selector).collect::<Vec<_>>();
+            let faces = projection
+                .boundary_faces_matching(&selector)
+                .collect::<Vec<_>>();
             let area: f64 = faces
                 .iter()
                 .map(|face| face.area_m2.canonical_value())
@@ -94,7 +96,9 @@ fn analytic_curved_geometry_moments_and_affine_axial_recovery_are_exact() {
             assert!((centroid[2] - 0.5).abs() < 1e-10);
         }
         let curved_side_area = 0.5 * ((1.0 + ETA * ETA).sqrt() + ETA.asinh() / ETA);
-        for face in projection.boundary_faces_matching(&runmat_meshing_core::fixtures::fixture_face("slab_insulated")) {
+        for face in projection.boundary_faces_matching(
+            &runmat_meshing_core::fixtures::fixture_face("slab_insulated"),
+        ) {
             projection
                 .visit_boundary_quadrature(face, |point| {
                     assert!(point.area_vector_weight_m2[0].abs() < 1e-12);

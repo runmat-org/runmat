@@ -89,7 +89,8 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
     let mut exact_ceiling = plan.input.clone();
     exact_ceiling.accuracy_ceiling.maximum_resident_bytes = Some(plan.request.memory_bytes);
     runmat_analysis_fea::planning::resource::build_resource_plan(exact_ceiling.clone()).unwrap();
-    exact_ceiling.accuracy_ceiling.maximum_resident_bytes = Some(exact_ceiling.accuracy_ceiling.resident_byte_budget() - 1);
+    exact_ceiling.accuracy_ceiling.maximum_resident_bytes =
+        Some(exact_ceiling.accuracy_ceiling.resident_byte_budget() - 1);
     assert!(runmat_analysis_fea::planning::resource::build_resource_plan(exact_ceiling).is_err());
 
     let mut altered_input = plan.input.clone();

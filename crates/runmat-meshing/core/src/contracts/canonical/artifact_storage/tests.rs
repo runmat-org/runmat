@@ -136,9 +136,7 @@ fn distinct_identity_heap(artifact: &crate::SolverMeshArtifact) -> u64 {
         match value {
             serde_json::Value::Object(map) => {
                 if map.contains_key("source_topology_id") && map.contains_key("kind") {
-                    if let Ok(id) =
-                        serde_json::from_value::<PersistentEntityId>(value.clone())
-                    {
+                    if let Ok(id) = serde_json::from_value::<PersistentEntityId>(value.clone()) {
                         // Interning resolves to the live allocation the artifact holds.
                         if seen.insert(id.shared_address()) {
                             *total += id.shared_heap_bytes();
@@ -156,6 +154,10 @@ fn distinct_identity_heap(artifact: &crate::SolverMeshArtifact) -> u64 {
     }
     let mut seen = Default::default();
     let mut total = 0;
-    visit(&serde_json::to_value(artifact).unwrap(), &mut seen, &mut total);
+    visit(
+        &serde_json::to_value(artifact).unwrap(),
+        &mut seen,
+        &mut total,
+    );
     total
 }

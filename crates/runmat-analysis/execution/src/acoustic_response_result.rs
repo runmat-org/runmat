@@ -1,11 +1,11 @@
 //! Import canonical acoustic response fields through the shared output-set/inventory authority.
 use crate::{
     import_analysis_objects, import_analysis_output_set, AnalysisBridgeError, AnalysisBridgeResult,
-    PreparedAnalysisObjects, PreparedAcousticResponseTask,
+    PreparedAcousticResponseTask, PreparedAnalysisObjects,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AcousticResponseNumericalReceiptArtifact, AcousticResponseSolverResult,
-    AcousticResponseWorkload,
+    AcousticResponseNumericalReceiptArtifact, AcousticResponseSolverResult,
+    AcousticResponseWorkload, AnalysisNumericalObjectKind,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution_artifact::{
@@ -67,7 +67,8 @@ pub fn import_acoustic_response_result(
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
     let [output, receipt, profiles] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
-            "acoustic response task requires exact result, receipt and publication-profile outputs".into(),
+            "acoustic response task requires exact result, receipt and publication-profile outputs"
+                .into(),
         ));
     };
     if output.kind != AnalysisNumericalObjectKind::SolverResult
@@ -127,9 +128,9 @@ pub fn import_acoustic_response_result(
             .inputs
             .iter()
             .filter(|input| input.manifest.kind == kind);
-        let first = matches
-            .next()
-            .ok_or_else(|| AnalysisBridgeError::Invalid("acoustic response task input absent".into()))?;
+        let first = matches.next().ok_or_else(|| {
+            AnalysisBridgeError::Invalid("acoustic response task input absent".into())
+        })?;
         if matches.next().is_some() {
             return Err(AnalysisBridgeError::Invalid(
                 "duplicate acoustic response input".into(),

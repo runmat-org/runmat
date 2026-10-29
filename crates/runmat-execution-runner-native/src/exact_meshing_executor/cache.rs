@@ -267,9 +267,9 @@ fn limits(stage: &PlannedMeshingStage) -> ObjectInventoryLimits {
     limits.max_total_bytes = limits
         .max_total_bytes
         .min(stage.host().ceilings.maximum_memory_bytes / 3);
-    limits.max_total_bytes = limits.max_total_bytes.min(
-        stage.host().ceilings.maximum_artifact_bytes,
-    );
+    limits.max_total_bytes = limits
+        .max_total_bytes
+        .min(stage.host().ceilings.maximum_artifact_bytes);
     limits.max_object_bytes = limits.max_object_bytes.min(limits.max_total_bytes);
     limits
 }

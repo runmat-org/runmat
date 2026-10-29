@@ -33,7 +33,8 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
@@ -50,7 +51,9 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "stationary".into(),
             kind: FluidConstraintKind::NoSlipWall {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_insulated",
+                )),
             },
         }));
     model
@@ -58,7 +61,9 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Constant([Velocity::new(0.0); 3]),
             },
         }));
@@ -274,7 +279,6 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     cells.sort_by_key(|&cell| source.topology.cells[cell].source_element_index);
     for (field, expected) in native.fields().iter().zip([
         cells
-            
             .iter()
             .flat_map(|&cell| result.original().velocity_m_per_s.canonical_values()[cell])
             .collect::<Vec<_>>(),
@@ -282,7 +286,11 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
             .iter()
             .map(|&cell| result.original().pressure_pa.canonical_values()[cell])
             .collect(),
-        result.original().face_volume_flux_m3_per_s.canonical_values().clone(),
+        result
+            .original()
+            .face_volume_flux_m3_per_s
+            .canonical_values()
+            .clone(),
     ]) {
         assert_eq!(
             field.storage().values,
@@ -399,7 +407,10 @@ fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observa
         .all(|field| field.definition().support().is_complete()));
     assert_eq!(
         artifact.fields()[2].storage().as_host_f64().unwrap(),
-        &result.original().face_volume_flux_m3_per_s.canonical_values()[..]
+        &result
+            .original()
+            .face_volume_flux_m3_per_s
+            .canonical_values()[..]
     );
     let definitions = artifact
         .fields()
@@ -456,7 +467,8 @@ fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expan
             > projection.numerical.resident_bytes_upper_bound
     );
     let mut caller_limited = workload.clone();
-    caller_limited.policy.maximum_resident_bytes = Some(projection.phase_resident_bytes_upper_bound.0 - 1);
+    caller_limited.policy.maximum_resident_bytes =
+        Some(projection.phase_resident_bytes_upper_bound.0 - 1);
     assert!(caller_limited.prepare(&mesh).is_ok());
     assert!(
         crate::planning::resource::derive_fluid_steady_resource_projection(&caller_limited, &mesh)
@@ -564,7 +576,8 @@ fn missing_original_cell_material_boundary_or_source_and_stale_cfd_reject() {
     wrong.model.material_assignments.clear();
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
-    wrong.model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    wrong.model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
     wrong.model.constraints.pop();

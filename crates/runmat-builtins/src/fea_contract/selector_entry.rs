@@ -11,9 +11,9 @@ use super::identities::{
 };
 use crate::{
     catalog::{argument_error, finish_fixed},
-    BuiltinCatalogEntry, BuiltinCompletionPolicy, BuiltinDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCatalogEntry, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
@@ -151,7 +151,11 @@ pub fn infer_output_named(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
             request.arguments.len(),
         ));
     }
-    if request.arguments.first().is_some_and(|name| !host_text(name)) {
+    if request
+        .arguments
+        .first()
+        .is_some_and(|name| !host_text(name))
+    {
         diagnostics.push(argument_error(
             "RM-CATALOG-FEA-TEXT",
             "fea.OutputField.named requires a text output name",
@@ -169,7 +173,12 @@ pub fn infer_output_named(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
             0,
         ));
     }
-    finish_fixed(entry, request, object_fact(FEA_OUTPUT_FIELD_CLASS), diagnostics)
+    finish_fixed(
+        entry,
+        request,
+        object_fact(FEA_OUTPUT_FIELD_CLASS),
+        diagnostics,
+    )
 }
 
 #[cfg(test)]
@@ -213,7 +222,11 @@ mod tests {
     }
 
     fn codes(inference: &CallInference) -> Vec<&str> {
-        inference.diagnostics.iter().map(|d| d.code.as_str()).collect()
+        inference
+            .diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect()
     }
 
     fn class(inference: &CallInference) -> Option<String> {
@@ -226,14 +239,20 @@ mod tests {
     #[test]
     fn selectors_are_pure_and_return_their_exact_class() {
         let entry = entry();
-        assert_eq!(entry.contract.effects, &[runmat_types::EffectKind::MayThrow]);
+        assert_eq!(
+            entry.contract.effects,
+            &[runmat_types::EffectKind::MayThrow]
+        );
         let structural = infer_structural(&request(vec![], vec![]), &entry);
         assert!(structural.diagnostics.is_empty());
         assert_eq!(class(&structural).as_deref(), Some("fea.StructuralField"));
         let nodal = infer_response_spectrum_nodal(&request(vec![], vec![]), &entry);
         assert_eq!(class(&nodal).as_deref(), Some("fea.ResponseSpectrumField"));
         let extra = infer_structural(
-            &request(vec![ValueFact::scalar(ValueKindFact::String)], vec![LiteralValue::Unknown]),
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::String)],
+                vec![LiteralValue::Unknown],
+            ),
             &entry,
         );
         assert!(codes(&extra).contains(&"RM-CATALOG-FEA-ARITY"));
@@ -243,7 +262,10 @@ mod tests {
     fn statistical_selectors_require_a_structural_quantity() {
         let entry = entry();
         let valid = infer_random_response(
-            &request(vec![object_fact(FEA_STRUCTURAL_FIELD_CLASS)], vec![LiteralValue::Unknown]),
+            &request(
+                vec![object_fact(FEA_STRUCTURAL_FIELD_CLASS)],
+                vec![LiteralValue::Unknown],
+            ),
             &entry,
         );
         assert!(valid.diagnostics.is_empty(), "{:?}", valid.diagnostics);
@@ -287,7 +309,10 @@ mod tests {
         assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-OUTPUT-NAME"));
         assert_eq!(class(&invalid).as_deref(), Some("fea.OutputField"));
         let numeric = infer_output_named(
-            &request(vec![ValueFact::scalar(ValueKindFact::Logical)], vec![LiteralValue::Unknown]),
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::Logical)],
+                vec![LiteralValue::Unknown],
+            ),
             &entry,
         );
         assert!(codes(&numeric).contains(&"RM-CATALOG-FEA-TEXT"));

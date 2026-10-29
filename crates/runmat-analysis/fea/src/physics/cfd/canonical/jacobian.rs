@@ -227,8 +227,8 @@ pub(super) fn assemble(
         };
         // Correction blocks per column cell.
         let mut blocks: Vec<(usize, [[f64; 3]; 3])> = Vec::new();
-        let mut add_block = |m: usize, block: [[f64; 3]; 3]| {
-            match blocks.iter_mut().find(|(cell, _)| *cell == m) {
+        let mut add_block =
+            |m: usize, block: [[f64; 3]; 3]| match blocks.iter_mut().find(|(cell, _)| *cell == m) {
                 Some((_, existing)) => {
                     for k in 0..3 {
                         for j in 0..3 {
@@ -237,8 +237,7 @@ pub(super) fn assemble(
                     }
                 }
                 None => blocks.push((m, block)),
-            }
-        };
+            };
         // Viscous remainder μ [ n_d (∂u_k/∂x · t) + Σ_i (∂u_i/∂x_k) A_i ].
         for &(cell, lambda) in &sources {
             for (m, term) in &p.momentum_jacobian.gradient[cell] {
@@ -267,9 +266,7 @@ pub(super) fn assemble(
             for (m, term) in &p.momentum_jacobian.gradient[cell] {
                 add_block(
                     *m,
-                    std::array::from_fn(|k| {
-                        std::array::from_fn(|j| -factor * dot(term[k][j], d))
-                    }),
+                    std::array::from_fn(|k| std::array::from_fn(|j| -factor * dot(term[k][j], d))),
                 );
             }
         };
@@ -285,8 +282,8 @@ pub(super) fn assemble(
             );
             trace(f.owner, mass_flux, &mut add_block);
         } else {
-            let velocity_face = f.neighbor.is_none()
-                && matches!(p.boundaries[i], FaceBoundary::Velocity { .. });
+            let velocity_face =
+                f.neighbor.is_none() && matches!(p.boundaries[i], FaceBoundary::Velocity { .. });
             if velocity_face {
                 // Upwind is the boundary value; the remainder ρq (value − u_owner) for q ≥ 0.
                 if transported >= 0.0 {

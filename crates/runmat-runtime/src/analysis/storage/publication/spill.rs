@@ -46,7 +46,10 @@ impl SpilledChunks {
     }
 
     /// Reads one chunk back and re-authenticates it.
-    pub(in crate::analysis::storage) fn read(&self, digest: &Digest) -> Result<Option<Vec<u8>>, String> {
+    pub(in crate::analysis::storage) fn read(
+        &self,
+        digest: &Digest,
+    ) -> Result<Option<Vec<u8>>, String> {
         let Some(length) = self.lengths.get(digest) else {
             return Ok(None);
         };
@@ -71,7 +74,11 @@ impl SpilledChunks {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn existing_path(&self, digest: Digest) -> Option<std::path::PathBuf> {
-        let hex: String = digest.bytes().iter().map(|byte| format!("{byte:02x}")).collect();
+        let hex: String = digest
+            .bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         self.area.as_ref().map(|area| area.path().join(hex))
     }
 

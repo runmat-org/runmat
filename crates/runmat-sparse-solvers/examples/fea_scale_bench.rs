@@ -16,7 +16,9 @@
 use std::time::Instant;
 
 use runmat_sparse_solvers::control::SolveControl;
-use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind, SymbolicFactorization};
+use runmat_sparse_solvers::direct::{
+    DirectOptions, DirectSolver, FactorKind, SymbolicFactorization,
+};
 use runmat_sparse_solvers::eigen::{modal, EigenOptions};
 use runmat_sparse_solvers::krylov::{gmres, pcg, GmresOptions, KrylovOptions};
 use runmat_sparse_solvers::ordering::Ordering;
@@ -31,7 +33,11 @@ fn peak_rss_gib() -> f64 {
         libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr());
         usage.assume_init().ru_maxrss as u64
     };
-    let bytes = if cfg!(target_os = "macos") { max } else { max * 1024 };
+    let bytes = if cfg!(target_os = "macos") {
+        max
+    } else {
+        max * 1024
+    };
     bytes as f64 / (1u64 << 30) as f64
 }
 
@@ -150,7 +156,11 @@ fn main() {
             let spmv = median_seconds(10, || a.as_ref().spmv(&r, &mut y));
             let t = Instant::now();
             let mut x = vec![0.0; n];
-            let options = KrylovOptions { rtol: 1e-8, max_iterations: 2000, ..Default::default() };
+            let options = KrylovOptions {
+                rtol: 1e-8,
+                max_iterations: 2000,
+                ..Default::default()
+            };
             let report = pcg(&a, Some(&amg), &b, &mut x, &options, SolveControl::NONE).unwrap();
             let solve = t.elapsed().as_secs_f64();
             let iterations = report.iterations.max(1) as f64;
@@ -169,13 +179,28 @@ fn main() {
             let p = elasticity3d(grid, grid, grid);
             let (a, b) = (p.matrix, p.load);
             let n = a.nrows();
-            let options = DirectOptions { ordering: Ordering::NestedDissection, ..DirectOptions::new(FactorKind::Cholesky) };
+            let options = DirectOptions {
+                ordering: Ordering::NestedDissection,
+                ..DirectOptions::new(FactorKind::Cholesky)
+            };
             let t = Instant::now();
-            let symbolic = SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE).unwrap();
+            let symbolic = SymbolicFactorization::analyze::<f64>(
+                a.as_ref().into(),
+                &options,
+                SolveControl::NONE,
+            )
+            .unwrap();
             let analyze = t.elapsed().as_secs_f64();
             let estimate = symbolic.estimate();
             let t = Instant::now();
-            let solver = DirectSolver::factorize(symbolic, a.as_ref().into(), options, None, SolveControl::NONE).unwrap();
+            let solver = DirectSolver::factorize(
+                symbolic,
+                a.as_ref().into(),
+                options,
+                None,
+                SolveControl::NONE,
+            )
+            .unwrap();
             let factor = t.elapsed().as_secs_f64();
             let t = Instant::now();
             let mut x = b.clone();
@@ -195,8 +220,15 @@ fn main() {
             let a = convection3d(grid);
             let n = a.nrows();
             let b = par::seeded_vector::<f64>(n, 9);
-            let options = KrylovOptions { rtol: 1e-8, max_iterations: 3000, ..Default::default() };
-            let gmres_options = GmresOptions { restart: 30, ..Default::default() };
+            let options = KrylovOptions {
+                rtol: 1e-8,
+                max_iterations: 3000,
+                ..Default::default()
+            };
+            let gmres_options = GmresOptions {
+                restart: 30,
+                ..Default::default()
+            };
             let t = Instant::now();
             let ilu = Ilu0::new(a.as_ref(), false).unwrap();
             let ilu_setup = t.elapsed().as_secs_f64();
@@ -205,7 +237,16 @@ fn main() {
             let ilu_apply = median_seconds(5, || ilu.apply(&r, &mut z).unwrap());
             let t = Instant::now();
             let mut x = vec![0.0; n];
-            let report = gmres(&a, Some(&ilu), &b, &mut x, &options, &gmres_options, SolveControl::NONE).unwrap();
+            let report = gmres(
+                &a,
+                Some(&ilu),
+                &b,
+                &mut x,
+                &options,
+                &gmres_options,
+                SolveControl::NONE,
+            )
+            .unwrap();
             let solve = t.elapsed().as_secs_f64();
             println!(
                 "{{\"section\":\"cfd_gmres_ilu0\",\"n\":{n},\"nnz\":{},\"threads\":{threads},\"setup_s\":{ilu_setup:.3},\"apply_s\":{ilu_apply:.5},\"solve_s\":{solve:.3},\"iterations\":{},\"per_iteration_s\":{:.5},\"relative_residual\":{:.2e}}}",
@@ -216,7 +257,16 @@ fn main() {
             let amg_setup = t.elapsed().as_secs_f64();
             let t = Instant::now();
             let mut x = vec![0.0; n];
-            let report = gmres(&a, Some(&amg), &b, &mut x, &options, &gmres_options, SolveControl::NONE).unwrap();
+            let report = gmres(
+                &a,
+                Some(&amg),
+                &b,
+                &mut x,
+                &options,
+                &gmres_options,
+                SolveControl::NONE,
+            )
+            .unwrap();
             let solve = t.elapsed().as_secs_f64();
             println!(
                 "{{\"section\":\"cfd_gmres_amg\",\"n\":{n},\"threads\":{threads},\"setup_s\":{amg_setup:.3},\"solve_s\":{solve:.3},\"iterations\":{},\"per_iteration_s\":{:.5},\"relative_residual\":{:.2e}}}",
@@ -224,11 +274,20 @@ fn main() {
             );
             let pressure = poisson3d::<f64>(grid, grid, grid);
             let t = Instant::now();
-            let amg = Amg::new(pressure.as_ref(), AmgOptions::default(), SolveControl::NONE).unwrap();
+            let amg =
+                Amg::new(pressure.as_ref(), AmgOptions::default(), SolveControl::NONE).unwrap();
             let setup = t.elapsed().as_secs_f64();
             let t = Instant::now();
             let mut x = vec![0.0; n];
-            let report = pcg(&pressure, Some(&amg), &b, &mut x, &options, SolveControl::NONE).unwrap();
+            let report = pcg(
+                &pressure,
+                Some(&amg),
+                &b,
+                &mut x,
+                &options,
+                SolveControl::NONE,
+            )
+            .unwrap();
             let solve = t.elapsed().as_secs_f64();
             println!(
                 "{{\"section\":\"cfd_pressure_amg_pcg\",\"n\":{n},\"threads\":{threads},\"setup_s\":{setup:.3},\"solve_s\":{solve:.3},\"iterations\":{},\"relative_residual\":{:.2e},\"peak_rss_gib\":{:.2}}}",
@@ -245,7 +304,16 @@ fn main() {
             }
             let m: CsrMatrix<f64> = mass.build();
             let t = Instant::now();
-            let result = modal(k.as_ref(), m.as_ref(), &EigenOptions { count: 10, ..Default::default() }, SolveControl::NONE).unwrap();
+            let result = modal(
+                k.as_ref(),
+                m.as_ref(),
+                &EigenOptions {
+                    count: 10,
+                    ..Default::default()
+                },
+                SolveControl::NONE,
+            )
+            .unwrap();
             let total = t.elapsed().as_secs_f64();
             println!(
                 "{{\"section\":\"modal\",\"n\":{n},\"threads\":{threads},\"modes\":{},\"total_s\":{total:.3},\"restarts\":{},\"operator_applications\":{},\"max_residual\":{:.2e},\"converged\":{},\"peak_rss_gib\":{:.2}}}",

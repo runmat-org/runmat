@@ -148,7 +148,10 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     let decoded = decode_structural_study_root(prepared.request(), &store).unwrap();
     assert_eq!(decoded.study, realized);
     assert_eq!(decoded.materials, resolved.material_catalog);
-    assert_eq!(decoded.planning, crate::StudyRootPlanning::Structural(planning));
+    assert_eq!(
+        decoded.planning,
+        crate::StudyRootPlanning::Structural(planning)
+    );
     assert_eq!(decoded.local_execution, local_execution);
     // memory_per_worker travels with the root, so a remote placement plans within it too.
     assert_eq!(decoded.memory_per_worker_bytes, Some(3 << 30));

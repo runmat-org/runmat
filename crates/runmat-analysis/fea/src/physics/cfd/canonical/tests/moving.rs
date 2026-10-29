@@ -12,7 +12,9 @@ use runmat_analysis_core::{
 fn uniform_stream_is_preserved_on_a_moving_mesh() {
     let mut f = case(3, ReferenceCase::Couette, false);
     let stream = [0.7, -0.2, 0.1];
-    let mut inflow = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("walls_and_inlet"));
+    let mut inflow = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+        "walls_and_inlet",
+    ));
     inflow
         .bind_resolved_entities(
             f.constraints
@@ -53,7 +55,10 @@ fn uniform_stream_is_preserved_on_a_moving_mesh() {
     let mut moved = f.mesh.clone();
     for node in &mut moved.topology.nodes {
         let x = node.coordinates_m;
-        if x.canonical_values().iter().all(|v| *v > 1e-9 && *v < 1.0 - 1e-9) {
+        if x.canonical_values()
+            .iter()
+            .all(|v| *v > 1e-9 && *v < 1.0 - 1e-9)
+        {
             node.coordinates_m = runmat_types::physical::Quantity::new([
                 x.canonical_value()[0] + 0.04 * (3.0 * x.canonical_value()[1]).sin(),
                 x.canonical_value()[1] - 0.03 * (2.0 * x.canonical_value()[2]).cos(),

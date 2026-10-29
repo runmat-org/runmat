@@ -6,8 +6,8 @@ use super::{
     model_authoring::{AuthoredModelError, AuthoredRegionSource},
     prescribed_value::PrescribedValue,
     quantity::{
-        Damping, FoundationModulus, FrictionCoefficient, HeatFlux, HeatTransferCoefficient,
-        CanonicalQuantity, Pressure, SpecificAcousticImpedance, Stiffness, SurfaceEmissivity,
+        CanonicalQuantity, Damping, FoundationModulus, FrictionCoefficient, HeatFlux,
+        HeatTransferCoefficient, Pressure, SpecificAcousticImpedance, Stiffness, SurfaceEmissivity,
         Temperature, ThermalContactResistance,
     },
 };
@@ -74,7 +74,9 @@ impl AuthoredBoundaryKind {
             Self::ThermalRadiation { emissivity, .. } => emissivity.validate_inputs(
                 inputs,
                 &[
-                    AuthoredInputType::Quantity(runmat_types::PhysicalDimension::DIMENSIONLESS.into()),
+                    AuthoredInputType::Quantity(
+                        runmat_types::PhysicalDimension::DIMENSIONLESS.into(),
+                    ),
                     AuthoredInputType::Real,
                 ],
             ),
@@ -227,11 +229,11 @@ impl AuthoredBoundary {
                 emissivity.constant().is_none_or(|emissivity| {
                     emissivity.is_finite() && (0.0..=1.0).contains(&emissivity.canonical_value())
                 }) && match ambient_temperature {
-                        PrescribedValue::Constant(value) => {
-                            value.is_finite() && value.canonical_value() >= 0.0
-                        }
-                        PrescribedValue::Signal(_) => true,
+                    PrescribedValue::Constant(value) => {
+                        value.is_finite() && value.canonical_value() >= 0.0
                     }
+                    PrescribedValue::Signal(_) => true,
+                }
             }
             AuthoredBoundaryKind::AcousticImpedance { impedance } => {
                 impedance.is_finite() && impedance.canonical_value() > 0.0

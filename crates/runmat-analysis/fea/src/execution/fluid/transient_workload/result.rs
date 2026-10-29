@@ -45,7 +45,9 @@ impl FluidTransientSolverResult {
         })
     }
     /// Retained original intervals with their schedule interval ordinals.
-    pub fn retained_results(&self) -> &[(usize, crate::physics::cfd::canonical::CanonicalFluidResult)] {
+    pub fn retained_results(
+        &self,
+    ) -> &[(usize, crate::physics::cfd::canonical::CanonicalFluidResult)] {
         self.data.original.retained_results()
     }
     /// Evidence of every accepted interval.

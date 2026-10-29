@@ -177,7 +177,8 @@ struct StandardDigestView<'a> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     observation_histories: &'a Vec<PersistedObservationHistory>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    original_fields: &'a Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
+    original_fields:
+        &'a Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     dynamic_balance: &'a Option<PersistedDynamicBalance>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -320,7 +321,10 @@ impl AnalysisPublicationBuilder {
         validate_run_identity(run)?;
         let mut requested = 0u64;
         let mut denied = None;
-        let mut spill = self.spill.lock().map_err(|_| "publication spill lock poisoned")?;
+        let mut spill = self
+            .spill
+            .lock()
+            .map_err(|_| "publication spill lock poisoned")?;
         // Field payloads stream to the spill area: each is charged only while in flight, on
         // top of what staging already retains, and released once its chunks are written.
         struct Streamed<'a> {
@@ -431,14 +435,19 @@ impl AnalysisPublicationBuilder {
     /// staged record goes through here.
     pub(in crate::analysis::storage) fn read_staged_chunks<R>(
         &self,
-        read: impl FnOnce(&mut dyn FnMut(Digest) -> Result<Option<Vec<u8>>, String>) -> Result<R, String>,
+        read: impl FnOnce(
+            &mut dyn FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
+        ) -> Result<R, String>,
     ) -> Result<R, String> {
         let chunks = self
             .store
             .chunks
             .read()
             .map_err(|_| "publication chunks poisoned")?;
-        let spilled = self.spill.lock().map_err(|_| "publication spill lock poisoned")?;
+        let spilled = self
+            .spill
+            .lock()
+            .map_err(|_| "publication spill lock poisoned")?;
         read(&mut |digest| match chunks.get(&digest) {
             Some(bytes) => Ok(Some(bytes.to_vec())),
             None => spilled.read(&digest),
@@ -732,11 +741,9 @@ pub use outcome::AnalysisPublicationError;
 pub(in crate::analysis) fn stage_and_read_back_for_tests(
     run: &AnalysisRunResult,
 ) -> Result<(AnalysisRunResult, usize), String> {
-    let builder = AnalysisPublicationBuilder::new(
-        Digest::sha256(b"staged-run-readback"),
-        512 * 1024 * 1024,
-    )
-    .map_err(|error| error.to_string())?;
+    let builder =
+        AnalysisPublicationBuilder::new(Digest::sha256(b"staged-run-readback"), 512 * 1024 * 1024)
+            .map_err(|error| error.to_string())?;
     builder.stage_run(run).map_err(|error| error.to_string())?;
     let spilled = builder
         .spill

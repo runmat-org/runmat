@@ -467,7 +467,10 @@ fn shape_candidate_never_rewrites_a_sizing_validated_shared_curve() {
     // the curve it can be neither inserted nor used to split it, so it is withdrawn.
     assert_eq!(classify([0.0, 1.5]), ExactFaceCandidateDisposition::Insert);
     assert_eq!(classify([0.0, 0.1]), ExactFaceCandidateDisposition::Insert);
-    assert_eq!(classify([0.0, 0.0]), ExactFaceCandidateDisposition::Withdraw);
+    assert_eq!(
+        classify([0.0, 0.0]),
+        ExactFaceCandidateDisposition::Withdraw
+    );
 }
 
 #[test]

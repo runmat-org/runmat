@@ -1,7 +1,7 @@
 //! Placement-neutral accepted static acoustic response evidence with authenticated object-source authority.
 use runmat_analysis_fea::execution::{
-    CanonicalSemanticState, AcousticResponseNumericalReceiptArtifact, AcousticResponseSolverResult,
-    AcousticResponseWorkload,
+    AcousticResponseNumericalReceiptArtifact, AcousticResponseSolverResult,
+    AcousticResponseWorkload, CanonicalSemanticState,
 };
 use runmat_execution::{
     value::{PublishedObjectCatalog, PublishedObjectSource, ValueRef},

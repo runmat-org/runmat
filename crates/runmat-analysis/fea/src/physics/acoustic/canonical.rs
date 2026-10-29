@@ -15,7 +15,8 @@ mod real_solve;
 mod transient;
 pub use modal::{solve_canonical_modal, AcousticModalPolicy, CanonicalAcousticModes};
 pub use transient::{
-    solve_canonical_transient, AcousticTransientPolicy, CanonicalAcousticTransient, TransientRetention,
+    solve_canonical_transient, AcousticTransientPolicy, CanonicalAcousticTransient,
+    TransientRetention,
 };
 mod periodic;
 mod recovery;

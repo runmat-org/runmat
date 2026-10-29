@@ -46,7 +46,11 @@ fn dense_numeric_inventory_uses_original_nodes_and_bytes() {
     .unwrap();
     let (profile, length) = chunked_profile(bytes.chunks(257), &NeverCancelled).unwrap();
     assert_eq!(
-        (profile.value_nodes, profile.map_entries, profile.string_bytes),
+        (
+            profile.value_nodes,
+            profile.map_entries,
+            profile.string_bytes
+        ),
         (100_001, 0, 0)
     );
     assert_eq!(length, bytes.len() as u64);
@@ -135,9 +139,13 @@ fn admission_value_and_envelope_share_the_same_independent_structural_inventory(
         |value| {
             let (profile, bytes) = value_profile(value, &NeverCancelled)?;
             assert_eq!(
-        (profile.value_nodes, profile.map_entries, profile.string_bytes),
-        (8, 2, 15)
-    );
+                (
+                    profile.value_nodes,
+                    profile.map_entries,
+                    profile.string_bytes
+                ),
+                (8, 2, 15)
+            );
             assert_eq!(bytes, value.len() as u64);
             let value_estimate = crate::canonical_value_materialization_resident_bytes_estimate(
                 value,

@@ -126,8 +126,7 @@ pub fn prepare_thermal_study_publication(
             )
         })?;
     let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence)
-            .map_err(invalid)?;
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
 
     // Reconstruct only retained partitions; the shared owner also validates accuracy/resource
     // closure and projects catalog-backed observations without gathering or evaluating them.

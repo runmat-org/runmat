@@ -100,7 +100,16 @@ fn signal(
     if waveform {
         return waveform::lower(declaration, id, domain, body, kind, wrap, diagnostics);
     }
-    constant_signal(declaration, id, quantity, domain, body, kind, wrap, diagnostics)
+    constant_signal(
+        declaration,
+        id,
+        quantity,
+        domain,
+        body,
+        kind,
+        wrap,
+        diagnostics,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -127,7 +136,13 @@ fn constant_signal(
     }
     validate_assignments(declaration, body, &["value", "frame"], diagnostics);
     let expression = required_assignment(declaration, body, "value", diagnostics)?;
-    authored_unit_matches(declaration, quantity, expression, kind.dimension(), diagnostics)?;
+    authored_unit_matches(
+        declaration,
+        quantity,
+        expression,
+        kind.dimension(),
+        diagnostics,
+    )?;
     let raw = signal_value(declaration, expression, kind, diagnostics)?;
     let frame = optional_frame(declaration, body, raw.is_vector(), diagnostics)?;
     Some(wrap(signal_contract(

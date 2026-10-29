@@ -2,14 +2,13 @@ use super::*;
 
 pub(super) fn implicit_resource_plan_input_facts(
 ) -> Result<PreparedInputResourceFacts, ResourcePlanningError> {
-    let decoded =
-        runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
-            RESOURCE_PLAN_MAX_ENCODED_BYTES,
-            1,
-        )
-        .ok_or(ResourcePlanningError::Overflow(
-            "resource-plan decoded residency budget",
-        ))?;
+    let decoded = runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
+        RESOURCE_PLAN_MAX_ENCODED_BYTES,
+        1,
+    )
+    .ok_or(ResourcePlanningError::Overflow(
+        "resource-plan decoded residency budget",
+    ))?;
     let transport = add(
         RESOURCE_PLAN_MAX_ENCODED_BYTES,
         crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,

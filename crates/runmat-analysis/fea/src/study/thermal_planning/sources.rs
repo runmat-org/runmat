@@ -1,8 +1,9 @@
 use super::ThermalStudyPlanningError;
 use crate::{
     excitation::{
-        realize_step_excitations, sample_prescribed_heat_flux, sample_prescribed_temperature, sample_prescribed_temperature_difference,
-        ExcitationSamplePoint, RealizedExcitationKind, RealizedExcitationTarget,
+        realize_step_excitations, sample_prescribed_heat_flux, sample_prescribed_temperature,
+        sample_prescribed_temperature_difference, ExcitationSamplePoint, RealizedExcitationKind,
+        RealizedExcitationTarget,
     },
     execution::{ThermalSolveSchedule, ThermalWorkload},
     ThermalProcedureControl,

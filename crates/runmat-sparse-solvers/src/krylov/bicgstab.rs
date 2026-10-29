@@ -1,6 +1,8 @@
 //! Right-preconditioned BiCGStab (van der Vorst) for general systems.
 
-use super::{relative, split_work, tolerance, ApplyStatus, KrylovOps, KrylovOptions, KrylovReport, StopFlag};
+use super::{
+    relative, split_work, tolerance, ApplyStatus, KrylovOps, KrylovOptions, KrylovReport, StopFlag,
+};
 use crate::error::SolverResult;
 use crate::par;
 use crate::scalar::Scalar;
@@ -18,7 +20,11 @@ pub async fn bicgstab_async<T: Scalar, O: KrylovOps<T>>(
 ) -> SolverResult<KrylovReport> {
     let n = b.len();
     let mut parts = split_work(work, n, 7 + usize::from(options.return_best_iterate));
-    let mut best = if options.return_best_iterate { parts.pop() } else { None };
+    let mut best = if options.return_best_iterate {
+        parts.pop()
+    } else {
+        None
+    };
     let mut it = parts.into_iter();
     let (r, rhat, p, v, t, phat, shat) = (
         it.next().unwrap(),
@@ -67,7 +73,8 @@ pub async fn bicgstab_async<T: Scalar, O: KrylovOps<T>>(
         let mut stagnant = 0usize;
         while iteration < options.max_iterations {
             iteration += 1;
-            ops.checkpoint(iteration, relative(residual, rhs_norm)).await?;
+            ops.checkpoint(iteration, relative(residual, rhs_norm))
+                .await?;
             let rho = par::dot(rhat, r);
             if rho.abs() == 0.0 || !rho.is_finite() {
                 flag = StopFlag::Breakdown;

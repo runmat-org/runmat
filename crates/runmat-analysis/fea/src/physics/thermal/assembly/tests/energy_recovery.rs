@@ -215,7 +215,9 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
             let selector = face.provenance[0].analysis_selection_id().unwrap();
             model.boundaries = vec![AnalysisBoundary {
                 boundary_id: "physical_robin".into(),
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)),
+                ),
                 operator: BoundaryOperator::ThermalConvection {
                     ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient)),
                     coefficient: HeatTransferCoefficient::new(18.0),
@@ -296,7 +298,9 @@ fn small_boundary_flux_is_not_lost_in_robin_forcing_regardless_of_operator_order
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let face = &projection.boundary_faces[0];
     let selector = face.provenance[0].analysis_selection_id().unwrap();
-    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)));
+    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+        &(selector),
+    ));
     model.boundaries = vec![
         AnalysisBoundary {
             boundary_id: "ambient".into(),
@@ -348,8 +352,14 @@ fn bar_between_two_fixed_temperatures_reports_its_closed_form_heat_flow() {
     // prescribed end faces x = 0 and x = 1 each have area 1 m^2.
     let (length_m, area_m2) = (1.0, 1.0);
     for (order, mesh) in [
-        (ElementOrder::Tet4, runmat_meshing_core::fixtures::slab_mesh(2)),
-        (ElementOrder::Tet10, runmat_meshing_core::fixtures::quadratic_slab_mesh(2)),
+        (
+            ElementOrder::Tet4,
+            runmat_meshing_core::fixtures::slab_mesh(2),
+        ),
+        (
+            ElementOrder::Tet10,
+            runmat_meshing_core::fixtures::quadratic_slab_mesh(2),
+        ),
     ] {
         let mut assembly = energy_assembly_on(&model, &mesh, 0.0);
         let coordinates = assembly
@@ -516,7 +526,9 @@ fn steady_increment_formulation_preserves_exact_equilibrium_without_erasing_smal
             if robin_anchor {
                 model.boundaries.push(AnalysisBoundary {
                     boundary_id: "increment_robin".into(),
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)),
+                    ),
                     operator: BoundaryOperator::ThermalConvection {
                         ambient_temperature: PrescribedValue::Constant(Temperature::new(
                             equilibrium_k,
@@ -530,7 +542,11 @@ fn steady_increment_formulation_preserves_exact_equilibrium_without_erasing_smal
                     .push(AnalysisConstraint::Thermal(ThermalConstraint {
                         constraint_id: "increment_fixed".into(),
                         kind: ThermalConstraintKind::Prescribed {
-                            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
+                            target: RegionTarget::boundary(
+                                runmat_meshing_core::fixtures::fixture_boundary_selection(
+                                    &(selector),
+                                ),
+                            ),
                             value: PrescribedValue::Constant(Temperature::new(equilibrium_k)),
                         },
                     }));

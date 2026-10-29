@@ -24,9 +24,15 @@ fn bound_is_javascript_safe_integer() {
     assert_eq!(bounded(MAX_WIRE_INTEGER), Some(MAX_WIRE_INTEGER));
     assert_eq!(bounded(MAX_WIRE_INTEGER + 1), None);
     assert_eq!(bounded(u64::MAX), None);
-    assert_eq!(bounded(-(MAX_WIRE_INTEGER as i64)), Some(-(MAX_WIRE_INTEGER as i64)));
+    assert_eq!(
+        bounded(-(MAX_WIRE_INTEGER as i64)),
+        Some(-(MAX_WIRE_INTEGER as i64))
+    );
     assert_eq!(bounded(-(MAX_WIRE_INTEGER as i64) - 1), None);
-    assert_eq!(bounded_whole_f64(9_007_199_254_740_991.0), Some(MAX_WIRE_INTEGER));
+    assert_eq!(
+        bounded_whole_f64(9_007_199_254_740_991.0),
+        Some(MAX_WIRE_INTEGER)
+    );
     assert_eq!(bounded_whole_f64(9_007_199_254_740_992.0), None);
     assert_eq!(bounded_whole_f64(1.5), None);
     assert_eq!(bounded_whole_f64(-1.0), None);

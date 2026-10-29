@@ -270,7 +270,9 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
     // The output set is the one root manifest listing this phase's output roots. Its bound is
     // the root schema bound, not the numerical payload bound carried by the prepared output.
     let output_set = output_set.unwrap_or(PreparedOutputSetResourceFacts {
-        encoded_bytes_upper_bound: ByteCount(crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES),
+        encoded_bytes_upper_bound: ByteCount(
+            crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES,
+        ),
     });
     if output_set.encoded_bytes_upper_bound.0 == 0
         || output_set.encoded_bytes_upper_bound.0

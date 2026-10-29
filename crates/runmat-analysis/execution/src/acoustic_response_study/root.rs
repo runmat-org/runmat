@@ -7,12 +7,12 @@ use std::collections::BTreeMap;
 
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, AnalysisObjectManifest, AcousticResponseWorkload,
+        AcousticResponseWorkload, AnalysisNumericalObjectKind, AnalysisObjectManifest,
         ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
     },
     study::{
-        plan_acoustic_response_study, CompiledAnalysisStudy, AcousticResponseStudyPlanningPolicy,
-        AcousticResponseStudyProduct,
+        plan_acoustic_response_study, AcousticResponseStudyPlanningPolicy,
+        AcousticResponseStudyProduct, CompiledAnalysisStudy,
     },
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
@@ -28,8 +28,8 @@ use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    import_acoustic_response_study_completion, CompletedAcousticResponseStudy, AcousticResponseStudyPreparation,
-    AcousticResponseStudyResultClosure,
+    import_acoustic_response_study_completion, AcousticResponseStudyPreparation,
+    AcousticResponseStudyResultClosure, CompletedAcousticResponseStudy,
 };
 use crate::{
     import_analysis_objects, prepare_analysis_objects, AnalysisBridgeError, AnalysisBridgeResult,
@@ -187,7 +187,9 @@ pub fn import_acoustic_response_study_root(
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<CompletedAcousticResponseStudy> {
     if root.logical_digest != expected_root {
-        return Err(invalid("acoustic response root differs from trusted digest"));
+        return Err(invalid(
+            "acoustic response root differs from trusted digest",
+        ));
     }
     access.validate_reference(
         root,
@@ -207,10 +209,16 @@ pub fn import_acoustic_response_study_root(
     )?;
     let payload = objects.payload();
     if manifest.logical_identity != Digest::sha256(&payload) {
-        return Err(invalid("acoustic response completion payload identity differs"));
+        return Err(invalid(
+            "acoustic response completion payload identity differs",
+        ));
     }
-    let wire: CompletionWire =
-        decode_contract(PREFIX, "acoustic-response-study-completion", &payload, LIMITS)?;
+    let wire: CompletionWire = decode_contract(
+        PREFIX,
+        "acoustic-response-study-completion",
+        &payload,
+        LIMITS,
+    )?;
     if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported acoustic response completion schema"));
     }
@@ -288,7 +296,9 @@ fn unique(references: Vec<ValueRef>) -> AnalysisBridgeResult<Vec<ValueRef>> {
     for reference in references {
         if let Some(previous) = by_id.insert(reference.id, reference.clone()) {
             if previous != reference {
-                return Err(invalid("acoustic response closure reference identity conflict"));
+                return Err(invalid(
+                    "acoustic response closure reference identity conflict",
+                ));
             }
         }
     }

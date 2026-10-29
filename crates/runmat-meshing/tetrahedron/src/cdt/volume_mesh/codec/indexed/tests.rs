@@ -31,10 +31,10 @@ fn mesh(permuted: bool, background: usize, scoped: bool) -> DelaunayVolumeMesh {
             ),
         )
         .unwrap();
-        assert!(result
-            .quality_mutations
-            .iter()
-            .any(|step| matches!(step, crate::cdt::DelaunayVolumeQualityMutation::Optimized(_))));
+        assert!(result.quality_mutations.iter().any(|step| matches!(
+            step,
+            crate::cdt::DelaunayVolumeQualityMutation::Optimized(_)
+        )));
         DelaunayVolumeMesh {
             topology: result.topology,
             provenance: result.provenance,

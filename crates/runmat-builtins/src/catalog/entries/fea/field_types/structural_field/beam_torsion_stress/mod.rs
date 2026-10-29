@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const BEAM_TORSION_STRESS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.beamTorsionStress()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const BEAM_TORSION_STRESS_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&BEAM_TORSION_STRESS_SIGNATURES);
+const BEAM_TORSION_STRESS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.beamTorsionStress()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const BEAM_TORSION_STRESS_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&BEAM_TORSION_STRESS_SIGNATURES);
 const BEAM_TORSION_STRESS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-beam-torsion-stress",
     title: "Select beam torsion stress",

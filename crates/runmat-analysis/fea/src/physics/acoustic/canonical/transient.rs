@@ -223,9 +223,15 @@ pub fn solve_canonical_transient(
     let (next, mut prescribed, mut g_previous) = sample(assembly, times[0])?;
     assembly = next;
     // Numerical boundary: the Newmark recurrence runs on the canonical operator storage.
-    let damping = assembly.impedance.with_canonical_storage(RealSparseMatrix::clone);
-    let stiffness = assembly.stiffness.with_canonical_storage(RealSparseMatrix::clone);
-    let mass = assembly.mass.with_canonical_storage(RealSparseMatrix::clone);
+    let damping = assembly
+        .impedance
+        .with_canonical_storage(RealSparseMatrix::clone);
+    let stiffness = assembly
+        .stiffness
+        .with_canonical_storage(RealSparseMatrix::clone);
+    let mass = assembly
+        .mass
+        .with_canonical_storage(RealSparseMatrix::clone);
     let constrained = prescribed.iter().map(Option::is_some).collect::<Vec<_>>();
     let free = (0..n).filter(|&i| !constrained[i]).collect::<Vec<_>>();
     let fixed = (0..n).filter(|&i| constrained[i]).collect::<Vec<_>>();
@@ -486,7 +492,12 @@ fn sample_sources(
             )),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if assembly.source.canonical_values().iter().any(|value| value.real != 0.0) {
+    if assembly
+        .source
+        .canonical_values()
+        .iter()
+        .any(|value| value.real != 0.0)
+    {
         return Err(AcousticHarmonicError::Boundary(
             "a time-domain acoustic source must be real".into(),
         ));

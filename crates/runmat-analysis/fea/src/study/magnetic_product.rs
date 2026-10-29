@@ -62,8 +62,11 @@ pub fn plan_magnetic_study_product(
         workload.relative_residual_target,
     )
     .map_err(|error| MagneticStudyProductError::Admission(error.to_string()))?;
-    crate::physics::magnetic::validate_projection_envelope(&input.projection, &input.grounded_faces)
-        .map_err(|error| MagneticStudyProductError::Admission(error.to_string()))?;
+    crate::physics::magnetic::validate_projection_envelope(
+        &input.projection,
+        &input.grounded_faces,
+    )
+    .map_err(|error| MagneticStudyProductError::Admission(error.to_string()))?;
     Ok(MagneticStudyProduct { compiled, workload })
 }
 

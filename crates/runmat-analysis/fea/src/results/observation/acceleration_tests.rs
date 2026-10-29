@@ -6,9 +6,9 @@ use std::sync::{
 use crate::planning::resource::FeaResourcePlanIdentity;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
-    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, ApiDeviceInfo,
-    GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorOwned, HostNumericTensorView, HostTensorView, ProviderCapabilitySnapshot,
+    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle,
+    GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
+    HostNumericTensorView, HostTensorView, ProviderCapabilitySnapshot,
     ProviderConcurrencyCapabilities, ProviderExecutionFuture, ProviderExecutionResult,
     ReduceDimResult, SpawnHandleConcurrency, PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };

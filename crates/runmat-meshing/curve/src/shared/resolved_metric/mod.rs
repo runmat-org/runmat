@@ -243,12 +243,18 @@ impl CurveMetricField for ResolvedCurveMetricField {
                 )
                 .map_err(failure(
                     "graded face metric",
-                    format!("uniform {:?} at {:?}", self.face_metrics[*face].metric, query.point_m),
+                    format!(
+                        "uniform {:?} at {:?}",
+                        self.face_metrics[*face].metric, query.point_m
+                    ),
                 ))?;
             density = density.max(
                 face_metric
                     .directional_density(query.unit_tangent)
-                    .map_err(failure("face directional density", format!("{face_metric:?}")))?,
+                    .map_err(failure(
+                        "face directional density",
+                        format!("{face_metric:?}"),
+                    ))?,
             );
         }
         let metric = resolved

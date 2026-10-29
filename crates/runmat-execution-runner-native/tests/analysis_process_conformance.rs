@@ -1541,9 +1541,10 @@ fn fixture_for_study(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     (
@@ -1595,9 +1596,10 @@ fn explicit_fixture(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     assert!(prepared
@@ -1721,7 +1723,9 @@ fn mixed_fixture(
         ));
     let assignment = model.material_assignments.first().unwrap();
     let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
-        assignment.selected_region_id().expect("fixture uses selected material region"),
+        assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region"),
     )
     .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
@@ -1790,9 +1794,10 @@ fn mixed_fixture(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     let constraint_plan =
@@ -1951,9 +1956,10 @@ fn sequence_preparation(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     }
 }
 
@@ -2157,7 +2163,9 @@ fn solver_mesh(
     }
     let assignment = model.material_assignments.first().unwrap();
     let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
-        assignment.selected_region_id().expect("fixture uses selected material region"),
+        assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region"),
     )
     .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();

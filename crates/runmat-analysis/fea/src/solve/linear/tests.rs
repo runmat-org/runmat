@@ -4,9 +4,7 @@ use crate::{
         CanonicalRealOperators, MatrixProperties, OperatorRole, RealSparseAssembler,
         RealSparseMatrix,
     },
-    planning::resource::{
-        ByteCount, Count, LocalThreadCount,
-    },
+    planning::resource::{ByteCount, Count, LocalThreadCount},
     solve::backend::cpu_reference::CpuReferenceBackend,
 };
 

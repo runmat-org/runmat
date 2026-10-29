@@ -435,7 +435,9 @@ impl AcousticStudyEntryCoordinator {
             workload,
             result: self.result.expect("completed solve"),
             fields: self.fields.expect("completed retained fields"),
-            field_objects: self.field_objects.expect("completed retained field objects"),
+            field_objects: self
+                .field_objects
+                .expect("completed retained field objects"),
             observations: self.observation_state.completed,
             observation_objects: self.observation_objects,
             observation_catalog: self.observation_state.catalog,

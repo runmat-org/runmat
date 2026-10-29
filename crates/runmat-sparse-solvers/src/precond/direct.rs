@@ -15,8 +15,7 @@ pub struct DirectPreconditioner<T: FactorScalar> {
 
 impl<T: FactorScalar> DirectPreconditioner<T> {
     pub fn new(solver: Arc<DirectSolver<T>>) -> Self {
-        let symmetric_positive_definite =
-            solver.kind() == crate::direct::FactorKind::Cholesky;
+        let symmetric_positive_definite = solver.kind() == crate::direct::FactorKind::Cholesky;
         Self {
             solver,
             symmetric_positive_definite,

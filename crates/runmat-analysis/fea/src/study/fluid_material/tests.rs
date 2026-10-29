@@ -76,7 +76,9 @@ fn cell_coverage_rejects_missing_overlapping_unused_and_solid_owners() {
     ));
     let mut unused = model.clone();
     let mut extra = unused.material_assignments[0].clone();
-    extra.target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region("absent-region"));
+    extra.target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_region(
+        "absent-region",
+    ));
     unused.material_assignments.push(extra);
     assert!(matches!(
         compile_property_map(&unused, Some(&mesh)),

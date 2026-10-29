@@ -227,9 +227,13 @@ pub fn build_prepared_fluid_field_recovery_resource_plan(
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     static MEMO: crate::fluid_phase_plan_memo::PlanMemo =
         crate::fluid_phase_plan_memo::PlanMemo::new();
-    MEMO.get_or_derive("fluid-field-recovery", &request.canonical_bytes()?, inputs, policy, || {
-        derive_prepared_fluid_field_recovery_resource_plan(request, inputs, policy)
-    })
+    MEMO.get_or_derive(
+        "fluid-field-recovery",
+        &request.canonical_bytes()?,
+        inputs,
+        policy,
+        || derive_prepared_fluid_field_recovery_resource_plan(request, inputs, policy),
+    )
 }
 
 fn derive_prepared_fluid_field_recovery_resource_plan(

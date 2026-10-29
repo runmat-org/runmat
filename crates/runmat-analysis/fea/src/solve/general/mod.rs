@@ -84,7 +84,8 @@ pub fn solve_general_system(
     {
         return Err(GeneralSolveError::Admission);
     }
-    let certified = certify_nonsingular(matrix, policy.contraction_limit).map_err(certificate_error)?;
+    let certified =
+        certify_nonsingular(matrix, policy.contraction_limit).map_err(certificate_error)?;
     cancelled()?;
     let load = rhs.iter().fold(0.0_f64, |norm, b| norm.hypot(*b));
     if load == 0.0 {

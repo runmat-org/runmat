@@ -259,8 +259,13 @@ fn dense_cube_topology(n: usize) -> AnalysisRenderTopology {
                         p[(axis + 2) % 3] = b as f64 / n as f64;
                         p
                     };
-                    let q = [point(i, j), point(i + 1, j), point(i + 1, j + 1), point(i, j + 1)]
-                        .map(|p| vertex(p, &mut vertices));
+                    let q = [
+                        point(i, j),
+                        point(i + 1, j),
+                        point(i + 1, j + 1),
+                        point(i, j + 1),
+                    ]
+                    .map(|p| vertex(p, &mut vertices));
                     // (axis+1, axis+2) is right-handed about +axis; flip on the low side.
                     if side == 1.0 {
                         triangles.push([q[0], q[1], q[2]]);
@@ -317,6 +322,13 @@ fn dense_poster_scene_draws_boundary_triangles_and_feature_edges_only() {
     assert!(lines
         .iter()
         .all(|chunk| chunk.label.as_deref() == Some("Feature edges")));
-    let segments = lines.iter().map(|chunk| chunk.vertices.len() / 2).sum::<usize>();
-    assert_eq!(segments, 12 * n, "only the cube's 12 crease edges are drawn");
+    let segments = lines
+        .iter()
+        .map(|chunk| chunk.vertices.len() / 2)
+        .sum::<usize>();
+    assert_eq!(
+        segments,
+        12 * n,
+        "only the cube's 12 crease edges are drawn"
+    );
 }

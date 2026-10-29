@@ -95,13 +95,19 @@ fn floating_and_integral_terminal_intent_is_not_replaced_by_insulation() {
     use runmat_analysis_core::{ElectricCurrent, ElectricalConstraint, PrescribedValue};
     for kind in [
         ElectricalConstraintKind::FloatingConductor {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
         },
         ElectricalConstraintKind::Equipotential {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
         },
         ElectricalConstraintKind::IntegralCurrent {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
             value: PrescribedValue::Constant(ElectricCurrent::new(1.0)),
         },
     ] {

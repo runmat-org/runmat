@@ -7,8 +7,8 @@
 //! symbolic analysis is worth computing.
 
 use crate::krylov::{
-    bicgstab_workspace_len, gmres_workspace_len, minres_workspace_len, pcg_workspace_len, GmresOptions,
-    KrylovOptions,
+    bicgstab_workspace_len, gmres_workspace_len, minres_workspace_len, pcg_workspace_len,
+    GmresOptions, KrylovOptions,
 };
 
 /// Krylov method selector for estimates and policy decisions.
@@ -80,7 +80,10 @@ pub fn quick_direct_estimate(n: usize, nnz: usize, dimension: u8) -> (f64, f64) 
 pub fn host_memory_bytes() -> Option<u64> {
     #[cfg(target_os = "macos")]
     {
-        let output = std::process::Command::new("/usr/sbin/sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+        let output = std::process::Command::new("/usr/sbin/sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
         return String::from_utf8(output.stdout).ok()?.trim().parse().ok();
     }
     #[cfg(target_os = "linux")]

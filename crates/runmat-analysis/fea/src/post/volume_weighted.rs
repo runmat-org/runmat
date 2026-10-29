@@ -120,7 +120,10 @@ mod tests {
                 solved_thermal_quadrature: None,
                 geometry: SolidRecoveryGeometry::Tetrahedron4 {
                     node_indices: [0, 1, 2, 3],
-                    coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([
                         [0.0, 0.0, 0.0],
                         [1.0, 0.0, 0.0],
                         [0.0, 1.0, 0.0],
@@ -137,7 +140,10 @@ mod tests {
                 solved_thermal_quadrature: None,
                 geometry: SolidRecoveryGeometry::Tetrahedron4 {
                     node_indices: [0, 4, 5, 6],
-                    coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([
                         [0.0, 0.0, 0.0],
                         [2.0, 0.0, 0.0],
                         [0.0, 2.0, 0.0],
@@ -184,8 +190,18 @@ mod tests {
                 -2.0 + x[0],
             ]
         };
-        let corners_a = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-        let corners_b = [[1.0, 1.0, 1.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]];
+        let corners_a = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let corners_b = [
+            [1.0, 1.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ];
         let tet10 = |corners: [[f64; 3]; 4]| -> [[f64; 3]; 10] {
             let edges = runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
             std::array::from_fn(|node| {
@@ -247,7 +263,8 @@ mod tests {
             for component in 0..6 {
                 let value = recovered[node * 6 + component];
                 assert!(
-                    (value - expected[component]).abs() <= 1e-12 * (1.0 + expected[component].abs()),
+                    (value - expected[component]).abs()
+                        <= 1e-12 * (1.0 + expected[component].abs()),
                     "node {node} component {component}: {value} vs {}",
                     expected[component]
                 );

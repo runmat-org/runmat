@@ -37,7 +37,8 @@ impl<T: FactorScalar> LeastSquaresQr<T> {
         let mut indices = try_vec(symbolic.len_idx(), 0usize)?;
         let mut values = try_vec(symbolic.len_val(), T::zero())?;
         let par = par::faer_par();
-        let mut buffer = memory(symbolic.factorize_numeric_qr_scratch::<T>(par, Default::default()))?;
+        let mut buffer =
+            memory(symbolic.factorize_numeric_qr_scratch::<T>(par, Default::default()))?;
         control.check()?;
         symbolic.factorize_numeric_qr::<T>(
             &mut indices,
@@ -85,7 +86,9 @@ impl<T: FactorScalar> LeastSquaresQr<T> {
         let mut work = b.to_vec();
         let par = par::faer_par();
         // SAFETY: indices and values were produced by this symbolic factorization.
-        let qr = unsafe { QrRef::<usize, T>::new_unchecked(&self.symbolic, &self.indices, &self.values) };
+        let qr = unsafe {
+            QrRef::<usize, T>::new_unchecked(&self.symbolic, &self.indices, &self.values)
+        };
         let mut buffer = memory(self.symbolic.solve_in_place_scratch::<T>(k, par))?;
         qr.solve_in_place_with_conj(
             Conj::No,
@@ -98,7 +101,9 @@ impl<T: FactorScalar> LeastSquaresQr<T> {
             x.extend_from_slice(&work[column * m..column * m + n]);
         }
         if let Some(position) = x.iter().position(|v| !v.is_finite()) {
-            return Err(SolverError::Singular { pivot: position % n.max(1) });
+            return Err(SolverError::Singular {
+                pivot: position % n.max(1),
+            });
         }
         Ok(x)
     }

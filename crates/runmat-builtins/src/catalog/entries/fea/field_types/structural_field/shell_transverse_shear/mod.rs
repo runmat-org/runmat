@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const SHELL_TRANSVERSE_SHEAR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.shellTransverseShear()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const SHELL_TRANSVERSE_SHEAR_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&SHELL_TRANSVERSE_SHEAR_SIGNATURES);
+const SHELL_TRANSVERSE_SHEAR_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.shellTransverseShear()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const SHELL_TRANSVERSE_SHEAR_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&SHELL_TRANSVERSE_SHEAR_SIGNATURES);
 const SHELL_TRANSVERSE_SHEAR_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-shell-transverse-shear",
     title: "Select shell transverse shear",

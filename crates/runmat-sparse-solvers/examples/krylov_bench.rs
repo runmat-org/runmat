@@ -57,7 +57,11 @@ fn main() {
         let a = poisson3d::<f64>(grid, grid, grid);
         let b = par::seeded_vector::<f64>(a.nrows(), 7);
         let jacobi = Jacobi(a.as_ref().diagonal());
-        let options = KrylovOptions { rtol: 1e-10, max_iterations: 5000, ..Default::default() };
+        let options = KrylovOptions {
+            rtol: 1e-10,
+            max_iterations: 5000,
+            ..Default::default()
+        };
         for _ in 0..repeats {
             let mut x = vec![0.0; a.nrows()];
             let start = Instant::now();
@@ -71,12 +75,28 @@ fn main() {
         let a = convection(m);
         let b = par::seeded_vector::<f64>(a.nrows(), 11);
         let jacobi = Jacobi(a.as_ref().diagonal());
-        let options = KrylovOptions { rtol: 1e-8, max_iterations: 5000, ..Default::default() };
-        let gmres_options = GmresOptions { restart: 30, ..Default::default() };
+        let options = KrylovOptions {
+            rtol: 1e-8,
+            max_iterations: 5000,
+            ..Default::default()
+        };
+        let gmres_options = GmresOptions {
+            restart: 30,
+            ..Default::default()
+        };
         for _ in 0..repeats {
             let mut x = vec![0.0; a.nrows()];
             let start = Instant::now();
-            let report = gmres(&a, Some(&jacobi), &b, &mut x, &options, &gmres_options, SolveControl::NONE).unwrap();
+            let report = gmres(
+                &a,
+                Some(&jacobi),
+                &b,
+                &mut x,
+                &options,
+                &gmres_options,
+                SolveControl::NONE,
+            )
+            .unwrap();
             println!(
                 "{{\"solver\":\"gmres\",\"n\":{},\"threads\":{threads},\"iterations\":{},\"operator_applications\":{},\"relres\":{:e},\"seconds\":{:.6}}}",
                 a.nrows(), report.iterations, report.operator_applications, report.relative_residual, start.elapsed().as_secs_f64()

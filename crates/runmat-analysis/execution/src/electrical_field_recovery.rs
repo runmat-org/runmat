@@ -7,13 +7,13 @@ use crate::portable_source_admission::authenticate_source_objects as authenticat
 use crate::*;
 use runmat_analysis_fea::{
     execution::{
-        ElectricalStaticSolverResult, ElectricalStaticWorkload, AnalysisNumericalObjectKind,
-        AnalysisTransportProfiler, AnalysisWorkKind, ExecutionPlanIdentity, FieldRecoveryRequest,
-        NumericalPlanIdentity,
+        AnalysisNumericalObjectKind, AnalysisTransportProfiler, AnalysisWorkKind,
+        ElectricalStaticSolverResult, ElectricalStaticWorkload, ExecutionPlanIdentity,
+        FieldRecoveryRequest, NumericalPlanIdentity,
     },
     planning::resource::{
-        electrical_field_recovery_partition_count, electrical_field_recovery_shape,
-        electrical_recovery_source_validation_workspace, build_electrical_field_recovery_resource_plan,
+        build_electrical_field_recovery_resource_plan, electrical_field_recovery_partition_count,
+        electrical_field_recovery_shape, electrical_recovery_source_validation_workspace,
         ByteCount, FeaResourcePlan, PreparedPhaseResourceFacts,
     },
 };
@@ -90,7 +90,9 @@ pub fn prepare_electrical_field_recovery(
             || source[0].manifest_digest != objects.root.digest
             || source[0].manifest_encoded_length != objects.root.encoded_length
         {
-            return Err(invalid("electrical recovery original source closure differs"));
+            return Err(invalid(
+                "electrical recovery original source closure differs",
+            ));
         }
     }
     let (workload, mesh, result) =
@@ -122,11 +124,8 @@ pub fn prepare_electrical_field_recovery(
         p.output_policy.inventory_limits(),
     )?;
     let mut inputs = vec![request_objects, p.workload, p.mesh, p.source_result];
-    let resource_plan = build_prepared_electrical_field_recovery_resource_plan(
-        &request,
-        &inputs,
-        p.output_policy,
-    )?;
+    let resource_plan =
+        build_prepared_electrical_field_recovery_resource_plan(&request, &inputs, p.output_policy)?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),
@@ -323,7 +322,9 @@ pub fn import_electrical_recovered_fields(
         prepared.output_policy,
     )?;
     if expected != prepared.resource_plan {
-        return Err(invalid("electrical recovery import resource authority differs"));
+        return Err(invalid(
+            "electrical recovery import resource authority differs",
+        ));
     }
     let input = |kind| {
         prepared

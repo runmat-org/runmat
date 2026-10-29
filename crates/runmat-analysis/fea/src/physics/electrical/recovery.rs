@@ -55,7 +55,12 @@ pub(super) fn recover(
                 "nonfinite constitutive flux".into(),
             ));
         }
-        Ok((average, average.map(|value| coefficient * value), square, volume))
+        Ok((
+            average,
+            average.map(|value| coefficient * value),
+            square,
+            volume,
+        ))
     });
     let mut result = RecoveredElectrical {
         electric_field: Vec::with_capacity(elements.len()),

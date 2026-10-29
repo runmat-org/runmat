@@ -50,7 +50,6 @@ impl RefinementProgressPolicy {
     }
 }
 
-
 pub(super) fn canonical_progress(
     prior: &DelaunayVolumeQuality,
     result: &DelaunayVolumeQuality,

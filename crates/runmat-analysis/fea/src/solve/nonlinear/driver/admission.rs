@@ -43,9 +43,7 @@ pub(crate) fn require_fixed_structural_nonlinear(model: &AnalysisModel) -> Resul
                     .into(),
             ));
         }
-        if action.excitation().kinematics == ExcitationKinematics::Follower
-            && !large_deformation
-        {
+        if action.excitation().kinematics == ExcitationKinematics::Follower && !large_deformation {
             return Err(FeaRunError::InvalidModel(
                 "follower loads change direction with the deformed surface and require `kinematics = large_deformation`".into(),
             ));

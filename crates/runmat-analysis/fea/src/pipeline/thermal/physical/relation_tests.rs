@@ -6,8 +6,12 @@ use crate::physics::thermal::qualification::{mesh, workload};
 fn periodic(jump_k: Option<f64>) -> ThermalConstraint {
     let periodic = PeriodicConstraint {
         pair: PairedConstraint {
-            primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
-            secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_left",
+            )),
+            secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
             pairing: PairingPolicy::GeometricTolerance(Length::new(1e-9)),
         },
         transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),
@@ -25,7 +29,10 @@ fn periodic(jump_k: Option<f64>) -> ThermalConstraint {
 }
 
 fn convective_left(input: &mut crate::execution::ThermalWorkload, ambient_k: f64) {
-    input.model.boundaries.retain(|b| b.boundary_id == "insulated-sides");
+    input
+        .model
+        .boundaries
+        .retain(|b| b.boundary_id == "insulated-sides");
     input.model.boundaries.push(AnalysisBoundary {
         boundary_id: "left-film".into(),
         target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
@@ -50,7 +57,10 @@ fn temperature_jump_carries_a_linear_profile_through_a_periodic_cell() {
         let mesh = mesh(quadratic);
         let mut input = workload();
         convective_left(&mut input, 300.0);
-        input.model.constraints.push(AnalysisConstraint::Thermal(periodic(Some(20.0))));
+        input
+            .model
+            .constraints
+            .push(AnalysisConstraint::Thermal(periodic(Some(20.0))));
         let result = input.execute(&mesh).unwrap();
         for (node, &temperature) in mesh
             .topology
@@ -82,7 +92,10 @@ fn periodic_cell_without_sources_settles_at_the_film_ambient() {
     let mesh = mesh(false);
     let mut input = workload();
     convective_left(&mut input, 330.0);
-    input.model.constraints.push(AnalysisConstraint::Thermal(periodic(None)));
+    input
+        .model
+        .constraints
+        .push(AnalysisConstraint::Thermal(periodic(None)));
     let result = input.execute(&mesh).unwrap();
     for &temperature in result.temperature_snapshots[0].as_host_f64().unwrap() {
         assert!((temperature - 330.0).abs() < 1e-8 * 330.0, "{temperature}");
@@ -99,7 +112,8 @@ fn radiating_periodic_cell_balances_film_and_radiation_through_the_jump() {
     // h (T_L - 300) + eps sigma ((T_L + 20)^4 - 300^4) = 0, with T = T_L + 20 x exactly.
     use crate::physics::thermal::qualification::{AMBIENT, EMISSIVITY, SIGMA};
     let h = 25.0;
-    let balance = |t: f64| h * (t - 300.0) + EMISSIVITY * SIGMA * ((t + 20.0).powi(4) - AMBIENT.powi(4));
+    let balance =
+        |t: f64| h * (t - 300.0) + EMISSIVITY * SIGMA * ((t + 20.0).powi(4) - AMBIENT.powi(4));
     let (mut low, mut high) = (200.0_f64, 300.0_f64);
     assert!(balance(low) < 0.0 && balance(high) > 0.0);
     for _ in 0..200 {
@@ -116,13 +130,18 @@ fn radiating_periodic_cell_balances_film_and_radiation_through_the_jump() {
         let mut input = workload();
         input.model.boundaries.push(AnalysisBoundary {
             boundary_id: "left-film".into(),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_left",
+            )),
             operator: BoundaryOperator::ThermalConvection {
                 ambient_temperature: PrescribedValue::Constant(Temperature::new(300.0)),
                 coefficient: HeatTransferCoefficient::new(h),
             },
         });
-        input.model.constraints.push(AnalysisConstraint::Thermal(periodic(Some(20.0))));
+        input
+            .model
+            .constraints
+            .push(AnalysisConstraint::Thermal(periodic(Some(20.0))));
         let result = input.execute(&mesh).unwrap();
         for (node, &temperature) in mesh
             .topology

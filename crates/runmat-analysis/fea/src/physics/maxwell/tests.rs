@@ -281,19 +281,25 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
     reject(&changed, 9);
     let mut changed = input.clone();
     for source in &mut changed.source_current {
-        source.current_density_a_per_m2 = source.current_density_a_per_m2
+        source.current_density_a_per_m2 = source
+            .current_density_a_per_m2
             .try_map_canonical_storage(|mut values| {
                 for value in &mut values {
                     value.real *= 1e-200;
                     value.imaginary *= 1e-200;
                 }
                 values
-            }).unwrap();
+            })
+            .unwrap();
     }
     // Tiny but nonzero forcing is still nonzero: the linear solve scales with it, and the
     // acceptance checks are relative, so it is neither mistaken for zero nor rejected.
     let tiny = solve(&mesh, &changed, 1e-10).unwrap();
-    assert!(tiny.edge_circulations_v.canonical_values().iter().any(|value| value.real != 0.0 || value.imaginary != 0.0));
+    assert!(tiny
+        .edge_circulations_v
+        .canonical_values()
+        .iter()
+        .any(|value| value.real != 0.0 || value.imaginary != 0.0));
     let (other_mesh, _) = fixture::problem(
         ElementOrder::Tet4,
         2,
@@ -306,7 +312,8 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
     assert!(solve(&mesh, &input, 0.0).is_err());
     let mut zero = input.clone();
     for source in &mut zero.source_current {
-        source.current_density_a_per_m2 = runmat_types::physical::Quantity::new([ComplexPhasor::ZERO; 3]);
+        source.current_density_a_per_m2 =
+            runmat_types::physical::Quantity::new([ComplexPhasor::ZERO; 3]);
     }
     let zero = solve(&mesh, &zero, 1e-10).unwrap();
     assert_eq!(zero.ohmic_power_w.canonical_value(), 0.0);

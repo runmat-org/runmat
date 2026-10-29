@@ -413,7 +413,8 @@ pub fn append_feature_edges(scene: &mut GeometryScene, crease_degrees: f32) {
             .clone()
             .unwrap_or_else(|| (0..chunk.vertices.len() as u32).collect());
         for triangle in indices.chunks_exact(3) {
-            let corners = [0, 1, 2].map(|corner| chunk.vertices.get(triangle[corner] as usize).copied());
+            let corners =
+                [0, 1, 2].map(|corner| chunk.vertices.get(triangle[corner] as usize).copied());
             let [Some(a), Some(b), Some(c)] = corners else {
                 continue;
             };
@@ -443,10 +444,11 @@ pub fn append_feature_edges(scene: &mut GeometryScene, crease_degrees: f32) {
     for key in keys {
         let (mut start, mut end, normals) = edges.remove(&key).expect("collected edge");
         let feature = normals.len() == 1
-            || normals
-                .iter()
-                .enumerate()
-                .any(|(i, left)| normals[i + 1..].iter().any(|right| left.dot(*right) < cosine));
+            || normals.iter().enumerate().any(|(i, left)| {
+                normals[i + 1..]
+                    .iter()
+                    .any(|right| left.dot(*right) < cosine)
+            });
         if !feature {
             continue;
         }

@@ -155,7 +155,9 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
                 source_quality,
                 input.quality_options,
             )
-            .ok_or_else(|| invalid("source has no size-violating edge with an interior endpoint"))?;
+            .ok_or_else(|| {
+                invalid("source has no size-violating edge with an interior endpoint")
+            })?;
             if !strictly_inside_region_from(
                 input.topology,
                 topology_index,
@@ -163,7 +165,9 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
                 point,
                 cancellation,
             )? {
-                return Err(invalid("metric edge midpoint is outside its admitted domain"));
+                return Err(invalid(
+                    "metric edge midpoint is outside its admitted domain",
+                ));
             }
             point
         }

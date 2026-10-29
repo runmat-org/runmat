@@ -184,13 +184,16 @@ fn workload(drive: Drive, signal: PhysicalSignal) -> AcousticHarmonicWorkload {
         speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
         damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic-spectrum");
     step.independent_domain = IndependentDomain::FrequencyHertz(FREQUENCIES.to_vec());
     model.sequence.steps = vec![step];
     let action = AnalysisExcitation {
         excitation_id: ExcitationId("drive".into()),
-        target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0"))),
+        target: ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("face:0"),
+        )),
         frame: CoordinateFrame::BoundaryNormalTangent,
         direction: None,
         distribution: ExcitationDistribution::UniformKinematic,

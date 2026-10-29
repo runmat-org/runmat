@@ -217,7 +217,11 @@ mod tests {
     use super::*;
     use runmat_geometry_core::PersistentEntityKind;
     fn entity(kind: PersistentEntityKind, occurrence: &str) -> PersistentEntityId {
-        PersistentEntityId::new(kind, "same-shape".into(), vec!["root".into(), occurrence.into()])
+        PersistentEntityId::new(
+            kind,
+            "same-shape".into(),
+            vec!["root".into(), occurrence.into()],
+        )
     }
     fn asset() -> GeometryAsset {
         let mut asset = crate::import_geometry("triangle.stl", b"solid s\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid s", Default::default()).unwrap().asset;

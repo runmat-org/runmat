@@ -49,11 +49,11 @@ use super::contract::{
     ObservationHistoryCheckpointResourceDemand, ObservationPartitionResourceDemand,
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
     PreparedInputResourceFacts, PreparedOutputResourceFacts, ResourceBreakdown,
-    ResourcePlanningError, SparseResourceFacts, StructuralFrequencyResultAssemblyResourceDemand, RESIDENT_MEMORY_RESOURCE,
+    ResourcePlanningError, SparseResourceFacts, StructuralFrequencyResultAssemblyResourceDemand,
     StructuralModalResponseSpectrumAssemblyResourceDemand, StructuralOperatorResourceDemand,
     StructuralRandomResponseAssemblyResourceDemand,
-    StructuralTransientResultAssemblyResourceDemand, RESOURCE_ESTIMATION_MODEL_REVISION,
-    RESOURCE_PLAN_MAX_ENCODED_BYTES,
+    StructuralTransientResultAssemblyResourceDemand, RESIDENT_MEMORY_RESOURCE,
+    RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 use runmat_execution::{resource::ResourceRequest, Digest};
 
@@ -92,10 +92,7 @@ fn build_resource_plan_unlogged(
                     &demand.inputs,
                     demand.workspace_bytes_upper_bound,
                     ByteCount(0),
-                    &[
-                        &demand.result_output,
-                        &demand.publication_output,
-                    ],
+                    &[&demand.result_output, &demand.publication_output],
                 ),
             )
         }

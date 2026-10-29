@@ -279,7 +279,9 @@ impl TcpCommunicator {
         peers: &[usize],
         sends: Vec<Vec<f64>>,
     ) -> DistributedResult<Vec<Vec<f64>>> {
-        let mut outgoing = (0..self.size).map(|_| None).collect::<Vec<Option<Vec<f64>>>>();
+        let mut outgoing = (0..self.size)
+            .map(|_| None)
+            .collect::<Vec<Option<Vec<f64>>>>();
         for (&peer, values) in peers.iter().zip(sends) {
             if outgoing[peer].replace(values).is_some() {
                 return Err(DistributedError::Communication(
@@ -317,9 +319,9 @@ impl TcpCommunicator {
                 })
                 .collect::<DistributedResult<Vec<_>>>();
             for handle in handles {
-                handle
-                    .join()
-                    .map_err(|_| DistributedError::Communication("peer writer panicked".into()))??;
+                handle.join().map_err(|_| {
+                    DistributedError::Communication("peer writer panicked".into())
+                })??;
             }
             received
         })
@@ -422,8 +424,7 @@ mod tests {
 
     #[test]
     fn tcp_mesh_exchanges_and_reduces() {
-        let rendezvous =
-            TcpRendezvous::bind("127.0.0.1:0".parse().unwrap(), 17).unwrap();
+        let rendezvous = TcpRendezvous::bind("127.0.0.1:0".parse().unwrap(), 17).unwrap();
         let address = rendezvous.address().unwrap();
         let size = 3;
         let workers = (0..size)
@@ -442,7 +443,10 @@ mod tests {
                     let next = (rank + 1) % size;
                     let previous = (rank + size - 1) % size;
                     let received = comm
-                        .exchange(&[next, previous], vec![vec![rank as f64; 2], vec![-(rank as f64)]])
+                        .exchange(
+                            &[next, previous],
+                            vec![vec![rank as f64; 2], vec![-(rank as f64)]],
+                        )
                         .unwrap();
                     (values, received)
                 })

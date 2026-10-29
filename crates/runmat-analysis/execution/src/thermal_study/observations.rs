@@ -58,12 +58,15 @@ impl SampledHistorySource for Context<'_> {
         source: &impl CacheImport,
         ordinal: usize,
     ) -> AnalysisBridgeResult<(ObservationPreparation, RecoveredFieldSample)> {
-        let output = import_analysis_output_set(source, self.result.response.clone(), &self.solve.host)?
-            .manifest
-            .outputs
-            .into_iter()
-            .find(|output| output.kind == Kind::SolverResult)
-            .ok_or(AnalysisBridgeError::Identity("thermal solver result output absent"))?;
+        let output =
+            import_analysis_output_set(source, self.result.response.clone(), &self.solve.host)?
+                .manifest
+                .outputs
+                .into_iter()
+                .find(|output| output.kind == Kind::SolverResult)
+                .ok_or(AnalysisBridgeError::Identity(
+                    "thermal solver result output absent",
+                ))?;
         let coordinate = self.result.manifest.fields[ordinal]
             .first()
             .ok_or(AnalysisBridgeError::Identity(
@@ -99,7 +102,9 @@ impl SampledHistorySource for Context<'_> {
         ))
     }
     fn field_catalog(&self) -> AnalysisBridgeResult<ObservationFieldCatalog> {
-        Ok(ObservationFieldCatalog::thermal(self.result.manifest.clone())?)
+        Ok(ObservationFieldCatalog::thermal(
+            self.result.manifest.clone(),
+        )?)
     }
     fn finalization_source(&self) -> AnalysisBridgeResult<ObservationHistoryFinalizationSource> {
         Ok(ObservationHistoryFinalizationSource::Thermal {

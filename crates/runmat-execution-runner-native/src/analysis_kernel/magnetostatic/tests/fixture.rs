@@ -50,7 +50,8 @@ pub(super) fn task(
             persistence: StatePersistence::Canonical,
         })
         .collect();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(0.0),
@@ -65,7 +66,9 @@ pub(super) fn task(
             .push(AnalysisConstraint::Magnetic(MagneticConstraint {
                 constraint_id: boundary.into(),
                 kind: MagneticConstraintKind::VectorPotentialGround {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),
+                    ),
                 },
             }));
     }

@@ -270,7 +270,13 @@ fn main() {
             .unwrap_or_else(|| problem(&options, cells));
         let subdomains = options
             .subdomains
-            .map(|count| if options.weak { count * processes } else { count })
+            .map(|count| {
+                if options.weak {
+                    count * processes
+                } else {
+                    count
+                }
+            })
             .unwrap_or(processes);
         let launch = CooperativeLaunch::for_current_executable(processes, options.threads)
             .expect("launch configuration");

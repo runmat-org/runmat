@@ -47,7 +47,8 @@ pub(crate) fn task(
         persistence: StatePersistence::Canonical,
     }];
     model.sequence = AnalysisSequence::from_steps("native-maxwell", vec![step]);
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
         conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(3.0),
@@ -62,7 +63,9 @@ pub(crate) fn task(
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: boundary.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),
+                    ),
                 },
             }));
     }
@@ -192,8 +195,10 @@ fn native_both_orders_preserve_original_complex_fields_power_and_receipt_across_
             identity = Some(result.identity().unwrap());
             let response = result.response();
             assert!(response.ohmic_power_w > runmat_types::physical::Quantity::new(0.0));
-            assert!(response.electric_energy_j > runmat_types::physical::Quantity::new(0.0)
-                && response.magnetic_energy_j > runmat_types::physical::Quantity::new(0.0));
+            assert!(
+                response.electric_energy_j > runmat_types::physical::Quantity::new(0.0)
+                    && response.magnetic_energy_j > runmat_types::physical::Quantity::new(0.0)
+            );
             assert!(response.relative_physical_residual < 8e-10);
             assert!(response.relative_complex_power_error < 1.6e-9);
             assert!(

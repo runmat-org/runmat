@@ -33,7 +33,14 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         let field_ids = manifest
             .fields
             .iter()
-            .map(|entries| [entries[0].field, entries[1].field, entries[2].field, entries[3].field])
+            .map(|entries| {
+                [
+                    entries[0].field,
+                    entries[1].field,
+                    entries[2].field,
+                    entries[3].field,
+                ]
+            })
             .collect::<Vec<_>>();
         let expected_content = encode_contract(
             b"runmat-thermal-solver-result/v1\0",

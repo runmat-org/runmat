@@ -133,10 +133,18 @@ pub(crate) fn mesh(
             _ => continue,
         };
         let points = key.map(|id| nodes[id as usize - 1].coordinates_m);
-        let centroid: [f64; 3] =
-            std::array::from_fn(|a| (points[0].canonical_value()[a] + points[1].canonical_value()[a] + points[2].canonical_value()[a]) / 3.0);
-        let u: [f64; 3] = std::array::from_fn(|a| points[1].canonical_value()[a] - points[0].canonical_value()[a]);
-        let v: [f64; 3] = std::array::from_fn(|a| points[2].canonical_value()[a] - points[0].canonical_value()[a]);
+        let centroid: [f64; 3] = std::array::from_fn(|a| {
+            (points[0].canonical_value()[a]
+                + points[1].canonical_value()[a]
+                + points[2].canonical_value()[a])
+                / 3.0
+        });
+        let u: [f64; 3] = std::array::from_fn(|a| {
+            points[1].canonical_value()[a] - points[0].canonical_value()[a]
+        });
+        let v: [f64; 3] = std::array::from_fn(|a| {
+            points[2].canonical_value()[a] - points[0].canonical_value()[a]
+        });
         let mut normal = [
             u[1] * v[2] - u[2] * v[1],
             u[2] * v[0] - u[0] * v[2],
@@ -154,7 +162,11 @@ pub(crate) fn mesh(
                 .sum::<f64>()
                 / 4.0
         });
-        if (0..3).map(|a| normal[a] * (centroid[a] - inside[a])).sum::<f64>() < 0.0 {
+        if (0..3)
+            .map(|a| normal[a] * (centroid[a] - inside[a]))
+            .sum::<f64>()
+            < 0.0
+        {
             normal = normal.map(|n| -n);
         }
         let name = face(centroid, normal, &regions);
@@ -195,12 +207,14 @@ pub(crate) fn mesh(
     artifact.topology.boundary_edges.clear();
     let mut conformal = interfaces
         .into_iter()
-        .map(|((name, a, b), boundary_face_ids)| runmat_meshing_core::ConformalInterface {
-            source_face_id: entity(PersistentEntityKind::Face, &name),
-            side_a_region_id: entity(PersistentEntityKind::Region, a),
-            side_b_region_id: entity(PersistentEntityKind::Region, b),
-            boundary_face_ids,
-        })
+        .map(
+            |((name, a, b), boundary_face_ids)| runmat_meshing_core::ConformalInterface {
+                source_face_id: entity(PersistentEntityKind::Face, &name),
+                side_a_region_id: entity(PersistentEntityKind::Region, a),
+                side_b_region_id: entity(PersistentEntityKind::Region, b),
+                boundary_face_ids,
+            },
+        )
         .collect::<Vec<_>>();
     conformal.sort_by(|x, y| {
         (&x.source_face_id, &x.side_a_region_id, &x.side_b_region_id).cmp(&(
@@ -220,7 +234,11 @@ pub(crate) fn mesh(
         .collect();
     artifact.topology.field_topologies = vec![
         topology("nodes", FieldTopologyLocation::Node, node_ids),
-        topology("elements", FieldTopologyLocation::VolumeElement, element_ids),
+        topology(
+            "elements",
+            FieldTopologyLocation::VolumeElement,
+            element_ids,
+        ),
         topology("faces", FieldTopologyLocation::BoundaryFace, face_ids),
         topology("edges", FieldTopologyLocation::BoundaryEdge, Vec::new()),
     ];
@@ -241,9 +259,12 @@ fn topology(id: &str, location: FieldTopologyLocation, ids: Vec<u64>) -> FieldTo
 
 fn six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
     let p = corners.map(|id| nodes[id as usize - 1].coordinates_m);
-    let a: [f64; 3] = std::array::from_fn(|i| p[1].canonical_value()[i] - p[0].canonical_value()[i]);
-    let b: [f64; 3] = std::array::from_fn(|i| p[2].canonical_value()[i] - p[0].canonical_value()[i]);
-    let c: [f64; 3] = std::array::from_fn(|i| p[3].canonical_value()[i] - p[0].canonical_value()[i]);
+    let a: [f64; 3] =
+        std::array::from_fn(|i| p[1].canonical_value()[i] - p[0].canonical_value()[i]);
+    let b: [f64; 3] =
+        std::array::from_fn(|i| p[2].canonical_value()[i] - p[0].canonical_value()[i]);
+    let c: [f64; 3] =
+        std::array::from_fn(|i| p[3].canonical_value()[i] - p[0].canonical_value()[i]);
     a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
         + a[2] * (b[0] * c[1] - b[1] * c[0])
 }

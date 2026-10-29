@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_RAYLEIGH_MASS_COEFFICIENT_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::NonNegative };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_RAYLEIGH_MASS_COEFFICIENT_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::NonNegative,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const RAYLEIGH_MASS_COEFFICIENT_PER_SECOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.RayleighMassCoefficient.perSecond(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const RAYLEIGH_MASS_COEFFICIENT_PER_SECOND_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&RAYLEIGH_MASS_COEFFICIENT_PER_SECOND_SIGNATURES);
+const RAYLEIGH_MASS_COEFFICIENT_PER_SECOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.RayleighMassCoefficient.perSecond(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const RAYLEIGH_MASS_COEFFICIENT_PER_SECOND_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&RAYLEIGH_MASS_COEFFICIENT_PER_SECOND_SIGNATURES);
 const RAYLEIGH_MASS_COEFFICIENT_PER_SECOND_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "rayleigh-mass-coefficient-persecond",
     title: "A Rayleigh alpha of 0.5 1/s",

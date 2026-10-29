@@ -19,9 +19,9 @@ use crate::{
     topology::AnalysisProjection,
 };
 use runmat_analysis_core::{
-    AcousticConstraintKind, AnalysisConstraint, AnalysisModel, AnalysisProcedure,
-    BoundaryOperator, IndependentDomain, PhysicsFamily, PrescribedValue, ProcedureSettings,
-    RestartPolicy, SolutionSpace, StepObjectRef,
+    AcousticConstraintKind, AnalysisConstraint, AnalysisModel, AnalysisProcedure, BoundaryOperator,
+    IndependentDomain, PhysicsFamily, PrescribedValue, ProcedureSettings, RestartPolicy,
+    SolutionSpace, StepObjectRef,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -294,15 +294,16 @@ fn lowest_eigenpairs(
         policy.linear_relative_tolerance,
         policy.linear_maximum_iterations,
     )?;
-    let apply_m = |v: &[f64]| {
-        spmv(mass, v).map_err(|error| AcousticHarmonicError::Operator(error.into()))
-    };
+    let apply_m =
+        |v: &[f64]| spmv(mass, v).map_err(|error| AcousticHarmonicError::Operator(error.into()));
     let apply_k = |v: &[f64]| {
         spmv(stiffness, v).map_err(|error| AcousticHarmonicError::Operator(error.into()))
     };
     // Basis capacity before a thick restart keeps the lowest Ritz vectors.
     let capacity = (2 * count + 6 * block + 20).min(n);
-    let retained_on_restart = (count + block).min(capacity.saturating_sub(block)).max(count);
+    let retained_on_restart = (count + block)
+        .min(capacity.saturating_sub(block))
+        .max(count);
     let mut basis: Vec<Vec<f64>> = Vec::new();
     let mut mass_basis: Vec<Vec<f64>> = Vec::new();
     let mut stiffness_basis: Vec<Vec<f64>> = Vec::new();
@@ -418,16 +419,13 @@ fn lowest_eigenpairs(
                 .map(|ritz| combine(&basis, ritz))
                 .collect::<Vec<_>>();
             for vector in &mut vectors {
-                let largest = vector
-                    .iter()
-                    .copied()
-                    .fold(0.0_f64, |best, value| {
-                        if value.abs() > best.abs() {
-                            value
-                        } else {
-                            best
-                        }
-                    });
+                let largest = vector.iter().copied().fold(0.0_f64, |best, value| {
+                    if value.abs() > best.abs() {
+                        value
+                    } else {
+                        best
+                    }
+                });
                 if largest < 0.0 {
                     vector.iter_mut().for_each(|value| *value = -*value);
                 }

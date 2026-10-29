@@ -132,11 +132,20 @@ fn authored_step_units_override_a_different_declaration_and_record_it() {
         (authored_volume / pipe_m3 - 1.0).abs() < 1.0e-9,
         "{authored_volume} vs {pipe_m3}"
     );
-    assert_eq!(authored.source_unit_evidence.uniform_unit(), Some(LengthUnit::Meter));
-    assert_eq!(authored.source_unit_evidence.overridden_declared_unit(), Some(LengthUnit::Millimeter));
+    assert_eq!(
+        authored.source_unit_evidence.uniform_unit(),
+        Some(LengthUnit::Meter)
+    );
+    assert_eq!(
+        authored.source_unit_evidence.overridden_declared_unit(),
+        Some(LengthUnit::Millimeter)
+    );
     assert!((authored.kernel_units.meters_per_unit() - 1.0).abs() < 1.0e-15);
     let document = authored.geometry_document().unwrap();
-    assert_eq!(document.source.unit_evidence.overridden_declared_unit(), Some(LengthUnit::Millimeter));
+    assert_eq!(
+        document.source.unit_evidence.overridden_declared_unit(),
+        Some(LengthUnit::Millimeter)
+    );
     authored.build_closure().unwrap();
 
     // Without authority the caller's unit is only a fallback: the millimetre declaration governs.
@@ -145,7 +154,10 @@ fn authored_step_units_override_a_different_declaration_and_record_it() {
         ..ExactCadImportOptions::default()
     });
     assert!((declared_volume / (pipe_m3 * 1.0e-9) - 1.0).abs() < 1.0e-9);
-    assert_eq!(declared.source_unit_evidence.overridden_declared_unit(), None);
+    assert_eq!(
+        declared.source_unit_evidence.overridden_declared_unit(),
+        None
+    );
 
     // An authored unit equal to the declaration is not an override.
     let (same_volume, same) = pipe_volume_m3(&ExactCadImportOptions {
@@ -194,14 +206,20 @@ fn authored_iges_units_override_a_different_declaration_and_record_it() {
         (authored_volume / box_m3 - 1.0).abs() < 1.0e-9,
         "{authored_volume} vs {box_m3}"
     );
-    assert_eq!(authored.source_unit_evidence.overridden_declared_unit(), Some(LengthUnit::Millimeter));
+    assert_eq!(
+        authored.source_unit_evidence.overridden_declared_unit(),
+        Some(LengthUnit::Millimeter)
+    );
     authored.build_closure().unwrap();
     let (declared_volume, declared) = import(&ExactCadImportOptions {
         source_units: Some(LengthUnit::Meter),
         ..ExactCadImportOptions::default()
     });
     assert!((declared_volume / (box_m3 * 1.0e-9) - 1.0).abs() < 1.0e-9);
-    assert_eq!(declared.source_unit_evidence.overridden_declared_unit(), None);
+    assert_eq!(
+        declared.source_unit_evidence.overridden_declared_unit(),
+        None
+    );
 }
 
 fn step_volume_m3(
@@ -280,7 +298,9 @@ fn centimetre_and_foot_step_declarations_resolve_and_accept_authored_overrides()
             "{name}: {authored_volume} vs {pipe_m3}"
         );
         let declared = authored
-            .source_unit_evidence.overridden_declared_unit().map(LengthUnit::meters_per_unit);
+            .source_unit_evidence
+            .overridden_declared_unit()
+            .map(LengthUnit::meters_per_unit);
         assert!(
             (declared.unwrap() / meters_per_unit - 1.0).abs() < 1.0e-12,
             "{name}: {declared:?}"

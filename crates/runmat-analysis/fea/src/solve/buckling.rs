@@ -130,7 +130,8 @@ pub fn solve_eigenvalue_buckling(
         .admissibility()
         .and_then(|evidence| evidence.factor())
         .map(|factor| factor.0.clone());
-    let stiffness_arrays = crate::solve::shared_sparse::CsrArrays::of(system.operators().stiffness());
+    let stiffness_arrays =
+        crate::solve::shared_sparse::CsrArrays::of(system.operators().stiffness());
     let geometric_arrays = crate::solve::shared_sparse::CsrArrays::of(&geometric);
     let options = runmat_sparse_solvers::eigen::EigenOptions {
         count: requested_mode_count.min(dimension),

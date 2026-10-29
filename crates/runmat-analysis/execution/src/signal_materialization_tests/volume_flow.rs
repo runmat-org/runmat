@@ -35,7 +35,13 @@ fn generated_volume_flow_complex_spectrum_matches_explicit_table() {
     generator.domain = GeneratorDomain::FrequencyHertz;
     generator.sampling = SignalSamplingPolicy::CanonicalPoints(vec![10.0, 17.0, 20.0]);
     let mut admitted = admitted();
-    admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(GeneratorDomain::FrequencyHertz.axis_descriptor(None).unwrap(), vec![10.0, 17.0, 20.0]).unwrap();
+    admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(
+        GeneratorDomain::FrequencyHertz
+            .axis_descriptor(None)
+            .unwrap(),
+        vec![10.0, 17.0, 20.0],
+    )
+    .unwrap();
     let expected = [(1.0, 0.4), (2.0, -0.3), (-1.0, 0.8)];
     let mut explicit = generated.clone();
     let PhysicalSignal::VolumeFlowRate(value) = &mut explicit else {
@@ -145,7 +151,17 @@ fn generated_volume_flow_complex_spectrum_matches_explicit_table() {
         )
         .is_err());
         let mut substituted = admitted.clone();
-        substituted.sample_points.try_replace(1, runmat_types::physical::Quantity::try_from_descriptor(substituted.sample_points.descriptor(), 18.0).unwrap()).unwrap();
+        substituted
+            .sample_points
+            .try_replace(
+                1,
+                runmat_types::physical::Quantity::try_from_descriptor(
+                    substituted.sample_points.descriptor(),
+                    18.0,
+                )
+                .unwrap(),
+            )
+            .unwrap();
         assert!(validate_signal_generator_chunks(&generated, &substituted, &chunks).is_err());
     }
 }

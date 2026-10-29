@@ -371,7 +371,11 @@ fn mesh_has_boundary_target(
             .boundary_edges
             .iter()
             .any(|edge| matches(&edge.provenance))
-        || mesh.topology.nodes.iter().any(|node| matches(&node.provenance))
+        || mesh
+            .topology
+            .nodes
+            .iter()
+            .any(|node| matches(&node.provenance))
 }
 
 fn primary_solver_mesh_field_expected_count(
@@ -454,7 +458,9 @@ mod lineage_tests {
     fn boundary_quality_uses_resolved_occurrence_provenance() {
         let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
         let source_face = mesh.topology.boundary_faces[0].provenance[0].clone();
-        let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("authored_support"));
+        let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+            "authored_support",
+        ));
         target
             .bind_resolved_entities(vec![source_face.clone()])
             .expect("resolve authored face");

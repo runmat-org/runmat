@@ -16,7 +16,8 @@ fn shared_cad_face_provenance_is_deduplicated_without_changing_selection() {
         for face in &mut mesh.topology.boundary_faces {
             face.provenance.push(entity.clone());
         }
-        let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("shared-face"));
+        let mut target =
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("shared-face"));
         target.cardinality = TargetCardinality::One;
         let expected = resolve_nodal_target(&mesh, &target, "fixed").unwrap();
         assert_eq!(expected.matched_entities, vec![entity]);

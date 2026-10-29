@@ -24,7 +24,8 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
     });
     model.materials[0].mass_density_kg_per_m3 =
         (Some(3.0)).map(runmat_types::physical::MassDensity::new);
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     model.sequence.steps = vec![step];
@@ -33,7 +34,9 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));
@@ -55,7 +58,6 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
         power_balance_relative_tolerance: 1e-8,
     }
 }
-
 
 #[test]
 fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage() {

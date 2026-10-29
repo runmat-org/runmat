@@ -7,7 +7,6 @@ mod shell_contribution;
 #[cfg(test)]
 mod tests;
 
-
 use runmat_analysis_core::{
     BeamSectionModel, HomogeneousShellReferenceSurface, HomogeneousShellSectionModel,
     StructuralElementKind, StructuralFormulationRealization, StructuralModel,
@@ -23,13 +22,13 @@ use super::{
     BeamRecoveryElementSummary, ShellRecoveryElementSummary, StructuralAssemblyError,
 };
 use crate::{
-    algebra::{
-        ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
-        RealSparseAssembler, RealSparseMatrix,
-    },
     algebra::element_assembly::{
         assemble_elements, no_visit, ElementAssemblyError, ElementDofMap, ElementOutputShape,
         ElementOutputs,
+    },
+    algebra::{
+        ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
+        RealSparseAssembler, RealSparseMatrix,
     },
     planning::resource::LocalExecutionPlan,
     properties::CompiledPropertyMap,
@@ -85,37 +84,40 @@ pub(super) fn assemble_explicit_elements(
         .collect();
     let elements = &structural.elements;
     // Element DOFs; an unresolvable element gets no DOFs and its kernel reports the error.
-    let map = ElementDofMap::from_elements(dof_count, elements.len(), local_execution, |index, out| {
-        let element = &elements[index];
-        let canonical = |node_id: &u32| {
-            node_index
-                .get(node_id)
-                .and_then(|&explicit| canonical_node_indices.get(explicit).copied())
-        };
-        match &element.kind {
-            StructuralElementKind::Beam(beam) => {
-                if let (Some(i), Some(j)) = (canonical(&beam.node_ids[0]), canonical(&beam.node_ids[1])) {
-                    if let Some(dofs) = beam_element_dof_indices(layout, i, j) {
-                        out.extend(dofs.iter().map(|&dof| Some(dof)));
+    let map =
+        ElementDofMap::from_elements(dof_count, elements.len(), local_execution, |index, out| {
+            let element = &elements[index];
+            let canonical = |node_id: &u32| {
+                node_index
+                    .get(node_id)
+                    .and_then(|&explicit| canonical_node_indices.get(explicit).copied())
+            };
+            match &element.kind {
+                StructuralElementKind::Beam(beam) => {
+                    if let (Some(i), Some(j)) =
+                        (canonical(&beam.node_ids[0]), canonical(&beam.node_ids[1]))
+                    {
+                        if let Some(dofs) = beam_element_dof_indices(layout, i, j) {
+                            out.extend(dofs.iter().map(|&dof| Some(dof)));
+                        }
+                    }
+                }
+                StructuralElementKind::Shell(shell) => {
+                    let nodes = [
+                        canonical(&shell.node_ids[0]),
+                        canonical(&shell.node_ids[1]),
+                        canonical(&shell.node_ids[2]),
+                    ];
+                    if let [Some(a), Some(b), Some(c)] = nodes {
+                        if let Some(dofs) = shell_element_dof_indices(layout, [a, b, c]) {
+                            out.extend(dofs.iter().map(|&dof| Some(dof)));
+                        }
                     }
                 }
             }
-            StructuralElementKind::Shell(shell) => {
-                let nodes = [
-                    canonical(&shell.node_ids[0]),
-                    canonical(&shell.node_ids[1]),
-                    canonical(&shell.node_ids[2]),
-                ];
-                if let [Some(a), Some(b), Some(c)] = nodes {
-                    if let Some(dofs) = shell_element_dof_indices(layout, [a, b, c]) {
-                        out.extend(dofs.iter().map(|&dof| Some(dof)));
-                    }
-                }
-            }
-        }
-        Ok::<_, StructuralAssemblyError>(())
-    })
-    .map_err(explicit_assembly_error)?;
+            Ok::<_, StructuralAssemblyError>(())
+        })
+        .map_err(explicit_assembly_error)?;
     let pattern = map
         .symbolic_pattern(local_execution)
         .map_err(|error| explicit_assembly_error(error.map_element(|never| match never {})))?;
@@ -162,12 +164,15 @@ pub(super) fn assemble_explicit_elements(
                         let damping = out.matrix(C);
                         for row in 0..BEAM_ELEMENT_DOF_COUNT {
                             for column in 0..BEAM_ELEMENT_DOF_COUNT {
-                                let mass = if row == column { contribution.mass[row] } else { 0.0 };
-                                damping[row * BEAM_ELEMENT_DOF_COUNT + column] = mass_coefficient
-                                    .canonical_value()
-                                    * mass
-                                    + stiffness_coefficient.canonical_value()
-                                        * contribution.stiffness[row][column];
+                                let mass = if row == column {
+                                    contribution.mass[row]
+                                } else {
+                                    0.0
+                                };
+                                damping[row * BEAM_ELEMENT_DOF_COUNT + column] =
+                                    mass_coefficient.canonical_value() * mass
+                                        + stiffness_coefficient.canonical_value()
+                                            * contribution.stiffness[row][column];
                             }
                         }
                         *out.scalar(0) = 1.0;

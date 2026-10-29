@@ -139,7 +139,11 @@ fn lower_expression(
                 .ok_or_else(|| AuthoredObservationError::UnknownStep(step_id.clone()))?;
             Ok(ObservationDraft {
                 step_id: step_id.clone(),
-                spec: base_spec(*quantity, *location, field_domain(step.procedure, *quantity)),
+                spec: base_spec(
+                    *quantity,
+                    *location,
+                    field_domain(step.procedure, *quantity),
+                ),
                 kind: ObservationKind::Field,
             })
         }
@@ -234,7 +238,10 @@ fn lower_expression(
                 // An element field is piecewise per element, and a finite-volume cell field holds
                 // the cell average: a point samples the native value of the element or cell that
                 // contains it.
-                (ObservationTarget::Point { .. }, location @ (FieldLocation::Element | FieldLocation::Cell)) => {
+                (
+                    ObservationTarget::Point { .. },
+                    location @ (FieldLocation::Element | FieldLocation::Cell),
+                ) => {
                     draft.spec.output_location = location;
                     draft.spec.recovery = RecoveryPolicy::Native;
                 }

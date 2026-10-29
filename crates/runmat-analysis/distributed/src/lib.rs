@@ -23,7 +23,9 @@ mod problem;
 mod rank;
 mod subdomain;
 
-pub use comm::{read_bytes, write_bytes, Communicator, TcpCommunicator, TcpRendezvous, ThreadCommunicator};
+pub use comm::{
+    read_bytes, write_bytes, Communicator, TcpCommunicator, TcpRendezvous, ThreadCommunicator,
+};
 pub use driver::{gather_outputs, solve_in_threads, DistributedSolution};
 pub use error::{DistributedError, DistributedResult};
 pub use krylov::{IterationRecord, KrylovSettings, KrylovSummary};

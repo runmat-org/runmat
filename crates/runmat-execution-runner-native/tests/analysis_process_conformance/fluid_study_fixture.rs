@@ -139,14 +139,10 @@ pub(super) async fn cold_fixture(
     {
         let mut reordered = closures.clone();
         reordered.swap(0, 1);
-        assert!(
-            import_fluid_study_completion(&store, done.preparation(), reordered).is_err()
-        );
+        assert!(import_fluid_study_completion(&store, done.preparation(), reordered).is_err());
         let mut missing = closures.clone();
         missing.pop();
-        assert!(
-            import_fluid_study_completion(&store, done.preparation(), missing).is_err()
-        );
+        assert!(import_fluid_study_completion(&store, done.preparation(), missing).is_err());
         let mut foreign = done.preparation();
         let resident = foreign.policy.numerical.maximum_resident_bytes;
         foreign.policy.numerical.maximum_resident_bytes =
@@ -223,7 +219,9 @@ pub(super) async fn cold_fixture(
             entry.definition.clone(),
             entry.sample,
             partitions,
-            entry.definition.stored_entities(cold.fields.manifest.entity_counts),
+            entry
+                .definition
+                .stored_entities(cold.fields.manifest.entity_counts),
         )
         .unwrap();
         assert_eq!(&actual, original);

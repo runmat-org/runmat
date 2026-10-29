@@ -57,11 +57,17 @@ fn blocked_reduce<R: Copy + Send + std::ops::Add<Output = R>>(
 /// One value per fixed block, in block order. Folding these from zero in order is the
 /// reduction; a row-partitioned solve whose rank boundaries are block multiples gathers every
 /// rank's partials and folds them the same way, so its result is bitwise the single-rank one.
-fn block_partials<R: Send>(len: usize, block: impl Fn(std::ops::Range<usize>) -> R + Sync) -> Vec<R> {
+fn block_partials<R: Send>(
+    len: usize,
+    block: impl Fn(std::ops::Range<usize>) -> R + Sync,
+) -> Vec<R> {
     let blocks = len.div_ceil(REDUCTION_BLOCK);
     let range = |b: usize| b * REDUCTION_BLOCK..((b + 1) * REDUCTION_BLOCK).min(len);
     if parallel(len) {
-        (0..blocks).into_par_iter().map(|b| block(range(b))).collect()
+        (0..blocks)
+            .into_par_iter()
+            .map(|b| block(range(b)))
+            .collect()
     } else {
         (0..blocks).map(|b| block(range(b))).collect()
     }
@@ -75,7 +81,9 @@ pub fn dot_partials<T: Scalar>(x: &[T], y: &[T]) -> Vec<T> {
 
 /// Folds block partials (of any rank layout, in global block order) from zero.
 pub fn fold_partials<T: Scalar>(partials: impl IntoIterator<Item = T>) -> T {
-    partials.into_iter().fold(T::zero(), |acc, value| acc + value)
+    partials
+        .into_iter()
+        .fold(T::zero(), |acc, value| acc + value)
 }
 
 /// `Σ conj(x_i) y_i` over one block with four interleaved accumulators combined as
@@ -117,9 +125,10 @@ fn block_abs2<T: Scalar>(x: &[T]) -> f64 {
 /// Hermitian inner product `Σ conj(x_i) y_i`.
 pub fn dot<T: Scalar>(x: &[T], y: &[T]) -> T {
     debug_assert_eq!(x.len(), y.len());
-    blocked_reduce(x.len(), T::zero(), |range| block_dot(&x[range.clone()], &y[range]))
+    blocked_reduce(x.len(), T::zero(), |range| {
+        block_dot(&x[range.clone()], &y[range])
+    })
 }
-
 
 /// Hermitian inner product together with `Σ |conj(x_i) y_i|` (one pass, same block order).
 pub fn dot_and_magnitude<T: Scalar>(x: &[T], y: &[T]) -> (T, f64) {
@@ -145,7 +154,9 @@ pub fn dot_and_magnitude_partials<T: Scalar>(x: &[T], y: &[T]) -> Vec<(T, f64)> 
 }
 
 /// Folds [`dot_and_magnitude_partials`] from zero in order.
-pub fn fold_dot_magnitude_partials<T: Scalar>(partials: impl IntoIterator<Item = (T, f64)>) -> (T, f64) {
+pub fn fold_dot_magnitude_partials<T: Scalar>(
+    partials: impl IntoIterator<Item = (T, f64)>,
+) -> (T, f64) {
     partials
         .into_iter()
         .fold((T::zero(), 0.0), |(d, m), (pd, pm)| (d + pd, m + pm))
@@ -171,7 +182,10 @@ pub fn multi_dot_partials<T: Scalar>(vectors: &[T], count: usize, w: &[T]) -> Ve
 }
 
 /// Folds [`multi_dot_partials`] (global block order) from zero, per vector.
-pub fn fold_multi_partials<T: Scalar>(count: usize, partials: impl IntoIterator<Item = Vec<T>>) -> Vec<T> {
+pub fn fold_multi_partials<T: Scalar>(
+    count: usize,
+    partials: impl IntoIterator<Item = Vec<T>>,
+) -> Vec<T> {
     let mut out = vec![T::zero(); count];
     for partial in partials {
         for (o, p) in out.iter_mut().zip(partial) {
@@ -317,7 +331,10 @@ pub fn norm2_partials<T: Scalar>(x: &[T]) -> Vec<(f64, f64)> {
         }
         sum
     });
-    partials.into_iter().map(|p| (p.scale, p.sum_squares)).collect()
+    partials
+        .into_iter()
+        .map(|p| (p.scale, p.sum_squares))
+        .collect()
 }
 
 /// Folds [`norm2_partials`] (any rank layout, global block order) into the norm.

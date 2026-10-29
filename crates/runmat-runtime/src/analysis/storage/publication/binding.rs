@@ -125,8 +125,8 @@ impl access::FilesystemAccess<'_> {
         self.ensure_owned_directory(&directory, "run attempts")?;
         let directory = directory.join(definition);
         self.ensure_owned_directory(&directory, "definition run attempts")?;
-        let bytes = serde_json::to_vec(&RunBinding::Study { publication })
-            .map_err(|e| e.to_string())?;
+        let bytes =
+            serde_json::to_vec(&RunBinding::Study { publication }).map_err(|e| e.to_string())?;
         match self
             .atomic_create_new(directory.join(format!("{run_id}.json")), &bytes)
             .map_err(AnalysisPublicationError::from_io)?

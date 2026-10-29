@@ -282,7 +282,11 @@ fn check_authored_names(
             GeometryRegionRole::Face => "face",
             GeometryRegionRole::Solid | GeometryRegionRole::Cell => "solid",
         };
-        let roles = if role == "vertex" { "vertices".to_string() } else { format!("{role}s") };
+        let roles = if role == "vertex" {
+            "vertices".to_string()
+        } else {
+            format!("{role}s")
+        };
         let available = inspection
             .facts
             .authored_names

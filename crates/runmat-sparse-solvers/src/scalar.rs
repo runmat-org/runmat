@@ -239,6 +239,9 @@ impl Scalar for c32 {
     }
     #[inline(always)]
     fn scale(self, factor: f64) -> Self {
-        Complex::new((self.re as f64 * factor) as f32, (self.im as f64 * factor) as f32)
+        Complex::new(
+            (self.re as f64 * factor) as f32,
+            (self.im as f64 * factor) as f32,
+        )
     }
 }

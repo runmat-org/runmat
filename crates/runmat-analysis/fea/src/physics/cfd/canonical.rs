@@ -439,7 +439,9 @@ impl<'a> CanonicalFluidProblem<'a> {
             ));
         }
         if material.rheology.is_some_and(|law| !law.is_valid()) {
-            return Err(CanonicalFluidError::Invalid("generalized-Newtonian viscosity law"));
+            return Err(CanonicalFluidError::Invalid(
+                "generalized-Newtonian viscosity law",
+            ));
         }
         if material
             .porous_zones
@@ -578,10 +580,12 @@ impl<'a> CanonicalFluidProblem<'a> {
         let n = self.topology.cells.len();
         if initial.velocity_m_per_s.canonical_values().len() != n
             || initial.pressure_fluctuation_pa.canonical_values().len() != n
-            || initial.face_volume_flux_m3_per_s.canonical_values().len() != self.topology.faces.len()
+            || initial.face_volume_flux_m3_per_s.canonical_values().len()
+                != self.topology.faces.len()
             || initial
                 .velocity_m_per_s
-                .canonical_values().iter()
+                .canonical_values()
+                .iter()
                 .flatten()
                 .chain(initial.pressure_fluctuation_pa.canonical_values().iter())
                 .chain(initial.face_volume_flux_m3_per_s.canonical_values().iter())

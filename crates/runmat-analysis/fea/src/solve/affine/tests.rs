@@ -24,8 +24,14 @@ fn scoped_affine_lift_preserves_serial_bits() {
     let serial_full = expand(&reduction, &reduced, None).unwrap();
     for threads in [2, 3, 7, 8] {
         let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
-        assert_eq!(expand_linear(&reduction, &reduced, Some(plan)).unwrap(), serial_linear);
-        assert_eq!(expand(&reduction, &reduced, Some(plan)).unwrap(), serial_full);
+        assert_eq!(
+            expand_linear(&reduction, &reduced, Some(plan)).unwrap(),
+            serial_linear
+        );
+        assert_eq!(
+            expand(&reduction, &reduced, Some(plan)).unwrap(),
+            serial_full
+        );
     }
 }
 

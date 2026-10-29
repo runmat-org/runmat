@@ -169,9 +169,9 @@ fn prepare_for<'a>(
     );
     // Fixed-frame loads form the dead-load vector. Follower loads depend on the deformed
     // boundary; the nonlinear solid integrates them at every iterate and owns their source.
-    let follower_present = excitations.iter().any(|load| {
-        load.policy.kinematics == runmat_analysis_core::ExcitationKinematics::Follower
-    });
+    let follower_present = excitations
+        .iter()
+        .any(|load| load.policy.kinematics == runmat_analysis_core::ExcitationKinematics::Follower);
     let dead_loads = excitations.filtered(|load| {
         load.policy.kinematics == runmat_analysis_core::ExcitationKinematics::FixedFrame
     });
@@ -186,9 +186,9 @@ fn prepare_for<'a>(
         _ => FeaRunError::Assembly(err.to_string()),
     })?;
     if follower_present
-        && !summary
-            .structural_sources
-            .contains(&runmat_analysis_core::SourceImplementation::CanonicalFollowerBoundaryIntegration)
+        && !summary.structural_sources.contains(
+            &runmat_analysis_core::SourceImplementation::CanonicalFollowerBoundaryIntegration,
+        )
     {
         summary
             .structural_sources

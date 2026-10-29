@@ -103,7 +103,9 @@ impl runmat_runtime::context::RuntimeAnalysisService for NativeAnalysisService {
 
 /// Runs a `.fea` document with this executable's public `fea run` command, then reads the
 /// authenticated publication it wrote. The study runs exactly as it does from a shell.
-fn run_document_through_cli(path: &std::path::Path) -> Result<AnalysisStudyRunData, runmat_runtime::RuntimeError> {
+fn run_document_through_cli(
+    path: &std::path::Path,
+) -> Result<AnalysisStudyRunData, runmat_runtime::RuntimeError> {
     let failure = |message: String| {
         runmat_runtime::build_runtime_error(message)
             .with_identifier("RunMat:fea:OperationFailed")

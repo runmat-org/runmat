@@ -49,14 +49,23 @@ struct SinglePrecisionCsr {
 impl SinglePrecisionCsr {
     fn of(matrix: &CsrMatrix<f64>) -> SolverResult<Self> {
         let narrow = |value: usize| {
-            u32::try_from(value).map_err(|_| SolverError::Unsupported("device index exceeds 32 bits".into()))
+            u32::try_from(value)
+                .map_err(|_| SolverError::Unsupported("device index exceeds 32 bits".into()))
         };
         let a = matrix.as_ref();
         Ok(Self {
             rows: narrow(a.nrows())?,
             columns: narrow(a.ncols())?,
-            row_offsets: a.row_ptr().iter().map(|&p| narrow(p)).collect::<SolverResult<_>>()?,
-            column_indices: a.col_idx().iter().map(|&c| narrow(c)).collect::<SolverResult<_>>()?,
+            row_offsets: a
+                .row_ptr()
+                .iter()
+                .map(|&p| narrow(p))
+                .collect::<SolverResult<_>>()?,
+            column_indices: a
+                .col_idx()
+                .iter()
+                .map(|&c| narrow(c))
+                .collect::<SolverResult<_>>()?,
             values: a.values().iter().map(|&v| v as f32).collect(),
         })
     }
@@ -77,16 +86,26 @@ fn device_error(error: impl std::fmt::Display) -> SolverError {
 
 impl<'p> DeviceAmg<'p> {
     /// Uploads `amg` (exported in single precision) to `provider`.
-    pub fn new(provider: &'p dyn AccelProvider, amg: &Amg, apply: DeviceApply) -> SolverResult<Self> {
+    pub fn new(
+        provider: &'p dyn AccelProvider,
+        amg: &Amg,
+        apply: DeviceApply,
+    ) -> SolverResult<Self> {
         let export = amg.export()?;
         Self::from_export(provider, &export, apply)
     }
 
-    pub fn from_export(provider: &'p dyn AccelProvider, export: &AmgExport, apply: DeviceApply) -> SolverResult<Self> {
+    pub fn from_export(
+        provider: &'p dyn AccelProvider,
+        export: &AmgExport,
+        apply: DeviceApply,
+    ) -> SolverResult<Self> {
         let coarse_inverse: Vec<f32> = export
             .coarse_inverse
             .as_ref()
-            .ok_or_else(|| SolverError::Unsupported("device multigrid needs an exact coarse solve".into()))?
+            .ok_or_else(|| {
+                SolverError::Unsupported("device multigrid needs an exact coarse solve".into())
+            })?
             .iter()
             .map(|&v| v as f32)
             .collect();
@@ -96,9 +115,21 @@ impl<'p> DeviceAmg<'p> {
             .map(|level| {
                 Ok((
                     SinglePrecisionCsr::of(&level.matrix)?,
-                    level.prolongation.as_ref().map(SinglePrecisionCsr::of).transpose()?,
-                    level.restriction.as_ref().map(SinglePrecisionCsr::of).transpose()?,
-                    level.inverse_blocks.iter().map(|&v| v as f32).collect::<Vec<f32>>(),
+                    level
+                        .prolongation
+                        .as_ref()
+                        .map(SinglePrecisionCsr::of)
+                        .transpose()?,
+                    level
+                        .restriction
+                        .as_ref()
+                        .map(SinglePrecisionCsr::of)
+                        .transpose()?,
+                    level
+                        .inverse_blocks
+                        .iter()
+                        .map(|&v| v as f32)
+                        .collect::<Vec<f32>>(),
                 ))
             })
             .collect::<SolverResult<Vec<_>>>()?;
@@ -121,14 +152,25 @@ impl<'p> DeviceAmg<'p> {
             smoother_degree: export.smoother_degree as u32,
             chebyshev_ratio: export.chebyshev_ratio as f32,
         };
-        let handle = provider.prepare_sparse_multigrid(&request).map_err(device_error)?;
-        Ok(Self { provider, handle, apply })
+        let handle = provider
+            .prepare_sparse_multigrid(&request)
+            .map_err(device_error)?;
+        Ok(Self {
+            provider,
+            handle,
+            apply,
+        })
     }
 
     /// One device application in single precision (also the benchmark entry point).
     pub fn apply_f32(&self, rhs: &[f32], apply: SparseMultigridApply) -> SolverResult<Vec<f32>> {
-        let request = SparseMultigridSolveRequest { hierarchy: &self.handle, rhs, apply };
-        let result = pollster::block_on(self.provider.sparse_multigrid_solve(&request)).map_err(device_error)?;
+        let request = SparseMultigridSolveRequest {
+            hierarchy: &self.handle,
+            rhs,
+            apply,
+        };
+        let result = pollster::block_on(self.provider.sparse_multigrid_solve(&request))
+            .map_err(device_error)?;
         Ok(result.solution)
     }
 
@@ -145,14 +187,20 @@ impl<'p> DeviceAmg<'p> {
 impl Preconditioner<f64> for DeviceAmg<'_> {
     fn apply(&self, r: &[f64], z: &mut [f64]) -> SolverResult<()> {
         if r.len() != self.handle.rows as usize || z.len() != r.len() {
-            return Err(SolverError::Dimension("device multigrid vector length".into()));
+            return Err(SolverError::Dimension(
+                "device multigrid vector length".into(),
+            ));
         }
         // Scale into f32 range by the residual's largest magnitude; the map is linear (V-cycle)
         // or scale-equivariant (CG), so the correction is scaled back exactly.
         let scale = r.iter().fold(0.0f64, |m, v| m.max(v.abs()));
         if scale == 0.0 || !scale.is_finite() {
             z.iter_mut().for_each(|v| *v = 0.0);
-            return if scale == 0.0 { Ok(()) } else { Err(SolverError::NonFinite { entry: 0 }) };
+            return if scale == 0.0 {
+                Ok(())
+            } else {
+                Err(SolverError::NonFinite { entry: 0 })
+            };
         }
         let rhs: Vec<f32> = r.iter().map(|&v| (v / scale) as f32).collect();
         let solution = self.apply_f32(&rhs, self.device_apply())?;
@@ -160,7 +208,9 @@ impl Preconditioner<f64> for DeviceAmg<'_> {
             *z = f64::from(v) * scale;
         }
         if z.iter().any(|v| !v.is_finite()) {
-            return Err(SolverError::Breakdown("device multigrid produced a nonfinite correction".into()));
+            return Err(SolverError::Breakdown(
+                "device multigrid produced a nonfinite correction".into(),
+            ));
         }
         Ok(())
     }

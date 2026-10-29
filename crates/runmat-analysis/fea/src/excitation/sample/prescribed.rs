@@ -4,8 +4,8 @@ use super::{
     ExcitationSamplePoint, RealizationError, SampledValue,
 };
 use runmat_analysis_core::{
-    ElectricCurrent, ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue, Pressure, Signal, Temperature,
-    TemperatureDifference, Velocity,
+    ElectricCurrent, ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue, Pressure,
+    Signal, Temperature, TemperatureDifference, Velocity,
 };
 
 pub(crate) fn sample_prescribed_velocity(

@@ -45,7 +45,8 @@ impl MagneticUnknownLayout {
     pub fn physical_gauge(
         &self,
         value: Quantity<kind::MagneticFlux>,
-    ) -> Result<Quantity<kind::MagneticFieldIntensity>, runmat_types::physical::QuantityValueError> {
+    ) -> Result<Quantity<kind::MagneticFieldIntensity>, runmat_types::physical::QuantityValueError>
+    {
         Quantity::try_new(
             value.canonical_value()
                 / self.permeability.canonical_value()
@@ -87,7 +88,15 @@ mod tests {
             MagneticUnknownLayout::try_new(4, 2, MagneticPermeability::new(2.0), Length::new(0.01))
                 .unwrap();
         assert_eq!(layout.component_count(), 6);
-        assert!((layout.physical_gauge(Quantity::new(0.0006)).unwrap().canonical_value() - 3.0).abs() < 1e-14);
+        assert!(
+            (layout
+                .physical_gauge(Quantity::new(0.0006))
+                .unwrap()
+                .canonical_value()
+                - 3.0)
+                .abs()
+                < 1e-14
+        );
         assert_eq!(
             layout.component_descriptor(5).unwrap().kind(),
             Some(runmat_types::physical::QuantityKind::MagneticFlux)

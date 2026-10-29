@@ -265,4 +265,3 @@ fn cooling_convergence(quadratic: bool, cell_counts: [usize; 3]) {
     assert!(finest.heat < if quadratic { 0.005 } else { 0.08 });
     assert!(finest.power < if quadratic { 0.02 } else { 0.15 });
 }
-

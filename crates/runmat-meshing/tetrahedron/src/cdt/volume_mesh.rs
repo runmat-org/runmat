@@ -92,16 +92,20 @@ pub enum DelaunayVolumeQualityMutation {
 
 impl DelaunayVolumeMesh {
     pub fn refinement_insertions(&self) -> impl Iterator<Item = &DelaunayVolumeNode> {
-        self.quality_mutations.iter().filter_map(|mutation| match mutation {
-            DelaunayVolumeQualityMutation::Refined(node) => Some(node),
-            DelaunayVolumeQualityMutation::Optimized(_) => None,
-        })
+        self.quality_mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                DelaunayVolumeQualityMutation::Refined(node) => Some(node),
+                DelaunayVolumeQualityMutation::Optimized(_) => None,
+            })
     }
     pub fn optimization_mutations(&self) -> impl Iterator<Item = &DelaunayVolumeSliverMutation> {
-        self.quality_mutations.iter().filter_map(|mutation| match mutation {
-            DelaunayVolumeQualityMutation::Refined(_) => None,
-            DelaunayVolumeQualityMutation::Optimized(mutation) => Some(mutation),
-        })
+        self.quality_mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                DelaunayVolumeQualityMutation::Refined(_) => None,
+                DelaunayVolumeQualityMutation::Optimized(mutation) => Some(mutation),
+            })
     }
 }
 

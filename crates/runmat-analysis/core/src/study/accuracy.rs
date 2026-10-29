@@ -134,7 +134,8 @@ impl AccuracyResourceCeiling {
 
     /// Whether `bytes` of residency fits the authored ceiling; always true without one.
     pub fn admits_resident_bytes(&self, bytes: u64) -> bool {
-        self.maximum_resident_bytes.is_none_or(|limit| bytes <= limit)
+        self.maximum_resident_bytes
+            .is_none_or(|limit| bytes <= limit)
     }
 
     /// The authored ceiling as a saturating byte budget for planning arithmetic: `u64::MAX`

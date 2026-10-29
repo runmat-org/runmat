@@ -1,12 +1,13 @@
 #[cfg(test)]
-use runmat_geometry_core::{CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind};
+use runmat_geometry_core::{
+    CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership, CadSemanticKind,
+};
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    AssemblyNode, CadEvaluatorSet, CadFaceEvaluationSample,
-    CadFaceEvaluationSampleSource, CadFaceEvaluator,
-    EntityIdRange, EntityKind, Region, RegionEntityMapping,
-    SourceGeometryKind, SurfaceMesh,
+    AssemblyNode, CadEvaluatorSet, CadFaceEvaluationSample, CadFaceEvaluationSampleSource,
+    CadFaceEvaluator, EntityIdRange, EntityKind, Region, RegionEntityMapping, SourceGeometryKind,
+    SurfaceMesh,
 };
 
 use crate::{
@@ -50,7 +51,13 @@ pub(super) fn import_cad(
         let selection = match exact_selection {
             Some(selection) => selection,
             None => {
-                imported_projection = crate::ExactSelectionProjection::import(path, bytes, format, options.source_units, context)?;
+                imported_projection = crate::ExactSelectionProjection::import(
+                    path,
+                    bytes,
+                    format,
+                    options.source_units,
+                    context,
+                )?;
                 &imported_projection
             }
         };

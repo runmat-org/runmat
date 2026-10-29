@@ -120,7 +120,9 @@ pub(super) fn resolve_probe(
                     ))?;
             let location = projection
                 .locate_volume_point(position.canonical_value())?
-                .ok_or_else(|| target_error(spec, "point lies outside the admitted solid topology"))?;
+                .ok_or_else(|| {
+                    target_error(spec, "point lies outside the admitted solid topology")
+                })?;
             let index = elements
                 .iter()
                 .position(|element| element.identity == location.element_identity)

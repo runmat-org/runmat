@@ -1,6 +1,8 @@
 //! MINRES (Paige–Saunders) for Hermitian, possibly indefinite systems with an HPD preconditioner.
 
-use super::{relative, split_work, tolerance, ApplyStatus, KrylovOps, KrylovOptions, KrylovReport, StopFlag};
+use super::{
+    relative, split_work, tolerance, ApplyStatus, KrylovOps, KrylovOptions, KrylovReport, StopFlag,
+};
 use crate::error::SolverResult;
 use crate::par;
 use crate::scalar::Scalar;
@@ -18,7 +20,11 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
 ) -> SolverResult<KrylovReport> {
     let n = b.len();
     let mut parts = split_work(work, n, 7 + usize::from(options.return_best_iterate));
-    let mut best = if options.return_best_iterate { parts.pop() } else { None };
+    let mut best = if options.return_best_iterate {
+        parts.pop()
+    } else {
+        None
+    };
     let mut it = parts.into_iter();
     let (r1, r2, y, v, w, w1, w2) = (
         it.next().unwrap(),
@@ -101,7 +107,8 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
         let mut first = true;
         while iteration < options.max_iterations {
             iteration += 1;
-            ops.checkpoint(iteration, relative(phibar * scale, rhs_norm)).await?;
+            ops.checkpoint(iteration, relative(phibar * scale, rhs_norm))
+                .await?;
             let s = 1.0 / beta;
             for i in 0..n {
                 v[i] = y[i].scale(s);

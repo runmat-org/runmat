@@ -128,8 +128,11 @@ fn evaluate(
                 retained.optimization_violation_ratio,
             ) = evaluation::violation_ratios(
                 evaluation::volume_owned_maximum_metric_edge_length(
-                    cell.vertex_indices
-                        .map(|vertex| topology.nodes[vertex as usize].coordinates_m.canonical_value()),
+                    cell.vertex_indices.map(|vertex| {
+                        topology.nodes[vertex as usize]
+                            .coordinates_m
+                            .canonical_value()
+                    }),
                     retained.resolved_metric,
                     protected_edge_mask(identities, &protected_facets),
                 ),

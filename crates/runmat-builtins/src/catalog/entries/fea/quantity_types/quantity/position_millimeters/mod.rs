@@ -13,12 +13,14 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_vector(request, entry, identities::FEA_POSITION_CLASS)
 }
 
-const POSITION_MILLIMETERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "position = fea.Position.millimeters(coordinates)",
-    inputs: &VECTOR_QUANTITY_INPUTS,
-    outputs: &VECTOR_QUANTITY_OUTPUTS,
-}];
-pub const POSITION_MILLIMETERS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&POSITION_MILLIMETERS_SIGNATURES);
+const POSITION_MILLIMETERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "position = fea.Position.millimeters(coordinates)",
+        inputs: &VECTOR_QUANTITY_INPUTS,
+        outputs: &VECTOR_QUANTITY_OUTPUTS,
+    }];
+pub const POSITION_MILLIMETERS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&POSITION_MILLIMETERS_SIGNATURES);
 const POSITION_MILLIMETERS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "position-millimeters",
     title: "A point in millimeters",

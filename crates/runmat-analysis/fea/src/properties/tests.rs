@@ -148,8 +148,9 @@ fn compiled_map_rejects_gaps_overlaps_wrong_roles_and_stale_scopes() {
     ));
 
     let mut stale = model;
-    stale.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("absent-region"));
+    stale.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_region("absent-region"),
+    );
     assert!(compile_solid_property_map(&stale, &mesh).is_err());
 }
 
@@ -239,7 +240,9 @@ fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     let mut model = matching_model(&mesh);
-    let mut target = runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("logical-body"));
+    let mut target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_solid("logical-body"),
+    );
     target
         .bind_resolved_entities(vec![
             selected,
@@ -255,7 +258,9 @@ fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
     let compiled = compile_solid_property_map(&model, &mesh).expect("compiled properties");
     assert_eq!(compiled.solid_materials().len(), 1);
 
-    let mut wrong_kind = runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("logical-body"));
+    let mut wrong_kind = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_solid("logical-body"),
+    );
     assert!(wrong_kind
         .bind_resolved_entities(vec![mesh.topology.boundary_faces[0].provenance[0].clone()])
         .is_err());
@@ -353,8 +358,14 @@ fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_owne
             .map(|ply_id| LaminatePlyModel {
                 ply_id: ply_id.into(),
                 material_id: "mat_steel".into(),
-                thickness_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.001),
-                angle_rad: runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle,_>::new(0.0),
+                thickness_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.001),
+                angle_rad:
+                    runmat_types::physical::Quantity::<runmat_types::physical::kind::Angle, _>::new(
+                        0.0,
+                    ),
             })
             .to_vec(),
         shear_correction: Some(5.0 / 6.0),
@@ -473,7 +484,8 @@ fn matching_model(
     model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
         mesh.topology.volume_elements[0]
             .region_id
-            .analysis_selection_id().unwrap(),
+            .analysis_selection_id()
+            .unwrap(),
     );
     model
 }

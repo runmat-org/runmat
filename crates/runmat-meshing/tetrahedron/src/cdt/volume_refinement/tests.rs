@@ -459,9 +459,11 @@ fn size_refinement_splits_the_longest_edge_with_an_interior_endpoint() {
     let contexts = context(&topology);
     let (evaluated, options) = quality(&topology, &contexts, 1.2);
     let points = |index: usize| {
-        topology.tetrahedra[index]
-            .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].coordinates_m.canonical_value())
+        topology.tetrahedra[index].vertex_indices.map(|vertex| {
+            topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        })
     };
     // The hull edges (corner to corner, up to 2.24) are longer than the interior
     // edge to the far corner (1.73), but they cannot be split from inside.
@@ -483,13 +485,25 @@ fn size_refinement_splits_the_longest_edge_with_an_interior_endpoint() {
         .unwrap();
     let point = candidate::metric_edge_midpoint(&topology, source, cell, options).unwrap();
     let midpoint: [f64; 3] = std::array::from_fn(|axis| 0.5 * (interior[axis] + corner[axis]));
-    let offset = (0..3).map(|axis| (point[axis] - midpoint[axis]).powi(2)).sum::<f64>().sqrt();
-    assert!(offset < 0.1, "{point:?} is not near the interior edge midpoint {midpoint:?}");
+    let offset = (0..3)
+        .map(|axis| (point[axis] - midpoint[axis]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        offset < 0.1,
+        "{point:?} is not near the interior edge midpoint {midpoint:?}"
+    );
     assert!(candidate::strictly_inside(points(source), point).unwrap());
     // No edge over the bound with an interior endpoint: no candidate.
     let (relaxed, relaxed_options) = quality(&topology, &contexts, 2.0);
-    let relaxed_cell = relaxed.tetrahedra.iter().find(|candidate| candidate.node_identities == cell.node_identities).unwrap();
-    assert!(candidate::metric_edge_midpoint(&topology, source, relaxed_cell, relaxed_options).is_none());
+    let relaxed_cell = relaxed
+        .tetrahedra
+        .iter()
+        .find(|candidate| candidate.node_identities == cell.node_identities)
+        .unwrap();
+    assert!(
+        candidate::metric_edge_midpoint(&topology, source, relaxed_cell, relaxed_options).is_none()
+    );
 }
 
 struct Cancelled;

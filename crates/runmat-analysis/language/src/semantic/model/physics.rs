@@ -5,10 +5,10 @@ use crate::{
 };
 use runmat_analysis_core::{
     AuthoredBoundary, AuthoredBoundaryCoefficient, AuthoredBoundaryKind, AuthoredConnector,
-    AuthoredConnectorKind, CanonicalQuantity,
-    AuthoredInterface, AuthoredInterfaceKind, Damping, FoundationModulus, FrictionCoefficient,
-    HeatFlux, HeatTransferCoefficient, PrescribedValue, Pressure, SpecificAcousticImpedance,
-    Stiffness, SurfaceEmissivity, Temperature, ThermalContactResistance,
+    AuthoredConnectorKind, AuthoredInterface, AuthoredInterfaceKind, CanonicalQuantity, Damping,
+    FoundationModulus, FrictionCoefficient, HeatFlux, HeatTransferCoefficient, PrescribedValue,
+    Pressure, SpecificAcousticImpedance, Stiffness, SurfaceEmissivity, Temperature,
+    ThermalContactResistance,
 };
 use runmat_fea_syntax::FeaModelDefinitionKind;
 

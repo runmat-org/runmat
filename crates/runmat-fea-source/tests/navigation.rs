@@ -304,11 +304,19 @@ fn named_region_selection_is_canonical_bounded_and_does_not_export_definitions()
 fn indexed_but_unresolved_definition_is_not_reported_as_a_missing_name() {
     let source = checked();
     let request = FeaBrowseRequest {
-        revision: source.revision, module_path: None,
-        filter: FeaQueryFilter::Identity { identity: source.source_index.entries[0].identity.clone() },
-        after: None, limit: 1, detail: FeaQueryDetail::Definition,
+        revision: source.revision,
+        module_path: None,
+        filter: FeaQueryFilter::Identity {
+            identity: source.source_index.entries[0].identity.clone(),
+        },
+        after: None,
+        limit: 1,
+        detail: FeaQueryDetail::Definition,
     };
-    assert_eq!(source.browse(&request), Err(FeaQueryError::DefinitionUnavailable));
+    assert_eq!(
+        source.browse(&request),
+        Err(FeaQueryError::DefinitionUnavailable)
+    );
 }
 
 #[test]
@@ -319,11 +327,19 @@ fn region_query_reports_unresolved_geometry_without_claiming_the_name_is_missing
         "location":{"path":"project/main.fea","span":{"start":0,"end":20}}
     }])).unwrap();
     let request = FeaBrowseRequest {
-        revision: source.revision, module_path: None, after: None, limit: 1,
+        revision: source.revision,
+        module_path: None,
+        after: None,
+        limit: 1,
         filter: FeaQueryFilter::GeometryRegionSelection {
             geometry: source.source_index.entries[0].identity.clone(),
-            region_ids: vec!["face_000008".into()], required_role: None,
-        }, detail: FeaQueryDetail::Navigation,
+            region_ids: vec!["face_000008".into()],
+            required_role: None,
+        },
+        detail: FeaQueryDetail::Navigation,
     };
-    assert_eq!(source.browse(&request), Err(FeaQueryError::DefinitionUnavailable));
+    assert_eq!(
+        source.browse(&request),
+        Err(FeaQueryError::DefinitionUnavailable)
+    );
 }

@@ -58,7 +58,10 @@ pub fn is_exposed_analysis_identity(
             )
             | (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse)
             | (PhysicsFamily::Acoustic, AnalysisProcedure::ModalExtraction)
-            | (PhysicsFamily::Acoustic, AnalysisProcedure::TransientResponse)
+            | (
+                PhysicsFamily::Acoustic,
+                AnalysisProcedure::TransientResponse
+            )
             | (PhysicsFamily::Fluid, AnalysisProcedure::Static)
             | (PhysicsFamily::Fluid, AnalysisProcedure::TransientResponse)
             | (
@@ -130,7 +133,10 @@ mod tests {
             ),
             (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse),
             (PhysicsFamily::Acoustic, AnalysisProcedure::ModalExtraction),
-            (PhysicsFamily::Acoustic, AnalysisProcedure::TransientResponse),
+            (
+                PhysicsFamily::Acoustic,
+                AnalysisProcedure::TransientResponse,
+            ),
             (PhysicsFamily::Fluid, AnalysisProcedure::Static),
             (PhysicsFamily::Fluid, AnalysisProcedure::TransientResponse),
             (

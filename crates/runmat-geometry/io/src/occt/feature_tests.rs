@@ -38,7 +38,10 @@ fn exact_primitives_use_the_canonical_import_path() {
             radius_m: runmat_types::physical::Length::new(0.25),
             height_m: runmat_types::physical::Length::new(6.0),
             axis: [0.0, 0.0, 1.0],
-            origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.0, 1.5, -1.0]),
+            origin_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [1.0, 1.5, -1.0],
+                ),
         },
         &[],
     );
@@ -52,7 +55,10 @@ fn exact_primitives_use_the_canonical_import_path() {
         "sphere",
         ResolvedGeometryFeatureOperation::Sphere {
             radius_m: runmat_types::physical::Length::new(0.5),
-            center_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([2.0, -1.0, 0.25]),
+            center_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [2.0, -1.0, 0.25],
+                ),
         },
         &[],
     );

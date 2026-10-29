@@ -51,7 +51,12 @@ impl FeaSourceCheckResult {
                 value.module_path == module_path.as_str() && value.geometry_id == symbol.name
             })
             .ok_or_else(|| {
-                if self.source_index.entries.iter().any(|entry| &entry.identity == geometry) {
+                if self
+                    .source_index
+                    .entries
+                    .iter()
+                    .any(|entry| &entry.identity == geometry)
+                {
                     FeaQueryError::DefinitionUnavailable
                 } else {
                     FeaQueryError::NotFound

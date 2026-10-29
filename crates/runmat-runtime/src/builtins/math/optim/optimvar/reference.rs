@@ -67,9 +67,14 @@ impl View {
                 cooperation.completed(1).await?;
             }
         }
-        if view.selection().role()==runmat_value::optimization_variable::OptimizationVariableReferenceRole::Definition
-            && (!view.selection().is_whole() || view.selection().shape()!=view.definition().shape()) {
-            return Err(invalid("definition access requires its original complete shape"));
+        if view.selection().role()
+            == runmat_value::optimization_variable::OptimizationVariableReferenceRole::Definition
+            && (!view.selection().is_whole()
+                || view.selection().shape() != view.definition().shape())
+        {
+            return Err(invalid(
+                "definition access requires its original complete shape",
+            ));
         }
         Ok(view)
     }

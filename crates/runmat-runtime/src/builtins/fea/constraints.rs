@@ -257,11 +257,7 @@ macro_rules! define_simple_constraint {
         $function:ident, $descriptor:ident, $builtin_name:literal, $class:expr,
         $builtin_path:literal, $build:expr
     ) => {
-        #[runtime_builtin(
-                                            name = $builtin_name,
-                                            binding_variant = "default",
-                                            builtin_path = $builtin_path
-                                        )]
+        #[runtime_builtin(name = $builtin_name, binding_variant = "default", builtin_path = $builtin_path)]
         pub async fn $function(id: String, region: Value) -> BuiltinResult<Value> {
             fixed_outputs(&runmat_builtins::$descriptor, $builtin_name)?;
             let (id, geometry_id, geometry_revision, target) =
@@ -283,11 +279,7 @@ macro_rules! define_quantity_constraint {
         $function:ident, $descriptor:ident, $builtin_name:literal, $class:expr,
         $builtin_path:literal, $value_class:expr, $value_field:literal, $build:expr
     ) => {
-        #[runtime_builtin(
-                                            name = $builtin_name,
-                                            binding_variant = "default",
-                                            builtin_path = $builtin_path
-                                        )]
+        #[runtime_builtin(name = $builtin_name, binding_variant = "default", builtin_path = $builtin_path)]
         pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
             fixed_outputs(&runmat_builtins::$descriptor, $builtin_name)?;
             let (id, geometry_id, geometry_revision, target) =

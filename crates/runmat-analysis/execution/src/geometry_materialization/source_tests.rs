@@ -113,7 +113,8 @@ fn imported_source_is_chunked_and_bound_to_declared_bytes_and_units() {
                 ..Default::default()
             },
             exchange: None,
-            shared_interfaces: false,        })),
+            shared_interfaces: false,
+        })),
         regions: Vec::new(),
         cad_parameters: Vec::new(),
     };
@@ -180,7 +181,8 @@ fn definition_and_prepared_source_kind_must_converge() {
                 ..Default::default()
             },
             exchange: None,
-            shared_interfaces: false,        })),
+            shared_interfaces: false,
+        })),
         regions: Vec::new(),
         cad_parameters: Vec::new(),
     };

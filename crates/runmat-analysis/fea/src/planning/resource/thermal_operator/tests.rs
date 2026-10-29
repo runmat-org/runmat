@@ -22,8 +22,10 @@ fn workload() -> ThermalWorkload {
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_transient("heat")]);
     // The authored ceiling is part of the encoded model, so resident requirements are
     // measured under a non-binding authored ceiling (present, like the ceilings tests author).
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
-        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -89,7 +91,9 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
         )
         .unwrap_err();
         assert!(
-            rejected.to_string().contains("outside the symbolic pattern"),
+            rejected
+                .to_string()
+                .contains("outside the symbolic pattern"),
             "{rejected}"
         );
         let live_assembly_arrays =
@@ -196,7 +200,8 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     let mut workload = workload();
     let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
     let history =
-        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap(), &[]).unwrap();
+        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap(), &[])
+            .unwrap();
     let required = facts.numerical_reservation_bytes(&history).unwrap().0;
     let rows = facts.support().rows() as u64;
     let entries = facts.support().column_indices().len() as u64;

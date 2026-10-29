@@ -9,7 +9,8 @@ const STRESS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const STRESS_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&STRESS_SIGNATURES);
+pub const STRESS_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&STRESS_SIGNATURES);
 const STRESS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-stress",
     title: "Select element stress tensor",

@@ -6,8 +6,8 @@ use crate::{
     BoundFeaProgram, FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey,
     FeaSymbolKind, FeaSymbolOrigin, LogicalSourcePath,
 };
-use runmat_geometry_core::GeometryDefinitionRef;
 use runmat_analysis_core::AuthoredRegionSource;
+use runmat_geometry_core::GeometryDefinitionRef;
 use runmat_geometry_core::GeometryRegionRole;
 use runmat_meshing_core::{
     ElementOrder, MeshDefinition, MeshDimension, MeshSizeControl, MeshSizeControlTarget,
@@ -68,18 +68,19 @@ fn definition(
     } else if assignment(settings_block, "order").is_none() {
         Some(defaults.element_order)
     } else {
-        required_enum(declaration, settings_block, "order", diagnostics).and_then(|value| match value
-        {
-            "linear" => Some(ElementOrder::Tet4),
-            "quadratic" => Some(ElementOrder::Tet10),
-            _ => {
-                diagnostic(
-                    declaration,
-                    declaration.span,
-                    "mesh `order` must be `linear` or `quadratic`",
-                    diagnostics,
-                );
-                None
+        required_enum(declaration, settings_block, "order", diagnostics).and_then(|value| {
+            match value {
+                "linear" => Some(ElementOrder::Tet4),
+                "quadratic" => Some(ElementOrder::Tet10),
+                _ => {
+                    diagnostic(
+                        declaration,
+                        declaration.span,
+                        "mesh `order` must be `linear` or `quadratic`",
+                        diagnostics,
+                    );
+                    None
+                }
             }
         })
     };
@@ -88,11 +89,15 @@ fn definition(
     } else {
         required_length(declaration, settings_block, "target_size", diagnostics)
     };
-    let maximum_chordal_deviation_m = if assignment(settings_block, "maximum_deviation").is_none()
-    {
+    let maximum_chordal_deviation_m = if assignment(settings_block, "maximum_deviation").is_none() {
         Some(defaults.maximum_chordal_deviation_m.canonical_value())
     } else {
-        required_length(declaration, settings_block, "maximum_deviation", diagnostics)
+        required_length(
+            declaration,
+            settings_block,
+            "maximum_deviation",
+            diagnostics,
+        )
     };
 
     let maximum_grading_ratio = optional_scalar(
@@ -102,9 +107,13 @@ fn definition(
         diagnostics,
     )
     .unwrap_or(defaults.maximum_grading_ratio);
-    let deterministic_seed =
-        optional_integer(declaration, settings_block, "deterministic_seed", diagnostics)
-            .unwrap_or(defaults.deterministic_seed);
+    let deterministic_seed = optional_integer(
+        declaration,
+        settings_block,
+        "deterministic_seed",
+        diagnostics,
+    )
+    .unwrap_or(defaults.deterministic_seed);
     let cells_across_gap =
         optional_integer(declaration, settings_block, "cells_across_gap", diagnostics).and_then(
             |cells| match u32::try_from(cells) {
@@ -390,7 +399,8 @@ fn size_controls(
         for member in body {
             match &member.kind {
                 CheckedFeaStatementKind::Assignment { target, .. }
-                    if target.len() == 1 && ["on", "target_size"].contains(&target[0].as_str()) => {}
+                    if target.len() == 1 && ["on", "target_size"].contains(&target[0].as_str()) => {
+                }
                 _ => coded(
                     declaration,
                     member.span,
@@ -422,9 +432,15 @@ fn size_controls(
                     None
                 } else {
                     match region.role {
-                        GeometryRegionRole::Solid => Some((region.region_id, MeshSizeControlTarget::Solid)),
-                        GeometryRegionRole::Face => Some((region.region_id, MeshSizeControlTarget::Face)),
-                        GeometryRegionRole::Edge => Some((region.region_id, MeshSizeControlTarget::Edge)),
+                        GeometryRegionRole::Solid => {
+                            Some((region.region_id, MeshSizeControlTarget::Solid))
+                        }
+                        GeometryRegionRole::Face => {
+                            Some((region.region_id, MeshSizeControlTarget::Face))
+                        }
+                        GeometryRegionRole::Edge => {
+                            Some((region.region_id, MeshSizeControlTarget::Edge))
+                        }
                         role => {
                             coded(
                                 declaration,
@@ -485,7 +501,9 @@ fn size_controls(
                 declaration,
                 statement.span,
                 "fea.semantic.mesh.control_conflict",
-                format!("refine `{name}` and refine `{previous}` both control region `{region_id}`"),
+                format!(
+                    "refine `{name}` and refine `{previous}` both control region `{region_id}`"
+                ),
                 diagnostics,
             );
             continue;
@@ -635,16 +653,20 @@ fn optional_integer(
         );
         return None;
     };
-    source.parse().ok().and_then(runmat_types::wire_integer::bounded).or_else(|| {
-        invalid(
-            declaration,
-            value,
-            name,
-            "non-negative integer of at most 2^53 - 1",
-            diagnostics,
-        );
-        None
-    })
+    source
+        .parse()
+        .ok()
+        .and_then(runmat_types::wire_integer::bounded)
+        .or_else(|| {
+            invalid(
+                declaration,
+                value,
+                name,
+                "non-negative integer of at most 2^53 - 1",
+                diagnostics,
+            );
+            None
+        })
 }
 
 fn scalar(value: &CheckedExpression) -> Option<f64> {

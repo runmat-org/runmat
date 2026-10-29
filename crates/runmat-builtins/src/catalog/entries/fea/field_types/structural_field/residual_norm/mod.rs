@@ -9,7 +9,8 @@ const RESIDUAL_NORM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignat
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const RESIDUAL_NORM_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&RESIDUAL_NORM_SIGNATURES);
+pub const RESIDUAL_NORM_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&RESIDUAL_NORM_SIGNATURES);
 const RESIDUAL_NORM_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-residual-norm",
     title: "Select equilibrium residual norm",

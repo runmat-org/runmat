@@ -54,11 +54,12 @@ pub use execution_policy::{
     MAX_CPU_THREADS_PER_WORKER,
 };
 pub use study::{
-    attach_authored_outputs, authored_output_root, authored_output_types, retain_authored_outputs, geometry_parameter_input_type,
-    lower_authored_observations, validate_authored_outputs, AuthoredCaseOutputRef,
-    AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
-    AuthoredGeometryArgument, AuthoredGeometryArgumentValue, AuthoredGeometryInstance,
-    AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
+    attach_authored_outputs, authored_output_root, authored_output_types,
+    geometry_parameter_input_type, lower_authored_observations, retain_authored_outputs,
+    validate_authored_outputs, AuthoredCaseOutputRef, AuthoredExtremaTiePolicy,
+    AuthoredFieldDomain, AuthoredFieldProjection, AuthoredGeometryArgument,
+    AuthoredGeometryArgumentValue, AuthoredGeometryInstance, AuthoredMeshRef,
+    AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
     AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
     AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection,
     AuthoredSeriesDomain, AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredStudy,
@@ -79,6 +80,7 @@ pub use validate_outputs::{
 pub use validate_signals::validate_physical_signals;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
+pub use problem::acoustic_impedance::AcousticImpedanceLaw;
 pub use problem::authored_constraints::{
     authored_motion_acceleration_is_compatible, materialized_motion_acceleration_is_compatible,
     AuthoredConstraint, AuthoredConstraintError, AuthoredConstraintKind, AuthoredConstraintTarget,
@@ -105,8 +107,8 @@ pub use problem::authored_inputs::{
     AuthoredInputDefinition, AuthoredInputError, AuthoredInputType, AuthoredInputValue,
 };
 pub use problem::authored_model_physics::{
-    AuthoredBoundary, AuthoredBoundaryCoefficient, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
-    AuthoredInterface, AuthoredInterfaceKind, AuthoredModelPhysicsError,
+    AuthoredBoundary, AuthoredBoundaryCoefficient, AuthoredBoundaryKind, AuthoredConnector,
+    AuthoredConnectorKind, AuthoredInterface, AuthoredInterfaceKind, AuthoredModelPhysicsError,
 };
 pub use problem::authored_parameterized_signals::{
     AuthoredParameterizedSignal, AuthoredParameterizedSignalError, AuthoredSignalExpression,
@@ -118,8 +120,6 @@ pub use problem::authored_properties::{
     AuthoredSectionSource, AxisOrientation, CartesianOrientation, CircularBeamSection,
     GeneralBeamSection, HomogeneousShellSection, RectangularBeamSection, TubularBeamSection,
 };
-pub use problem::acoustic_impedance::AcousticImpedanceLaw;
-pub use problem::rheology::GeneralizedNewtonianLaw;
 pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
 pub use problem::connector::{AnalysisConnector, ConnectorKind};
 pub use problem::constraint::{
@@ -204,6 +204,7 @@ pub use problem::response_spectrum::{
     SpectrumAbscissa, SpectrumConstruction, SpectrumDamping, SpectrumDirection, SpectrumEnvelope,
     SpectrumEvidence, SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse,
 };
+pub use problem::rheology::GeneralizedNewtonianLaw;
 pub use problem::signal::{
     AuthoredSignalFieldLocation, AuthoredSignalTopologySelector, GeneratorArgument,
     GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy, GeneratorInvocation,
@@ -248,8 +249,8 @@ pub use study::sequence::{
     SequenceDependencyReason, StateCompleteness, StateId, StateInput, StateKind, StateOutput,
     StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
     StepObjectActivation, StepObjectRef, StructuralKinematics, StructuralNonlinearSettings,
-    StructuralRandomResponseSettings,
-    TopologyTransitionPolicy, TransitionId, ValidatedAnalysisSequence,
+    StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
+    ValidatedAnalysisSequence,
 };
 pub use study::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,

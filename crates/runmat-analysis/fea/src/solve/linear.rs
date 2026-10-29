@@ -7,24 +7,25 @@ mod diagnostics;
 mod settings;
 use diagnostics::SuccessfulDiagnostic;
 pub(crate) use diagnostics::{successful_diagnostic_record_count, successful_diagnostics_profile};
-pub(crate) use settings::ScopedLinearSolveSettings;
 pub(crate) use settings::accelerator_iteration_limit;
+pub(crate) use settings::ScopedLinearSolveSettings;
 
 use admission::{incompatible_system_result, invalid_system_result, rejected_system_result};
 
 use crate::{
     algebra::{
-        validate_prepared_solver_compatibility, AssembledRealSystem, RealPreconditioner, RealSolver, ScopedSpmvError,
+        validate_prepared_solver_compatibility, AssembledRealSystem, RealPreconditioner,
+        RealSolver, ScopedSpmvError,
     },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
-    solve::{preconditioner::SpdPreconditionerKind, shared_sparse},
     solve::{
         accelerator::{prepare_accelerator_linear_system, solve_prepared_accelerator_system},
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
     },
+    solve::{preconditioner::SpdPreconditionerKind, shared_sparse},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -317,7 +318,7 @@ fn solve_operator_system_with_settings(
                 return Ok(linear_result_from_accelerator_output(
                     output,
                     SpdPreconditionerKind::Jacobi,
-                ))
+                ));
             }
             Err(error) if error.permits_cpu_fallback() => {
                 effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
@@ -402,7 +403,10 @@ fn solve_operator_system_with_settings(
             message: format!(
                 "{} did not reach tolerance {tol}: {}",
                 strategy.label(),
-                outcome.failure.as_deref().unwrap_or("residual above tolerance"),
+                outcome
+                    .failure
+                    .as_deref()
+                    .unwrap_or("residual above tolerance"),
             ),
         });
     }

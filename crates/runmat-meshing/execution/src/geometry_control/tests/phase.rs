@@ -25,7 +25,8 @@ fn publication_releases_kernel_scratch_and_drops_record_charge_at_last_use() {
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request, ceilings,
+        &request,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -65,7 +66,8 @@ fn unadmitted_record_transfer_rejects_and_keeps_ownership_until_error_cleanup() 
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request, ceilings,
+        &request,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -95,7 +97,8 @@ fn surviving_kernel_view_preserves_its_own_storage_but_new_views_use_publication
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request, ceilings,
+        &request,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )

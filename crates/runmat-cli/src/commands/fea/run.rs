@@ -162,18 +162,22 @@ fn print_local_sweep(
         entries: completed
             .into_iter()
             .enumerate()
-            .map(|(study_index, case)| super::remote::MaterializedFeaSweepEntry {
-                study_index,
-                terminal: match case.outcome {
-                    Ok(completed) => super::remote::MaterializedFeaSweepTerminal::Succeeded(
-                        Box::new(super::remote::MaterializedFeaStudy {
-                            result: completed.result,
-                            publication: completed.publication,
-                        }),
-                    ),
-                    Err(message) => super::remote::MaterializedFeaSweepTerminal::Failed(message),
+            .map(
+                |(study_index, case)| super::remote::MaterializedFeaSweepEntry {
+                    study_index,
+                    terminal: match case.outcome {
+                        Ok(completed) => super::remote::MaterializedFeaSweepTerminal::Succeeded(
+                            Box::new(super::remote::MaterializedFeaStudy {
+                                result: completed.result,
+                                publication: completed.publication,
+                            }),
+                        ),
+                        Err(message) => {
+                            super::remote::MaterializedFeaSweepTerminal::Failed(message)
+                        }
+                    },
                 },
-            })
+            )
             .collect(),
     };
     print_fea_sweep_result(sweep_id, &case_ids, &materialized, json)

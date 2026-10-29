@@ -5,8 +5,8 @@ use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 #[cfg(feature = "plot-core")]
 use runmat_geometry_core::{AssemblyNode, DiagnosticSeverity};
 use runmat_geometry_core::{
-    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind,
-    Region, SourceGeometry, SourceGeometryKind, TessellationProfile,
+    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind, Region,
+    SourceGeometry, SourceGeometryKind, TessellationProfile,
 };
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry_with_context, GeometryFormat,

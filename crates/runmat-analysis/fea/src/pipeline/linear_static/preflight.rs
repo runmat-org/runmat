@@ -6,10 +6,10 @@ use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     contracts::{ComputeBackend, FeaRunError, LinearStaticSolveOptions},
     planning::resource::{
-        build_static_resource_plan_selecting,
-        require_executable_static_backend, StaticSolvePath, StaticSolveSelection,
+        build_static_resource_plan_selecting, require_executable_static_backend,
         verify_assembled_structural_storage, FeaResourceDemand, ResourcePlanningError,
         SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticResourcePreflight,
+        StaticSolvePath, StaticSolveSelection,
     },
     post::fields::structural_static_observable_field_definitions,
     results::observation::{
@@ -106,37 +106,42 @@ pub(super) fn prepare_static_preassembly(
     // An admitted plan fixes the path; a direct run selects it within the authored ceiling and
     // the memory a single solve may use on this host.
     let selection = match admitted.as_ref() {
-        Some(admission) => match crate::planning::resource::recorded_static_solve_path(admission.plan) {
-            Some(path) => StaticSolveSelection::Recorded(path),
-            None => {
-                return Err(ResourcePlanningError::Invalid(
-                    "admitted static plan records no solve path".into(),
-                )
-                .into())
+        Some(admission) => {
+            match crate::planning::resource::recorded_static_solve_path(admission.plan) {
+                Some(path) => StaticSolveSelection::Recorded(path),
+                None => {
+                    return Err(ResourcePlanningError::Invalid(
+                        "admitted static plan records no solve path".into(),
+                    )
+                    .into())
+                }
             }
-        },
+        }
         None => StaticSolveSelection::WithinCeiling {
             machine_memory_bytes: crate::solve::shared_sparse::default_memory_budget(),
         },
     };
-    let resource_plan = build_static_resource_plan_selecting(StaticResourcePreflight {
-        compilation: Some(&compilation),
-        model,
-        step,
-        backend,
-        preconditioner: options.preconditioner_kind,
-        observation_execution: admitted
-            .as_ref()
-            .map_or(ObservationExecutionPolicy::serial(), |admission| {
-                admission.observation_execution
-            }),
-        mesh: options.solver_mesh.as_ref(),
-        constraints,
-        observations: &observations,
-        accelerator_requests: &[],
-        local_execution: options.local_execution,
-        prepared_inputs: admitted.and_then(|admission| admission.prepared_inputs),
-    }, selection)?;
+    let resource_plan = build_static_resource_plan_selecting(
+        StaticResourcePreflight {
+            compilation: Some(&compilation),
+            model,
+            step,
+            backend,
+            preconditioner: options.preconditioner_kind,
+            observation_execution: admitted
+                .as_ref()
+                .map_or(ObservationExecutionPolicy::serial(), |admission| {
+                    admission.observation_execution
+                }),
+            mesh: options.solver_mesh.as_ref(),
+            constraints,
+            observations: &observations,
+            accelerator_requests: &[],
+            local_execution: options.local_execution,
+            prepared_inputs: admitted.and_then(|admission| admission.prepared_inputs),
+        },
+        selection,
+    )?;
     if admitted.is_some_and(|admission| admission.plan != &resource_plan) {
         return Err(ResourcePlanningError::Invalid(
             "numerical static preassembly differs from the admitted resource plan".into(),
@@ -164,7 +169,6 @@ pub(super) fn prepare_static_preassembly(
         solve_path: crate::planning::resource::recorded_static_solve_path(&resource_plan),
     })
 }
-
 
 pub(super) fn verify_executed_preassembly(
     model: &AnalysisModel,
@@ -208,8 +212,8 @@ pub(super) fn model_has_explicit_structural_elements(model: &AnalysisModel) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::resource::build_static_resource_plan;
     use crate::fixtures::{fixture_model, FixtureId};
+    use crate::planning::resource::build_static_resource_plan;
     use runmat_analysis_core::{AnalysisProcedure, AnalysisSequence};
 
     /// Diagnostic: the static resource plan of a structured Tet10 cantilever as it refines.
@@ -223,13 +227,19 @@ mod tests {
                 divisions,
                 runmat_meshing_core::ElementOrder::Tet10,
             );
-            let compilation =
-                crate::pipeline::constraint_preparation::compile_inventory(&model, Some(&mesh), step)
-                    .unwrap();
+            let compilation = crate::pipeline::constraint_preparation::compile_inventory(
+                &model,
+                Some(&mesh),
+                step,
+            )
+            .unwrap();
             let constraints = compilation.plan();
-            let connectors =
-                compile_model_connector_plan(&model, Some(&mesh), constraints.reference_points.len())
-                    .unwrap();
+            let connectors = compile_model_connector_plan(
+                &model,
+                Some(&mesh),
+                constraints.reference_points.len(),
+            )
+            .unwrap();
             let fields = structural_static_observable_field_definitions().unwrap();
             let observations = resolve_structural_observation_plan_with_connectors(
                 step,

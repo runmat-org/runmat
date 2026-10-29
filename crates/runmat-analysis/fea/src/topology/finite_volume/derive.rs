@@ -84,7 +84,10 @@ fn reserve_regions<'a>(
             .ok_or(Error::Overflow)?;
         for component in &region.assembly_path {
             region_visits = region_visits.checked_add(1).ok_or(Error::Overflow)?;
-            if policy.max_traversal_operations.is_some_and(|m| region_visits > m) {
+            if policy
+                .max_traversal_operations
+                .is_some_and(|m| region_visits > m)
+            {
                 return Err(Error::Limit("traversal operations"));
             }
             bytes = bytes.checked_add(component.len()).ok_or(Error::Overflow)?;
@@ -103,7 +106,10 @@ fn reserve_regions<'a>(
     if policy.max_scratch_bytes.is_some_and(|m| bytes > m) {
         return Err(Error::Limit("scratch bytes"));
     }
-    if policy.max_traversal_operations.is_some_and(|m| operations > m) {
+    if policy
+        .max_traversal_operations
+        .is_some_and(|m| operations > m)
+    {
         return Err(Error::Limit("traversal operations"));
     }
     Ok(FiniteVolumeReservation {

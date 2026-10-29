@@ -66,7 +66,10 @@ pub struct AcousticSolveCertificate {
 
 impl AcousticSolveCertificate {
     /// Every unknown is prescribed: there is no operator left to certify.
-    pub(super) fn no_free_unknowns(operator_identity: runmat_execution::Digest, limit: f64) -> Self {
+    pub(super) fn no_free_unknowns(
+        operator_identity: runmat_execution::Digest,
+        limit: f64,
+    ) -> Self {
         Self {
             operator_identity,
             dimension: 0,
@@ -87,7 +90,9 @@ impl AcousticSolveCertificate {
             self.condition_estimate,
             self.contraction_bound,
         ];
-        if values.iter().any(|value| !value.is_finite() || *value < 0.0)
+        if values
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
             || self.limit != limit
             || !(self.contraction_bound < self.limit)
             || self.dimension > maximum_dimension
@@ -119,8 +124,7 @@ pub(super) fn solve(
     policy: AcousticHarmonicPolicy,
     power_tolerance: f64,
 ) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
-    let (solution, power) =
-        refinement::solve(&assembly, policy, power_tolerance)?;
+    let (solution, power) = refinement::solve(&assembly, policy, power_tolerance)?;
     let reduced::ReducedSolution {
         real,
         imaginary,

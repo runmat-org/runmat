@@ -173,7 +173,9 @@ fn refine(
     }
     let mean = elements as f64 / options.parts as f64;
     let maximum = (mean * (1.0 + options.imbalance_tolerance)).ceil() as usize;
-    let minimum = (mean * (1.0 - options.imbalance_tolerance)).floor().max(1.0) as usize;
+    let minimum = (mean * (1.0 - options.imbalance_tolerance))
+        .floor()
+        .max(1.0) as usize;
     let mut moves = 0;
     let mut counts: Vec<(u32, u32)> = Vec::with_capacity(8);
     for _ in 0..options.refinement_passes {
@@ -320,10 +322,14 @@ pub(crate) mod tests {
             let mut unrefined = PartitionOptions::new(parts);
             unrefined.refinement_passes = 0;
             let (_, coarse) = partition_elements(&mesh, unrefined).unwrap();
-            let (assignment, refined) = partition_elements(&mesh, PartitionOptions::new(parts)).unwrap();
+            let (assignment, refined) =
+                partition_elements(&mesh, PartitionOptions::new(parts)).unwrap();
             assert_eq!(assignment.len(), mesh.element_count());
             assert!(assignment.iter().all(|&part| (part as usize) < parts));
-            assert!(refined.cut_faces <= coarse.cut_faces, "{parts}: {refined:?} {coarse:?}");
+            assert!(
+                refined.cut_faces <= coarse.cut_faces,
+                "{parts}: {refined:?} {coarse:?}"
+            );
             let mean = mesh.element_count() as f64 / parts as f64;
             assert!(refined.largest_part as f64 <= (mean * 1.03).ceil());
             assert!(refined.smallest_part > 0);

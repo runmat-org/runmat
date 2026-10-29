@@ -232,7 +232,9 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     let selector = face.provenance[0].analysis_selection_id().unwrap();
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "applied_flux".into(),
-        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector.clone()))),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+            &(selector.clone()),
+        )),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Constant(HeatFlux::new(240.0)),
         },
@@ -255,7 +257,9 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
 
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "ambient_convection".into(),
-        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+            &(selector),
+        )),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(305.0)),
             coefficient: HeatTransferCoefficient::new(18.0),
@@ -321,7 +325,9 @@ fn prescribed_face_temperature_is_enforced_exactly() {
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "fixed_temperature".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)),
+                ),
                 value: PrescribedValue::Constant(Temperature::new(290.0)),
             },
         }));
@@ -456,7 +462,9 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let ambient_temperature_k = 290.0;
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "side_convection".into(),
-        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(convection_region.source_topology_id.clone()))),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+            &(convection_region.source_topology_id.clone()),
+        )),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient_temperature_k)),
             coefficient: HeatTransferCoefficient::new(coefficient),

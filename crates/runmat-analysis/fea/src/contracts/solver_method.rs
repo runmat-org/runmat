@@ -65,7 +65,9 @@ impl SolverMethod {
             Self::AcousticDomainGraphHelmholtzHarmonic => {
                 "acoustic_domain_graph_helmholtz_harmonic"
             }
-            Self::AcousticCanonicalHelmholtzCertifiedLu => "acoustic_canonical_helmholtz_certified_lu",
+            Self::AcousticCanonicalHelmholtzCertifiedLu => {
+                "acoustic_canonical_helmholtz_certified_lu"
+            }
             Self::AcousticCanonicalShiftInvertBlockKrylov => {
                 "acoustic_canonical_shift_invert_block_krylov"
             }

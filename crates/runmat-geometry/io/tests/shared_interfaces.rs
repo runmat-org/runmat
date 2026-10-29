@@ -33,7 +33,11 @@ fn import(name: &str, bytes: &[u8], shared: bool) -> Result<ImportedExactCad, St
     .map_err(|error| error.to_string())
 }
 
-fn named(imported: &ImportedExactCad, kind: PersistentEntityKind, name: &str) -> Vec<PersistentEntityId> {
+fn named(
+    imported: &ImportedExactCad,
+    kind: PersistentEntityKind,
+    name: &str,
+) -> Vec<PersistentEntityId> {
     imported
         .entity_names
         .iter()
@@ -43,7 +47,12 @@ fn named(imported: &ImportedExactCad, kind: PersistentEntityKind, name: &str) ->
 }
 
 fn interface_faces(imported: &ImportedExactCad) -> Vec<&PersistentEntityId> {
-    imported.topology.interfaces.iter().map(|interface| &interface.face_id).collect()
+    imported
+        .topology
+        .interfaces
+        .iter()
+        .map(|interface| &interface.face_id)
+        .collect()
 }
 
 // witness: FEA-MESH-GEOMETRY-001/authored_names_survive_to_run @
@@ -55,9 +64,18 @@ fn interface_faces(imported: &ImportedExactCad) -> Vec<&PersistentEntityId> {
 #[test]
 fn authored_face_and_body_names_reach_the_exact_model() {
     let imported = import("named-faces.step", NAMED_FACES, false).unwrap();
-    assert_eq!(named(&imported, PersistentEntityKind::Face, "Fixed end").len(), 1);
-    assert_eq!(named(&imported, PersistentEntityKind::Face, "Loaded end").len(), 1);
-    assert_eq!(named(&imported, PersistentEntityKind::Solid, "Bar").len(), 1);
+    assert_eq!(
+        named(&imported, PersistentEntityKind::Face, "Fixed end").len(),
+        1
+    );
+    assert_eq!(
+        named(&imported, PersistentEntityKind::Face, "Loaded end").len(),
+        1
+    );
+    assert_eq!(
+        named(&imported, PersistentEntityKind::Solid, "Bar").len(),
+        1
+    );
     // Names are selector metadata: renaming the file or reimporting leaves identity unchanged.
     let again = import("renamed.step", NAMED_FACES, false).unwrap();
     assert_eq!(imported.topology, again.topology);
@@ -85,7 +103,10 @@ fn separate_parts_stay_independent_unless_interfaces_are_shared() {
     assert_eq!(shared.model.interface_count, 6);
     assert_eq!(named(&shared, PersistentEntityKind::Solid, "Part").len(), 1);
     assert_eq!(named(&shared, PersistentEntityKind::Solid, "Air").len(), 1);
-    assert_eq!(named(&shared, PersistentEntityKind::Face, "Outer boundary").len(), 6);
+    assert_eq!(
+        named(&shared, PersistentEntityKind::Face, "Outer boundary").len(),
+        6
+    );
     // The part's face name survives on the interface face it now shares with the air.
     let part_top = named(&shared, PersistentEntityKind::Face, "Part top");
     assert_eq!(part_top.len(), 1);
@@ -99,14 +120,23 @@ fn an_air_body_with_two_cavities_imports_as_one_solid() {
     assert_eq!(independent.topology.solids.len(), 3);
     let air = named(&independent, PersistentEntityKind::Solid, "Air");
     assert_eq!(air.len(), 1);
-    let air_solid = independent.topology.solids.iter().find(|solid| solid.id == air[0]).unwrap();
+    let air_solid = independent
+        .topology
+        .solids
+        .iter()
+        .find(|solid| solid.id == air[0])
+        .unwrap();
     assert_eq!(air_solid.void_shell_ids.len(), 2);
 
     let shared = import("two_cavity_air_assembly.step", TWO_CAVITY_AIR, true).unwrap();
     assert_eq!(shared.topology.solids.len(), 3);
     assert_eq!(shared.topology.interfaces.len(), 12);
     for name in ["Left", "Right", "Air"] {
-        assert_eq!(named(&shared, PersistentEntityKind::Solid, name).len(), 1, "{name}");
+        assert_eq!(
+            named(&shared, PersistentEntityKind::Solid, name).len(),
+            1,
+            "{name}"
+        );
     }
 }
 
@@ -117,17 +147,32 @@ fn partially_touching_parts_share_only_their_contact_patch() {
     // The plate's top face is imprinted by the block's base; only the covered patch is shared.
     assert_eq!(shared.topology.interfaces.len(), 1);
     assert_eq!(named(&shared, PersistentEntityKind::Face, "Base").len(), 1);
-    assert_eq!(named(&shared, PersistentEntityKind::Face, "Top load").len(), 1);
-    assert_eq!(named(&shared, PersistentEntityKind::Solid, "Plate").len(), 1);
-    assert_eq!(named(&shared, PersistentEntityKind::Solid, "Block").len(), 1);
+    assert_eq!(
+        named(&shared, PersistentEntityKind::Face, "Top load").len(),
+        1
+    );
+    assert_eq!(
+        named(&shared, PersistentEntityKind::Solid, "Plate").len(),
+        1
+    );
+    assert_eq!(
+        named(&shared, PersistentEntityKind::Solid, "Block").len(),
+        1
+    );
 }
 
 #[test]
 fn interpenetrating_parts_are_rejected_by_name() {
     let error = import("overlapping_parts_assembly.step", OVERLAPPING_PARTS, true).unwrap_err();
     let message = error;
-    assert!(message.contains("interpenetrates") || message.contains("same volume"), "{message}");
-    assert!(message.contains("'First'") || message.contains("'Second'"), "{message}");
+    assert!(
+        message.contains("interpenetrates") || message.contains("same volume"),
+        "{message}"
+    );
+    assert!(
+        message.contains("'First'") || message.contains("'Second'"),
+        "{message}"
+    );
 }
 
 // witness: FEA-MESH-GEOMETRY-001/multibody_assembly_import @
@@ -148,9 +193,15 @@ fn a_general_fuse_compound_imports_with_its_shared_faces_and_solid_names() {
     assert_eq!(shared.topology.faces.len(), 12);
     assert_eq!(shared.topology.interfaces.len(), 6);
     for imported in [&separate, &shared] {
-        assert_eq!(named(imported, PersistentEntityKind::Solid, "Part").len(), 1);
+        assert_eq!(
+            named(imported, PersistentEntityKind::Solid, "Part").len(),
+            1
+        );
         assert_eq!(named(imported, PersistentEntityKind::Solid, "Air").len(), 1);
-        assert_eq!(named(imported, PersistentEntityKind::Face, "Outer boundary").len(), 6);
+        assert_eq!(
+            named(imported, PersistentEntityKind::Face, "Outer boundary").len(),
+            6
+        );
     }
     shared.build_closure().unwrap();
 }
@@ -160,17 +211,34 @@ fn construction_wireframe_beside_a_solid_is_not_part_of_the_model() {
     let imported = import("free_wireframe_part.step", FREE_WIREFRAME, false).unwrap();
     assert_eq!(imported.topology.solids.len(), 1);
     assert_eq!(imported.topology.faces.len(), 6);
-    assert_eq!(imported.topology.edges.len(), 12, "the free line is dropped");
-    assert_eq!(imported.topology.vertices.len(), 8, "its coincident corner vertex too");
+    assert_eq!(
+        imported.topology.edges.len(),
+        12,
+        "the free line is dropped"
+    );
+    assert_eq!(
+        imported.topology.vertices.len(),
+        8,
+        "its coincident corner vertex too"
+    );
 }
 
 #[test]
 fn face_names_on_a_cavity_shell_are_read() {
     let imported = import("named_cavity_part.step", NAMED_CAVITY, false).unwrap();
     assert_eq!(imported.topology.solids.len(), 1);
-    assert_eq!(named(&imported, PersistentEntityKind::Face, "Electrode").len(), 6);
-    assert_eq!(named(&imported, PersistentEntityKind::Face, "Ground plane").len(), 1);
-    assert_eq!(named(&imported, PersistentEntityKind::Solid, "Insulator").len(), 1);
+    assert_eq!(
+        named(&imported, PersistentEntityKind::Face, "Electrode").len(),
+        6
+    );
+    assert_eq!(
+        named(&imported, PersistentEntityKind::Face, "Ground plane").len(),
+        1
+    );
+    assert_eq!(
+        named(&imported, PersistentEntityKind::Solid, "Insulator").len(),
+        1
+    );
 }
 
 // witness: FEA-MESH-GEOMETRY-001/multibody_assembly_import @
@@ -184,9 +252,17 @@ fn imprinted_coincident_faces_become_one_shared_face_with_one_source_ordinal() {
         let imported = import("strip-line.step", STRIP_LINE_IMPRINTED, shared).unwrap();
         let mut seen = std::collections::BTreeSet::new();
         for id in imported.source_face_ids.values() {
-            assert!(seen.insert(id), "shared={shared}: duplicate source face identity {id:?}");
+            assert!(
+                seen.insert(id),
+                "shared={shared}: duplicate source face identity {id:?}"
+            );
         }
-        let faces = imported.topology.faces.iter().map(|face| &face.id).collect::<std::collections::BTreeSet<_>>();
+        let faces = imported
+            .topology
+            .faces
+            .iter()
+            .map(|face| &face.id)
+            .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(seen.len(), imported.source_face_ids.len());
         // Source face ordinals are contiguous: a face shared by two solids is one source face.
         assert!(imported
@@ -197,7 +273,11 @@ fn imprinted_coincident_faces_become_one_shared_face_with_one_source_ordinal() {
         assert!(seen.iter().all(|id| faces.contains(id)));
         if shared {
             assert_eq!(imported.topology.solids.len(), 2);
-            assert_eq!(interface_faces(&imported).len(), 1, "one contact face shared by both bodies");
+            assert_eq!(
+                interface_faces(&imported).len(),
+                1,
+                "one contact face shared by both bodies"
+            );
         }
     }
 }

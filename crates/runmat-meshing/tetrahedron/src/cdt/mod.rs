@@ -90,10 +90,9 @@ pub use volume_mesh::{
     volume_quality_snapshot_preparation_storage_bytes, DelaunayVolumeMesh,
     DelaunayVolumeMeshCodecError, DelaunayVolumeMeshCodecErrorKind, DelaunayVolumeMeshError,
     DelaunayVolumeMeshErrorKind, DelaunayVolumeMeshOptions, DelaunayVolumeMeshStage,
-    DelaunayVolumeQualityMutation,
-    PreparedVolumeQualitySnapshot, ValidatedDelaunayVolumeMesh, VolumeMeshEncoding,
-    VolumeQualityBinding, VolumeQualityObserver, VolumeQualityReplayResult, VolumeQualitySnapshot,
-    DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
+    DelaunayVolumeQualityMutation, PreparedVolumeQualitySnapshot, ValidatedDelaunayVolumeMesh,
+    VolumeMeshEncoding, VolumeQualityBinding, VolumeQualityObserver, VolumeQualityReplayResult,
+    VolumeQualitySnapshot, DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
 };
 pub use volume_provenance::{
     build_delaunay_volume_provenance, validate_delaunay_volume_provenance,

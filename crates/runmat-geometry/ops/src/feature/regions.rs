@@ -102,7 +102,9 @@ fn resolve_geometry_regions_inner<E: GeometryRegionEvidence>(
             GeometryRegionSelector::Tag(tag) => evidence
                 .by_tag(region.role, tag)
                 .map_err(|error| evidence_error(&region.region_id, error))?,
-            GeometryRegionSelector::PersistentId(selection) => resolve_persistent_region_selection(topology, region.role, selection, revision_map)?,
+            GeometryRegionSelector::PersistentId(selection) => {
+                resolve_persistent_region_selection(topology, region.role, selection, revision_map)?
+            }
             GeometryRegionSelector::Result => available,
             GeometryRegionSelector::FeatureResult(feature) => history_by_feature
                 .get(&feature.0)
@@ -222,14 +224,31 @@ fn evidence_error(region_id: &str, error: impl Display) -> GeometryFeatureError 
 }
 
 /// Single persistent-selection admission path for authored IDs and managed named selections.
-pub fn resolve_persistent_region_selection(topology: &ExactBRepTopology, role: GeometryRegionRole, selection: &str, revision_map: Option<&runmat_geometry_core::GeometryRevisionMap>) -> Result<Vec<PersistentEntityId>, GeometryFeatureError> {
-    PersistentEntityId::validate_analysis_selection_id(selection).map_err(|e| evidence_error("selection", e))?;
+pub fn resolve_persistent_region_selection(
+    topology: &ExactBRepTopology,
+    role: GeometryRegionRole,
+    selection: &str,
+    revision_map: Option<&runmat_geometry_core::GeometryRevisionMap>,
+) -> Result<Vec<PersistentEntityId>, GeometryFeatureError> {
+    PersistentEntityId::validate_analysis_selection_id(selection)
+        .map_err(|e| evidence_error("selection", e))?;
     let available = role_entities(topology, role);
-    let current: Vec<_> = available.iter().filter(|entity| entity.matches_analysis_selection(selection)).cloned().collect();
-    if !current.is_empty() { return Ok(current); }
+    let current: Vec<_> = available
+        .iter()
+        .filter(|entity| entity.matches_analysis_selection(selection))
+        .cloned()
+        .collect();
+    if !current.is_empty() {
+        return Ok(current);
+    }
     if let Some(map) = revision_map {
-        let rebound = map.remap_selection_id(selection, role, topology).map_err(|e| evidence_error("selection", e))?;
-        return Ok(available.into_iter().filter(|entity| entity.matches_analysis_selection(&rebound)).collect());
+        let rebound = map
+            .remap_selection_id(selection, role, topology)
+            .map_err(|e| evidence_error("selection", e))?;
+        return Ok(available
+            .into_iter()
+            .filter(|entity| entity.matches_analysis_selection(&rebound))
+            .collect());
     }
     Ok(Vec::new())
 }

@@ -149,8 +149,8 @@ pub(super) async fn run() {
                 sample.electric_field_v_per_m.canonical_value(),
                 sample.flux_density_t.canonical_value(),
             ]
-                .iter()
-                .enumerate()
+            .iter()
+            .enumerate()
             {
                 for (axis, value) in actual.iter().enumerate() {
                     let actual = [value.real, value.imaginary];

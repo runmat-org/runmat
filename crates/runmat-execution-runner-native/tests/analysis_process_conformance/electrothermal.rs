@@ -119,9 +119,16 @@ pub(super) async fn run() {
         .unwrap();
         let completed = executed.completed;
         let producer = executed.source;
-        assert!((completed.result.manifest.energy_balances[0].applied_power_w - runmat_types::physical::Quantity::new(12.0)).abs() < runmat_types::physical::Quantity::new(1e-8));
         assert!(
-            (completed.result.manifest.energy_balances[0].prescribed_boundary_power_w - runmat_types::physical::Quantity::new(12.0)).abs()
+            (completed.result.manifest.energy_balances[0].applied_power_w
+                - runmat_types::physical::Quantity::new(12.0))
+            .abs()
+                < runmat_types::physical::Quantity::new(1e-8)
+        );
+        assert!(
+            (completed.result.manifest.energy_balances[0].prescribed_boundary_power_w
+                - runmat_types::physical::Quantity::new(12.0))
+            .abs()
                 < runmat_types::physical::Quantity::new(1e-8)
         );
         assert!(!completed.states.is_empty());

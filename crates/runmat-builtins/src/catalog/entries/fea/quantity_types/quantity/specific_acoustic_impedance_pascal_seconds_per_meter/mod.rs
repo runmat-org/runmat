@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_SPECIFIC_ACOUSTIC_IMPEDANCE_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::Positive };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_SPECIFIC_ACOUSTIC_IMPEDANCE_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::Positive,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const SPECIFIC_ACOUSTIC_IMPEDANCE_PASCAL_SECONDS_PER_METER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+const SPECIFIC_ACOUSTIC_IMPEDANCE_PASCAL_SECONDS_PER_METER_SIGNATURES:
+    [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "value = fea.SpecificAcousticImpedance.pascalSecondsPerMeter(value)",
     inputs: &QUANTITY_INPUTS,
     outputs: &QUANTITY_OUTPUTS,
 }];
-pub const SPECIFIC_ACOUSTIC_IMPEDANCE_PASCAL_SECONDS_PER_METER_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&SPECIFIC_ACOUSTIC_IMPEDANCE_PASCAL_SECONDS_PER_METER_SIGNATURES);
+pub const SPECIFIC_ACOUSTIC_IMPEDANCE_PASCAL_SECONDS_PER_METER_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&SPECIFIC_ACOUSTIC_IMPEDANCE_PASCAL_SECONDS_PER_METER_SIGNATURES);
 const SPECIFIC_ACOUSTIC_IMPEDANCE_PASCAL_SECONDS_PER_METER_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "specific-acoustic-impedance-pascalsecondspermeter",
     title: "The characteristic impedance of air",

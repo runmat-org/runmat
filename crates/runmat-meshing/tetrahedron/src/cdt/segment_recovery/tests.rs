@@ -318,7 +318,10 @@ fn recovery_evidence_is_independently_rejected_after_tampering() {
         DelaunayVolumeNode::explicit(last, constraints.nodes[4].coordinates_m.canonical_value()),
         DelaunayVolumeNode {
             identity: midpoint,
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(midpoint_coordinates),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(midpoint_coordinates),
             construction: Point3Construction::Segment {
                 endpoints: [
                     constraints.nodes[1].coordinates_m.canonical_value(),

@@ -34,8 +34,8 @@ use super::{
     FieldRecoveryResourceFacts, LocalExecutionPlan, NumericalScalar, ObservationResourceFacts,
     PartitioningPolicy, PhaseResourcePolicy, PreconditionerStorage, PreparedInputResourceFacts,
     ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticSolvePath,
-    StaticSolveSelection, StructuralLinearPipelineResourceDemand, StructuralOperatorResourceDemand, WorkerResourcePolicy,
-    RESOURCE_ESTIMATION_MODEL_REVISION,
+    StaticSolveSelection, StructuralLinearPipelineResourceDemand, StructuralOperatorResourceDemand,
+    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 use super::RESIDENT_MEMORY_RESOURCE;
@@ -171,9 +171,7 @@ fn plan_static_solve_within_ceiling(
         SpdPreconditionerKind::Auto => {}
         SpdPreconditionerKind::Direct
         | SpdPreconditionerKind::Jacobi
-        | SpdPreconditionerKind::Ilu0 => {
-            return plan_path(StaticSolvePath::ProvingFactorization)
-        }
+        | SpdPreconditionerKind::Ilu0 => return plan_path(StaticSolvePath::ProvingFactorization),
     }
     let authored = input.step.accuracy.resources.resident_byte_budget();
     let ceiling = machine_memory_bytes.map_or(authored, |machine| machine.min(authored));

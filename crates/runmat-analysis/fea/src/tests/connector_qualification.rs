@@ -139,7 +139,9 @@ fn solid_face_foundation_matches_an_independent_quadrature_sum() {
     model.connectors = vec![runmat_analysis_core::AnalysisConnector {
         connector_id: "tip_foundation".into(),
         kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
+            target: runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("tip"),
+            ),
             modulus: runmat_analysis_core::FoundationModulus::new(FOUNDATION_MODULUS_N_PER_M3),
         },
     }];

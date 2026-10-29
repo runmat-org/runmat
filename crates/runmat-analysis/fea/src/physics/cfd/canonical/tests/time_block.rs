@@ -86,7 +86,11 @@ fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
     // every interval keeps its evidence.
     assert_eq!(result.intervals().len(), 3);
     assert_eq!(
-        result.retained_results().iter().map(|(o, _)| *o).collect::<Vec<_>>(),
+        result
+            .retained_results()
+            .iter()
+            .map(|(o, _)| *o)
+            .collect::<Vec<_>>(),
         vec![1, 2]
     );
     for (ordinal, r) in result.retained_results() {

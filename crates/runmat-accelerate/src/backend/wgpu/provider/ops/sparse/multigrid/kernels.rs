@@ -16,7 +16,8 @@ pub(super) enum SpmvMode {
     Add,
 }
 
-const LINEAR_INDEX: &str = "fn linear_group(wid: vec3<u32>, nwg: vec3<u32>) -> u32 { return wid.x + wid.y * nwg.x; }";
+const LINEAR_INDEX: &str =
+    "fn linear_group(wid: vec3<u32>, nwg: vec3<u32>) -> u32 { return wid.x + wid.y * nwg.x; }";
 
 /// Vector CSR: `lanes` consecutive invocations share one row (strided over its entries) and
 /// reduce through workgroup memory; a workgroup covers `workgroup / lanes` rows.

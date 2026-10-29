@@ -62,7 +62,9 @@ impl<'de> Deserialize<'de> for HexDigest {
         let text = std::borrow::Cow::<'de, str>::deserialize(deserializer)?;
         let text = text.as_bytes();
         if text.len() != 64 {
-            return Err(D::Error::custom("element digest must be 64 lowercase hex digits"));
+            return Err(D::Error::custom(
+                "element digest must be 64 lowercase hex digits",
+            ));
         }
         let nibble = |c: u8| match c {
             b'0'..=b'9' => Ok(c - b'0'),
@@ -100,7 +102,9 @@ fn columns(
     for entry in entries.values() {
         columns.element_ids.push(entry.element_id);
         columns.identities.push(HexDigest(entry.element_identity));
-        columns.materials.push(material_index(table, &entry.material)?);
+        columns
+            .materials
+            .push(material_index(table, &entry.material)?);
     }
     Ok(columns)
 }

@@ -27,7 +27,8 @@ fn compiled_duct() -> CompiledAnalysisStudy {
     });
     model.materials[0].mass_density_kg_per_m3 =
         (Some(3.0)).map(runmat_types::physical::MassDensity::new);
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     step.accuracy.criteria[0].tolerance = AccuracyTolerance::Relative(2.0e-9);
@@ -37,7 +38,9 @@ fn compiled_duct() -> CompiledAnalysisStudy {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));

@@ -76,7 +76,11 @@ fn entity_count(
     let count = match domain {
         RecoveredFieldEntityDomain::Nodes => projection.nodes.len(),
         RecoveredFieldEntityDomain::VolumeElements => projection.elements.len(),
-        _ => return Err(invalid("statistical fields live on nodes or volume elements")),
+        _ => {
+            return Err(invalid(
+                "statistical fields live on nodes or volume elements",
+            ))
+        }
     };
     u64::try_from(count).map_err(|_| invalid("statistical field entity count overflows"))
 }
@@ -174,9 +178,12 @@ pub fn statistical_recovered_fields(
         recovered,
     )
     .map_err(invalid)?;
-    request
-        .plan
-        .validate_definitions(artifact.fields().iter().map(|field| field.definition().clone()))?;
+    request.plan.validate_definitions(
+        artifact
+            .fields()
+            .iter()
+            .map(|field| field.definition().clone()),
+    )?;
     Ok(artifact)
 }
 

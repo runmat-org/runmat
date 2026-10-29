@@ -308,134 +308,134 @@ impl KeyText {
         value.serialize(Text).ok()
     }
 }
-    struct Text;
-    impl ser::Serializer for Text {
-        type Ok = KeyText;
-        type Error = super::super::CanonicalCodecError;
-        type SerializeSeq = ser::Impossible<KeyText, Self::Error>;
-        type SerializeTuple = ser::Impossible<KeyText, Self::Error>;
-        type SerializeTupleStruct = ser::Impossible<KeyText, Self::Error>;
-        type SerializeTupleVariant = ser::Impossible<KeyText, Self::Error>;
-        type SerializeMap = ser::Impossible<KeyText, Self::Error>;
-        type SerializeStruct = ser::Impossible<KeyText, Self::Error>;
-        type SerializeStructVariant = ser::Impossible<KeyText, Self::Error>;
-        fn serialize_str(self, value: &str) -> Result<KeyText, Self::Error> {
-            KeyText::from_str(value)
-        }
-        fn serialize_char(self, value: char) -> Result<KeyText, Self::Error> {
-            KeyText::from_str(value.encode_utf8(&mut [0; 4]))
-        }
-        fn serialize_unit_variant(
-            self,
-            _: &'static str,
-            _: u32,
-            variant: &'static str,
-        ) -> Result<KeyText, Self::Error> {
-            KeyText::from_str(variant)
-        }
-        fn serialize_newtype_struct<T: Serialize + ?Sized>(
-            self,
-            _: &'static str,
-            value: &T,
-        ) -> Result<KeyText, Self::Error> {
-            value.serialize(self)
-        }
-        fn serialize_bool(self, _: bool) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_i8(self, _: i8) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_i16(self, _: i16) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_i32(self, _: i32) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_i64(self, _: i64) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_u8(self, _: u8) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_u16(self, _: u16) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_u32(self, _: u32) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_u64(self, _: u64) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_f32(self, _: f32) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_f64(self, _: f64) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_bytes(self, _: &[u8]) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_none(self) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_some<T: Serialize + ?Sized>(self, _: &T) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_unit(self) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_unit_struct(self, _: &'static str) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_newtype_variant<T: Serialize + ?Sized>(
-            self,
-            _: &'static str,
-            _: u32,
-            _: &'static str,
-            _: &T,
-        ) -> Result<KeyText, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_tuple_struct(
-            self,
-            _: &'static str,
-            _: usize,
-        ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_tuple_variant(
-            self,
-            _: &'static str,
-            _: u32,
-            _: &'static str,
-            _: usize,
-        ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_struct(
-            self,
-            _: &'static str,
-            _: usize,
-        ) -> Result<Self::SerializeStruct, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
-        fn serialize_struct_variant(
-            self,
-            _: &'static str,
-            _: u32,
-            _: &'static str,
-            _: usize,
-        ) -> Result<Self::SerializeStructVariant, Self::Error> {
-            Err(invalid("unprofiled key"))
-        }
+struct Text;
+impl ser::Serializer for Text {
+    type Ok = KeyText;
+    type Error = super::super::CanonicalCodecError;
+    type SerializeSeq = ser::Impossible<KeyText, Self::Error>;
+    type SerializeTuple = ser::Impossible<KeyText, Self::Error>;
+    type SerializeTupleStruct = ser::Impossible<KeyText, Self::Error>;
+    type SerializeTupleVariant = ser::Impossible<KeyText, Self::Error>;
+    type SerializeMap = ser::Impossible<KeyText, Self::Error>;
+    type SerializeStruct = ser::Impossible<KeyText, Self::Error>;
+    type SerializeStructVariant = ser::Impossible<KeyText, Self::Error>;
+    fn serialize_str(self, value: &str) -> Result<KeyText, Self::Error> {
+        KeyText::from_str(value)
     }
+    fn serialize_char(self, value: char) -> Result<KeyText, Self::Error> {
+        KeyText::from_str(value.encode_utf8(&mut [0; 4]))
+    }
+    fn serialize_unit_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        variant: &'static str,
+    ) -> Result<KeyText, Self::Error> {
+        KeyText::from_str(variant)
+    }
+    fn serialize_newtype_struct<T: Serialize + ?Sized>(
+        self,
+        _: &'static str,
+        value: &T,
+    ) -> Result<KeyText, Self::Error> {
+        value.serialize(self)
+    }
+    fn serialize_bool(self, _: bool) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_i8(self, _: i8) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_i16(self, _: i16) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_i32(self, _: i32) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_i64(self, _: i64) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_u8(self, _: u8) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_u16(self, _: u16) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_u32(self, _: u32) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_u64(self, _: u64) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_f32(self, _: f32) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_f64(self, _: f64) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_bytes(self, _: &[u8]) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_none(self) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_some<T: Serialize + ?Sized>(self, _: &T) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_unit(self) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_unit_struct(self, _: &'static str) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_newtype_variant<T: Serialize + ?Sized>(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: &T,
+    ) -> Result<KeyText, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_tuple_struct(
+        self,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_tuple_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_struct(
+        self,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+    fn serialize_struct_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        Err(invalid("unprofiled key"))
+    }
+}

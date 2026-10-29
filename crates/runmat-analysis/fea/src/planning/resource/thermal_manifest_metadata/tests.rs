@@ -27,8 +27,10 @@ fn workload(procedure: ThermalProcedureControl) -> ThermalWorkload {
     model.sequence = AnalysisSequence::from_steps("thermal", vec![step]);
     // The authored ceiling is part of the encoded model, so resident requirements are
     // measured under a non-binding authored ceiling (present, like the ceilings tests author).
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
-        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -59,7 +61,9 @@ fn complete_manifest_profile_bounds_real_steady_and_transient_headers() {
                 .push(AnalysisConstraint::Thermal(ThermalConstraint {
                     constraint_id: "thermal_anchor".into(),
                     kind: ThermalConstraintKind::Prescribed {
-                        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
+                        target: RegionTarget::boundary(
+                            runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),
+                        ),
                         value: PrescribedValue::Constant(Temperature::new(293.15)),
                     },
                 }));
@@ -142,9 +146,10 @@ fn scalar_inventory_profiles_grow_with_all_retained_axes() {
     for (nodes, elements, samples, solves) in
         [(40, 1, 3, 2), (4, 10, 3, 2), (4, 1, 30, 2), (4, 1, 3, 20)]
     {
-        let grown =
-            ThermalSolverResultManifest::scalar_inventory_profile(nodes, elements, samples, solves, 0)
-                .unwrap();
+        let grown = ThermalSolverResultManifest::scalar_inventory_profile(
+            nodes, elements, samples, solves, 0,
+        )
+        .unwrap();
         assert!(grown.encoded_bytes_upper_bound > base.encoded_bytes_upper_bound);
         assert!(
             grown.materialization_resident_bytes_estimate

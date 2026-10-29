@@ -44,105 +44,99 @@ pub(crate) fn build(
     let elements = &mesh.topology.volume_elements;
     // Independent per-element summaries on the admitted pool, collected in element order.
     crate::algebra::element_assembly::ordered_map_range(elements.len(), |index| {
-            let element = &elements[index];
-            let material = resolve_element_material(element, properties)?;
-            let prescribed_temperature_k = thermal_context
-                .map(|context| {
-                    thermoelastic_load::element_temperature_k(
-                        &element.region_id,
-                        &element.provenance,
-                        context,
-                    )
-                    .map_err(|error| {
-                        SolverSolidAssemblyError::InvalidMaterialCoverage(error.to_string())
-                    })
+        let element = &elements[index];
+        let material = resolve_element_material(element, properties)?;
+        let prescribed_temperature_k = thermal_context
+            .map(|context| {
+                thermoelastic_load::element_temperature_k(
+                    &element.region_id,
+                    &element.provenance,
+                    context,
+                )
+                .map_err(|error| {
+                    SolverSolidAssemblyError::InvalidMaterialCoverage(error.to_string())
                 })
-                .transpose()?;
-            let thermal_eigenstrain = thermal_context
-                .map(|context| {
-                    let owner = properties
-                        .solid_material(element.stable_identity)
-                        .ok_or_else(|| {
-                            SolverSolidAssemblyError::InvalidMaterialCoverage(format!(
-                                "thermoelastic element {} has no compiled material owner",
-                                element.element_id
-                            ))
-                        })?;
-                    thermoelastic_load::element_thermal_eigenstrain(
-                        owner,
-                        &element.region_id,
-                        &element.provenance,
-                        context,
-                    )
-                    .map_err(|error| {
-                        SolverSolidAssemblyError::InvalidMaterialCoverage(error.to_string())
-                    })
-                })
-                .transpose()?;
-            let geometry = match element.order {
-                ElementOrder::Tet4 => {
-                    let (node_indices, coordinates_m) = recovery_geometry::<4>(
-                        element.element_id,
-                        &element.node_ids,
-                        &node_indices,
-                        mesh,
-                    )?;
-                    SolidRecoveryGeometry::Tetrahedron4 {
-                        node_indices,
-                        coordinates_m: runmat_types::physical::Quantity::<
-                            runmat_types::physical::kind::Position,
-                            _,
-                        >::new(coordinates_m),
-                    }
-                }
-                ElementOrder::Tet10 => {
-                    let (node_indices, coordinates_m) = recovery_geometry::<10>(
-                        element.element_id,
-                        &element.node_ids,
-                        &node_indices,
-                        mesh,
-                    )?;
-                    SolidRecoveryGeometry::Tetrahedron10 {
-                        node_indices,
-                        coordinates_m: runmat_types::physical::Quantity::<
-                            runmat_types::physical::kind::Position,
-                            _,
-                        >::new(coordinates_m),
-                    }
-                }
-            };
-            let solved_thermal_quadrature = solved_nodal_temperature_k
-                .map(|temperatures| {
-                    solved_thermal_quadrature(
-                        index,
-                        element,
-                        &node_indices,
-                        properties,
-                        temperatures,
-                    )
-                })
-                .transpose()?;
-            Ok::<_, SolverSolidAssemblyError>(SolidRecoveryElementSummary {
-                element_id: element.element_id.to_string(),
-                region_id: element.region_id.source_topology_id.clone(),
-                material: SolidMaterial {
-                    youngs_modulus_pa: material.youngs_modulus_pa,
-                    poisson_ratio: runmat_types::physical::PoissonRatio::new(
-                        material.poisson_ratio.canonical_value(),
-                    ),
-                    density_kg_per_m3: runmat_types::physical::MassDensity::new(
-                        material.density_kg_per_m3.canonical_value(),
-                    ),
-                },
-                thermal_eigenstrain,
-                prescribed_temperature_k: prescribed_temperature_k
-                    .map(runmat_types::physical::Temperature::new),
-                solved_thermal_quadrature,
-                geometry,
             })
+            .transpose()?;
+        let thermal_eigenstrain = thermal_context
+            .map(|context| {
+                let owner = properties
+                    .solid_material(element.stable_identity)
+                    .ok_or_else(|| {
+                        SolverSolidAssemblyError::InvalidMaterialCoverage(format!(
+                            "thermoelastic element {} has no compiled material owner",
+                            element.element_id
+                        ))
+                    })?;
+                thermoelastic_load::element_thermal_eigenstrain(
+                    owner,
+                    &element.region_id,
+                    &element.provenance,
+                    context,
+                )
+                .map_err(|error| {
+                    SolverSolidAssemblyError::InvalidMaterialCoverage(error.to_string())
+                })
+            })
+            .transpose()?;
+        let geometry = match element.order {
+            ElementOrder::Tet4 => {
+                let (node_indices, coordinates_m) = recovery_geometry::<4>(
+                    element.element_id,
+                    &element.node_ids,
+                    &node_indices,
+                    mesh,
+                )?;
+                SolidRecoveryGeometry::Tetrahedron4 {
+                    node_indices,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(coordinates_m),
+                }
+            }
+            ElementOrder::Tet10 => {
+                let (node_indices, coordinates_m) = recovery_geometry::<10>(
+                    element.element_id,
+                    &element.node_ids,
+                    &node_indices,
+                    mesh,
+                )?;
+                SolidRecoveryGeometry::Tetrahedron10 {
+                    node_indices,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(coordinates_m),
+                }
+            }
+        };
+        let solved_thermal_quadrature = solved_nodal_temperature_k
+            .map(|temperatures| {
+                solved_thermal_quadrature(index, element, &node_indices, properties, temperatures)
+            })
+            .transpose()?;
+        Ok::<_, SolverSolidAssemblyError>(SolidRecoveryElementSummary {
+            element_id: element.element_id.to_string(),
+            region_id: element.region_id.source_topology_id.clone(),
+            material: SolidMaterial {
+                youngs_modulus_pa: material.youngs_modulus_pa,
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(
+                    material.poisson_ratio.canonical_value(),
+                ),
+                density_kg_per_m3: runmat_types::physical::MassDensity::new(
+                    material.density_kg_per_m3.canonical_value(),
+                ),
+            },
+            thermal_eigenstrain,
+            prescribed_temperature_k: prescribed_temperature_k
+                .map(runmat_types::physical::Temperature::new),
+            solved_thermal_quadrature,
+            geometry,
         })
-        .into_iter()
-        .collect()
+    })
+    .into_iter()
+    .collect()
 }
 
 fn solved_thermal_quadrature(

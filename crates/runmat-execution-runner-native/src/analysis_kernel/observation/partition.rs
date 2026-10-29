@@ -246,7 +246,10 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 "nonlinear observation partition policy differs",
             ));
         }
-        (Some(workload.model), runmat_analysis_fea::ComputeBackend::Cpu)
+        (
+            Some(workload.model),
+            runmat_analysis_fea::ComputeBackend::Cpu,
+        )
     } else if let Some(workload) = linear_workload {
         catalog.validate_structural_selection(&source_request.selection)?;
         let workload = StructuralLinearWorkload::from_canonical_bytes(&workload.payload())?;
@@ -262,15 +265,16 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
     };
     // Only structural evaluation reads the authored model; the other sources carry their
     // own topology. A missing model outside those sources is rejected here.
-    if model.is_none()
-        && solid_projection.is_none()
-        && sampled_topology.is_none()
-    {
+    if model.is_none() && solid_projection.is_none() && sampled_topology.is_none() {
         return Err(AnalysisBridgeError::Identity(
             "structural observation evaluation requires its authored model",
         ));
     }
-    let structural_model = || model.as_ref().expect("structural sources carry their model");
+    let structural_model = || {
+        model
+            .as_ref()
+            .expect("structural sources carry their model")
+    };
     let FeaResourceDemand::StructuralObservationPartition(_) = &resource_plan.input.demand else {
         return Err(AnalysisBridgeError::Identity(
             "observation partition requires its exact phase resource demand",
@@ -285,8 +289,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
             ))
         }
     };
-    if sampled_topology.is_some()
-        && (accelerator.is_some() || request.event_attribution.is_some())
+    if sampled_topology.is_some() && (accelerator.is_some() || request.event_attribution.is_some())
     {
         return Err(AnalysisBridgeError::Identity(
             "sampled observations require serial final evaluation",

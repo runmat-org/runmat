@@ -9,9 +9,9 @@ use crate::{
         fea_transient_connector_stored_energy_field_id, fea_transient_snapshot_field_id,
         fea_transient_velocity_field_id, FeaRunError, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
         FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-        FEA_FIELD_STRUCTURAL_ROTATION,
-        FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-        FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_VON_MISES,
+        FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN,
+        FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     excitation::SpatialProjectionEvidence,
     execution::StructuralTransientSchedule,
@@ -506,28 +506,25 @@ mod tests {
 
     #[test]
     fn recovery_requires_the_exact_accepted_schedule() {
-        let schedule =
-            StructuralTransientSchedule::new(
-                vec![
-                    StructuralTransientSchedulePoint {
-                        time_s: runmat_types::physical::Quantity::<
-                            runmat_types::physical::kind::Time,
-                            _,
-                        >::new(0.0),
-                        arrival: StructuralTransientScheduleArrival::Initial,
-                        continuation: StructuralTransientContinuationApproach::At,
-                    },
-                    StructuralTransientSchedulePoint {
-                        time_s: runmat_types::physical::Quantity::<
-                            runmat_types::physical::kind::Time,
-                            _,
-                        >::new(1.0),
-                        arrival: StructuralTransientScheduleArrival::Continuous,
-                        continuation: StructuralTransientContinuationApproach::At,
-                    },
-                ],
-            )
-            .unwrap();
+        let schedule = StructuralTransientSchedule::new(vec![
+            StructuralTransientSchedulePoint {
+                time_s:
+                    runmat_types::physical::Quantity::<runmat_types::physical::kind::Time, _>::new(
+                        0.0,
+                    ),
+                arrival: StructuralTransientScheduleArrival::Initial,
+                continuation: StructuralTransientContinuationApproach::At,
+            },
+            StructuralTransientSchedulePoint {
+                time_s:
+                    runmat_types::physical::Quantity::<runmat_types::physical::kind::Time, _>::new(
+                        1.0,
+                    ),
+                arrival: StructuralTransientScheduleArrival::Continuous,
+                continuation: StructuralTransientContinuationApproach::At,
+            },
+        ])
+        .unwrap();
         assert!(validate_schedule_points(&schedule, &[0.0, 1.0]).is_ok());
         for wrong in [&[0.0][..], &[0.0, 1.25][..], &[1.0, 0.0][..]] {
             assert!(matches!(

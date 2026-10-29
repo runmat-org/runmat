@@ -413,7 +413,9 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             &mut solve.accelerator_evidence,
             &facts.metadata.backend_evidence,
         )?;
-        refined.host_sync_count = refined.host_sync_count.saturating_add(solve.host_sync_count);
+        refined.host_sync_count = refined
+            .host_sync_count
+            .saturating_add(solve.host_sync_count);
         refined.device_apply_k_count = refined
             .device_apply_k_count
             .saturating_add(solve.device_apply_k_count);
@@ -629,8 +631,8 @@ fn solve_unchecked(
         })
         .map_err(|error| FeaRunError::Solve(error.to_string()))?;
     operator
-            .admit_solution(solve)
-            .map_err(|error| FeaRunError::Solve(error.into()))
+        .admit_solution(solve)
+        .map_err(|error| FeaRunError::Solve(error.into()))
 }
 
 /// Tie, periodic and jump relations eliminate secondary nodes (Galerkin reduction) and solve

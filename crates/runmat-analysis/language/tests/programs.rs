@@ -466,7 +466,11 @@ geometry part {
     let host = TestHost::default().with_named_geometry(
         "project/geometry/part.step",
         8,
-        &[("solid", "Part body"), ("face", "Fixed end"), ("face", "Loaded end")],
+        &[
+            ("solid", "Part body"),
+            ("face", "Fixed end"),
+            ("face", "Loaded end"),
+        ],
     );
     let program = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
@@ -481,7 +485,11 @@ geometry part {
         .collect::<Vec<_>>();
     assert_eq!(messages.len(), 1, "{messages:#?}");
     assert!(messages[0].contains("\"Fixed edn\""), "{}", messages[0]);
-    assert!(messages[0].contains("\"Fixed end\", \"Loaded end\""), "{}", messages[0]);
+    assert!(
+        messages[0].contains("\"Fixed end\", \"Loaded end\""),
+        "{}",
+        messages[0]
+    );
 }
 
 // witness: FEA-AUTHORING-GEOMETRY-002/inspected_selector_semantics @
@@ -547,8 +555,11 @@ geometry cell {
     region air : solid { select name "Air"; expect one_or_more }
 }
 "#;
-    let host =
-        TestHost::default().with_named_geometry("project/geometry/cell.step", 8, &[("solid", "Air")]);
+    let host = TestHost::default().with_named_geometry(
+        "project/geometry/cell.step",
+        8,
+        &[("solid", "Air")],
+    );
     let program = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),
@@ -557,7 +568,8 @@ geometry cell {
     });
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let geometry = program.geometries.values().next().unwrap();
-    let runmat_geometry_core::GeometryDefinitionSource::Imported(imported) = &geometry.source else {
+    let runmat_geometry_core::GeometryDefinitionSource::Imported(imported) = &geometry.source
+    else {
         panic!("expected imported geometry");
     };
     assert!(imported.shared_interfaces);

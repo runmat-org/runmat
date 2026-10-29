@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.constraintReactionMomentAboutGlobalOrigin()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN_SIGNATURES);
+const CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.constraintReactionMomentAboutGlobalOrigin()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN_SIGNATURES);
 const CONSTRAINT_REACTION_MOMENT_ABOUT_GLOBAL_ORIGIN_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-constraint-reaction-moment-about-global-origin",
     title: "Select total reaction moment per constraint",

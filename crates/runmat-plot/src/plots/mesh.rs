@@ -611,7 +611,9 @@ impl MeshPlot {
                         }
                         let start = vertices_source[index];
                         let end = start + *vector * field.scale;
-                        if !start.is_finite() || !end.is_finite() { continue; }
+                        if !start.is_finite() || !end.is_finite() {
+                            continue;
+                        }
                         vertices.push(Vertex::new(start, color));
                         vertices.push(Vertex::new(end, color));
                     }
@@ -627,7 +629,9 @@ impl MeshPlot {
                             + vertices_source[triangle[2] as usize])
                             / 3.0;
                         let end = start + *vector * field.scale;
-                        if !start.is_finite() || !end.is_finite() { continue; }
+                        if !start.is_finite() || !end.is_finite() {
+                            continue;
+                        }
                         vertices.push(Vertex::new(start, color));
                         vertices.push(Vertex::new(end, color));
                     }
@@ -1213,17 +1217,21 @@ fn vertex_normals(vertices: &[Vec3], triangles: &[[u32; 3]]) -> Vec<Vec3> {
     for &[a, b, c] in triangles {
         let [ia, ib, ic] = [a as usize, b as usize, c as usize];
         let origin = vertices[ia].as_dvec3();
-        let normal = (vertices[ib].as_dvec3() - origin)
-            .cross(vertices[ic].as_dvec3() - origin);
+        let normal = (vertices[ib].as_dvec3() - origin).cross(vertices[ic].as_dvec3() - origin);
         if normal.is_finite() {
             normals[ia] += normal;
             normals[ib] += normal;
             normals[ic] += normal;
         }
     }
-    normals.into_iter().map(|normal| {
-        normal.try_normalize().map_or(Vec3::Z, |normal| normal.as_vec3())
-    }).collect()
+    normals
+        .into_iter()
+        .map(|normal| {
+            normal
+                .try_normalize()
+                .map_or(Vec3::Z, |normal| normal.as_vec3())
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1434,7 +1442,10 @@ mod tests {
         for scale in [1.0e-9, 1.0e-3, 1.0, 1.0e9] {
             let vertices = [Vec3::ZERO, Vec3::Y * scale, Vec3::Z * scale];
             for normal in vertex_normals(&vertices, &[[0, 1, 2]]) {
-                assert!((normal - Vec3::X).length() < 1.0e-6, "scale {scale}: {normal:?}");
+                assert!(
+                    (normal - Vec3::X).length() < 1.0e-6,
+                    "scale {scale}: {normal:?}"
+                );
             }
         }
     }
@@ -1451,17 +1462,24 @@ mod tests {
     fn small_vectors_remain_visible_after_display_scaling() {
         for location in [MeshFieldLocation::Vertex, MeshFieldLocation::Triangle] {
             let mut mesh = square_mesh();
-            let count = match location { MeshFieldLocation::Vertex => 4, MeshFieldLocation::Triangle => 2 };
-            let mut field = MeshVectorField::new("displacement", location, vec![Vec3::X * 1.0e-6; count]);
+            let count = match location {
+                MeshFieldLocation::Vertex => 4,
+                MeshFieldLocation::Triangle => 2,
+            };
+            let mut field =
+                MeshVectorField::new("displacement", location, vec![Vec3::X * 1.0e-6; count]);
             field.scale = 1.0e6;
-            mesh.set_vector_field(Some(field)).expect("valid vector field");
-            let data = mesh.vector_render_data().expect("small vectors must render");
+            mesh.set_vector_field(Some(field))
+                .expect("valid vector field");
+            let data = mesh
+                .vector_render_data()
+                .expect("small vectors must render");
             assert_eq!(data.vertices.len(), count * 2);
             for segment in data.vertices.chunks_exact(2) {
-                let displacement = Vec3::from_array(segment[1].position) - Vec3::from_array(segment[0].position);
+                let displacement =
+                    Vec3::from_array(segment[1].position) - Vec3::from_array(segment[0].position);
                 assert!((displacement - Vec3::X).length() < 1.0e-6);
             }
         }
     }
-
 }

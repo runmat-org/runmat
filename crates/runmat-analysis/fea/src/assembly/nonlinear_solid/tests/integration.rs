@@ -76,13 +76,12 @@ fn cancelled_original_basis_preparation_preserves_typed_cancellation() {
 #[test]
 fn curved_tet10_nonlinear_assembly_integrates_on_the_shared_rule_points() {
     let (model, _, _) = fixture(ElementOrder::Tet10, false);
-    let mut mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let mut mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let mut midside = mesh.topology.nodes[4].coordinates_m.canonical_value();
     midside[1] -= 0.05;
-    mesh.topology.nodes[4].coordinates_m = runmat_types::physical::Quantity::<
-        runmat_types::physical::kind::Position,
-        _,
-    >::new(midside);
+    mesh.topology.nodes[4].coordinates_m =
+        runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(midside);
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     let initial = assemble_structural_system_borrowed(
@@ -105,8 +104,8 @@ fn curved_tet10_nonlinear_assembly_integrates_on_the_shared_rule_points() {
     let shared = runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates).unwrap();
     let expected_rule =
         crate::topology::solid_integration_curved_rule(shared.rule).expect("curved element");
-    let plan =
-        CanonicalSolidIntegrationPlan::derive(&mesh, CanonicalSolidIntegrationRule::Keast15).unwrap();
+    let plan = CanonicalSolidIntegrationPlan::derive(&mesh, CanonicalSolidIntegrationRule::Keast15)
+        .unwrap();
     assert_eq!(plan.elements()[0].rule, expected_rule);
     let plan_points = expected_rule.reference_points().collect::<Vec<_>>();
     assert_eq!(plan_points, shared.quadrature_points());
@@ -126,7 +125,12 @@ fn curved_tet10_nonlinear_assembly_integrates_on_the_shared_rule_points() {
         },
     )
     .unwrap();
-    let dofs = basis.elements[0].dofs.iter().flatten().copied().collect::<Vec<_>>();
+    let dofs = basis.elements[0]
+        .dofs
+        .iter()
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
     for probe in 0..dofs.len() {
         let mut vector = vec![0.0; basis.dof_count];
         vector[dofs[probe]] = 1.0;

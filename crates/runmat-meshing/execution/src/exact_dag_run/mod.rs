@@ -179,7 +179,10 @@ pub async fn execute_exact_meshing_dag_async<E: ExactMeshingDagExecutor>(
     // stage then reads them from the one resolved request.
     run.request = run
         .request
-        .resolve_size_controls(&run.named_regions, &run.geometry.geometry_objects().topology)
+        .resolve_size_controls(
+            &run.named_regions,
+            &run.geometry.geometry_objects().topology,
+        )
         .map_err(|error| ExactMeshingDagRunError::Invalid(error.to_string()))?
         .0;
     validate_run(&run)?;
@@ -273,8 +276,7 @@ fn validate_run(run: &ExactMeshingDagRun<'_>) -> Result<(), ExactMeshingDagRunEr
                 remediation: if run.request.dimension.is_solid() {
                     "select geometry containing at least one closed solid region".into()
                 } else {
-                    "select geometry containing at least one face for shell or beam meshing"
-                        .into()
+                    "select geometry containing at least one face for shell or beam meshing".into()
                 },
             })),
         ));

@@ -229,7 +229,9 @@ pub struct MeshingSizeLimits {
 
 impl MeshingSizeLimits {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
-        if self.maximum_nodes == 0 || self.maximum_elements == 0 || self.maximum_recursion_depth == 0
+        if self.maximum_nodes == 0
+            || self.maximum_elements == 0
+            || self.maximum_recursion_depth == 0
         {
             return Err(MeshingContractError::invalid(
                 "meshing size limits",

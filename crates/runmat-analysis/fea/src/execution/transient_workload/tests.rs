@@ -112,17 +112,23 @@ fn modal_case() -> (
     .unwrap();
     let schedule = StructuralTransientSchedule::new(vec![
         StructuralTransientSchedulePoint {
-            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time,_>::new(0.0),
+            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time, _>::new(
+                0.0,
+            ),
             arrival: StructuralTransientScheduleArrival::Initial,
             continuation: StructuralTransientContinuationApproach::At,
         },
         StructuralTransientSchedulePoint {
-            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time,_>::new(0.5),
+            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time, _>::new(
+                0.5,
+            ),
             arrival: StructuralTransientScheduleArrival::Continuous,
             continuation: StructuralTransientContinuationApproach::At,
         },
         StructuralTransientSchedulePoint {
-            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time,_>::new(1.0),
+            time_s: runmat_types::physical::Quantity::<runmat_types::physical::kind::Time, _>::new(
+                1.0,
+            ),
             arrival: StructuralTransientScheduleArrival::Continuous,
             continuation: StructuralTransientContinuationApproach::At,
         },

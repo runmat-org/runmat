@@ -268,13 +268,16 @@ fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
         crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap_err();
-    assert!(matches!(
-        error,
-        crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
-            resource: "resident memory bytes",
-            ..
-        }
-    ), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -403,7 +406,8 @@ fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
     assert_eq!(task_plan.input.output_set, Some(output_set.clone()));
     // The supplied output-set root bound replaces the default root bound one for one.
     assert_eq!(
-        task_plan.request.max_artifact_bytes + crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES,
+        task_plan.request.max_artifact_bytes
+            + crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES,
         baseline.request.max_artifact_bytes + output_set.encoded_bytes_upper_bound.0
     );
     assert_eq!(

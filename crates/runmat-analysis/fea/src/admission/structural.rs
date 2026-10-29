@@ -1,10 +1,10 @@
 use runmat_analysis_core::{
-    AnalysisProcedure, StructuralKinematics, BoundaryTransferImplementation, ConstitutiveImplementation,
+    AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
     CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization,
     FormulationAdmissionRejectionReason, FormulationAxis, RecoveryImplementation,
     SourceImplementation, SpatialOperatorImplementation, StructuralFormulationRealization,
-    StructuralOperatorImplementation, StructuralRecoveryImplementation, TemporalImplementation,
-    TopologyImplementation,
+    StructuralKinematics, StructuralOperatorImplementation, StructuralRecoveryImplementation,
+    TemporalImplementation, TopologyImplementation,
 };
 
 #[cfg(test)]

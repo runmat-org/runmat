@@ -20,7 +20,11 @@ fn main() {
         .expect("read import request");
     let request = CString::new(request).expect("JSON request must not contain NUL");
     unsafe {
-        let response = if std::env::args().any(|arg|arg=="--execute") { runmat_geometry_wasm_host::runmat_occt_exact_execute(request.as_ptr()) } else { runmat_geometry_wasm_host::runmat_occt_exact_import(request.as_ptr()) };
+        let response = if std::env::args().any(|arg| arg == "--execute") {
+            runmat_geometry_wasm_host::runmat_occt_exact_execute(request.as_ptr())
+        } else {
+            runmat_geometry_wasm_host::runmat_occt_exact_import(request.as_ptr())
+        };
         println!(
             "{}",
             CStr::from_ptr(response)

@@ -2676,7 +2676,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
     }
 
     fn free_sparse_multigrid(&self, _hierarchy: &SparseMultigridHandle) -> anyhow::Result<()> {
-        Err(anyhow!("sparse multigrid release not supported by provider"))
+        Err(anyhow!(
+            "sparse multigrid release not supported by provider"
+        ))
     }
 
     fn free_sparse_preconditioner(

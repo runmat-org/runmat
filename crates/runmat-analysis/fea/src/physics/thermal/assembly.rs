@@ -6,8 +6,7 @@ use runmat_analysis_core::{
 use crate::{
     algebra::{
         element_assembly::{
-            assemble_elements, no_visit, ElementAssemblyError, ElementOutputShape,
-            ElementOutputs,
+            assemble_elements, no_visit, ElementAssemblyError, ElementOutputShape, ElementOutputs,
         },
         spmv, AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
         ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
@@ -15,9 +14,9 @@ use crate::{
     },
     excitation::{
         sample_prescribed_heat_flux, sample_prescribed_temperature,
-        sample_prescribed_temperature_difference, ExcitationSamplePoint,
-        RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations,
-        ScalarProjectionAccumulator, SpatialIntegrationRule, SpatialProjectionEvidence,
+        sample_prescribed_temperature_difference, ExcitationSamplePoint, RealizedExcitationKind,
+        RealizedExcitationTarget, RealizedExcitations, ScalarProjectionAccumulator,
+        SpatialIntegrationRule, SpatialProjectionEvidence,
     },
     physics::{
         scalar_constraints::{self, ScalarNodeRelation, ScalarPairing},
@@ -220,7 +219,7 @@ pub(crate) fn assemble(
     // Element conduction/capacity kernels run on the admitted CPU pool and scatter onto the
     // planned support in canonical element order (thread-count independent values).
     let element_map = crate::topology::projection_element_map(&projection)
-    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
+        .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
     let assembled = assemble_elements(
         &element_map,
         support,
@@ -498,9 +497,10 @@ pub(crate) fn assemble(
             "a tie, periodic or jump relation reaches a node split by a conductance interface; pair faces away from the interface".into(),
         ));
     }
-    if let Some(relation) = relations.iter().find(|relation| {
-        prescribed_temperature_k[relation.secondary].is_some()
-    }) {
+    if let Some(relation) = relations
+        .iter()
+        .find(|relation| prescribed_temperature_k[relation.secondary].is_some())
+    {
         return Err(ThermalAssemblyError::InvalidProjection(format!(
             "solver node {} is both prescribed and the secondary of a tie, periodic or jump relation",
             projection.nodes[relation.secondary].node_id

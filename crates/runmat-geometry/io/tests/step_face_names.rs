@@ -14,12 +14,36 @@ const NAMED_FACES: &[u8] = include_bytes!("fixtures/named-faces.step");
 //   boundary: Authored STEP face names become face region names in the imported model.
 #[test]
 fn authored_step_face_names_become_face_region_names() {
-    let imported = import_geometry("named-faces.step", NAMED_FACES, GeometryImportOptions::default()).unwrap();
+    let imported = import_geometry(
+        "named-faces.step",
+        NAMED_FACES,
+        GeometryImportOptions::default(),
+    )
+    .unwrap();
     let regions = &imported.asset.regions;
-    let face = |name: &str| regions.iter().find(|r| r.name == name && r.region_id.starts_with("face_"));
-    assert!(face("Fixed end").is_some(), "regions: {:?}", regions.iter().map(|r| (&r.region_id, &r.name)).collect::<Vec<_>>());
+    let face = |name: &str| {
+        regions
+            .iter()
+            .find(|r| r.name == name && r.region_id.starts_with("face_"))
+    };
+    assert!(
+        face("Fixed end").is_some(),
+        "regions: {:?}",
+        regions
+            .iter()
+            .map(|r| (&r.region_id, &r.name))
+            .collect::<Vec<_>>()
+    );
     assert!(face("Loaded end").is_some());
     // Unnamed faces keep their ordinal names, and the body keeps its product name.
-    assert_eq!(regions.iter().filter(|r| r.region_id.starts_with("face_")).count(), 6);
-    assert!(regions.iter().any(|r| r.name == "Bar" && r.tag.as_deref() == Some("cad_body")));
+    assert_eq!(
+        regions
+            .iter()
+            .filter(|r| r.region_id.starts_with("face_"))
+            .count(),
+        6
+    );
+    assert!(regions
+        .iter()
+        .any(|r| r.name == "Bar" && r.tag.as_deref() == Some("cad_body")));
 }

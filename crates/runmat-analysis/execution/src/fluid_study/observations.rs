@@ -123,7 +123,9 @@ impl FluidStudyCoordinator {
                 recovery: self.recovery_task.as_ref().expect("completed recovery"),
                 fields: self.fields.as_ref().expect("completed fields"),
             };
-            workflow.prepare(source, &context).map(|task| task.is_some())
+            workflow
+                .prepare(source, &context)
+                .map(|task| task.is_some())
         };
         self.observation_state = workflow;
         if prepared? {

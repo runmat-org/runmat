@@ -16,7 +16,9 @@ pub fn linear_profile() -> ThermalWorkload {
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "fixed-right-initial-producer".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_right",
+                )),
                 value: PrescribedValue::Constant(Temperature::new(390.0)),
             },
         }));

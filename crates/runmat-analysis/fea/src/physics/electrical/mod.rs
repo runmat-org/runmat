@@ -145,11 +145,7 @@ pub(crate) fn solve_conduction_with_conductivity(
     sample: crate::excitation::ExcitationSamplePoint<'_>,
     element_conductivity_s_per_m: &[f64],
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
-    let step = validate_canonical_input(
-        model,
-        step_id,
-        residual_target,
-    )?;
+    let step = validate_canonical_input(model, step_id, residual_target)?;
     if terminals::has_floating_terminals(model) {
         return terminals::solve(model, step_id, sample.clone(), |fixed| {
             solve_conduction_with_conductivity(
@@ -275,11 +271,10 @@ pub(crate) fn validate_canonical_input<'a>(
                     true,
                     runmat_analysis_core::ExcitationAction::ElectricCurrent(_)
                         | runmat_analysis_core::ExcitationAction::CurrentDensity(_)
+                ) | (
+                    false,
+                    runmat_analysis_core::ExcitationAction::ElectricChargeDensity(_)
                 )
-                    | (
-                        false,
-                        runmat_analysis_core::ExcitationAction::ElectricChargeDensity(_)
-                    )
             )
         })
     };

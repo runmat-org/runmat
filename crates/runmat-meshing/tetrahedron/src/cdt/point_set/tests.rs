@@ -316,11 +316,14 @@ fn a_point_on_a_flat_hull_cap_replaces_the_cells_whose_circumcircle_holds_it() {
             for (index, byte) in identity.iter_mut().enumerate() {
                 *byte = u8::from_str_radix(&fields[0][2 * index..2 * index + 2], 16).unwrap();
             }
-            let coordinate =
-                |field: &str| f64::from_bits(u64::from_str_radix(field, 16).unwrap());
+            let coordinate = |field: &str| f64::from_bits(u64::from_str_radix(field, 16).unwrap());
             DelaunayVolumeNode::explicit(
                 StableDigest::from_bytes(identity),
-                [coordinate(fields[1]), coordinate(fields[2]), coordinate(fields[3])],
+                [
+                    coordinate(fields[1]),
+                    coordinate(fields[2]),
+                    coordinate(fields[3]),
+                ],
             )
         })
         .collect::<Vec<_>>();

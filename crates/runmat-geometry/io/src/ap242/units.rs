@@ -454,11 +454,13 @@ mod declared_length_unit_tests {
              #5=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));\n\
              #6=DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.",
         );
-        let meters = declared_length_unit(&foot).map(runmat_geometry_core::LengthUnit::meters_per_unit);
+        let meters =
+            declared_length_unit(&foot).map(runmat_geometry_core::LengthUnit::meters_per_unit);
         assert!((meters.unwrap() - 0.3048).abs() < 1.0e-15, "{meters:?}");
         // A named unit without a readable factor falls back to its definition.
         let mil = step("CONVERSION_BASED_UNIT('MIL',#9) LENGTH_UNIT() NAMED_UNIT(*)");
-        let meters = declared_length_unit(&mil).map(runmat_geometry_core::LengthUnit::meters_per_unit);
+        let meters =
+            declared_length_unit(&mil).map(runmat_geometry_core::LengthUnit::meters_per_unit);
         assert!((meters.unwrap() - 2.54e-5).abs() < 1.0e-18, "{meters:?}");
         // An unknown conversion-based unit without a factor is unresolvable.
         let cubit = step("CONVERSION_BASED_UNIT('CUBIT',#9) LENGTH_UNIT() NAMED_UNIT(*)");
@@ -468,7 +470,8 @@ mod declared_length_unit_tests {
             let unit = step(&format!(
                 "LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.{prefix}.,.METRE.)"
             ));
-            let resolved = declared_length_unit(&unit).map(runmat_geometry_core::LengthUnit::meters_per_unit);
+            let resolved =
+                declared_length_unit(&unit).map(runmat_geometry_core::LengthUnit::meters_per_unit);
             assert_eq!(resolved, Some(meters), "{prefix}");
         }
     }

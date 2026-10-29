@@ -54,7 +54,8 @@ use runmat_analysis_core::Pressure;
 
 fn duct(end: Option<f64>, end_time: f64, intervals: usize) -> AnalysisModel {
     let mut model = super::super::tests::model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps = vec![ProcedureStep::new(
         "acoustic",
         PhysicsFamily::Acoustic,
@@ -74,14 +75,18 @@ fn duct(end: Option<f64>, end_time: f64, intervals: usize) -> AnalysisModel {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "drive".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Signal(SignalId("pulse".into())),
             },
         }));
     if let Some(impedance) = end {
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "termination".into(),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
             operator: BoundaryOperator::AcousticImpedance {
                 impedance: SpecificAcousticImpedance::new(impedance),
             },

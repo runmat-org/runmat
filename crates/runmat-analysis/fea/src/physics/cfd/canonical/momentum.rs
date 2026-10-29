@@ -42,7 +42,16 @@ pub(super) fn assemble_with_time(
     time: Option<super::transient::TimeDerivative<'_>>,
 ) -> Result<Momentum, Error> {
     let mut a = Some(linear::assembler(p, "incompressible-newtonian-momentum")?);
-    let (rhs, diagonal) = parts(p, u, Some(pressure_fluctuation), q, mode, time, None, &mut a)?;
+    let (rhs, diagonal) = parts(
+        p,
+        u,
+        Some(pressure_fluctuation),
+        q,
+        mode,
+        time,
+        None,
+        &mut a,
+    )?;
     let matrix = a
         .expect("assembled operator")
         .finish()
@@ -186,8 +195,7 @@ fn parts(
     // part Picard-lagged on the current speed.
     for c in 0..n {
         if let Some((linear, quadratic)) = p.porous[c] {
-            let coefficient =
-                p.topology.cells[c].volume_m3 * (linear + quadratic * norm(u[c]));
+            let coefficient = p.topology.cells[c].volume_m3 * (linear + quadratic * norm(u[c]));
             entry(c, c, coefficient);
             diagonal[c] += coefficient;
         }

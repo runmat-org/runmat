@@ -15,8 +15,10 @@ fn workload() -> ThermalWorkload {
         AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_transient("heat")]);
     // The authored ceiling is part of the encoded model, so resident requirements are
     // measured under a non-binding authored ceiling (present, like the ceilings tests author).
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
-        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -215,7 +217,8 @@ fn assignment_diagnostics_are_admitted_and_checked_before_retention() {
             facts.assignment_diagnostics
         );
         let mut bounded = step.clone();
-        bounded.accuracy.resources.maximum_resident_bytes = Some(preassembly.reservation_bytes().unwrap().0 - 1);
+        bounded.accuracy.resources.maximum_resident_bytes =
+            Some(preassembly.reservation_bytes().unwrap().0 - 1);
         assert!(matches!(
             ThermalPreassemblyResourceFacts::derive(
                 &[],

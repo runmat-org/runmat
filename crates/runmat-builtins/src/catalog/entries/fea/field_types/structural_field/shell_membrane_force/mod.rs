@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const SHELL_MEMBRANE_FORCE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.shellMembraneForce()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const SHELL_MEMBRANE_FORCE_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&SHELL_MEMBRANE_FORCE_SIGNATURES);
+const SHELL_MEMBRANE_FORCE_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.shellMembraneForce()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const SHELL_MEMBRANE_FORCE_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&SHELL_MEMBRANE_FORCE_SIGNATURES);
 const SHELL_MEMBRANE_FORCE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-shell-membrane-force",
     title: "Select shell membrane force",

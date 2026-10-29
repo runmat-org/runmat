@@ -199,7 +199,11 @@ impl<'a> ConjugateHeatProblem<'a> {
             &self.system.dirichlet,
             self.input.policy,
         )?;
-        let (temperature_k, second) = self.system.dofs.split(&values).map_err(ConjugateHeatError::InvalidDetail)?;
+        let (temperature_k, second) = self
+            .system
+            .dofs
+            .split(&values)
+            .map_err(ConjugateHeatError::InvalidDetail)?;
         let evidence = evidence::evaluate(&self.input, &self.system, &values, None)?;
         if !evidence.accepted(self.input.policy.linear_relative_tolerance) {
             return Err(ConjugateHeatError::InvalidDetail(format!(
@@ -225,11 +229,14 @@ impl<'a> ConjugateHeatProblem<'a> {
         if !duration_s.is_finite() || duration_s <= 0.0 {
             return Err(ConjugateHeatError::Invalid("transient interval duration"));
         }
-        let previous = self.system.dofs.join(
-            &departure.temperature_k,
-            &departure.interface_second_side_temperature_k,
-        )
-        .map_err(ConjugateHeatError::InvalidDetail)?;
+        let previous = self
+            .system
+            .dofs
+            .join(
+                &departure.temperature_k,
+                &departure.interface_second_side_temperature_k,
+            )
+            .map_err(ConjugateHeatError::InvalidDetail)?;
         let effective = RealSparseMatrix::scaled_sum(
             &[
                 (1.0, &self.system.full),
@@ -270,7 +277,11 @@ impl<'a> ConjugateHeatProblem<'a> {
             &self.system.dirichlet,
             self.input.policy,
         )?;
-        let (temperature_k, second) = self.system.dofs.split(&values).map_err(ConjugateHeatError::InvalidDetail)?;
+        let (temperature_k, second) = self
+            .system
+            .dofs
+            .split(&values)
+            .map_err(ConjugateHeatError::InvalidDetail)?;
         let evidence = evidence::evaluate(
             &self.input,
             &self.system,
@@ -298,16 +309,22 @@ impl<'a> ConjugateHeatProblem<'a> {
         original: &ConjugateHeatResult,
         duration_s: f64,
     ) -> Result<(), ConjugateHeatError> {
-        let previous = self.system.dofs.join(
-            &departure.temperature_k,
-            &departure.interface_second_side_temperature_k,
-        )
-        .map_err(ConjugateHeatError::InvalidDetail)?;
-        let values = self.system.dofs.join(
-            &original.temperature_k,
-            &original.interface_second_side_temperature_k,
-        )
-        .map_err(ConjugateHeatError::InvalidDetail)?;
+        let previous = self
+            .system
+            .dofs
+            .join(
+                &departure.temperature_k,
+                &departure.interface_second_side_temperature_k,
+            )
+            .map_err(ConjugateHeatError::InvalidDetail)?;
+        let values = self
+            .system
+            .dofs
+            .join(
+                &original.temperature_k,
+                &original.interface_second_side_temperature_k,
+            )
+            .map_err(ConjugateHeatError::InvalidDetail)?;
         let evidence = evidence::evaluate(
             &self.input,
             &self.system,
@@ -336,11 +353,14 @@ impl<'a> ConjugateHeatProblem<'a> {
 
     /// Re-evaluate the original equations and evidence from retained temperatures.
     pub fn recover(&self, original: &ConjugateHeatResult) -> Result<(), ConjugateHeatError> {
-        let values = self.system.dofs.join(
-            &original.temperature_k,
-            &original.interface_second_side_temperature_k,
-        )
-        .map_err(ConjugateHeatError::InvalidDetail)?;
+        let values = self
+            .system
+            .dofs
+            .join(
+                &original.temperature_k,
+                &original.interface_second_side_temperature_k,
+            )
+            .map_err(ConjugateHeatError::InvalidDetail)?;
         if original.linear_iterations > MAXIMUM_REFINEMENT_STEPS {
             return Err(ConjugateHeatError::Invalid(
                 "retained linear iteration count",

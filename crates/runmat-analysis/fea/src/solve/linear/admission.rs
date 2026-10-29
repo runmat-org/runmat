@@ -91,10 +91,14 @@ pub(crate) fn requested_provenance(
     kind: SpdPreconditionerKind,
 ) -> (SolverMethod, SolverPreconditioner) {
     match kind {
-        SpdPreconditionerKind::Auto | SpdPreconditionerKind::Direct => {
-            (SolverMethod::SparseDirectCholesky, SolverPreconditioner::None)
-        }
-        other => (SolverMethod::AssembledPcg, SolverPreconditioner::from_spd(other)),
+        SpdPreconditionerKind::Auto | SpdPreconditionerKind::Direct => (
+            SolverMethod::SparseDirectCholesky,
+            SolverPreconditioner::None,
+        ),
+        other => (
+            SolverMethod::AssembledPcg,
+            SolverPreconditioner::from_spd(other),
+        ),
     }
 }
 

@@ -25,7 +25,7 @@ pub fn region_selector(
                 runmat_geometry_core::PersistentEntityId::validate_analysis_selection_id(value)
                     .map_err(|error| error.to_string())?;
                 Ok(GeometryRegionSelector::PersistentId(value.clone()))
-            },
+            }
             "boundary_introduced_by" => Ok(GeometryRegionSelector::BoundaryIntroducedBy(
                 feature_reference(value)?,
             )),

@@ -1,9 +1,9 @@
 use runmat_analysis_core::AnalysisModel;
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, MagnetostaticWorkload,
-        MaxwellHarmonicWorkload, NonlinearSolidWorkload, StructuralFrequencyWorkload,
-        StructuralLinearWorkload, ThermalWorkload,
+        AnalysisNumericalObjectKind, MagnetostaticWorkload, MaxwellHarmonicWorkload,
+        NonlinearSolidWorkload, StructuralFrequencyWorkload, StructuralLinearWorkload,
+        ThermalWorkload,
     },
     results::observation::ObservationExecutionPolicy,
     ComputeBackend,

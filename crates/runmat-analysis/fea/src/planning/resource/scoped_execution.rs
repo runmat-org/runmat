@@ -400,9 +400,10 @@ mod installed_pool_tests {
         .unwrap()
         .unwrap();
         assert_eq!(chunks, vec![(0, 3), (3, 6), (6, 9)]);
-        let serial =
-            execute_scoped_chunks(LocalExecutionPlan::serial(), 9, |chunk| Ok::<_, ()>(chunk.len()))
-                .unwrap();
+        let serial = execute_scoped_chunks(LocalExecutionPlan::serial(), 9, |chunk| {
+            Ok::<_, ()>(chunk.len())
+        })
+        .unwrap();
         assert_eq!(serial, vec![9]);
     }
 }

@@ -9,7 +9,8 @@ const BEAM_SHEAR_FORCE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSig
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const BEAM_SHEAR_FORCE_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&BEAM_SHEAR_FORCE_SIGNATURES);
+pub const BEAM_SHEAR_FORCE_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&BEAM_SHEAR_FORCE_SIGNATURES);
 const BEAM_SHEAR_FORCE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-beam-shear-force",
     title: "Select beam shear force",

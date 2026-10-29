@@ -263,7 +263,11 @@ fn cancelled_topology_construction_and_surface_selection_stop_at_entry() {
         ))
     ));
     assert_eq!(
-        super::super::explicit_target_node_indices(&structural, &runmat_meshing_core::fixtures::fixture_face("shell_panel")).unwrap_err(),
+        super::super::explicit_target_node_indices(
+            &structural,
+            &runmat_meshing_core::fixtures::fixture_face("shell_panel")
+        )
+        .unwrap_err(),
         TopologyStorageError::Cancelled
     );
     assert!(matches!(

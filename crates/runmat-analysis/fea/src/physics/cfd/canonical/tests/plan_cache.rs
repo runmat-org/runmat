@@ -15,8 +15,14 @@ fn shared_plan_is_derived_once_and_matches_a_fresh_preparation() {
     for p in [&first, &hit] {
         assert_eq!(p.numerical_input_identity, fresh.numerical_input_identity);
         assert_eq!(p.reservation(), fresh.reservation());
-        assert_eq!(identity("plan-cache-test", &p.boundaries).unwrap(), boundaries);
-        assert_eq!(identity("plan-cache-test", &p.solve().unwrap()).unwrap(), solved);
+        assert_eq!(
+            identity("plan-cache-test", &p.boundaries).unwrap(),
+            boundaries
+        );
+        assert_eq!(
+            identity("plan-cache-test", &p.solve().unwrap()).unwrap(),
+            solved
+        );
     }
 
     // A different policy is a different plan, never the cached one.

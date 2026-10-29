@@ -43,7 +43,8 @@ fn duct(
     }
     mesh.seal_canonical_digest().unwrap();
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     // Positive physical incoming flow is negative outward-normal flow.
     let q = if phase {
         [0.4 / 6.0, -1.0 / 6.0]
@@ -298,7 +299,9 @@ fn total_volume_flow_rejects_overlapping_sources_in_both_action_orders() {
         let (mut model, mesh) = duct(2, false, 1.0, false);
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "conflict".into(),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_left",
+            )),
             operator,
         });
         let result = solve_canonical_harmonic(
@@ -325,7 +328,9 @@ fn total_volume_flow_rejects_prescribed_pressure_on_its_patch() {
             .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                 constraint_id: "prescribed_source_patch".into(),
                 kind: AcousticConstraintKind::PrescribedPressure {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "slab_left",
+                    )),
                     value: PrescribedValue::Constant(Pressure::new(0.0)),
                 },
             }));
@@ -357,11 +362,17 @@ fn total_volume_flow_rejects_periodic_and_bloch_primary_or_secondary_patches() {
                 let ExcitationAction::VolumeVelocity(action) = &mut model.excitations[0] else {
                     unreachable!()
                 };
-                action.target = ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(source_side))));
+                action.target = ExcitationTarget::Region(RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(source_side)),
+                ));
                 let periodic = PeriodicConstraint {
                     pair: PairedConstraint {
-                        primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
-                        secondary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                        primary: RegionTarget::boundary(
+                            runmat_meshing_core::fixtures::fixture_face("slab_left"),
+                        ),
+                        secondary: RegionTarget::boundary(
+                            runmat_meshing_core::fixtures::fixture_face("slab_right"),
+                        ),
                         pairing: PairingPolicy::Matching,
                     },
                     transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),

@@ -211,7 +211,11 @@ fn solve_affine_constraint_system_with_kind(
     let elastic = prepared
         .admissibility()
         .is_some_and(|evidence| evidence.coercivity().proved_by_elastic_rigidity());
-    let block_size = if elastic && keeps_whole_nodes(reduction) { 3 } else { 1 };
+    let block_size = if elastic && keeps_whole_nodes(reduction) {
+        3
+    } else {
+        1
+    };
     let strategy = shared_sparse::resolve_spd_strategy(
         kind,
         prepared.dof_count(),
@@ -244,7 +248,10 @@ fn solve_affine_constraint_system_with_kind(
             message: format!(
                 "affine reduced {} did not reach tolerance {tolerance}: {}",
                 strategy.label(),
-                outcome.failure.as_deref().unwrap_or("residual above tolerance"),
+                outcome
+                    .failure
+                    .as_deref()
+                    .unwrap_or("residual above tolerance"),
             ),
         });
     }

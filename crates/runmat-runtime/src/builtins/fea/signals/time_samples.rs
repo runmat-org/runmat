@@ -59,10 +59,10 @@ macro_rules! scalar_time_signal {
         $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
         #[runtime_builtin(
-                            name = $builtin,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::signals::time_samples"
-                        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::signals::time_samples"
+                                )]
         pub async fn $function(
             id: String,
             times: Value,
@@ -103,10 +103,10 @@ macro_rules! vector_time_signal {
         $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
         #[runtime_builtin(
-                            name = $builtin,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::signals::time_samples"
-                        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::signals::time_samples"
+                                )]
         pub async fn $function(
             id: String,
             times: Value,

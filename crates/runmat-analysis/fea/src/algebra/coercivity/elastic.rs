@@ -29,7 +29,8 @@ impl CoercivityCertificate {
             proof: CoercivityProof::ElasticRigidity {
                 elements: proof.elements(),
                 components: proof.components(),
-                element_margin_rounding_factor_bits: ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR.to_bits(),
+                element_margin_rounding_factor_bits: ELASTIC_ELEMENT_MARGIN_ROUNDING_FACTOR
+                    .to_bits(),
                 anchor_rank_ratio_bits: ANCHOR_MINIMUM_RANK_RATIO.to_bits(),
                 scalar_operations: proof.scalar_operations(),
                 resident_bytes: proof.resident_bytes(),

@@ -1097,13 +1097,19 @@ fn circle_mesh(topology: &runmat_geometry_core::ExactBRepTopology) -> SharedCurv
                 node_uv: vec![[0.0, 0.0], [PI, 0.0], [TAU, 0.0]],
             }],
             requested: CurveResolutionPolicy {
-                maximum_chordal_deviation_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.1),
+                maximum_chordal_deviation_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.1),
                 maximum_tangent_change_rad: PI,
                 minimum_metric_edge_length: 0.5,
                 maximum_metric_edge_length: 4.0,
             },
             achieved: CurveResolutionEvidence {
-                maximum_chordal_deviation_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.05),
+                maximum_chordal_deviation_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.05),
                 maximum_tangent_change_rad: PI,
                 minimum_metric_edge_length: 2.0,
                 maximum_metric_edge_length: 2.0,

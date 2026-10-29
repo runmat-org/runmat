@@ -64,10 +64,14 @@ impl<'a> NativeMaxwellValues<'a> {
         match self {
             Self::Loss(samples) => return Box::new(samples.iter().map(sample_loss)),
             Self::ElementElectric(samples) => {
-                return Box::new(element_average(samples, |s| s.electric_field_v_per_m.canonical_value()))
+                return Box::new(element_average(samples, |s| {
+                    s.electric_field_v_per_m.canonical_value()
+                }))
             }
             Self::ElementFlux(samples) => {
-                return Box::new(element_average(samples, |s| s.flux_density_t.canonical_value()))
+                return Box::new(element_average(samples, |s| {
+                    s.flux_density_t.canonical_value()
+                }))
             }
             Self::ElementCurrent(samples) => {
                 return Box::new(element_average(samples, |s| {
@@ -112,8 +116,12 @@ impl<'a> NativeMaxwellValues<'a> {
                         Self::Electric(v) => v[i].electric_field_v_per_m.canonical_value(),
                         Self::Flux(v) => v[i].flux_density_t.canonical_value(),
                         Self::Intensity(v) => v[i].magnetic_field_a_per_m.canonical_value(),
-                        Self::Displacement(v) => v[i].electric_displacement_c_per_m2.canonical_value(),
-                        Self::Current(v) => v[i].conduction_current_density_a_per_m2.canonical_value(),
+                        Self::Displacement(v) => {
+                            v[i].electric_displacement_c_per_m2.canonical_value()
+                        }
+                        Self::Current(v) => {
+                            v[i].conduction_current_density_a_per_m2.canonical_value()
+                        }
                         _ => unreachable!("handled above"),
                     };
                     values.into_iter().take(components)

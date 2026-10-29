@@ -101,8 +101,9 @@ pub fn profile_direct_materialization<T: Serialize + ?Sized>(
     };
     counter.encoded(ENVELOPE_BYTES)?;
     value.serialize(Profiler::value(&mut counter, 0))?;
-    let overflow =
-        || CanonicalCodecError::resource_limit("direct materialization profile", "byte count overflow");
+    let overflow = || {
+        CanonicalCodecError::resource_limit("direct materialization profile", "byte count overflow")
+    };
     let typed = crate::materialization::typed_resident_bytes_estimate(counter.profile)?;
     let encoding = counter
         .encoded_bytes

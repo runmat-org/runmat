@@ -30,7 +30,9 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                     vec!["root".into()],
                 ));
                 face.provenance.sort();
-                let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(name.clone())));
+                let target = RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(name.clone())),
+                );
                 if mixed_anchors && component > 0 {
                     model.boundaries.push(AnalysisBoundary {
                         boundary_id: name,

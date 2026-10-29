@@ -98,8 +98,8 @@ pub fn build_magnetostatic_resource_plan(
         w.relative_residual_target,
     )
     .map_err(invalid)?;
-    let system = MagneticSystemPlan::derive(&input.projection, &input.grounded_faces)
-        .map_err(invalid)?;
+    let system =
+        MagneticSystemPlan::derive(&input.projection, &input.grounded_faces).map_err(invalid)?;
     drop(input);
     let krylov = estimate::magnetic_static::krylov_envelope(
         system.saddle_pattern().rows(),

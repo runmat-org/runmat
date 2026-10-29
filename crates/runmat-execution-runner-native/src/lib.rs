@@ -5,8 +5,8 @@ mod test_support;
 
 mod accelerator_placement;
 mod machine_capacity;
-pub use machine_capacity::publication_staging_bytes;
 pub use accelerator_placement::active_provider_resource;
+pub use machine_capacity::publication_staging_bytes;
 mod analysis_acoustic;
 mod analysis_acoustic_response;
 mod analysis_electrical;
@@ -219,7 +219,8 @@ pub use exact_structural_sweep_root::{
     ExactStructuralSweepResultExpectation, ExactStructuralSweepRootPreparation,
     ExactStructuralSweepTerminal, PreparedExactStructuralSweepRoot, PreparedStructuralSweepRoot,
     StructuralSweepResultExpectation, StructuralSweepRootPreparation, StudySweepEntry,
-    StudySweepTerminal, EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,
+    StudySweepTerminal, EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE,
+    EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,
 };
 pub use geometry_materialization::{
     execute_geometry_materialization_program_request, native_geometry_provider_profile,
@@ -237,11 +238,11 @@ pub use local_structural_study::{
     execute_prepared_study_locally_with_observers, LocalStructuralStudyObservers,
     LocalStudyCompletion,
 };
-pub use meshing_platform::native_meshing_capability_cohort;
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
 };
+pub use meshing_platform::native_meshing_capability_cohort;
 pub use process_provider::NATIVE_OBJECT_STORE_ROOT_ENV;
 pub use program_object_source::NativeProgramObjectSource;
 pub use program_session::{
@@ -286,12 +287,13 @@ pub use typed_fea::{
     MaterializedFeaGeometry, PreparedFeaStudy,
 };
 pub use typed_fea::{
-    execute_checked_fea_locally, execute_checked_fea_locally_with_timing, execute_prepared_fea_study_locally, imported_family_result,
-    prepare_study_publication, CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
-    CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
-    CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,
-    CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,
+    execute_checked_fea_locally, execute_checked_fea_locally_with_timing,
+    execute_prepared_fea_study_locally, imported_family_result, prepare_study_publication,
+    CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy,
+    CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy,
+    CompletedAuthoredMaxwellStudy, CompletedAuthoredNonlinearSolidStudy,
+    CompletedAuthoredThermalStudy, CompletedFeaStudyResult, CompletedLocalFeaCase,
+    LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver, LocalFeaProgressObserver,
     LocalSweepCase,
-    LocalFeaProgressObserver,
 };
 pub use worker::run_worker_stdio;

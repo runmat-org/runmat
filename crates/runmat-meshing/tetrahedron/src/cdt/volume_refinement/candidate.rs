@@ -135,7 +135,9 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
     // A size defect that the circumcenter cannot reach (thin sections put it
     // outside the region) is an over-long edge. Interior lattice points of the
     // source keep that edge, so split it near its midpoint before them.
-    if let Some(midpoint) = metric_edge_midpoint(topology, tetrahedron_index, quality, quality_options) {
+    if let Some(midpoint) =
+        metric_edge_midpoint(topology, tetrahedron_index, quality, quality_options)
+    {
         if strictly_inside_region_from(
             topology,
             tetrahedron_index,
@@ -225,10 +227,14 @@ pub(in crate::cdt::volume_refinement) fn metric_edge_midpoint(
     quality: &DelaunayTetrahedronQuality,
     quality_options: crate::cdt::DelaunayVolumeQualityOptions,
 ) -> Option<[f64; 3]> {
-    let vertices = topology.tetrahedron(tetrahedron_index as u32)?.vertex_indices;
+    let vertices = topology
+        .tetrahedron(tetrahedron_index as u32)?
+        .vertex_indices;
     let corners = vertices.map(|vertex| {
         (
-            topology.nodes()[vertex as usize].coordinates_m.canonical_value(),
+            topology.nodes()[vertex as usize]
+                .coordinates_m
+                .canonical_value(),
             topology.vertex_is_boundary(vertex),
         )
     });
@@ -251,7 +257,8 @@ pub(in crate::cdt::volume_refinement) fn metric_edge_midpoint(
                 metric.xy * delta[0] + metric.yy * delta[1] + metric.yz * delta[2],
                 metric.xz * delta[0] + metric.yz * delta[1] + metric.zz * delta[2],
             ];
-            let length = (delta[0] * product[0] + delta[1] * product[1] + delta[2] * product[2]).sqrt();
+            let length =
+                (delta[0] * product[0] + delta[1] * product[1] + delta[2] * product[2]).sqrt();
             if !length.is_finite() || length <= quality_options.maximum_metric_edge_length {
                 continue;
             }
@@ -260,8 +267,10 @@ pub(in crate::cdt::volume_refinement) fn metric_edge_midpoint(
                 Some((best_length, best_low, best_high)) => {
                     length > best_length
                         || length == best_length
-                            && (compare_points(&low, &best_low), compare_points(&high, &best_high))
-                                < (std::cmp::Ordering::Equal, std::cmp::Ordering::Equal)
+                            && (
+                                compare_points(&low, &best_low),
+                                compare_points(&high, &best_high),
+                            ) < (std::cmp::Ordering::Equal, std::cmp::Ordering::Equal)
                 }
             };
             if better {

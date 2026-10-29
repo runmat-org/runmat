@@ -196,9 +196,10 @@ fn structural_root_sequence(sequence: &AnalysisSequence) -> bool {
         .iter()
         .filter(|step| step.family == PhysicsFamily::Thermal)
         .count();
-    let thermomechanical = sequence.steps.iter().any(|step| {
-        step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
-    });
+    let thermomechanical = sequence
+        .steps
+        .iter()
+        .any(|step| step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical));
     sequence
         .steps
         .iter()
@@ -316,12 +317,7 @@ mod tests {
             })
         )
         .is_err());
-        for frequencies in [
-            vec![],
-            vec![2000.0, 3000.0],
-            vec![f64::NAN],
-            vec![0.0],
-        ] {
+        for frequencies in [vec![], vec![2000.0, 3000.0], vec![f64::NAN], vec![0.0]] {
             let mut changed = step.clone();
             changed.independent_domain =
                 runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies);

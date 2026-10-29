@@ -66,7 +66,9 @@ impl RunMatSession {
                     directories.push(path.to_path_buf());
                     continue;
                 }
-                if !runmat_geometry_core::is_geometry_selection_metadata_path(&relative.to_string_lossy()) && !matches!(
+                if !runmat_geometry_core::is_geometry_selection_metadata_path(
+                    &relative.to_string_lossy(),
+                ) && !matches!(
                     path.extension().and_then(|value| value.to_str()),
                     Some("fea" | "m")
                 ) && self
@@ -102,13 +104,17 @@ impl RunMatSession {
         for overlay in request.overlays {
             runmat_runtime::analysis::physical_source_path(&root, &overlay.path)
                 .map_err(|error| error.to_string())?;
-            if !runmat_geometry_core::is_geometry_selection_metadata_path(overlay.path.as_str()) && !matches!(
-                std::path::Path::new(overlay.path.as_str())
-                    .extension()
-                    .and_then(|value| value.to_str()),
-                Some("fea" | "m")
-            ) {
-                return Err("working editor overlays must be FEA, MATLAB, or CAD selection metadata".into());
+            if !runmat_geometry_core::is_geometry_selection_metadata_path(overlay.path.as_str())
+                && !matches!(
+                    std::path::Path::new(overlay.path.as_str())
+                        .extension()
+                        .and_then(|value| value.to_str()),
+                    Some("fea" | "m")
+                )
+            {
+                return Err(
+                    "working editor overlays must be FEA, MATLAB, or CAD selection metadata".into(),
+                );
             }
             if !seen.insert(overlay.path.clone()) {
                 return Err("duplicate working editor overlay".into());

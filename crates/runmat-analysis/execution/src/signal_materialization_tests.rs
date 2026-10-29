@@ -391,7 +391,11 @@ fn generated_nodal_vectors_preserve_each_node_component_and_sample() {
             SignalPrecision::Real64,
         );
         let mut admitted = admitted();
-        admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(GeneratorDomain::TimeSeconds.axis_descriptor(None).unwrap(), vec![0.0, 1.0]).unwrap();
+        admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(
+            GeneratorDomain::TimeSeconds.axis_descriptor(None).unwrap(),
+            vec![0.0, 1.0],
+        )
+        .unwrap();
         let chunks = plan_signal_generator_chunks(
             &authored,
             &admitted,
@@ -458,7 +462,11 @@ fn matrix_output_is_reordered_from_column_major_to_sample_major() {
     };
     value.frame = Some(runmat_analysis_core::CoordinateFrame::Global);
     let mut admitted = admitted();
-    admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(GeneratorDomain::TimeSeconds.axis_descriptor(None).unwrap(), vec![0.0, 1.0]).unwrap();
+    admitted.sample_points = runmat_types::physical::Quantity::try_from_descriptor(
+        GeneratorDomain::TimeSeconds.axis_descriptor(None).unwrap(),
+        vec![0.0, 1.0],
+    )
+    .unwrap();
     let chunks = plan_signal_generator_chunks(
         &signal,
         &admitted,

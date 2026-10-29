@@ -52,7 +52,7 @@ impl TestHost {
         self.with_geometry_inspection(
             path,
             GeometryInspection {
-            named_selections: None,
+                named_selections: None,
                 preview_extent_m: None,
                 content_digest: SourceDigest([digest; 32]),
                 topology_digest: SourceDigest([digest.wrapping_add(1); 32]),

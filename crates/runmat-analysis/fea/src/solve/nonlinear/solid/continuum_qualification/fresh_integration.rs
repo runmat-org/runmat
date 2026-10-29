@@ -28,11 +28,10 @@ fn fresh_tet10_integration_trajectories_meet_original_eight_step_exactness() {
         {
             failures.push((rule, e));
         }
-        let stepped = [1, 2, 4]
-            .map(|cells| {
-                let run = execution::run_with_rule(cells, true, 8, rule);
-                (run.errors.displacement, run.plastic_off_axis)
-            });
+        let stepped = [1, 2, 4].map(|cells| {
+            let run = execution::run_with_rule(cells, true, 8, rule);
+            (run.errors.displacement, run.plastic_off_axis)
+        });
         assert_stepped_path_error_converges(&stepped, &format!("fresh {rule:?}"));
     }
     assert!(

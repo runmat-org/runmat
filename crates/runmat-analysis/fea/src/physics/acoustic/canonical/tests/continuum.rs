@@ -14,7 +14,8 @@ fn solve_duct(
         slab_mesh(cells)
     };
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![frequency]);
     velocity_source(&mut model, -1.0 / 6.0, -0.4 / 6.0);
     // The shared source is constant over this extended frequency schedule.

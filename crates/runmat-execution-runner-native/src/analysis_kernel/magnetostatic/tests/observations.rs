@@ -156,9 +156,10 @@ fn magnetic_authored_native_observations_are_admitted_before_solve() {
         wrong_location.source_location = FieldLocation::Edge;
         wrong_location.output_location = FieldLocation::Edge;
         let mut unknown_selector = native.clone();
-        unknown_selector.target = ObservationTarget::Spatial(ExcitationTarget::Region(
-            RegionTarget::volume(runmat_meshing_core::fixtures::fixture_region("missing-magnetic-volume")),
-        ));
+        unknown_selector.target =
+            ObservationTarget::Spatial(ExcitationTarget::Region(RegionTarget::volume(
+                runmat_meshing_core::fixtures::fixture_region("missing-magnetic-volume"),
+            )));
         let mut understated_cost = native;
         understated_cost.cost = ObservationCostPolicy::UpperBound(ObservationCostEstimate {
             operation_count: 1,
@@ -417,7 +418,9 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
         // Expected values are the retained native fields themselves, by field identity: the
         // integration-point samples and their element averages alike.
         let native = retained
-            .recover_native_fields_from_result(&retained.native_field_request_from_result().unwrap())
+            .recover_native_fields_from_result(
+                &retained.native_field_request_from_result().unwrap(),
+            )
             .unwrap();
         for entry in &fields.manifest.fields {
             let expected = native
@@ -486,7 +489,8 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                     program_revision: task.program.request.recipe.program_revision.clone(),
                     chunk_bytes: 1024,
                     inventory_limits: limits,
-                    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+                    local_execution:
+                        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 }
             };
         assert!(prepare_observation_fanout(
@@ -663,7 +667,8 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                         .iter()
                         .map(|s| s
                             .magnetic_field_a_per_m
-                            .canonical_values().iter()
+                            .canonical_values()
+                            .iter()
                             .map(|v| v * v)
                             .sum::<f64>()
                             .sqrt())
@@ -674,7 +679,8 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                         retained
                             .response()
                             .edge_circulations_wb
-                            .canonical_values().iter()
+                            .canonical_values()
+                            .iter()
                             .copied()
                             .reduce(f64::min)
                             .unwrap()
@@ -682,7 +688,8 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                         retained
                             .response()
                             .edge_circulations_wb
-                            .canonical_values().iter()
+                            .canonical_values()
+                            .iter()
                             .copied()
                             .reduce(f64::max)
                             .unwrap()

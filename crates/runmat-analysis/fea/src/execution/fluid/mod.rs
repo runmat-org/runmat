@@ -9,9 +9,7 @@ pub use receipt::{
 };
 mod profile;
 mod result;
-pub use fields::{
-    fluid_native_field_definition_inventory, fluid_native_field_definitions,
-};
+pub use fields::{fluid_native_field_definition_inventory, fluid_native_field_definitions};
 mod checkpoint;
 mod source;
 pub use checkpoint::{

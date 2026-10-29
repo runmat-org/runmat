@@ -23,8 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CompletedFamilyStudy, CompletedFeaStudyResult, DecodedStructuralStudyRoot,
-    NativeExecutionError, NativeExecutionResult, StructuralStudyResultExpectation,
-    StudyFamilyKind,
+    NativeExecutionError, NativeExecutionResult, StructuralStudyResultExpectation, StudyFamilyKind,
 };
 
 const PREFIX: &[u8] = b"runmat-family-study-publication/v1\0";
@@ -116,8 +115,12 @@ pub(crate) fn package_family_study_result(
             .into_iter()
             .flatten(),
     )?;
-    let meshing_request_digest =
-        Digest::from_bytes(*meshing_request.canonical_digest().map_err(protocol)?.bytes());
+    let meshing_request_digest = Digest::from_bytes(
+        *meshing_request
+            .canonical_digest()
+            .map_err(protocol)?
+            .bytes(),
+    );
     let publication = FamilyStudyPublication {
         schema_version: 1,
         family: completed.kind(),
@@ -139,7 +142,11 @@ pub(crate) fn package_family_study_result(
     )
     .map_err(protocol)?;
     let publication_root = access
-        .reference(&publication_object, ValueRefKind::ResultObject, VALUE_SCHEMA)
+        .reference(
+            &publication_object,
+            ValueRefKind::ResultObject,
+            VALUE_SCHEMA,
+        )
         .map_err(protocol)?;
     let inventory = unique(
         meshing
@@ -207,7 +214,9 @@ pub fn import_family_study_result(
         result_objects,
     } = &response
     else {
-        return Err(protocol("family study execution did not return a result closure"));
+        return Err(protocol(
+            "family study execution did not return a result closure",
+        ));
     };
     let [ValuePayload::Object(root)] = outputs.as_slice() else {
         return Err(protocol("family study result root is invalid"));
@@ -308,8 +317,7 @@ pub fn import_family_study_result(
     let admitted = if expected.input_materializations.is_empty() {
         compiled == &recompiled
     } else {
-        compiled.study_id == recompiled.study_id
-            && compiled.properties == recompiled.properties
+        compiled.study_id == recompiled.study_id && compiled.properties == recompiled.properties
     };
     if !admitted {
         return Err(protocol(
@@ -319,9 +327,7 @@ pub fn import_family_study_result(
     Ok(result)
 }
 
-fn unique(
-    references: impl IntoIterator<Item = ValueRef>,
-) -> NativeExecutionResult<Vec<ValueRef>> {
+fn unique(references: impl IntoIterator<Item = ValueRef>) -> NativeExecutionResult<Vec<ValueRef>> {
     let mut by_digest = BTreeMap::new();
     for reference in references {
         if let Some(existing) = by_digest.insert(reference.logical_digest, reference.clone()) {
@@ -343,7 +349,9 @@ fn read(source: &impl CacheImport, reference: &ValueRef) -> NativeExecutionResul
     if reference.logical_digest != Digest::sha256(&bytes)
         || reference.encoded_length != bytes.len() as u64
     {
-        return Err(protocol("family study publication differs from its reference"));
+        return Err(protocol(
+            "family study publication differs from its reference",
+        ));
     }
     Ok(bytes)
 }

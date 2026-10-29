@@ -36,7 +36,8 @@ fn streamed_publication_digest_matches_original_framing() {
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request, ceilings,
+        &request,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -77,7 +78,8 @@ fn publication_hash_preserves_one_shot_typed_cancellation() {
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request, ceilings,
+        &request,
+        ceilings,
         &pulse,
         &mut progress,
     )

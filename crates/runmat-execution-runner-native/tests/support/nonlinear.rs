@@ -22,7 +22,8 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
     model.signals.clear();
     model.excitations.clear();
     model.excitation_cases.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].elasticity = Some(MaterialElasticityModel::IsotropicLinear(
         MaterialMechanicalModel {
             youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(1000.0),
@@ -59,7 +60,9 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
         .excitations
         .push(ExcitationAction::Traction(AnalysisExcitation {
             excitation_id: ExcitationId("pull".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
+            target: ExcitationTarget::Region(RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("slab_right"),
+            )),
             frame: CoordinateFrame::Global,
             direction: None,
             distribution: ExcitationDistribution::IntensityPerArea,

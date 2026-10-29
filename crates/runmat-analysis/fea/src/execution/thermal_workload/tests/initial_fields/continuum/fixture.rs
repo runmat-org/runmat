@@ -17,7 +17,8 @@ pub(super) fn base() -> ThermalWorkload {
     input.model.excitations.clear();
     input.model.excitation_cases.clear();
     input.model.initial_conditions.clear();
-    input.model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    input.model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     input.model.materials[0].mass_density_kg_per_m3 =
         (Some(1.0)).map(runmat_types::physical::MassDensity::new);
     let thermal = input.model.materials[0].thermal.as_mut().unwrap();
@@ -35,7 +36,9 @@ pub(super) fn ends(input: &mut ThermalWorkload) {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: face.into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+                    ),
                     value: PrescribedValue::Constant(Temperature::new(REFERENCE)),
                 },
             }));
@@ -48,7 +51,9 @@ pub(super) fn insulate_all(input: &mut ThermalWorkload) {
     for face in ["slab_left", "slab_right", "slab_insulated"] {
         input.model.boundaries.push(AnalysisBoundary {
             boundary_id: format!("zero-flux-{face}"),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+            target: RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+            ),
             operator: BoundaryOperator::ThermalHeatFlux {
                 value: PrescribedValue::Constant(HeatFlux::new(0.0)),
             },

@@ -10,8 +10,8 @@ use crate::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
     study::{
-        plan_acoustic_response_study, CompiledAnalysisStudy, AcousticResponseStudyPlanningPolicy,
-        AcousticResponseStudyProduct,
+        plan_acoustic_response_study, AcousticResponseStudyPlanningPolicy,
+        AcousticResponseStudyProduct, CompiledAnalysisStudy,
     },
 };
 use runmat_execution::{Digest, ProgramRevision};
@@ -19,9 +19,9 @@ use runmat_execution_artifact::{cache::CacheImport, ArtifactAccess, ProgramExecu
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    import_acoustic_response_result, prepare_acoustic_response_task, AnalysisBridgeError,
-    AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisOutputPolicy, AcousticResponseTaskPreparation, ImportedAccuracy,
+    import_acoustic_response_result, prepare_acoustic_response_task,
+    AcousticResponseTaskPreparation, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisOutputPolicy, ImportedAccuracy,
     ImportedAcousticResponseResult, ImportedPublishedResult, ImportedSemanticState,
     PreparedAccuracy, PreparedAcousticResponseTask, PreparedResourceUsage,
     PreparedResultPublication, PreparedSemanticStatePublication,
@@ -30,10 +30,12 @@ use crate::{
 mod completion;
 mod root;
 pub use completion::{
-    import_acoustic_response_study_completion, AcousticResponseStudyResultClosure, AcousticResponseStudyResultPhase,
+    import_acoustic_response_study_completion, AcousticResponseStudyResultClosure,
+    AcousticResponseStudyResultPhase,
 };
 pub use root::{
-    import_acoustic_response_study_root, prepare_acoustic_response_study_root, PreparedAcousticResponseStudyRoot,
+    import_acoustic_response_study_root, prepare_acoustic_response_study_root,
+    PreparedAcousticResponseStudyRoot,
 };
 
 /// Owned terminal artifacts for the exact standalone authored static envelope.
@@ -94,8 +96,9 @@ impl AcousticResponseStudyCoordinator {
             .compiled
             .validate_against(&preparation.mesh)
             .map_err(|error| invalid(error.to_string()))?;
-        let expected = plan_acoustic_response_study(&preparation.product.compiled, preparation.policy)
-            .map_err(|error| invalid(error.to_string()))?;
+        let expected =
+            plan_acoustic_response_study(&preparation.product.compiled, preparation.policy)
+                .map_err(|error| invalid(error.to_string()))?;
         if expected != preparation.product.workload {
             return Err(AnalysisBridgeError::Identity(
                 "acoustic response workload differs from the compiled authored study",
@@ -214,7 +217,8 @@ impl AcousticResponseStudyCoordinator {
             .accuracy_task
             .as_ref()
             .ok_or_else(|| invalid("acoustic response phase has not been prepared"))?;
-        let closure = AcousticResponseStudyResultClosure::new(phase, &task.host, &response, &accounting);
+        let closure =
+            AcousticResponseStudyResultClosure::new(phase, &task.host, &response, &accounting);
         tail.complete_accuracy(source, response, accounting)?;
         self.closures.push(closure);
         Ok(())
@@ -244,7 +248,8 @@ impl AcousticResponseStudyCoordinator {
             .state_task
             .as_ref()
             .ok_or_else(|| invalid("acoustic response phase has not been prepared"))?;
-        let closure = AcousticResponseStudyResultClosure::new(phase, &task.host, &response, &accounting);
+        let closure =
+            AcousticResponseStudyResultClosure::new(phase, &task.host, &response, &accounting);
         tail.complete_next_state(source, response, accounting)?;
         self.closures.push(closure);
         Ok(())
@@ -270,7 +275,8 @@ impl AcousticResponseStudyCoordinator {
             .publication_task
             .as_ref()
             .ok_or_else(|| invalid("acoustic response phase has not been prepared"))?;
-        let closure = AcousticResponseStudyResultClosure::new(phase, &task.host, &response, &accounting);
+        let closure =
+            AcousticResponseStudyResultClosure::new(phase, &task.host, &response, &accounting);
         tail.complete_publication(source, response, accounting)?;
         self.closures.push(closure);
         Ok(())
@@ -295,8 +301,12 @@ impl AcousticResponseStudyCoordinator {
                     AcousticResponseStudyPhase::AwaitingState { ordinal }
                 }
                 SteadyStudyPhase::ReadyForBaseline => AcousticResponseStudyPhase::ReadyForBaseline,
-                SteadyStudyPhase::ReadyForPublication => AcousticResponseStudyPhase::ReadyForPublication,
-                SteadyStudyPhase::AwaitingPublication => AcousticResponseStudyPhase::AwaitingPublication,
+                SteadyStudyPhase::ReadyForPublication => {
+                    AcousticResponseStudyPhase::ReadyForPublication
+                }
+                SteadyStudyPhase::AwaitingPublication => {
+                    AcousticResponseStudyPhase::AwaitingPublication
+                }
                 SteadyStudyPhase::Complete => AcousticResponseStudyPhase::Complete,
             })
     }

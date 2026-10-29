@@ -1,7 +1,7 @@
 //! Detached profiles authenticate the retained acoustic response result, without rerunning physics.
 use crate::{AnalysisBridgeError, AnalysisBridgeResult, PreparedAnalysisObjects};
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AcousticResponseSolverResult, AcousticResponseWorkload,
+    AcousticResponseSolverResult, AcousticResponseWorkload, AnalysisNumericalObjectKind,
     StatePublicationProfiles,
 };
 

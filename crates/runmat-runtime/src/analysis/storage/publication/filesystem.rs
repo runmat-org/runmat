@@ -88,8 +88,7 @@ pub(in crate::analysis::storage) fn commit(
             .keys()
             .copied()
             .chain(prepared.spilled.digests()),
-    )?
-        == reclamation::SweepOutcome::DeferredLegacyInventory
+    )? == reclamation::SweepOutcome::DeferredLegacyInventory
     {
         log::debug!("analysis object reclamation deferred: unsupported legacy inventory");
     }

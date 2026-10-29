@@ -40,7 +40,9 @@ impl RowPartition {
         let valid = starts.len() >= 2
             && starts[0] == 0
             && starts.windows(2).all(|w| w[0] <= w[1])
-            && starts[1..starts.len() - 1].iter().all(|s| s % REDUCTION_BLOCK == 0);
+            && starts[1..starts.len() - 1]
+                .iter()
+                .all(|s| s % REDUCTION_BLOCK == 0);
         if !valid {
             return Err(SolverError::Dimension(
                 "row partition must be nondecreasing with block-aligned rank boundaries".into(),
@@ -101,8 +103,13 @@ impl<'c, T: Scalar> DistributedCsr<'c, T> {
         let rank = comm.rank();
         let owned_range = partition.rows(rank);
         let owned = owned_range.len();
-        if rows.nrows() != owned || rows.ncols() != partition.global_rows() || partition.ranks() != comm.size() {
-            return Err(SolverError::Dimension("distributed rows do not match the partition".into()));
+        if rows.nrows() != owned
+            || rows.ncols() != partition.global_rows()
+            || partition.ranks() != comm.size()
+        {
+            return Err(SolverError::Dimension(
+                "distributed rows do not match the partition".into(),
+            ));
         }
         // Ghost columns needed from each owner rank (sorted, unique).
         let mut needed: Vec<Vec<usize>> = vec![Vec::new(); comm.size()];
@@ -133,7 +140,11 @@ impl<'c, T: Scalar> DistributedCsr<'c, T> {
         let asked = comm.exchange(requests)?;
         let sends = asked
             .iter()
-            .map(|list| list.iter().map(|&g| g as usize - owned_range.start).collect())
+            .map(|list| {
+                list.iter()
+                    .map(|&g| g as usize - owned_range.start)
+                    .collect()
+            })
             .collect();
         let receives = needed.iter().map(Vec::len).collect();
         let col_idx = rows
@@ -195,7 +206,11 @@ impl<T: Scalar> LinearOperator<T> for DistributedCsr<'_, T> {
             if values.len() != count * width {
                 return Err(SolverError::Operator("halo exchange length".into()));
             }
-            extended.extend(values.chunks(width).map(|v| T::from_parts(v[0], if width == 2 { v[1] } else { 0.0 })));
+            extended.extend(
+                values
+                    .chunks(width)
+                    .map(|v| T::from_parts(v[0], if width == 2 { v[1] } else { 0.0 })),
+            );
         }
         // The single-rank row kernel: each row summed sequentially in its stored entry order
         // (rows of one rank may be split over the admitted pool; rows are independent).
@@ -236,7 +251,12 @@ impl LoopbackCommunicator {
             gather: std::sync::Mutex::new(vec![Vec::new(); size]),
             mailboxes: std::sync::Mutex::new(vec![vec![Vec::new(); size]; size]),
         });
-        (0..size).map(|rank| Self { rank, shared: shared.clone() }).collect()
+        (0..size)
+            .map(|rank| Self {
+                rank,
+                shared: shared.clone(),
+            })
+            .collect()
     }
 }
 
@@ -275,7 +295,9 @@ impl Communicator for LoopbackCommunicator {
 mod tests {
     use super::*;
     use crate::control::SolveControl;
-    use crate::krylov::{gmres, gmres_distributed, pcg, pcg_distributed, GmresOptions, GmresWorkspace, KrylovOptions};
+    use crate::krylov::{
+        gmres, gmres_distributed, pcg, pcg_distributed, GmresOptions, GmresWorkspace, KrylovOptions,
+    };
     use crate::operator::Preconditioner;
     use crate::testutil::poisson3d;
     use crate::{par, CsrMatrix};
@@ -291,15 +313,30 @@ mod tests {
     }
 
     /// Owned rows `range` of `a` with global column indices.
-    fn rows(a: &CsrMatrix<f64>, range: std::ops::Range<usize>) -> (Vec<usize>, Vec<usize>, Vec<f64>) {
+    fn rows(
+        a: &CsrMatrix<f64>,
+        range: std::ops::Range<usize>,
+    ) -> (Vec<usize>, Vec<usize>, Vec<f64>) {
         let a = a.as_ref();
         let (start, end) = (a.row_ptr()[range.start], a.row_ptr()[range.end]);
-        let row_ptr = a.row_ptr()[range.start..=range.end].iter().map(|p| p - start).collect();
-        (row_ptr, a.col_idx()[start..end].to_vec(), a.values()[start..end].to_vec())
+        let row_ptr = a.row_ptr()[range.start..=range.end]
+            .iter()
+            .map(|p| p - start)
+            .collect();
+        (
+            row_ptr,
+            a.col_idx()[start..end].to_vec(),
+            a.values()[start..end].to_vec(),
+        )
     }
 
     /// Solves on `ranks` loopback ranks; returns the concatenated solution and iteration count.
-    fn distributed(a: &CsrMatrix<f64>, b: &[f64], ranks: usize, use_gmres: bool) -> (Vec<f64>, usize) {
+    fn distributed(
+        a: &CsrMatrix<f64>,
+        b: &[f64],
+        ranks: usize,
+        use_gmres: bool,
+    ) -> (Vec<f64>, usize) {
         let n = a.nrows();
         let partition = RowPartition::balanced(n, ranks);
         let diagonal = a.as_ref().diagonal();
@@ -313,11 +350,16 @@ mod tests {
                     scope.spawn(move || {
                         let range = partition.rows(comm.rank());
                         let (row_ptr, col_idx, values) = rows(a, range.clone());
-                        let local = CsrRef::new_unchecked(range.len(), n, &row_ptr, &col_idx, &values);
+                        let local =
+                            CsrRef::new_unchecked(range.len(), n, &row_ptr, &col_idx, &values);
                         let operator = DistributedCsr::new(comm, partition, local).unwrap();
                         let jacobi = Diagonal(diagonal[range.clone()].to_vec());
                         let mut x = vec![0.0; range.len()];
-                        let options = KrylovOptions { rtol: 1e-10, max_iterations: 400, ..Default::default() };
+                        let options = KrylovOptions {
+                            rtol: 1e-10,
+                            max_iterations: 400,
+                            ..Default::default()
+                        };
                         let report = if use_gmres {
                             gmres_distributed(
                                 comm,
@@ -327,11 +369,22 @@ mod tests {
                                 &b[range.clone()],
                                 &mut x,
                                 &options,
-                                &GmresOptions { restart: 20, ..Default::default() },
+                                &GmresOptions {
+                                    restart: 20,
+                                    ..Default::default()
+                                },
                                 SolveControl::NONE,
                             )
                         } else {
-                            pcg_distributed(comm, &operator, Some(&jacobi), &b[range.clone()], &mut x, &options, SolveControl::NONE)
+                            pcg_distributed(
+                                comm,
+                                &operator,
+                                Some(&jacobi),
+                                &b[range.clone()],
+                                &mut x,
+                                &options,
+                                SolveControl::NONE,
+                            )
                         }
                         .unwrap();
                         assert!(report.converged(), "{report:?}");
@@ -352,20 +405,47 @@ mod tests {
         let n = a.nrows();
         let b = par::seeded_vector::<f64>(n, 21);
         let jacobi = Diagonal(a.as_ref().diagonal());
-        let options = KrylovOptions { rtol: 1e-10, max_iterations: 400, ..Default::default() };
+        let options = KrylovOptions {
+            rtol: 1e-10,
+            max_iterations: 400,
+            ..Default::default()
+        };
         for use_gmres in [false, true] {
             let mut reference = vec![0.0; n];
             let report = if use_gmres {
-                gmres(&a, Some(&jacobi), &b, &mut reference, &options, &GmresOptions { restart: 20, ..Default::default() }, SolveControl::NONE)
+                gmres(
+                    &a,
+                    Some(&jacobi),
+                    &b,
+                    &mut reference,
+                    &options,
+                    &GmresOptions {
+                        restart: 20,
+                        ..Default::default()
+                    },
+                    SolveControl::NONE,
+                )
             } else {
-                pcg(&a, Some(&jacobi), &b, &mut reference, &options, SolveControl::NONE)
+                pcg(
+                    &a,
+                    Some(&jacobi),
+                    &b,
+                    &mut reference,
+                    &options,
+                    SolveControl::NONE,
+                )
             }
             .unwrap();
             for ranks in [1, 2, 4] {
                 let (x, iterations) = distributed(&a, &b, ranks, use_gmres);
-                assert_eq!(iterations, report.iterations, "gmres={use_gmres} ranks={ranks}");
+                assert_eq!(
+                    iterations, report.iterations,
+                    "gmres={use_gmres} ranks={ranks}"
+                );
                 assert!(
-                    x.iter().zip(&reference).all(|(p, q)| p.to_bits() == q.to_bits()),
+                    x.iter()
+                        .zip(&reference)
+                        .all(|(p, q)| p.to_bits() == q.to_bits()),
                     "gmres={use_gmres} ranks={ranks}"
                 );
             }
@@ -378,6 +458,13 @@ mod tests {
         let p = RowPartition::balanced(10 * REDUCTION_BLOCK + 7, 3);
         assert_eq!(p.ranks(), 3);
         assert_eq!(p.global_rows(), 10 * REDUCTION_BLOCK + 7);
-        assert!(RowPartition::new((0..=3).map(|r| p.rows(r.min(2)).start).chain([p.global_rows()]).take(4).collect()).is_ok());
+        assert!(RowPartition::new(
+            (0..=3)
+                .map(|r| p.rows(r.min(2)).start)
+                .chain([p.global_rows()])
+                .take(4)
+                .collect()
+        )
+        .is_ok());
     }
 }

@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_ELECTRIC_CURRENT_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_ELECTRIC_CURRENT_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const ELECTRIC_CURRENT_AMPERES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.ElectricCurrent.amperes(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const ELECTRIC_CURRENT_AMPERES_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&ELECTRIC_CURRENT_AMPERES_SIGNATURES);
+const ELECTRIC_CURRENT_AMPERES_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.ElectricCurrent.amperes(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const ELECTRIC_CURRENT_AMPERES_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&ELECTRIC_CURRENT_AMPERES_SIGNATURES);
 const ELECTRIC_CURRENT_AMPERES_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "electric-current-amperes",
     title: "A 3 A terminal current",
@@ -31,7 +38,8 @@ const ELECTRIC_CURRENT_AMPERES_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     fixture: BuiltinExampleFixture::None,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
-        source: "assert(isa(value, 'fea.ElectricCurrent'));\nassert(abs(value.amperes - 3) <= 1e-12);",
+        source:
+            "assert(isa(value, 'fea.ElectricCurrent'));\nassert(abs(value.amperes - 3) <= 1e-12);",
     },
 }];
 pub(super) const ENTRY: BuiltinCatalogEntry = catalog_entry::entry(ConstructorEntryDefinition {

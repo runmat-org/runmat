@@ -41,7 +41,8 @@ fn native_pressure_projection_preserves_original_governing_state() {
         );
         for (absolute, fluctuation) in original
             .pressure_pa
-            .canonical_values().iter()
+            .canonical_values()
+            .iter()
             .zip(original.pressure_fluctuation_pa.canonical_values())
         {
             assert_eq!(absolute.to_bits(), (reference + fluctuation).to_bits());

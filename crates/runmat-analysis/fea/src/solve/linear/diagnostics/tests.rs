@@ -11,7 +11,9 @@ fn successful_profile_bounds_each_supported_placement_outcome() {
                 SuccessfulDiagnostic::AdmissionFallback,
                 SuccessfulDiagnostic::CpuMethod(strategy),
             ],
-            vec![SuccessfulDiagnostic::AcceleratorMethod(SpdPreconditionerKind::Jacobi)],
+            vec![SuccessfulDiagnostic::AcceleratorMethod(
+                SpdPreconditionerKind::Jacobi,
+            )],
         ] {
             let actual: Vec<_> = messages.iter().map(|value| value.diagnostic()).collect();
             largest_actual_count = largest_actual_count.max(actual.len());

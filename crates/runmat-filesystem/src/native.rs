@@ -74,7 +74,9 @@ impl NativeFsProvider {
 
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
-    fn supports_workspace_transactions(&self) -> bool { true }
+    fn supports_workspace_transactions(&self) -> bool {
+        true
+    }
     fn workspace_access(
         &self,
         root: &Path,

@@ -23,8 +23,15 @@ fn quadratic_tet10_temperature_energy_matches_exact_simplex_moment() {
         })
         .collect::<Vec<_>>();
     let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-    let mut elements =
-        solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(temperatures.clone()))).unwrap();
+    let mut elements = solid_recovery::build(
+        &mesh,
+        &properties,
+        None,
+        Some(&crate::execution::SolvedTemperatureField::nodal(
+            temperatures.clone(),
+        )),
+    )
+    .unwrap();
     let fixed =
         recover_solid_fields_with_plan(&elements, &[0.0; 30], LocalExecutionPlan::serial(), true)
             .unwrap();
@@ -80,8 +87,15 @@ fn curved_tet10_thermal_integrals_match_weighted_simplex_moments() {
         })
         .collect::<Vec<_>>();
     let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-    let mut elements =
-        solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(temperatures.clone()))).unwrap();
+    let mut elements = solid_recovery::build(
+        &mesh,
+        &properties,
+        None,
+        Some(&crate::execution::SolvedTemperatureField::nodal(
+            temperatures.clone(),
+        )),
+    )
+    .unwrap();
     // Isoparametric map x = ξ + c ξη, y = η, z = ζ; det(J) = 1 + cη.
     let c = 0.4;
     let SolidRecoveryGeometry::Tetrahedron10 { coordinates_m, .. } = &mut elements[0].geometry
@@ -203,8 +217,15 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
             .map(|node| reference + 10.0 + 20.0 * node.coordinates_m.canonical_value()[0])
             .collect::<Vec<_>>();
         let retained = temperatures.clone();
-        let elements =
-            solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(temperatures.clone()))).unwrap();
+        let elements = solid_recovery::build(
+            &mesh,
+            &properties,
+            None,
+            Some(&crate::execution::SolvedTemperatureField::nodal(
+                temperatures.clone(),
+            )),
+        )
+        .unwrap();
         assert_eq!(temperatures, retained);
         let fixed = recover_solid_fields_with_plan(
             &elements,
@@ -267,7 +288,15 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
         .is_err());
         let mut invalid = temperatures.clone();
         invalid[0] = f64::NAN;
-        assert!(solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(invalid.clone()))).is_err());
+        assert!(solid_recovery::build(
+            &mesh,
+            &properties,
+            None,
+            Some(&crate::execution::SolvedTemperatureField::nodal(
+                invalid.clone()
+            ))
+        )
+        .is_err());
     }
 }
 

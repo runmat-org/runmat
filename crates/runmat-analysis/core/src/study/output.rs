@@ -145,7 +145,9 @@ impl ObservationSpec {
             .map_or(SpatialReduction::None, |reduction| reduction.spatial);
         let measure = self.target.measure_dimension();
         let spatial_dimension = match spatial {
-            SpatialReduction::Integral | SpatialReduction::NormalFlux => source.multiply(measure?.into()),
+            SpatialReduction::Integral | SpatialReduction::NormalFlux => {
+                source.multiply(measure?.into())
+            }
             SpatialReduction::Resultant => {
                 if matches!(
                     self.quantity,
@@ -406,7 +408,9 @@ pub enum SpatialReduction {
     Minimum,
     Maximum,
     Resultant,
-    Moment { about: Position },
+    Moment {
+        about: Position,
+    },
     /// Flux of a vector field through a face region along its outward normal, ∫ v·n dA.
     NormalFlux,
 }
@@ -572,7 +576,9 @@ pub enum MonitorCadence {
         #[serde(with = "runmat_types::wire_integer")]
         interval: usize,
     },
-    WallSeconds { interval: f64 },
+    WallSeconds {
+        interval: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

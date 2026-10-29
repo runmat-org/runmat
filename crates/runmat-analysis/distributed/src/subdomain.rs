@@ -35,8 +35,7 @@ pub fn extract_rank_inputs(
     let elements = mesh.element_count();
     let nodes = mesh.node_count();
     let dofs_per_node = problem.field.dofs_per_node();
-    if element_parts.len() != elements || element_parts.iter().any(|&part| part as usize >= ranks)
-    {
+    if element_parts.len() != elements || element_parts.iter().any(|&part| part as usize >= ranks) {
         return Err(DistributedError::InvalidProblem(
             "element partition does not match the mesh and rank count".into(),
         ));
@@ -173,7 +172,8 @@ pub fn extract_rank_inputs(
         let part = owner[node] as usize;
         let c = centroid[part];
         let x = mesh.coordinates[node];
-        let distance = ((x[0] - c[0]).powi(2) + (x[1] - c[1]).powi(2) + (x[2] - c[2]).powi(2)).sqrt();
+        let distance =
+            ((x[0] - c[0]).powi(2) + (x[1] - c[1]).powi(2) + (x[2] - c[2]).powi(2)).sqrt();
         scale[part] = scale[part].max(distance);
     }
     for value in &mut scale {
@@ -260,10 +260,22 @@ pub fn extract_rank_inputs(
             }
             neighbors.push(NeighborPlan {
                 subdomain: other as u32,
-                ghost_recv: ghost_recv[part][other].iter().map(|&n| local_index(n)).collect(),
-                ghost_send: ghost_send[part][other].iter().map(|&n| local_index(n)).collect(),
-                accum_send: accum_send[part][other].iter().map(|&n| local_index(n)).collect(),
-                accum_recv: accum_recv[part][other].iter().map(|&n| local_index(n)).collect(),
+                ghost_recv: ghost_recv[part][other]
+                    .iter()
+                    .map(|&n| local_index(n))
+                    .collect(),
+                ghost_send: ghost_send[part][other]
+                    .iter()
+                    .map(|&n| local_index(n))
+                    .collect(),
+                accum_send: accum_send[part][other]
+                    .iter()
+                    .map(|&n| local_index(n))
+                    .collect(),
+                accum_recv: accum_recv[part][other]
+                    .iter()
+                    .map(|&n| local_index(n))
+                    .collect(),
             });
         }
         layout.local_nodes.push(local_nodes.len());

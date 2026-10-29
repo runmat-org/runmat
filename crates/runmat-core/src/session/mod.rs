@@ -64,7 +64,9 @@ pub use fea_duration::{
 mod fea_preflight;
 pub use fea_preflight::FeaExecutionPreflight;
 mod fea_execution;
-pub use fea_execution::{PreparedSerialFeaStudy,FeaGeometryExecutionHost,FeaStudyPreparationError};
+pub use fea_execution::{
+    FeaGeometryExecutionHost, FeaStudyPreparationError, PreparedSerialFeaStudy,
+};
 pub use fea_source::CheckedFeaSessionSource;
 mod fea_changes;
 mod fea_publication;

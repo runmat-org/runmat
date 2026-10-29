@@ -205,7 +205,10 @@ fn shape_candidate_crowds_a_shared_curve(
     minimum_metric_edge_length: f64,
 ) -> bool {
     pslg.segments.iter().any(|segment| {
-        if !matches!(segment.source, crate::ExactFacePslgSegmentSource::ExactTrim { .. }) {
+        if !matches!(
+            segment.source,
+            crate::ExactFacePslgSegmentSource::ExactTrim { .. }
+        ) {
             return false;
         }
         let [Some(first), Some(second)] = segment

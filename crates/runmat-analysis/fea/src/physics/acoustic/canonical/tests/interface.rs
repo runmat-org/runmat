@@ -43,7 +43,9 @@ fn outward_recovered_power(result: &CanonicalAcousticResponse, target: &str) -> 
     let mut power = 0.0;
     for face in result
         .projection
-        .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
+        .boundary_faces_for_target(&RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_boundary_selection(&(target)),
+        ))
     {
         let velocity =
             &result.element_velocity_m_per_s.canonical_values()[face.adjacent_element_indices[0]];
@@ -199,7 +201,9 @@ pub(super) fn two_medium(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "total_inlet_pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Signal(SignalId("drive".into())),
             },
         }));
@@ -251,14 +255,18 @@ pub(super) fn two_medium(
         .as_mut()
         .unwrap()
         .speed_of_sound_m_per_s = runmat_types::physical::SpeedOfSound::new(2.0);
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("incident_medium"));
+    model.material_assignments[0].target = PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_region("incident_medium"),
+    );
     let mut right = model.materials[0].clone();
     right.material_id = "transmitted_fluid".into();
     right.mass_density_kg_per_m3 = (Some(5.0)).map(runmat_types::physical::MassDensity::new);
     right.acoustic.as_mut().unwrap().speed_of_sound_m_per_s =
         runmat_types::physical::SpeedOfSound::new(4.0);
     let mut assignment = model.material_assignments[0].clone();
-    assignment.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("transmitted_medium"));
+    assignment.target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region(
+        "transmitted_medium",
+    ));
     assignment.assigned_material_id = right.material_id.clone();
     assignment.expected_material_id = right.material_id.clone();
     model.materials.push(right);

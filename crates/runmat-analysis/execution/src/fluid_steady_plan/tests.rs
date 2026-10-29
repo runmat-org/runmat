@@ -273,7 +273,8 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
@@ -290,7 +291,9 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "stationary".into(),
             kind: FluidConstraintKind::NoSlipWall {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_insulated",
+                )),
             },
         }));
     model
@@ -298,7 +301,9 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Constant([Velocity::new(0.0); 3]),
             },
         }));
@@ -447,14 +452,19 @@ fn fluid_accuracy_context_binds_the_authored_accuracy_plan() {
         )
         .unwrap()
     };
-    let source = runmat_analysis_fea::execution::AccuracySourceReceipt::FluidSteady(receipt.clone());
+    let source =
+        runmat_analysis_fea::execution::AccuracySourceReceipt::FluidSteady(receipt.clone());
     crate::validate_accuracy_source_context(&request(plan.clone()), &source, None, &refs).unwrap();
     let mut retagged = plan.clone();
     retagged.accuracy_plan_id = AccuracyPlanId("foreign-accuracy".into());
-    assert!(crate::validate_accuracy_source_context(&request(retagged), &source, None, &refs).is_err());
+    assert!(
+        crate::validate_accuracy_source_context(&request(retagged), &source, None, &refs).is_err()
+    );
     let mut loosened = plan;
     if let AccuracyTolerance::Relative(value) = &mut loosened.criteria[0].tolerance {
         *value *= 10.0;
     }
-    assert!(crate::validate_accuracy_source_context(&request(loosened), &source, None, &refs).is_err());
+    assert!(
+        crate::validate_accuracy_source_context(&request(loosened), &source, None, &refs).is_err()
+    );
 }

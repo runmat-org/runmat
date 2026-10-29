@@ -458,7 +458,8 @@ fn direct_materialization_stays_within_a_small_factor_of_measured_storage() {
         values: (0..20_000).map(|i| i as f64 * 0.5).collect(),
         name: "fluid-state".into(),
     };
-    let encoded = crate::encode_contract(b"p\0", "direct-materialization", &payload, limits).unwrap();
+    let encoded =
+        crate::encode_contract(b"p\0", "direct-materialization", &payload, limits).unwrap();
     let decoded: Payload =
         crate::decode_contract(b"p\0", "direct-materialization", &encoded, limits).unwrap();
     assert_eq!(decoded, payload);
@@ -468,7 +469,8 @@ fn direct_materialization_stays_within_a_small_factor_of_measured_storage() {
     let import = crate::canonical_payload_typed_resident_bytes_estimate(&encoded).unwrap();
     assert!(profile.materialization_resident_bytes_estimate >= import);
     // Measured: owned typed storage plus the canonical buffer and the decoded copy.
-    let typed = payload.result_bytes.capacity() + 8 * payload.values.capacity() + payload.name.len();
+    let typed =
+        payload.result_bytes.capacity() + 8 * payload.values.capacity() + payload.name.len();
     let measured = (typed + encoded.len()) as u64;
     assert!(profile.materialization_resident_bytes_estimate >= measured);
     assert!(

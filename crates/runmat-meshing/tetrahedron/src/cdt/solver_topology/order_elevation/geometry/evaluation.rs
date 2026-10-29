@@ -182,11 +182,14 @@ fn surface_midpoint(
     let mut parameters = storage.vector(request.surface_uses.len())?;
     for surface_use in request.surface_uses {
         let face = evaluation.sources.face(surface_use.source_face_id)?;
-        let periods = ExactSurfaceEvaluator::periodicity(evaluation.evaluator, &face.surface_evaluator_id)
-            .map_err(error::geometry)?;
-        let bounds =
-            ExactSurfaceEvaluator::parameter_bounds(evaluation.evaluator, &face.surface_evaluator_id)
+        let periods =
+            ExactSurfaceEvaluator::periodicity(evaluation.evaluator, &face.surface_evaluator_id)
                 .map_err(error::geometry)?;
+        let bounds = ExactSurfaceEvaluator::parameter_bounds(
+            evaluation.evaluator,
+            &face.surface_evaluator_id,
+        )
+        .map_err(error::geometry)?;
         let (left_uv, right_uv) =
             compatible_surface_parameters(request.left, request.right, surface_use, periods)?;
         let evaluator_uv = wrap_into_period(

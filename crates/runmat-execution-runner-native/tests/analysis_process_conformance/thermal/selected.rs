@@ -132,9 +132,10 @@ pub(super) async fn execute_downstream<D: PublicationChainDriver>(
         required_capabilities: Default::default(),
         accelerator_requests: Vec::new(),
         local_execution: LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     let invocation = prepared

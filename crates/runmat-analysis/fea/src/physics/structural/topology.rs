@@ -119,7 +119,11 @@ mod tests {
             vec![0]
         );
         assert_eq!(
-            explicit_target_node_indices(structural, &runmat_meshing_core::fixtures::fixture_edge("beam_span")).unwrap(),
+            explicit_target_node_indices(
+                structural,
+                &runmat_meshing_core::fixtures::fixture_edge("beam_span")
+            )
+            .unwrap(),
             vec![0, 1]
         );
         assert!(explicit_target_node_indices(structural, "absent")

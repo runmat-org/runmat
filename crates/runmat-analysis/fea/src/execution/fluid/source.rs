@@ -295,13 +295,12 @@ impl PreparedFluidSource {
             }
             _ => crate::excitation::ProjectionSample::Static,
         };
-        let problem =
-            CanonicalFluidProblem::prepare_shared(
-                self.input(&workload.model, workload.policy),
-                sample,
-                &self.plans,
-            )
-            .map_err(invalid)?;
+        let problem = CanonicalFluidProblem::prepare_shared(
+            self.input(&workload.model, workload.policy),
+            sample,
+            &self.plans,
+        )
+        .map_err(invalid)?;
         require_bytes(
             add_bytes(
                 self.preparation_resident_bytes,

@@ -7,7 +7,9 @@
 
 use std::time::Instant;
 
-use runmat_accelerate::backend::wgpu::provider::{WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions};
+use runmat_accelerate::backend::wgpu::provider::{
+    WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions,
+};
 use runmat_accelerate_api::SparseMultigridApply;
 use runmat_sparse_accelerate::{DeviceAmg, DeviceApply};
 use runmat_sparse_solvers::control::SolveControl;
@@ -39,12 +41,21 @@ fn main() {
         let t = Instant::now();
         let amg = Amg::new(
             a.as_ref(),
-            AmgOptions { block_size: 3, near_nullspace: Some(rigid_body_modes(&p.coordinates, 3)), strength_threshold: 0.02, ..Default::default() },
+            AmgOptions {
+                block_size: 3,
+                near_nullspace: Some(rigid_body_modes(&p.coordinates, 3)),
+                strength_threshold: 0.02,
+                ..Default::default()
+            },
             SolveControl::NONE,
         )
         .unwrap();
         let setup = t.elapsed().as_secs_f64();
-        let options = KrylovOptions { rtol: 1e-8, max_iterations: 500, ..Default::default() };
+        let options = KrylovOptions {
+            rtol: 1e-8,
+            max_iterations: 500,
+            ..Default::default()
+        };
         let mut x = vec![0.0; n];
         let t = Instant::now();
         let report = pcg(a, Some(&amg), b, &mut x, &options, SolveControl::NONE).unwrap();
@@ -60,7 +71,9 @@ fn main() {
         let rhs: Vec<f32> = b.iter().map(|&v| v as f32).collect();
         let timed = |reps: u32| {
             let t = Instant::now();
-            device.apply_f32(&rhs, SparseMultigridApply::Operator { repetitions: reps }).unwrap();
+            device
+                .apply_f32(&rhs, SparseMultigridApply::Operator { repetitions: reps })
+                .unwrap();
             t.elapsed().as_secs_f64()
         };
         timed(1);
@@ -87,7 +100,9 @@ fn main() {
         );
         drop(device);
         for inner in [5u32, 10] {
-            let device = DeviceAmg::new(&provider, &amg, DeviceApply::InnerCg { iterations: inner }).unwrap();
+            let device =
+                DeviceAmg::new(&provider, &amg, DeviceApply::InnerCg { iterations: inner })
+                    .unwrap();
             assert!(device.is_variable());
             let mut x = vec![0.0; n];
             let t = Instant::now();

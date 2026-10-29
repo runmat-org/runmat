@@ -79,7 +79,11 @@ pub(super) fn length(
     builtin: &'static str,
     name: &str,
 ) -> BuiltinResult<GeometryScalarExpression> {
-    physical(real_scalar(value, builtin, name)?, QuantityKind::Length, builtin)
+    physical(
+        real_scalar(value, builtin, name)?,
+        QuantityKind::Length,
+        builtin,
+    )
 }
 
 /// Canonical angle scalar in radians.
@@ -88,7 +92,11 @@ pub(super) fn angle(
     builtin: &'static str,
     name: &str,
 ) -> BuiltinResult<GeometryScalarExpression> {
-    physical(real_scalar(value, builtin, name)?, QuantityKind::Angle, builtin)
+    physical(
+        real_scalar(value, builtin, name)?,
+        QuantityKind::Angle,
+        builtin,
+    )
 }
 
 /// Canonical position in metres: three length components.
@@ -167,8 +175,10 @@ pub(super) fn transform(
 pub(super) fn text(value: &Value, builtin: &'static str, name: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.to_string()),
-        Value::CharArray(chars) if chars.rows == 1 => runmat_value::decode_utf16_code_units(chars.data())
-            .map_err(|_| invalid(builtin, format!("{name} must be valid text"))),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            runmat_value::decode_utf16_code_units(chars.data())
+                .map_err(|_| invalid(builtin, format!("{name} must be valid text")))
+        }
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
         _ => Err(invalid(builtin, format!("{name} must be scalar text"))),
     }

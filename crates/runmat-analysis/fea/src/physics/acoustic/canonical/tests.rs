@@ -64,7 +64,9 @@ fn velocity_source(model: &mut AnalysisModel, real: f64, imaginary: f64) {
         .excitations
         .push(ExcitationAction::NormalVelocity(AnalysisExcitation {
             excitation_id: ExcitationId("speaker".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
+            target: ExcitationTarget::Region(RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("slab_left"),
+            )),
             frame: CoordinateFrame::BoundaryNormalTangent,
             direction: None,
             distribution: ExcitationDistribution::UniformKinematic,
@@ -96,7 +98,8 @@ fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_
         for cells in [2, 4, 8] {
             let mesh = slab_mesh(cells);
             let mut model = model();
-            model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+            model.material_assignments[0].target =
+                PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
             if velocity {
                 velocity_source(&mut model, -1.0 / 6.0, -0.4 / 6.0);
             } else {
@@ -109,14 +112,18 @@ fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_
                     .push(AnalysisConstraint::Acoustic(AcousticConstraint {
                         constraint_id: "left_pressure".into(),
                         kind: AcousticConstraintKind::PrescribedPressure {
-                            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                            target: RegionTarget::boundary(
+                                runmat_meshing_core::fixtures::fixture_face("slab_left"),
+                            ),
                             value: PrescribedValue::Signal(SignalId("drive".into())),
                         },
                     }));
             }
             model.boundaries.push(AnalysisBoundary {
                 boundary_id: "matched".into(),
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_right",
+                )),
                 operator: BoundaryOperator::AcousticImpedance {
                     impedance: SpecificAcousticImpedance::new(6.0),
                 },
@@ -273,7 +280,9 @@ fn prescribed_pressure_and_impedance_solve_close_power() {
         .iter()
         .find(|face| !face.node_indices.contains(&0))
         .unwrap();
-    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&pressure_face.provenance[0].source_topology_id)));
+    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+        &(&pressure_face.provenance[0].source_topology_id),
+    ));
     prescribe(&mut model, target, 1.0);
     let impedance_face = projection
         .boundary_faces
@@ -282,7 +291,9 @@ fn prescribed_pressure_and_impedance_solve_close_power() {
         .unwrap();
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "termination".into(),
-        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&impedance_face.provenance[0].source_topology_id))),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+            &(&impedance_face.provenance[0].source_topology_id),
+        )),
         operator: BoundaryOperator::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(6.0),
         },
@@ -346,7 +357,10 @@ impl C {
     }
     fn div(self, o: C) -> C {
         let d = o.0 * o.0 + o.1 * o.1;
-        C((self.0 * o.0 + self.1 * o.1) / d, (self.1 * o.0 - self.0 * o.1) / d)
+        C(
+            (self.0 * o.0 + self.1 * o.1) / d,
+            (self.1 * o.0 - self.0 * o.1) / d,
+        )
     }
     fn sqrt(self) -> C {
         let r = self.0.hypot(self.1).sqrt();
@@ -371,12 +385,20 @@ fn damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_
     for cells in [2, 4, 8] {
         let mesh = slab_mesh(cells);
         let mut model = model();
-        model.materials[0].acoustic.as_mut().unwrap().damping_ratio = runmat_types::physical::Quantity::new(zeta);
-        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
-        prescribe(&mut model, RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 1.0);
+        model.materials[0].acoustic.as_mut().unwrap().damping_ratio =
+            runmat_types::physical::Quantity::new(zeta);
+        model.material_assignments[0].target =
+            PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+        prescribe(
+            &mut model,
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            1.0,
+        );
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "rigid".into(),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
             operator: BoundaryOperator::AcousticRigidWall,
         });
         let result = solve_canonical_harmonic(
@@ -398,7 +420,10 @@ fn damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_
             .iter()
             .zip(result.pressure_pa.canonical_values())
             .map(|(node, p)| {
-                let exact = k.mul(C(1.0 - node.coordinates_m.canonical_value()[0], 0.0)).cos().div(denominator);
+                let exact = k
+                    .mul(C(1.0 - node.coordinates_m.canonical_value()[0], 0.0))
+                    .cos()
+                    .div(denominator);
                 (p.real - exact.0).powi(2) + (p.imaginary - exact.1).powi(2)
             })
             .sum::<f64>()
@@ -423,11 +448,18 @@ fn rigid_duct_converges_to_independent_standing_wave_without_artificial_loss() {
     for cells in [2, 4, 8] {
         let mesh = slab_mesh(cells);
         let mut model = model();
-        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
-        prescribe(&mut model, RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 1.0);
+        model.material_assignments[0].target =
+            PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+        prescribe(
+            &mut model,
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            1.0,
+        );
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "rigid".into(),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
             operator: BoundaryOperator::AcousticRigidWall,
         });
         let result = solve_canonical_harmonic(
@@ -610,7 +642,8 @@ fn quadratic_phasor_recovery_integrates_products_not_products_of_averages() {
 fn boundaries_fail_closed_on_missing_targets_and_overlap() {
     let mesh = slab_mesh(2);
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "wall".into(),
         target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("not_a_face")),
@@ -630,7 +663,8 @@ fn boundaries_fail_closed_on_missing_targets_and_overlap() {
         solve(&model),
         Err(AcousticHarmonicError::Boundary(_))
     ));
-    model.boundaries[0].target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"));
+    model.boundaries[0].target =
+        RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"));
     model.boundaries.push(model.boundaries[0].clone());
     assert!(matches!(
         solve(&model),
@@ -645,7 +679,8 @@ fn boundaries_fail_closed_on_missing_targets_and_overlap() {
 fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
     let mesh = slab_mesh(2);
     let mut model = model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     velocity_source(&mut model, -1.0, 0.0);
     let mut signal = complex_signal(Pressure::new(1.0), Pressure::new(0.0));
     signal.signal_id = SignalId("pressure_drive".into());
@@ -695,7 +730,10 @@ fn complex_impedance_termination_converges_to_the_two_wave_duct_solution() {
     let a_coefficient = em.mul(C(1.0 - zk.0, -zk.1));
     let b_coefficient = ep.mul(C(1.0 + zk.0, zk.1));
     // A = b/(b − a), B = −a/(b − a)
-    let denominator = C(b_coefficient.0 - a_coefficient.0, b_coefficient.1 - a_coefficient.1);
+    let denominator = C(
+        b_coefficient.0 - a_coefficient.0,
+        b_coefficient.1 - a_coefficient.1,
+    );
     let a = b_coefficient.div(denominator);
     let b = C(-a_coefficient.0, -a_coefficient.1).div(denominator);
     let exact = |position: f64| {
@@ -707,11 +745,18 @@ fn complex_impedance_termination_converges_to_the_two_wave_duct_solution() {
     for cells in [2, 4, 8] {
         let mesh = slab_mesh(cells);
         let mut model = model();
-        model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
-        prescribe(&mut model, RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")), 1.0);
+        model.material_assignments[0].target =
+            PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+        prescribe(
+            &mut model,
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            1.0,
+        );
         model.boundaries.push(AnalysisBoundary {
             boundary_id: "lined_end".into(),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
             operator: BoundaryOperator::AcousticImpedanceLaw {
                 law: runmat_analysis_core::AcousticImpedanceLaw::Table {
                     frequencies_hz: vec![0.1, 0.3],

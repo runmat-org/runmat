@@ -6,9 +6,7 @@ use runmat_analysis_core::{AuthoredMaterialRef, MaterialModel, RealizedStudy};
 use runmat_analysis_execution::{
     prepare_analysis_host_program, InputMaterializationPlan, InputMaterializationPlanExpectation,
 };
-use runmat_analysis_fea::{
-    planning::resource::LocalExecutionPlan,
-};
+use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::value::{ValuePayload, ValueRefKind};
@@ -44,11 +42,11 @@ const CONTRACT_LIMITS: CanonicalLimits =
 mod contract;
 mod initial_fields;
 mod preparation;
-use contract::{StructuralStudyMaterial, StructuralStudyRootRequest};
 pub use contract::{
     NonlinearSolidStudyPlanning, StructuralStudyMaterialExpectation,
     StructuralStudyResultExpectation, StructuralStudyRootPreparation, StudyRootPlanning,
 };
+use contract::{StructuralStudyMaterial, StructuralStudyRootRequest};
 pub use preparation::prepare_structural_study_root;
 
 #[derive(Clone, Debug, PartialEq)]

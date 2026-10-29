@@ -97,7 +97,12 @@ pub(super) fn solve_structural_system_with_execution(
         // reduced SPD system is the canonical (direct-solvable) form of both.
         let reduction = match matrix.affine_reduction() {
             Ok(reduction) => reduction,
-            Err(error) => return Ok(super::admission::rejected_constraint_system(summary, error.to_string())),
+            Err(error) => {
+                return Ok(super::admission::rejected_constraint_system(
+                    summary,
+                    error.to_string(),
+                ))
+            }
         };
         return solve_affine_constraint_system_with_execution(
             summary,
@@ -181,7 +186,9 @@ fn solve_structural_system_with_preparation(
     if let Some(matrix) = summary.constraint_matrix.as_ref() {
         let reduction = match matrix.affine_reduction() {
             Ok(reduction) => reduction,
-            Err(error) => return super::admission::rejected_constraint_system(summary, error.to_string()),
+            Err(error) => {
+                return super::admission::rejected_constraint_system(summary, error.to_string())
+            }
         };
         return match reuse {
             Some(reuse) => crate::solve::affine::solve_affine_constraint_system_reusing(

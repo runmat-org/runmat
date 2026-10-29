@@ -366,13 +366,13 @@ study cooling {
                 &[runmat_analysis_core::AuthoredStudyInputBinding {
                     input_id: "film".into(),
                     value: runmat_analysis_core::AuthoredInputValue::Quantity(
-                    runmat_types::physical::DimensionedScalar::try_from_dimension(
-                        runmat_types::PhysicalDimension::HEAT_TRANSFER_COEFFICIENT,
-                        None,
-                        film,
-                    )
-                    .unwrap(),
-                ),
+                        runmat_types::physical::DimensionedScalar::try_from_dimension(
+                            runmat_types::PhysicalDimension::HEAT_TRANSFER_COEFFICIENT,
+                            None,
+                            film,
+                        )
+                        .unwrap(),
+                    ),
                 }],
             )
             .unwrap();

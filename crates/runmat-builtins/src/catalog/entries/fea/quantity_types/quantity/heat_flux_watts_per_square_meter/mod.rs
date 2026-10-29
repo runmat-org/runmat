@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_HEAT_FLUX_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_HEAT_FLUX_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const HEAT_FLUX_WATTS_PER_SQUARE_METER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.HeatFlux.wattsPerSquareMeter(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const HEAT_FLUX_WATTS_PER_SQUARE_METER_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&HEAT_FLUX_WATTS_PER_SQUARE_METER_SIGNATURES);
+const HEAT_FLUX_WATTS_PER_SQUARE_METER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.HeatFlux.wattsPerSquareMeter(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const HEAT_FLUX_WATTS_PER_SQUARE_METER_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&HEAT_FLUX_WATTS_PER_SQUARE_METER_SIGNATURES);
 const HEAT_FLUX_WATTS_PER_SQUARE_METER_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "heat-flux-wattspersquaremeter",
     title: "A 1.5 kW/m^2 heat flux",

@@ -101,13 +101,17 @@ impl ElectricalStaticSolverResult {
                     r.equation,
                     d.element_order,
                     match (&r.charge_sources, r.equation) {
-                        (None, _) => crate::physics::electrical::CanonicalElectricalSource::SourceFree,
-                        (Some(_), runmat_analysis_core::StaticElectricalEquation::Electrostatics) => {
-                            crate::physics::electrical::CanonicalElectricalSource::VolumeCharge
+                        (None, _) => {
+                            crate::physics::electrical::CanonicalElectricalSource::SourceFree
                         }
-                        (Some(_), runmat_analysis_core::StaticElectricalEquation::SteadyConduction) => {
-                            crate::physics::electrical::CanonicalElectricalSource::BoundaryCurrent
-                        }
+                        (
+                            Some(_),
+                            runmat_analysis_core::StaticElectricalEquation::Electrostatics,
+                        ) => crate::physics::electrical::CanonicalElectricalSource::VolumeCharge,
+                        (
+                            Some(_),
+                            runmat_analysis_core::StaticElectricalEquation::SteadyConduction,
+                        ) => crate::physics::electrical::CanonicalElectricalSource::BoundaryCurrent,
                     },
                 )
             || d.formulation.procedure() != AnalysisProcedure::Static
@@ -242,9 +246,14 @@ impl ElectricalStaticSolverResult {
             workload.relative_residual_target,
         )
         .map_err(invalid)?;
-        let sources =
-            crate::physics::electrical::sources::assemble(&workload.model, mesh, step, &projection, workload.sample_point())
-                .map_err(invalid)?;
+        let sources = crate::physics::electrical::sources::assemble(
+            &workload.model,
+            mesh,
+            step,
+            &projection,
+            workload.sample_point(),
+        )
+        .map_err(invalid)?;
         if r.charge_sources != sources {
             return Err(invalid(
                 "retained charge source disagrees with authored volume integration",

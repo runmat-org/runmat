@@ -45,7 +45,8 @@ mod execution;
 
 fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let MaterialElasticityModel::IsotropicLinear(elasticity) =
         model.materials[0].elasticity.as_mut().unwrap()
     else {

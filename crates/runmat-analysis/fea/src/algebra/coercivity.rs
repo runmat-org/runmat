@@ -23,7 +23,9 @@ pub(crate) use symbolic::CoercivityWorkEnvelope;
 /// A numeric Cholesky factorization of exactly the certified operator, shared between the
 /// coercivity proof and the direct solve (one factorization serves both).
 #[derive(Clone)]
-pub(crate) struct SharedFactor(pub std::sync::Arc<runmat_sparse_solvers::direct::DirectSolver<f64>>);
+pub(crate) struct SharedFactor(
+    pub std::sync::Arc<runmat_sparse_solvers::direct::DirectSolver<f64>>,
+);
 
 /// Factors are derived data: the certificate binds the exact operator, so two factors of the
 /// same certified operator compare equal.
@@ -167,7 +169,9 @@ impl CoercivityCertificate {
 
     /// Proves strict positivity of the inertia by a sparse Cholesky factorization of the
     /// diagonally scaled operator and returns the factorization for reuse by the solve.
-    pub(super) fn prove(matrix: &RealSparseMatrix) -> Result<(Self, SharedFactor), CoercivityError> {
+    pub(super) fn prove(
+        matrix: &RealSparseMatrix,
+    ) -> Result<(Self, SharedFactor), CoercivityError> {
         use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind};
         let dimension = matrix.rows();
         if dimension == 0
@@ -215,13 +219,15 @@ impl CoercivityCertificate {
                 CoercivityError::NonPositivePivot { pivot }
             }
             runmat_sparse_solvers::SolverError::OutOfMemory { .. }
-            | runmat_sparse_solvers::SolverError::OverBudget { .. } => CoercivityError::ResourceLimit {
-                pivot: 0,
-                factor_nonzero_count: 0,
-                factor_nonzero_limit: 0,
-                update_count: 0,
-                update_limit: 0,
-            },
+            | runmat_sparse_solvers::SolverError::OverBudget { .. } => {
+                CoercivityError::ResourceLimit {
+                    pivot: 0,
+                    factor_nonzero_count: 0,
+                    factor_nonzero_limit: 0,
+                    update_count: 0,
+                    update_limit: 0,
+                }
+            }
             runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
             _ => CoercivityError::SymbolicOrdering,
         })?;
@@ -458,7 +464,10 @@ mod tests {
             PreparedSolverAdmissibility::prove(&operator, &[1.0, 2.0, 3.0], None).unwrap();
         let estimate = symbolic::analyze(operator.pattern()).unwrap();
         assert_eq!(evidence.coercivity.work_counts().1, estimate.factor_entries);
-        assert_eq!(evidence.coercivity.work_counts().2, symbolic::flop_count(&estimate));
+        assert_eq!(
+            evidence.coercivity.work_counts().2,
+            symbolic::flop_count(&estimate)
+        );
         assert!(evidence.factor().is_some());
         evidence.validate_for(&operator, &[1.0, 2.0, 3.0]).unwrap();
         assert_eq!(
@@ -485,7 +494,11 @@ mod tests {
     fn roundoff_asymmetry_is_measured_against_the_coupled_diagonals() {
         // A reduced coupling entry that cancels to almost zero keeps the roundoff of the
         // 1e11-scale terms it was formed from; that is not an asymmetric operator.
-        let reduced = matrix([[4.0e11, 1.0e-6, 0.0], [-1.0e-6, 4.0e11, 0.0], [0.0, 0.0, 1.0]]);
+        let reduced = matrix([
+            [4.0e11, 1.0e-6, 0.0],
+            [-1.0e-6, 4.0e11, 0.0],
+            [0.0, 0.0, 1.0],
+        ]);
         assert!(CoercivityCertificate::prove(&reduced).is_ok());
     }
 

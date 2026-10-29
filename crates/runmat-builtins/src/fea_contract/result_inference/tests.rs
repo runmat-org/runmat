@@ -45,7 +45,11 @@ fn unknown() -> ValueFact {
     ValueFact::unknown(DynamicReason::RuntimeValue)
 }
 
-fn infer(kind: FeaResultKind, arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallInference {
+fn infer(
+    kind: FeaResultKind,
+    arguments: Vec<ValueFact>,
+    literals: Vec<LiteralValue>,
+) -> CallInference {
     infer_result(&request(arguments, literals), &entry(), kind)
 }
 
@@ -101,7 +105,11 @@ fn results_accepts_run_references_and_typed_selectors() {
     let arity = infer(FeaResultKind::Results, vec![], vec![]);
     assert!(codes(&arity).contains(&"RM-CATALOG-FEA-ARITY"));
 
-    let dynamic = infer(FeaResultKind::Results, vec![unknown()], vec![LiteralValue::Unknown]);
+    let dynamic = infer(
+        FeaResultKind::Results,
+        vec![unknown()],
+        vec![LiteralValue::Unknown],
+    );
     assert!(dynamic.diagnostics.is_empty(), "{:?}", dynamic.diagnostics);
 }
 
@@ -133,7 +141,11 @@ fn field_requires_typed_selector_and_frequency_sample() {
     );
     assert!(codes(&wrong_sample).contains(&"RM-CATALOG-FEA-SAMPLE"));
 
-    let arity = infer(FeaResultKind::Field, vec![text()], vec![LiteralValue::Unknown]);
+    let arity = infer(
+        FeaResultKind::Field,
+        vec![text()],
+        vec![LiteralValue::Unknown],
+    );
     assert!(codes(&arity).contains(&"RM-CATALOG-FEA-ARITY"));
 
     let dynamic = infer(

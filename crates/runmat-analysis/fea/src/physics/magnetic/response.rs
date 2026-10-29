@@ -73,9 +73,9 @@ pub(super) fn solve(
                 runmat_sparse_solvers::SolverError::Cancelled => {
                     MagnetostaticError::NotConverged("cancelled".into())
                 }
-                other => MagnetostaticError::NotConverged(format!(
-                    "sparse direct saddle solve: {other}"
-                )),
+                other => {
+                    MagnetostaticError::NotConverged(format!("sparse direct saddle solve: {other}"))
+                }
             })?;
         (solution, 1)
     };
@@ -152,9 +152,8 @@ pub(super) fn solve(
             })?;
         // Element samples are recovered on the admitted pool; the energy/work sums then run
         // in canonical point order, so totals are identical to a serial recovery.
-        let per_element = crate::algebra::element_assembly::ordered_map_range(
-            assembled.volumes.len(),
-            |index| {
+        let per_element =
+            crate::algebra::element_assembly::ordered_map_range(assembled.volumes.len(), |index| {
                 let data = &assembled.volumes[index];
                 let indices = assembled.edge_space.element_edge_indices(index).unwrap();
                 let permeability = data.permeability_h_per_m.canonical_value();
@@ -199,8 +198,7 @@ pub(super) fn solve(
                     })
                     .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
                 Ok::<_, MagnetostaticError>((element_samples, terms))
-            },
-        );
+            });
         let mut samples = Vec::with_capacity(count);
         let mut energy = 0.0;
         let mut work = 0.0;

@@ -187,7 +187,10 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
         },
     )
     .unwrap_err();
-    assert!(failure.reason.contains("InsufficientJacobianMargin"), "{failure:?}");
+    assert!(
+        failure.reason.contains("InsufficientJacobianMargin"),
+        "{failure:?}"
+    );
 }
 
 #[test]
@@ -297,7 +300,10 @@ fn interval_certificate_bounds_each_element_and_honors_cancellation() {
         // An element that cannot be certified within its own work share is not admitted.
         DelaunaySolverTopologyErrorKind::InvalidMesh
     );
-    assert!(work > 3, "the element's actual work is charged to the shared counter");
+    assert!(
+        work > 3,
+        "the element's actual work is charged to the shared counter"
+    );
 
     struct Cancelled;
     impl MeshingCancellationSignal for Cancelled {

@@ -9,7 +9,8 @@ const NAMED_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     inputs: &OUTPUT_NAME_INPUT,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const NAMED_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&NAMED_SIGNATURES);
+pub const NAMED_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&NAMED_SIGNATURES);
 const NAMED_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "named-output",
     title: "Select a declared output by name",

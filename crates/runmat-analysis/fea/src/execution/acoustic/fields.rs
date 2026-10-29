@@ -152,7 +152,11 @@ impl AcousticHarmonicSolverResult {
                 &request.plan.requirements[2],
                 sample,
                 vec![self.intensity_w_per_m2().len(), 3],
-                self.intensity_w_per_m2().iter().flatten().copied().collect(),
+                self.intensity_w_per_m2()
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .collect(),
             )?,
         ];
         request
@@ -188,7 +192,10 @@ impl AcousticHarmonicSolverResult {
         };
         matches(
             pressure,
-            &mut self.pressure_pa().iter().flat_map(|p| [p.real, p.imaginary]),
+            &mut self
+                .pressure_pa()
+                .iter()
+                .flat_map(|p| [p.real, p.imaginary]),
         ) && matches(
             velocity,
             &mut self

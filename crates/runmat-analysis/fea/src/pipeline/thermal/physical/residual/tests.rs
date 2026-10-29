@@ -114,7 +114,9 @@ fn public_small_power_fields_and_receipts_keep_original_relative_evidence() {
             );
             workload.model.boundaries.push(AnalysisBoundary {
                 boundary_id: "scaled-incoming-power".into(),
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_right",
+                )),
                 operator: BoundaryOperator::ThermalHeatFlux {
                     value: PrescribedValue::Constant(HeatFlux::new(0.37 * scale)),
                 },

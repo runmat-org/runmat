@@ -23,7 +23,8 @@ fn fixture_with_memory(
     });
     model.materials[0].mass_density_kg_per_m3 =
         (Some(3.0)).map(runmat_types::physical::MassDensity::new);
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("solid"));
     let mut step = ProcedureStep::acoustic_harmonic("acoustic");
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.1, 0.2]);
     step.accuracy.resources.maximum_resident_bytes = Some(maximum_resident_bytes);
@@ -33,7 +34,9 @@ fn fixture_with_memory(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
                 value: PrescribedValue::Constant(Pressure::new(1.0)),
             },
         }));

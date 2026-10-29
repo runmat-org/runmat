@@ -9,7 +9,8 @@ const EQUATION_SCALE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSigna
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const EQUATION_SCALE_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&EQUATION_SCALE_SIGNATURES);
+pub const EQUATION_SCALE_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&EQUATION_SCALE_SIGNATURES);
 const EQUATION_SCALE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-equation-scale",
     title: "Select equation scale",

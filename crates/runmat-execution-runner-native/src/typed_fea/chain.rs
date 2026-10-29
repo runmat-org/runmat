@@ -50,7 +50,9 @@ pub(super) fn heating_chain(study: &ResolvedAnalysisStudy) -> Option<HeatingChai
 pub(super) fn sub_study(study: &ResolvedAnalysisStudy, step_id: &str) -> ResolvedAnalysisStudy {
     let mut part = study.clone();
     let sequence = &mut part.study.sequence;
-    sequence.steps.retain(|step| step.step_id.as_str() == step_id);
+    sequence
+        .steps
+        .retain(|step| step.step_id.as_str() == step_id);
     for step in &mut sequence.steps {
         step.state_inputs
             .retain(|input| input.use_as != StateUse::HeatSource);

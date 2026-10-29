@@ -104,9 +104,7 @@ pub(super) fn admit(
 /// Run fields named once each: the terminal (or steady) state keeps the native field ids, and
 /// each earlier retained sample of a transient publishes as `<id>.time.<n>`, n counting retained
 /// samples from 1 in increasing time.
-fn published_fields(
-    fields: RecoveredFieldArtifact,
-) -> Vec<runmat_analysis_core::AnalysisField> {
+fn published_fields(fields: RecoveredFieldArtifact) -> Vec<runmat_analysis_core::AnalysisField> {
     let fields = fields.into_fields();
     let terminal = fields.last().map(|field| field.sample());
     let mut ordinal = 0usize;

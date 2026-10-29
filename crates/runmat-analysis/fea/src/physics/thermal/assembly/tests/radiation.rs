@@ -45,7 +45,9 @@ fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_conti
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "hot_face".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Constant(Temperature::new(surface + flux)),
             },
         }));

@@ -14,7 +14,9 @@ mod tests;
 pub enum ObservationSelectionCoordinate {
     SampledRecovery,
     StructuralRecovery,
-    ThermalSample { ordinal: usize },
+    ThermalSample {
+        ordinal: usize,
+    },
     /// Native canonical-mesh fields; the selection's projection digest is the plan topology.
     VolumeMeshRecovery,
 }

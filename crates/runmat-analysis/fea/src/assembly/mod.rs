@@ -2940,7 +2940,8 @@ mod tests {
             },
         ];
         let structural = model.structural.as_mut().expect("beam topology");
-        structural.elements[0].region_id = runmat_meshing_core::fixtures::fixture_edge("span_first");
+        structural.elements[0].region_id =
+            runmat_meshing_core::fixtures::fixture_edge("span_first");
         structural.nodes.push(runmat_analysis_core::StructuralNode {
             node_id: 3,
             coordinates_m: runmat_types::physical::Quantity::<

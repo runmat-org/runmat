@@ -111,9 +111,15 @@ fn canonical(count: usize) -> Canonical {
 fn encoder_peak_stays_within_the_profiled_workspace() {
     let streamed = canonical(200_000);
     let (peak, profile, wire) = measured_peak(&streamed);
-    assert!(peak <= profile, "streamed peak {peak} exceeds profile {profile}");
+    assert!(
+        peak <= profile,
+        "streamed peak {peak} exceeds profile {profile}"
+    );
     // Streaming holds no second copy of the output.
-    assert!(peak < 2 * wire as u64, "streamed peak {peak} for {wire} wire bytes");
+    assert!(
+        peak < 2 * wire as u64,
+        "streamed peak {peak} for {wire} wire bytes"
+    );
 
     let declared = Declared {
         zeta: vec![0.25; 100_000],
@@ -122,11 +128,17 @@ fn encoder_peak_stays_within_the_profiled_workspace() {
         nested: vec![canonical(1_000), canonical(10)],
     };
     let (peak, profile, _) = measured_peak(&declared);
-    assert!(peak <= profile, "held-field peak {peak} exceeds profile {profile}");
+    assert!(
+        peak <= profile,
+        "held-field peak {peak} exceeds profile {profile}"
+    );
 
     let unknown = vec![UnknownLength((0..50_000).collect()); 1];
     let (peak, profile, _) = measured_peak(&unknown.iter().collect::<Vec<_>>());
-    assert!(peak <= profile, "unknown-length peak {peak} exceeds profile {profile}");
+    assert!(
+        peak <= profile,
+        "unknown-length peak {peak} exceeds profile {profile}"
+    );
 
     let unordered = Unordered(
         (0..2_000)
@@ -135,11 +147,17 @@ fn encoder_peak_stays_within_the_profiled_workspace() {
             .collect(),
     );
     let (peak, profile, _) = measured_peak(&unordered);
-    assert!(peak <= profile, "fallback map peak {peak} exceeds profile {profile}");
+    assert!(
+        peak <= profile,
+        "fallback map peak {peak} exceeds profile {profile}"
+    );
 
     let ordered = BTreeMap::from_iter((0..2_000).map(|i| (format!("key{i:05}"), vec![i; 32])));
     let (peak, profile, _) = measured_peak(&ordered);
-    assert!(peak <= profile, "ordered map peak {peak} exceeds profile {profile}");
+    assert!(
+        peak <= profile,
+        "ordered map peak {peak} exceeds profile {profile}"
+    );
 }
 
 impl Clone for UnknownLength {

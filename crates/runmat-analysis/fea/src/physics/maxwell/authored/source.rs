@@ -98,7 +98,8 @@ pub(super) fn compile(
             };
             if selected {
                 matched = true;
-                sample.current_density_a_per_m2 = sample.current_density_a_per_m2
+                sample.current_density_a_per_m2 = sample
+                    .current_density_a_per_m2
                     .try_map_canonical_storage(|mut components| {
                         for (axis, current) in components.iter_mut().enumerate() {
                             *current += ComplexPhasor::new(value.real[axis], value.imaginary[axis]);

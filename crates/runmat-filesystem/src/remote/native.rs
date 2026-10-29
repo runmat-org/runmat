@@ -1153,7 +1153,9 @@ struct UploadTask {
 
 #[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
-    fn supports_workspace_transactions(&self) -> bool { true }
+    fn supports_workspace_transactions(&self) -> bool {
+        true
+    }
     fn path_namespace(&self) -> crate::FsPathNamespace {
         crate::FsPathNamespace::VirtualRooted
     }

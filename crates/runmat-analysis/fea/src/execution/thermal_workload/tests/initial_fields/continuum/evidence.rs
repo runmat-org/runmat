@@ -199,7 +199,10 @@ fn integrate(
     }
     // Summing n weights carries up to n·ε of rounding error.
     let tolerance = 1e-12_f64.max(weights as f64 * f64::EPSILON);
-    assert!((volume - 1.0).abs() < tolerance, "{volume} over {weights} weights");
+    assert!(
+        (volume - 1.0).abs() < tolerance,
+        "{volume} over {weights} weights"
+    );
     norms
 }
 

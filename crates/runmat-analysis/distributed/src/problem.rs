@@ -82,7 +82,11 @@ impl PartitionMesh {
             ));
         }
         let nodes = self.node_count();
-        if self.element_nodes.iter().any(|&node| node as usize >= nodes) {
+        if self
+            .element_nodes
+            .iter()
+            .any(|&node| node as usize >= nodes)
+        {
             return Err(DistributedError::InvalidProblem(
                 "element references a node outside the mesh".into(),
             ));

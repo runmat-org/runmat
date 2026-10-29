@@ -3,7 +3,10 @@
 use super::*;
 use runmat_analysis_core::{ProcedureStep, StructuralKinematics, StructuralNonlinearSettings};
 
-fn large(order: ElementOrder, plastic: bool) -> (AnalysisModel, SolverMeshArtifact, AssemblySummary) {
+fn large(
+    order: ElementOrder,
+    plastic: bool,
+) -> (AnalysisModel, SolverMeshArtifact, AssemblySummary) {
     let (mut model, mesh, initial) = fixture(order, plastic);
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear_with(
         "large",
@@ -19,12 +22,18 @@ fn homogeneous(mesh: &SolverMeshArtifact, initial: &AssemblySummary, g: [[f64; 3
     let mut u = vec![0.0; initial.dof_count];
     for (i, node) in mesh.topology.nodes.iter().enumerate() {
         let x = node.coordinates_m;
-        for (axis, kind) in [StructuralDofKind::Ux, StructuralDofKind::Uy, StructuralDofKind::Uz]
-            .into_iter()
-            .enumerate()
+        for (axis, kind) in [
+            StructuralDofKind::Ux,
+            StructuralDofKind::Uy,
+            StructuralDofKind::Uz,
+        ]
+        .into_iter()
+        .enumerate()
         {
-            u[initial.structural_dof_layout.index(i, kind).unwrap()] =
-                (0..3).map(|j| g[axis][j] * x.canonical_value()[j]).sum::<f64>() - x.canonical_value()[axis];
+            u[initial.structural_dof_layout.index(i, kind).unwrap()] = (0..3)
+                .map(|j| g[axis][j] * x.canonical_value()[j])
+                .sum::<f64>()
+                - x.canonical_value()[axis];
         }
     }
     u
@@ -49,8 +58,14 @@ fn rigid_rotation_is_strain_and_stress_free_and_small_strain_is_not() {
         let basis = CanonicalNonlinearSolidBasis::prepare(&model, &mesh, &initial).unwrap();
         let u = homogeneous(&mesh, &initial, rotation(1.2));
         let evaluation = basis.evaluate(&u, &basis.zero_state()).unwrap();
-        let force = evaluation.internal_force.iter().fold(0.0_f64, |n, v| n.hypot(*v));
-        assert!(force < 1e-10, "order={order:?} rigid rotation force {force}");
+        let force = evaluation
+            .internal_force
+            .iter()
+            .fold(0.0_f64, |n, v| n.hypot(*v));
+        assert!(
+            force < 1e-10,
+            "order={order:?} rigid rotation force {force}"
+        );
         assert!(evaluation
             .point_evidence
             .iter()
@@ -59,7 +74,13 @@ fn rigid_rotation_is_strain_and_stress_free_and_small_strain_is_not() {
         let small = CanonicalNonlinearSolidBasis::prepare(&small_model, &mesh, &initial).unwrap();
         assert_ne!(small.identity(), basis.identity());
         let spurious = small.evaluate(&u, &small.zero_state()).unwrap();
-        assert!(spurious.internal_force.iter().fold(0.0_f64, |n, v| n.hypot(*v)) > 1.0);
+        assert!(
+            spurious
+                .internal_force
+                .iter()
+                .fold(0.0_f64, |n, v| n.hypot(*v))
+                > 1.0
+        );
     }
 }
 
@@ -77,16 +98,32 @@ fn rotated_uniaxial_stretch_gives_saint_venant_kirchhoff_cauchy_stress() {
         let g = std::array::from_fn(|i| {
             std::array::from_fn(|j| r[i][j] * if j == 0 { stretch } else { 1.0 })
         });
-        let evaluation = basis.evaluate(&homogeneous(&mesh, &initial, g), &basis.zero_state()).unwrap();
+        let evaluation = basis
+            .evaluate(&homogeneous(&mesh, &initial, g), &basis.zero_state())
+            .unwrap();
         let e11 = 0.5 * (stretch * stretch - 1.0);
         let s = [(lambda + 2.0 * mu) * e11, lambda * e11, lambda * e11];
         // sigma = R diag(stretch² S11, S22, S33) Rᵀ / stretch
-        let d = [stretch * stretch * s[0] / stretch, s[1] / stretch, s[2] / stretch];
+        let d = [
+            stretch * stretch * s[0] / stretch,
+            s[1] / stretch,
+            s[2] / stretch,
+        ];
         let sigma = |i: usize, j: usize| (0..3).map(|k| r[i][k] * d[k] * r[j][k]).sum::<f64>();
-        let expected = [sigma(0, 0), sigma(1, 1), sigma(2, 2), sigma(1, 2), sigma(0, 2), sigma(0, 1)];
+        let expected = [
+            sigma(0, 0),
+            sigma(1, 1),
+            sigma(2, 2),
+            sigma(1, 2),
+            sigma(0, 2),
+            sigma(0, 1),
+        ];
         for point in &evaluation.point_evidence {
             for (actual, expected) in point.stress_pa.iter().zip(expected) {
-                assert!((actual - expected).abs() < 1e-9 * s[0].abs(), "order={order:?} {actual} {expected}");
+                assert!(
+                    (actual - expected).abs() < 1e-9 * s[0].abs(),
+                    "order={order:?} {actual} {expected}"
+                );
             }
             assert!((point.total_engineering_strain[0] - e11).abs() < 1e-13);
         }
@@ -118,10 +155,16 @@ fn total_lagrangian_tangent_differentiates_internal_force_elastic_and_plastic() 
                     .iter()
                     .any(|p| p.equivalent_plastic_strain > 0.0));
             }
-            let direction = (0..u.len()).map(|i| (i as f64 + 0.3).sin()).collect::<Vec<_>>();
+            let direction = (0..u.len())
+                .map(|i| (i as f64 + 0.3).sin())
+                .collect::<Vec<_>>();
             let h = 1e-7;
             let shifted = |sign: f64| {
-                let v = u.iter().zip(&direction).map(|(u, d)| u + sign * h * d).collect::<Vec<_>>();
+                let v = u
+                    .iter()
+                    .zip(&direction)
+                    .map(|(u, d)| u + sign * h * d)
+                    .collect::<Vec<_>>();
                 basis.evaluate(&v, &committed).unwrap().internal_force
             };
             let (plus, minus) = (shifted(1.0), shifted(-1.0));
@@ -133,7 +176,11 @@ fn total_lagrangian_tangent_differentiates_internal_force_elastic_and_plastic() 
                 .sum::<f64>()
                 .sqrt();
             let norm = exact.iter().map(|x| x * x).sum::<f64>().sqrt();
-            assert!(error / norm < 1e-6, "order={order:?} plastic={plastic} relative={}", error / norm);
+            assert!(
+                error / norm < 1e-6,
+                "order={order:?} plastic={plastic} relative={}",
+                error / norm
+            );
         }
     }
 }

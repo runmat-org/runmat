@@ -13,8 +13,8 @@ use runmat_geometry_core::{
 };
 use runmat_meshing_core::{
     CanonicalMeshingContract, MeshingCapabilityRequirement, MeshingExecutionCeilings,
-    MeshingInputKind, MeshingRequest, MeshingResourceBudget,
-    MeshingStageIdentity, MeshingWorkloadRequest,
+    MeshingInputKind, MeshingRequest, MeshingResourceBudget, MeshingStageIdentity,
+    MeshingWorkloadRequest,
 };
 
 use crate::task::validate_inputs;
@@ -186,7 +186,14 @@ impl MeshingHostWorkload {
         );
         bytes.extend_from_slice(HOST_PREFIX);
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
-        for component in [&workload, &identity, &request, &ceilings, &access, &geometry_document] {
+        for component in [
+            &workload,
+            &identity,
+            &request,
+            &ceilings,
+            &access,
+            &geometry_document,
+        ] {
             if component.len() > MAX_COMPONENT_BYTES {
                 return Err(MeshingExecutionError::Invalid(
                     "meshing host workload component exceeds its bound".into(),
@@ -564,7 +571,11 @@ fn decode_ceilings(bytes: &[u8]) -> MeshingExecutionResult<MeshingExecutionCeili
         ));
     }
     let value = |index: usize| {
-        u64::from_be_bytes(bytes[index * 8..index * 8 + 8].try_into().expect("eight bytes"))
+        u64::from_be_bytes(
+            bytes[index * 8..index * 8 + 8]
+                .try_into()
+                .expect("eight bytes"),
+        )
     };
     Ok(MeshingExecutionCeilings {
         maximum_memory_bytes: value(0),

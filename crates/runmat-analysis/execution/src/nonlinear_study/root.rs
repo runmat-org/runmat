@@ -132,9 +132,7 @@ pub fn import_nonlinear_solid_study_root(
     };
     let manifest_bytes = read(source, root, read_limits)?;
     let manifest_resident =
-        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
-            &manifest_bytes,
-        )?;
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&manifest_bytes)?;
     if manifest_resident > maximum_resident_bytes {
         return Err(limit(
             "nonlinear root manifest exceeds caller decode admission",
@@ -159,12 +157,10 @@ pub fn import_nonlinear_solid_study_root(
         return Err(invalid("nonlinear completion payload identity differs"));
     }
     let decode_bytes =
-        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
-            &payload,
-        )?
-        .checked_add(objects.retained_storage_bytes()?)
-        .and_then(|n| n.checked_add(manifest_resident))
-        .ok_or_else(|| limit("nonlinear root decode storage overflow"))?;
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&payload)?
+            .checked_add(objects.retained_storage_bytes()?)
+            .and_then(|n| n.checked_add(manifest_resident))
+            .ok_or_else(|| limit("nonlinear root decode storage overflow"))?;
     if decode_bytes > maximum_resident_bytes {
         return Err(limit(
             "nonlinear root decode exceeds caller memory admission",

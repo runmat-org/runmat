@@ -56,9 +56,8 @@ pub use chunk::{
 pub use codec::{CanonicalMeshingContract, MeshingCanonicalCodecControl, MeshingCanonicalLimits};
 pub use error::MeshingContractError;
 pub use evidence::{
-    AchievedEdgeLengths,
-    CacheAdmissionDecision, ErrorDistribution, InvariantEvidence, MeshingEvidence,
-    MeshingResourceUsage, MeshingStageEvidence, PlatformBuildIdentity,
+    AchievedEdgeLengths, CacheAdmissionDecision, ErrorDistribution, InvariantEvidence,
+    MeshingEvidence, MeshingResourceUsage, MeshingStageEvidence, PlatformBuildIdentity,
     ReusedMeshingStageObservation, SizingResolutionEvidence, MESHING_EVIDENCE_SCHEMA_VERSION,
 };
 pub use failure::{
@@ -86,25 +85,22 @@ pub use metric::{
     MetricSourceKind, MetricTensor3,
 };
 pub use request::{
-    AlgorithmVersionSet, CurveQualityTargets, ElementOrder, MeshDimension, MeshingQualityTargets,
-    MeshingRequest,
-    MeshingExecutionCeilings, MeshingResourceBudget, MeshingSizeLimits, SurfaceQualityTargets,
-    VolumeQualityTargets,
-    MESHING_REQUEST_SCHEMA_VERSION,
+    AlgorithmVersionSet, CurveQualityTargets, ElementOrder, MeshDimension,
+    MeshingExecutionCeilings, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingSizeLimits, SurfaceQualityTargets, VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
 };
 pub use runmat_geometry_core::{GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind};
-pub use size_controls::{
-    size_control_evidence, validate_size_controls, AppliedSizeControl, MeshSizeControl, MeshSizeControlTarget,
-    NamedRegionEntities,
-};
 pub use settings::{
     production_algorithm_versions, resolve_meshing_request, MeshingRequestSettings,
 };
+pub use size_controls::{
+    size_control_evidence, validate_size_controls, AppliedSizeControl, MeshSizeControl,
+    MeshSizeControlTarget, NamedRegionEntities,
+};
 pub use solver_projection::{
     SolverElevationReport, SolverMeshProjection, SolverMeshValidation,
-    ValidatedSolverMeshProjection,
-    ValidatedSolverMeshTopology, SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
-    SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
+    ValidatedSolverMeshProjection, ValidatedSolverMeshTopology,
+    SOLVER_MESH_PROJECTION_SCHEMA_VERSION, SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
 };
 pub use transfer::{
     SolverEntityTransfer, SolverMeshTransferMap, SolverTransferMethod, SolverTransferSource,

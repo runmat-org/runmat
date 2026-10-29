@@ -10,11 +10,10 @@ use std::collections::BTreeMap;
 use runmat_geometry_core::{ExactBRepTopology, PersistentEntityId};
 use runmat_meshing_core::{
     solver_boundary_edge_identity, solver_boundary_face_identity,
-    sort_solver_node_exact_parameters, BoundaryEdgeOrder, BoundaryFaceRole,
-    BoundaryTriangleOrder, FieldTopologyLocation, FieldTopologyMap, MeshDimension,
-    MeshingCancellationSignal, MeshingContractError, MeshingRequest, SolverBoundaryEdge,
-    SolverBoundaryFace, SolverMeshNode, SolverMeshTopology, SolverNodeExactParameter,
-    StableDigest, ValidatedSolverMeshTopology,
+    sort_solver_node_exact_parameters, BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder,
+    FieldTopologyLocation, FieldTopologyMap, MeshDimension, MeshingCancellationSignal,
+    MeshingContractError, MeshingRequest, SolverBoundaryEdge, SolverBoundaryFace, SolverMeshNode,
+    SolverMeshTopology, SolverNodeExactParameter, StableDigest, ValidatedSolverMeshTopology,
 };
 
 use crate::ExactSurfaceMesh;
@@ -92,7 +91,9 @@ pub fn build_surface_solver_topology(
                         .tolerance_m
                         .max(edge.tolerance_m)
                         .max(request.tolerance.absolute_floor_m);
-                    if distance(vertex.point_m.canonical_value(), node.point_m) <= tolerance.canonical_value() {
+                    if distance(vertex.point_m.canonical_value(), node.point_m)
+                        <= tolerance.canonical_value()
+                    {
                         provenance.push(vertex.id.clone());
                     }
                 }

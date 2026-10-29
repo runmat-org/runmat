@@ -86,4 +86,3 @@ pub struct MaxwellResponse {
     /// Interior corner-gradient tests of div[(σ+iωε)E+J]=0; no solenoidal projection.
     pub relative_charge_continuity_residual: f64,
 }
-

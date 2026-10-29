@@ -9,7 +9,8 @@ const SHELL_VON_MISES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const SHELL_VON_MISES_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&SHELL_VON_MISES_SIGNATURES);
+pub const SHELL_VON_MISES_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&SHELL_VON_MISES_SIGNATURES);
 const SHELL_VON_MISES_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-shell-von-mises",
     title: "Select shell von Mises stress",

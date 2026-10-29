@@ -1,12 +1,12 @@
 //! Portable, explicitly planned static acoustic response work; no driver-side numerical solve.
 use crate::{
-    prepare_analysis_objects, prepare_analysis_program, prepare_acoustic_response_inputs,
+    prepare_acoustic_response_inputs, prepare_analysis_objects, prepare_analysis_program,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     AnalysisOutputPolicy, AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkKind, AcousticResponseWorkload, ExecutionPlanIdentity,
+    AcousticResponseWorkload, AnalysisNumericalObjectKind, AnalysisWorkKind, ExecutionPlanIdentity,
     NumericalPlanIdentity, StudyIdentity,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;

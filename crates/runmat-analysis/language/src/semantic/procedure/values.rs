@@ -49,7 +49,10 @@ pub fn positive_usize(value: &CheckedExpression) -> Option<usize> {
     let CheckedExpressionKind::Number(source) = &value.kind else {
         return None;
     };
-    let value = source.parse::<usize>().ok().and_then(runmat_types::wire_integer::bounded)?;
+    let value = source
+        .parse::<usize>()
+        .ok()
+        .and_then(runmat_types::wire_integer::bounded)?;
     (value > 0).then_some(value)
 }
 

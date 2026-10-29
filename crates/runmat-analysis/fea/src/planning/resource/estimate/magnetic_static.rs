@@ -13,9 +13,12 @@ pub(in crate::planning::resource) fn krylov_envelope(
     }
     let nonzeros = usize::try_from(nonzeros)
         .ok()
-        .filter(|&nonzeros| dimension <= isize::MAX as usize / 1024 && nonzeros <= isize::MAX as usize / 1024)
+        .filter(|&nonzeros| {
+            dimension <= isize::MAX as usize / 1024 && nonzeros <= isize::MAX as usize / 1024
+        })
         .ok_or(ResourcePlanningError::Overflow("direct factor dimension"))?;
-    let bytes = runmat_sparse_solvers::estimate::direct_reservation_bytes(dimension, nonzeros, false);
+    let bytes =
+        runmat_sparse_solvers::estimate::direct_reservation_bytes(dimension, nonzeros, false);
     Ok(MagneticGmresResourceEnvelope {
         dimension: Count(dimension as u64),
         restart: Count(0),

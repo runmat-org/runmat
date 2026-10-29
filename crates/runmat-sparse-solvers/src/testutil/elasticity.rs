@@ -49,9 +49,13 @@ fn element_stiffness(young: f64, poisson: f64) -> [[f64; 24]; 24] {
                         for i in 0..3 {
                             for j in 0..3 {
                                 // λ ∂_i N_a ∂_j N_b + μ (δ_ij ∇N_a·∇N_b + ∂_j N_a ∂_i N_b)
-                                let mut value = lambda * grad[a][i] * grad[b][j] + mu * grad[a][j] * grad[b][i];
+                                let mut value =
+                                    lambda * grad[a][i] * grad[b][j] + mu * grad[a][j] * grad[b][i];
                                 if i == j {
-                                    value += mu * (grad[a][0] * grad[b][0] + grad[a][1] * grad[b][1] + grad[a][2] * grad[b][2]);
+                                    value += mu
+                                        * (grad[a][0] * grad[b][0]
+                                            + grad[a][1] * grad[b][1]
+                                            + grad[a][2] * grad[b][2]);
                                 }
                                 k[3 * a + i][3 * b + j] += weight * value;
                             }
@@ -84,10 +88,19 @@ pub fn elasticity3d(ex: usize, ey: usize, ez: usize) -> ElasticityProblem {
             for dj in [-1i64, 0, 1] {
                 for di in [-1i64, 0, 1] {
                     let (ii, jj, kk) = (i as i64 + di, j as i64 + dj, k as i64 + dk);
-                    if ii < 0 || jj < 0 || kk < 1 || ii >= nx as i64 || jj >= ny as i64 || kk >= nz as i64 {
+                    if ii < 0
+                        || jj < 0
+                        || kk < 1
+                        || ii >= nx as i64
+                        || jj >= ny as i64
+                        || kk >= nz as i64
+                    {
                         continue;
                     }
-                    neighbors.push((free_index(ii as usize, jj as usize, kk as usize).unwrap(), [[0.0; 3]; 3]));
+                    neighbors.push((
+                        free_index(ii as usize, jj as usize, kk as usize).unwrap(),
+                        [[0.0; 3]; 3],
+                    ));
                 }
             }
         }
@@ -107,11 +120,16 @@ pub fn elasticity3d(ex: usize, ey: usize, ez: usize) -> ElasticityProblem {
                         (ei + 1, ej + 1, ek + 1),
                         (ei, ej + 1, ek + 1),
                     ];
-                    let Some(a) = local_nodes.iter().position(|&(x, y, z)| (x, y, z) == (i, j, k)) else {
+                    let Some(a) = local_nodes
+                        .iter()
+                        .position(|&(x, y, z)| (x, y, z) == (i, j, k))
+                    else {
                         continue;
                     };
                     for (b, &(x, y, z)) in local_nodes.iter().enumerate() {
-                        let Some(column) = free_index(x, y, z) else { continue };
+                        let Some(column) = free_index(x, y, z) else {
+                            continue;
+                        };
                         let position = neighbors.binary_search_by_key(&column, |e| e.0).unwrap();
                         for r in 0..3 {
                             for c in 0..3 {

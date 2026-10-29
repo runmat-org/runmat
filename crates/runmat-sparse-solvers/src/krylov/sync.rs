@@ -131,23 +131,38 @@ impl<T: Scalar> SyncOperations<'_, T> {
     /// or OR (`any = true`).
     fn agree(&mut self, comm: &dyn Communicator, local: bool, any: bool) -> Option<bool> {
         let all = self.gather(comm, &[f64::from(u8::from(local))])?;
-        Some(if any { all.iter().any(|v| *v != 0.0) } else { all.iter().all(|v| *v != 0.0) })
+        Some(if any {
+            all.iter().any(|v| *v != 0.0)
+        } else {
+            all.iter().all(|v| *v != 0.0)
+        })
     }
     /// Global `(Σ conj(l)r, Σ |conj(l)r|)` folded in global block order.
-    fn global_dot_magnitude(&mut self, comm: &dyn Communicator, left: &[T], right: &[T]) -> Option<(T, f64)> {
+    fn global_dot_magnitude(
+        &mut self,
+        comm: &dyn Communicator,
+        left: &[T],
+        right: &[T],
+    ) -> Option<(T, f64)> {
         let mut local = Vec::new();
         for (dot, magnitude) in par::dot_and_magnitude_partials(left, right) {
             local.extend([dot.re(), dot.im(), magnitude]);
         }
         let all = self.gather(comm, &local)?;
         Some(par::fold_dot_magnitude_partials(
-            all.chunks_exact(3).map(|v| (T::from_parts(v[0], v[1]), v[2])),
+            all.chunks_exact(3)
+                .map(|v| (T::from_parts(v[0], v[1]), v[2])),
         ))
     }
     fn global_norm(&mut self, comm: &dyn Communicator, values: &[T]) -> Option<f64> {
-        let local: Vec<f64> = par::norm2_partials(values).into_iter().flat_map(|(s, q)| [s, q]).collect();
+        let local: Vec<f64> = par::norm2_partials(values)
+            .into_iter()
+            .flat_map(|(s, q)| [s, q])
+            .collect();
         let all = self.gather(comm, &local)?;
-        Some(par::fold_norm_partials(all.chunks_exact(2).map(|v| (v[0], v[1]))))
+        Some(par::fold_norm_partials(
+            all.chunks_exact(2).map(|v| (v[0], v[1])),
+        ))
     }
 }
 
@@ -258,7 +273,8 @@ impl<T: Scalar> GmresOperations<T> for SyncOperations<'_, T> {
         let Some(comm) = self.distribution else {
             return HostKernels::norm(values);
         };
-        self.global_norm(comm, values).filter(|norm| norm.is_finite())
+        self.global_norm(comm, values)
+            .filter(|norm| norm.is_finite())
     }
     fn native_dot(&mut self, left: &[T], right: &[T]) -> Option<Complex64> {
         let Some(comm) = self.distribution else {
@@ -295,8 +311,12 @@ impl<T: Scalar> GmresOperations<T> for SyncOperations<'_, T> {
         };
         let dots = par::fold_multi_partials(
             rows,
-            all.chunks_exact(2 * rows)
-                .map(|block| block.chunks_exact(2).map(|v| T::from_parts(v[0], v[1])).collect()),
+            all.chunks_exact(2 * rows).map(|block| {
+                block
+                    .chunks_exact(2)
+                    .map(|v| T::from_parts(v[0], v[1]))
+                    .collect()
+            }),
         );
         HostKernels::apply_projection(basis, &dots, w, coefficients)
     }
@@ -413,9 +433,14 @@ fn rhs_norm<T: Scalar>(b: &[T], distribution: Option<&dyn Communicator>) -> Solv
     let Some(comm) = distribution else {
         return Ok(par::norm2(b));
     };
-    let local: Vec<f64> = par::norm2_partials(b).into_iter().flat_map(|(s, q)| [s, q]).collect();
+    let local: Vec<f64> = par::norm2_partials(b)
+        .into_iter()
+        .flat_map(|(s, q)| [s, q])
+        .collect();
     let all = comm.all_gather(&local)?.concat();
-    Ok(par::fold_norm_partials(all.chunks_exact(2).map(|v| (v[0], v[1]))))
+    Ok(par::fold_norm_partials(
+        all.chunks_exact(2).map(|v| (v[0], v[1])),
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -455,7 +480,11 @@ fn pcg_impl<T: Scalar>(
     let mut history = vec![0.0f64; options.max_iterations + 1];
     // A variable preconditioner needs flexible CG (one extra vector).
     let flexible = preconditioner.is_some_and(|p| p.is_variable());
-    let mut previous = if flexible { par::try_zeros::<T>(n)? } else { Vec::new() };
+    let mut previous = if flexible {
+        par::try_zeros::<T>(n)?
+    } else {
+        Vec::new()
+    };
     let mut coefficients = super::pcg::PcgCoefficients::default();
     let mut operations = SyncOperations {
         operator,
@@ -608,7 +637,17 @@ pub fn gmres_with_workspace<T: Scalar>(
     gmres_options: &GmresOptions,
     control: SolveControl<'_>,
 ) -> SolverResult<KrylovReport> {
-    gmres_impl(workspace, operator, preconditioner, b, x, options, gmres_options, control, None)
+    gmres_impl(
+        workspace,
+        operator,
+        preconditioner,
+        b,
+        x,
+        options,
+        gmres_options,
+        control,
+        None,
+    )
 }
 
 /// Row-distributed GMRES (see [`pcg_distributed`]).
@@ -624,7 +663,17 @@ pub fn gmres_distributed<T: Scalar>(
     gmres_options: &GmresOptions,
     control: SolveControl<'_>,
 ) -> SolverResult<KrylovReport> {
-    gmres_impl(workspace, operator, preconditioner, b, x, options, gmres_options, control, Some(comm))
+    gmres_impl(
+        workspace,
+        operator,
+        preconditioner,
+        b,
+        x,
+        options,
+        gmres_options,
+        control,
+        Some(comm),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

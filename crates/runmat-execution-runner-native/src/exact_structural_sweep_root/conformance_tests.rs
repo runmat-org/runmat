@@ -136,7 +136,10 @@ async fn run_exact_structural_sweep_conformance() {
         artifact_access: access.clone(),
         source_name: "box.brep",
         source_bytes: BOX,
-        import_options: ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+        import_options: ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..ExactCadImportOptions::default()
+        },
         contact_definitions: Vec::new(),
         meshing_request: meshing_request.clone(),
         preferred_edges_per_partition: 3,
@@ -358,7 +361,10 @@ async fn run_exact_structural_sweep_conformance() {
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+        &ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..ExactCadImportOptions::default()
+        },
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -1283,7 +1289,10 @@ pub(crate) fn box_selectors() -> &'static BoxSelectors {
             "box.brep",
             BOX,
             GeometryFormat::Brep,
-            &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+            &ExactCadImportOptions {
+                source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+                ..ExactCadImportOptions::default()
+            },
             &GeometryImportContext::new(),
         )
         .unwrap();
@@ -1302,12 +1311,14 @@ fn box_structural_workload() -> StructuralLinearWorkload {
     model.material_assignments[0].target =
         runmat_analysis_core::PropertyRegionTarget::solid(box_selectors().solid_selector());
     model.constraints[0].visit_targets_mut(|target| {
-        *target = runmat_analysis_core::RegionTarget::boundary(box_selectors().fixed_face_selector());
+        *target =
+            runmat_analysis_core::RegionTarget::boundary(box_selectors().fixed_face_selector());
     });
     if let runmat_analysis_core::ExcitationTarget::Region(target) =
         &mut model.excitations[0].excitation_mut().target
     {
-        *target = runmat_analysis_core::RegionTarget::boundary(box_selectors().loaded_face_selector());
+        *target =
+            runmat_analysis_core::RegionTarget::boundary(box_selectors().loaded_face_selector());
     } else {
         panic!("cantilever fixture must use a region excitation");
     }
@@ -1796,7 +1807,10 @@ fn boundary_centroid(
 
 fn coarse_box_request() -> MeshingRequest {
     let mut request = crate::resolve_native_meshing_request(
-        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+        &ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..ExactCadImportOptions::default()
+        },
         runmat_meshing_core::MeshingRequestSettings::default(),
     )
     .unwrap();

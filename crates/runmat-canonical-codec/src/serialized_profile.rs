@@ -12,8 +12,7 @@ mod integer_values;
 mod materialization_profile;
 pub use materialization_profile::{
     profile_direct_materialization, profile_serialized, profile_serialized_shape,
-    profile_serialized_with_control,
-    profile_typed_resident_bytes,
+    profile_serialized_with_control, profile_typed_resident_bytes,
     serialized_materialization_resident_bytes_estimate,
 };
 #[cfg(test)]

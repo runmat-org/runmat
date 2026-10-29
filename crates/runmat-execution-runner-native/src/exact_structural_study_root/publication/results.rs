@@ -70,7 +70,8 @@ pub struct ExactStructuralModalResponseSpectrumAnalysisResult {
     pub response_publication: runmat_analysis_execution::ImportedPublishedResult,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
-    pub response_observations: Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    pub response_observations:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -88,7 +89,8 @@ pub struct ExactStructuralRandomResponseAnalysisResult {
     pub response_resource_usage: runmat_analysis_execution::PreparedResourceUsage,
     pub response_publication: runmat_analysis_execution::ImportedPublishedResult,
     pub statistics_state: runmat_analysis_fea::execution::CanonicalSemanticState,
-    pub response_observations: Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    pub response_observations:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

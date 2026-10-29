@@ -114,9 +114,8 @@ fn complete_convex_hull(
                     continue;
                 }
                 budget.consume(3)?;
-                let signs = [[a, c], [c, b], [b, a]].map(|[left, right]| {
-                    orient2d([uv(left), uv(right), uv(vertex)])
-                });
+                let signs = [[a, c], [c, b], [b, a]]
+                    .map(|[left, right]| orient2d([uv(left), uv(right), uv(vertex)]));
                 let mut inside = true;
                 for sign in signs {
                     if sign.map_err(|e| predicate_error(pslg, e))? == PredicateSign::Negative {
@@ -144,9 +143,8 @@ fn complete_convex_hull(
     triangles.sort();
     loop {
         budget.checkpoint()?;
-        let edges = super::super::topology::edge_uses_with_checkpoint(triangles, || {
-            budget.checkpoint()
-        })?;
+        let edges =
+            super::super::topology::edge_uses_with_checkpoint(triangles, || budget.checkpoint())?;
         let mut flipped = false;
         for (edge, uses) in &edges {
             if uses.len() != 2 {
@@ -154,8 +152,13 @@ fn complete_convex_hull(
             }
             budget.consume(1)?;
             let triangle = triangles[uses[0].triangle_index].vertex_indices;
-            let query = [triangle[0], triangle[1], triangle[2], uses[1].opposite_vertex]
-                .map(|index| predicate_point(pslg.vertices[index as usize], index).coordinates);
+            let query = [
+                triangle[0],
+                triangle[1],
+                triangle[2],
+                uses[1].opposite_vertex,
+            ]
+            .map(|index| predicate_point(pslg.vertices[index as usize], index).coordinates);
             if incircle2d(query).map_err(|e| predicate_error(pslg, e))? != PredicateSign::Positive {
                 continue;
             }

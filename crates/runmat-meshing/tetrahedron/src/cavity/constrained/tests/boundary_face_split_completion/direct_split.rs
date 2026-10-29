@@ -80,19 +80,35 @@ fn boundary_face_split_completion_prefers_higher_quality_split_point() {
     let nodes = vec![
         ConstrainedCavityNode {
             node_id: 0,
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 1,
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.649331064611886, 0.0, 0.0]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.649331064611886, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 2,
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.10383330216927095, 0.5285988568010986, 0.0]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.10383330216927095, 0.5285988568010986, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 3,
-            coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.583996624105325, 0.04591313203731445, 1.25490017426856]),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                1.583996624105325,
+                0.04591313203731445,
+                1.25490017426856,
+            ]),
         },
     ];
     let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)

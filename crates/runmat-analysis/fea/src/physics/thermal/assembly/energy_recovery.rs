@@ -38,7 +38,8 @@ impl ThermalOperatorAssembly {
         // reaction unchanged while every nodal residual stays accounted for.
         let mut reacting = self
             .prescribed_temperature_k
-            .canonical_values().iter()
+            .canonical_values()
+            .iter()
             .map(Option::is_some)
             .collect::<Vec<_>>();
         for relation in &self.relations {
@@ -62,21 +63,15 @@ impl ThermalOperatorAssembly {
         // Prescribed/prescribed pairs cancel globally but still contribute to individual
         // reactions and hence the physical through-flow scale, not an absolute-T floor.
         for (element_index, element) in self.projection.elements.iter().enumerate() {
-            if element
-                .node_indices
-                .iter()
-                .all(|&node| !reacting[node])
-            {
+            if element.node_indices.iter().all(|&node| !reacting[node]) {
                 continue;
             }
             self.projection
                 .visit_element_quadrature(element, |point| {
                     for (i, &left) in element.node_indices.iter().enumerate() {
                         for (j, &right) in element.node_indices.iter().enumerate().skip(i + 1) {
-                            let left_prescribed =
-                                reacting[left];
-                            let right_prescribed =
-                                reacting[right];
+                            let left_prescribed = reacting[left];
+                            let right_prescribed = reacting[right];
                             if !left_prescribed && !right_prescribed {
                                 continue;
                             }

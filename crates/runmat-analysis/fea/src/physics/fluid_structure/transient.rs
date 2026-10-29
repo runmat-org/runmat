@@ -187,7 +187,13 @@ impl FluidStructureProblem<'_> {
             velocity_m_per_s: runmat_types::physical::Quantity::new(vec![[0.0; 3]; cells]),
             pressure_reference_pa: runmat_types::physical::Quantity::new(Vec::new()),
             pressure_fluctuation_pa: runmat_types::physical::Quantity::new(vec![0.0; cells]),
-            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::new(vec![0.0; departure.topology.faces.len()]),
+            face_volume_flux_m3_per_s: runmat_types::physical::Quantity::new(vec![
+                0.0;
+                departure
+                    .topology
+                    .faces
+                    .len()
+            ]),
         };
         let mut load = vec![0.0; dofs];
         let mut steps = Vec::new();
@@ -226,7 +232,9 @@ impl FluidStructureProblem<'_> {
                     self.wall_velocities(&arrival.topology, &kinematics.velocity, &mesh_flux)?;
                 let problem = self.interval(&arrival, t1, &walls)?;
                 if flow.pressure_reference_pa.canonical_values().is_empty() {
-                    flow.pressure_reference_pa = runmat_types::physical::Quantity::new(problem.pressure_reference().to_vec());
+                    flow.pressure_reference_pa = runmat_types::physical::Quantity::new(
+                        problem.pressure_reference().to_vec(),
+                    );
                 }
                 let previous_volume = departure
                     .topology

@@ -9,7 +9,8 @@ const VON_MISES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const VON_MISES_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&VON_MISES_SIGNATURES);
+pub const VON_MISES_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&VON_MISES_SIGNATURES);
 const VON_MISES_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-von-mises",
     title: "Select element von Mises stress",

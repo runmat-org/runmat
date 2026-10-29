@@ -175,7 +175,9 @@ impl SandboxFsProvider {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl FsProvider for SandboxFsProvider {
-    fn supports_workspace_transactions(&self) -> bool { true }
+    fn supports_workspace_transactions(&self) -> bool {
+        true
+    }
     fn workspace_access(
         &self,
         root: &Path,

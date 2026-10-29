@@ -60,8 +60,8 @@ impl CanonicalNonlinearSolidBasis {
         mesh: &SolverMeshArtifact,
         excitations: &RealizedExcitations,
     ) -> Result<Option<FollowerLoadOperator>, NonlinearSolidError> {
-        let follower = excitations
-            .filtered(|load| load.policy.kinematics == ExcitationKinematics::Follower);
+        let follower =
+            excitations.filtered(|load| load.policy.kinematics == ExcitationKinematics::Follower);
         if follower.len() == 0 {
             return Ok(None);
         }
@@ -122,7 +122,10 @@ impl CanonicalNonlinearSolidBasis {
                     FollowerIntensity::NominalTraction(value.real)
                 }
                 RealizedExcitationKind::Force(value) => {
-                    let area = selected.iter().map(|face| face.area_m2.canonical_value()).sum::<f64>();
+                    let area = selected
+                        .iter()
+                        .map(|face| face.area_m2.canonical_value())
+                        .sum::<f64>();
                     if !area.is_finite() || area <= 0.0 {
                         return Err(NonlinearSolidError::Authority(format!(
                             "follower force `{}` needs a positive reference area",
@@ -133,9 +136,9 @@ impl CanonicalNonlinearSolidBasis {
                 }
                 _ => {
                     return Err(NonlinearSolidError::Unsupported(format!(
-                        "follower kinematics is defined for force, traction and pressure only (`{}`)",
-                        load.excitation_id.0
-                    )))
+                    "follower kinematics is defined for force, traction and pressure only (`{}`)",
+                    load.excitation_id.0
+                )))
                 }
             };
             for face in selected {
@@ -203,7 +206,9 @@ impl CanonicalNonlinearSolidBasis {
                 .iter()
                 .map(|&node| {
                     let n = &self.nodes[node];
-                    std::array::from_fn(|k| n.coordinates_m.canonical_value()[k] + displacement[n.rows[k]])
+                    std::array::from_fn(|k| {
+                        n.coordinates_m.canonical_value()[k] + displacement[n.rows[k]]
+                    })
                 })
                 .collect::<Vec<[f64; 3]>>();
             let face_force = face_force(face, &reference, &current)?;
@@ -315,9 +320,8 @@ fn face_force(
                     ));
                 };
                 // R = Σ_i e_i(current) ⊗ e_i(reference)
-                let local: [f64; 3] = std::array::from_fn(|i| {
-                    (0..3).map(|k| from[i][k] * traction[k]).sum::<f64>()
-                });
+                let local: [f64; 3] =
+                    std::array::from_fn(|i| (0..3).map(|k| from[i][k] * traction[k]).sum::<f64>());
                 let rotated: [f64; 3] =
                     std::array::from_fn(|k| (0..3).map(|i| to[i][k] * local[i]).sum::<f64>());
                 let area = norm(reference_normal) * point.weight;
@@ -396,7 +400,9 @@ mod tests {
         let mut nodes = corners.to_vec();
         if quadratic {
             for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-                nodes.push(std::array::from_fn(|k| 0.5 * (corners[a][k] + corners[b][k])));
+                nodes.push(std::array::from_fn(|k| {
+                    0.5 * (corners[a][k] + corners[b][k])
+                }));
             }
         }
         (
@@ -476,7 +482,10 @@ mod tests {
                         }
                     }
                 }
-                assert!(worst < 1e-6, "quadratic={quadratic} {intensity:?} worst={worst}");
+                assert!(
+                    worst < 1e-6,
+                    "quadratic={quadratic} {intensity:?} worst={worst}"
+                );
             }
         }
     }

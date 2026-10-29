@@ -55,7 +55,10 @@ pub(super) fn analyze<T: FactorScalar>(
     })
 }
 
-fn estimate<T: FactorScalar>(symbolic: &SymbolicCholesky<usize>, kind: FactorKind) -> FactorEstimate {
+fn estimate<T: FactorScalar>(
+    symbolic: &SymbolicCholesky<usize>,
+    kind: FactorKind,
+) -> FactorEstimate {
     let n = symbolic.nrows();
     let entries = symbolic.len_val() as u64;
     let (structure, flops) = match symbolic.raw() {
@@ -82,12 +85,17 @@ fn estimate<T: FactorScalar>(symbolic: &SymbolicCholesky<usize>, kind: FactorKin
                     flops += c * c;
                 }
             }
-            ((this.row_idx().len() + 4 * this.n_supernodes() + n) as u64 * 8, flops)
+            (
+                (this.row_idx().len() + 4 * this.n_supernodes() + n) as u64 * 8,
+                flops,
+            )
         }
     };
     let par = par::faer_par();
     let workspace = match kind {
-        FactorKind::Cholesky => symbolic.factorize_numeric_llt_scratch::<T>(par, Default::default()),
+        FactorKind::Cholesky => {
+            symbolic.factorize_numeric_llt_scratch::<T>(par, Default::default())
+        }
         FactorKind::Ldlt => symbolic.factorize_numeric_ldlt_scratch::<T>(par, Default::default()),
         _ => symbolic.factorize_numeric_intranode_lblt_scratch::<T>(par, Default::default()),
     };
@@ -141,7 +149,9 @@ pub(super) fn factorize<T: FactorScalar>(
             {
                 Ok(values)
             }
-            Some(NumericInner::Lblt { values, .. }) if values.len() == inner.len_val() => Ok(values),
+            Some(NumericInner::Lblt { values, .. }) if values.len() == inner.len_val() => {
+                Ok(values)
+            }
             _ => try_vec(inner.len_val(), T::zero()),
         }
     };
@@ -151,7 +161,8 @@ pub(super) fn factorize<T: FactorScalar>(
     match symbolic.kind {
         FactorKind::Cholesky => {
             let mut values = reuse(previous)?;
-            let mut buffer = memory(inner.factorize_numeric_llt_scratch::<T>(par, Default::default()))?;
+            let mut buffer =
+                memory(inner.factorize_numeric_llt_scratch::<T>(par, Default::default()))?;
             inner
                 .factorize_numeric_llt::<T>(
                     &mut values,
@@ -199,7 +210,10 @@ pub(super) fn factorize<T: FactorScalar>(
                     }
                 })?;
             let diagonal = factor_diagonal(inner, &values);
-            if let Some(pivot) = diagonal.iter().position(|d| !d.is_finite() || d.abs() == 0.0) {
+            if let Some(pivot) = diagonal
+                .iter()
+                .position(|d| !d.is_finite() || d.abs() == 0.0)
+            {
                 return Err(SolverError::Singular { pivot });
             }
             Ok((NumericInner::Ldlt(values), 0))
@@ -209,8 +223,9 @@ pub(super) fn factorize<T: FactorScalar>(
             let mut subdiag = try_vec(n, T::zero())?;
             let mut perm = try_vec(n, 0usize)?;
             let mut inverse = try_vec(n, 0usize)?;
-            let mut buffer =
-                memory(inner.factorize_numeric_intranode_lblt_scratch::<T>(par, Default::default()))?;
+            let mut buffer = memory(
+                inner.factorize_numeric_intranode_lblt_scratch::<T>(par, Default::default()),
+            )?;
             inner.factorize_numeric_intranode_lblt::<T>(
                 &mut values,
                 &mut subdiag,
@@ -339,7 +354,9 @@ pub(super) fn inertia<T: FactorScalar>(
                 classify(d.re(), &mut inertia);
             }
         }
-        NumericInner::Lblt { values, subdiag, .. } => {
+        NumericInner::Lblt {
+            values, subdiag, ..
+        } => {
             let d = factor_diagonal(inner, values);
             let mut j = 0;
             while j < n {

@@ -224,7 +224,9 @@ fn symmetry_uses_outward_geometry_normals_on_one_persistent_face() {
         constraint_id: "symmetry_plane".into(),
         frame: CoordinateFrame::BoundaryNormalTangent,
         kind: StructuralConstraintKind::Symmetry {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_entity))),
+            target: RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_entity)),
+            ),
         },
     })];
 
@@ -249,7 +251,9 @@ fn symmetry_uses_outward_geometry_normals_on_one_persistent_face() {
 #[test]
 fn fixed_constraint_projects_a_logical_region_bound_to_multiple_faces() {
     let (mut model, mesh) = model_and_mesh();
-    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("mounting-surfaces"));
+    let mut target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+        "mounting-surfaces",
+    ));
     target
         .bind_resolved_entities(vec![
             mesh.topology.boundary_faces[0].provenance[0].clone(),
@@ -286,7 +290,9 @@ fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces()
         .unwrap()
         .source_topology_id
         .clone();
-    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_entity)));
+    let target = RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+        &(face_entity),
+    ));
     model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
         constraint_id: "normal_offset".into(),
         frame: CoordinateFrame::BoundaryNormalTangent,
@@ -419,7 +425,9 @@ fn geometric_tie_projects_secondary_node_to_primary_surface() {
         constraint_id: "surface_tie".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Tie(PairedConstraint {
-            primary: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(primary))),
+            primary: RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(primary)),
+            ),
             secondary: RegionTarget::point("node:4"),
             pairing: PairingPolicy::GeometricTolerance(Length::new(0.02)),
         }),
@@ -485,7 +493,9 @@ fn distributing_coupling_uses_area_weights_and_six_resultant_relations() {
         constraint_id: "distributed_end".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+            target: RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+            ),
             reference_point: ReferencePoint {
                 reference_point_id: "control".into(),
                 position: Position::new([0.25, 0.25, 0.0]),
@@ -560,7 +570,9 @@ fn conflicting_prescriptions_fail_with_both_constraint_identities() {
                 constraint_id: constraint_id.into(),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "root",
+                    )),
                     translations: vec![TranslationDofValue {
                         dof: StructuralTranslationDof::Ux,
                         value: PrescribedValue::Constant(Displacement::new(meters)),
@@ -1601,14 +1613,18 @@ fn preflight_admits_a_reference_point_wrench_through_distributing_coupling() {
             constraint_id: "anchor".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Fixed {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[0]))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[0])),
+                ),
             },
         }),
         AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "remote_load".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[3]))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[3])),
+                ),
                 reference_point: ReferencePoint {
                     reference_point_id: "control".into(),
                     position: Position::new([1.0 / 3.0; 3]),
@@ -1640,7 +1656,6 @@ fn preflight_admits_a_reference_point_wrench_through_distributing_coupling() {
     assert!(result.is_ok(), "{:?}", result.err());
 }
 
-
 // witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
 //   linear_structural/tet4/numerical_kernel; coverage: partial;
 //   boundary: A reference-point wrench solves through distributing coupling on a fixture solid.
@@ -1665,14 +1680,18 @@ fn reference_point_wrench_solves_through_distributing_coupling() {
             constraint_id: "anchor".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Fixed {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[0]))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[0])),
+                ),
             },
         }),
         AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "remote_load".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[3]))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(&boundary_ids[3])),
+                ),
                 reference_point: ReferencePoint {
                     reference_point_id: "control".into(),
                     position: Position::new([1.0 / 3.0; 3]),

@@ -255,7 +255,11 @@ fn sound_power() -> OperationFacts {
         "sound_power",
         "Mean acoustic power of a harmonic analysis through a face region (outward positive).",
         vec![
-            parameter("analysis", OperationTypePattern::Any, OperationParameterArity::Required),
+            parameter(
+                "analysis",
+                OperationTypePattern::Any,
+                OperationParameterArity::Required,
+            ),
             parameter("through", region(), OperationParameterArity::Required),
         ],
         OperationTypePattern::Any,

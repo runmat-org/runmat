@@ -115,7 +115,10 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
     let aluminum = model
         .material_assignments
         .iter_mut()
-        .find(|assignment| assignment.selected_region_id() == Some(runmat_meshing_core::fixtures::fixture_region("mid_aluminum").as_str()))
+        .find(|assignment| {
+            assignment.selected_region_id()
+                == Some(runmat_meshing_core::fixtures::fixture_region("mid_aluminum").as_str())
+        })
         .unwrap();
     aluminum.assigned_material_id = "mat_aluminum".into();
     aluminum.confidence = runmat_analysis_core::EvidenceConfidence::Verified;

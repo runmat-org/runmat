@@ -38,7 +38,11 @@ impl OutputOperation {
                 if measure != crate::PhysicalDimension::AREA {
                     return Err("flux requires a face region");
                 }
-let FeaType::Vector { element, length: Some(3) } = field.value.as_ref() else {
+                let FeaType::Vector {
+                    element,
+                    length: Some(3),
+                } = field.value.as_ref()
+                else {
                     return Err("flux requires a three-component vector field");
                 };
                 let FeaType::Quantity(dimension) = element.as_ref() else {
@@ -185,7 +189,9 @@ fn project_type(operation: OutputOperation, value: &FeaType) -> Result<FeaType, 
         OutputOperation::Level => match field.value.as_ref() {
             value if value.is_numeric() => Ok(projected_field(
                 field,
-                Box::new(FeaType::Quantity(crate::PhysicalDimension::DIMENSIONLESS.into())),
+                Box::new(FeaType::Quantity(
+                    crate::PhysicalDimension::DIMENSIONLESS.into(),
+                )),
                 Some(runmat_analysis_core::ObservationQuantity::SoundPressureLevel),
             )),
             _ => Err("level requires a complex scalar acoustic pressure field"),

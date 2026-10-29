@@ -153,7 +153,9 @@ pub(super) async fn run() {
                 entry.definition.clone(),
                 entry.sample,
                 partitions,
-                entry.definition.stored_entities(imported.manifest.entity_counts),
+                entry
+                    .definition
+                    .stored_entities(imported.manifest.entity_counts),
             )
             .unwrap();
             let original = expected

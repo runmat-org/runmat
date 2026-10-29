@@ -61,10 +61,7 @@ impl CompiledPropertyMap {
                 }
             }
         }
-        add(
-            &mut total,
-            map_slots::<usize, ()>(owners.len())?,
-        )?;
+        add(&mut total, map_slots::<usize, ()>(owners.len())?)?;
         // Beam/shell metadata has variable section/ply owners. Its conservative
         // shared projection remains additional to map slots, never a solid-map tree.
         add(

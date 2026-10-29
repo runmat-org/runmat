@@ -30,7 +30,9 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let assignment = model.material_assignments.first().unwrap();
     let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
-        assignment.selected_region_id().expect("fixture uses selected material region"),
+        assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region"),
     )
     .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
@@ -80,7 +82,9 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         shell_sections: Vec::new(),
     });
     let mut beam_assignment = model.material_assignments[0].clone();
-    beam_assignment.target = runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span"));
+    beam_assignment.target = runmat_analysis_core::PropertyRegionTarget::beam(
+        runmat_meshing_core::fixtures::fixture_edge("beam_span"),
+    );
     model.material_assignments.push(beam_assignment);
     model
         .constraints
@@ -131,9 +135,10 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     let outputs = NativeAnalysisKernel

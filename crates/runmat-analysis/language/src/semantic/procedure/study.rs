@@ -163,16 +163,23 @@ fn require_sections_for_structural_domains(
     closure: &[&AuthoredModel],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) {
-    use runmat_analysis_core::{AuthoredPropertyAssignment, AuthoredPropertyTarget, AuthoredRegionSource};
+    use runmat_analysis_core::{
+        AuthoredPropertyAssignment, AuthoredPropertyTarget, AuthoredRegionSource,
+    };
     let has_section = |target: &AuthoredPropertyTarget| {
         closure.iter().any(|model| {
-            model.property_assignments.iter().any(|assignment| match assignment {
-                AuthoredPropertyAssignment::Section { target: section, .. } => section == target,
-                AuthoredPropertyAssignment::Layup { target: layup, .. } => {
-                    matches!(target, AuthoredPropertyTarget::Shell(shell) if shell == layup)
-                }
-                AuthoredPropertyAssignment::Orientation { .. } => false,
-            })
+            model
+                .property_assignments
+                .iter()
+                .any(|assignment| match assignment {
+                    AuthoredPropertyAssignment::Section {
+                        target: section, ..
+                    } => section == target,
+                    AuthoredPropertyAssignment::Layup { target: layup, .. } => {
+                        matches!(target, AuthoredPropertyTarget::Shell(shell) if shell == layup)
+                    }
+                    AuthoredPropertyAssignment::Orientation { .. } => false,
+                })
         })
     };
     for model in closure {
@@ -192,7 +199,10 @@ fn require_sections_for_structural_domains(
             };
             let region = match source {
                 AuthoredRegionSource::Geometry(region) => {
-                    format!("geometry.{}.region.{}", region.geometry_id, region.region_id)
+                    format!(
+                        "geometry.{}.region.{}",
+                        region.geometry_id, region.region_id
+                    )
                 }
                 AuthoredRegionSource::ModelInput(input) => format!("input.{}", input.input_id),
             };

@@ -13,10 +13,16 @@ pub(crate) fn registry() -> ExactEvaluatorRegistry {
             id: CurveEvaluatorId::new("curve:1").unwrap(),
             implementation: ExactCurveImplementation::Portable {
                 definition: ExactCurveDefinition::Circle {
-                    center_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
+                    center_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([0.0, 0.0, 0.0]),
                     x_axis: [1.0, 0.0, 0.0],
                     y_axis: [0.0, 1.0, 0.0],
-                    radius_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(1.0),
+                    radius_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Length,
+                        _,
+                    >::new(1.0),
                     domain: range(0.0, std::f64::consts::TAU),
                     periodic: true,
                 },
@@ -38,7 +44,10 @@ pub(crate) fn registry() -> ExactEvaluatorRegistry {
             id: SurfaceEvaluatorId::new("surface:1").unwrap(),
             implementation: ExactSurfaceImplementation::Portable {
                 definition: ExactSurfaceDefinition::Plane {
-                    origin_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
+                    origin_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([0.0, 0.0, 0.0]),
                     u_axis_m_per_parameter: [1.0, 0.0, 0.0],
                     v_axis_m_per_parameter: [0.0, 1.0, 0.0],
                     domains: [range(-2.0, 2.0), range(-2.0, 2.0)],

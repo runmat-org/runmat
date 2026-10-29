@@ -19,7 +19,8 @@ pub use materialization::{
     canonical_payload_materialization_resident_bytes_estimate,
     canonical_payload_typed_resident_bytes_estimate,
     canonical_value_materialization_resident_bytes_estimate,
-    canonical_value_typed_resident_bytes_estimate, projected_canonical_encoding_resident_bytes_estimate,
+    canonical_value_typed_resident_bytes_estimate,
+    projected_canonical_encoding_resident_bytes_estimate,
     projected_canonical_materialization_resident_bytes_estimate,
     projected_canonical_typed_decode_resident_bytes_estimate,
     CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
@@ -27,17 +28,17 @@ pub use materialization::{
 
 mod json;
 mod typed_resident;
-pub use typed_resident::typed_resident_bytes_estimate;
 pub use json::{encode_json_bounded, profile_json_bytes, write_json_bounded};
+pub use typed_resident::typed_resident_bytes_estimate;
 
 mod controlled_serde;
 mod serialized_profile;
 mod value;
 
 pub use serialized_profile::{
-    profile_canonical_encoding, profile_canonical_encoding_with_control, profile_serialized,
-    profile_direct_materialization, profile_serialized_shape, profile_serialized_with_control,
-    profile_typed_resident_bytes,
+    profile_canonical_encoding, profile_canonical_encoding_with_control,
+    profile_direct_materialization, profile_serialized, profile_serialized_shape,
+    profile_serialized_with_control, profile_typed_resident_bytes,
     serialized_materialization_resident_bytes_estimate, CanonicalEncodingProfile,
     SerializedCanonicalProfile,
 };

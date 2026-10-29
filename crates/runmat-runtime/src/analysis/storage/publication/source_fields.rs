@@ -68,9 +68,7 @@ impl AnalysisPublicationBuilder {
                 if field.shape
                     != entry
                         .definition
-                        .storage_shape(
-                            entry.definition.stored_entities(source.entity_counts),
-                        )
+                        .storage_shape(entry.definition.stored_entities(source.entity_counts))
                         .map_err(|error| error.to_string())?
                 {
                     return Err("original source shape differs from staged data".into());
@@ -92,10 +90,9 @@ impl AnalysisPublicationBuilder {
                     .iter()
                     .find(|field| field.field_id == entry.definition.field_id())
                     .ok_or("original source channel disappeared")?;
-                let payload =
-                    self.read_staged_chunks(|mut read| {
-                super::super::field_reader::read_field_payload(field, &mut read)
-            })?;
+                let payload = self.read_staged_chunks(|mut read| {
+                    super::super::field_reader::read_field_payload(field, &mut read)
+                })?;
                 let recovered = RecoveredField::new(
                     entry.definition.clone(),
                     entry.sample,

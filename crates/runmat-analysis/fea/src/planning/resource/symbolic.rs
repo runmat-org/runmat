@@ -503,7 +503,9 @@ impl CliqueAdjacency {
         let gather = |index: usize, scratch: &mut Vec<usize>| {
             scratch.clear();
             for &clique in &incidence[incidence_offsets[index]..incidence_offsets[index + 1]] {
-                scratch.extend_from_slice(&members[clique_offsets[clique]..clique_offsets[clique + 1]]);
+                scratch.extend_from_slice(
+                    &members[clique_offsets[clique]..clique_offsets[clique + 1]],
+                );
             }
             scratch.sort_unstable();
             scratch.dedup();
@@ -610,7 +612,9 @@ mod tests {
     fn cliques(dimension: usize, count: usize, size: usize, seed: u64) -> Vec<Vec<usize>> {
         let mut state = seed;
         let mut next = || {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (state >> 33) as usize % dimension
         };
         (0..count)

@@ -33,8 +33,13 @@ unsafe impl Sync for JsFsProvider {}
 
 #[async_trait(?Send)]
 impl FsProvider for JsFsProvider {
-    fn supports_workspace_transactions(&self) -> bool { self.funcs.supports_workspace_transactions() }
-    async fn capture_workspace(&self, request: runmat_filesystem::workspace::WorkspaceCaptureRequest) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
+    fn supports_workspace_transactions(&self) -> bool {
+        self.funcs.supports_workspace_transactions()
+    }
+    async fn capture_workspace(
+        &self,
+        request: runmat_filesystem::workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
         self.funcs.capture_workspace(&request).await
     }
 

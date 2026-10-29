@@ -40,7 +40,9 @@ pub(super) fn solve(
     model: &AnalysisModel,
     step_id: &str,
     sample: crate::excitation::ExcitationSamplePoint<'_>,
-    mut solve_fixed: impl FnMut(&AnalysisModel) -> Result<CanonicalElectricalResponse, ElectricalStaticError>,
+    mut solve_fixed: impl FnMut(
+        &AnalysisModel,
+    ) -> Result<CanonicalElectricalResponse, ElectricalStaticError>,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
     let step = model
         .sequence
@@ -125,7 +127,9 @@ pub(super) fn solve(
         for case in &mut model.excitation_cases {
             case.action_ids.retain(|id| !removed.contains(id));
         }
-        model.excitation_cases.retain(|case| !case.action_ids.is_empty());
+        model
+            .excitation_cases
+            .retain(|case| !case.action_ids.is_empty());
         model
     };
     let fixed = |model: &AnalysisModel, potentials: &[f64], keep_sources: bool| {
@@ -206,10 +210,7 @@ pub(super) fn solve(
 /// Gaussian elimination with partial pivoting for the small terminal system.
 fn solve_dense(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
     let n = b.len();
-    let scale = a
-        .iter()
-        .flatten()
-        .fold(0.0_f64, |m, v| m.max(v.abs()));
+    let scale = a.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs()));
     if !(scale > 0.0) {
         return None;
     }

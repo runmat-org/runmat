@@ -410,7 +410,9 @@ fn fixture() -> (
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let volume_region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
-        model.material_assignments[0].selected_region_id().expect("fixture uses selected material region"),
+        model.material_assignments[0]
+            .selected_region_id()
+            .expect("fixture uses selected material region"),
     )
     .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = volume_region.clone();

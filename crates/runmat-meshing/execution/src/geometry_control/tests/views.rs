@@ -14,7 +14,8 @@ fn stage_views_share_retention_work_and_rejection_without_reset() {
     let stage = MeshingStageControl::new(
         MeshingStageKind::OrderElevation,
         0,
-        &request, ceilings,
+        &request,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )

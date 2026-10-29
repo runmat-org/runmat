@@ -202,7 +202,10 @@ fn box_selectors(source: &str) -> String {
         "box.brep",
         BOX_BREP,
         runmat_geometry_io::GeometryFormat::Brep,
-        &runmat_geometry_io::ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..runmat_geometry_io::ExactCadImportOptions::default() },
+        &runmat_geometry_io::ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..runmat_geometry_io::ExactCadImportOptions::default()
+        },
         &runmat_geometry_io::GeometryImportContext::new(),
     )
     .unwrap();
@@ -210,7 +213,10 @@ fn box_selectors(source: &str) -> String {
         "\"solid_000001\"",
         &format!(
             "\"{}\"",
-            imported.topology.regions[0].id.analysis_selection_id().unwrap()
+            imported.topology.regions[0]
+                .id
+                .analysis_selection_id()
+                .unwrap()
         ),
     );
     for (ordinal, face) in &imported.source_face_ids {
@@ -287,7 +293,10 @@ async fn run_family(family: &'static str, source: &str, nodes: u32) -> RemoteFam
     let root = directory.path();
     std::env::set_var("RUNMAT_EXECUTION_STATE_DIR", root.join("native-state"));
     std::env::set_var("RUNMAT_FEA_ARTIFACT_ROOT", root.join("runtime-artifacts"));
-    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.join("study-artifacts"));
+    std::env::set_var(
+        "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        root.join("study-artifacts"),
+    );
     runmat_runtime::analysis::storage::configure_artifact_store_from_env().unwrap();
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
@@ -356,8 +365,16 @@ async fn run_family(family: &'static str, source: &str, nodes: u32) -> RemoteFam
         );
     }
     let mut bundle = Vec::new();
-    write_bundle(&builder.build().unwrap(), &mut bundle, ArchiveLimits::default()).unwrap();
-    let cpu_millicores = expectation.local_execution.checked_cpu_millicores().unwrap();
+    write_bundle(
+        &builder.build().unwrap(),
+        &mut bundle,
+        ArchiveLimits::default(),
+    )
+    .unwrap();
+    let cpu_millicores = expectation
+        .local_execution
+        .checked_cpu_millicores()
+        .unwrap();
     let allocation = AllocationResources {
         cpu_millicores: cpu_millicores.into(),
         memory_bytes: 4 << 30,
@@ -395,9 +412,13 @@ async fn run_family(family: &'static str, source: &str, nodes: u32) -> RemoteFam
             .map(|object| (object.reference.logical_digest, object.bytes))
             .collect(),
     ));
-    let remote =
-        import_family_study_result(cache, response, &expectation, ObjectInventoryLimits::default())
-            .unwrap_or_else(|error| panic!("{family}: remote import failed: {error}"));
+    let remote = import_family_study_result(
+        cache,
+        response,
+        &expectation,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap_or_else(|error| panic!("{family}: remote import failed: {error}"));
     let remote_digest = remote.numerical_digest().unwrap();
     // The imported closure publishes through the same owner as a local run.
     let publication =
@@ -522,7 +543,9 @@ where
                     run_key: run_key.clone(),
                     limits: FrameLimits::default(),
                 },
-                kernel: Arc::new(runmat_execution_runner_native::native_meshing_kernel_dispatcher()),
+                kernel: Arc::new(
+                    runmat_execution_runner_native::native_meshing_kernel_dispatcher(),
+                ),
                 meshing_limits: runmat_execution_runner_native::NativeMeshingHostLimits::default(),
             },
         )));

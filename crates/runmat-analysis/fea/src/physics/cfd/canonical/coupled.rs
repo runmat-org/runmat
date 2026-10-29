@@ -15,9 +15,9 @@ use crate::{
     solve::shared_sparse::{ambient_plan, control, with_plan, CsrArrays},
 };
 use runmat_sparse_solvers::{
+    krylov::GmresWorkspace,
     krylov::PreconditionerSide,
     operator::FnOperator,
-    krylov::GmresWorkspace,
     precond::{Amg, AmgOptions},
     Preconditioner, SolverError, SolverResult,
 };
@@ -90,7 +90,8 @@ fn momentum_rows(
     let mut out = vec![0.0; 3 * n];
     for k in 0..3 {
         let component = u.iter().map(|v| v[k]).collect::<Vec<_>>();
-        let action = spmv(&frozen.matrix, &component).map_err(|e| Error::Operator(e.to_string()))?;
+        let action =
+            spmv(&frozen.matrix, &component).map_err(|e| Error::Operator(e.to_string()))?;
         for c in 0..n {
             out[k * n + c] = action[c] - rhs[c][k];
         }
@@ -459,11 +460,8 @@ pub(super) fn solve_with_time(
         let base_residual = residual(p, &frozen, &u, &pressure_values)?;
         let (laplacian, outlets) = pressure_schur(p, &frozen.rf, &frozen.rau)?;
         let pressure_arrays = CsrArrays::of(&laplacian);
-        let blocks = super::jacobian::component_operators(
-            p,
-            &frozen.matrix,
-            &frozen.viscosity_gradients,
-        )?;
+        let blocks =
+            super::jacobian::component_operators(p, &frozen.matrix, &frozen.viscosity_gradients)?;
         let planned = PreconditionerEnvelope::for_counts(n as u64, p.reservation.sparse_entries)
             .ok_or(Error::Resource("planned preconditioner envelope"))?;
         let solved = with_plan(ambient_plan(), || {
@@ -555,8 +553,13 @@ pub(super) fn solve_with_time(
             u[c] = add(u[c], du[c]);
             pressure_values[c] += dp[c];
         }
-        p.pressure_reference_plan.normalize(p, &mut pressure_values)?;
-        if u.iter().flatten().chain(&pressure_values).any(|v| !v.is_finite()) {
+        p.pressure_reference_plan
+            .normalize(p, &mut pressure_values)?;
+        if u.iter()
+            .flatten()
+            .chain(&pressure_values)
+            .any(|v| !v.is_finite())
+        {
             return Err(Error::Invalid("nonfinite coupled iterate"));
         }
         q = face_flux(p, &frozen, &u, &pressure_values)?;
@@ -623,4 +626,3 @@ pub(super) fn solve_with_time(
         worst_cell: worst,
     })
 }
-

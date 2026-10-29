@@ -9,7 +9,8 @@ const ROTATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const ROTATION_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&ROTATION_SIGNATURES);
+pub const ROTATION_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&ROTATION_SIGNATURES);
 const ROTATION_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-rotation",
     title: "Select nodal rotation",

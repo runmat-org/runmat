@@ -114,7 +114,9 @@ pub(super) fn workload() -> MaxwellHarmonicWorkload {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: boundary.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),
+                    ),
                 },
             }));
     }
@@ -262,7 +264,9 @@ fn authored_frequency_pec_material_source_and_lifecycle_negatives_fail_closed() 
     changed.model.constraints[0] = AnalysisConstraint::Electrical(ElectricalConstraint {
         constraint_id: "potential".into(),
         kind: ElectricalConstraintKind::PrescribedPotential {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_left",
+            )),
             value: PrescribedValue::Constant(ElectricPotential::new(0.0)),
         },
     });
@@ -289,7 +293,9 @@ fn authored_frequency_pec_material_source_and_lifecycle_negatives_fail_closed() 
     changed.model.constraints[0] = AnalysisConstraint::Magnetic(MagneticConstraint {
         constraint_id: "magnetic".into(),
         kind: MagneticConstraintKind::VectorPotentialGround {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_left",
+            )),
         },
     });
     accept(changed);

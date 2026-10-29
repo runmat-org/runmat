@@ -31,7 +31,8 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });
-    model.material_assignments[0].target = PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::cell(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.cfd = Some(CfdDomain {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
@@ -52,12 +53,16 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
             constraint_id: "wall".into(),
             kind: if nonzero {
                 FluidConstraintKind::MovingWall {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "slab_insulated",
+                    )),
                     velocity: PrescribedValue::Constant(velocity),
                 }
             } else {
                 FluidConstraintKind::NoSlipWall {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "slab_insulated",
+                    )),
                 }
             },
         }));
@@ -66,7 +71,9 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
         .push(AnalysisConstraint::Fluid(FluidConstraint {
             constraint_id: "inlet".into(),
             kind: FluidConstraintKind::PrescribedVelocity {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Constant(velocity),
             },
         }));

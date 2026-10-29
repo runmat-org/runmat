@@ -18,7 +18,11 @@ pub(super) fn retained_field_identities(
         &result.energy_storage_rate_snapshots,
         &result.interface_temperature_snapshots,
     ];
-    let count = if result.interface_node_ids.is_empty() { 4 } else { 5 };
+    let count = if result.interface_node_ids.is_empty() {
+        4
+    } else {
+        5
+    };
     result
         .time_points_s
         .iter()

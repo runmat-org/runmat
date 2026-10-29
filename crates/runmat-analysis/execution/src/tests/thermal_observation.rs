@@ -158,7 +158,8 @@ fn thermal_observation_fanout_uses_published_sample_and_reads_only_selected_fiel
                 program_revision: revision(),
                 chunk_bytes: 1024,
                 inventory_limits: limits,
-                local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             };
             let sample = RecoveredFieldSample::TimeSeconds(manifest.time_points_s[1]);
             let fanout = prepare_observation_fanout(&store, prepare(1), sample, None).unwrap();

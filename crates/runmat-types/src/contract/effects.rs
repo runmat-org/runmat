@@ -51,8 +51,11 @@ mod tests {
 
     #[test]
     fn deterministic_value_functions_may_suspend_but_not_observe_external_state() {
-        assert!(EffectSet(BTreeSet::from([EffectKind::MaySuspend, EffectKind::MayThrow]))
-            .is_deterministic_value_function());
+        assert!(EffectSet(BTreeSet::from([
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow
+        ]))
+        .is_deterministic_value_function());
         for forbidden in [
             EffectKind::WorkspaceRead,
             EffectKind::FilesystemRead,
@@ -61,8 +64,10 @@ mod tests {
             EffectKind::HostCallback,
             EffectKind::Unknown,
         ] {
-            assert!(!EffectSet(BTreeSet::from([EffectKind::MaySuspend, forbidden]))
-                .is_deterministic_value_function());
+            assert!(
+                !EffectSet(BTreeSet::from([EffectKind::MaySuspend, forbidden]))
+                    .is_deterministic_value_function()
+            );
         }
     }
 

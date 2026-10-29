@@ -100,7 +100,9 @@ fn native_solve_receipt_and_copy_only_all_face_recovery_survive_cold_store() {
                 entry.definition.clone(),
                 entry.sample,
                 partitions,
-                entry.definition.stored_entities(cold.manifest.entity_counts),
+                entry
+                    .definition
+                    .stored_entities(cold.manifest.entity_counts),
             )
             .unwrap();
             assert_eq!(&field, original);

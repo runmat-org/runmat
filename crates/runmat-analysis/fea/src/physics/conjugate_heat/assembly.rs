@@ -3,6 +3,8 @@ use super::{
     velocity::{lift, CellVelocity},
     ConjugateHeatError as Error, ConjugateHeatInput,
 };
+pub(super) use crate::physics::thermal_interface::InterfaceLaw;
+use crate::physics::thermal_interface::{self, add_conductance, InterfaceDofs, InterfacePlan};
 use crate::{
     algebra::{
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
@@ -14,10 +16,6 @@ use crate::{
     },
     topology::AnalysisProjection,
 };
-use crate::physics::thermal_interface::{
-    self, add_conductance, InterfaceDofs, InterfacePlan,
-};
-pub(super) use crate::physics::thermal_interface::InterfaceLaw;
 use runmat_analysis_core::{AnalysisConstraint, BoundaryOperator, ThermalConstraintKind};
 use runmat_meshing_core::BoundaryFaceRole;
 use std::collections::BTreeSet;
@@ -151,8 +149,11 @@ fn supg_tau(
     if speed == 0.0 {
         return Ok(0.0);
     }
-    let corners: [[f64; 3]; 4] =
-        std::array::from_fn(|i| projection.nodes[e.node_indices[i]].coordinates_m.canonical_value());
+    let corners: [[f64; 3]; 4] = std::array::from_fn(|i| {
+        projection.nodes[e.node_indices[i]]
+            .coordinates_m
+            .canonical_value()
+    });
     let gradients = barycentric_gradients(corners)?;
     let projected = gradients.iter().map(|g| dot(u, *g).abs()).sum::<f64>();
     if projected <= 0.0 || !projected.is_finite() {
@@ -243,7 +244,8 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
             .material
             .require_mass_density()
             .map_err(|e| Error::InvalidDetail(e.to_string()))?;
-        let capacity = density.canonical_value() * thermal.specific_heat_j_per_kgk.canonical_value();
+        let capacity =
+            density.canonical_value() * thermal.specific_heat_j_per_kgk.canonical_value();
         let conductivity = thermal.conductivity_w_per_mk.canonical_value();
         if !conductivity.is_finite()
             || conductivity <= 0.0

@@ -9,7 +9,8 @@ const BEAM_AXIAL_FORCE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSig
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const BEAM_AXIAL_FORCE_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&BEAM_AXIAL_FORCE_SIGNATURES);
+pub const BEAM_AXIAL_FORCE_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&BEAM_AXIAL_FORCE_SIGNATURES);
 const BEAM_AXIAL_FORCE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-beam-axial-force",
     title: "Select beam axial force",

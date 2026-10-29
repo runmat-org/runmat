@@ -77,7 +77,9 @@ fn post_mesh_ground_gauge_and_material_limits_are_not_inferred() {
     let mut foreign_ground = model.clone();
     if let AnalysisConstraint::Magnetic(ground) = &mut foreign_ground.constraints[0] {
         ground.kind = MagneticConstraintKind::VectorPotentialGround {
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("unknown-face")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "unknown-face",
+            )),
         };
     }
     let mut coupled_material = model;
@@ -87,7 +89,9 @@ fn post_mesh_ground_gauge_and_material_limits_are_not_inferred() {
         .unwrap()
         .resistive_heating_coefficient = runmat_types::physical::InverseTemperature::new(1.0);
     // Magnetostatics uses only the permeability; a conductivity law is not an error.
-    assert!(plan_magnetic_study_product(compiled(coupled_material, &mesh), &mesh, policy()).is_ok());
+    assert!(
+        plan_magnetic_study_product(compiled(coupled_material, &mesh), &mesh, policy()).is_ok()
+    );
     for changed in [missing_ground, missing_gauge, foreign_ground] {
         assert!(matches!(
             plan_magnetic_study_product(compiled(changed, &mesh), &mesh, policy()),

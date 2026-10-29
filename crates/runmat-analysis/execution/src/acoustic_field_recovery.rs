@@ -122,11 +122,8 @@ pub fn prepare_acoustic_field_recovery(
         p.output_policy.inventory_limits(),
     )?;
     let mut inputs = vec![request_objects, p.workload, p.mesh, p.source_result];
-    let resource_plan = build_prepared_acoustic_field_recovery_resource_plan(
-        &request,
-        &inputs,
-        p.output_policy,
-    )?;
+    let resource_plan =
+        build_prepared_acoustic_field_recovery_resource_plan(&request, &inputs, p.output_policy)?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),
@@ -242,8 +239,7 @@ pub fn build_prepared_acoustic_field_recovery_resource_plan(
             "acoustic recovery request, workload or mesh differs from its admitted closure",
         ));
     }
-    if acoustic_field_recovery_partition_count(request)? >= policy.inventory_limits().max_objects
-    {
+    if acoustic_field_recovery_partition_count(request)? >= policy.inventory_limits().max_objects {
         return Err(invalid(
             "acoustic recovery partition inventory exceeds output policy",
         ));
@@ -325,7 +321,9 @@ pub fn import_acoustic_recovered_fields(
         prepared.output_policy,
     )?;
     if expected != prepared.resource_plan {
-        return Err(invalid("acoustic recovery import resource authority differs"));
+        return Err(invalid(
+            "acoustic recovery import resource authority differs",
+        ));
     }
     let input = |kind| {
         prepared

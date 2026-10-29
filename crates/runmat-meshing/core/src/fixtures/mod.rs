@@ -15,11 +15,11 @@ pub use solver_mesh::{
     three_region_tetrahedron_solver_mesh, three_region_tetrahedron_solver_mesh_with_order,
 };
 
-use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
 };
+use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 
 /// The occurrence of a named entity in every meshing-owned fixture mesh.
 ///

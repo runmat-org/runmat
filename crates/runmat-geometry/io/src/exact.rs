@@ -138,10 +138,11 @@ pub(crate) fn exact_import_units(
     let kernel_unit = match format {
         OcctCadFormat::Step | OcctCadFormat::Iges => match evidence.overridden_declared_unit() {
             Some(declared) => LengthUnit::from_meters_per_unit(
-                LengthUnit::Millimeter.meters_per_unit() * evidence
-                    .uniform_unit()
-                    .expect("authored override carries its unit")
-                    .meters_per_unit()
+                LengthUnit::Millimeter.meters_per_unit()
+                    * evidence
+                        .uniform_unit()
+                        .expect("authored override carries its unit")
+                        .meters_per_unit()
                     / declared.meters_per_unit(),
             )
             .ok_or_else(|| {

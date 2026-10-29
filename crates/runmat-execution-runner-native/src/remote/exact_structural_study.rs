@@ -370,19 +370,25 @@ mod allocation_tests {
         assert!(admit_analysis_task_resources(&resources(0), &[], serial, None).is_ok());
         let mut fractional = resources(0);
         fractional.cpu_millicores = 500;
-        assert!(admit_analysis_task_resources(&fractional, &[], serial, None)
-            .unwrap_err()
-            .contains("allocated CPU differs"));
+        assert!(
+            admit_analysis_task_resources(&fractional, &[], serial, None)
+                .unwrap_err()
+                .contains("allocated CPU differs")
+        );
         let parallel = runmat_analysis_fea::planning::resource::LocalExecutionPlan::fixed(
             runmat_analysis_fea::planning::resource::LocalThreadCount::new(2).unwrap(),
         )
         .unwrap();
-        assert!(admit_analysis_task_resources(&resources(0), &[], parallel, None)
-            .unwrap_err()
-            .contains("allocated CPU differs"));
-        assert!(admit_analysis_task_resources(&resources(1), &[], serial, None)
-            .unwrap_err()
-            .contains("immutable structural-study request"));
+        assert!(
+            admit_analysis_task_resources(&resources(0), &[], parallel, None)
+                .unwrap_err()
+                .contains("allocated CPU differs")
+        );
+        assert!(
+            admit_analysis_task_resources(&resources(1), &[], serial, None)
+                .unwrap_err()
+                .contains("immutable structural-study request")
+        );
         let requested = runmat_execution::resource::AcceleratorRequest {
             class: runmat_execution::resource::AcceleratorClass::new("gpu.test").unwrap(),
             count: 1,
@@ -420,8 +426,7 @@ mod allocation_tests {
         assert_eq!(capped.scratch_bytes, unbounded.scratch_bytes);
         assert_eq!(capped.cpu_millicores, unbounded.cpu_millicores);
         // A policy above the allocation never raises the request past what was granted.
-        let above =
-            admit_analysis_task_resources(&allocation, &[], serial, Some(1 << 30)).unwrap();
+        let above = admit_analysis_task_resources(&allocation, &[], serial, Some(1 << 30)).unwrap();
         assert_eq!(above.memory_bytes, allocation.memory_bytes);
     }
 }

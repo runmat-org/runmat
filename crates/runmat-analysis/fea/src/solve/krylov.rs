@@ -1,6 +1,5 @@
 //! Matrix-free Krylov authority shared by indefinite finite-element solve domains.
 
-
 mod envelope;
 pub(crate) mod right_ilu;
 pub(crate) use envelope::GmresWorkEnvelope;
@@ -95,10 +94,19 @@ pub(crate) fn restarted_gmres<E>(
         fn native_norm(&mut self, values: &[f64]) -> Option<f64> {
             HostKernels::norm(values)
         }
-        fn native_dot(&mut self, left: &[f64], right: &[f64]) -> Option<runmat_sparse_solvers::c64> {
+        fn native_dot(
+            &mut self,
+            left: &[f64],
+            right: &[f64],
+        ) -> Option<runmat_sparse_solvers::c64> {
             HostKernels::dot(left, right)
         }
-        fn native_axpy(&mut self, target: &mut [f64], scale: runmat_sparse_solvers::c64, source: &[f64]) -> bool {
+        fn native_axpy(
+            &mut self,
+            target: &mut [f64],
+            scale: runmat_sparse_solvers::c64,
+            source: &[f64],
+        ) -> bool {
             HostKernels::axpy(target, scale, source)
         }
         fn native_divide(&mut self, target: &mut [f64], source: &[f64], divisor: f64) -> bool {
@@ -113,7 +121,12 @@ pub(crate) fn restarted_gmres<E>(
         ) -> bool {
             HostKernels::project(basis, rows, w, coefficients)
         }
-        fn native_residual(&mut self, rhs: &[f64], product: &[f64], residual: &mut [f64]) -> Option<bool> {
+        fn native_residual(
+            &mut self,
+            rhs: &[f64],
+            product: &[f64],
+            residual: &mut [f64],
+        ) -> Option<bool> {
             HostKernels::residual(rhs, product, residual)
         }
         fn native_equal(&mut self, left: &[f64], right: &[f64]) -> Option<bool> {
@@ -175,7 +188,11 @@ pub(crate) fn restarted_gmres<E>(
             outcome.flag == 0,
             outcome.flag == 4,
             false,
-            if reference_norm > 0.0 { outcome.relres * reference_norm } else { outcome.relres },
+            if reference_norm > 0.0 {
+                outcome.relres * reference_norm
+            } else {
+                outcome.relres
+            },
         ),
         Err(KrylovFailure::Operation(Stop::Operator(error))) => return Err(error),
         Err(KrylovFailure::Operation(Stop::Dimension) | KrylovFailure::Invalid(_)) => {
@@ -196,7 +213,11 @@ pub(crate) fn restarted_gmres<E>(
     if !residual_norm.is_finite() {
         return Ok(None);
     }
-    let reference = if reference_norm > 0.0 { reference_norm } else { residual_norm };
+    let reference = if reference_norm > 0.0 {
+        reference_norm
+    } else {
+        residual_norm
+    };
     Ok(Some(GmresResult {
         solution,
         iterations: u32::try_from(iterations).unwrap_or(u32::MAX),

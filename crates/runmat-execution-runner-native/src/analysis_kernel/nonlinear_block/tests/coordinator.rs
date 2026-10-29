@@ -44,8 +44,9 @@ pub(super) fn preparation_from(
     // The fixture solve supplies no spatial-discretization evidence, so its report is
     // indeterminate. Lifecycle and replay tests publish that labeled result explicitly; a study
     // with the default policy would stop at the accuracy gate instead.
-    workload.model.sequence.steps[0].accuracy.unavailable_evidence =
-        runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
+    workload.model.sequence.steps[0]
+        .accuracy
+        .unavailable_evidence = runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
     let product = plan_nonlinear_solid_study_product(
         super::planning::compiled(&workload, &mesh),
         &mesh,

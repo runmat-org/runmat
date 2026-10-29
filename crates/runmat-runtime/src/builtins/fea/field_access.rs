@@ -99,7 +99,9 @@ pub(super) fn selection_from_field_object(
             }
             Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(hertz))
         }
-        Some(value @ Value::Object(sample)) if sample.class_name().is(identities::FEA_TIME_CLASS) => {
+        Some(value @ Value::Object(sample))
+            if sample.class_name().is(identities::FEA_TIME_CLASS) =>
+        {
             let seconds = super::values::quantity_scalar(
                 builtin,
                 value,

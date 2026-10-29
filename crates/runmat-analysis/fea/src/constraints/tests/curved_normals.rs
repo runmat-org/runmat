@@ -147,7 +147,9 @@ fn curved_tri6_normal_support_solves_tangential_traction_and_recovers_normal_rea
             constraint_id: "curved_face_normal".into(),
             frame: CoordinateFrame::BoundaryNormalTangent,
             kind: StructuralConstraintKind::NormalDisplacement {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
                 value: PrescribedValue::Constant(Displacement::new(0.0)),
             },
         }));
@@ -290,7 +292,9 @@ fn curved_tri6_foundation_adds_independent_normal_stiffness_and_recovered_energy
             constraint_id: "curved_face_normal".into(),
             frame: CoordinateFrame::BoundaryNormalTangent,
             kind: StructuralConstraintKind::NormalDisplacement {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
                 value: PrescribedValue::Constant(Displacement::new(0.0)),
             },
         }));
@@ -299,7 +303,9 @@ fn curved_tri6_foundation_adds_independent_normal_stiffness_and_recovered_energy
         .push(runmat_analysis_core::AnalysisConnector {
             connector_id: "curved_foundation".into(),
             kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
                 modulus: runmat_analysis_core::FoundationModulus::new(modulus),
             },
         });

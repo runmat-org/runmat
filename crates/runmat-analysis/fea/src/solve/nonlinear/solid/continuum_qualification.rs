@@ -201,7 +201,8 @@ fn check_manufactured_cube(quadratic: bool) {
             primary.windows(2).all(|p| (0..3)
                 .all(|i| (p[0].energies[i] < 1e-10 && p[1].energies[i] < 1e-10)
                     || p[1].energies[i] < p[0].energies[i]))
-                && (0..3).all(|i| (primary[1].energies[i] < 1e-10 && primary[2].energies[i] < 1e-10)
+                && (0..3).all(|i| (primary[1].energies[i] < 1e-10
+                    && primary[2].energies[i] < 1e-10)
                     || primary[1].energies[i] / primary[2].energies[i] > 2.0),
             "Tet4 energies: {primary:?}"
         );

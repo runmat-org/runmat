@@ -288,9 +288,10 @@ fn sequence_preparation(
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution,
-        solve_selection: runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
 }
 impl PreparedSerialFeaStudy {

@@ -107,15 +107,13 @@ pub fn persist_thermal_observations(
     completed: &ThermalStudyCompletion,
     source: &ThermalStudyObjectSource,
 ) -> Result<(), String> {
-    capture_artifact_store()?
-        .persist_thermal_observations(run_id, completed, source)
+    capture_artifact_store()?.persist_thermal_observations(run_id, completed, source)
 }
 
 pub fn load_observation_publication(
     run_id: &str,
 ) -> Result<Option<ThermalObservationPublication>, String> {
-    capture_artifact_store()?
-        .load_observation_publication(run_id)
+    capture_artifact_store()?.load_observation_publication(run_id)
 }
 
 pub fn load_observation_history_sample(
@@ -123,8 +121,7 @@ pub fn load_observation_history_sample(
     observation_id: &ObservationId,
     sample: RecoveredFieldSample,
 ) -> Result<ObservationHistoryLookup, String> {
-    capture_artifact_store()?
-        .load_observation_history_sample(run_id, observation_id, sample)
+    capture_artifact_store()?.load_observation_history_sample(run_id, observation_id, sample)
 }
 
 #[cfg(test)]

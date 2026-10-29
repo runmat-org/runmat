@@ -21,8 +21,8 @@ pub fn global_stiffness_matrix(
 ) -> Result<Tetrahedron10Matrix30, Tetrahedron10ElementError> {
     validate_nodes(geometry.nodes_m)?;
     let elasticity = elasticity_matrix(material)?;
-    let moments = runmat_meshing_core::tetrahedron10_stiffness_moments(&geometry.nodes_m)
-        .map_err(|invalidity| match invalidity {
+    let moments = runmat_meshing_core::tetrahedron10_stiffness_moments(&geometry.nodes_m).map_err(
+        |invalidity| match invalidity {
             runmat_meshing_core::Tet10ElementInvalidity::InvertedOrDegenerate => {
                 Tetrahedron10ElementError::DegenerateOrInverted
             }
@@ -32,7 +32,8 @@ pub fn global_stiffness_matrix(
             runmat_meshing_core::Tet10ElementInvalidity::UnconvergedStiffnessQuadrature => {
                 Tetrahedron10ElementError::UnconvergedStiffnessQuadrature
             }
-        })?;
+        },
+    )?;
     let lambda = elasticity[0][1];
     let mu = elasticity[3][3];
     // The isotropic BᵀDB block is λ∂ₐNᵢ∂ᵦNⱼ + μ(δₐᵦ∇Nᵢ·∇Nⱼ + ∂ᵦNᵢ∂ₐNⱼ), integrated term by term.
@@ -45,8 +46,7 @@ pub fn global_stiffness_matrix(
             } else {
                 0.0
             };
-            lambda * moments.moment(i, a, j, b)
-                + mu * (moments.moment(i, b, j, a) + gradient_dot)
+            lambda * moments.moment(i, a, j, b) + mu * (moments.moment(i, b, j, a) + gradient_dot)
         })
     });
     debug_assert_eq!(stiffness.len(), TETRAHEDRON10_ELEMENT_DOF_COUNT);
@@ -88,7 +88,8 @@ mod tests {
                 tensor_tetrahedron_rule(&GAUSS_LEGENDRE_SIXTEEN_UNIT).collect()
             }
         };
-        let mut stiffness = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
+        let mut stiffness =
+            [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
         for (barycentric, weight) in points {
             let gradients = physical_shape_gradients_and_measure(nodes_m, barycentric)
                 .unwrap()
@@ -129,9 +130,13 @@ mod tests {
                 .unwrap()
                 .rule;
             let actual =
-                global_stiffness_matrix(material, Tetrahedron10ElementGeometry { nodes_m }).unwrap();
+                global_stiffness_matrix(material, Tetrahedron10ElementGeometry { nodes_m })
+                    .unwrap();
             let reference = full_b_transpose_d_b(nodes_m, &elasticity, rule);
-            let scale = reference.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs()));
+            let scale = reference
+                .iter()
+                .flatten()
+                .fold(0.0_f64, |m, v| m.max(v.abs()));
             for (row, actual_row) in actual.iter().enumerate() {
                 for (column, actual_value) in actual_row.iter().enumerate() {
                     assert!(
@@ -156,7 +161,9 @@ mod tests {
             poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
             density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
         };
-        assert!(!runmat_meshing_core::is_valid_tetrahedron10_element(&nodes_m));
+        assert!(!runmat_meshing_core::is_valid_tetrahedron10_element(
+            &nodes_m
+        ));
         assert!(matches!(
             global_stiffness_matrix(material, geometry),
             Err(Tetrahedron10ElementError::UnconvergedStiffnessQuadrature

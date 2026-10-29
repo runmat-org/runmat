@@ -124,8 +124,14 @@ pub(crate) fn retained_ordinals(
         for ordinal in range.clone() {
             let sampled = match &spec.sampling {
                 SamplingPolicy::EveryAcceptedIncrement => true,
-                SamplingPolicy::TimeSeconds(times) => times.iter().any(|t| matches_time(ordinal, *t)),
-                SamplingPolicy::TimeIntervalSeconds { start, end, interval } => {
+                SamplingPolicy::TimeSeconds(times) => {
+                    times.iter().any(|t| matches_time(ordinal, *t))
+                }
+                SamplingPolicy::TimeIntervalSeconds {
+                    start,
+                    end,
+                    interval,
+                } => {
                     let t = points[ordinal + 1];
                     t >= *start - 1e-9 * start.abs()
                         && t <= *end + 1e-9 * end.abs()
@@ -300,13 +306,19 @@ impl<'a> FluidTransientBlock<'a> {
             return Err(invalid("fluid temporal block cancelled"));
         }
         let mut intervals = Vec::new();
-        intervals.try_reserve_exact(self.range.len()).map_err(invalid)?;
+        intervals
+            .try_reserve_exact(self.range.len())
+            .map_err(invalid)?;
         let mut retained: Vec<(usize, CanonicalFluidResult)> = Vec::new();
-        retained.try_reserve_exact(self.retain.len()).map_err(invalid)?;
+        retained
+            .try_reserve_exact(self.retain.len())
+            .map_err(invalid)?;
         // Only the latest interval is held beyond the retained set: it is the next predecessor.
         let mut latest: Option<CanonicalFluidResult> = None;
         for ordinal in self.range.clone() {
-            let previous = latest.as_ref().map_or(self.initial, |r| r.original_fields());
+            let previous = latest
+                .as_ref()
+                .map_or(self.initial, |r| r.original_fields());
             let p = self.problem(ordinal + 1)?;
             let interval = p
                 .prepare_backward_euler(

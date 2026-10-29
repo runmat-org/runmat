@@ -32,7 +32,8 @@ pub(crate) fn prepare(
     model.excitations.clear();
     model.signals.clear();
     model.excitation_cases.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.materials[0].elasticity = Some(MaterialElasticityModel::IsotropicLinear(
         MaterialMechanicalModel {
             youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(E),
@@ -75,7 +76,9 @@ pub(crate) fn prepare(
         ),
         (
             "traction",
-            ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
+            ExcitationTarget::Region(RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("slab_right"),
+            )),
             ExcitationDistribution::IntensityPerArea,
         ),
     ] {

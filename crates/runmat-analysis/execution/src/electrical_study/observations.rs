@@ -67,7 +67,9 @@ impl ElectricalStudyCoordinator {
     ) -> AnalysisBridgeResult<()> {
         self.require(ElectricalStudyPhase::AwaitingObservationPartitions)?;
         if self.observation_state.contributions.contains_key(&ordinal) {
-            return Err(invalid("electrical observation partition already completed"));
+            return Err(invalid(
+                "electrical observation partition already completed",
+            ));
         }
         let fanout = self
             .observation_state
@@ -224,7 +226,9 @@ impl ElectricalStudyCoordinator {
             ObservationFieldCatalog::volume_mesh_recovery(
                 recovery.request.clone(),
                 fields.manifest.clone(),
-                SequenceIdentity::from_solver_contract(&self.preparation.workload().model.sequence)?,
+                SequenceIdentity::from_solver_contract(
+                    &self.preparation.workload().model.sequence,
+                )?,
                 self.selected_step().clone(),
             )?,
             self.selected_step(),

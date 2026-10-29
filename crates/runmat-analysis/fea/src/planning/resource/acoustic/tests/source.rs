@@ -45,7 +45,9 @@ fn long_named_complex_volume_flow_evidence_and_cold_result_fit_admitted_payload(
             .excitations
             .push(ExcitationAction::VolumeVelocity(AnalysisExcitation {
                 excitation_id: action_id.clone(),
-                target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
+                target: ExcitationTarget::Region(RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("slab_left"),
+                )),
                 frame: CoordinateFrame::BoundaryNormalTangent,
                 direction: None,
                 distribution: ExcitationDistribution::PreserveResultant,
@@ -164,7 +166,9 @@ fn incident_projection_metadata_and_cold_result_fit_admitted_payload() {
             .push(ExcitationAction::AcousticIncidentPressure(
                 AnalysisExcitation {
                     excitation_id: action_id.clone(),
-                    target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
+                    target: ExcitationTarget::Region(RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_face("slab_left"),
+                    )),
                     frame: CoordinateFrame::BoundaryNormalTangent,
                     direction: None,
                     distribution: ExcitationDistribution::UniformKinematic,
@@ -251,7 +255,9 @@ fn long_named_complex_normal_velocity_evidence_fits_actual_payload() {
             .excitations
             .push(ExcitationAction::NormalVelocity(AnalysisExcitation {
                 excitation_id: ExcitationId(action_id.clone()),
-                target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"))),
+                target: ExcitationTarget::Region(RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("slab_left"),
+                )),
                 frame: CoordinateFrame::BoundaryNormalTangent,
                 direction: None,
                 distribution: ExcitationDistribution::UniformKinematic,

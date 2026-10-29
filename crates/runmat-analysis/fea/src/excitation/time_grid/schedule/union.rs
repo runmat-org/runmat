@@ -35,8 +35,7 @@ impl Iterator for OrderedUnion<'_> {
         // One coordinate per cluster; an authored event or required time (later sources)
         // names it over a computed grid point.
         let mut chosen = value;
-        for (index, (source, position)) in
-            self.sources.iter().zip(&mut self.positions).enumerate()
+        for (index, (source, position)) in self.sources.iter().zip(&mut self.positions).enumerate()
         {
             while let Some(v) = source.get(*position).copied() {
                 if v - value > self.tolerance {

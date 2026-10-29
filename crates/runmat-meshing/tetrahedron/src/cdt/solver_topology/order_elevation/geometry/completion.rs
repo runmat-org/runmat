@@ -138,8 +138,9 @@ fn derive_surface_parameters(
     } = scratch;
     let source_nodes = &evaluation.sources.nodes;
     let face = evaluation.sources.face(surface_use.source_face_id)?;
-    let periods = ExactSurfaceEvaluator::periodicity(evaluation.evaluator, &face.surface_evaluator_id)
-        .map_err(error::geometry)?;
+    let periods =
+        ExactSurfaceEvaluator::periodicity(evaluation.evaluator, &face.surface_evaluator_id)
+            .map_err(error::geometry)?;
     let bounds =
         ExactSurfaceEvaluator::parameter_bounds(evaluation.evaluator, &face.surface_evaluator_id)
             .map_err(error::geometry)?;

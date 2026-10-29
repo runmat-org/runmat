@@ -11,7 +11,6 @@ use super::{
     RecoveredFieldEntityCounts, RecoveredFieldError, RecoveredFieldSample,
 };
 
-
 #[derive(Clone, Debug)]
 pub struct RecoveredFieldCatalog {
     topology_digest: Digest,

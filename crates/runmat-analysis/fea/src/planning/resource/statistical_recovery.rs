@@ -21,8 +21,9 @@ pub fn build_statistical_field_recovery_resource_plan(
     let (partitions, construction_workspace_bytes) =
         statistical_field_recovery_shape(procedure, request)?;
     let bytes = partitions.iter().try_fold(0u64, |n, v| {
-        n.checked_add(*v)
-            .ok_or(ResourcePlanningError::Overflow("statistical recovery output"))
+        n.checked_add(*v).ok_or(ResourcePlanningError::Overflow(
+            "statistical recovery output",
+        ))
     })?;
     if facts.output.encoded_payload_bytes_upper_bound.0 != bytes {
         return Err(ResourcePlanningError::Invalid(

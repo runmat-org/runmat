@@ -70,9 +70,7 @@ impl FeaResourceDemand {
             (
                 Self::MagneticFieldRecovery(demand) | Self::StatisticalFieldRecovery(demand),
                 AnalysisNumericalObjectKind::Field,
-            ) => {
-                Some(&demand.output)
-            }
+            ) => Some(&demand.output),
             (Self::ElectricalFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }

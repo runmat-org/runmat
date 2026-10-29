@@ -134,9 +134,7 @@ pub(crate) fn execute(
                 )?;
             result.validate_publication_request(&publication)?;
             let fields = result.state_fields();
-            check_profile(
-                SemanticStatePublicationProfileSource::AcousticResponseFields(&fields),
-            )?;
+            check_profile(SemanticStatePublicationProfileSource::AcousticResponseFields(&fields))?;
             CanonicalSemanticState::from_acoustic_response_publication(&publication, &result)?
         }
         SemanticStatePublicationSource::ThermalPrimaryField => {

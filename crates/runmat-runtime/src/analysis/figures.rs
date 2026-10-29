@@ -2433,7 +2433,9 @@ mod tests {
                 constraint_id: "fixed_bc".to_string(),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::Fixed {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fixed")),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "fixed",
+                    )),
                 },
             })],
             boundaries: Vec::new(),
@@ -2592,7 +2594,9 @@ mod tests {
                 if matches!(distribution, ExcitationDistribution::IntensityPerVolume) {
                     RegionTarget::volume(region_id)
                 } else {
-                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region_id)))
+                    RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(region_id)),
+                    )
                 },
             ),
             frame: CoordinateFrame::Global,

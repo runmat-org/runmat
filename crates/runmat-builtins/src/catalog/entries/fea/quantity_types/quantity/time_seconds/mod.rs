@@ -9,7 +9,12 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_TIME_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_TIME_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
@@ -20,7 +25,8 @@ const TIME_SECONDS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatu
     inputs: &QUANTITY_INPUTS,
     outputs: &QUANTITY_OUTPUTS,
 }];
-pub const TIME_SECONDS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&TIME_SECONDS_SIGNATURES);
+pub const TIME_SECONDS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&TIME_SECONDS_SIGNATURES);
 const TIME_SECONDS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "time-seconds",
     title: "The 12.2 ms state of a transient run",

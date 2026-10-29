@@ -32,8 +32,8 @@ pub use exact::{
 };
 pub use faceted::{import_faceted_solid, FacetedSolidImportOptions, ImportedFacetedSolid};
 pub use import::{
-    import_geometry, import_geometry_with_context, import_materialized_geometry_preview, GeometryImportBudgetPolicy,
-    GeometryImportContext, GeometryImportOptions,
+    import_geometry, import_geometry_with_context, import_materialized_geometry_preview,
+    GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportOptions,
 };
 #[cfg(all(
     any(not(target_arch = "wasm32"), target_os = "emscripten"),

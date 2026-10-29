@@ -78,7 +78,10 @@ pub(crate) fn profile_import_workspace_phases(
             .filter(|r| r.media_type != ANALYSIS_CHUNK_MEDIA_TYPE)
         {
             let raw = read(&bounded, reference, limits)?;
-            bytes = bytes.checked_add(runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&raw)?)
+            bytes = bytes
+                .checked_add(
+                    runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&raw)?,
+                )
                 .ok_or_else(|| limit("profile contract inventory overflow"))?;
             admit(bytes, maximum)?;
             if reference.media_type == ANALYSIS_MANIFEST_MEDIA_TYPE {

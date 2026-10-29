@@ -87,13 +87,17 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
         .push(AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "time_prescribed_temperature".into(),
             kind: ThermalConstraintKind::Prescribed {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(base_region))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(base_region)),
+                ),
                 value: PrescribedValue::Signal(SignalId("prescribed_temperature".into())),
             },
         }));
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "time_heat_flux".into(),
-        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(flux_region.clone()))),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+            &(flux_region.clone()),
+        )),
         operator: BoundaryOperator::ThermalHeatFlux {
             value: PrescribedValue::Signal(SignalId("boundary_flux".into())),
         },
@@ -141,7 +145,9 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
 
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "time_convection".into(),
-        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(flux_region))),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+            &(flux_region),
+        )),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Signal(SignalId("ambient_temperature".into())),
             coefficient: HeatTransferCoefficient::new(5.0),
@@ -212,7 +218,9 @@ fn energy_recovery_uses_the_same_robin_signal_side_as_assembly() {
     model.signals.push(signal);
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "jump_convection".into(),
-        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(
+            &(selector),
+        )),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Signal(SignalId("jump_ambient".into())),
             coefficient: HeatTransferCoefficient::new(5.0),

@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_VELOCITY_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::Finite };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_VELOCITY_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::Finite,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const VELOCITY_METERS_PER_SECOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.Velocity.metersPerSecond(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const VELOCITY_METERS_PER_SECOND_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&VELOCITY_METERS_PER_SECOND_SIGNATURES);
+const VELOCITY_METERS_PER_SECOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.Velocity.metersPerSecond(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const VELOCITY_METERS_PER_SECOND_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&VELOCITY_METERS_PER_SECOND_SIGNATURES);
 const VELOCITY_METERS_PER_SECOND_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "velocity-meterspersecond",
     title: "An inlet speed of 2.5 m/s",

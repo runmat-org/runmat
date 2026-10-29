@@ -9,7 +9,13 @@ enum Tagged {
 
 #[test]
 fn counts_round_trip_inside_tagged_enums_without_changing_narrow_encoding() {
-    for count in [0_u128, 5, u128::from(u64::MAX), u128::from(u64::MAX) + 1, u128::MAX] {
+    for count in [
+        0_u128,
+        5,
+        u128::from(u64::MAX),
+        u128::from(u64::MAX) + 1,
+        u128::MAX,
+    ] {
         let usage = ResourceUsage {
             memory_byte_millis: count,
             retained_byte_millis: count,
@@ -19,7 +25,10 @@ fn counts_round_trip_inside_tagged_enums_without_changing_narrow_encoding() {
         if count <= u128::from(u64::MAX) {
             assert!(plain.contains(&format!("\"memory_byte_millis\":{count}")));
         }
-        assert_eq!(serde_json::from_str::<ResourceUsage>(&plain).unwrap(), usage);
+        assert_eq!(
+            serde_json::from_str::<ResourceUsage>(&plain).unwrap(),
+            usage
+        );
         let tagged = Tagged::Values { usage };
         let encoded = serde_json::to_string(&tagged).unwrap();
         assert_eq!(serde_json::from_str::<Tagged>(&encoded).unwrap(), tagged);

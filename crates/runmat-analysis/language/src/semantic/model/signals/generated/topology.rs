@@ -91,13 +91,11 @@ pub(super) fn shape(
         None
     })?;
     let width = match &components.kind {
-        CheckedExpressionKind::Number(number) => {
-            number
-                .parse::<usize>()
-                .ok()
-                .and_then(runmat_types::wire_integer::bounded)
-                .filter(|width| *width > 0)
-        }
+        CheckedExpressionKind::Number(number) => number
+            .parse::<usize>()
+            .ok()
+            .and_then(runmat_types::wire_integer::bounded)
+            .filter(|width| *width > 0),
         _ => None,
     }
     .or_else(|| {

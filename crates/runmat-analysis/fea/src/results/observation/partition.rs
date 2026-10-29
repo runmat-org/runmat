@@ -334,13 +334,13 @@ impl ObservationPartitionPlan {
         }
         for partition in &self.partitions {
             if partition.identity
-                    != derive_partition_identity(
-                        self.observation_plan,
-                        self.topology_digest,
-                        &self.observation_id,
-                        partition.ordinal,
-                        &partition.target,
-                    )?
+                != derive_partition_identity(
+                    self.observation_plan,
+                    self.topology_digest,
+                    &self.observation_id,
+                    partition.ordinal,
+                    &partition.target,
+                )?
             {
                 return Err(ObservationError::Invalid(
                     "observation partition metadata or identity is invalid".into(),

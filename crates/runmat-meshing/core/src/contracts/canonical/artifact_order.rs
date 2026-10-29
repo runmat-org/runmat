@@ -2,9 +2,9 @@ use super::{
     artifact::validation_checkpoint,
     artifact_workspace::{flags, reserve},
     solver_midside_node_identity, BoundaryEdgeOrder, BoundaryTriangleOrder, ElementOrder,
-    MeshDimension,
-    MeshingCancellationSignal, MeshingContractError, MeshingRequest, PersistentEntityKind,
-    SolverMeshTopology, SolverNodeExactParameter, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+    MeshDimension, MeshingCancellationSignal, MeshingContractError, MeshingRequest,
+    PersistentEntityKind, SolverMeshTopology, SolverNodeExactParameter,
+    TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 
 pub(super) fn validate_order_topology(

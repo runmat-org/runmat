@@ -8,7 +8,8 @@ use runmat_analysis_core::{
 
 fn cavity_model(count: usize) -> AnalysisModel {
     let mut model = super::super::tests::model();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps = vec![ProcedureStep::new(
         "acoustic",
         PhysicsFamily::Acoustic,
@@ -28,7 +29,9 @@ fn release(model: &mut AnalysisModel, face: &str) {
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: format!("release_{face}"),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+                ),
                 value: PrescribedValue::Constant(Pressure::new(0.0)),
             },
         }));
@@ -73,7 +76,11 @@ fn rigid_cube_modes_match_rectangular_cavity_including_degenerate_triplets() {
         let expected = reference(false, count);
         assert_eq!(result.frequencies_hz.len(), count);
         // Uniform-pressure mode of the closed cavity.
-        assert!(result.frequencies_hz[0].abs() < 1e-5, "{:?}", result.frequencies_hz);
+        assert!(
+            result.frequencies_hz[0].abs() < 1e-5,
+            "{:?}",
+            result.frequencies_hz
+        );
         let error = result.frequencies_hz[1..]
             .iter()
             .zip(&expected[1..])
@@ -112,7 +119,10 @@ fn pressure_release_ends_remove_the_rigid_mode_and_match_open_open_duct() {
     )
     .unwrap();
     for (value, reference) in result.frequencies_hz.iter().zip(reference(true, count)) {
-        assert!(((value - reference) / reference).abs() < 4e-3, "{value} vs {reference}");
+        assert!(
+            ((value - reference) / reference).abs() < 4e-3,
+            "{value} vs {reference}"
+        );
     }
     // Released nodes carry exactly zero modal pressure.
     let projection = &result.projection;
@@ -151,11 +161,15 @@ fn linear_cube_converges_at_second_order() {
 #[test]
 fn lossy_boundaries_and_sources_are_rejected() {
     let mut model = cavity_model(2);
-    model.boundaries.push(runmat_analysis_core::AnalysisBoundary {
-        boundary_id: "absorber".into(),
-        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
-        operator: BoundaryOperator::AcousticRadiation,
-    });
+    model
+        .boundaries
+        .push(runmat_analysis_core::AnalysisBoundary {
+            boundary_id: "absorber".into(),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_right",
+            )),
+            operator: BoundaryOperator::AcousticRadiation,
+        });
     let error = solve_canonical_modal(
         &model,
         &slab_mesh(2),

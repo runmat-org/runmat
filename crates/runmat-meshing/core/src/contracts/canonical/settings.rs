@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder, MeshDimension,
-    MeshingContractError, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
-    MetricCombinationRule, MetricFieldRequest, MetricTensor3, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION, MeshSizeControl,
+    MeshSizeControl, MeshingContractError, MeshingQualityTargets, MeshingRequest,
+    MeshingSizeLimits, MetricCombinationRule, MetricFieldRequest, MetricTensor3,
+    SurfaceQualityTargets, VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -89,7 +89,10 @@ impl MeshingRequestSettings {
                 "must be at least one",
             ));
         }
-        if self.cells_across_gap.is_some_and(|cells| !(1..=64).contains(&cells)) {
+        if self
+            .cells_across_gap
+            .is_some_and(|cells| !(1..=64).contains(&cells))
+        {
             return Err(MeshingContractError::invalid(
                 "cells across gap",
                 "must be between 1 and 64",

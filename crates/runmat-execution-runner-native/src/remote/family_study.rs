@@ -53,7 +53,11 @@ pub(super) async fn execute(
         .collect::<Result<Vec<_>, _>>()
     {
         Ok(plans) => plans,
-        Err(error) => return Ok(RemoteExactStructuralStudyComposition::Failed(error.to_string())),
+        Err(error) => {
+            return Ok(RemoteExactStructuralStudyComposition::Failed(
+                error.to_string(),
+            ))
+        }
     };
     let mut terminal = None;
     let mut completed_inputs = Vec::new();
@@ -111,17 +115,16 @@ pub(super) async fn execute(
         priority: 0,
     };
     let mut task_pool = RemoteAnalysisTaskPool::new(Arc::clone(&pool));
-    let family = match crate::study_family::execute_family_study(&mut task_pool, planned, policy)
-        .await
-    {
-        Ok(family) => family,
-        Err(error) => {
-            return Ok(super::exact_structural_study::sequence_error_composition(
-                &pool,
-                error.to_string(),
-            ))
-        }
-    };
+    let family =
+        match crate::study_family::execute_family_study(&mut task_pool, planned, policy).await {
+            Ok(family) => family,
+            Err(error) => {
+                return Ok(super::exact_structural_study::sequence_error_composition(
+                    &pool,
+                    error.to_string(),
+                ))
+            }
+        };
     let (response, objects) = crate::family_study_publication::package_family_study_result(
         request,
         &decoded,

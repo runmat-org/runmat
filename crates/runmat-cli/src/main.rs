@@ -20,7 +20,9 @@ fn main() -> ExitCode {
                 .block_on(run())
         })
         .expect("start the command thread");
-    command.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    command
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
 async fn run() -> ExitCode {

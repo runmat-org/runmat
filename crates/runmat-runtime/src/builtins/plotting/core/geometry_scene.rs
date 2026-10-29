@@ -22,8 +22,10 @@ thread_local! {
 
 #[cfg(feature = "plot-core")]
 pub fn import_geometry_scene_payload(bytes: &[u8]) -> crate::BuiltinResult<Option<u32>> {
-    let scene =
-        crate::replay::scene::decode_figure_scene_payload_with_limits(bytes, geometry_scene_limits())?;
+    let scene = crate::replay::scene::decode_figure_scene_payload_with_limits(
+        bytes,
+        geometry_scene_limits(),
+    )?;
     let hash = geometry_scene_payload_hash(bytes);
     let scene_id = format!("geometry-scene-payload:{hash:016x}");
     let scene = scene.into_geometry_scene(scene_id, hash).map_err(|err| {

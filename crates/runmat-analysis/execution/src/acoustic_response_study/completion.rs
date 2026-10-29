@@ -165,7 +165,9 @@ pub fn import_acoustic_response_study_completion(
         }
     }
     if closures.next().is_some() {
-        return Err(invalid("acoustic response completion contains an extra phase"));
+        return Err(invalid(
+            "acoustic response completion contains an extra phase",
+        ));
     }
     study.into_completed()
 }

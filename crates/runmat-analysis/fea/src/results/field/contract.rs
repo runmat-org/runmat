@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use thiserror::Error;
 
-use super::entity::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain, RecoveredFieldSupport};
+use super::entity::{
+    RecoveredFieldEntityCounts, RecoveredFieldEntityDomain, RecoveredFieldSupport,
+};
 use crate::execution::{FieldRecoveryRequestIdentity, FieldRecoverySource};
 
 use super::partition_set::{
@@ -205,7 +207,10 @@ impl RecoveredFieldDefinition {
     }
 
     /// The same field restricted to `support` (a new definition identity).
-    pub fn with_support(mut self, support: RecoveredFieldSupport) -> Result<Self, RecoveredFieldError> {
+    pub fn with_support(
+        mut self,
+        support: RecoveredFieldSupport,
+    ) -> Result<Self, RecoveredFieldError> {
         self.support = support;
         self.identity = self.derive_identity()?;
         self.validate()?;
@@ -218,7 +223,8 @@ impl RecoveredFieldDefinition {
 
     /// Stored entity count given the complete domain count.
     pub fn stored_entities(&self, counts: RecoveredFieldEntityCounts) -> usize {
-        self.support.stored_entities(counts.entity_count(self.entity_domain))
+        self.support
+            .stored_entities(counts.entity_count(self.entity_domain))
     }
 
     pub const fn identity(&self) -> RecoveredFieldDefinitionIdentity {
@@ -315,7 +321,12 @@ impl RecoveredFieldDefinition {
         );
         // Complete fields keep their established identity; a support is part of the identity.
         if self.support.is_complete() {
-            encode_contract(FIELD_PREFIX, "recovered-field-definition", &shape, FIELD_LIMITS)
+            encode_contract(
+                FIELD_PREFIX,
+                "recovered-field-definition",
+                &shape,
+                FIELD_LIMITS,
+            )
         } else {
             encode_contract(
                 FIELD_PREFIX,

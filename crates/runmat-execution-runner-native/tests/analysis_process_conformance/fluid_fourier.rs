@@ -26,16 +26,31 @@ pub(super) async fn run() {
             .map(|(i, _)| original.face_volume_flux_m3_per_s.canonical_values()[i])
             .sum();
         flows.push((flow - reference::duct_flow(255)).abs() / reference::duct_flow(255));
-        assert!(original.residual.global_boundary_flux_m3_per_s.abs() < runmat_types::physical::Quantity::new(1e-8));
+        assert!(
+            original.residual.global_boundary_flux_m3_per_s.abs()
+                < runmat_types::physical::Quantity::new(1e-8)
+        );
         let mut net = [1.0, 0.0, 0.0];
         for (i, face) in fixture.topology.faces.iter().enumerate() {
             if face.neighbor.is_some() {
                 continue;
             }
             for (axis, value) in net.iter_mut().enumerate() {
-                *value += original.residual.face_forces.viscous_traction_n.canonical_values()[i][axis]
-                    + original.residual.face_forces.pressure_traction_n.canonical_values()[i][axis]
-                    - original.residual.face_forces.advective_momentum_n.canonical_values()[i][axis];
+                *value += original
+                    .residual
+                    .face_forces
+                    .viscous_traction_n
+                    .canonical_values()[i][axis]
+                    + original
+                        .residual
+                        .face_forces
+                        .pressure_traction_n
+                        .canonical_values()[i][axis]
+                    - original
+                        .residual
+                        .face_forces
+                        .advective_momentum_n
+                        .canonical_values()[i][axis];
             }
         }
         assert!(

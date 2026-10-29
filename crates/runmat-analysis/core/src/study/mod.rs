@@ -18,11 +18,12 @@ pub use authored_observation::{
     LoweredAuthoredObservation,
 };
 pub use authored_output::{
-    authored_output_root, authored_output_types, retain_authored_outputs, validate_authored_outputs, AuthoredExtremaTiePolicy,
-    AuthoredFieldDomain, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError,
-    AuthoredOutputExpression, AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue,
-    AuthoredPrincipalSelection, AuthoredSeriesDomain, AuthoredSeriesReduction,
-    AuthoredSpatialReduction, AuthoredVectorComponent,
+    authored_output_root, authored_output_types, retain_authored_outputs,
+    validate_authored_outputs, AuthoredExtremaTiePolicy, AuthoredFieldDomain,
+    AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
+    AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection,
+    AuthoredSeriesDomain, AuthoredSeriesReduction, AuthoredSpatialReduction,
+    AuthoredVectorComponent,
 };
 pub use authoring::{
     geometry_parameter_input_type, AuthoredGeometryArgument, AuthoredGeometryArgumentValue,

@@ -413,7 +413,10 @@ impl NumericalPlanIdentity {
         source: SolverResultIdentity,
         topology: Digest,
     ) -> AnalysisExecutionResult<Self> {
-        Self::derive("statistical-field-recovery-numerical-plan", &(source, topology))
+        Self::derive(
+            "statistical-field-recovery-numerical-plan",
+            &(source, topology),
+        )
     }
     /// Thermal numerical intent is independent of task placement and transport chunking.
     pub fn from_thermal_intent(

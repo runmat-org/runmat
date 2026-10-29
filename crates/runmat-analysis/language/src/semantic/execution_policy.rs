@@ -125,8 +125,8 @@ fn resource_limits(
         count_range(value)
             .or_else(|| invalid(declaration, "workers must be N or N..M", diagnostics))
     });
-    let cpu_threads_per_worker = assignment(statements, "cpu_threads_per_worker")
-        .and_then(|(_, value)| {
+    let cpu_threads_per_worker =
+        assignment(statements, "cpu_threads_per_worker").and_then(|(_, value)| {
             let range = count_range(value).or_else(|| {
                 invalid(
                     declaration,

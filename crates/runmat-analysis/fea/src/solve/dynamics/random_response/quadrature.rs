@@ -9,7 +9,6 @@ pub(super) struct IntervalIntegration {
     pub estimated_relative_error: f64,
 }
 
-
 /// Gauss-Kronrod 7/15 abscissae on [-1, 1] (non-negative half, QUADPACK `qk15`).
 const KRONROD_NODES: [f64; 8] = [
     0.991_455_371_120_812_6,
@@ -195,8 +194,20 @@ where
         let segment = segments.swap_remove(worst);
         let center = 0.5 * (segment.left + segment.right);
         let depth = segment.depth + 1;
-        segments.push(kronrod_segment(segment.left, center, depth, width, &mut evaluate)?);
-        segments.push(kronrod_segment(center, segment.right, depth, width, &mut evaluate)?);
+        segments.push(kronrod_segment(
+            segment.left,
+            center,
+            depth,
+            width,
+            &mut evaluate,
+        )?);
+        segments.push(kronrod_segment(
+            center,
+            segment.right,
+            depth,
+            width,
+            &mut evaluate,
+        )?);
         evaluations += 30;
     }
 }
@@ -279,7 +290,8 @@ mod tests {
         let below = integrate_interval(0.0, natural_hz, policy, 1, density).unwrap();
         let above = integrate_interval(natural_hz, 1.0e4 * natural_hz, policy, 1, density).unwrap();
         let exact = 1.0 / (8.0 * zeta * omega_n.powi(3));
-        let tail = 1.0 / (3.0 * (std::f64::consts::TAU * 1.0e4 * natural_hz).powi(3))
+        let tail = 1.0
+            / (3.0 * (std::f64::consts::TAU * 1.0e4 * natural_hz).powi(3))
             / std::f64::consts::TAU;
         let total = below.values[0] + above.values[0];
         assert!(

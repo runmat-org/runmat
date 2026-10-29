@@ -43,7 +43,9 @@ impl runmat_meshing_core::MeshingCancellationSignal for Cancellation {
         false
     }
 }
-pub(super) fn execute(json: &str) -> Result<String, runmat_analysis_execution::SerialGeometryMeshingError> {
+pub(super) fn execute(
+    json: &str,
+) -> Result<String, runmat_analysis_execution::SerialGeometryMeshingError> {
     if json.len() > MAX_REQUEST_BYTES {
         return Err("Geometry preparation exceeds this host's input allowance.".into());
     }
@@ -89,8 +91,7 @@ pub(super) fn execute(json: &str) -> Result<String, runmat_analysis_execution::S
                 INVENTORY,
                 &Cancellation,
                 &mut runmat_meshing_execution::NoopMeshingProgress,
-            )
-            ?;
+            )?;
             serde_json::to_string(&PreparedFeaGeometry {
                 geometry: completed.geometry,
                 mesh: completed.meshing.artifact,

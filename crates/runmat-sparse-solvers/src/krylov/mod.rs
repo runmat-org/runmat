@@ -33,9 +33,8 @@ pub use gmres::{PreconditionerSide, ResidualCheck};
 pub use minres::{minres_async, minres_workspace_len};
 pub use sync::{
     gmres_distributed, gmres_solve as gmres, gmres_with_workspace, gmres_workspace_len,
-    pcg_distributed, pcg_solve as pcg,
-    pcg_workspace_len, GmresOptions, GmresWorkspace, HostKernels,
-    ScalarArithmetic,
+    pcg_distributed, pcg_solve as pcg, pcg_workspace_len, GmresOptions, GmresWorkspace,
+    HostKernels, ScalarArithmetic,
 };
 
 /// Outcome of a callback application.

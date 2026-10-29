@@ -114,7 +114,8 @@ pub fn canonical_payload_typed_resident_bytes_estimate(
 pub(crate) fn typed_resident_bytes_estimate(
     profile: value::MaterializationProfile,
 ) -> Result<u64, CanonicalCodecError> {
-    let overflow = || CanonicalCodecError::resource_limit("typed decode estimate", "byte count overflow");
+    let overflow =
+        || CanonicalCodecError::resource_limit("typed decode estimate", "byte count overflow");
     let scalars = profile
         .value_nodes
         .checked_sub(profile.heap_containers)

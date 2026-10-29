@@ -400,7 +400,9 @@ mod transient_sample_tests {
     #[test]
     fn time_and_index_samples_select_the_retained_transient_state_and_report_its_time() {
         // Retained times as an integrator accumulates them: 0.0122 is not exactly 122 × 1e-4.
-        let times = (0..=200).map(|step| step as f64 * 1.0e-4).collect::<Vec<_>>();
+        let times = (0..=200)
+            .map(|step| step as f64 * 1.0e-4)
+            .collect::<Vec<_>>();
         let run = Some(times.as_slice());
         let (field, time_s) = resolve_transient_snapshot(
             run,
@@ -412,8 +414,12 @@ mod transient_sample_tests {
         assert_eq!(field, "transient.displacement.122");
         assert_eq!(time_s.to_bits(), times[122].to_bits());
         assert_eq!(
-            resolve_transient_snapshot(run, "structural.von_mises", TransientSampleRequest::Index(122))
-                .unwrap(),
+            resolve_transient_snapshot(
+                run,
+                "structural.von_mises",
+                TransientSampleRequest::Index(122)
+            )
+            .unwrap(),
             Some(("transient.von_mises.122".to_string(), times[122]))
         );
         // A paged field carries the resolved snapshot id with its time.
@@ -430,12 +436,31 @@ mod transient_sample_tests {
         // A time between retained states, an index past the last state, a field without
         // transient states, and a run without transient results select nothing.
         for (run, field, request) in [
-            (run, "structural.displacement", TransientSampleRequest::Time(0.01225)),
-            (run, "structural.displacement", TransientSampleRequest::Index(201)),
-            (run, "structural.residual_norm", TransientSampleRequest::Index(3)),
-            (None, "structural.displacement", TransientSampleRequest::Index(0)),
+            (
+                run,
+                "structural.displacement",
+                TransientSampleRequest::Time(0.01225),
+            ),
+            (
+                run,
+                "structural.displacement",
+                TransientSampleRequest::Index(201),
+            ),
+            (
+                run,
+                "structural.residual_norm",
+                TransientSampleRequest::Index(3),
+            ),
+            (
+                None,
+                "structural.displacement",
+                TransientSampleRequest::Index(0),
+            ),
         ] {
-            assert_eq!(resolve_transient_snapshot(run, field, request).unwrap(), None);
+            assert_eq!(
+                resolve_transient_snapshot(run, field, request).unwrap(),
+                None
+            );
         }
     }
 }

@@ -123,7 +123,8 @@ fn borrowed_identity_views_preserve_solid_beam_and_shell_bytes() {
         model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
             mesh.topology.volume_elements[0]
                 .region_id
-                .analysis_selection_id().unwrap(),
+                .analysis_selection_id()
+                .unwrap(),
         );
         assert_legacy_identity(&compile_solid_property_map(&model, &mesh).unwrap());
     }

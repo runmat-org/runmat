@@ -15,7 +15,9 @@ fn inputs(bytes: &mut u64, objects: &[PreparedAnalysisObjects]) -> AnalysisBridg
 }
 /// Retained metadata is resident typed data; charge its typed size, not a JSON tree.
 fn metadata<T: serde::Serialize>(value: &T) -> AnalysisBridgeResult<u64> {
-    Ok(runmat_canonical_codec::typed_resident_bytes_estimate(value)?)
+    Ok(runmat_canonical_codec::typed_resident_bytes_estimate(
+        value,
+    )?)
 }
 impl SteadyStudyTail {
     pub(crate) fn retained_storage_bytes(&self) -> AnalysisBridgeResult<u64> {

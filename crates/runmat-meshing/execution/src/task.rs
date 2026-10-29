@@ -448,4 +448,3 @@ const fn order_name(order: ElementOrder) -> &'static str {
         ElementOrder::Tet10 => "tet10",
     }
 }
-

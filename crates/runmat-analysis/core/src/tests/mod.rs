@@ -15,20 +15,44 @@ fn valid_model() -> AnalysisModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
             provenance: MaterialProvenance::Authored,
-            mass_density_kg_per_m3: Some(runmat_types::physical::Quantity::<runmat_types::physical::kind::MassDensity,_>::new(7850.0)),
+            mass_density_kg_per_m3: Some(runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::MassDensity,
+                _,
+            >::new(7850.0)),
             elasticity: Some(MaterialElasticityModel::IsotropicLinear(
                 MaterialMechanicalModel {
-                    youngs_modulus_pa: runmat_types::physical::Quantity::<runmat_types::physical::kind::YoungsModulus,_>::new(200e9),
-                    poisson_ratio: runmat_types::physical::Quantity::<runmat_types::physical::kind::PoissonRatio,_>::new(0.3),
+                    youngs_modulus_pa: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::YoungsModulus,
+                        _,
+                    >::new(200e9),
+                    poisson_ratio: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::PoissonRatio,
+                        _,
+                    >::new(0.3),
                 },
             )),
             damping: None,
             thermal: Some(MaterialThermalModel {
-                reference_temperature_k: runmat_types::physical::Quantity::<runmat_types::physical::kind::Temperature,_>::new(293.15),
-                modulus_temp_coeff_per_k: runmat_types::physical::Quantity::<runmat_types::physical::kind::InverseTemperature,_>::new(-2.5e-4),
-                conductivity_w_per_mk: runmat_types::physical::Quantity::<runmat_types::physical::kind::ThermalConductivity,_>::new(45.0),
-                specific_heat_j_per_kgk: runmat_types::physical::Quantity::<runmat_types::physical::kind::SpecificHeat,_>::new(500.0),
-                expansion_coefficient_per_k: runmat_types::physical::Quantity::<runmat_types::physical::kind::ThermalExpansion,_>::new(1.2e-5),
+                reference_temperature_k: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Temperature,
+                    _,
+                >::new(293.15),
+                modulus_temp_coeff_per_k: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::InverseTemperature,
+                    _,
+                >::new(-2.5e-4),
+                conductivity_w_per_mk: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::ThermalConductivity,
+                    _,
+                >::new(45.0),
+                specific_heat_j_per_kgk: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::SpecificHeat,
+                    _,
+                >::new(500.0),
+                expansion_coefficient_per_k: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::ThermalExpansion,
+                    _,
+                >::new(1.2e-5),
             }),
             acoustic: None,
             electrical: None,

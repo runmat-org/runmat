@@ -56,23 +56,21 @@ impl SolidNewtonProblem<'_> {
                 }
             };
             let rhs = residual.iter().map(|r| -r).collect::<Vec<_>>();
-            let solved = crate::solve::general::solve_general_system(
-                &reduced,
-                &rhs,
-                policy,
-                admission,
-            )
-            .map_err(|error| match error {
-                crate::solve::general::GeneralSolveError::Cancelled => SolidNewtonError::Cancelled,
-                crate::solve::general::GeneralSolveError::NotConverged { .. } => {
-                    SolidNewtonError::NotConverged {
-                        factor,
-                        cutbacks: 0,
-                        reason: error.to_string(),
-                    }
-                }
-                other => SolidNewtonError::General(other),
-            })?;
+            let solved =
+                crate::solve::general::solve_general_system(&reduced, &rhs, policy, admission)
+                    .map_err(|error| match error {
+                        crate::solve::general::GeneralSolveError::Cancelled => {
+                            SolidNewtonError::Cancelled
+                        }
+                        crate::solve::general::GeneralSolveError::NotConverged { .. } => {
+                            SolidNewtonError::NotConverged {
+                                factor,
+                                cutbacks: 0,
+                                reason: error.to_string(),
+                            }
+                        }
+                        other => SolidNewtonError::General(other),
+                    })?;
             return self
                 .reduction
                 .expand_linear(&solved.solution)

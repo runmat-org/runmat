@@ -1901,10 +1901,7 @@ fn ready_minimal_meshing_output() -> crate::meshing::MeshingExecutionOutput {
         .seal_canonical_digest()
         .expect("seal remote solver mesh fixture");
     let evidence = runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&artifact);
-    crate::meshing::MeshingExecutionOutput {
-        artifact,
-        evidence,
-    }
+    crate::meshing::MeshingExecutionOutput { artifact, evidence }
 }
 
 fn ready_buckling_meshing_output() -> crate::meshing::MeshingExecutionOutput {

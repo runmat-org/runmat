@@ -150,10 +150,10 @@ periodic_builtin!(
 macro_rules! phase_periodic_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $constraint:ident, $kind:ident) => {
         #[runtime_builtin(
-                            name = $name,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::constraints::paired"
-                        )]
+                                    name = $name,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::constraints::paired"
+                                )]
         pub async fn $function(
             id: String,
             primary: Value,

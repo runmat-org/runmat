@@ -18,8 +18,18 @@ geometry part {{
 model flow {{ {body} }}
 "#
     );
-    let selection = |name: &str| runmat_geometry_core::PersistentEntityId::new(runmat_geometry_core::PersistentEntityKind::Face, name.into(), vec!["root".into()]).analysis_selection_id().unwrap();
-    let source = source.replace("INLET_ID", &selection("inlet")).replace("WALL_ID", &selection("wall"));
+    let selection = |name: &str| {
+        runmat_geometry_core::PersistentEntityId::new(
+            runmat_geometry_core::PersistentEntityKind::Face,
+            name.into(),
+            vec!["root".into()],
+        )
+        .analysis_selection_id()
+        .unwrap()
+    };
+    let source = source
+        .replace("INLET_ID", &selection("inlet"))
+        .replace("WALL_ID", &selection("wall"));
     FeaCompiler::new(&TestHost::default()).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),

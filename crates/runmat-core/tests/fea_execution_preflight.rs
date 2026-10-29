@@ -6,7 +6,9 @@ use runmat_core::RunMatSession;
 fn checked_study_can_be_preflighted_without_materializing_geometry() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("study.fea");
-    std::fs::write(&path, r#"
+    std::fs::write(
+        &path,
+        r#"
 geometry part {
     construct {
         feature body = box(width = 1 m, depth = 1 m, height = 1 m)
@@ -24,9 +26,12 @@ study static {
     analysis solve { structural static {} }
     output displacement = analysis.solve.field.node.displacement
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let mut session = RunMatSession::with_options(false, false).unwrap();
-    let source = futures::executor::block_on(session.load_and_check_fea_source_path(&path)).unwrap();
+    let source =
+        futures::executor::block_on(session.load_and_check_fea_source_path(&path)).unwrap();
     assert!(source.check_result().status.is_valid());
     let preflight = source.fea_execution_preflight().unwrap();
     assert!(preflight.browser_supported);

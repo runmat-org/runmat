@@ -24,7 +24,10 @@ pub enum OperationEffectProfile {
 
 impl OperationEffectProfile {
     const fn suspends(self) -> bool {
-        matches!(self, Self::EvidenceWrite | Self::ArtifactRead | Self::Figure)
+        matches!(
+            self,
+            Self::EvidenceWrite | Self::ArtifactRead | Self::Figure
+        )
     }
 }
 

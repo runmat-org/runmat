@@ -143,7 +143,9 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
             constraint_id: "nonconformal_beam_root_tie".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Tie(PairedConstraint {
-                primary: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("solid_load")),
+                primary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("solid_load"),
+                ),
                 secondary: runmat_analysis_core::RegionTarget::point("node:101"),
                 pairing: PairingPolicy::GeometricTolerance(Length::new(1.0e-9)),
             }),
@@ -187,7 +189,9 @@ fn explicit_shell_symmetry_uses_the_authored_surface_normal() {
             constraint_id: "shell_symmetry".into(),
             frame: CoordinateFrame::BoundaryNormalTangent,
             kind: StructuralConstraintKind::Symmetry {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("skin")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("skin"),
+                ),
             },
         }));
 
@@ -220,7 +224,9 @@ fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
             constraint_id: "shell_reference_coupling".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("skin")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("skin"),
+                ),
                 reference_point: ReferencePoint {
                     reference_point_id: "shell_control".into(),
                     position: Position::new([0.0, 0.0, 0.0]),
@@ -323,7 +329,9 @@ fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
             constraint_id: "panel_reference_coupling".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("shell_panel")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("shell_panel"),
+                ),
                 reference_point: ReferencePoint {
                     reference_point_id: "panel_control".into(),
                     position: Position::new([0.25, 0.25, 0.0]),
@@ -398,7 +406,9 @@ fn mixed_dispatch_preserves_target_failure_and_cancellation_instead_of_falling_t
         constraint_id: "absent".into(),
         frame: CoordinateFrame::Global,
         kind: StructuralConstraintKind::Fixed {
-            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("absent")),
+            target: runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("absent"),
+            ),
         },
     };
     let direct = super::super::prepared::PreparedTargets::derive(

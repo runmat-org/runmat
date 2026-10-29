@@ -25,12 +25,8 @@ impl InterfaceLaw {
     pub(crate) fn of(transfer: ThermalInterfaceTransfer) -> Result<Self, String> {
         let law = match transfer {
             ThermalInterfaceTransfer::Perfect => Self::Perfect,
-            ThermalInterfaceTransfer::Conductance(h) => {
-                Self::Conductance(h.canonical_value())
-            }
-            ThermalInterfaceTransfer::Resistance(r) => {
-                Self::Conductance(1.0 / r.canonical_value())
-            }
+            ThermalInterfaceTransfer::Conductance(h) => Self::Conductance(h.canonical_value()),
+            ThermalInterfaceTransfer::Resistance(r) => Self::Conductance(1.0 / r.canonical_value()),
         };
         if let Self::Conductance(h) = law {
             if !h.is_finite() || h <= 0.0 {
@@ -113,11 +109,7 @@ pub(crate) fn plan<'a>(
 
 /// Between two solids the second side is the greater region (a deterministic, authored-order
 /// independent choice).
-pub(crate) fn solid_sides(
-    projection: &AnalysisProjection,
-    a: usize,
-    b: usize,
-) -> (usize, usize) {
+pub(crate) fn solid_sides(projection: &AnalysisProjection, a: usize, b: usize) -> (usize, usize) {
     if projection.elements[a].region_id <= projection.elements[b].region_id {
         (a, b)
     } else {
@@ -133,7 +125,9 @@ pub(crate) fn solid_conduction(
     if interfaces.is_empty() {
         return Ok((Vec::new(), InterfaceDofs::nodal(projection)));
     }
-    let (plans, _) = plan(projection, interfaces, |a, b| Ok(solid_sides(projection, a, b)))?;
+    let (plans, _) = plan(projection, interfaces, |a, b| {
+        Ok(solid_sides(projection, a, b))
+    })?;
     let dofs = InterfaceDofs::derive(projection, &plans)?;
     Ok((plans, dofs))
 }
@@ -241,7 +235,11 @@ impl InterfaceDofs {
         node
     }
 
-    pub(crate) fn element_dofs(&self, projection: &AnalysisProjection, element: usize) -> Vec<usize> {
+    pub(crate) fn element_dofs(
+        &self,
+        projection: &AnalysisProjection,
+        element: usize,
+    ) -> Vec<usize> {
         projection.elements[element]
             .node_indices
             .iter()

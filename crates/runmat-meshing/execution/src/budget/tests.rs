@@ -15,7 +15,8 @@ fn terminal_evidence_retains_shared_usage_after_the_last_algorithm_checkpoint() 
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &fixture.request, ceilings,
+        &fixture.request,
+        ceilings,
         &NeverCancelled,
         &mut progress,
     )

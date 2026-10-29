@@ -4,8 +4,8 @@ use super::*;
 use crate::analysis::*;
 use runmat_analysis_fea::{
     contracts::{ExecutionBackend, SolverMethod, SolverPreconditioner},
-    results::field::RecoveredFieldArtifact,
     planning::resource::FeaResourcePhase,
+    results::field::RecoveredFieldArtifact,
     solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend, FeaRunResult,
 };

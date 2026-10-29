@@ -466,7 +466,9 @@ fn event_inventory_ignores_unreferenced_signal_jumps() {
                 constraint_id: "inactive_constraint".into(),
                 frame: runmat_analysis_core::CoordinateFrame::Global,
                 kind: runmat_analysis_core::StructuralConstraintKind::NormalDisplacement {
-                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("fixed")),
+                    target: runmat_analysis_core::RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_face("fixed"),
+                    ),
                     value: runmat_analysis_core::PrescribedValue::Signal(displacement_id),
                 },
             },

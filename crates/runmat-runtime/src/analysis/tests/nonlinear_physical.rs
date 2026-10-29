@@ -78,7 +78,9 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
                 constraint_id: region.clone(),
                 frame: CoordinateFrame::Global,
                 kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(region))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(region)),
+                    ),
                     translations: vec![TranslationDofValue {
                         dof,
                         value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -135,7 +137,9 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
         .excitations
         .push(ExcitationAction::Traction(AnalysisExcitation {
             excitation_id: ExcitationId("traction".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("loaded"))),
+            target: ExcitationTarget::Region(RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("loaded"),
+            )),
             frame: CoordinateFrame::Global,
             direction: None,
             distribution: ExcitationDistribution::IntensityPerArea,

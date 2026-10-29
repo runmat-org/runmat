@@ -125,10 +125,13 @@ fn disconnected_cad_solids_retain_distinct_region_identity_through_meshing() {
     let error =
         runmat_analysis_fea::properties::compile_solid_property_map(&legacy, &result.artifact)
             .expect_err("a legacy solid_000001 selector must not match a meshed CAD solid");
-    assert!(error.to_string().contains("solid_000001") || matches!(
-        error,
-        runmat_analysis_fea::properties::PropertyCompilationError::InvalidCoverage { .. }
-    ));
+    assert!(
+        error.to_string().contains("solid_000001")
+            || matches!(
+                error,
+                runmat_analysis_fea::properties::PropertyCompilationError::InvalidCoverage { .. }
+            )
+    );
 
     model.material_assignments.pop();
     let error =
@@ -191,7 +194,10 @@ fn execute_fixture_with_layout(
         source_name,
         source_bytes,
         GeometryFormat::Brep,
-        &ExactCadImportOptions { source_units: Some(runmat_geometry_core::LengthUnit::Meter), ..ExactCadImportOptions::default() },
+        &ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..ExactCadImportOptions::default()
+        },
         &GeometryImportContext::new(),
     )
     .unwrap();

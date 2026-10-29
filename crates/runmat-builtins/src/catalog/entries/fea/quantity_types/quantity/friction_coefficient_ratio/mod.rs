@@ -9,18 +9,25 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_FRICTION_COEFFICIENT_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::NonNegative };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_FRICTION_COEFFICIENT_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::NonNegative,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
 }
 
-const FRICTION_COEFFICIENT_RATIO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.FrictionCoefficient.ratio(value)",
-    inputs: &QUANTITY_INPUTS,
-    outputs: &QUANTITY_OUTPUTS,
-}];
-pub const FRICTION_COEFFICIENT_RATIO_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&FRICTION_COEFFICIENT_RATIO_SIGNATURES);
+const FRICTION_COEFFICIENT_RATIO_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = fea.FrictionCoefficient.ratio(value)",
+        inputs: &QUANTITY_INPUTS,
+        outputs: &QUANTITY_OUTPUTS,
+    }];
+pub const FRICTION_COEFFICIENT_RATIO_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&FRICTION_COEFFICIENT_RATIO_SIGNATURES);
 const FRICTION_COEFFICIENT_RATIO_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "friction-coefficient-ratio",
     title: "Steel on steel, lubricated",

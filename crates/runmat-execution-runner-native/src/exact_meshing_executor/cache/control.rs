@@ -21,9 +21,7 @@ impl<'a> CacheControl<'a> {
         Self {
             session,
             started,
-            maximum_wall: Duration::from_millis(
-                stage.host().ceilings.maximum_wall_time_ms,
-            ),
+            maximum_wall: Duration::from_millis(stage.host().ceilings.maximum_wall_time_ms),
             deadline,
             stage: stage.host().workload.stage,
         }

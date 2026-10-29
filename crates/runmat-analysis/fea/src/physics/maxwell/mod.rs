@@ -40,8 +40,8 @@ pub use input::{
 };
 pub use plan::MaxwellSystemPlan;
 pub use response::{MaxwellFieldSample, MaxwellResponse};
-pub use system::MaxwellDriveResponse;
 use runmat_meshing_core::SolverMeshArtifact;
+pub use system::MaxwellDriveResponse;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -84,4 +84,3 @@ fn invalid(error: impl std::fmt::Display) -> MaxwellError {
 fn topology(error: impl std::fmt::Display) -> MaxwellError {
     MaxwellError::Topology(error.to_string())
 }
-

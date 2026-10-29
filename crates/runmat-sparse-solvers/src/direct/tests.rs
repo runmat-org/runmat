@@ -15,7 +15,9 @@ fn dense_solve(a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
     let mut m = a.to_vec();
     let mut x = b.to_vec();
     for k in 0..n {
-        let p = (k..n).max_by(|&i, &j| m[i * n + k].abs().partial_cmp(&m[j * n + k].abs()).unwrap()).unwrap();
+        let p = (k..n)
+            .max_by(|&i, &j| m[i * n + k].abs().partial_cmp(&m[j * n + k].abs()).unwrap())
+            .unwrap();
         for c in 0..n {
             m.swap(k * n + c, p * n + c);
         }
@@ -44,15 +46,24 @@ fn cholesky_matches_dense_reference_with_every_ordering() {
     let n = a.nrows();
     let b = par::seeded_vector::<f64>(n, 1);
     let reference = dense_solve(&a.as_ref().to_dense(), &b, n);
-    for ordering in [Ordering::Amd, Ordering::NestedDissection, Ordering::Identity] {
+    for ordering in [
+        Ordering::Amd,
+        Ordering::NestedDissection,
+        Ordering::Identity,
+    ] {
         let options = DirectOptions {
             ordering: ordering.clone(),
             ..DirectOptions::new(FactorKind::Cholesky)
         };
-        let solver = DirectSolver::<f64>::new(a.as_ref().into(), options, SolveControl::NONE).unwrap();
+        let solver =
+            DirectSolver::<f64>::new(a.as_ref().into(), options, SolveControl::NONE).unwrap();
         let mut x = b.clone();
         solver.solve_in_place(&mut x, 1).unwrap();
-        let error = x.iter().zip(&reference).map(|(p, q)| (p - q).abs()).fold(0.0, f64::max);
+        let error = x
+            .iter()
+            .zip(&reference)
+            .map(|(p, q)| (p - q).abs())
+            .fold(0.0, f64::max);
         assert!(error < 1e-12, "{ordering:?}: {error}");
         assert_eq!(solver.inertia().unwrap().positive, n);
     }
@@ -63,12 +74,23 @@ fn symbolic_reuse_refactorizes_new_values_and_rejects_new_patterns() {
     let a = poisson3d::<f64>(9, 9, 9);
     let n = a.nrows();
     let options = DirectOptions::new(FactorKind::Cholesky);
-    let symbolic = SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE).unwrap();
+    let symbolic =
+        SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE)
+            .unwrap();
     let estimate = symbolic.estimate();
     assert!(estimate.factor_entries as usize >= a.nnz() / 2);
-    let mut solver = DirectSolver::factorize(symbolic.clone(), a.as_ref().into(), options.clone(), None, SolveControl::NONE).unwrap();
+    let mut solver = DirectSolver::factorize(
+        symbolic.clone(),
+        a.as_ref().into(),
+        options.clone(),
+        None,
+        SolveControl::NONE,
+    )
+    .unwrap();
     let shifted = a.clone().with_shifted_diagonal(2.5);
-    solver.refactorize(shifted.as_ref().into(), SolveControl::NONE).unwrap();
+    solver
+        .refactorize(shifted.as_ref().into(), SolveControl::NONE)
+        .unwrap();
     let b = par::seeded_vector::<f64>(n, 4);
     let mut x = b.clone();
     solver.solve_in_place(&mut x, 1).unwrap();
@@ -76,16 +98,34 @@ fn symbolic_reuse_refactorizes_new_values_and_rejects_new_patterns() {
     let other = poisson3d::<f64>(9, 9, 9).with_identity_rows(&vec![false; n]);
     let mut extended = TripletBuilder::new(n, n);
     for row in 0..n {
-        for (&c, &v) in other.as_ref().row(row).0.iter().zip(other.as_ref().row(row).1) {
+        for (&c, &v) in other
+            .as_ref()
+            .row(row)
+            .0
+            .iter()
+            .zip(other.as_ref().row(row).1)
+        {
             extended.push(row, c, v);
         }
     }
     extended.push(0, n - 1, 0.0);
     extended.push(n - 1, 0, 0.0);
     let extended = extended.build();
-    assert_eq!(solver.refactorize(extended.as_ref().into(), SolveControl::NONE).unwrap_err(), SolverError::PatternMismatch);
+    assert_eq!(
+        solver
+            .refactorize(extended.as_ref().into(), SolveControl::NONE)
+            .unwrap_err(),
+        SolverError::PatternMismatch
+    );
     // Budget refusal happens before numeric work.
-    let refused = DirectSolver::<f64>::factorize(symbolic, a.as_ref().into(), options, Some(16), SolveControl::NONE).unwrap_err();
+    let refused = DirectSolver::<f64>::factorize(
+        symbolic,
+        a.as_ref().into(),
+        options,
+        Some(16),
+        SolveControl::NONE,
+    )
+    .unwrap_err();
     assert!(matches!(refused, SolverError::OverBudget { .. }));
 }
 
@@ -110,12 +150,19 @@ fn indefinite_shifted_laplacian_bunch_kaufman_inertia_counts_eigenvalues() {
         .filter(|&k| 2.0 - 2.0 * (k as f64 * std::f64::consts::PI / (n as f64 + 1.0)).cos() < shift)
         .count();
     for kind in [FactorKind::BunchKaufman, FactorKind::Ldlt] {
-        let solver = DirectSolver::<f64>::new(shifted.as_ref().into(), DirectOptions::new(kind), SolveControl::NONE).unwrap();
+        let solver = DirectSolver::<f64>::new(
+            shifted.as_ref().into(),
+            DirectOptions::new(kind),
+            SolveControl::NONE,
+        )
+        .unwrap();
         let inertia = solver.inertia().unwrap();
         assert_eq!(inertia.negative, expected, "{kind:?}");
         let b = par::seeded_vector::<f64>(n, 2);
         let mut x = vec![0.0; n];
-        let report = solver.solve_refined(shifted.as_ref().into(), &b, &mut x, 1).unwrap();
+        let report = solver
+            .solve_refined(shifted.as_ref().into(), &b, &mut x, 1)
+            .unwrap();
         assert!(report.relative_residual < 1e-12, "{kind:?} {report:?}");
     }
 }
@@ -150,7 +197,9 @@ fn saddle_point_ldlt_with_signed_regularization() {
     let solver = DirectSolver::<f64>::new(a.as_ref().into(), options, SolveControl::NONE).unwrap();
     let b = par::seeded_vector::<f64>(n + m, 8);
     let mut x = vec![0.0; n + m];
-    let report = solver.solve_refined(a.as_ref().into(), &b, &mut x, 1).unwrap();
+    let report = solver
+        .solve_refined(a.as_ref().into(), &b, &mut x, 1)
+        .unwrap();
     assert!(report.relative_residual < 1e-12, "{report:?}");
     let inertia = solver.inertia().unwrap();
     assert_eq!((inertia.positive, inertia.negative), (n, m));
@@ -181,26 +230,47 @@ fn lu_solves_real_and_complex_nonsymmetric_from_csr_and_csc() {
     }
     let a = t.build();
     let b = par::seeded_vector::<c64>(n, 6);
-    let solver = DirectSolver::<c64>::new(a.as_ref().into(), DirectOptions::new(FactorKind::Lu), SolveControl::NONE).unwrap();
+    let solver = DirectSolver::<c64>::new(
+        a.as_ref().into(),
+        DirectOptions::new(FactorKind::Lu),
+        SolveControl::NONE,
+    )
+    .unwrap();
     let mut x = b.clone();
     solver.solve_in_place(&mut x, 1).unwrap();
     assert!(relative_residual(&a, &x, &b) < 1e-13);
     // Same matrix supplied as CSC arrays.
     let at = a.as_ref().transpose(false);
     let csc = CscRef::new_unchecked(n, n, at.row_ptr(), at.col_idx(), at.values());
-    let solver = DirectSolver::<c64>::new(csc.into(), DirectOptions::new(FactorKind::Lu), SolveControl::NONE).unwrap();
+    let solver = DirectSolver::<c64>::new(
+        csc.into(),
+        DirectOptions::new(FactorKind::Lu),
+        SolveControl::NONE,
+    )
+    .unwrap();
     let mut y = b.clone();
     solver.solve_in_place(&mut y, 1).unwrap();
     assert!(relative_residual(&a, &y, &b) < 1e-13);
     // Real LU, two right-hand sides.
     let real = poisson3d::<f64>(5, 6, 7);
     let nr = real.nrows();
-    let solver = DirectSolver::<f64>::new(real.as_ref().into(), DirectOptions::new(FactorKind::Lu), SolveControl::NONE).unwrap();
+    let solver = DirectSolver::<f64>::new(
+        real.as_ref().into(),
+        DirectOptions::new(FactorKind::Lu),
+        SolveControl::NONE,
+    )
+    .unwrap();
     let rhs = par::seeded_vector::<f64>(2 * nr, 3);
     let mut sol = rhs.clone();
     solver.solve_in_place(&mut sol, 2).unwrap();
     for c in 0..2 {
-        assert!(relative_residual(&real, &sol[c * nr..(c + 1) * nr], &rhs[c * nr..(c + 1) * nr]) < 1e-13);
+        assert!(
+            relative_residual(
+                &real,
+                &sol[c * nr..(c + 1) * nr],
+                &rhs[c * nr..(c + 1) * nr]
+            ) < 1e-13
+        );
     }
 }
 
@@ -211,13 +281,24 @@ fn hermitian_cholesky_from_csr_input() {
     for row in 0..base.nrows() {
         let (c, v) = base.as_ref().row(row);
         for (&col, &val) in c.iter().zip(v) {
-            let imag = if col > row { 0.3 } else if col < row { -0.3 } else { 0.0 };
+            let imag = if col > row {
+                0.3
+            } else if col < row {
+                -0.3
+            } else {
+                0.0
+            };
             t.push(row, col, c64::new(val, imag));
         }
     }
     let a = t.build();
     let b = par::seeded_vector::<c64>(a.nrows(), 12);
-    let solver = DirectSolver::<c64>::new(a.as_ref().into(), DirectOptions::new(FactorKind::Cholesky), SolveControl::NONE).unwrap();
+    let solver = DirectSolver::<c64>::new(
+        a.as_ref().into(),
+        DirectOptions::new(FactorKind::Cholesky),
+        SolveControl::NONE,
+    )
+    .unwrap();
     let mut x = b.clone();
     solver.solve_in_place(&mut x, 1).unwrap();
     assert!(relative_residual(&a, &x, &b) < 1e-13);
@@ -260,7 +341,12 @@ fn norm_estimates_match_dense_references() {
         }
     }
     let a = t.build();
-    let solver = DirectSolver::<f64>::new(a.as_ref().into(), DirectOptions::new(FactorKind::Lu), SolveControl::NONE).unwrap();
+    let solver = DirectSolver::<f64>::new(
+        a.as_ref().into(),
+        DirectOptions::new(FactorKind::Lu),
+        SolveControl::NONE,
+    )
+    .unwrap();
     // Dense inverse 1-norm.
     let dense = a.as_ref().to_dense();
     let mut exact = 0.0f64;
@@ -271,8 +357,13 @@ fn norm_estimates_match_dense_references() {
         exact = exact.max(column.iter().map(|v| v.abs()).sum());
     }
     let estimate = solver.estimate_inverse_norm1().unwrap();
-    assert!(estimate <= exact * (1.0 + 1e-12) && estimate >= 0.3 * exact, "{estimate} vs {exact}");
-    let defect = solver.estimate_right_inverse_defect1(a.as_ref().into()).unwrap();
+    assert!(
+        estimate <= exact * (1.0 + 1e-12) && estimate >= 0.3 * exact,
+        "{estimate} vs {exact}"
+    );
+    let defect = solver
+        .estimate_right_inverse_defect1(a.as_ref().into())
+        .unwrap();
     assert!(defect < 1e-12, "{defect}");
     // Transpose solve.
     let b = par::seeded_vector::<f64>(n, 3);

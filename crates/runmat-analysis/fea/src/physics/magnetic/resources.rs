@@ -192,7 +192,8 @@ fn from_counts(
     } else {
         runmat_sparse_solvers::estimate::direct_reservation_bytes(
             host_dimension,
-            usize::try_from(support_entries).map_err(|_| resource("saddle entry count overflow"))?,
+            usize::try_from(support_entries)
+                .map_err(|_| resource("saddle entry count overflow"))?,
             false,
         )
     };

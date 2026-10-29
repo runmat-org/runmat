@@ -1133,13 +1133,13 @@ fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
             field.shape.clone(),
         )
         .map(Value::Tensor)
-            .map_err(|err| {
-                builtin_error(
-                    FIELD_NAME,
-                    &ERROR_INTERNAL,
-                    format!("fea.field: failed to build values tensor: {err}"),
-                )
-            }),
+        .map_err(|err| {
+            builtin_error(
+                FIELD_NAME,
+                &ERROR_INTERNAL,
+                format!("fea.field: failed to build values tensor: {err}"),
+            )
+        }),
         AnalysisFieldValues::DeviceRef(device) => serializable_to_value_preserving_integers(
             FIELD_NAME,
             &ERROR_INTERNAL,
@@ -3391,8 +3391,16 @@ mod tests {
         let column_major = values.materialize_f64();
         let column = |k: usize| column_major[3 * k..3 * (k + 1)].to_vec();
         assert_eq!(column(0), vec![1.0, 2.0, 3.0], "u(:,1) is the x component");
-        assert_eq!(column(1), vec![10.0, 20.0, 30.0], "u(:,2) is the y component");
-        assert_eq!(column(2), vec![100.0, 200.0, 300.0], "u(:,3) is the z component");
+        assert_eq!(
+            column(1),
+            vec![10.0, 20.0, 30.0],
+            "u(:,2) is the y component"
+        );
+        assert_eq!(
+            column(2),
+            vec![100.0, 200.0, 300.0],
+            "u(:,3) is the z component"
+        );
         let row = |i: usize| [0, 1, 2].map(|k| column_major[i + 3 * k]);
         assert_eq!(row(1), [2.0, 20.0, 200.0], "u(2,:) is node 2's vector");
 
@@ -4659,9 +4667,8 @@ mod tests {
             "synthetic_plot.sequence",
             vec![ProcedureStep::structural_static("static")],
         );
-        let execution =
-            AnalysisExecutionPlan::for_sequence(&sequence, ComputeBackend::Cpu)
-                .expect("execution plan should match the sequence");
+        let execution = AnalysisExecutionPlan::for_sequence(&sequence, ComputeBackend::Cpu)
+            .expect("execution plan should match the sequence");
         let model = runmat_analysis_core::AnalysisModel {
             model_id: runmat_analysis_core::AnalysisModelId("synthetic_plot.model".to_string()),
             geometry_id: geometry.geometry_id.clone(),

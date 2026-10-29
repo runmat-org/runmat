@@ -362,7 +362,9 @@ pub fn import_study_sweep_entries(
         .map(|(study_index, entry)| StudySweepEntry {
             study_index,
             terminal: match entry {
-                PublishedSweepEntry::Succeeded { response } => StudySweepTerminal::Succeeded(response),
+                PublishedSweepEntry::Succeeded { response } => {
+                    StudySweepTerminal::Succeeded(response)
+                }
                 PublishedSweepEntry::Failed { message } => StudySweepTerminal::Failed(message),
                 PublishedSweepEntry::Cancelled => StudySweepTerminal::Cancelled,
                 PublishedSweepEntry::Indeterminate { message } => {
@@ -387,10 +389,14 @@ pub fn import_structural_sweep_result(
         .zip(&expected.studies)
         .map(|(entry, study)| {
             let terminal = match entry.terminal {
-                StudySweepTerminal::Succeeded(response) => ExactStructuralSweepTerminal::Succeeded(
-                    Box::new(import_structural_study_result(source, response, study, limits)?),
-                ),
-                StudySweepTerminal::Failed(message) => ExactStructuralSweepTerminal::Failed(message),
+                StudySweepTerminal::Succeeded(response) => {
+                    ExactStructuralSweepTerminal::Succeeded(Box::new(
+                        import_structural_study_result(source, response, study, limits)?,
+                    ))
+                }
+                StudySweepTerminal::Failed(message) => {
+                    ExactStructuralSweepTerminal::Failed(message)
+                }
                 StudySweepTerminal::Cancelled => ExactStructuralSweepTerminal::Cancelled,
                 StudySweepTerminal::Indeterminate(message) => {
                     ExactStructuralSweepTerminal::Indeterminate(message)

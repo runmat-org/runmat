@@ -234,13 +234,17 @@ fn residual_scale_and_large_zero_field_gauge_do_not_change_acceptance_authority(
                 prescribe(
                     &mut source.model,
                     "left".into(),
-                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "slab_left",
+                    )),
                     left,
                 );
                 prescribe(
                     &mut source.model,
                     "right".into(),
-                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+                    RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "slab_right",
+                    )),
                     right,
                 );
                 let result = source.execute(&mesh).unwrap();

@@ -48,7 +48,9 @@ fn energy_limits(dimension: u64, edges: u64) -> Option<(u64, u64)> {
     let input = dimension.checked_add(edges)?;
     let operations = input.checked_mul(1024)?.checked_add(dimension)?;
     let entries = input.checked_mul(16)?.checked_add(dimension)?;
-    let resident = entries.checked_mul(192)?.checked_add(dimension.checked_mul(256)?)?;
+    let resident = entries
+        .checked_mul(192)?
+        .checked_add(dimension.checked_mul(256)?)?;
     Some((operations, resident))
 }
 
@@ -62,15 +64,20 @@ impl CoercivityWorkEnvelope {
         Self::from_estimate(&estimate, undirected_edge_count(pattern))
     }
 
-    pub(super) fn from_estimate(estimate: &FactorEstimate, edges: u64) -> Result<Self, CoercivityError> {
-        let dimension = u64::try_from(estimate.dimension).map_err(|_| CoercivityError::WorkOverflow)?;
+    pub(super) fn from_estimate(
+        estimate: &FactorEstimate,
+        edges: u64,
+    ) -> Result<Self, CoercivityError> {
+        let dimension =
+            u64::try_from(estimate.dimension).map_err(|_| CoercivityError::WorkOverflow)?;
         let (energy_operation_limit, energy_resident_limit) =
             energy_limits(dimension, edges).ok_or(CoercivityError::WorkOverflow)?;
         Ok(Self {
             energy_operation_limit,
             energy_resident_limit,
             dimension,
-            factor_nonzero_limit: with_headroom(estimate.factor_entries).ok_or(CoercivityError::WorkOverflow)?,
+            factor_nonzero_limit: with_headroom(estimate.factor_entries)
+                .ok_or(CoercivityError::WorkOverflow)?,
             // Either proof method may run: the limits cover the Cholesky factorization and the
             // anchored local-energy proof.
             update_limit: with_headroom(flop_count(estimate))

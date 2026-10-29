@@ -45,7 +45,9 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {
             constraint_id: "pressure".into(),
             kind: ElectricalConstraintKind::PrescribedPotential {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+                target: RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+                ),
                 value: PrescribedValue::Constant(ElectricPotential::new(1.0)),
             },
         }));

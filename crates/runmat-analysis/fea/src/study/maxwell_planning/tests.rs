@@ -18,7 +18,9 @@ pub(in crate::study) fn model() -> AnalysisModel {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: boundary.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),
+                    ),
                 },
             }));
     }

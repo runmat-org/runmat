@@ -9,7 +9,8 @@ const VARIANCE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     inputs: &LINEAR_QUANTITY_INPUT,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const VARIANCE_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&VARIANCE_SIGNATURES);
+pub const VARIANCE_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&VARIANCE_SIGNATURES);
 const VARIANCE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "variance-displacement",
     title: "Select the variance of a structural quantity",

@@ -87,7 +87,8 @@ pub fn case_mapped(
 ) -> Fixture {
     let mut mesh = fixtures::slab_mesh(n);
     for node in &mut mesh.topology.nodes {
-        node.coordinates_m = runmat_types::physical::Quantity::new(map(node.coordinates_m.canonical_value()));
+        node.coordinates_m =
+            runmat_types::physical::Quantity::new(map(node.coordinates_m.canonical_value()));
     }
     if rotated {
         for node in &mut mesh.topology.nodes {

@@ -65,10 +65,14 @@ fn both_coupling_kinds_and_surface_directions_preserve_original_row_shape() {
             StructuralConstraintKind::RigidCoupling(coupling.clone()),
             StructuralConstraintKind::DistributingCoupling(coupling.clone()),
             StructuralConstraintKind::Symmetry {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
             },
             StructuralConstraintKind::Antisymmetry {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "face:0",
+                )),
             },
         ] {
             model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {

@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const TOTAL_STRAIN_ENERGY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.StructuralField.totalStrainEnergy()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const TOTAL_STRAIN_ENERGY_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&TOTAL_STRAIN_ENERGY_SIGNATURES);
+const TOTAL_STRAIN_ENERGY_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.StructuralField.totalStrainEnergy()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const TOTAL_STRAIN_ENERGY_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&TOTAL_STRAIN_ENERGY_SIGNATURES);
 const TOTAL_STRAIN_ENERGY_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-total-strain-energy",
     title: "Select total strain energy",

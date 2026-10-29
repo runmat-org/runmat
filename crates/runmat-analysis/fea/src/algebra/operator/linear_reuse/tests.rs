@@ -93,8 +93,9 @@ fn physical_nullspace_provenance_is_rebound_from_the_current_original_source() {
         },
     };
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.material_assignments[0].target =
-        runmat_analysis_core::PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_solid("slab"),
+    );
     let runmat_analysis_core::AnalysisConstraint::Structural(constraint) =
         &mut model.constraints[0]
     else {
@@ -104,7 +105,9 @@ fn physical_nullspace_provenance_is_rebound_from_the_current_original_source() {
     else {
         panic!("fixed fixture");
     };
-    *target = runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left"));
+    *target = runmat_analysis_core::RegionTarget::boundary(
+        runmat_meshing_core::fixtures::fixture_face("slab_left"),
+    );
     replace_fixture_excitations(
         &mut model,
         vec![FixtureExcitation {

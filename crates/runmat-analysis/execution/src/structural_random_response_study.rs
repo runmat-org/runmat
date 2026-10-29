@@ -660,7 +660,6 @@ impl StructuralRandomResponseStudyCoordinator {
     }
 }
 
-
 fn invalid(message: impl Into<String>) -> AnalysisBridgeError {
     AnalysisBridgeError::Invalid(message.into())
 }

@@ -39,8 +39,9 @@ pub fn build_electrical_field_recovery_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let (partitions, construction_workspace_bytes) = electrical_field_recovery_shape(request)?;
     let bytes = partitions.iter().try_fold(0u64, |n, v| {
-        n.checked_add(*v)
-            .ok_or(ResourcePlanningError::Overflow("electrical recovery output"))
+        n.checked_add(*v).ok_or(ResourcePlanningError::Overflow(
+            "electrical recovery output",
+        ))
     })?;
     if facts.output.encoded_payload_bytes_upper_bound.0 != bytes {
         return Err(ResourcePlanningError::Invalid(

@@ -26,7 +26,9 @@ pub(crate) fn sparse_workspace_bound(
         usize::try_from(reduced).map_err(|_| invalid("acoustic reduced nonzeros"))?,
     );
     if factor == u64::MAX {
-        return Err(ResourcePlanningError::Overflow("acoustic factor reservation"));
+        return Err(ResourcePlanningError::Overflow(
+            "acoustic factor reservation",
+        ));
     }
     // CSR row/header allowances, reduction clone and solution/residual vectors coexist.
     add(

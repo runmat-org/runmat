@@ -50,9 +50,8 @@ impl SampledStudyObservations {
         preparation: ObservationPreparation,
         sample: RecoveredFieldSample,
     ) -> AnalysisBridgeResult<PreparedObservationFanout> {
-        Self::prepare_fanout_if_sampled(source, preparation, sample)?.ok_or_else(|| {
-            invalid("sampled authored observations have no executable partitions")
-        })
+        Self::prepare_fanout_if_sampled(source, preparation, sample)?
+            .ok_or_else(|| invalid("sampled authored observations have no executable partitions"))
     }
 
     /// Fan out at one retained sample of a multi-sample source; `None` when no authored

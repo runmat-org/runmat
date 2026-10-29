@@ -56,7 +56,8 @@ fn native_magnetic_nonzero_reference_converges_without_reference_solver_outputs(
             for axis in 0..3 {
                 potential += sample.volume_weight_m3
                     * (sample.vector_potential_wb_per_m.canonical_value()[axis] - a[axis]).powi(2);
-                flux += sample.volume_weight_m3 * (sample.flux_density_t.canonical_value()[axis] - b[axis]).powi(2);
+                flux += sample.volume_weight_m3
+                    * (sample.flux_density_t.canonical_value()[axis] - b[axis]).powi(2);
             }
         }
         let error = (
@@ -95,7 +96,8 @@ fn native_magnetic_signed_material_scaling_and_affine_orders_are_transport_neutr
                 for (a, b) in cold
                     .response()
                     .edge_circulations_wb
-                    .canonical_values().iter()
+                    .canonical_values()
+                    .iter()
                     .zip(base.response().edge_circulations_wb.canonical_values())
                 {
                     assert!((a - scale * b).abs() <= 1e-13 * scale.abs().max(1.0));

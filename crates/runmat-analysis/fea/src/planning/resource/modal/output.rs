@@ -41,10 +41,8 @@ pub(in crate::planning::resource) fn result_output(
         "modal metadata and coordinate layout",
     )?;
     let metadata_resident =
-        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
-            metadata, 1,
-        )
-        .ok_or(ResourcePlanningError::Overflow(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(metadata, 1)
+            .ok_or(ResourcePlanningError::Overflow(
             "modal metadata materialization",
         ))?;
     profiled_canonical_output_resource_facts(runmat_canonical_codec::SerializedCanonicalProfile {

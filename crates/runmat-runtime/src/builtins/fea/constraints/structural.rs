@@ -79,10 +79,10 @@ pub async fn structural_prescribed_motion_builtin(
 macro_rules! coupling_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $variant:ident) => {
         #[runtime_builtin(
-                            name = $name,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::constraints::structural"
-                        )]
+                                    name = $name,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::constraints::structural"
+                                )]
         pub async fn $function(
             id: String,
             region: Value,

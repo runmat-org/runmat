@@ -39,7 +39,8 @@ fn fixture(
             .unwrap()
             .speed_of_sound_m_per_s = runmat_types::physical::SpeedOfSound::new(4.0);
     }
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![frequency]);
     model.signals.push(PhysicalSignal::Pressure(complex_signal(
         Pressure::new(amplitude[0]),
@@ -50,7 +51,9 @@ fn fixture(
         .push(AnalysisConstraint::Acoustic(AcousticConstraint {
             constraint_id: "pressure".into(),
             kind: AcousticConstraintKind::PrescribedPressure {
-                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                    "slab_left",
+                )),
                 value: PrescribedValue::Signal(SignalId("drive".into())),
             },
         }));
@@ -94,7 +97,9 @@ fn outward_recovered_power(result: &CanonicalAcousticResponse, target: &str) -> 
     let mut power = 0.0;
     for face in result
         .projection
-        .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
+        .boundary_faces_for_target(&RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_boundary_selection(&(target)),
+        ))
     {
         let velocity =
             &result.element_velocity_m_per_s.canonical_values()[face.adjacent_element_indices[0]];
@@ -301,20 +306,24 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
                             let exact_power = norm / (2.0 * impedance);
                             let inlet = outward_recovered_power(&result, "slab_left");
                             let outlet = outward_recovered_power(&result, "slab_right");
-                            let vectors = ["slab_left", "slab_right"].map(|target| {
-                                let mut total = [0.0; 3];
-                                for face in result
-                                    .projection
-                                    .boundary_faces_for_target(&RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(target))))
-                                {
-                                    for (value, component) in
-                                        total.iter_mut().zip(face.oriented_area_vector_m2)
-                                    {
-                                        *value += component;
+                            let vectors =
+                                ["slab_left", "slab_right"].map(|target| {
+                                    let mut total = [0.0; 3];
+                                    for face in result
+                                        .projection
+                                        .boundary_faces_for_target(&RegionTarget::boundary(
+                                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                                            &(target),
+                                        ),
+                                    )) {
+                                        for (value, component) in
+                                            total.iter_mut().zip(face.oriented_area_vector_m2)
+                                        {
+                                            *value += component;
+                                        }
                                     }
-                                }
-                                total
-                            });
+                                    total
+                                });
                             eprintln!("radiation quadratic={quadratic} rotated={rotated} rho={rho} c={c} frequency={frequency} cells={cells} amplitude={amplitude:?} pressure={pressure_errors:?} velocity={velocity_errors:?} inlet={inlet} outlet={outlet} exact={exact_power} admittance_power={} face_vectors={vectors:?}", result.mean_impedance_loss_w.canonical_value());
                             gate!(
                                 inlet < 0.0 && outlet > 0.0,

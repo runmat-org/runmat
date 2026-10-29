@@ -221,7 +221,6 @@ pub(crate) fn classify_with_context(
     })
 }
 
-
 fn within_closed_bounds(point: [f64; 2], first: [f64; 2], second: [f64; 2]) -> bool {
     (0..2).all(|axis| {
         point[axis] >= first[axis].min(second[axis]) && point[axis] <= first[axis].max(second[axis])

@@ -63,20 +63,33 @@ pub struct SparseMultigridRequest<'a> {
 impl SparseMultigridRequest<'_> {
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(!self.levels.is_empty(), "multigrid hierarchy has no levels");
-        ensure!(self.smoother_degree >= 1 && self.chebyshev_ratio > 1.0, "invalid smoother");
+        ensure!(
+            self.smoother_degree >= 1 && self.chebyshev_ratio > 1.0,
+            "invalid smoother"
+        );
         for (index, level) in self.levels.iter().enumerate() {
             level.matrix.validate()?;
             let n = level.matrix.rows;
-            ensure!(level.matrix.columns == n && level.block >= 1 && n % level.block == 0, "level operator shape");
             ensure!(
-                level.inverse_blocks.len() == (n as usize / level.block as usize) * (level.block * level.block) as usize,
+                level.matrix.columns == n && level.block >= 1 && n % level.block == 0,
+                "level operator shape"
+            );
+            ensure!(
+                level.inverse_blocks.len()
+                    == (n as usize / level.block as usize) * (level.block * level.block) as usize,
                 "inverse block extent"
             );
-            ensure!(level.lambda_max.is_finite() && level.lambda_max > 0.0, "Chebyshev bound");
+            ensure!(
+                level.lambda_max.is_finite() && level.lambda_max > 0.0,
+                "Chebyshev bound"
+            );
             let last = index + 1 == self.levels.len();
             match (&level.prolongation, &level.restriction, last) {
                 (None, None, true) => {
-                    ensure!(self.coarse_inverse.len() == (n as usize) * (n as usize), "coarse inverse extent");
+                    ensure!(
+                        self.coarse_inverse.len() == (n as usize) * (n as usize),
+                        "coarse inverse extent"
+                    );
                 }
                 (Some(p), Some(r), false) => {
                     p.validate()?;
@@ -87,7 +100,9 @@ impl SparseMultigridRequest<'_> {
                         "transfer operator shapes"
                     );
                 }
-                _ => anyhow::bail!("transfer operators must exist exactly above the coarsest level"),
+                _ => {
+                    anyhow::bail!("transfer operators must exist exactly above the coarsest level")
+                }
             }
         }
         Ok(())

@@ -27,7 +27,11 @@ const LEVEL_ROWS_PER_TASK: usize = 1024;
 impl LevelSchedule {
     /// `dependencies(i)` yields the rows row `i` reads. For a forward (lower) solve they are all
     /// `< i`; for a backward (upper) solve all `> i`.
-    pub(crate) fn build<'a>(n: usize, forward: bool, dependencies: impl Fn(usize) -> &'a [usize]) -> Self {
+    pub(crate) fn build<'a>(
+        n: usize,
+        forward: bool,
+        dependencies: impl Fn(usize) -> &'a [usize],
+    ) -> Self {
         let mut level = vec![0usize; n];
         let mut depth = 0usize;
         let mut visit = |i: usize, level: &mut Vec<usize>| {
@@ -65,7 +69,11 @@ impl LevelSchedule {
             .map(|w| w[1] - w[0])
             .filter(|&rows| rows >= PARALLEL_LEVEL_ROWS)
             .sum();
-        Self { rows, level_ptr, wide: 2 * wide_rows >= n.max(1) }
+        Self {
+            rows,
+            level_ptr,
+            wide: 2 * wide_rows >= n.max(1),
+        }
     }
 
     /// Whether the scheduled (level-parallel) solve is worth using.
@@ -79,13 +87,24 @@ impl LevelSchedule {
 
     /// Solves level by level: `row(i, z)` returns the new `z[i]`, reading only entries of `z`
     /// from earlier levels.
-    pub(crate) fn solve<T: Scalar>(&self, z: &mut [T], row: impl Fn(usize, Earlier<'_, T>) -> T + Sync) {
+    pub(crate) fn solve<T: Scalar>(
+        &self,
+        z: &mut [T],
+        row: impl Fn(usize, Earlier<'_, T>) -> T + Sync,
+    ) {
         let shared = SharedSlice(z.as_mut_ptr(), z.len());
         for level in 0..self.levels() {
             let rows = &self.rows[self.level_ptr[level]..self.level_ptr[level + 1]];
             let kernel = |&i: &usize| {
                 let (ptr, len) = shared.parts();
-                let value = row(i, Earlier { ptr, len, lifetime: std::marker::PhantomData });
+                let value = row(
+                    i,
+                    Earlier {
+                        ptr,
+                        len,
+                        lifetime: std::marker::PhantomData,
+                    },
+                );
                 // SAFETY: rows of one level are distinct and each writes only its own entry; no
                 // row of this level reads it (its readers lie in later levels).
                 unsafe { ptr.add(i).write(value) };
@@ -161,7 +180,10 @@ mod tests {
         ilu.apply(&r, &mut serial).unwrap();
         let mut threaded = vec![0.0; n];
         par::with_threads(4, || ilu.apply(&r, &mut threaded).unwrap());
-        assert!(serial.iter().zip(&threaded).all(|(p, q)| p.to_bits() == q.to_bits()));
+        assert!(serial
+            .iter()
+            .zip(&threaded)
+            .all(|(p, q)| p.to_bits() == q.to_bits()));
     }
 
     #[test]
@@ -178,7 +200,10 @@ mod tests {
             for threads in [2, 4] {
                 let mut threaded = vec![0.0; n];
                 par::with_threads(threads, || preconditioner.apply(&r, &mut threaded).unwrap());
-                assert!(serial.iter().zip(&threaded).all(|(p, q)| p.to_bits() == q.to_bits()));
+                assert!(serial
+                    .iter()
+                    .zip(&threaded)
+                    .all(|(p, q)| p.to_bits() == q.to_bits()));
             }
         }
     }

@@ -26,7 +26,10 @@ pub(super) fn assert_accuracy_plan_identity_bound(
     };
     let loosened = {
         let mut plan = request.plan.clone();
-        let criterion = plan.criteria.first_mut().expect("an accuracy plan has a criterion");
+        let criterion = plan
+            .criteria
+            .first_mut()
+            .expect("an accuracy plan has a criterion");
         criterion.tolerance = match criterion.tolerance {
             runmat_analysis_core::AccuracyTolerance::Relative(value) => {
                 runmat_analysis_core::AccuracyTolerance::Relative(value * 10.0)

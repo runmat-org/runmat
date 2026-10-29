@@ -9,16 +9,13 @@ use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, SolverVolumeElement}
 use crate::algebra::{OperatorRole, RealSparseMatrix};
 use crate::{
     physics::structural::material::StructuralElementMaterial,
-    planning::resource::LocalExecutionPlan,
-    properties::CompiledPropertyMap,
+    planning::resource::LocalExecutionPlan, properties::CompiledPropertyMap,
 };
 
-use super::{
-    elements::solid::{
-        global_stiffness_matrix as tetrahedron4_stiffness, tetrahedron10_consistent_mass_matrix,
-        tetrahedron10_global_stiffness_matrix, tetrahedron4_consistent_mass_matrix, SolidMaterial,
-        Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
-    },
+use super::elements::solid::{
+    global_stiffness_matrix as tetrahedron4_stiffness, tetrahedron10_consistent_mass_matrix,
+    tetrahedron10_global_stiffness_matrix, tetrahedron4_consistent_mass_matrix, SolidMaterial,
+    Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
 };
 use crate::algebra::{
     element_assembly::{
@@ -166,20 +163,21 @@ fn assemble_solid_operators(
     local_execution: LocalExecutionPlan,
     mut capture: Option<&mut SolidEnergyPreparation>,
 ) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
-    let map = ElementDofMap::from_elements(dof_count, elements.len(), local_execution, |index, out| {
-        let element = &elements[index];
-        for node_id in &element.node_ids {
-            let (_, offset) = nodes.get(node_id).copied().ok_or(
-                SolverSolidAssemblyError::UnknownElementNode {
-                    element_id: element.element_id,
-                    node_id: *node_id,
-                },
-            )?;
-            out.extend((0..3).map(|axis| Some(offset + axis)));
-        }
-        Ok(())
-    })
-    .map_err(element_assembly_error)?;
+    let map =
+        ElementDofMap::from_elements(dof_count, elements.len(), local_execution, |index, out| {
+            let element = &elements[index];
+            for node_id in &element.node_ids {
+                let (_, offset) = nodes.get(node_id).copied().ok_or(
+                    SolverSolidAssemblyError::UnknownElementNode {
+                        element_id: element.element_id,
+                        node_id: *node_id,
+                    },
+                )?;
+                out.extend((0..3).map(|axis| Some(offset + axis)));
+            }
+            Ok(())
+        })
+        .map_err(element_assembly_error)?;
     let pattern = map
         .symbolic_pattern(local_execution)
         .map_err(|error| element_assembly_error(error.map_element(|never| match never {})))?;
@@ -306,7 +304,10 @@ fn write_element<const D: usize>(
             MechanicalDampingModel::Rayleigh {
                 mass_coefficient,
                 stiffness_coefficient,
-            } => (mass_coefficient.canonical_value(), stiffness_coefficient.canonical_value()),
+            } => (
+                mass_coefficient.canonical_value(),
+                stiffness_coefficient.canonical_value(),
+            ),
         };
         let target = out.matrix(DAMPING);
         for row in 0..D {

@@ -260,7 +260,9 @@ pub fn electrical_native_field_definitions(
 ) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
     request.validate()?;
     let FieldTopologyIdentity::VolumeMesh { .. } = request.topology else {
-        return Err(invalid("electrical native fields live on the canonical volume mesh"));
+        return Err(invalid(
+            "electrical native fields live on the canonical volume mesh",
+        ));
     };
     let [potential, field, flux, density] = request.plan.requirements.as_slice() else {
         return Err(invalid("electrical native inventory has four fields"));
@@ -277,7 +279,9 @@ pub fn electrical_native_field_definitions(
     let nodes = usize::try_from(potential.cost.output_entity_count).map_err(invalid)?;
     let elements = usize::try_from(field.cost.output_entity_count).map_err(invalid)?;
     if native_electrical_field_plan(equation, nodes, elements)? != request.plan {
-        return Err(invalid("electrical native inventory differs from canonical shape"));
+        return Err(invalid(
+            "electrical native inventory differs from canonical shape",
+        ));
     }
     let ids = match equation {
         StaticElectricalEquation::SteadyConduction => [

@@ -64,7 +64,14 @@ fn kernel(element: usize, dofs: &[u32], out: &mut ElementOutputs<'_, f64>) -> Re
 }
 
 /// Serial reference: element loop, rows outer, columns inner, `+=` into ordered maps.
-fn reference(map: &ElementDofMap) -> (Vec<BTreeMap<usize, f64>>, Vec<BTreeMap<usize, f64>>, Vec<f64>, f64) {
+fn reference(
+    map: &ElementDofMap,
+) -> (
+    Vec<BTreeMap<usize, f64>>,
+    Vec<BTreeMap<usize, f64>>,
+    Vec<f64>,
+    f64,
+) {
     let n_dofs = map.dof_count();
     let mut a = vec![BTreeMap::new(); n_dofs];
     let mut b = vec![BTreeMap::new(); n_dofs];
@@ -79,7 +86,16 @@ fn reference(map: &ElementDofMap) -> (Vec<BTreeMap<usize, f64>>, Vec<BTreeMap<us
             vectors: 1,
             scalars: 1,
         };
-        kernel(element, dofs, &mut ElementOutputs { n, shape, values: &mut values }).unwrap();
+        kernel(
+            element,
+            dofs,
+            &mut ElementOutputs {
+                n,
+                shape,
+                values: &mut values,
+            },
+        )
+        .unwrap();
         for i in 0..n {
             if dofs[i] == SKIPPED_DOF {
                 continue;
@@ -145,9 +161,21 @@ fn assembly_is_bitwise_identical_to_the_serial_element_loop_for_every_thread_cou
         let expected_b = to_csr_values(&pattern, &b);
         let assembled =
             assemble_elements(&map, &pattern, shape, plan(threads), kernel, no_visit).unwrap();
-        assert_eq!(bits(&assembled.matrices[0]), bits(&expected_a), "threads {threads}");
-        assert_eq!(bits(&assembled.matrices[1]), bits(&expected_b), "threads {threads}");
-        assert_eq!(bits(&assembled.vectors[0]), bits(&vector), "threads {threads}");
+        assert_eq!(
+            bits(&assembled.matrices[0]),
+            bits(&expected_a),
+            "threads {threads}"
+        );
+        assert_eq!(
+            bits(&assembled.matrices[1]),
+            bits(&expected_b),
+            "threads {threads}"
+        );
+        assert_eq!(
+            bits(&assembled.vectors[0]),
+            bits(&vector),
+            "threads {threads}"
+        );
         assert_eq!(assembled.scalars[0].to_bits(), scalar.to_bits());
     }
 }
@@ -234,13 +262,8 @@ fn ordered_visitor_sees_every_element_in_canonical_order() {
 #[test]
 fn entries_outside_a_foreign_pattern_fail_closed() {
     let map = test_map(300, 600);
-    let diagonal = SparsePattern::try_new(
-        300,
-        300,
-        (0..=300).collect(),
-        (0..300).collect(),
-    )
-    .unwrap();
+    let diagonal =
+        SparsePattern::try_new(300, 300, (0..=300).collect(), (0..300).collect()).unwrap();
     let error = assemble_elements(
         &map,
         &diagonal,

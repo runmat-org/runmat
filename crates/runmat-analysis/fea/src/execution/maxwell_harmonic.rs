@@ -116,9 +116,8 @@ impl MaxwellHarmonicWorkload {
     ) -> AnalysisExecutionResult<MaxwellHarmonicSolverResult> {
         let input = self.compile_input(mesh)?;
         let formulation = self.formulation(mesh)?;
-        let response =
-            crate::physics::maxwell::solve(mesh, &input, self.relative_residual_target)
-                .map_err(invalid)?;
+        let response = crate::physics::maxwell::solve(mesh, &input, self.relative_residual_target)
+            .map_err(invalid)?;
         MaxwellHarmonicSolverResult::new(self, mesh, formulation, input, response)
     }
 }

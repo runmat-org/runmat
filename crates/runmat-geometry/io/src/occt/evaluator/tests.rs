@@ -443,7 +443,8 @@ fn independent_coincident_faces_require_explicit_contact_authoring() {
                 .iter()
                 .find(|instance| instance.id.assembly_path == face.id.assembly_path)
                 .map(|instance| instance.transform.0[3])?;
-            ((point.canonical_value()[0] + translation_x - 0.001).abs() < 1.0e-12).then(|| face.id.clone())
+            ((point.canonical_value()[0] + translation_x - 0.001).abs() < 1.0e-12)
+                .then(|| face.id.clone())
         })
         .collect::<Vec<_>>();
     coincident_faces.sort();
@@ -1188,8 +1189,14 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     );
     let id = &imported.topology.edges[0].curve_evaluator_id;
     let range = evaluator.parameter_range(id).unwrap();
-    let start = evaluator.point(id, range.start, &Unlimited).unwrap().canonical_value();
-    let end = evaluator.point(id, range.end, &Unlimited).unwrap().canonical_value();
+    let start = evaluator
+        .point(id, range.start, &Unlimited)
+        .unwrap()
+        .canonical_value();
+    let end = evaluator
+        .point(id, range.end, &Unlimited)
+        .unwrap()
+        .canonical_value();
     let expected_length = norm([end[0] - start[0], end[1] - start[1], end[2] - start[2]]);
     let length = evaluator
         .arc_length_m(id, range, Length::new(1.0e-12), &Unlimited)
@@ -1366,8 +1373,9 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     .unwrap();
     assert!(curvature.minimum_1_per_m.canonical_value().abs() < 1.0e-12);
     assert!(curvature.maximum_1_per_m.canonical_value().abs() < 1.0e-12);
-    let displaced =
-        std::array::from_fn(|axis| surface_derivatives.point_m.canonical_value()[axis] + normal[axis] * 0.25);
+    let displaced = std::array::from_fn(|axis| {
+        surface_derivatives.point_m.canonical_value()[axis] + normal[axis] * 0.25
+    });
     let surface_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
         &evaluator,
         surface_id,
@@ -1379,7 +1387,8 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     assert!((surface_projection.distance_m.canonical_value() - 0.25).abs() < 1.0e-12);
     assert!(
         norm(std::array::from_fn(|axis| {
-            surface_projection.point_m.canonical_value()[axis] - surface_derivatives.point_m.canonical_value()[axis]
+            surface_projection.point_m.canonical_value()[axis]
+                - surface_derivatives.point_m.canonical_value()[axis]
         })) < 1.0e-12
     );
     let u_boundary_uv = [surface_bounds[0].end, surface_uv[1]];
@@ -1390,8 +1399,14 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         &Unlimited,
     )
     .unwrap();
-    let u_direction = normalized(surface_derivatives.du_m.with_canonical_storage(|values, _frames| *values)).unwrap();
-    let beyond_u = std::array::from_fn(|axis| u_boundary.canonical_value()[axis] + u_direction[axis] * 0.25);
+    let u_direction = normalized(
+        surface_derivatives
+            .du_m
+            .with_canonical_storage(|values, _frames| *values),
+    )
+    .unwrap();
+    let beyond_u =
+        std::array::from_fn(|axis| u_boundary.canonical_value()[axis] + u_direction[axis] * 0.25);
     let boundary_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
         &evaluator,
         surface_id,
@@ -1419,7 +1434,12 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     let edge_3d = evaluator
         .point(&edge.curve_evaluator_id, pcurve_parameter, &Unlimited)
         .unwrap();
-    assert!(norm(std::array::from_fn(|axis| boundary_3d.canonical_value()[axis] - edge_3d.canonical_value()[axis])) < 1.0e-12);
+    assert!(
+        norm(std::array::from_fn(|axis| boundary_3d.canonical_value()
+            [axis]
+            - edge_3d.canonical_value()[axis]))
+            < 1.0e-12
+    );
     assert_eq!(
         runmat_geometry_core::ExactSurfaceEvaluator::point(
             &evaluator,
@@ -1470,7 +1490,9 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
             &Unlimited,
         )
         .unwrap();
-    assert!((millimeter_length.canonical_value() - length.canonical_value() * 0.001).abs() < 1.0e-15);
+    assert!(
+        (millimeter_length.canonical_value() - length.canonical_value() * 0.001).abs() < 1.0e-15
+    );
     let millimeter_surface_id = &millimeter_import
         .topology
         .faces
@@ -1487,11 +1509,13 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     .unwrap();
     assert!(
         norm(std::array::from_fn(|axis| {
-            millimeter_surface_point.canonical_value()[axis] - surface_derivatives.point_m.canonical_value()[axis] * 0.001
+            millimeter_surface_point.canonical_value()[axis]
+                - surface_derivatives.point_m.canonical_value()[axis] * 0.001
         })) < 1.0e-15
     );
-    let millimeter_displaced =
-        std::array::from_fn(|axis| millimeter_surface_point.canonical_value()[axis] + normal[axis] * 0.00025);
+    let millimeter_displaced = std::array::from_fn(|axis| {
+        millimeter_surface_point.canonical_value()[axis] + normal[axis] * 0.00025
+    });
     let millimeter_projection = runmat_geometry_core::ExactSurfaceEvaluator::closest_point(
         &millimeter_evaluator,
         millimeter_surface_id,

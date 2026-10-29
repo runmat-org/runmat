@@ -51,7 +51,6 @@ pub fn retain_authored_outputs(
         authored_output_root(&all, &output.output_id)
             .is_some_and(|(step, quantity)| keep(&step, quantity))
     });
-    let kept: std::collections::BTreeSet<_> =
-        outputs.iter().map(|o| o.output_id.clone()).collect();
+    let kept: std::collections::BTreeSet<_> = outputs.iter().map(|o| o.output_id.clone()).collect();
     assessments.retain(|assessment| kept.contains(&assessment.output_id));
 }

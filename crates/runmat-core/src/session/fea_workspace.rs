@@ -73,12 +73,13 @@ impl RunMatSession {
         // Configuration changes require a newly admitted graph, rather than
         // silently checking under the old package/security configuration.
         if candidate.changed_paths().any(|path| {
-            !runmat_geometry_core::is_geometry_selection_metadata_path(path.as_str()) && !matches!(
-                std::path::Path::new(path.as_str())
-                    .extension()
-                    .and_then(|extension| extension.to_str()),
-                Some("fea" | "m")
-            )
+            !runmat_geometry_core::is_geometry_selection_metadata_path(path.as_str())
+                && !matches!(
+                    std::path::Path::new(path.as_str())
+                        .extension()
+                        .and_then(|extension| extension.to_str()),
+                    Some("fea" | "m")
+                )
         }) {
             return Err("FEA source changes may only mutate admitted .fea/.m sources and CAD selection metadata".into());
         }
@@ -197,9 +198,15 @@ impl RunMatSession {
                 .requests(functions.clone(), profiles.clone())?
                 .geometry
             {
-                let metadata = runmat_geometry_core::geometry_selection_metadata_path(geometry.logical_path.as_str()).map_err(|e| e.to_string())?;
-                let metadata = runmat_runtime::analysis::LogicalSourcePath::file(metadata).map_err(|e| e.to_string())?;
-                if let Some(bytes) = candidate.read(&metadata) { prepared.add_geometry(metadata, bytes.to_vec())?; }
+                let metadata = runmat_geometry_core::geometry_selection_metadata_path(
+                    geometry.logical_path.as_str(),
+                )
+                .map_err(|e| e.to_string())?;
+                let metadata = runmat_runtime::analysis::LogicalSourcePath::file(metadata)
+                    .map_err(|e| e.to_string())?;
+                if let Some(bytes) = candidate.read(&metadata) {
+                    prepared.add_geometry(metadata, bytes.to_vec())?;
+                }
                 if let Some(bytes) = candidate.read(&geometry.logical_path) {
                     prepared.add_geometry(geometry.logical_path, bytes.to_vec())?;
                 }

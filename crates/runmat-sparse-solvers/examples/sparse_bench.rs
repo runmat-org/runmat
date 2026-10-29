@@ -4,7 +4,9 @@
 use std::time::Instant;
 
 use runmat_sparse_solvers::control::SolveControl;
-use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind, SymbolicFactorization};
+use runmat_sparse_solvers::direct::{
+    DirectOptions, DirectSolver, FactorKind, SymbolicFactorization,
+};
 use runmat_sparse_solvers::krylov::{pcg, KrylovOptions};
 use runmat_sparse_solvers::ordering::Ordering;
 use runmat_sparse_solvers::par;
@@ -18,7 +20,11 @@ fn peak_rss_bytes() -> u64 {
         libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr());
         // macOS reports bytes, Linux kilobytes.
         let max = usage.assume_init().ru_maxrss as u64;
-        if cfg!(target_os = "macos") { max } else { max * 1024 }
+        if cfg!(target_os = "macos") {
+            max
+        } else {
+            max * 1024
+        }
     }
 }
 
@@ -33,18 +39,19 @@ fn main() {
         _ => Ordering::NestedDissection,
     };
     let t = Instant::now();
-    let (a, b, near_nullspace, block): (CsrMatrix<f64>, Vec<f64>, _, usize) = par::with_threads(threads, || match problem {
-        "elasticity" => {
-            let p = elasticity3d(grid, grid, grid);
-            let ns = rigid_body_modes(&p.coordinates, 3);
-            (p.matrix, p.load, Some(ns), 3)
-        }
-        _ => {
-            let a = poisson3d::<f64>(grid, grid, grid);
-            let n = a.nrows();
-            (a, vec![1.0; n], None, 1)
-        }
-    });
+    let (a, b, near_nullspace, block): (CsrMatrix<f64>, Vec<f64>, _, usize) =
+        par::with_threads(threads, || match problem {
+            "elasticity" => {
+                let p = elasticity3d(grid, grid, grid);
+                let ns = rigid_body_modes(&p.coordinates, 3);
+                (p.matrix, p.load, Some(ns), 3)
+            }
+            _ => {
+                let a = poisson3d::<f64>(grid, grid, grid);
+                let n = a.nrows();
+                (a, vec![1.0; n], None, 1)
+            }
+        });
     let n = a.nrows();
     println!(
         "{{\"phase\":\"assemble\",\"problem\":\"{problem}\",\"grid\":{grid},\"n\":{n},\"nnz\":{},\"threads\":{threads},\"seconds\":{:.3}}}",
@@ -64,7 +71,12 @@ fn main() {
                 ..DirectOptions::new(FactorKind::Cholesky)
             };
             let t = Instant::now();
-            let symbolic = SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE).unwrap();
+            let symbolic = SymbolicFactorization::analyze::<f64>(
+                a.as_ref().into(),
+                &options,
+                SolveControl::NONE,
+            )
+            .unwrap();
             let e = symbolic.estimate();
             println!(
                 "{{\"phase\":\"estimate\",\"problem\":\"{problem}\",\"n\":{n},\"ordering\":\"{ordering:?}\",\"analyze_s\":{:.3},\"factor_entries\":{},\"factor_gib\":{:.3},\"workspace_gib\":{:.3},\"gflop\":{:.1}}}",
@@ -81,11 +93,23 @@ fn main() {
                 ..DirectOptions::new(FactorKind::Cholesky)
             };
             let t = Instant::now();
-            let symbolic = SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE).unwrap();
+            let symbolic = SymbolicFactorization::analyze::<f64>(
+                a.as_ref().into(),
+                &options,
+                SolveControl::NONE,
+            )
+            .unwrap();
             let analyze = t.elapsed().as_secs_f64();
             let e = symbolic.estimate();
             let t = Instant::now();
-            let solver = DirectSolver::factorize(symbolic, a.as_ref().into(), options, None, SolveControl::NONE).unwrap();
+            let solver = DirectSolver::factorize(
+                symbolic,
+                a.as_ref().into(),
+                options,
+                None,
+                SolveControl::NONE,
+            )
+            .unwrap();
             let factor = t.elapsed().as_secs_f64();
             let t = Instant::now();
             let mut x = b.clone();
@@ -117,7 +141,19 @@ fn main() {
             let setup = t.elapsed().as_secs_f64();
             let t = Instant::now();
             let mut x = vec![0.0; n];
-            let report = pcg(&a, Some(&amg), &b, &mut x, &KrylovOptions { rtol: 1e-8, max_iterations: 1000, ..Default::default() }, SolveControl::NONE).unwrap();
+            let report = pcg(
+                &a,
+                Some(&amg),
+                &b,
+                &mut x,
+                &KrylovOptions {
+                    rtol: 1e-8,
+                    max_iterations: 1000,
+                    ..Default::default()
+                },
+                SolveControl::NONE,
+            )
+            .unwrap();
             let solve = t.elapsed().as_secs_f64();
             println!(
                 "{{\"phase\":\"amg_pcg\",\"problem\":\"{problem}\",\"n\":{n},\"threads\":{threads},\"setup_s\":{setup:.3},\"solve_s\":{solve:.3},\"iterations\":{},\"levels\":{:?},\"operator_complexity\":{:.2},\"relative_residual\":{:.2e},\"peak_rss_gib\":{:.2}}}",

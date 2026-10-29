@@ -283,8 +283,11 @@ impl AcousticResponseSolverResult {
                 ..
             },
             AcousticResponseDiagnostics::Transient { time_points_s, .. },
-        ) = (d.solver, &workload.step()?.independent_domain, &d.diagnostics)
-        {
+        ) = (
+            d.solver,
+            &workload.step()?.independent_domain,
+            &d.diagnostics,
+        ) {
             // Fields are retained exactly at the sampled schedule points the step implies.
             let retention =
                 crate::physics::acoustic::TransientRetention::for_step(workload.step()?);

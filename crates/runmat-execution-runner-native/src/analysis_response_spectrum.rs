@@ -33,7 +33,8 @@ pub struct CompletedStructuralModalResponseSpectrumStudy {
     pub publication: ImportedPublishedResult,
     pub envelope_state: ImportedSemanticState,
     /// Authored-output observations of the response step, bound by accuracy and publication.
-    pub observations: Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    pub observations:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
 }
 
 pub async fn execute_structural_modal_response_spectrum_locally(

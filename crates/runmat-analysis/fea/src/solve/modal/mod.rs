@@ -199,7 +199,8 @@ pub(crate) fn solve_modal_system_reusing(
         .admissibility()
         .and_then(|evidence| evidence.factor())
         .map(|factor| factor.0.clone());
-    let stiffness = crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().stiffness());
+    let stiffness =
+        crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().stiffness());
     let mass = crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().mass());
     let mut modes: Vec<ModalCandidate> = Vec::with_capacity(target_mode_count.saturating_add(4));
     let mut boundary_probe_count = 0usize;
@@ -316,7 +317,8 @@ pub(crate) fn solve_modal_system_reusing(
         }
     }
     let solver_backend = LinearAlgebraBackendKind::CpuReference;
-    let (solver_host_sync_count, device_apply_k_count, device_apply_k_attempt_count) = (0u32, 0u32, 0u32);
+    let (solver_host_sync_count, device_apply_k_count, device_apply_k_attempt_count) =
+        (0u32, 0u32, 0u32);
     let fallback_apply_count = 0u32;
     let accelerator_evidence = Vec::new();
     let unconstrained: Vec<usize> = (0..unconstrained_count).collect();
@@ -338,8 +340,9 @@ pub(crate) fn solve_modal_system_reusing(
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_MODAL_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
-        message: "solver=shift_invert_block_lanczos shift=0 factor=sparse_cholesky sturm_check=true"
-            .to_string(),
+        message:
+            "solver=shift_invert_block_lanczos shift=0 factor=sparse_cholesky sturm_check=true"
+                .to_string(),
     }];
     diagnostics.extend(linear_diagnostics);
     diagnostics.push(FeaDiagnostic {

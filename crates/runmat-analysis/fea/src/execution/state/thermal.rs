@@ -210,7 +210,10 @@ impl CanonicalSemanticState {
                 .copied()
                 .fold(0.0_f64, f64::max),
             interface_node_ids: result.interface_node_ids.clone(),
-            interface_temperature: result.interface_temperature_snapshots.get(terminal_index).cloned(),
+            interface_temperature: result
+                .interface_temperature_snapshots
+                .get(terminal_index)
+                .cloned(),
         };
         Self::new(CanonicalSemanticStateInput {
             producer: request.producer,
@@ -467,7 +470,9 @@ mod tests {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: "steady_temperature".into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_id))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_id)),
+                    ),
                     value: PrescribedValue::Constant(Temperature::new(315.0)),
                 },
             }));

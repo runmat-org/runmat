@@ -132,8 +132,14 @@ mod tests {
             vec![1.0; dofs],
         )
         .unwrap();
-        let error = solve_static_system(&summary, &LinearStaticSolveOptions::default(), None, None, None)
-            .expect_err("invalid exact operator must not yield a recoverable static solution");
+        let error = solve_static_system(
+            &summary,
+            &LinearStaticSolveOptions::default(),
+            None,
+            None,
+            None,
+        )
+        .expect_err("invalid exact operator must not yield a recoverable static solution");
         assert!(
             matches!(error, FeaRunError::Solve(message) if message.contains("FEA_INVALID_REAL_SYSTEM"))
         );

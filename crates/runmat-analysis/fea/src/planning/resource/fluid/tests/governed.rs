@@ -58,7 +58,8 @@ fn original_cpu_plan_codec_execution_and_request_substitution() {
 fn minimum_numeric_ceiling_cannot_be_bypassed_by_higher_authored_ceiling() {
     let (mut workload, mesh) = crate::execution::fluid_test_workload();
     let projection = derive_fluid_steady_resource_projection(&workload, &mesh).unwrap();
-    workload.policy.maximum_resident_bytes = Some(projection.phase_resident_bytes_upper_bound.0 - 1);
+    workload.policy.maximum_resident_bytes =
+        Some(projection.phase_resident_bytes_upper_bound.0 - 1);
     assert!(derive_fluid_steady_resource_projection(&workload, &mesh).is_err());
 }
 

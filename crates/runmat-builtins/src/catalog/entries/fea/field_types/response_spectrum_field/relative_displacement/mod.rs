@@ -4,12 +4,14 @@ use crate::fea_contract::{
 };
 use crate::*;
 
-const RELATIVE_DISPLACEMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.ResponseSpectrumField.relativeDisplacement()",
-    inputs: &NO_INPUTS,
-    outputs: &SELECTOR_OUTPUT,
-}];
-pub const RELATIVE_DISPLACEMENT_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&RELATIVE_DISPLACEMENT_SIGNATURES);
+const RELATIVE_DISPLACEMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "field = fea.ResponseSpectrumField.relativeDisplacement()",
+        inputs: &NO_INPUTS,
+        outputs: &SELECTOR_OUTPUT,
+    }];
+pub const RELATIVE_DISPLACEMENT_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&RELATIVE_DISPLACEMENT_SIGNATURES);
 const RELATIVE_DISPLACEMENT_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-relative-displacement",
     title: "Select the relative displacement envelope",

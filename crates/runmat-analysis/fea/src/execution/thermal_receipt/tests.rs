@@ -201,7 +201,9 @@ fn steady_receipts_bind_one_accepted_sample_and_mandatory_workload_lineage() {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: "prescribed_temperature".into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+                    ),
                     value: PrescribedValue::Constant(Temperature::new(315.0)),
                 },
             }));

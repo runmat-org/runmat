@@ -1,8 +1,8 @@
 use super::{assembly::ElectricalAssembly, ElectricalStaticError};
 use crate::excitation::{RealizedExcitationKind, RealizedExcitationTarget};
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, ElectricalConstraintKind, EntityDimension,
-    ExcitationAction, ProcedureStep, StepObjectRef,
+    AnalysisConstraint, AnalysisModel, ElectricalConstraintKind, EntityDimension, ExcitationAction,
+    ProcedureStep, StepObjectRef,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 use std::collections::BTreeMap;

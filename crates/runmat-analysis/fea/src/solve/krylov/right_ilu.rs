@@ -55,15 +55,22 @@ impl SparseRightIlu {
             return Err(SparseRightIluError::NonSquare);
         }
         let arrays = crate::solve::shared_sparse::CsrArrays::of(matrix);
-        let factor = runmat_sparse_solvers::precond::Ilu0::strict(arrays.view()).map_err(|error| {
-            use runmat_sparse_solvers::SolverError;
-            match error {
-                SolverError::MissingDiagonal { row } => SparseRightIluError::MissingDiagonal { row },
-                SolverError::Singular { pivot } => SparseRightIluError::InvalidPivot { row: pivot },
-                SolverError::NonFinite { entry } => SparseRightIluError::NonfiniteFactor { entry },
-                _ => SparseRightIluError::NonSquare,
-            }
-        })?;
+        let factor =
+            runmat_sparse_solvers::precond::Ilu0::strict(arrays.view()).map_err(|error| {
+                use runmat_sparse_solvers::SolverError;
+                match error {
+                    SolverError::MissingDiagonal { row } => {
+                        SparseRightIluError::MissingDiagonal { row }
+                    }
+                    SolverError::Singular { pivot } => {
+                        SparseRightIluError::InvalidPivot { row: pivot }
+                    }
+                    SolverError::NonFinite { entry } => {
+                        SparseRightIluError::NonfiniteFactor { entry }
+                    }
+                    _ => SparseRightIluError::NonSquare,
+                }
+            })?;
         check_cancelled(&cancelled)?;
         Ok(Self {
             factor,

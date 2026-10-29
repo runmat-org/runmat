@@ -27,7 +27,11 @@ fn imported_source_aliases_are_rejected() {
 
 #[test]
 fn canonical_occurrence_selection_is_preserved_by_the_compiler() {
-    let entity = runmat_geometry_core::PersistentEntityId::new(runmat_geometry_core::PersistentEntityKind::Face, "exact-face".into(), vec!["root".into(), "part-a".into()]);
+    let entity = runmat_geometry_core::PersistentEntityId::new(
+        runmat_geometry_core::PersistentEntityKind::Face,
+        "exact-face".into(),
+        vec!["root".into(), "part-a".into()],
+    );
     let id = entity.analysis_selection_id().unwrap();
     let source = r#"geometry part {
         file = "./part.brep"
@@ -187,7 +191,11 @@ geometry bracket {
 //   boundary: Authored `units = m` over a STEP file declaring millimetres resolves to metres and reports a located units-override warning; the check stays valid.
 #[test]
 fn readable_inline_geometry_uses_asset_owned_named_selections() {
-    let entity = runmat_geometry_core::PersistentEntityId::new(runmat_geometry_core::PersistentEntityKind::Solid, "exact-bracket".into(), vec!["root".into()]);
+    let entity = runmat_geometry_core::PersistentEntityId::new(
+        runmat_geometry_core::PersistentEntityKind::Solid,
+        "exact-bracket".into(),
+        vec!["root".into()],
+    );
     let id = entity.analysis_selection_id().unwrap();
     let metadata = runmat_geometry_core::GeometryNamedSelections {
         schema_version: 1,
@@ -206,7 +214,7 @@ material steel { mass_density = 7850 kg/m^3 }
 model loaded_bracket { assign material.steel to geometry.bracket.region.body }
 "#;
     let inspection = GeometryInspection {
-            authored_names: Default::default(),
+        authored_names: Default::default(),
         preview_extent_m: None,
         named_selections: Some(metadata),
         content_digest: SourceDigest([3; 32]),
@@ -261,7 +269,7 @@ geometry channel {
 }
 "#;
     let inspection = GeometryInspection {
-            named_selections: None,
+        named_selections: None,
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
         capabilities: vec![

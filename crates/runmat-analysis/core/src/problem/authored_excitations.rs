@@ -78,7 +78,9 @@ pub enum AuthoredExcitationTarget {
     WholeModel,
     /// The reference point of a rigid or distributing coupling, named by the coupling's
     /// constraint id; a force or moment there is transmitted through the coupling.
-    ReferencePoint { constraint_id: String },
+    ReferencePoint {
+        constraint_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

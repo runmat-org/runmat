@@ -10,7 +10,12 @@ struct Conduction;
 struct Elastic;
 
 fn gradients(coordinates: &[[f64; 3]]) -> ([[f64; 3]; 4], f64) {
-    let [p0, p1, p2, p3] = [coordinates[0], coordinates[1], coordinates[2], coordinates[3]];
+    let [p0, p1, p2, p3] = [
+        coordinates[0],
+        coordinates[1],
+        coordinates[2],
+        coordinates[3],
+    ];
     let a = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
     let b = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
     let c = [p3[0] - p0[0], p3[1] - p0[1], p3[2] - p0[2]];
@@ -41,12 +46,18 @@ impl ElementKernel for Conduction {
     fn nodes_per_element(&self) -> usize {
         4
     }
-    fn element_matrix(&self, material: u32, coordinates: &[[f64; 3]], matrix: &mut [f64]) -> Result<(), String> {
+    fn element_matrix(
+        &self,
+        material: u32,
+        coordinates: &[[f64; 3]],
+        matrix: &mut [f64],
+    ) -> Result<(), String> {
         let (g, volume) = gradients(coordinates);
         let k = 1.0 + material as f64;
         for i in 0..4 {
             for j in 0..4 {
-                matrix[i * 4 + j] = k * volume * (g[i][0] * g[j][0] + g[i][1] * g[j][1] + g[i][2] * g[j][2]);
+                matrix[i * 4 + j] =
+                    k * volume * (g[i][0] * g[j][0] + g[i][1] * g[j][1] + g[i][2] * g[j][2]);
             }
         }
         Ok(())
@@ -54,11 +65,20 @@ impl ElementKernel for Conduction {
     fn result_width(&self) -> usize {
         3
     }
-    fn element_result(&self, material: u32, coordinates: &[[f64; 3]], solution: &[f64], result: &mut [f64]) -> Result<(), String> {
+    fn element_result(
+        &self,
+        material: u32,
+        coordinates: &[[f64; 3]],
+        solution: &[f64],
+        result: &mut [f64],
+    ) -> Result<(), String> {
         let (g, _) = gradients(coordinates);
         let k = 1.0 + material as f64;
         for axis in 0..3 {
-            result[axis] = -k * (0..4).map(|node| g[node][axis] * solution[node]).sum::<f64>();
+            result[axis] = -k
+                * (0..4)
+                    .map(|node| g[node][axis] * solution[node])
+                    .sum::<f64>();
         }
         Ok(())
     }
@@ -71,7 +91,12 @@ impl ElementKernel for Elastic {
     fn nodes_per_element(&self) -> usize {
         4
     }
-    fn element_matrix(&self, _material: u32, coordinates: &[[f64; 3]], matrix: &mut [f64]) -> Result<(), String> {
+    fn element_matrix(
+        &self,
+        _material: u32,
+        coordinates: &[[f64; 3]],
+        matrix: &mut [f64],
+    ) -> Result<(), String> {
         let (g, volume) = gradients(coordinates);
         let (e, nu) = (1000.0, 0.25);
         let lambda = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
@@ -94,10 +119,22 @@ impl ElementKernel for Elastic {
     fn result_width(&self) -> usize {
         1
     }
-    fn element_result(&self, _material: u32, coordinates: &[[f64; 3]], solution: &[f64], result: &mut [f64]) -> Result<(), String> {
+    fn element_result(
+        &self,
+        _material: u32,
+        coordinates: &[[f64; 3]],
+        solution: &[f64],
+        result: &mut [f64],
+    ) -> Result<(), String> {
         let (g, _) = gradients(coordinates);
         // Volumetric strain.
-        result[0] = (0..4).map(|node| (0..3).map(|axis| g[node][axis] * solution[node * 3 + axis]).sum::<f64>()).sum();
+        result[0] = (0..4)
+            .map(|node| {
+                (0..3)
+                    .map(|axis| g[node][axis] * solution[node * 3 + axis])
+                    .sum::<f64>()
+            })
+            .sum();
         Ok(())
     }
 }
@@ -107,9 +144,15 @@ fn conduction_problem(n: usize) -> PartitionedProblem {
     let mut prescribed = Vec::new();
     for (node, point) in mesh.coordinates.iter().enumerate() {
         if point[0] == 0.0 {
-            prescribed.push(PrescribedDof { dof: node as u64, value: 300.0 });
+            prescribed.push(PrescribedDof {
+                dof: node as u64,
+                value: 300.0,
+            });
         } else if point[0] == 1.0 {
-            prescribed.push(PrescribedDof { dof: node as u64, value: 350.0 });
+            prescribed.push(PrescribedDof {
+                dof: node as u64,
+                value: 350.0,
+            });
         }
     }
     PartitionedProblem {
@@ -125,14 +168,24 @@ fn cantilever_problem(n: usize) -> PartitionedProblem {
     let mesh = box_mesh(n, 1.0);
     let mut prescribed = Vec::new();
     let mut loads = Vec::new();
-    let loaded = mesh.coordinates.iter().filter(|point| point[0] == 1.0).count() as f64;
+    let loaded = mesh
+        .coordinates
+        .iter()
+        .filter(|point| point[0] == 1.0)
+        .count() as f64;
     for (node, point) in mesh.coordinates.iter().enumerate() {
         if point[0] == 0.0 {
             for component in 0..3 {
-                prescribed.push(PrescribedDof { dof: node as u64 * 3 + component, value: 0.0 });
+                prescribed.push(PrescribedDof {
+                    dof: node as u64 * 3 + component,
+                    value: 0.0,
+                });
             }
         } else if point[0] == 1.0 {
-            loads.push(PointLoad { dof: node as u64 * 3 + 2, value: -1.0 / loaded });
+            loads.push(PointLoad {
+                dof: node as u64 * 3 + 2,
+                value: -1.0 / loaded,
+            });
         }
     }
     PartitionedProblem {
@@ -161,7 +214,11 @@ fn conduction_reproduces_the_exact_linear_field_for_every_rank_count() {
         assert!(quality.smallest_part > 0);
         for (node, point) in problem.mesh.coordinates.iter().enumerate() {
             let exact = 300.0 + 50.0 * point[0];
-            assert!((solution.solution[node] - exact).abs() < 1e-6, "{ranks}: {} vs {exact}", solution.solution[node]);
+            assert!(
+                (solution.solution[node] - exact).abs() < 1e-6,
+                "{ranks}: {} vs {exact}",
+                solution.solution[node]
+            );
         }
         for element in 0..problem.mesh.element_count() {
             assert!((solution.element_results[element * 3] + 50.0).abs() < 1e-6);
@@ -184,7 +241,11 @@ fn elastic_decomposition_matches_the_single_rank_solution_with_bounded_iteration
     .unwrap()
     .0;
     assert!(reference.iterations <= 2);
-    let scale = reference.solution.iter().map(|value| value.abs()).fold(0.0, f64::max);
+    let scale = reference
+        .solution
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0, f64::max);
     assert!(scale > 0.0);
     let mut iterations = Vec::new();
     for ranks in [2, 4, 8] {
@@ -203,12 +264,18 @@ fn elastic_decomposition_matches_the_single_rank_solution_with_bounded_iteration
             .zip(&reference.solution)
             .map(|(a, b)| (a - b).abs())
             .fold(0.0, f64::max);
-        assert!(difference <= 1e-7 * scale, "{ranks}: {difference} vs {scale}");
+        assert!(
+            difference <= 1e-7 * scale,
+            "{ranks}: {difference} vs {scale}"
+        );
         assert!(solution.coarse_dimension == 6 * ranks as u64);
         iterations.push(solution.iterations);
     }
     // The rigid-body coarse space keeps the iteration count bounded as ranks grow.
-    assert!(iterations.iter().all(|&count| count < 120), "{iterations:?}");
+    assert!(
+        iterations.iter().all(|&count| count < 120),
+        "{iterations:?}"
+    );
 }
 
 #[test]

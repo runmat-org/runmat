@@ -83,7 +83,10 @@ pub(super) fn validate(
             request.source_kind,
             request.source_result,
         )?;
-        catalog.validate_for(step, ObservationHistorySourceContext::VolumeMesh { mesh: &mesh })?;
+        catalog.validate_for(
+            step,
+            ObservationHistorySourceContext::VolumeMesh { mesh: &mesh },
+        )?;
         let ObservationFieldCatalogSource::VolumeMeshRecovery {
             recovery_request, ..
         } = catalog.source().source()

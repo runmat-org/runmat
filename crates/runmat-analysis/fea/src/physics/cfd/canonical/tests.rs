@@ -656,7 +656,10 @@ fn policy_caps_are_null_without_a_cap_and_share_the_wire_bound() {
     let json = serde_json::to_value(policy).unwrap();
     assert!(json["maximum_resident_bytes"].is_null());
     assert!(json["maximum_operator_work"].is_null());
-    assert_eq!(serde_json::from_value::<CanonicalFluidPolicy>(json.clone()).unwrap(), policy);
+    assert_eq!(
+        serde_json::from_value::<CanonicalFluidPolicy>(json.clone()).unwrap(),
+        policy
+    );
     assert_eq!(policy.resident_byte_budget(), u64::MAX);
     assert_eq!(policy.operator_work_budget(), u64::MAX);
     let max = runmat_types::wire_integer::MAX_WIRE_INTEGER;
@@ -667,7 +670,12 @@ fn policy_caps_are_null_without_a_cap_and_share_the_wire_bound() {
             serde_json::from_value::<CanonicalFluidPolicy>(json)
         };
         let decoded = with(max.into()).unwrap();
-        assert_eq!(decoded.resident_byte_budget().min(decoded.operator_work_budget()), max);
+        assert_eq!(
+            decoded
+                .resident_byte_budget()
+                .min(decoded.operator_work_budget()),
+            max
+        );
         assert!(with((max + 1).into()).is_err());
         assert!(with((-1).into()).is_err());
         assert!(with(1.5.into()).is_err());

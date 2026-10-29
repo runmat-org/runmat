@@ -9,7 +9,8 @@ const PSEUDO_VELOCITY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     inputs: &NO_INPUTS,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const PSEUDO_VELOCITY_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&PSEUDO_VELOCITY_SIGNATURES);
+pub const PSEUDO_VELOCITY_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&PSEUDO_VELOCITY_SIGNATURES);
 const PSEUDO_VELOCITY_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "select-pseudo-velocity",
     title: "Select the pseudo-velocity envelope",

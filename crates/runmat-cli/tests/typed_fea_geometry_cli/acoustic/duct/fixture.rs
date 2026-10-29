@@ -73,8 +73,19 @@ pub(super) fn prepare(
         .replace("QUANTITY", quantity)
         .replace("ACTION", action)
         .replace("SOURCE", if generated { GENERATED } else { explicit });
-    let source = source.replace("FIRST_FACE_ID", &imported.source_face_ids[&0].analysis_selection_id().unwrap())
-        .replace("SECOND_FACE_ID", &imported.source_face_ids[&1].analysis_selection_id().unwrap());
+    let source = source
+        .replace(
+            "FIRST_FACE_ID",
+            &imported.source_face_ids[&0]
+                .analysis_selection_id()
+                .unwrap(),
+        )
+        .replace(
+            "SECOND_FACE_ID",
+            &imported.source_face_ids[&1]
+                .analysis_selection_id()
+                .unwrap(),
+        );
     fs::write(project.path().join("src/main.fea"), source).unwrap();
     [
         imported.source_face_ids[&0].clone(),

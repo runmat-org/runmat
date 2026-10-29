@@ -75,7 +75,9 @@ pub fn build_result_publication_resource_plan(
                     profile.encoded_bytes_upper_bound,
                     1,
                 )
-                .ok_or(ResourcePlanningError::Overflow("result publication receipt"))?,
+                .ok_or(ResourcePlanningError::Overflow(
+                    "result publication receipt",
+                ))?,
             ),
             accounting_interval_workspace_bytes: ByteCount(interval_workspace),
             nested_plan_workspace_bytes: ByteCount(nested_plan_workspace),

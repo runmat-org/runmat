@@ -53,7 +53,7 @@ impl MagnetostaticWorkload {
             &input.projection,
             &input.grounded_faces,
         )
-            .map_err(invalid)?;
+        .map_err(invalid)?;
         if system.identity().map_err(invalid)? != demand.system_plan_identity {
             return Err(invalid(
                 "magnetic assembly support differs from admitted plan",

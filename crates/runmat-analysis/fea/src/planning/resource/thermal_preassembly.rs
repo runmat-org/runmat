@@ -156,7 +156,14 @@ impl ThermalPreassemblyResourceFacts {
         )?;
         let catalog_bytes = manifest_catalog.reservation_bytes()?.0;
         let manifest_retained = ThermalManifestRetainedResourceFacts::derive(
-            model, step, mesh, schedule, identity, &metadata, &sources, history.interface_nodes,
+            model,
+            step,
+            mesh,
+            schedule,
+            identity,
+            &metadata,
+            &sources,
+            history.interface_nodes,
         )?;
         let retained_bytes = manifest_retained.reservation_bytes()?.0;
         let base = component_bytes(

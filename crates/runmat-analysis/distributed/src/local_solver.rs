@@ -62,8 +62,13 @@ impl SubdomainSolverFactory for FaerCholeskyFactory {
                 "subdomain operator has an inconsistent sparse layout".into(),
             ));
         }
-        let symbolic =
-            SymbolicSparseColMatRef::new_checked(dimension, dimension, &column_offsets, None, &row_indices);
+        let symbolic = SymbolicSparseColMatRef::new_checked(
+            dimension,
+            dimension,
+            &column_offsets,
+            None,
+            &row_indices,
+        );
         let matrix = SparseColMatRef::new(symbolic, &values);
         let analysis = SymbolicLlt::try_new(symbolic, Side::Lower)
             .map_err(|error| DistributedError::Factorization(format!("{error:?}")))?;

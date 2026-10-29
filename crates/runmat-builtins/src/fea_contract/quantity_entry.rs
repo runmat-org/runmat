@@ -7,16 +7,16 @@ use super::constructor_inference::{object_fact, resident};
 use super::descriptors::ERRORS;
 use crate::{
     catalog::{argument_error, finish_fixed},
-    BuiltinCatalogEntry, BuiltinCompletionPolicy, BuiltinDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinCatalogEntry, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_types::{
-    CallInference, CallRequest, InferenceDiagnostic, NumericDomain, StaticClassIdentity,
-    ValueFact, ValueKindFact,
+    CallInference, CallRequest, InferenceDiagnostic, NumericDomain, StaticClassIdentity, ValueFact,
+    ValueKindFact,
 };
 
 pub const QUANTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -259,14 +259,21 @@ mod tests {
     }
 
     fn codes(inference: &CallInference) -> Vec<&str> {
-        inference.diagnostics.iter().map(|d| d.code.as_str()).collect()
+        inference
+            .diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect()
     }
 
     #[test]
     fn scalar_quantities_check_kind_and_converted_literal_range() {
         let entry = entry();
         let valid = infer_scalar(
-            &request(vec![real(NumericClass::Int32)], vec![LiteralValue::Number(20.0)]),
+            &request(
+                vec![real(NumericClass::Int32)],
+                vec![LiteralValue::Number(20.0)],
+            ),
             &entry,
             CELSIUS,
         );
@@ -279,13 +286,19 @@ mod tests {
             other => panic!("expected object, got {other:?}"),
         }
         let below_zero = infer_scalar(
-            &request(vec![real(NumericClass::Double)], vec![LiteralValue::Number(-300.0)]),
+            &request(
+                vec![real(NumericClass::Double)],
+                vec![LiteralValue::Number(-300.0)],
+            ),
             &entry,
             CELSIUS,
         );
         assert!(codes(&below_zero).contains(&"RM-CATALOG-FEA-QUANTITY-RANGE"));
         let logical = infer_scalar(
-            &request(vec![ValueFact::scalar(ValueKindFact::Logical)], vec![LiteralValue::Unknown]),
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::Logical)],
+                vec![LiteralValue::Unknown],
+            ),
             &entry,
             CELSIUS,
         );
@@ -309,11 +322,19 @@ mod tests {
         let class = StaticClassIdentity::new("fea.Position");
         let mut row = real(NumericClass::Double);
         row.shape = ShapeFact::from(vec![Some(1), Some(3)]);
-        assert!(infer_vector(&request(vec![row.clone()], vec![LiteralValue::Unknown]), &entry, class)
-            .diagnostics
-            .is_empty());
+        assert!(infer_vector(
+            &request(vec![row.clone()], vec![LiteralValue::Unknown]),
+            &entry,
+            class
+        )
+        .diagnostics
+        .is_empty());
         row.shape = ShapeFact::from(vec![Some(1), Some(2)]);
-        let short = infer_vector(&request(vec![row], vec![LiteralValue::Unknown]), &entry, class);
+        let short = infer_vector(
+            &request(vec![row], vec![LiteralValue::Unknown]),
+            &entry,
+            class,
+        );
         assert!(codes(&short).contains(&"RM-CATALOG-FEA-QUANTITY"));
     }
 

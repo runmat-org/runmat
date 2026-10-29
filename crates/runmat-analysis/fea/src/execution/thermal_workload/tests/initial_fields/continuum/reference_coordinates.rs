@@ -24,7 +24,11 @@ fn transient_temperature_offset_preserves_flux_storage_and_boundary_power() {
                             ThermalConstraint {
                                 constraint_id: face.into(),
                                 kind: ThermalConstraintKind::Prescribed {
-                                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face))),
+                                    target: RegionTarget::boundary(
+                                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                                            &(face),
+                                        ),
+                                    ),
                                     value: PrescribedValue::Constant(Temperature::new(reference)),
                                 },
                             },
@@ -32,7 +36,9 @@ fn transient_temperature_offset_preserves_flux_storage_and_boundary_power() {
                     }
                     input.model.boundaries.push(AnalysisBoundary {
                         boundary_id: "ambient".into(),
-                        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_insulated")),
+                        target: RegionTarget::boundary(
+                            runmat_meshing_core::fixtures::fixture_face("slab_insulated"),
+                        ),
                         operator: BoundaryOperator::ThermalConvection {
                             ambient_temperature: PrescribedValue::Constant(Temperature::new(
                                 reference + 2.0,

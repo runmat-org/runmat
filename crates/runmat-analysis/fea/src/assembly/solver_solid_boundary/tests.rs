@@ -55,7 +55,9 @@ fn force() -> RealizedExcitation {
         signal_id: SignalId("complex-force".into()),
         quantity: PhysicalQuantityKind::Force,
         sample: ProjectionSample::Static,
-        target: RealizedExcitationTarget::Region(RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right"))),
+        target: RealizedExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("slab_right"),
+        )),
         kind: RealizedExcitationKind::Force(ComplexVector3 {
             real: [5.0, -7.0, 11.0],
             imaginary: [-3.0, 2.0, 4.0],
@@ -99,7 +101,9 @@ fn independent_weights(mesh: &SolverMeshArtifact) -> Vec<f64> {
     let projection = AnalysisProjection::derive(mesh).unwrap();
     let mut weights = vec![0.0; projection.nodes.len()];
     let mut area = 0.0;
-    for face in projection.boundary_faces_matching(&runmat_meshing_core::fixtures::fixture_face("slab_right")) {
+    for face in projection
+        .boundary_faces_matching(&runmat_meshing_core::fixtures::fixture_face("slab_right"))
+    {
         let [a, b, c] = [0, 1, 2].map(|corner| {
             projection.nodes[face.node_indices[corner]]
                 .coordinates_m

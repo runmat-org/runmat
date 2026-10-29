@@ -48,14 +48,19 @@ pub struct PreparedStatisticalFieldRecovery {
 pub fn statistical_procedure(
     inputs: &[PreparedAnalysisObjects],
 ) -> AnalysisBridgeResult<StatisticalProcedure> {
-    let kinds = inputs.iter().map(|input| input.manifest.kind).collect::<Vec<_>>();
+    let kinds = inputs
+        .iter()
+        .map(|input| input.manifest.kind)
+        .collect::<Vec<_>>();
     match (
         kinds.contains(&AnalysisNumericalObjectKind::StructuralRandomResponseWorkload),
         kinds.contains(&AnalysisNumericalObjectKind::StructuralModalResponseSpectrumWorkload),
     ) {
         (true, false) => Ok(StatisticalProcedure::RandomResponse),
         (false, true) => Ok(StatisticalProcedure::ResponseSpectrum),
-        _ => Err(invalid("statistical recovery requires exactly one statistical workload")),
+        _ => Err(invalid(
+            "statistical recovery requires exactly one statistical workload",
+        )),
     }
 }
 
@@ -147,8 +152,11 @@ pub fn prepare_statistical_field_recovery(
             p.output_policy.inventory_limits(),
         )?,
     );
-    let resource_plan =
-        build_prepared_statistical_field_recovery_resource_plan(&request, &inputs, p.output_policy)?;
+    let resource_plan = build_prepared_statistical_field_recovery_resource_plan(
+        &request,
+        &inputs,
+        p.output_policy,
+    )?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),
@@ -198,9 +206,7 @@ impl DecodedStatisticalSource {
             StatisticalValues::Random(result) => {
                 random_response_statistical_fields(result.numerical())
             }
-            StatisticalValues::Spectrum(recovery) => {
-                response_spectrum_statistical_fields(recovery)
-            }
+            StatisticalValues::Spectrum(recovery) => response_spectrum_statistical_fields(recovery),
         }
     }
 
@@ -208,7 +214,11 @@ impl DecodedStatisticalSource {
         &self,
         request: &FieldRecoveryRequest,
     ) -> AnalysisBridgeResult<RecoveredFieldArtifact> {
-        Ok(statistical_recovered_fields(request, &self.mesh, &self.fields())?)
+        Ok(statistical_recovered_fields(
+            request,
+            &self.mesh,
+            &self.fields(),
+        )?)
     }
 }
 

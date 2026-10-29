@@ -114,9 +114,10 @@ fn project(
     storage.slots::<runmat_meshing_core::SolverMeshProjection>(1)?;
     let linear = construction::construct(&input, options, cancellation)?;
     let (result, elevation) = match input.request.element_order {
-        runmat_meshing_core::ElementOrder::Tet4 => {
-            (linear, runmat_meshing_core::SolverElevationReport::default())
-        }
+        runmat_meshing_core::ElementOrder::Tet4 => (
+            linear,
+            runmat_meshing_core::SolverElevationReport::default(),
+        ),
         runmat_meshing_core::ElementOrder::Tet10 => {
             order_elevation::elevate(&input, linear, options, cancellation)?
         }

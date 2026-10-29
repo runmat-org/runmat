@@ -64,7 +64,9 @@ pub(super) async fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
                     )
                     .map_err(|error| ExactMeshingDagRunError::Invalid(error.to_string()))?;
                 let mut sizing = run.evidence.sizing.clone();
-                sizing.extend(runmat_meshing_core::size_control_evidence(&artifact, &applied));
+                sizing.extend(runmat_meshing_core::size_control_evidence(
+                    &artifact, &applied,
+                ));
                 sizing
             },
             cache_admission: run.evidence.cache_admission,

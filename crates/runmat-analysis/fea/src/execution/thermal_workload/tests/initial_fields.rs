@@ -194,12 +194,14 @@ fn cold_field_input_from_real_producer_preserves_insulated_temperature_and_linea
         aggregate_capped.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = Some(crate::planning::resource::initial_field_reservation_bytes(
-            &aggregate_capped.initial_fields,
-            LIMITS,
-        )
-        .unwrap()
-        .0);
+            .maximum_resident_bytes = Some(
+            crate::planning::resource::initial_field_reservation_bytes(
+                &aggregate_capped.initial_fields,
+                LIMITS,
+            )
+            .unwrap()
+            .0,
+        );
         assert!(
             aggregate_capped.validate().is_ok(),
             "field-only capacity must fit this fixture"

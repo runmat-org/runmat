@@ -32,7 +32,8 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
     model.excitations = vec![ExcitationAction::HeatGeneration(action)];
     model.boundaries.clear();
     model.constraints.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
     let MaterialElasticityModel::IsotropicLinear(elasticity) =
         model.materials[0].elasticity.as_mut().unwrap()
     else {
@@ -59,7 +60,9 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
             .push(AnalysisConstraint::Thermal(ThermalConstraint {
                 constraint_id: id.into(),
                 kind: ThermalConstraintKind::Prescribed {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(region)),
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        region,
+                    )),
                     value: PrescribedValue::Constant(Temperature::new(REFERENCE)),
                 },
             }));

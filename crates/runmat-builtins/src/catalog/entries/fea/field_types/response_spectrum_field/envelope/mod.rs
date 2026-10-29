@@ -9,7 +9,8 @@ const ENVELOPE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     inputs: &LINEAR_QUANTITY_INPUT,
     outputs: &SELECTOR_OUTPUT,
 }];
-pub const ENVELOPE_DESCRIPTOR: BuiltinDescriptor = selector_entry::selector_descriptor(&ENVELOPE_SIGNATURES);
+pub const ENVELOPE_DESCRIPTOR: BuiltinDescriptor =
+    selector_entry::selector_descriptor(&ENVELOPE_SIGNATURES);
 const ENVELOPE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "stress-envelope",
     title: "Select the stress envelope",

@@ -24,7 +24,9 @@ fn curved_foundation_preflight_budgets_the_compiled_surface_samples() {
         .push(runmat_analysis_core::AnalysisConnector {
             connector_id: "curved_foundation".into(),
             kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("face:0"),
+                ),
                 modulus: runmat_analysis_core::FoundationModulus::new(1.0),
             },
         });

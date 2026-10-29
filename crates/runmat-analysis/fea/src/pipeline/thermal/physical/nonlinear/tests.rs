@@ -183,7 +183,11 @@ fn radiating_bar_matches_the_gray_surface_closed_form_and_balances_power() {
     for quadratic in [false, true] {
         let mesh = mesh(quadratic);
         let mut input = workload();
-        input.model.materials[0].thermal.as_mut().unwrap().conductivity_w_per_mk = runmat_types::physical::Quantity::new(CONDUCTIVITY);
+        input.model.materials[0]
+            .thermal
+            .as_mut()
+            .unwrap()
+            .conductivity_w_per_mk = runmat_types::physical::Quantity::new(CONDUCTIVITY);
         for boundary in &mut input.model.boundaries {
             if let BoundaryOperator::ThermalRadiation { emissivity, .. } = &mut boundary.operator {
                 *emissivity = SurfaceEmissivity::new(EPSILON);
@@ -191,7 +195,9 @@ fn radiating_bar_matches_the_gray_surface_closed_form_and_balances_power() {
         }
         input.model.boundaries.push(AnalysisBoundary {
             boundary_id: "heated-end".into(),
-            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_left")),
+            target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                "slab_left",
+            )),
             operator: BoundaryOperator::ThermalHeatFlux {
                 value: PrescribedValue::Constant(HeatFlux::new(FLUX)),
             },

@@ -8,8 +8,8 @@ use runmat_analysis_execution::{
 };
 use runmat_analysis_fea::execution::{
     assemble_acoustic_frequency_result, AcousticFrequencyAssemblyRequest,
-    AcousticFrequencyWorkload, AnalysisNumericalObjectKind,
-    ExecutionPlanIdentity, NumericalPlanIdentity,
+    AcousticFrequencyWorkload, AnalysisNumericalObjectKind, ExecutionPlanIdentity,
+    NumericalPlanIdentity,
 };
 use runmat_analysis_fea::planning::resource::{FeaResourceDemand, FeaResourcePlan};
 use runmat_execution::Digest;

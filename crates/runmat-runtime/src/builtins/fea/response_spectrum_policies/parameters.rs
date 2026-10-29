@@ -11,7 +11,10 @@ pub async fn frequency_axis(values: Value) -> BuiltinResult<Value> {
     typed_value(
         "fea.SpectrumAxis.frequencyHertz",
         AXIS_CLASS,
-        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<runmat_types::physical::kind::Frequency, _>::new(values)),
+        SpectrumAbscissa::FrequencyHertz(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Frequency,
+            _,
+        >::new(values)),
     )
 }
 
@@ -26,7 +29,10 @@ pub async fn period_axis(values: Value) -> BuiltinResult<Value> {
     typed_value(
         "fea.SpectrumAxis.periodSeconds",
         AXIS_CLASS,
-        SpectrumAbscissa::PeriodSeconds(runmat_types::physical::Quantity::<runmat_types::physical::kind::Time, _>::new(values)),
+        SpectrumAbscissa::PeriodSeconds(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Time,
+            _,
+        >::new(values)),
     )
 }
 

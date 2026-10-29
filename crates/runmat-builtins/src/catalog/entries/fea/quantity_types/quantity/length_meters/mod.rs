@@ -9,7 +9,12 @@ use crate::fea_contract::{
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_LENGTH_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::NonNegative };
+const QUANTITY: ScalarQuantity = ScalarQuantity {
+    class: identities::FEA_LENGTH_CLASS,
+    scale: 1.0,
+    offset: 0.0,
+    range: QuantityRange::NonNegative,
+};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)
@@ -20,7 +25,8 @@ const LENGTH_METERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignat
     inputs: &QUANTITY_INPUTS,
     outputs: &QUANTITY_OUTPUTS,
 }];
-pub const LENGTH_METERS_DESCRIPTOR: BuiltinDescriptor = quantity_descriptor(&LENGTH_METERS_SIGNATURES);
+pub const LENGTH_METERS_DESCRIPTOR: BuiltinDescriptor =
+    quantity_descriptor(&LENGTH_METERS_SIGNATURES);
 const LENGTH_METERS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "length-meters",
     title: "A 1 mm pairing tolerance in meters",

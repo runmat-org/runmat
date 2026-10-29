@@ -54,7 +54,10 @@ fn vertex_mm(imported: &ImportedExactCad, id: &PersistentEntityId) -> [f64; 3] {
         .iter()
         .find(|vertex| &vertex.id == id)
         .unwrap_or_else(|| panic!("vertex {id:?} is not in the topology"));
-    vertex.point_m.canonical_values().map(|coordinate| coordinate * 1000.0)
+    vertex
+        .point_m
+        .canonical_values()
+        .map(|coordinate| coordinate * 1000.0)
 }
 
 fn edge_ends_mm(imported: &ImportedExactCad, id: &PersistentEntityId) -> [[f64; 3]; 2] {
@@ -143,7 +146,11 @@ fn authored_step_edge_and_vertex_names_select_their_entities() {
 #[test]
 fn edge_and_vertex_names_survive_placement_and_the_shared_interface_join() {
     for shared in [false, true] {
-        let imported = import("touching_parts_named_edges.step", TOUCHING_NAMED_EDGES, shared);
+        let imported = import(
+            "touching_parts_named_edges.step",
+            TOUCHING_NAMED_EDGES,
+            shared,
+        );
         assert_eq!(imported.topology.interfaces.len(), usize::from(shared));
         let edge = one(&imported, GeometryRegionRole::Edge, "Plate corner edge");
         let ends = edge_ends_mm(&imported, &edge);
@@ -152,7 +159,10 @@ fn edge_and_vertex_names_survive_placement_and_the_shared_interface_join() {
         assert!(ends.iter().any(|end| *end == vertex_mm(&imported, &corner)));
         let block_edge = one(&imported, GeometryRegionRole::Edge, "Block edge");
         let block_ends = edge_ends_mm(&imported, &block_edge);
-        assert!((block_ends[1][2] - block_ends[0][2] - 10.0).abs() < 1e-6, "{block_ends:?}");
+        assert!(
+            (block_ends[1][2] - block_ends[0][2] - 10.0).abs() < 1e-6,
+            "{block_ends:?}"
+        );
         let foot = one(&imported, GeometryRegionRole::Vertex, "Block foot");
         assert_eq!(vertex_mm(&imported, &foot), block_ends[0]);
         one(&imported, GeometryRegionRole::Solid, "Plate");

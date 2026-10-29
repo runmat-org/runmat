@@ -17,8 +17,10 @@ fn workload() -> ThermalWorkload {
     model.sequence = runmat_analysis_core::AnalysisSequence::from_steps("heat", vec![step]);
     // The authored ceiling is part of the encoded model, so resident requirements are
     // measured under a non-binding authored ceiling (present, like the ceilings tests author).
-    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes =
-        Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = Some(runmat_types::wire_integer::MAX_WIRE_INTEGER);
     ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
@@ -153,7 +155,8 @@ fn impossible_sample_or_retained_memory_ceilings_fail_before_thermal_assembly() 
     workload.model.sequence.steps[0].observations.clear();
     workload.procedure = ThermalProcedureControl::BackwardEuler { snapshot_count: 5 };
     let history =
-        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap(), &[]).unwrap();
+        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap(), &[])
+            .unwrap();
     let error = history.require_fits(439).unwrap_err();
     assert!(
         matches!(

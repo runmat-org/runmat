@@ -9,7 +9,10 @@ pub(in crate::analysis) struct StudyEvidenceAccess {
 }
 impl StudyEvidenceAccess {
     pub(in crate::analysis) fn capture() -> Self {
-        Self::new(study_evidence_root(), storage::scoped_artifact_provider().unwrap_or_else(runmat_filesystem::current_provider))
+        Self::new(
+            study_evidence_root(),
+            storage::scoped_artifact_provider().unwrap_or_else(runmat_filesystem::current_provider),
+        )
     }
     pub(in crate::analysis) fn new(
         root: PathBuf,

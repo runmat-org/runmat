@@ -57,7 +57,8 @@ fn shape_profile_bounds_actual_identity_wire_for_advertised_storage_shapes() {
                 let profile =
                     RecoveredField::identity_profile_shape(&definition, sample, count).unwrap();
                 let actual =
-                    profile_serialized_shape(&(&definition, sample, &storage), FIELD_LIMITS).unwrap();
+                    profile_serialized_shape(&(&definition, sample, &storage), FIELD_LIMITS)
+                        .unwrap();
                 assert_eq!(profile, actual);
                 // Independent original tuple proves no domain, prefix, tuple-order or wire change.
                 let original = encode_contract(
@@ -137,8 +138,10 @@ fn identity_profile_admits_mesh_scale_fields_beyond_a_fixed_item_count() {
             .unwrap();
     assert!(profile.encoded_bytes_upper_bound >= 3 * entities as u64);
     let beyond = FIELD_LIMITS.maximum_encoded_bytes / 3 + 1;
-    assert!(
-        RecoveredField::identity_profile_shape(&definition, RecoveredFieldSample::Final, beyond)
-            .is_err()
-    );
+    assert!(RecoveredField::identity_profile_shape(
+        &definition,
+        RecoveredFieldSample::Final,
+        beyond
+    )
+    .is_err());
 }
