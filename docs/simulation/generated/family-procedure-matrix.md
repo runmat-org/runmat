@@ -1,4 +1,14 @@
+---
+description: Every physics family and analysis procedure RunMat FEA knows, with its solution space and whether the current release runs it or lists it as planned.
+keywords: [family, procedure, analysis matrix, release status, supported analyses, FEA]
+doc_type: release-status
+generated: RUNMAT_BLESS_DOCS=1 cargo test -p runmat-analysis-core --lib committed_docs_matrix_matches_the_registry
+---
+# Families and procedures
+
 <!-- Generated from runmat-analysis-core ANALYSIS_IDENTITIES; do not edit by hand. -->
+
+Each row is one family and procedure pair from the closed registry that `runmat check`, `runmat run` and the qualification gate share. A planned pair links its pending id; `runmat check` reports the same id when a study uses it.
 
 | Family | Procedure | Solution space | Status |
 |---|---|---|---|

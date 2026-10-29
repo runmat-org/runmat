@@ -226,7 +226,17 @@ pub const fn procedure_label(procedure: AnalysisProcedure) -> &'static str {
 /// copy (docs/simulation/generated/family-procedure-matrix.md) identical to this rendering.
 pub fn render_analysis_identity_matrix() -> String {
     let mut out = String::from(
-        "<!-- Generated from runmat-analysis-core ANALYSIS_IDENTITIES; do not edit by hand. -->\n\n\
+        "---\n\
+         description: Every physics family and analysis procedure RunMat FEA knows, with its solution space and whether the current release runs it or lists it as planned.\n\
+         keywords: [family, procedure, analysis matrix, release status, supported analyses, FEA]\n\
+         doc_type: release-status\n\
+         generated: RUNMAT_BLESS_DOCS=1 cargo test -p runmat-analysis-core --lib committed_docs_matrix_matches_the_registry\n\
+         ---\n\
+         # Families and procedures\n\n\
+         <!-- Generated from runmat-analysis-core ANALYSIS_IDENTITIES; do not edit by hand. -->\n\n\
+         Each row is one family and procedure pair from the closed registry that `runmat check`, \
+         `runmat run` and the qualification gate share. A planned pair links its pending id; \
+         `runmat check` reports the same id when a study uses it.\n\n\
          | Family | Procedure | Solution space | Status |\n\
          |---|---|---|---|\n",
     );
@@ -397,6 +407,9 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../../docs/simulation/generated/family-procedure-matrix.md"
         );
+        if std::env::var_os("RUNMAT_BLESS_DOCS").is_some() {
+            std::fs::write(path, render_analysis_identity_matrix()).expect("write status matrix");
+        }
         let committed = std::fs::read_to_string(path).expect("committed status matrix");
         assert_eq!(
             committed,
