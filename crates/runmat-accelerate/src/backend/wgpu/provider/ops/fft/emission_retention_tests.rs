@@ -6,6 +6,7 @@ use runmat_accelerate_api::observation::{
     with_provider_observation, ProviderOperationReceipt, WgpuObservationCompletion,
     WgpuObservationProgress, WgpuObservationProgressError, WgpuObservationProgressReservation,
 };
+use runmat_accelerate_api::AccelProvider;
 use std::sync::{Arc, Mutex};
 
 type Callback = WgpuObservationCompletion;
