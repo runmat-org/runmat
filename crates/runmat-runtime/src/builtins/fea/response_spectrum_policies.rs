@@ -272,9 +272,9 @@ pub(super) fn ensure_spectrum_policy_classes_registered() {
     PORTABLE.call_once(|| {
         static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
             std::sync::OnceLock::new();
-        let mut schemas = Vec::new();
+        let mut registrations = Vec::new();
         for (class_name, type_identity, _) in schemas() {
-            schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+            registrations.push(crate::execution::value_codec::ImmutableValueClassSchema {
                 class_name,
                 type_identity,
                 schema_version: 1,
@@ -284,7 +284,7 @@ pub(super) fn ensure_spectrum_policy_classes_registered() {
             });
         }
 
-        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, registrations);
     });
     RUNTIME.ensure(|| {
         for (class_name, _, methods) in schemas() {
