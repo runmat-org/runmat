@@ -81,14 +81,13 @@ fn reserve(
     future: &FutureHandle,
 ) -> Result<(u64, Rc<DeferredCall>), ExecutionServiceError> {
     let mut state = state.lock().expect("native service poisoned");
-    let call = match state.futures.get(&future.id) {
-        Some(FutureState::Deferred(call)) => Rc::clone(call),
-        Some(_) => {
+    let call = match state.futures.validate(&future.id, &future.outputs)? {
+        FutureState::Deferred(call) => Rc::clone(call),
+        _ => {
             return Err(ExecutionServiceError::Failed(
                 "future has already been scheduled".into(),
             ));
         }
-        None => return Err(ExecutionServiceError::UnknownHandle),
     };
     let id = state.next_materialization;
     state.next_materialization = id.checked_add(1).ok_or_else(|| {

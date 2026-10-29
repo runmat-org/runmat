@@ -20,7 +20,9 @@ use crate::driver::{LocalDriver, TaskCompletion};
 use crate::durable::DurableJobBridge;
 use crate::{NativeExecutionConfig, NativeExecutionResult};
 
+mod future_table;
 mod materialization;
+use future_table::FutureTable;
 
 static NEXT_NATIVE_SCOPE: AtomicU64 = AtomicU64::new(1);
 
@@ -81,7 +83,7 @@ struct State {
     next_future: u64,
     next_task: u64,
     next_materialization: u64,
-    futures: HashMap<FutureId, FutureState>,
+    futures: FutureTable,
     cancelling_graphs: Vec<FutureId>,
     tasks: HashMap<TaskId, TaskRecord>,
     graph_jobs: HashMap<runmat_execution::JobId, Rc<GraphJobReceipt>>,
@@ -120,7 +122,7 @@ impl NativeExecutionService {
                 next_future: 0,
                 next_task: 0,
                 next_materialization: 0,
-                futures: HashMap::new(),
+                futures: FutureTable::default(),
                 cancelling_graphs: Vec::new(),
                 tasks: HashMap::new(),
                 graph_jobs: HashMap::new(),
@@ -184,7 +186,15 @@ impl NativeExecutionService {
         ExecutionServiceError,
     > {
         match value {
-            Value::Future(handle) => Ok(Ok(handle.into())),
+            Value::Future(handle) => {
+                self.validate_scope(handle.scope_id)?;
+                self.state
+                    .lock()
+                    .expect("native service poisoned")
+                    .futures
+                    .validate(&handle.id, &handle.outputs)?;
+                Ok(Ok(handle.into()))
+            }
             Value::Task(handle) => {
                 self.validate_scope(handle.scope_id)?;
                 let state = self.state.lock().expect("native service poisoned");
@@ -195,6 +205,7 @@ impl NativeExecutionService {
                 if task.generation != handle.generation {
                     return Err(ExecutionServiceError::UnknownHandle);
                 }
+                state.futures.validate(&task.future_id, &handle.outputs)?;
                 Ok(Ok(
                     runmat_runtime::execution::FutureExecutionHandle::from_task(
                         handle,
@@ -655,16 +666,17 @@ impl RuntimeExecutionServices for NativeExecutionService {
             .checked_add(1)
             .ok_or(ExecutionServiceError::UnknownHandle)?;
         let id = FutureId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
+        let outputs = OutputContract {
+            requested_outputs,
+            owned_work: None,
+        };
         state
             .futures
-            .insert(id, FutureState::Deferred(Rc::new(call)));
+            .issue(id, outputs.clone(), FutureState::Deferred(Rc::new(call)));
         Ok(FutureHandle {
             id,
             scope_id: self.scope_id,
-            outputs: OutputContract {
-                requested_outputs,
-                owned_work: None,
-            },
+            outputs,
         })
     }
 
@@ -680,10 +692,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         self.validate_scope(future.scope_id)?;
         self.sweep_completed_graph_cancellations();
         let state = self.state.lock().expect("native service poisoned");
-        let stored_state = state
-            .futures
-            .get(&future.id)
-            .ok_or(ExecutionServiceError::UnknownHandle)?;
+        let stored_state = state.futures.validate(&future.id, &future.outputs)?;
         Ok(ExecutionHandleSnapshot {
             state: native_future_state(stored_state),
             outputs: future.outputs.clone(),
@@ -709,11 +718,11 @@ impl RuntimeExecutionServices for NativeExecutionService {
         if record.generation != task.generation {
             return Err(ExecutionServiceError::UnknownHandle);
         }
-        let state = state
-            .futures
-            .get(&record.future_id)
-            .map(native_future_state)
-            .ok_or(ExecutionServiceError::UnknownHandle)?;
+        let state = native_future_state(
+            state
+                .futures
+                .validate(&record.future_id, &task.outputs)?,
+        );
         Ok(ExecutionHandleSnapshot {
             state,
             outputs: task.outputs.clone(),
@@ -1232,10 +1241,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("native service poisoned");
-        let record = state
-            .futures
-            .get(&future.id)
-            .ok_or(ExecutionServiceError::UnknownHandle)?;
+        let record = state.futures.validate(&future.id, future.outputs)?;
         if !matches!(record, FutureState::ExecutingInCaller) {
             return Err(ExecutionServiceError::Failed(
                 "future is not executing in its caller".into(),
@@ -1256,25 +1262,28 @@ impl RuntimeExecutionServices for NativeExecutionService {
         reason: CancellationReason,
     ) -> Result<(), ExecutionServiceError> {
         self.sweep_completed_graph_cancellations();
-        let future_id = match value {
+        let (future_id, outputs) = match value {
             Value::Future(handle) => {
                 self.validate_scope(handle.scope_id)?;
-                handle.id
+                (handle.id, &handle.outputs)
             }
             Value::Task(handle) => {
                 self.validate_scope(handle.scope_id)?;
-                self.state
-                    .lock()
-                    .expect("native service poisoned")
+                let state = self.state.lock().expect("native service poisoned");
+                let task = state
                     .tasks
                     .get(&handle.id)
-                    .ok_or(ExecutionServiceError::UnknownHandle)?
-                    .future_id
+                    .ok_or(ExecutionServiceError::UnknownHandle)?;
+                if task.generation != handle.generation {
+                    return Err(ExecutionServiceError::UnknownHandle);
+                }
+                (task.future_id, &handle.outputs)
             }
             Value::Job(handle) => return self.durable.cancel(handle.clone(), reason),
             _ => return Err(ExecutionServiceError::UnknownHandle),
         };
         let mut state = self.state.lock().expect("native service poisoned");
+        state.futures.validate(&future_id, outputs)?;
         let record = state
             .futures
             .get_mut(&future_id)
@@ -1339,7 +1348,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let mut retired = Vec::new();
         let mut running = Vec::new();
         let mut newly_cancelling = Vec::new();
-        for (future_id, future) in &mut state.futures {
+        for (future_id, future) in state.futures.iter_mut() {
             if let FutureState::Materializing(reservation) = future {
                 reservation.cancelled = true;
                 continue;

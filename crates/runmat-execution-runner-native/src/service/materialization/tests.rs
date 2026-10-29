@@ -93,11 +93,17 @@ fn fixture() -> (Mutex<State>, FutureHandle) {
         capabilities: Default::default(),
         program: DeferredProgram::Local,
     };
+    let outputs = OutputContract {
+        requested_outputs: 1,
+        owned_work: None,
+    };
+    let mut futures = crate::service::FutureTable::default();
+    futures.issue(id, outputs.clone(), FutureState::Deferred(Rc::new(call)));
     let state = State {
         next_future: 1,
         next_task: 0,
         next_materialization: 0,
-        futures: HashMap::from([(id, FutureState::Deferred(Rc::new(call)))]),
+        futures,
         tasks: HashMap::new(),
         graph_jobs: HashMap::new(),
         cancelling_graphs: Vec::new(),
@@ -109,10 +115,7 @@ fn fixture() -> (Mutex<State>, FutureHandle) {
         FutureHandle {
             id,
             scope_id,
-            outputs: OutputContract {
-                requested_outputs: 1,
-                owned_work: None,
-            },
+            outputs,
         },
     )
 }
@@ -388,4 +391,20 @@ fn callback_waves_release_only_internal_records_after_rooted_result_handoff() {
             "ordinary refetchable Future is untouched"
         );
     });
+}
+
+#[test]
+fn reservation_rejects_a_handle_whose_output_contract_differs_from_the_issued_one() {
+    let (state, future) = fixture();
+    let mut altered = future.clone();
+    altered.outputs.requested_outputs += 1;
+    assert!(matches!(
+        reserve(&state, &altered),
+        Err(runmat_runtime::execution::ExecutionServiceError::InvalidOutputContract)
+    ));
+    assert!(matches!(
+        state.lock().unwrap().futures.get(&future.id),
+        Some(FutureState::Deferred(_))
+    ));
+    reserve(&state, &future).unwrap();
 }
