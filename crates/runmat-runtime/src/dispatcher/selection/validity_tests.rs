@@ -31,7 +31,7 @@ fn validity_query_uses_selected_binding_for_execution_and_observation() {
         let query = canonical("isvalid");
         let ordinary = canonical("sin");
         let root = runmat_gc::gc_allocate_rooted(Value::Object(runmat_value::ObjectInstance::new(
-            "ExactValidityFixture".into(),
+            "ExactValidityFixture",
         )))
         .unwrap();
         for valid in [true, false] {
