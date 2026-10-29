@@ -100,7 +100,7 @@ fn selected_native_single_power_then_sum_matches_ordinary_power_output() {
         let mut reduction = ordinary.clone();
         reduction.group.kind = FusionKind::Reduction;
         reduction.kernel.kind = FusionKind::Reduction;
-        reduction.output = None;
+        select_sum_terminal(&mut reduction);
         reduction.reduction_data = Some(2);
         reduction.reduction_flavor = Some(ReductionFlavor::Sum);
         let reduced = block_on(execute_reduction_with_shape_placed_async(
@@ -177,7 +177,7 @@ fn singleton_reduction_matches_public_power_then_sum_exact_single_bits() {
         reduction.group.kind = FusionKind::Reduction;
         reduction.group.shape = ShapeInfo::Tensor(vec![Some(1), Some(1)]);
         reduction.kernel.kind = FusionKind::Reduction;
-        reduction.output = None;
+        select_sum_terminal(&mut reduction);
         reduction.reduction_data = Some(2);
         reduction.reduction_flavor = Some(ReductionFlavor::Sum);
         let result = block_on(execute_reduction_with_shape_placed_async(
@@ -275,7 +275,7 @@ fn broadcast_reduction_matches_public_power_then_sum_across_columns() {
     reduction.group.kind = FusionKind::Reduction;
     reduction.group.shape = ShapeInfo::Tensor(vec![Some(4), Some(3)]);
     reduction.kernel.kind = FusionKind::Reduction;
-    reduction.output = None;
+    select_sum_terminal(&mut reduction);
     reduction.reduction_data = Some(2);
     reduction.reduction_flavor = Some(ReductionFlavor::Sum);
     let result = block_on(execute_reduction_with_shape_placed_async(
@@ -309,4 +309,18 @@ fn broadcast_reduction_matches_public_power_then_sum_across_columns() {
             "column {column}: reduction={actual}, public POWER→sum={expected}"
         );
     }
+}
+
+// Retain the actual canonical terminal owner, not a flavor-only proxy plan.
+fn select_sum_terminal(plan: &mut runmat_accelerate::fusion::FusionGroupPlan) {
+    plan.operations.push(FusionOp::Builtin {
+        name: "sum".into(),
+        origin: runmat_accelerate::graph::FusionCallOrigin::named("sum"),
+        inputs: vec![2, 4],
+        output: Some(3),
+    });
+    plan.const_values.insert(4, Value::Num(1.0));
+    plan.output = Some(3);
+    plan.reduction_dim = Some(4);
+    plan.group.span.end = plan.operations.len();
 }

@@ -10,7 +10,7 @@ use runmat_value::{
 const PACKET: [(&str, usize); 15] = [
     ("perfcurve", 4),
     ("pie", 2),
-    ("pivot", 4),
+    ("pivot", 2),
     ("pol2cart", 3),
     ("polarhistogram", 4),
     ("polarplot", 3),
@@ -120,9 +120,55 @@ fn integer_cases(values: &[i64]) -> Vec<(&'static str, Value, Value)> {
 #[test]
 fn polynomial_polar_and_model_packet_has_class_complete_metadata() {
     for (name, expected_forms) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
+        if name == "pivot" {
+            use runmat_builtins::{
+                BuiltinIntegerComputationDomain as Domain, BuiltinIntegerOverflowRule as Overflow,
+                BuiltinIntegerOverloadKind as Overload, BuiltinIntegerScalarDoubleRule as Scalar,
+            };
+            let [data, selectors] = builtin.integer_capabilities else {
+                panic!("pivot separates table data from positional selectors");
+            };
+            assert_eq!(
+                data.inputs[0].name,
+                "integer grouping or DataVariable table columns"
+            );
+            assert_eq!(
+                selectors.inputs[0].name,
+                "rowvars, colvars, or datavar variable indices"
+            );
+            for capability in [data, selectors] {
+                assert_eq!(capability.inputs.len(), 1);
+                assert_eq!(
+                    capability.inputs[0].classes,
+                    &runmat_builtins::ALL_INTEGER_CLASSES
+                );
+                assert_eq!(
+                    capability.inputs[0].availability,
+                    runmat_builtins::BuiltinIntegerInputAvailability::Documented
+                );
+                assert_eq!(
+                    capability.backend,
+                    runmat_builtins::BuiltinIntegerBackendRule::HostOnly
+                );
+                assert_eq!(
+                    capability.output_class,
+                    runmat_builtins::BuiltinIntegerOutputClassRule::FunctionSpecific
+                );
+            }
+            assert_eq!(data.computation_domain, Domain::FunctionSpecific);
+            assert_eq!(data.overflow, Overflow::FunctionSpecific);
+            assert_eq!(data.overload, Overload::Multiple);
+            assert_eq!(data.inputs[0].scalar_double, Scalar::NotApplicable);
+            assert_eq!(selectors.computation_domain, Domain::Structural);
+            assert_eq!(selectors.overflow, Overflow::Error);
+            assert_eq!(selectors.overload, Overload::StructuralParameter);
+            assert_eq!(selectors.inputs[0].scalar_double, Scalar::Allowed);
+            assert!(selectors.notes.contains("not implemented"));
+        }
         for capability in builtin.integer_capabilities {
             assert!(!capability.inputs.is_empty(), "{name}: {}", capability.form);
             for input in capability.inputs {
@@ -153,7 +199,8 @@ fn polynomial_polar_and_model_extensions_are_declarative_and_independent() {
     ];
     let mut ids = std::collections::HashSet::new();
     for (name, count) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.extensions.len(), count, "{name}");
         for extension in builtin.extensions {
             assert_eq!(

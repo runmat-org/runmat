@@ -39,46 +39,64 @@ async fn reduce_sum_dim_semantics() {
     }
     let m = upload_matrix(&provider, rows, cols, &host);
 
-    // Sum over dim=0 (rows) → shape [1, cols]
-    let sum_dim0 = provider.reduce_sum_dim(&m, 0).await.expect("sum dim0");
-    let sum_dim0_host = AccelProvider::download(&provider, &sum_dim0)
-        .await
-        .expect("dl dim0");
-    let expected_dim0: Vec<f64> = (0..cols)
-        .map(|c| (0..rows).map(|r| host[r + c * rows]).sum::<f64>())
-        .collect();
-    assert_eq!(sum_dim0_host.shape, vec![1, cols]);
-    for (c, (got, exp)) in sum_dim0_host
-        .data
-        .iter()
-        .zip(expected_dim0.iter())
-        .enumerate()
-        .take(cols)
-    {
-        let got = *got;
-        let exp = *exp;
-        assert!((got - exp).abs() < 1e-6, "dim0 c={c} got={got} exp={exp}");
-    }
+    match provider.preflight_double_sum(&m) {
+        runmat_accelerate_api::ProviderDoubleSumPreflight::Unsupported => {
+            eprintln!("QUALIFICATION: negative double-sum admission (required F64 unavailable)");
+            for dim in [0, 1] {
+                let error = provider
+                    .reduce_sum_dim(&m, dim)
+                    .await
+                    .expect_err("unsupported capability must not execute");
+                assert!(
+                    error.is_unsupported(),
+                    "retain typed pre-effect Unsupported: {error:?}"
+                );
+            }
+        }
+        runmat_accelerate_api::ProviderDoubleSumPreflight::Unknown => {
+            eprintln!("QUALIFICATION: actual F64 double-sum numerical positive");
+            // Sum over dim=0 (rows) → shape [1, cols]
+            let sum_dim0 = provider.reduce_sum_dim(&m, 0).await.expect("sum dim0");
+            let sum_dim0_host = AccelProvider::download(&provider, &sum_dim0)
+                .await
+                .expect("dl dim0");
+            let expected_dim0: Vec<f64> = (0..cols)
+                .map(|c| (0..rows).map(|r| host[r + c * rows]).sum::<f64>())
+                .collect();
+            assert_eq!(sum_dim0_host.shape, vec![1, cols]);
+            for (c, (got, exp)) in sum_dim0_host
+                .data
+                .iter()
+                .zip(expected_dim0.iter())
+                .enumerate()
+                .take(cols)
+            {
+                let got = *got;
+                let exp = *exp;
+                assert!((got - exp).abs() < 1e-6, "dim0 c={c} got={got} exp={exp}");
+            }
 
-    // Sum over dim=1 (cols) → shape [rows, 1]
-    let sum_dim1 = provider.reduce_sum_dim(&m, 1).await.expect("sum dim1");
-    let sum_dim1_host = AccelProvider::download(&provider, &sum_dim1)
-        .await
-        .expect("dl dim1");
-    let expected_dim1: Vec<f64> = (0..rows)
-        .map(|r| (0..cols).map(|c| host[r + c * rows]).sum::<f64>())
-        .collect();
-    assert_eq!(sum_dim1_host.shape, vec![rows, 1]);
-    for (r, (got, exp)) in sum_dim1_host
-        .data
-        .iter()
-        .zip(expected_dim1.iter())
-        .enumerate()
-        .take(rows)
-    {
-        let got = *got;
-        let exp = *exp;
-        assert!((got - exp).abs() < 1e-6, "dim1 r={r} got={got} exp={exp}");
+            // Sum over dim=1 (cols) → shape [rows, 1]
+            let sum_dim1 = provider.reduce_sum_dim(&m, 1).await.expect("sum dim1");
+            let sum_dim1_host = AccelProvider::download(&provider, &sum_dim1)
+                .await
+                .expect("dl dim1");
+            let expected_dim1: Vec<f64> = (0..rows)
+                .map(|r| (0..cols).map(|c| host[r + c * rows]).sum::<f64>())
+                .collect();
+            assert_eq!(sum_dim1_host.shape, vec![rows, 1]);
+            for (r, (got, exp)) in sum_dim1_host
+                .data
+                .iter()
+                .zip(expected_dim1.iter())
+                .enumerate()
+                .take(rows)
+            {
+                let got = *got;
+                let exp = *exp;
+                assert!((got - exp).abs() < 1e-6, "dim1 r={r} got={got} exp={exp}");
+            }
+        }
     }
 }
 
@@ -139,21 +157,37 @@ async fn fused_dot_per_column_matches_manual() {
     let x = upload_matrix(&provider, rows, cols, &xh);
     let w = upload_matrix(&provider, rows, cols, &wh);
     let prod = provider.elem_mul(&x, &w).await.expect("mul");
-    let y = provider
-        .reduce_sum_dim(&prod, 0)
-        .await
-        .expect("sum per col");
-    let yh = AccelProvider::download(&provider, &y).await.expect("dl y");
-    // Manual per-column dot
-    for c in 0..cols {
-        let mut acc = 0.0;
-        for r in 0..rows {
-            acc += xh[r + c * rows] * wh[r + c * rows];
+    match provider.preflight_double_sum(&prod) {
+        runmat_accelerate_api::ProviderDoubleSumPreflight::Unsupported => {
+            eprintln!("QUALIFICATION: negative double-sum admission (required F64 unavailable)");
+            let error = provider
+                .reduce_sum_dim(&prod, 0)
+                .await
+                .expect_err("unsupported capability must not execute");
+            assert!(
+                error.is_unsupported(),
+                "retain typed pre-effect Unsupported: {error:?}"
+            );
         }
-        let got = yh.data[c];
-        assert!(
-            (got - acc).abs() < 1e-6,
-            "col={c} got={got} exp={acc} rows={rows}"
-        );
+        runmat_accelerate_api::ProviderDoubleSumPreflight::Unknown => {
+            eprintln!("QUALIFICATION: actual F64 double-sum numerical positive");
+            let y = provider
+                .reduce_sum_dim(&prod, 0)
+                .await
+                .expect("sum per col");
+            let yh = AccelProvider::download(&provider, &y).await.expect("dl y");
+            // Manual per-column dot
+            for c in 0..cols {
+                let mut acc = 0.0;
+                for r in 0..rows {
+                    acc += xh[r + c * rows] * wh[r + c * rows];
+                }
+                let got = yh.data[c];
+                assert!(
+                    (got - acc).abs() < 1e-6,
+                    "col={c} got={got} exp={acc} rows={rows}"
+                );
+            }
+        }
     }
 }

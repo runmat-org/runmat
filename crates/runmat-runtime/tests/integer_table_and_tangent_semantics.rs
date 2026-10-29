@@ -75,7 +75,8 @@ fn packet_metadata_is_complete_and_extensions_are_independent() {
         ("tanh", 1, 3),
     ];
     for (name, capabilities, extensions) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), capabilities, "{name}");
         assert_eq!(builtin.extensions.len(), extensions, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");

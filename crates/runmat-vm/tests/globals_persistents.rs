@@ -29,6 +29,9 @@ fn persistent_across_calls() {
     let program = r#"
         function y = counter()
             persistent p;
+            if isempty(p)
+                p = 0;
+            end
             p = p + 1;
             y = p;
         end

@@ -34,7 +34,8 @@ fn resident_handle(value: u32, provenance: GpuHandleProvenance) -> GpuTensorHand
 #[test]
 fn label_and_text_control_packet_has_class_complete_capability_metadata() {
     for (name, expected_forms) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {

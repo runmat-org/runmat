@@ -40,7 +40,8 @@ fn unregistered_resident_value() -> Value {
 #[test]
 fn text_only_packet_registers_explicit_integer_inapplicability() {
     for name in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         assert_eq!(
             builtin.integer_audit.expect("integer audit").kind,

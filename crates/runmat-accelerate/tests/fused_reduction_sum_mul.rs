@@ -4,7 +4,9 @@ use runmat_accelerate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptio
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
-use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::{
+    execute_reduction_with_shape_placed_async, FusionExecutionOutcome, FusionExecutionRequest,
+};
 use runmat_accelerate::graph::{InstrSpan, ShapeInfo, ValueId};
 use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
@@ -80,7 +82,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
     let mut constants: HashMap<usize, Value> = HashMap::new();
     constants.insert(0, Value::Num(1.0));
 
-    let plan = FusionGroupPlan {
+    let mut plan = FusionGroupPlan {
         index: 0,
         group,
         operations,
@@ -101,6 +103,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
         pattern: None,
     };
 
+    select_terminal(&mut plan);
     let request = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
@@ -109,7 +112,9 @@ async fn fused_sum_mul_dim0_matches_manual() {
     };
 
     // reduce_len = rows, num_slices = cols, workgroup_size = default(0)
-    let result = execute_reduction(request, rows, cols, 0).expect("execute fused reduction");
+    let result = execute_selected(request, rows, cols, 0)
+        .await
+        .expect("execute fused reduction");
     let out_handle = match result {
         Value::GpuTensor(h) => h,
         _ => panic!("expected GPU tensor"),
@@ -178,7 +183,7 @@ async fn fused_mean_mul_dim0_matches_manual() {
     }];
     let mut constants: HashMap<usize, Value> = HashMap::new();
     constants.insert(0, Value::Num(1.0)); // dim=1 => reduce rows
-    let plan = FusionGroupPlan {
+    let mut plan = FusionGroupPlan {
         index: 0,
         group,
         operations,
@@ -198,13 +203,16 @@ async fn fused_mean_mul_dim0_matches_manual() {
         reduction_axes: Some(ReductionAxes::Explicit(vec![1])),
         pattern: None,
     };
+    select_terminal(&mut plan);
     let request = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
         placement: None,
         runtime: None,
     };
-    let result = execute_reduction(request, rows, cols, 0).expect("execute fused reduction");
+    let result = execute_selected(request, rows, cols, 0)
+        .await
+        .expect("execute fused reduction");
     let out_handle = match result {
         Value::GpuTensor(h) => h,
         _ => panic!("expected GPU tensor"),
@@ -273,7 +281,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
     let mut constants: HashMap<usize, Value> = HashMap::new();
     constants.insert(0, Value::Num(2.0)); // MATLAB dim=2 → axis=1 (reduce cols)
 
-    let plan = FusionGroupPlan {
+    let mut plan = FusionGroupPlan {
         index: 0,
         group,
         operations,
@@ -294,6 +302,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
         pattern: None,
     };
 
+    select_terminal(&mut plan);
     let request = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
@@ -302,7 +311,9 @@ async fn fused_sum_mul_dim1_matches_manual() {
     };
 
     // reduce_len = cols, num_slices = rows
-    let result = execute_reduction(request, cols, rows, 0).expect("execute fused reduction");
+    let result = execute_selected(request, cols, rows, 0)
+        .await
+        .expect("execute fused reduction");
     let out_handle = match result {
         Value::GpuTensor(h) => h,
         _ => panic!("expected GPU tensor"),
@@ -327,5 +338,49 @@ async fn fused_sum_mul_dim1_matches_manual() {
             (got - acc).abs() < 1e-6,
             "dim1 row={r} got={got} exp={acc} cols={cols}"
         );
+    }
+}
+
+fn select_terminal(plan: &mut FusionGroupPlan) {
+    let name = match plan.reduction_flavor.unwrap() {
+        ReductionFlavor::Sum => "sum",
+        ReductionFlavor::Mean => "mean",
+        ReductionFlavor::CustomScale(_) => panic!("fixture terminal must be canonical sum or mean"),
+    };
+    let dim = match plan.reduction_axes.as_ref().unwrap() {
+        ReductionAxes::Explicit(axes) => axes[0] as f64,
+        _ => panic!("fixture has explicit matrix axis"),
+    };
+    plan.operations.push(FusionOp::Builtin {
+        name: name.into(),
+        origin: runmat_accelerate::graph::FusionCallOrigin::named(name),
+        inputs: vec![plan.reduction_data.unwrap(), 3],
+        output: Some(4),
+    });
+    plan.const_values.insert(3, Value::Num(dim));
+    plan.output = Some(4);
+    plan.reduction_dim = Some(3);
+    plan.group.span.end = plan.operations.len();
+}
+
+async fn execute_selected(
+    request: FusionExecutionRequest<'_>,
+    reduce_len: usize,
+    num_slices: usize,
+    workgroup_size: u32,
+) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
+    match execute_reduction_with_shape_placed_async(
+        request,
+        reduce_len,
+        num_slices,
+        &[num_slices],
+        workgroup_size,
+    )
+    .await?
+    {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            panic!("selected reduction must execute on provider")
+        }
     }
 }

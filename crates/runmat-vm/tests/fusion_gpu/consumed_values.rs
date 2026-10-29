@@ -172,9 +172,9 @@ fn completed_builtin_calls_release_consumed_intermediates_and_adopt_aliases() {
         let _reject = RejectFusion(provider);
         let dispatches = provider.fused_dispatches.load(Ordering::Relaxed);
         let single_calls = provider.single_inputs.lock().unwrap().len();
-        // MIR locals are part of the returned full-frame ABI. A second real
-        // iteration overwrites the first intermediate, making its retirement
-        // obligatory instead of mistaking a returned anonymous slot for a leak.
+        // Authored y/alias outputs must survive, but the exact compiler proof
+        // may move a uniquely consumed private sine temporary into single.
+        // Both real iterations must retire that unobservable intermediate.
         let source = "x = [0.25 0.5]; for k = 1:2; y = single(sin(x)); end; alias = y;";
         let bytecode = compile_semantic(source);
         let input = provider.push(vec![0.25, 0.5], vec![1, 2]);
@@ -265,8 +265,8 @@ fn completed_builtin_calls_release_consumed_intermediates_and_adopt_aliases() {
             "the first sine result consumed by single must be retired"
         );
         assert!(
-            expected.contains(&single_inputs[1]),
-            "the last represented MIR input slot remains adopted by completion"
+            retired.contains(&single_inputs[1]),
+            "the final compiler-private sine input must retire after its consuming cast"
         );
         for id in retired {
             assert_eq!(

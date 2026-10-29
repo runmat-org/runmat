@@ -40,6 +40,7 @@ impl RuntimeGraphObservationPermit for SelectedLogicalPermit {
 }
 
 struct Selection {
+    session: runmat_accelerate::placement::PlacementSession,
     operation: &'static str,
     kind: ExecutionCandidateKind,
     requests: RefCell<Vec<PlacementPlanRequest>>,
@@ -47,6 +48,20 @@ struct Selection {
 }
 
 impl RuntimePlacementService for Selection {
+    fn whole_work_runtime_binding_session_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        binding: runmat_builtins::BuiltinBindingIdentity,
+        registration: Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        RuntimePlacementService::whole_work_runtime_binding_session_revision(
+            &self.session,
+            program,
+            binding,
+            registration,
+        )
+    }
+
     fn plan_with_observation_permit(
         &self,
         request: PlacementPlanRequest,
@@ -110,6 +125,7 @@ fn context(
     kind: ExecutionCandidateKind,
 ) -> (RuntimeContext, Rc<Selection>) {
     let selection = Rc::new(Selection {
+        session: Default::default(),
         operation,
         kind,
         requests: RefCell::new(vec![]),

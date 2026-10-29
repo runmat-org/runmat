@@ -5,7 +5,8 @@ use runmat_accelerate::fusion::{
     detect_fusion_groups, FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
 use runmat_accelerate::fusion_exec::{
-    execute_elementwise, execute_reduction, FusionExecutionRequest,
+    execute_elementwise, execute_reduction_with_shape_placed_async, FusionExecutionOutcome,
+    FusionExecutionRequest,
 };
 use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
@@ -184,7 +185,8 @@ fn nlms_two_fused_reductions_integration() {
             placement: None,
             runtime: None,
         };
-        let _d = execute_reduction(req, rows, cols, 0).expect("fused sum(x.*x,1)");
+        let _d = futures::executor::block_on(execute_selected(req, rows, cols, 0))
+            .expect("fused sum(x.*x,1)");
     }
 
     // 2) y = sum(x .* w, 1)  (two-input fused reduction)
@@ -336,7 +338,8 @@ fn nlms_two_fused_reductions_integration() {
             placement: None,
             runtime: None,
         };
-        let y = execute_reduction(req, rows, cols, 0).expect("fused sum(x.*w,1)");
+        let y = futures::executor::block_on(execute_selected(req, rows, cols, 0))
+            .expect("fused sum(x.*w,1)");
         match y {
             Value::GpuTensor(h) => h,
             _ => panic!("expected GPU tensor for y"),
@@ -438,11 +441,11 @@ fn nlms_two_fused_reductions_integration() {
                 constant: None,
             },
         ];
-        let pow_node = AccelNode {
+        let square_node = AccelNode {
             id: 0,
-            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemPow),
+            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
             category: AccelOpCategory::Elementwise,
-            inputs: vec![v_e, v_e], // Not exactly pow(e,2), but good enough for plan shape; squared done via elementwise multiply
+            inputs: vec![v_e, v_e], // Actual square, preserving the error^2 contract.
             outputs: vec![v_sq],
             span: InstrSpan { start: 0, end: 0 },
             tags: vec![AccelGraphTag::Elementwise],
@@ -468,7 +471,7 @@ fn nlms_two_fused_reductions_integration() {
             },
         );
         let graph = AccelGraph {
-            nodes: vec![pow_node, mean_node],
+            nodes: vec![square_node, mean_node],
             values,
             var_bindings,
             node_bindings: HashMap::new(),
@@ -484,8 +487,8 @@ fn nlms_two_fused_reductions_integration() {
             group: red_group.clone(),
             operations: vec![
                 FusionOp::Primitive {
-                    op: PrimitiveOp::ElemPow,
-                    inputs: vec![v_e, v_e], // used as a stand-in for squaring
+                    op: PrimitiveOp::ElemMul,
+                    inputs: vec![v_e, v_e],
                     output: Some(v_sq),
                 },
                 FusionOp::Builtin {
@@ -522,7 +525,8 @@ fn nlms_two_fused_reductions_integration() {
             placement: None,
             runtime: None,
         };
-        let mse = execute_reduction(req, cols, 1, 0).expect("fused mean(all)");
+        let mse = futures::executor::block_on(execute_selected(req, cols, 1, 0))
+            .expect("fused mean(all)");
         match mse {
             Value::GpuTensor(h) => {
                 assert_eq!(
@@ -532,6 +536,28 @@ fn nlms_two_fused_reductions_integration() {
                 );
             }
             _ => panic!("expected GPU tensor for mse"),
+        }
+    }
+}
+
+async fn execute_selected(
+    request: FusionExecutionRequest<'_>,
+    reduce_len: usize,
+    num_slices: usize,
+    workgroup_size: u32,
+) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
+    match execute_reduction_with_shape_placed_async(
+        request,
+        reduce_len,
+        num_slices,
+        &[num_slices],
+        workgroup_size,
+    )
+    .await?
+    {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            panic!("selected reduction must execute on provider")
         }
     }
 }

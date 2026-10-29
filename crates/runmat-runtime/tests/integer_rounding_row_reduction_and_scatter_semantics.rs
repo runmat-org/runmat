@@ -25,7 +25,8 @@ fn rounding_row_reduction_and_scatter_packet_has_settled_metadata() {
         ("scatterhist", 3),
         ("scatterplot", 2),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         assert!(builtin.integer_capabilities.iter().all(|capability| {
@@ -37,7 +38,8 @@ fn rounding_row_reduction_and_scatter_packet_has_settled_metadata() {
         }));
     }
     for name in ["rowfilter", "saveas", "savefig", "saveobj"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         assert_eq!(
             builtin.integer_audit.expect("integer audit").kind,

@@ -5859,6 +5859,22 @@ fn explained_variance_matches_cpu() {
             }
         }
 
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            for (idx, value) in vars_cpu.iter().enumerate() {
+                if let Ok(Value::Tensor(t)) =
+                    futures::executor::block_on(gather_if_needed_async(value))
+                {
+                    if t.shape() == vec![2, 2] {
+                        println!(
+                            "tensor idx {idx} shape {:?} data {:?}",
+                            t.shape(),
+                            t.materialize_f64()
+                        );
+                    }
+                }
+            }
+        }
+
         ensure_provider_registered();
         let vars_gpu = vars_cpu
             .with_unbounded_values(|vars| interpret_function(&bytecode, vars))
@@ -5898,22 +5914,6 @@ fn explained_variance_matches_cpu() {
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             println!("Q tensor data {:?}", q_tensor.materialize_f64());
             println!("G tensor data {:?}", g_tensor.materialize_f64());
-        }
-
-        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
-            for (idx, value) in vars_cpu.iter().enumerate() {
-                if let Ok(Value::Tensor(t)) =
-                    futures::executor::block_on(gather_if_needed_async(value))
-                {
-                    if t.shape() == vec![2, 2] {
-                        println!(
-                            "tensor idx {idx} shape {:?} data {:?}",
-                            t.shape(),
-                            t.materialize_f64()
-                        );
-                    }
-                }
-            }
         }
 
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {

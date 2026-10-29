@@ -49,16 +49,22 @@ fn compiled_integer_gpuarray_intent_and_gather_roundtrip() {
 }
 
 #[test]
-fn compiled_gpudevice_facade_is_gated_in_matlab_mode() {
+fn compiled_gpudevice_integer_selector_requires_physical_control_not_a_facade() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
     let provider = runmat_accelerate_api::provider().expect("test provider");
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     let error = execute_source("d = gpuDevice(uint8(1));")
-        .expect_err("RunMat provider-info facade must be gated");
+        .expect_err("simple provider is not a physical GPUDevice lifecycle owner");
     assert_eq!(
         error.identifier(),
-        Some("RunMat:compatibility:GpuDeviceProviderInfoExtension")
+        Some("RunMat:gpuDevice:DeviceNotAvailable")
+    );
+    let error = execute_source("d = gpuDevice(true);")
+        .expect_err("logical selector remains an independently gated extension");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:GpuDeviceLogicalSelectorExtension")
     );
 }
 

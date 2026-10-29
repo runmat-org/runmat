@@ -14,7 +14,7 @@ const PACKET: [(&str, usize, &[usize]); 9] = [
     ("random", 2, &[8, 8]),
     ("randperm", 1, &[8]),
     ("randsample", 3, &[8, 8, 8]),
-    ("rng", 3, &[8, 8, 8]),
+    ("rng", 4, &[8, 8, 1, 8]),
 ];
 
 fn integer_tensor(storage: IntegerStorage, shape: &[usize]) -> Value {
@@ -66,7 +66,8 @@ fn resident_integer(shape: Vec<usize>) -> GpuTensorHandle {
 #[test]
 fn random_and_waveform_packet_has_precise_integer_metadata() {
     for (name, expected_forms, expected_class_counts) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         let class_counts = builtin
@@ -77,7 +78,56 @@ fn random_and_waveform_packet_has_precise_integer_metadata() {
         assert_eq!(class_counts, expected_class_counts, "{name}");
     }
 
-    let randi = runmat_builtins::builtin_function_by_name("randi").expect("randi");
+    let rng = runmat_builtins::builtin_catalog_entry_by_name("rng").expect("canonical rng");
+    let [seed, wide_seed, returned_state, extended_state] = rng.integer_capabilities else {
+        panic!("rng separates seed domains and returned versus extended state");
+    };
+    for (capability, availability) in [
+        (
+            seed,
+            runmat_builtins::BuiltinIntegerInputAvailability::Documented,
+        ),
+        (
+            wide_seed,
+            runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
+        ),
+        (
+            returned_state,
+            runmat_builtins::BuiltinIntegerInputAvailability::Documented,
+        ),
+        (
+            extended_state,
+            runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly,
+        ),
+    ] {
+        assert_eq!(capability.inputs.len(), 1);
+        assert_eq!(capability.inputs[0].availability, availability);
+        assert_eq!(
+            capability.backend,
+            runmat_builtins::BuiltinIntegerBackendRule::HostOnly
+        );
+        assert_eq!(
+            capability.overflow,
+            runmat_builtins::BuiltinIntegerOverflowRule::Error
+        );
+        assert_eq!(
+            capability.computation_domain,
+            runmat_builtins::BuiltinIntegerComputationDomain::Structural
+        );
+    }
+    assert!(seed.form.contains("seed < 2^32"));
+    assert!(wide_seed.form.contains("wide_integer_seed"));
+    assert!(returned_state
+        .form
+        .contains("twister_state_returned_by_rng"));
+    assert_eq!(
+        returned_state.inputs[0].classes,
+        &[runmat_builtins::BuiltinIntegerClass::Uint32]
+    );
+    assert!(returned_state.inputs[0].notes.contains("625-by-1 uint32"));
+    assert!(extended_state.form.contains("extended_integer_fields"));
+
+    let randi = runmat_builtins::builtin_catalog_entry_by_name("randi").expect("randi");
     assert_eq!(
         randi.integer_capabilities[0].overflow,
         runmat_builtins::BuiltinIntegerOverflowRule::Saturate
@@ -107,7 +157,8 @@ fn random_and_waveform_extensions_are_independent_declarative_records() {
     ];
     let mut ids = std::collections::HashSet::new();
     for (name, count) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.extensions.len(), count, "{name}");
         for extension in builtin.extensions {
             assert_eq!(

@@ -493,8 +493,11 @@ fn fminbnd_accepts_optimset_options() {
 
 #[test]
 fn fsolve_accepts_anonymous_vector_function() {
+    // The symmetric diagonal has a singular Jacobian and can terminate at a
+    // stationary non-root. Use the same nonsingular seed as the runtime's
+    // semantic callback witness; keep both original root residual oracles.
     let vars =
-        execute_source("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1; 1]);")
+        execute_source("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1.5; 0.5]);")
             .unwrap();
     assert!(vars.iter().any(|v| {
         if let runmat_value::Value::Tensor(t) = v {

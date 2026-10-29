@@ -1357,13 +1357,13 @@ fn registered_set_double_exception_keeps_wide_integer_comparison_exact() {
     expect_integer(
         &runmat_runtime::call_builtin("intersect", &[integer.clone(), double.clone()])
             .expect("wide intersect"),
-        &[0, 1],
+        &[1, 0],
         IntegerStorage::U64(Vec::new()),
     );
     expect_integer(
         &runmat_runtime::call_builtin("union", &[integer.clone(), double.clone()])
             .expect("wide union"),
-        &[2, 1],
+        &[1, 2],
         IntegerStorage::U64(vec![rounded, wide]),
     );
     expect_integer(
