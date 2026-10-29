@@ -99,6 +99,14 @@ fn derive_resource_input(
         options.line_search,
     )
     .map_err(|e| invalid(&e))?;
+    // Raw output buffers and the complete carrier coexist with canonical content
+    // identity construction. Reserve its materialization, not just f64 payloads.
+    let output = output::projection(
+        dofs,
+        integration.elements().len(),
+        output_limit,
+        storage.point_history_bytes,
+    )?;
     if recovery {
         // Preserve affine-reduction scratch needed by physical validation, but
         // remove Krylov/preconditioner/factorization work: no solve is executed.
@@ -127,18 +135,12 @@ fn derive_resource_input(
                             "nonlinear recovery storage",
                         ))?,
                 ),
+                history_limits: output.history_limits,
             },
         );
         return Ok(input);
     }
-    // Raw output buffers and the complete carrier coexist with canonical content
-    // identity construction. Reserve its materialization, not just f64 payloads.
-    let (output_bound, output_construction) = output::projection(
-        dofs,
-        integration.elements().len(),
-        output_limit,
-        storage.point_history_bytes,
-    )?;
+    let (output_bound, output_construction) = (output.wire, output.resident);
     baseline.operator.publication.result_artifact_bytes = ByteCount(output_bound);
     baseline.operator.publication.result_egress_bytes = ByteCount(output_bound);
     let limits =
@@ -172,6 +174,7 @@ fn derive_resource_input(
             ),
             state_profiles_output: baseline.state_profiles_output,
             block_transport: None,
+            history_limits: output.history_limits,
         });
     Ok(input)
 }

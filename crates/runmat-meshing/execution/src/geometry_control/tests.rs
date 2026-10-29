@@ -4,45 +4,76 @@ use super::*;
 use runmat_meshing_core::{MeshingRequestSettings, NeverCancelled};
 use std::time::Duration;
 
+fn control_at(
+    started: Instant,
+    last_probe: Instant,
+    settings: &MeshingRequestSettings,
+    ceilings: runmat_meshing_core::MeshingExecutionCeilings,
+) -> MeshingGeometryEvaluationControl<'static> {
+    MeshingGeometryEvaluationControl::new(
+        &NeverCancelled,
+        started,
+        Arc::new(CheckpointClock::new(last_probe)),
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+        &runmat_meshing_core::MeshingResourceBudget::new(settings.limits, ceilings),
+        &settings.cancellation,
+    )
+}
+
 #[test]
-fn time_failure_identifies_wall_and_checkpoint_envelopes_independently() {
+fn wall_time_budget_fails_exact_geometry_evaluation() {
     let mut ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
-    for wall_failure in [true, false] {
-        let now = Instant::now();
-        let expired = now - Duration::from_secs(2);
-        let mut settings = MeshingRequestSettings::default();
-        ceilings.maximum_wall_time_ms = 1_000;
-        settings.cancellation.maximum_checkpoint_latency_ms = 1_000;
-        let control = MeshingGeometryEvaluationControl::new(
-            &NeverCancelled,
-            if wall_failure { expired } else { now },
-            Arc::new(CheckpointClock::new(if wall_failure {
-                now
-            } else {
-                expired
-            })),
-            Arc::new(AtomicU64::new(0)),
-            Arc::new(AtomicU64::new(0)),
-            &runmat_meshing_core::MeshingResourceBudget::new(settings.limits, ceilings),
-            &settings.cancellation,
-        );
-        let failure = control.checkpoint().unwrap_err();
-        assert_eq!(
-            failure.kind,
-            GeometryEvaluationErrorKind::TimeBudgetExceeded
-        );
-        let description = failure.to_string();
-        assert!(description.contains("wall time"));
-        assert!(description.contains("checkpoint latency"));
-        assert_eq!(description.matches("/1000 ms").count(), 2);
-        assert_eq!(
-            control
-                .maximum_observed_checkpoint_latency_ms
-                .load(Ordering::Relaxed)
-                >= 2_000,
-            !wall_failure,
-        );
-    }
+    ceilings.maximum_wall_time_ms = 1_000;
+    let now = Instant::now();
+    let control = control_at(
+        now - Duration::from_secs(2),
+        now,
+        &MeshingRequestSettings::default(),
+        ceilings,
+    );
+    let failure = control.checkpoint().unwrap_err();
+    assert_eq!(
+        failure.kind,
+        GeometryEvaluationErrorKind::TimeBudgetExceeded
+    );
+    assert!(failure.to_string().contains("/1000 ms"));
+}
+
+/// A checkpoint gap fails on the search work done since the previous probe, the load-independent
+/// responsiveness contract; latency above the target is telemetry only.
+#[test]
+fn checkpoint_gap_is_bounded_by_work_done_not_by_machine_load() {
+    let ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
+    let mut settings = MeshingRequestSettings::default();
+    settings.cancellation.maximum_checkpoint_latency_ms = 1_000;
+    settings.cancellation.maximum_work_units_between_checks = 10;
+    let now = Instant::now();
+    // A two-second gap, as a loaded machine produces, with the algorithm inside its work bound.
+    let control = control_at(now, now - Duration::from_secs(2), &settings, ceilings);
+    control.consume_search_work(10).unwrap();
+    control.checkpoint().unwrap();
+    assert!(
+        control
+            .maximum_observed_checkpoint_latency_ms
+            .load(Ordering::Relaxed)
+            >= 2_000
+    );
+    // A probe through the cancellation signal renews the work window.
+    control.consume_search_work(10).unwrap();
+    assert!(!control.is_cancelled());
+    control.consume_search_work(10).unwrap();
+    control.checkpoint().unwrap();
+    // More work than the request admits between two probes fails, however fast it ran.
+    control.consume_search_work(11).unwrap();
+    let failure = control.checkpoint().unwrap_err();
+    assert_eq!(
+        failure.kind,
+        GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
+    );
+    assert!(failure.to_string().contains("11 search work units"));
+    // The failed probe closed its window: the next gap starts from zero.
+    control.checkpoint().unwrap();
 }
 
 pub(crate) fn bounded_control(limit: u64) -> MeshingGeometryEvaluationControl<'static> {

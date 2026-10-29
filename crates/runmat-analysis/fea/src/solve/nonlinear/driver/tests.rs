@@ -184,16 +184,20 @@ fn internal_driver_publishes_accepted_physical_force_stress_and_plastic_history(
             .unwrap()
             .iter()
             .all(|r| r.abs() < 2e-9));
-        let original = nonlinear_solver_content_digest(&result).unwrap();
+        let limits = crate::planning::resource::NonlinearHistoryLimits {
+            encoded_bytes: crate::planning::resource::ByteCount(1 << 26),
+            collection_items: crate::planning::resource::Count(1 << 26),
+        };
+        let original = nonlinear_solver_content_digest(&result, limits).unwrap();
         let mut changed_history = result.clone();
         changed_history.accepted_state.constitutive.points[0].equivalent_plastic_strain += 0.01;
         assert_ne!(
-            nonlinear_solver_content_digest(&changed_history).unwrap(),
+            nonlinear_solver_content_digest(&changed_history, limits).unwrap(),
             original
         );
         let mut changed = result;
         changed.internal_force_snapshots.last_mut().unwrap()[0] += 1.0;
-        assert_ne!(nonlinear_solver_content_digest(&changed).unwrap(), original);
+        assert_ne!(nonlinear_solver_content_digest(&changed, limits).unwrap(), original);
     }
 }
 

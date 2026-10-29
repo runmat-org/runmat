@@ -7,12 +7,9 @@ pub(super) fn numeric_inventory_profile(
     count: u64,
 ) -> Result<SerializedCanonicalProfile, ResourcePlanningError> {
     let overflow = || ResourcePlanningError::Overflow("numeric serialization inventory");
-    let limits = CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32);
-    if count > limits.maximum_collection_items as u64 {
-        return Err(ResourcePlanningError::Invalid(
-            "numeric inventory exceeds canonical shape capacity".into(),
-        ));
-    }
+    // Only an empty and a one-value array are profiled; the count scales them algebraically.
+    // Capacity is bounded by checked arithmetic and the wire-integer range, not by a fixed cap.
+    let limits = CanonicalLimits::new(1024, 1, 0, 1);
     let profile = |v: &[f64]| {
         profile_serialized(v, limits).map_err(|e| ResourcePlanningError::Invalid(e.to_string()))
     };
@@ -38,9 +35,11 @@ pub(super) fn numeric_inventory_profile(
         .and_then(|n| n.checked_add(empty.materialization_resident_bytes_estimate))
         .and_then(|n| n.checked_add(16))
         .ok_or_else(overflow)?;
-    if wire > limits.maximum_encoded_bytes as u64 {
+    if wire > runmat_types::wire_integer::MAX_WIRE_INTEGER
+        || resident > runmat_types::wire_integer::MAX_WIRE_INTEGER
+    {
         return Err(ResourcePlanningError::Invalid(
-            "numeric inventory exceeds canonical wire capacity".into(),
+            "numeric inventory exceeds canonical shape capacity".into(),
         ));
     }
     Ok(SerializedCanonicalProfile {
@@ -55,7 +54,7 @@ mod tests {
     // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
     //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
     //   boundary: Count-only numerical profiling covers real codec arrays across header-width
-    //   transitions and plans100million values without constructing or visiting that array. Domain
+    //   transitions and plans ten billion values without constructing or visiting that array. Domain
     //   metadata and transport remain separately reserved. This is structural codec accounting, not
     //   measured RSS or whole study admission.
     #[test]
@@ -71,8 +70,9 @@ mod tests {
                     >= actual.materialization_resident_bytes_estimate
             );
         }
-        // This call has constant work/storage, even at a hundred million values.
+        // Constant work/storage at any count; no fixed item or byte cap applies.
         assert!(numeric_inventory_profile(100_000_000).is_ok());
+        assert!(numeric_inventory_profile(10_000_000_000).is_ok());
         assert!(numeric_inventory_profile(u64::MAX).is_err());
     }
 }
