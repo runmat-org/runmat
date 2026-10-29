@@ -84,6 +84,8 @@ pub(super) async fn run<'a>(
             .with_workspace(workspace_projection.clone())
             .with_base_workspace(observed_base),
     );
+    let workspace_publication =
+        PendingWorkspacePublication::new(&workspace_projection, &execution_runtime);
 
     // Check if this is an expression statement (ends with Pop)
     let is_expression_stmt = bytecode
@@ -216,6 +218,7 @@ pub(super) async fn run<'a>(
             is_expression_stmt,
             is_semicolon_suppressed,
             final_stmt_emit,
+            workspace_publication,
             #[cfg(not(target_arch = "wasm32"))]
             completed_native_root,
             #[cfg(not(target_arch = "wasm32"))]

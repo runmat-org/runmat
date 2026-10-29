@@ -1,11 +1,14 @@
 //! Retire each completed execution phase before polling the selected successor.
 use super::*;
-#[path = "phases/native.rs"]
-mod native;
 #[path = "phases/interpreted.rs"]
 mod interpreted;
+#[path = "phases/native.rs"]
+mod native;
 #[path = "phases/publication.rs"]
 mod publication;
+#[path = "phases/workspace_publication.rs"]
+mod workspace_publication;
+use workspace_publication::PendingWorkspacePublication;
 struct Active<'a> {
     session: &'a mut RunMatSession,
     state: State<'a>,
@@ -35,6 +38,9 @@ struct State<'a> {
     is_expression_stmt: bool,
     is_semicolon_suppressed: bool,
     final_stmt_emit: FinalStmtEmitDisposition,
+    // The selected child retires before this guard publishes its admitted
+    // projection prefix; original command/profiling guards in Data retire last.
+    workspace_publication: PendingWorkspacePublication,
     // Every result/workspace owner above retires before Data's original guards.
     data: command::Data<'a>,
 }

@@ -4,6 +4,9 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
     let Active { session, state } = active;
     let _guards = state.data.guards;
     let State {
+        // Declared before the remaining owners so they retire before this
+        // guard, which itself still precedes the original `_guards` teardown.
+        workspace_publication: _workspace_publication,
         used_jit,
         execution_completed: _,
         mut result_value,

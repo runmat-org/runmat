@@ -1,8 +1,9 @@
 //! Own the exact frame completion across both polling and abandonment.
 //!
-//! Workspace mutations already publish through the selected workspace service
-//! in source order. This owner never replays register values into that service:
-//! it hands the moved completion to the caller, or retires it on abandonment.
+//! Workspace mutations stage through the selected workspace service in source
+//! order; the embedding host owns that service's canonical publication. This
+//! owner never replays register values: it hands the moved completion to the
+//! caller, or retires it on abandonment.
 //! The entire owner is polled and destroyed inside the existing RuntimeContext
 //! scope, so frame activation, publication, and draining select the same issuer's
 //! thread-local tables even when the public caller has no ambient context.
