@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
-    revision: 5,
+    revision: 6,
     operation: FusionReductionOperation::Mean,
     prepare,
 };

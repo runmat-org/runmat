@@ -144,15 +144,6 @@ fn failed_retirement_retains_payload_and_failure_record_without_reviving_view() 
     });
 }
 
-pub(super) fn resident_outputs(values: &[Value]) -> Vec<GpuTensorHandle> {
-    let mut seen = HashSet::new();
-    let mut handles = Vec::new();
-    for value in values {
-        record_resident_outputs(value, &mut seen, &mut handles);
-    }
-    handles
-}
-
 pub(super) fn resident_outputs_frame(values: &runmat_vm::InterpreterVars) -> Vec<GpuTensorHandle> {
     let mut seen = HashSet::new();
     let mut handles = Vec::new();

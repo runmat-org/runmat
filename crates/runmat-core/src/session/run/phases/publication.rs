@@ -57,7 +57,6 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
             command::Data {
                 workspace,
                 start_time,
-                debug_trace,
                 stdin_events,
                 ..
             },

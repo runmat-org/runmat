@@ -2443,7 +2443,6 @@ mod parfor_ownership_tests;
 mod tests {
     use super::{
         interpret_function_with_counts_in_context, interpret_resume_in_context, output_sequence,
-        run_interpreter,
     };
     #[cfg(feature = "native-accel")]
     use super::{interpret_workspace, run_interpreter_inner, run_interpreter_owned};

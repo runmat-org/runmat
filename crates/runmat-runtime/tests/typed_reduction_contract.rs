@@ -34,7 +34,7 @@ fn declaration(name: &str) -> &'static FusionReductionDeclaration {
     let declaration = selected.reduction.expect("joined typed declaration");
     let revision = match name {
         "sum" => 3,
-        "mean" => 5,
+        "mean" => 6,
         "min" | "max" => 2,
         _ => panic!("unregistered reduction witness"),
     };

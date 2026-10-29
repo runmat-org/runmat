@@ -3,7 +3,6 @@ use runmat_runtime::context::{RuntimeServicePorts, RuntimeWorkspaceService};
 use runmat_runtime::interaction::{replace_async_handler, InteractionResponse};
 use runmat_runtime::workspace::{BaseWorkspaceOwner, BaseWorkspaceService};
 use runmat_value::{CharArray, Tensor, Value};
-use std::future::Future;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,

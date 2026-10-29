@@ -23,7 +23,9 @@ impl Default for Provider {
         Self {
             inner: InProcessProvider::new(),
             budget: Arc::new(ProviderObservationBudget::new(NonZeroU32::new(8).unwrap())),
-            plus_operation: ProviderOperationIdentity::new(runmat_builtins::PLUS_DESCRIPTOR.name),
+            plus_operation: ProviderOperationIdentity::new(
+                runmat_builtins::PLUS_CATALOG_ENTRY.identity.name,
+            ),
             upload_operation: ProviderOperationIdentity::new("transfer.upload"),
             executed_adds: AtomicUsize::new(0),
         }

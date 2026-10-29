@@ -40,10 +40,10 @@ fn ordinary_reduction_constants_use_sealed_ieee_words_and_preserve_shadowing() {
             ));
             let request = invocation(&source);
             let bindings = AdmittedBindings::new(&request).unwrap();
-            assert!(requires_selected_arithmetic(&request, &bindings).unwrap());
             let selected = admitted_static(&request, &bindings, ProviderPrecision::F64)
                 .unwrap()
                 .unwrap();
+            assert!(selected.emission().is_some());
             let shader = source
                 .prepare_reduction_shader(
                     ProviderPrecision::F64,
@@ -107,12 +107,14 @@ fn ordinary_reduction_constants_use_sealed_ieee_words_and_preserve_shadowing() {
             Tensor::new(vec![2.0, 4.0], vec![2, 1]).unwrap(),
         ));
         let bindings = AdmittedBindings::new(&request).unwrap();
-        assert!(!requires_selected_arithmetic(&request, &bindings).unwrap());
+        let selected = admitted_static(&request, &bindings, ProviderPrecision::F64)
+            .unwrap()
+            .expect("selected producer ignores unused constants");
         let shader = source
             .prepare_reduction_shader(
                 ProviderPrecision::F64,
                 runmat_accelerate_api::ReductionFlavor::Sum,
-                None,
+                selected.emission(),
             )
             .unwrap();
         assert!(!shader.source().contains("control99"));
