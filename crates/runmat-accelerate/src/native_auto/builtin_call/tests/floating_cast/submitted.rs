@@ -16,6 +16,16 @@ struct DeferredProbe {
     deferrals: Cell<usize>,
 }
 impl RuntimePlacementService for DeferredProbe {
+    fn whole_work_runtime_binding_session_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        binding: runmat_builtins::BuiltinBindingIdentity,
+        registration: Digest,
+    ) -> Option<PlacementRevision> {
+        self.decisions
+            .whole_work_runtime_binding_session_revision(program, binding, registration)
+    }
+
     fn plan_with_observation_permit(
         &self,
         request: PlacementPlanRequest,

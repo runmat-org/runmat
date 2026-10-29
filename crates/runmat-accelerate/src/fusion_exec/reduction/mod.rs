@@ -74,36 +74,14 @@ pub fn execute_reduction_with_shape_placed(
     output_shape: &[usize],
     workgroup_size: u32,
 ) -> ExecutionResult<FusionExecutionOutcome<Value>> {
-    // Extrema have no legacy raw-hook flavor. Admit a projected producer
-    // before that compatibility-only flavor check so sync callers can use the
-    // same checked recipe as async callers without manufacturing a Sum lane.
-    if let (Some(bindings), Some(owner)) = (AdmittedBindings::new(&request), provider()) {
-        if legacy::selected_legacy_flavor(&request, &bindings).is_none()
-            && reduction_arithmetic::requires_selected_arithmetic(&request, &bindings)?
-        {
-            if let Some(arithmetic) =
-                reduction_arithmetic::admitted_static(&request, &bindings, owner.precision())?
-            {
-                if arithmetic.requires_typed() {
-                    return execute_projected_sync(
-                        request,
-                        reduce_len,
-                        num_slices,
-                        output_shape,
-                        workgroup_size,
-                    );
-                }
-            }
-        }
-    }
-    execute_reduction_with_shape_core(
+    // Sync and async callers share one selected mathematical contract owner.
+    // Static admission never blocks to invent missing source/domain proof.
+    execute_projected_sync(
         request,
         reduce_len,
         num_slices,
         output_shape,
         workgroup_size,
-        None,
-        None,
     )
 }
 
@@ -229,7 +207,14 @@ async fn execute_reduction_with_shape_placed_async_inner(
     } else {
         super::resolve_reduction_program(&request, selected_provider.precision()).await?
     };
-    if let Some(program) = program {
+    let Some(program) = program else {
+        // Missing or provider-inexpressible mathematics is not permission to
+        // forget its accumulator/class contract and try a raw legacy kernel.
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
+    {
         let current = AdmittedBindings::new(&request)
             .ok_or_else(|| anyhow!("selected reduction binding changed during typed admission"))?;
         if current.identity(None)? != selected_identity
@@ -365,12 +350,16 @@ async fn execute_reduction_with_shape_placed_async_inner(
         ));
     }
     let legacy = execute_reduction_with_shape_core(
-        request,
+        &request,
+        legacy::LegacyReductionProofs {
+            mathematical: &program,
+            producer: Some(&arithmetic),
+            owner: selected_provider,
+        },
         reduce_len,
         num_slices,
         output_shape,
         workgroup_size,
-        Some(&arithmetic),
         authority
             .as_ref()
             .and_then(super::VmFusionExecutionRight::as_selection)

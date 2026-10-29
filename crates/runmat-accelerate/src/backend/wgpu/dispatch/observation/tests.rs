@@ -513,16 +513,29 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
         );
         let provider_a = ProviderOperationReceipt::with_wgpu_progress(budget.clone(), gate.clone());
         let retention_drops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let (retention_completion, retirement) =
-            with_provider_observation(Some(provider_a.recorder()), || {
-                PreparedSubmittedAllocationRetention::reserve().unwrap()
-            });
-        pending
-            .retain_allocations_until_next_submit(
-                retention_completion,
+        let retirement = if matched_direct {
+            // A real direct encoder has no selected provider recorder. Keep
+            // its exact notifier, but obtain progress through the canonical
+            // recorder-independent resource admission rather than provider_a.
+            let (retention, retirement) = super::submitted_retention::with_retirement_for_test(
                 SubmittedAllocationRetention::new(RetentionDrop(retention_drops.clone())),
             )
             .unwrap();
+            pending.retain_submission_resources(retention).unwrap();
+            retirement
+        } else {
+            let (retention_completion, retirement) =
+                with_provider_observation(Some(provider_a.recorder()), || {
+                    PreparedSubmittedAllocationRetention::reserve().unwrap()
+                });
+            pending
+                .retain_allocations_until_next_submit(
+                    retention_completion,
+                    SubmittedAllocationRetention::new(RetentionDrop(retention_drops.clone())),
+                )
+                .unwrap();
+            retirement
+        };
         let command_a = CommandProfilingRoot::new();
         let command_b = CommandProfilingRoot::new();
         let provider_b = match provider.begin_operation_observation(&query) {

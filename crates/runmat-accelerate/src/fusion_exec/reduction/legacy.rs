@@ -1,8 +1,8 @@
 use super::super::{
     admit_provider_availability, host_f64_bytes, mark_fusion_output, scalar_upload_dtype,
-    select_fusion_provider_vm_decline, unbound_constant_values, AdmittedBindings,
-    FusionCpuObservation, FusionExecutionOutcome, FusionExecutionRequest, FusionPlacementObserver,
-    FusionStageTimer, PreparedInput,
+    select_fusion_provider_vm_decline, AdmittedBindings, FusionCpuObservation,
+    FusionExecutionOutcome, FusionExecutionRequest, FusionPlacementObserver, FusionStageTimer,
+    PreparedInput,
 };
 use super::reduction_arithmetic;
 use crate::precision::ensure_provider_supports_dtype;
@@ -14,6 +14,8 @@ use runmat_accelerate_api::{
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_time::Instant;
 use runmat_types::FusionReductionOperation;
+
+mod contract;
 use runmat_value::Value;
 
 /// A failing provider hook may already have made an effect. Its Unsupported
@@ -54,74 +56,65 @@ pub(super) fn selected_legacy_flavor(
     }
 }
 
+pub(super) struct LegacyReductionProofs<'a, 'request> {
+    pub(super) mathematical: &'a super::super::ResolvedReductionProgram<'request>,
+    pub(super) producer: Option<&'a reduction_arithmetic::PreparedReductionArithmetic>,
+    pub(super) owner: &'a dyn runmat_accelerate_api::AccelProvider,
+}
+
 pub(super) fn execute_reduction_with_shape_core(
-    request: FusionExecutionRequest<'_>,
+    request: &FusionExecutionRequest<'_>,
+    proofs: LegacyReductionProofs<'_, '_>,
     reduce_len: usize,
     num_slices: usize,
     output_shape: &[usize],
     workgroup_size: u32,
-    arithmetic: Option<&reduction_arithmetic::PreparedReductionArithmetic>,
     vm_decline: Option<&runmat_runtime::context::VmFusionDeclineRight>,
 ) -> ExecutionResult<FusionExecutionOutcome<Value>> {
-    let Some(bindings) = AdmittedBindings::new(&request) else {
+    let LegacyReductionProofs {
+        mathematical: program,
+        producer: arithmetic,
+        owner,
+    } = proofs;
+    let Some(bindings) = AdmittedBindings::new(request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
         ));
     };
-    let Some(flavor) = selected_legacy_flavor(&request, &bindings) else {
+    let Some(flavor) = selected_legacy_flavor(request, &bindings) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
         ));
     };
-    super::validation::request(&request, reduce_len, num_slices, output_shape)?;
+    super::validation::request(request, reduce_len, num_slices, output_shape)?;
     let len = reduce_len * num_slices;
     let scalar_shape = {
         let constant_shape = request.plan.constant_shape(len);
         normalize_scalar_shape(&vec![1; constant_shape.len()])
     };
-    let provider = match admit_provider_availability(&request, provider())? {
+    let provider = match admit_provider_availability(request, provider())? {
         FusionExecutionOutcome::Executed(provider) => provider,
         FusionExecutionOutcome::SharedRuntime(observation) => {
             return Ok(FusionExecutionOutcome::SharedRuntime(observation));
         }
     };
-    let static_arithmetic;
-    let arithmetic = if reduction_arithmetic::requires_selected_arithmetic(&request, &bindings)?
-        && !arithmetic.is_some_and(reduction_arithmetic::PreparedReductionArithmetic::selected)
-    {
-        static_arithmetic =
-            reduction_arithmetic::admitted_static(&request, &bindings, provider.precision())?;
-        match static_arithmetic.as_ref() {
-            Some(selected) => Some(selected),
-            None if request
-                .inputs
-                .iter()
-                .chain(unbound_constant_values(request.plan))
-                .any(runmat_runtime::dispatcher::value_contains_gpu) =>
-            {
-                return Err(anyhow!(
-                    "synchronous reduction requires an asynchronous selected proof"
-                )
-                .into());
-            }
-            None => {
-                return Ok(FusionExecutionOutcome::SharedRuntime(
-                    FusionCpuObservation::new(None),
-                ))
-            }
-        }
-    } else {
-        arithmetic
-    };
-    if arithmetic.is_some_and(reduction_arithmetic::PreparedReductionArithmetic::requires_typed) {
-        return super::execute_projected_sync(
-            request,
-            reduce_len,
-            num_slices,
-            output_shape,
-            workgroup_size,
-        );
+    if !runmat_accelerate_api::same_provider_instance(owner, provider) {
+        return Err(anyhow!("selected reduction provider changed before legacy admission").into());
     }
+    let Some(proof) = contract::admit(
+        request,
+        program,
+        flavor,
+        provider.precision(),
+        reduce_len,
+        num_slices,
+        output_shape,
+    ) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
+    let flavor = proof.flavor();
     if let Some(arithmetic) = arithmetic {
         arithmetic.validate(
             request.plan,
@@ -142,7 +135,7 @@ pub(super) fn execute_reduction_with_shape_core(
         .ok_or_else(|| anyhow!("fusion: reduction WGSL generation failed"))?;
     FusionPlacementObserver::new(request.placement).shader_source_generation(shader_started);
     let selection = select_fusion_provider_vm_decline(
-        &request,
+        request,
         &bindings,
         provider,
         &[output_shape.to_vec()],

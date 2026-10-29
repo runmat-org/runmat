@@ -4,15 +4,20 @@ use runmat_types::{ResidencyFact, ScalarOperation, StorageFact};
 
 /// No source fact changes: this proof only authorizes the existing host upload
 /// preparation to materialize this exact leaf as Single before its first use.
-pub(crate) struct ExplicitHostSingleInput {
+pub(crate) struct ExplicitHostSingleInput<'a> {
+    owner: &'a ResolvedProgram,
     source: ValueId,
 }
 
-impl ExplicitHostSingleInput {
-    pub(crate) fn represented_class_for(self, source: ValueId) -> Result<NumericClass> {
-        if source != self.source {
+impl ExplicitHostSingleInput<'_> {
+    pub(crate) fn represented_class_for(
+        self,
+        owner: &ResolvedProgram,
+        source: ValueId,
+    ) -> Result<NumericClass> {
+        if !std::ptr::eq(self.owner, owner) || source != self.source {
             return Err(anyhow!(
-                "explicit input representation belongs to another leaf"
+                "explicit input representation belongs to another program or leaf"
             ));
         }
         Ok(NumericClass::Single)
@@ -27,7 +32,7 @@ impl ResolvedProgram {
         &self,
         plan: &FusionGroupPlan,
         source: ValueId,
-    ) -> Option<ExplicitHostSingleInput> {
+    ) -> Option<ExplicitHostSingleInput<'_>> {
         let index = self.source_input_ids.iter().position(|id| *id == source)?;
         let original = self.source_inputs.get(index)?;
         if self.source_input_ids != plan.inputs
@@ -108,6 +113,9 @@ impl ResolvedProgram {
             }
             consumed = true;
         }
-        consumed.then_some(ExplicitHostSingleInput { source })
+        consumed.then_some(ExplicitHostSingleInput {
+            owner: self,
+            source,
+        })
     }
 }

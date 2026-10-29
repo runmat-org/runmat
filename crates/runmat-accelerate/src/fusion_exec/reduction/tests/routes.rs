@@ -2,7 +2,6 @@
 //! qualify orchestration and ownership only; real numerical GPU execution is
 //! owned by the WGPU product tests.
 use super::*;
-#[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
 use runmat_value::NumericStorage;
@@ -92,6 +91,81 @@ fn host_single_upload_preserves_source_class_with_double_result_control() {
         assert_eq!(probes.len(), 2);
         assert_eq!(probes[0].retirements(), 1);
         assert_eq!(probes[1].retirements(), 1);
+        drop(probes);
+
+        // The same selected public mathematics requires Double accumulation
+        // even when its input/output class is Single. A provider without that
+        // arithmetic must not retry the request through a raw F32 legacy hook.
+        for name in ["sum", "mean"] {
+            let provider =
+                TypedCallerProvider::registered_with_precision(1 << 20, ProviderPrecision::F32);
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let mut plan = sum_plan();
+            let FusionOp::Builtin {
+                name: terminal,
+                origin,
+                ..
+            } = &mut plan.operations[0]
+            else {
+                unreachable!()
+            };
+            *terminal = name.into();
+            *origin = crate::graph::FusionCallOrigin::named(name);
+            let input = provider
+                .resident_input(vec![1.25, 2.5], NumericElementType::F32)
+                .unwrap()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .unwrap();
+            let source = Value::GpuTensor(input.clone());
+            let invocation = request(&plan, source.clone(), None, None);
+            let bindings = AdmittedBindings::new(&invocation).unwrap();
+            let declaration = bindings.reduction(0).unwrap();
+            let controls = [Value::Num(1.0)];
+            let prepared = futures::executor::block_on((declaration.prepare)(
+                runmat_runtime::builtins::common::spec::FusionReductionControls {
+                    values: &controls,
+                    requested_outputs: 1,
+                },
+            ))
+            .unwrap()
+            .unwrap();
+            let contract = prepared
+                .resolve(&runmat_runtime::value_fact::value_fact(&source))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                contract.accumulator_class,
+                runmat_types::NumericClass::Double
+            );
+            assert_eq!(contract.axes, [0]);
+            assert_eq!(contract.output_shape, [1, 1]);
+            for synchronous in [false, true] {
+                let request = request(&plan, source.clone(), None, None);
+                let result = if synchronous {
+                    execute_reduction_with_shape_placed(request, 2, 1, &[1, 1], 8)
+                } else {
+                    futures::executor::block_on(execute_reduction_with_shape_placed_async(
+                        request,
+                        2,
+                        1,
+                        &[1, 1],
+                        8,
+                    ))
+                }
+                .unwrap();
+                assert!(matches!(result, FusionExecutionOutcome::SharedRuntime(_)));
+            }
+            assert_eq!(provider.configs.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.feasibility.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.submissions.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.cast_executions.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.probes.lock().unwrap()[0].retirements(), 0);
+            drop(invocation);
+            drop(source);
+            drop(input);
+            assert_eq!(provider.probes.lock().unwrap()[0].retirements(), 1);
+        }
     });
 }
 

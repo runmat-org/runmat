@@ -103,7 +103,7 @@ impl TypedProducer {
             }
             if class == NumericClass::Double && buffer_type == ScalarType::F32 {
                 if let Some(proof) = program.explicit_host_single_input(plan, id) {
-                    class = proof.represented_class_for(id)?;
+                    class = proof.represented_class_for(program, id)?;
                 }
             }
             require_provider_class(class, buffer_type)?;

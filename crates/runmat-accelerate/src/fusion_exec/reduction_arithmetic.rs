@@ -11,25 +11,6 @@ use runmat_accelerate_api::{ProviderExecutionError, ProviderPrecision};
 #[path = "reduction_program/legacy_producer.rs"]
 mod legacy_producer;
 
-pub(super) fn requires_selected_arithmetic(
-    request: &FusionExecutionRequest<'_>,
-    bindings: &AdmittedBindings,
-) -> anyhow::Result<bool> {
-    if request.plan.reduction_data.is_none() && !has_required_arithmetic(request, bindings) {
-        return Ok(false);
-    }
-    let (producer, indices) = legacy_producer::project(request.plan)?;
-    Ok(has_captured_operands(&producer)
-        || indices.iter().any(|&index| {
-            bindings.semantic(index).is_some_and(|snapshot| {
-                snapshot
-                    .declaration
-                    .semantics
-                    .is_some_and(|semantics| semantics.required_arithmetic.is_some())
-            })
-        }))
-}
-
 fn has_required_arithmetic(
     request: &FusionExecutionRequest<'_>,
     bindings: &AdmittedBindings,
@@ -79,9 +60,6 @@ pub(super) struct SelectedReductionArithmetic {
 impl PreparedReductionArithmetic {
     pub(super) fn requires_typed(&self) -> bool {
         matches!(self, Self::TypedOnly)
-    }
-    pub(super) fn selected(&self) -> bool {
-        matches!(self, Self::Selected(_))
     }
     pub(super) fn validate(
         &self,

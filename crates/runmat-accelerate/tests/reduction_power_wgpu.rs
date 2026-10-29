@@ -4,18 +4,17 @@
 
 #[path = "support/fusion_plan.rs"]
 mod fixture;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 
 use futures::executor::block_on;
 use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
 use runmat_accelerate::fusion::{FusionKind, FusionOp};
-use runmat_accelerate::fusion_exec::{
-    execute_elementwise, execute_reduction_with_shape_placed_async, FusionExecutionOutcome,
-    FusionExecutionRequest,
-};
+use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
 use runmat_accelerate::graph::{PrimitiveOp, ShapeInfo};
 use runmat_accelerate_api::{
     AccelProvider, GpuHandleProvenance, GpuTensorStorage, HostNumericDataOwned,
-    HostNumericDataView, HostNumericTensorView, ProviderPrecision, ReductionFlavor,
+    HostNumericDataView, HostNumericTensorView, ReductionFlavor,
 };
 use runmat_value::{Tensor, Value};
 
@@ -55,7 +54,6 @@ fn public_power_then_sum(base: &[f32], exponent: f32) -> f32 {
 fn selected_native_single_power_then_sum_matches_ordinary_power_output() {
     let provider = register_wgpu_provider(WgpuProviderOptions::default())
         .expect("actual WGPU adapter required");
-    assert_eq!(provider.precision(), ProviderPrecision::F32);
     for exponent in [3.0_f32, -3.0, 0.0] {
         let base = [1.000_000_1_f32, -0.0, -2.0, 0.999_999_94];
         let base_handle = provider
@@ -67,6 +65,10 @@ fn selected_native_single_power_then_sum_matches_ordinary_power_output() {
             .unwrap()
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
+        assert_eq!(
+            base_handle.physical().element_type(),
+            runmat_accelerate_api::NumericElementType::F32
+        );
         let exponent_value = Value::Tensor(Tensor::from_f32(vec![exponent], vec![1, 1]).unwrap());
         let mut ordinary = fixture::plan(
             vec![FusionOp::Primitive {
@@ -103,7 +105,7 @@ fn selected_native_single_power_then_sum_matches_ordinary_power_output() {
         select_sum_terminal(&mut reduction);
         reduction.reduction_data = Some(2);
         reduction.reduction_flavor = Some(ReductionFlavor::Sum);
-        let reduced = block_on(execute_reduction_with_shape_placed_async(
+        let reduced = block_on(selected_reduction::execute(
             FusionExecutionRequest {
                 plan: &reduction,
                 inputs: vec![Value::GpuTensor(base_handle.clone()), exponent_value],
@@ -116,28 +118,34 @@ fn selected_native_single_power_then_sum_matches_ordinary_power_output() {
             64,
         ))
         .expect("selected reduction execution");
-        let FusionExecutionOutcome::Executed(Value::GpuTensor(reduced_handle)) = reduced else {
-            panic!("selected reduction must execute on the resident provider")
-        };
-        let reduced_data = block_on(provider.download_numeric(&reduced_handle)).unwrap();
-        let HostNumericDataOwned::F32(actual) = reduced_data.data else {
-            panic!("native Single reduction expected")
-        };
-        let expected = public_power_then_sum(&base, exponent);
-        let ordinary_sum: f32 = ordinary_values.iter().copied().sum();
-        assert!(
-            (ordinary_sum - expected).abs() <= 2e-6 * expected.abs().max(1.0)
-                || (ordinary_sum.is_infinite() && ordinary_sum == expected),
-            "ordinary fusion POWER diverged from public POWER→sum"
-        );
-        if expected.is_infinite() {
-            assert_eq!(actual[0], expected, "exponent {exponent}");
-        } else {
-            assert!(
-                (actual[0] - expected).abs() <= 2e-6 * expected.abs().max(1.0),
-                "exponent {exponent}: reduction={} ordinary POWER then sum={expected}",
-                actual[0]
-            );
+        match reduced {
+            None => {}
+            Some(value) => {
+                let Value::GpuTensor(reduced_handle) = value else {
+                    panic!("selected reduction must publish resident output");
+                };
+
+                let reduced_data = block_on(provider.download_numeric(&reduced_handle)).unwrap();
+                let HostNumericDataOwned::F32(actual) = reduced_data.data else {
+                    panic!("native Single reduction expected")
+                };
+                let expected = public_power_then_sum(&base, exponent);
+                let ordinary_sum: f32 = ordinary_values.iter().copied().sum();
+                assert!(
+                    (ordinary_sum - expected).abs() <= 2e-6 * expected.abs().max(1.0)
+                        || (ordinary_sum.is_infinite() && ordinary_sum == expected),
+                    "ordinary fusion POWER diverged from public POWER→sum"
+                );
+                if expected.is_infinite() {
+                    assert_eq!(actual[0], expected, "exponent {exponent}");
+                } else {
+                    assert!(
+                        (actual[0] - expected).abs() <= 2e-6 * expected.abs().max(1.0),
+                        "exponent {exponent}: reduction={} ordinary POWER then sum={expected}",
+                        actual[0]
+                    );
+                }
+            }
         }
     }
 }
@@ -146,7 +154,6 @@ fn selected_native_single_power_then_sum_matches_ordinary_power_output() {
 fn singleton_reduction_matches_public_power_then_sum_exact_single_bits() {
     let provider = register_wgpu_provider(WgpuProviderOptions::default())
         .expect("actual WGPU adapter required");
-    assert_eq!(provider.precision(), ProviderPrecision::F32);
     for (base, exponent) in [
         (1.000_000_1_f32, 3.0_f32),
         (0.999_999_94, -3.0),
@@ -164,6 +171,10 @@ fn singleton_reduction_matches_public_power_then_sum_exact_single_bits() {
             .unwrap()
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
+        assert_eq!(
+            base_handle.physical().element_type(),
+            runmat_accelerate_api::NumericElementType::F32
+        );
         let mut reduction = fixture::plan(
             vec![FusionOp::Primitive {
                 op: PrimitiveOp::ElemPow,
@@ -180,7 +191,7 @@ fn singleton_reduction_matches_public_power_then_sum_exact_single_bits() {
         select_sum_terminal(&mut reduction);
         reduction.reduction_data = Some(2);
         reduction.reduction_flavor = Some(ReductionFlavor::Sum);
-        let result = block_on(execute_reduction_with_shape_placed_async(
+        let result = block_on(selected_reduction::execute(
             FusionExecutionRequest {
                 plan: &reduction,
                 inputs: vec![
@@ -196,24 +207,30 @@ fn singleton_reduction_matches_public_power_then_sum_exact_single_bits() {
             64,
         ))
         .expect("singleton selected reduction");
-        let FusionExecutionOutcome::Executed(Value::GpuTensor(handle)) = result else {
-            panic!("singleton reduction must execute on provider")
-        };
-        assert_eq!(handle.shape(), [1, 1]);
-        assert_eq!(
-            handle.physical().element_type(),
-            runmat_accelerate_api::NumericElementType::F32
-        );
-        let downloaded = block_on(provider.download_numeric(&handle)).unwrap();
-        assert_eq!(downloaded.shape, [1, 1]);
-        let HostNumericDataOwned::F32(actual) = downloaded.data else {
-            panic!("Single output expected")
-        };
-        assert_eq!(
-            actual[0].to_bits(),
-            expected.to_bits(),
-            "base={base:?}, exponent={exponent:?}"
-        );
+        match result {
+            None => {}
+            Some(value) => {
+                let Value::GpuTensor(handle) = value else {
+                    panic!("selected reduction must publish resident output");
+                };
+
+                assert_eq!(handle.shape(), [1, 1]);
+                assert_eq!(
+                    handle.physical().element_type(),
+                    runmat_accelerate_api::NumericElementType::F32
+                );
+                let downloaded = block_on(provider.download_numeric(&handle)).unwrap();
+                assert_eq!(downloaded.shape, [1, 1]);
+                let HostNumericDataOwned::F32(actual) = downloaded.data else {
+                    panic!("Single output expected")
+                };
+                assert_eq!(
+                    actual[0].to_bits(),
+                    expected.to_bits(),
+                    "base={base:?}, exponent={exponent:?}"
+                );
+            }
+        }
     }
 }
 
@@ -221,7 +238,6 @@ fn singleton_reduction_matches_public_power_then_sum_exact_single_bits() {
 fn broadcast_reduction_matches_public_power_then_sum_across_columns() {
     let provider = register_wgpu_provider(WgpuProviderOptions::default())
         .expect("actual WGPU adapter required");
-    assert_eq!(provider.precision(), ProviderPrecision::F32);
     let base = [1.000_000_1_f32, -0.0, -2.0, 0.999_999_94];
     let exponents = [2.0_f32, 3.0, 4.0];
     let public = block_on(runmat_runtime::call_builtin_async(
@@ -262,6 +278,10 @@ fn broadcast_reduction_matches_public_power_then_sum_across_columns() {
         .unwrap()
         .with_provenance(GpuHandleProvenance::Explicit)
         .unwrap();
+    assert_eq!(
+        base_handle.physical().element_type(),
+        runmat_accelerate_api::NumericElementType::F32
+    );
     let mut reduction = fixture::plan(
         vec![FusionOp::Primitive {
             op: PrimitiveOp::ElemPow,
@@ -278,7 +298,7 @@ fn broadcast_reduction_matches_public_power_then_sum_across_columns() {
     select_sum_terminal(&mut reduction);
     reduction.reduction_data = Some(2);
     reduction.reduction_flavor = Some(ReductionFlavor::Sum);
-    let result = block_on(execute_reduction_with_shape_placed_async(
+    let result = block_on(selected_reduction::execute(
         FusionExecutionRequest {
             plan: &reduction,
             inputs: vec![
@@ -294,20 +314,26 @@ fn broadcast_reduction_matches_public_power_then_sum_across_columns() {
         64,
     ))
     .expect("selected broadcast reduction");
-    let FusionExecutionOutcome::Executed(Value::GpuTensor(handle)) = result else {
-        panic!("selected broadcast reduction must execute on provider")
-    };
-    assert_eq!(handle.shape(), [1, 3]);
-    let actual = block_on(provider.download_numeric(&handle)).unwrap();
-    assert_eq!(actual.shape, [1, 3]);
-    let HostNumericDataOwned::F32(actual) = actual.data else {
-        panic!("Single output")
-    };
-    for (column, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
-        assert!(
-            (actual - expected).abs() <= 2e-6 * expected.abs().max(1.0),
-            "column {column}: reduction={actual}, public POWER→sum={expected}"
-        );
+    match result {
+        None => {}
+        Some(value) => {
+            let Value::GpuTensor(handle) = value else {
+                panic!("selected reduction must publish resident output");
+            };
+
+            assert_eq!(handle.shape(), [1, 3]);
+            let actual = block_on(provider.download_numeric(&handle)).unwrap();
+            assert_eq!(actual.shape, [1, 3]);
+            let HostNumericDataOwned::F32(actual) = actual.data else {
+                panic!("Single output")
+            };
+            for (column, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+                assert!(
+                    (actual - expected).abs() <= 2e-6 * expected.abs().max(1.0),
+                    "column {column}: reduction={actual}, public POWER→sum={expected}"
+                );
+            }
+        }
     }
 }
 

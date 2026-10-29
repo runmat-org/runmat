@@ -90,6 +90,17 @@ impl WgpuProvider {
                 ))
                 .with_unproven_effects()
             })?;
+        // Reserve registers this operation's exact submission token. Capture
+        // its prior boundary first; reusing that prepared token at submit does
+        // not create a second registration. Completion is still certified only
+        // after the actual kernel's fence and physical retirement below.
+        let operation =
+            ProviderOperationIdentity::new(PROVIDER_STOCHASTIC_EVOLUTION_STEP_OPERATION);
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        let checkpoint = observed.as_ref().map(
+            runmat_accelerate_api::observation::ProviderOperationRecorder::submission_checkpoint,
+        );
         let (submission_completion, submission_retirement) =
             PreparedSubmittedAllocationRetention::reserve()
                 .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
@@ -168,13 +179,6 @@ impl WgpuProvider {
                 .map_err(|error| ProviderExecutionError::from(anyhow!(error)).after_effect())?,
             _pad: 0,
         };
-        let operation =
-            ProviderOperationIdentity::new(PROVIDER_STOCHASTIC_EVOLUTION_STEP_OPERATION);
-        let observed = runmat_accelerate_api::observation::current_provider_observation()
-            .filter(|recorder| recorder.expects_operation(&operation));
-        let checkpoint = observed.as_ref().map(
-            runmat_accelerate_api::observation::ProviderOperationRecorder::submission_checkpoint,
-        );
         let submission_claim = completion_control.clone();
         let fence = self
             .with_emission(

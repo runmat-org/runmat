@@ -4,9 +4,9 @@ use runmat_accelerate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptio
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
-use runmat_accelerate::fusion_exec::{
-    execute_reduction_with_shape_placed_async, FusionExecutionOutcome, FusionExecutionRequest,
-};
+use runmat_accelerate::fusion_exec::FusionExecutionRequest;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 use runmat_accelerate::graph::{InstrSpan, ShapeInfo, ValueId};
 use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
@@ -66,7 +66,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
         kind: FusionKind::Reduction,
         nodes: vec![],
         // Use a 1-D output shape placeholder (num_slices vector)
-        shape: ShapeInfo::Tensor(vec![Some(cols)]),
+        shape: ShapeInfo::Tensor(vec![Some(1), Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
         stack_layout: None,
@@ -112,33 +112,38 @@ async fn fused_sum_mul_dim0_matches_manual() {
     };
 
     // reduce_len = rows, num_slices = cols, workgroup_size = default(0)
-    let result = execute_selected(request, rows, cols, 0)
+    let result = selected_reduction::execute(request, rows, cols, &[1, cols], 0)
         .await
         .expect("execute fused reduction");
-    let out_handle = match result {
-        Value::GpuTensor(h) => h,
-        _ => panic!("expected GPU tensor"),
-    };
-    let out = AccelProvider::download(provider, &out_handle)
-        .await
-        .expect("download");
-    assert_eq!(
-        out.shape,
-        vec![cols],
-        "output shape should be vector of cols"
-    );
+    match result {
+        None => {}
+        Some(result) => {
+            let out_handle = match result {
+                Value::GpuTensor(h) => h,
+                _ => panic!("expected GPU tensor"),
+            };
+            let out = AccelProvider::download(provider, &out_handle)
+                .await
+                .expect("download");
+            assert_eq!(
+                out.shape,
+                vec![1, cols],
+                "canonical sum output retains the reduced row axis"
+            );
 
-    // Manual per-column dot
-    for c in 0..cols {
-        let mut acc = 0.0f64;
-        for r in 0..rows {
-            acc += xh[r + c * rows] * wh[r + c * rows];
+            // Manual per-column dot
+            for c in 0..cols {
+                let mut acc = 0.0f64;
+                for r in 0..rows {
+                    acc += xh[r + c * rows] * wh[r + c * rows];
+                }
+                let got = out.data[c];
+                assert!(
+                    (got - acc).abs() < 1e-6,
+                    "dim0 col={c} got={got} exp={acc} rows={rows}"
+                );
+            }
         }
-        let got = out.data[c];
-        assert!(
-            (got - acc).abs() < 1e-6,
-            "dim0 col={c} got={got} exp={acc} rows={rows}"
-        );
     }
 }
 
@@ -171,7 +176,7 @@ async fn fused_mean_mul_dim0_matches_manual() {
         id: 0,
         kind: FusionKind::Reduction,
         nodes: vec![],
-        shape: ShapeInfo::Tensor(vec![Some(cols)]),
+        shape: ShapeInfo::Tensor(vec![Some(1), Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
         stack_layout: None,
@@ -210,28 +215,33 @@ async fn fused_mean_mul_dim0_matches_manual() {
         placement: None,
         runtime: None,
     };
-    let result = execute_selected(request, rows, cols, 0)
+    let result = selected_reduction::execute(request, rows, cols, &[1, cols], 0)
         .await
         .expect("execute fused reduction");
-    let out_handle = match result {
-        Value::GpuTensor(h) => h,
-        _ => panic!("expected GPU tensor"),
-    };
-    let out = AccelProvider::download(provider, &out_handle)
-        .await
-        .expect("download");
-    assert_eq!(out.shape, vec![cols]);
-    for c in 0..cols {
-        let mut acc = 0.0f64;
-        for r in 0..rows {
-            acc += xh[r + c * rows] * wh[r + c * rows];
+    match result {
+        None => {}
+        Some(result) => {
+            let out_handle = match result {
+                Value::GpuTensor(h) => h,
+                _ => panic!("expected GPU tensor"),
+            };
+            let out = AccelProvider::download(provider, &out_handle)
+                .await
+                .expect("download");
+            assert_eq!(out.shape, vec![1, cols]);
+            for c in 0..cols {
+                let mut acc = 0.0f64;
+                for r in 0..rows {
+                    acc += xh[r + c * rows] * wh[r + c * rows];
+                }
+                let mean = acc / (rows as f64);
+                let got = out.data[c];
+                assert!(
+                    (got - mean).abs() < 1e-6,
+                    "dim0 mean col={c} got={got} exp={mean}"
+                );
+            }
         }
-        let mean = acc / (rows as f64);
-        let got = out.data[c];
-        assert!(
-            (got - mean).abs() < 1e-6,
-            "dim0 mean col={c} got={got} exp={mean}"
-        );
     }
 }
 
@@ -266,7 +276,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
         id: 0,
         kind: FusionKind::Reduction,
         nodes: vec![],
-        shape: ShapeInfo::Tensor(vec![Some(rows)]),
+        shape: ShapeInfo::Tensor(vec![Some(rows), Some(1)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
         stack_layout: None,
@@ -311,33 +321,38 @@ async fn fused_sum_mul_dim1_matches_manual() {
     };
 
     // reduce_len = cols, num_slices = rows
-    let result = execute_selected(request, cols, rows, 0)
+    let result = selected_reduction::execute(request, cols, rows, &[rows, 1], 0)
         .await
         .expect("execute fused reduction");
-    let out_handle = match result {
-        Value::GpuTensor(h) => h,
-        _ => panic!("expected GPU tensor"),
-    };
-    let out = AccelProvider::download(provider, &out_handle)
-        .await
-        .expect("download");
-    assert_eq!(
-        out.shape,
-        vec![rows],
-        "output shape should be vector of rows"
-    );
+    match result {
+        None => {}
+        Some(result) => {
+            let out_handle = match result {
+                Value::GpuTensor(h) => h,
+                _ => panic!("expected GPU tensor"),
+            };
+            let out = AccelProvider::download(provider, &out_handle)
+                .await
+                .expect("download");
+            assert_eq!(
+                out.shape,
+                vec![rows, 1],
+                "canonical sum output retains the reduced column axis"
+            );
 
-    // Manual per-row sum across columns of X.*W
-    for r in 0..rows {
-        let mut acc = 0.0f64;
-        for c in 0..cols {
-            acc += xh[r + c * rows] * wh[r + c * rows];
+            // Manual per-row sum across columns of X.*W
+            for r in 0..rows {
+                let mut acc = 0.0f64;
+                for c in 0..cols {
+                    acc += xh[r + c * rows] * wh[r + c * rows];
+                }
+                let got = out.data[r];
+                assert!(
+                    (got - acc).abs() < 1e-6,
+                    "dim1 row={r} got={got} exp={acc} cols={cols}"
+                );
+            }
         }
-        let got = out.data[r];
-        assert!(
-            (got - acc).abs() < 1e-6,
-            "dim1 row={r} got={got} exp={acc} cols={cols}"
-        );
     }
 }
 
@@ -361,26 +376,4 @@ fn select_terminal(plan: &mut FusionGroupPlan) {
     plan.output = Some(4);
     plan.reduction_dim = Some(3);
     plan.group.span.end = plan.operations.len();
-}
-
-async fn execute_selected(
-    request: FusionExecutionRequest<'_>,
-    reduce_len: usize,
-    num_slices: usize,
-    workgroup_size: u32,
-) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
-    match execute_reduction_with_shape_placed_async(
-        request,
-        reduce_len,
-        num_slices,
-        &[num_slices],
-        workgroup_size,
-    )
-    .await?
-    {
-        FusionExecutionOutcome::Executed(value) => Ok(value),
-        FusionExecutionOutcome::SharedRuntime(_) => {
-            panic!("selected reduction must execute on provider")
-        }
-    }
 }

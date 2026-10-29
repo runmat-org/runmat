@@ -9,6 +9,16 @@ use super::{current_provider_observation, prepare, ProviderAdmission};
 mod retirement;
 use retirement::{SubmittedAllocationRetirement, SubmittedAllocationRetirementNotifier};
 
+/// Observe exact retirement in direct-route tests without minting a selected
+/// provider observation. Actual progress/budget admission remains mandatory.
+#[cfg(test)]
+pub(super) fn with_retirement_for_test(
+    retention: SubmittedAllocationRetention,
+) -> anyhow::Result<(SubmittedAllocationRetention, SubmittedAllocationRetirement)> {
+    let (retirement, notifier) = retirement::retirement_pair();
+    Ok((retention.with_retirement(notifier)?, retirement))
+}
+
 /// Finite FFT submission frame. Clones retain existing identities and claims;
 /// no tensor, shape or workspace payload is copied or newly charged here.
 pub(crate) struct SubmittedResourceOwners {

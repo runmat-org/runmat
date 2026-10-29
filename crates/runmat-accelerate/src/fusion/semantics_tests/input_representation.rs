@@ -18,7 +18,7 @@ fn explicit_host_single_input_proof_preserves_source_and_rejects_escapes() {
     let identity = admitted.cache_identity().unwrap();
     let proof = admitted.explicit_host_single_input(&direct, 0).unwrap();
     assert_eq!(
-        proof.represented_class_for(0).unwrap(),
+        proof.represented_class_for(&admitted, 0).unwrap(),
         NumericClass::Single
     );
     assert_eq!(admitted.floating_class(0).unwrap(), NumericClass::Double);
@@ -45,7 +45,19 @@ fn explicit_host_single_input_proof_preserves_source_and_rejects_escapes() {
     assert!(admitted
         .explicit_host_single_input(&direct, 0)
         .unwrap()
-        .represented_class_for(9)
+        .represented_class_for(&admitted, 9)
+        .is_err());
+    let other_owner = resolve_policy(
+        &direct,
+        std::slice::from_ref(&input),
+        ProviderPrecision::F32,
+        PrecisionPolicy::Exact,
+    )
+    .unwrap();
+    assert!(admitted
+        .explicit_host_single_input(&direct, 0)
+        .unwrap()
+        .represented_class_for(&other_owner, 0)
         .is_err());
 
     // An original Double store escapes before the conversion and must retain

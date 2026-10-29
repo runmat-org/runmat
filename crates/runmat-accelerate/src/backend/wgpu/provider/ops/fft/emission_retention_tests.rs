@@ -154,7 +154,10 @@ async fn fft_final_handle_drop_retains_allocation_until_real_direct_or_observed_
             .submit(held.submission, held.callback)
             .unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while weak.acquire().is_some() {
+        // A weak upgrade can fail once the final strong count reaches zero,
+        // before that owner's destructor finishes refunding its allocation.
+        // Observe both retirement effects, not the intermediate Arc state.
+        while weak.acquire().is_some() || provider.allocations.retained_bytes() != baseline {
             assert!(
                 std::time::Instant::now() < deadline,
                 "real progress must retire the lease"
@@ -225,7 +228,7 @@ async fn fft_final_handle_drop_retains_allocation_until_real_direct_or_observed_
     receipt.resolve().await.unwrap().unwrap();
     confirmation.0.confirm();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while weak.acquire().is_some() {
+    while weak.acquire().is_some() || provider.allocations.retained_bytes() != baseline {
         assert!(
             std::time::Instant::now() < deadline,
             "scoped proof must retire the lease"
