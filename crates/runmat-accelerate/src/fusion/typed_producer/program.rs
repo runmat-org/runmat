@@ -164,30 +164,17 @@ impl TypedProducer {
         buffer_type: ScalarType,
         expressions: HashMap<ValueId, String>,
     ) -> Result<Option<Self>> {
-        Self::lower_checked_with_words(checked, buffer_type, expressions, HashMap::new())
-    }
-
-    pub(crate) fn lower_checked_with_words(
-        checked: &ScalarProgram,
-        buffer_type: ScalarType,
-        expressions: HashMap<ValueId, String>,
-        word_expressions: HashMap<ValueId, String>,
-    ) -> Result<Option<Self>> {
         let source = checked.wire();
-        // Test/legacy entrypoint. The selected source emitter passes indexed
-        // slots directly and never allocates this compatibility map.
+        // Tests adapt their expression maps to the same indexed owner used
+        // by production. No map-based lowering path exists in production.
         let mut ids = source.nodes.iter().map(ScalarNode::id).collect::<Vec<_>>();
         ids.extend(expressions.keys().copied());
-        ids.extend(word_expressions.keys().copied());
         ids.sort_unstable();
         ids.dedup();
         let mut values = ExpressionSlots::from_sorted_ids(&ids);
-        let mut words = ExpressionSlots::from_sorted_ids(&ids);
+        let words = ExpressionSlots::from_sorted_ids(&ids);
         for (id, expression) in expressions {
             values.insert(id, expression)?;
-        }
-        for (id, expression) in word_expressions {
-            words.insert(id, expression)?;
         }
         Self::lower_checked_indexed_with_words(checked, buffer_type, values, words, None)
     }

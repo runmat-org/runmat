@@ -1,6 +1,7 @@
 //! Request-local type resolution. Cached structural plans never own runtime
 //! facts or evidence about the contents of a different invocation's operands.
 
+#[cfg(test)]
 use std::collections::HashSet;
 
 use crate::precision::PrecisionPolicy;
@@ -723,24 +724,15 @@ impl ResolvedProgram {
         plan: &FusionGroupPlan,
         outputs: &[ValueId],
     ) -> HashSet<ValueId> {
-        self.embedded_controls_for_precision(plan, outputs, ProviderPrecision::F32)
-    }
-
-    pub(crate) fn embedded_controls_for_precision(
-        &self,
-        plan: &FusionGroupPlan,
-        outputs: &[ValueId],
-        precision: ProviderPrecision,
-    ) -> HashSet<ValueId> {
-        self.embedded_controls_sorted_for_precision(plan, outputs, precision)
+        self.embedded_controls_sorted_for_precision(plan, outputs, ProviderPrecision::F32)
             .expect("fusion control geometry is representable")
             .into_iter()
             .collect()
     }
 
     /// Exact request-sized control IDs for finite elementwise preparation.
-    /// Reduction and legacy callers retain the Set adapter above; the typed
-    /// producer performs membership checks by binary search.
+    /// The typed producer performs membership checks by binary search; tests
+    /// may project this canonical inventory into a set for assertions.
     pub(crate) fn embedded_controls_sorted_for_precision(
         &self,
         plan: &FusionGroupPlan,
@@ -818,7 +810,7 @@ impl ResolvedProgram {
 
     /// Original words from operation-owned receipts, not a name, a narrowed
     /// physical buffer, or an unevaluated producer's ancestor. Callers first
-    /// prove exclusive metadata use through embedded_controls_for_precision.
+    /// prove exclusive metadata use through embedded_controls_sorted_for_precision.
     pub(crate) fn embedded_scalar_control_bits(&self, control: ValueId) -> Option<u64> {
         self.exact_products
             .values()

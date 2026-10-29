@@ -519,20 +519,6 @@ impl TypedProducer {
         writer.write_char('\n')?;
         Ok(())
     }
-    pub(crate) fn checked_preamble(&self) -> Result<String> {
-        let mut measured = super::wgsl_source::CountedWgslSource::with_preamble_bytes(0);
-        self.write_checked_preamble(&mut measured)?;
-        let mut preamble = String::new();
-        preamble.try_reserve_exact(measured.bytes())?;
-        self.write_checked_preamble(&mut preamble)?;
-        if preamble.len() != measured.bytes() {
-            return Err(anyhow!(
-                "checked fusion preamble changed length during emission"
-            ));
-        }
-        Ok(preamble)
-    }
-
     pub(crate) fn write_checked_preamble(
         &self,
         writer: &mut (impl std::fmt::Write + ?Sized),

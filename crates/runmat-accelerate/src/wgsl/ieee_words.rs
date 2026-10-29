@@ -43,14 +43,6 @@ pub(crate) const fn appended_bytes() -> usize {
 /// Exact widening of a binary32 storage word, without a floating binary32
 /// intermediate (which could flush subnormals). Same enabled F64/INT64 gate
 /// as the word helpers above. NaN payloads are not a language promise.
-pub(crate) fn binary32_widening() -> String {
-    format!(
-        "{}\n{}",
-        runmat_accelerate_api::wgpu_ieee_words::BINARY32_TO_BINARY64_WORDS_WGSL,
-        BINARY32_WIDENING
-    )
-}
-
 pub(crate) fn write_binary32_widening(writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
     writer.write_str(runmat_accelerate_api::wgpu_ieee_words::BINARY32_TO_BINARY64_WORDS_WGSL)?;
     writer.write_str("\n")?;
