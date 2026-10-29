@@ -158,7 +158,6 @@ impl ObservationHistoryFinalizationRequest {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        self.plan.validate_identity().map_err(invalid)?;
         if self.schema_version != 1
             || self.identity != self.derive_identity()?
             || self.series_reduction != authored_series(&self.plan, &self.observation_id)?

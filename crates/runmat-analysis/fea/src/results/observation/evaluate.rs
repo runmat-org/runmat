@@ -43,7 +43,6 @@ pub(super) fn evaluate_observations_for_topology(
     topology: &ObservationTopology,
     fields: &RecoveredFieldCatalog,
 ) -> Result<Vec<ObservationResult>, ObservationError> {
-    plan.validate_identity()?;
     if plan.topology_digest != topology.digest() {
         return Err(ObservationError::Identity(
             "observation plan names a different topology projection",
@@ -174,7 +173,6 @@ fn evaluate_observation_sample_for_topology(
     sample: RecoveredFieldSample,
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationResult, ObservationError> {
-    plan.validate_identity()?;
     if plan.topology_digest != topology.digest() || fields.topology_digest() != topology.digest() {
         return Err(ObservationError::Identity(
             "sampled observation inputs name different topology projections",

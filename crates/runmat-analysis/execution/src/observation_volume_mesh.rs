@@ -2,8 +2,6 @@
 //! canonical solver mesh, real or complex. The producing workload is authenticated as
 //! provenance only; the plan re-resolves from the authored step and the mesh projection.
 use super::*;
-use runmat_analysis_fea::results::observation::resolve_observation_plan;
-use runmat_analysis_fea::topology::AnalysisProjection;
 
 pub(super) fn admit_volume_mesh(
     preparation: &ObservationPreparation,
@@ -44,29 +42,14 @@ pub(super) fn admit_volume_mesh(
             "volume-mesh observation source differs from its original recovery, mesh or serial envelope",
         ));
     }
-    let projection = AnalysisProjection::derive(&mesh)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mut seen = std::collections::BTreeSet::new();
-    let definitions = fields
-        .fields
-        .iter()
-        .filter(|entry| seen.insert(entry.definition.identity()))
-        .map(|entry| entry.definition.clone())
-        .collect::<Vec<_>>();
-    let plan = resolve_observation_plan(
-        &preparation.step,
-        &projection,
-        &definitions,
-        preparation.limits,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let catalog = ObservationFieldCatalog::volume_mesh_recovery(
         source_request.clone(),
         fields.clone(),
         preparation.sequence,
         preparation.step.clone(),
     )?;
-    catalog.validate_volume_mesh_plan(&plan, &mesh)?;
+    // Resolved from the catalog's own step and manifest on this mesh: canonical by construction.
+    let (projection, plan) = catalog.resolve_volume_mesh_plan(&mesh, preparation.limits)?;
     let selected =
         catalog.canonical_selected_fields(&plan, ObservationSelectionCoordinate::VolumeMeshRecovery)?;
     let selection = ObservationFieldSelection::volume_mesh_recovery(
@@ -75,7 +58,7 @@ pub(super) fn admit_volume_mesh(
         projection.projection_digest,
         selected,
     )?;
-    catalog.validate_volume_mesh_selection(&selection, &mesh)?;
+    catalog.validate_volume_mesh_selection_metadata(&selection, projection.projection_digest)?;
     let request = ObservationEvaluationRequest::new(selection.clone(), plan)?;
     let field_catalog = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationFieldCatalog,

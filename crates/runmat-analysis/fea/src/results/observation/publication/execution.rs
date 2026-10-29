@@ -251,7 +251,7 @@ impl ObservationPublicationCatalog {
     ) -> AnalysisExecutionResult<ObservationPartitionPlan> {
         evidence.validate().map_err(invalid)?;
         // `visit_results` validated `source` (and so its plan identity) before visiting it.
-        let plan = ObservationPartitionPlan::derive_for_validated_plan(
+        let plan = ObservationPartitionPlan::derive(
             &source.plan,
             observation,
             self.execution_policy,

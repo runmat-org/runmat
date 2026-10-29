@@ -63,6 +63,44 @@ impl ObservationFieldCatalog {
         selection.validate_volume_mesh(recovery_request, manifest, projection_digest)
     }
 
+    /// Resolve this catalog's producing step on the exact mesh projection from the catalog's
+    /// own field manifest. The plan is canonical for this catalog by construction (it is the
+    /// resolution `validate_volume_mesh_plan` repeats for a plan from elsewhere), so the caller
+    /// does not verify it again. Returns the projection it was resolved on.
+    pub fn resolve_volume_mesh_plan(
+        &self,
+        mesh: &SolverMeshArtifact,
+        limits: super::super::ObservationLimits,
+    ) -> AnalysisExecutionResult<(AnalysisProjection, ResolvedObservationPlan)> {
+        let ObservationFieldCatalogSource::VolumeMeshRecovery {
+            recovery_request,
+            manifest,
+            step,
+            ..
+        } = &self.source
+        else {
+            return Err(invalid("expected native volume-mesh catalog"));
+        };
+        if !matches!(
+            recovery_request.topology,
+            crate::execution::FieldTopologyIdentity::VolumeMesh { mesh_digest }
+                if mesh_digest == mesh.canonical_digest
+        ) {
+            return Err(invalid("volume-mesh catalog differs from the canonical mesh"));
+        }
+        let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
+        let mut seen = std::collections::BTreeSet::new();
+        let definitions = manifest
+            .fields
+            .iter()
+            .filter(|entry| seen.insert(entry.definition.identity()))
+            .map(|entry| entry.definition.clone())
+            .collect::<Vec<_>>();
+        let plan = super::super::resolve_observation_plan(step, &projection, &definitions, limits)
+            .map_err(invalid)?;
+        Ok((projection, plan))
+    }
+
     /// Independently re-resolve the authored plan on the exact mesh projection.
     pub fn validate_volume_mesh_plan(
         &self,

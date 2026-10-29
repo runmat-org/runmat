@@ -19,7 +19,6 @@ impl ObservationPublicationCatalog {
         Ok(())
     }
     pub(super) fn validate_metadata_uncached(&self) -> AnalysisExecutionResult<()> {
-        self.plan.validate_identity().map_err(invalid)?;
         self.source.validate()?;
         if self.schema_version != 2
             || self.identity != self.derive_identity()?

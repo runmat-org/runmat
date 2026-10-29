@@ -50,6 +50,7 @@ pub use contract::{
     ObservationArtifactInput, ObservationArtifactManifest, ObservationEntity, ObservationError,
     ObservationLimits, ObservationResult, ObservationResultIdentity, ObservationSampleBounds,
     ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
+    ResolvedObservationPlanContents,
     ResolvedObservationPlanIdentity, ResolvedObservationPoint, ResolvedObservationTarget,
 };
 pub use distributed::{
@@ -84,7 +85,8 @@ pub use history::{
 };
 pub use partition::{
     ObservationExecutionPolicy, ObservationPartition, ObservationPartitionIdentity,
-    ObservationPartitionPlan, ObservationPartitionPlanIdentity, ObservationPartitionTarget,
+    ObservationPartitionPlan, ObservationPartitionPlanContents, ObservationPartitionPlanIdentity,
+    ObservationPartitionTarget,
     DEFAULT_MAXIMUM_OBSERVATION_PARTITIONS,
 };
 pub use publish::publish_observation;

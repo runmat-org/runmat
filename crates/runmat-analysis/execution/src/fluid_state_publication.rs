@@ -153,10 +153,23 @@ pub fn build_prepared_fluid_state_publication_resource_plan(
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
+    build_plan_with_source(request, inputs, policy, None)
+}
+
+type DecodedSource = (FluidSteadyWorkload, SolverMeshArtifact, FluidSteadySolverResult);
+
+/// `decoded` is the source `decode_source` already authenticated from these same original
+/// inputs (workload, mesh, result and solve plan); it is not decoded a second time.
+fn build_plan_with_source(
+    request: &SemanticStatePublicationRequest,
+    inputs: &[PreparedAnalysisObjects],
+    policy: AnalysisOutputPolicy,
+    decoded: Option<&DecodedSource>,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
     static MEMO: crate::fluid_phase_plan_memo::PlanMemo =
         crate::fluid_phase_plan_memo::PlanMemo::new();
     MEMO.get_or_derive("fluid-state-publication", &request.canonical_bytes()?, inputs, policy, || {
-        derive_prepared_fluid_state_publication_resource_plan(request, inputs, policy)
+        derive_prepared_fluid_state_publication_resource_plan(request, inputs, policy, decoded)
     })
 }
 
@@ -164,6 +177,7 @@ fn derive_prepared_fluid_state_publication_resource_plan(
     request: &SemanticStatePublicationRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
+    decoded: Option<&DecodedSource>,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let (source_plan_input, _) = source_plan(inputs, policy.inventory_limits())?;
     if !(5..=6).contains(&inputs.len())
@@ -199,16 +213,23 @@ fn derive_prepared_fluid_state_publication_resource_plan(
     {
         return Err(invalid("fluid state request differs"));
     }
-    let (w, m, r) = decode_source(numerical, policy)?;
+    let owned;
+    let (w, m, r) = match decoded {
+        Some(source) => source,
+        None => {
+            owned = decode_source(numerical, policy)?;
+            &owned
+        }
+    };
     let source = unique(numerical, K::SolverResult)?;
     let catalog =
-        fluid_state_publication_profile(request, &w, &m, &r, source.manifest.payload_digest)?;
+        fluid_state_publication_profile(request, w, m, r, source.manifest.payload_digest)?;
     let profile = catalog.entry(request)?.profile();
     Ok(build_fluid_state_publication_resource_plan(
         request,
-        &w,
-        &m,
-        &r,
+        w,
+        m,
+        r,
         source.manifest.payload_digest,
         &catalog,
         PreparedPhaseResourceFacts {
@@ -304,11 +325,12 @@ pub fn prepare_fluid_state_publication(
     let policy = AnalysisOutputPolicy::new(p.chunk_bytes, p.inventory_limits)?;
     let mut inputs = p.source_inputs;
     inputs.push(p.source_result);
-    let (w, m, r) = decode_source(&inputs, policy)?;
+    let source = decode_source(&inputs, policy)?;
+    let (w, m, r) = &source;
     if r.producer_identity() != p.source_host.workload.step {
         return Err(invalid("fluid publication producer differs"));
     }
-    let request = fluid_state_publication_requests(&w, &m, &r)?
+    let request = fluid_state_publication_requests(w, m, r)?
         .into_iter()
         .find(|r| r.declaration == p.declaration)
         .ok_or_else(|| invalid("fluid state declaration differs from original authored output"))?;
@@ -321,8 +343,7 @@ pub fn prepare_fluid_state_publication(
         ObjectNamespace::InputValue,
         p.inventory_limits,
     )?);
-    let resource_plan =
-        build_prepared_fluid_state_publication_resource_plan(&request, &inputs, policy)?;
+    let resource_plan = build_plan_with_source(&request, &inputs, policy, Some(&source))?;
     inputs.push(prepare_analysis_objects(
         K::ResourcePlan,
         resource_plan.identity.digest(),

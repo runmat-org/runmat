@@ -10,7 +10,8 @@ use crate::{
 use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_execution::{
     AnalysisHostWorkload, FluidStudyCoordinator, FluidStudyPhase,
-    FluidStudyPreparation, PreparedAnalysisProgram, PreparedAnalysisTaskClosure, VerifiedFluidStudy,
+    FluidStudyPreparation, PlannedFluidStudyPreparation, PreparedAnalysisProgram,
+    PreparedAnalysisTaskClosure, VerifiedFluidStudy,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
@@ -32,7 +33,7 @@ pub async fn execute_fluid_study_locally(
 ) -> NativeExecutionResult<VerifiedFluidStudy> {
     execute_with_pool(
         &mut crate::analysis_task_pool::LocalAnalysisTaskPool::new(session),
-        preparation,
+        PlannedFluidStudyPreparation::verify(preparation).map_err(protocol)?,
         policy,
     )
     .await
@@ -40,14 +41,14 @@ pub async fn execute_fluid_study_locally(
 
 pub(crate) async fn execute_with_pool(
     pool: &mut impl AnalysisTaskPool,
-    preparation: FluidStudyPreparation,
+    preparation: PlannedFluidStudyPreparation,
     policy: FluidStudyExecutionPolicy,
 ) -> NativeExecutionResult<VerifiedFluidStudy> {
     policy.resources.validate().map_err(protocol)?;
     let scope_id = pool.scope_id();
     let pool_id = pool.pool_id();
-    let output_policy = preparation.output_policy;
-    let mut coordinator = FluidStudyCoordinator::new(preparation).map_err(protocol)?;
+    let output_policy = preparation.preparation().output_policy;
+    let mut coordinator = FluidStudyCoordinator::planned(preparation).map_err(protocol)?;
     let solve = coordinator.prepare_solve().map_err(protocol)?;
     let (executed, accounting) = execute_one(
         pool,

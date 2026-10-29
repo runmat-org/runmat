@@ -144,9 +144,11 @@ pub struct ObservationPartition {
     pub target: ObservationPartitionTarget,
 }
 
+/// The content of an observation partition plan. Contents grant nothing: only the canonical
+/// derivation or `ObservationPartitionPlan::try_from` (which re-derives every identity) seals them.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, try_from = "ObservationPartitionPlanWire")]
-pub struct ObservationPartitionPlan {
+#[serde(deny_unknown_fields)]
+pub struct ObservationPartitionPlanContents {
     pub schema_version: u16,
     pub identity: ObservationPartitionPlanIdentity,
     pub observation_plan: super::ResolvedObservationPlanIdentity,
@@ -156,49 +158,47 @@ pub struct ObservationPartitionPlan {
     pub resource_cost: ObservationCostEstimate,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ObservationPartitionPlanWire {
-    schema_version: u16,
-    identity: ObservationPartitionPlanIdentity,
-    observation_plan: super::ResolvedObservationPlanIdentity,
-    topology_digest: Digest,
-    observation_id: ObservationId,
-    partitions: Vec<ObservationPartition>,
-    resource_cost: ObservationCostEstimate,
+/// A partition plan whose plan and partition identities match its contents. Sealed at the
+/// canonical derivation or at decode; read-only afterwards, so `validate_for` compares contents
+/// against the resolved plan without hashing anything.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(try_from = "ObservationPartitionPlanContents")]
+pub struct ObservationPartitionPlan {
+    contents: ObservationPartitionPlanContents,
 }
 
-impl TryFrom<ObservationPartitionPlanWire> for ObservationPartitionPlan {
+/// Encodes exactly as its contents (the wire form is unchanged).
+impl Serialize for ObservationPartitionPlan {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.contents.serialize(serializer)
+    }
+}
+
+impl std::ops::Deref for ObservationPartitionPlan {
+    type Target = ObservationPartitionPlanContents;
+
+    fn deref(&self) -> &Self::Target {
+        &self.contents
+    }
+}
+
+impl TryFrom<ObservationPartitionPlanContents> for ObservationPartitionPlan {
     type Error = ObservationError;
 
-    fn try_from(wire: ObservationPartitionPlanWire) -> Result<Self, Self::Error> {
-        let plan = Self {
-            schema_version: wire.schema_version,
-            identity: wire.identity,
-            observation_plan: wire.observation_plan,
-            topology_digest: wire.topology_digest,
-            observation_id: wire.observation_id,
-            partitions: wire.partitions,
-            resource_cost: wire.resource_cost,
-        };
-        plan.validate_structure()?;
-        Ok(plan)
+    fn try_from(contents: ObservationPartitionPlanContents) -> Result<Self, Self::Error> {
+        contents.validate_structure()?;
+        Ok(Self { contents })
     }
 }
 
 impl ObservationPartitionPlan {
-    pub fn derive(
-        plan: &ResolvedObservationPlan,
-        observation_id: &ObservationId,
-        policy: ObservationExecutionPolicy,
-    ) -> Result<Self, ObservationError> {
-        plan.validate_identity()?;
-        Self::derive_for_validated_plan(plan, observation_id, policy)
+    /// Give up the seal to edit the contents; re-sealing validates them again.
+    pub fn into_contents(self) -> ObservationPartitionPlanContents {
+        self.contents
     }
 
-    /// As `derive`, for a resolved plan whose identity the caller validated in the same
-    /// operation (for example through `ObservationEvaluationRequest::validate`).
-    pub(crate) fn derive_for_validated_plan(
+    /// The canonical partitioning of one observation of a (sealed) resolved plan.
+    pub fn derive(
         plan: &ResolvedObservationPlan,
         observation_id: &ObservationId,
         policy: ObservationExecutionPolicy,
@@ -237,7 +237,7 @@ impl ObservationPartitionPlan {
                 target,
             });
         }
-        let mut partition_plan = Self {
+        let mut partition_plan = ObservationPartitionPlanContents {
             schema_version: 1,
             identity: ObservationPartitionPlanIdentity(Digest::sha256([])),
             observation_plan: plan.identity,
@@ -249,12 +249,15 @@ impl ObservationPartitionPlan {
         partition_plan.identity = partition_plan.derive_identity()?;
         // Identities were just derived from this content; check only the shape.
         partition_plan.validate_shape()?;
-        Ok(partition_plan)
+        Ok(Self {
+            contents: partition_plan,
+        })
     }
 
-    /// The canonical derivation validates the resolved plan identity once and owns every
-    /// partition target, identity and cost; equality with it is the whole check, so neither
-    /// the stored identities nor the resolved plan are hashed a second time.
+    /// Both plans are sealed: every identity matches its contents and the resolved plan's
+    /// observations were validated when it was resolved or decoded. So the canonical derivation
+    /// for this partition count reproduces this plan exactly when the plan names the resolved
+    /// plan and its contents equal the canonical slices and cost, and no identity is hashed again.
     pub fn validate_for(&self, plan: &ResolvedObservationPlan) -> Result<(), ObservationError> {
         if self.observation_plan != plan.identity || self.topology_digest != plan.topology_digest {
             return Err(ObservationError::Identity(
@@ -266,12 +269,34 @@ impl ObservationPartitionPlan {
                 .map_err(|_| ObservationError::Limit("observation partition count"))?,
         )
         .ok_or_else(|| ObservationError::Invalid("observation partition plan is empty".into()))?;
-        let expected = ObservationPartitionPlan::derive(
-            plan,
-            &self.observation_id,
-            ObservationExecutionPolicy::canonical(partitions),
-        )?;
-        if *self != expected {
+        let observation = plan
+            .observations
+            .iter()
+            .find(|candidate| candidate.spec.observation_id == self.observation_id)
+            .ok_or_else(|| {
+                ObservationError::Invalid(
+                    "observation partition plan names an absent observation".into(),
+                )
+            })?;
+        let entity_count = observation.target.selected_entity_count();
+        let partition_count = self.partitions.len();
+        let canonical = partition_count <= entity_count
+            && self.partitions.iter().enumerate().all(|(ordinal, partition)| {
+                partition.ordinal as usize == ordinal
+                    && partition_target_matches(
+                        &observation.target,
+                        ordinal * entity_count / partition_count,
+                        (ordinal + 1) * entity_count / partition_count,
+                        &partition.target,
+                    )
+            })
+            && self.resource_cost
+                == partitioned_resource_cost(
+                    observation,
+                    partition_count,
+                    ObservationExecutionPolicy::canonical(partitions),
+                )?;
+        if !canonical {
             return Err(ObservationError::Identity(
                 "observation partition ownership does not cover the canonical target exactly",
             ));
@@ -280,7 +305,6 @@ impl ObservationPartitionPlan {
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
-        self.validate_structure()?;
         Ok(encode_contract(
             OBSERVATION_PREFIX,
             "observation-partition-plan",
@@ -298,6 +322,9 @@ impl ObservationPartitionPlan {
         )?)
     }
 
+}
+
+impl ObservationPartitionPlanContents {
     /// Metadata and per-partition shape, without hashing any identity.
     fn validate_shape(&self) -> Result<(), ObservationError> {
         if self.schema_version != 1
@@ -491,6 +518,102 @@ fn partition_target(
             indices: indices[start..end].to_vec(),
             identities: identities[start..end].to_vec(),
         },
+    }
+}
+
+/// `target` equals `partition_target(resolved, start, end)`, compared in place.
+fn partition_target_matches(
+    resolved: &ResolvedObservationTarget,
+    start: usize,
+    end: usize,
+    target: &ObservationPartitionTarget,
+) -> bool {
+    match (resolved, target) {
+        (
+            ResolvedObservationTarget::Nodes {
+                indices,
+                identities,
+            },
+            ObservationPartitionTarget::Nodes {
+                indices: part_indices,
+                identities: part_identities,
+            },
+        )
+        | (
+            ResolvedObservationTarget::Connectors {
+                indices,
+                identities,
+            },
+            ObservationPartitionTarget::Connectors {
+                indices: part_indices,
+                identities: part_identities,
+            },
+        )
+        | (
+            ResolvedObservationTarget::ConstraintGroups {
+                indices,
+                identities,
+            },
+            ObservationPartitionTarget::ConstraintGroups {
+                indices: part_indices,
+                identities: part_identities,
+            },
+        )
+        | (
+            ResolvedObservationTarget::Volume {
+                element_indices: indices,
+                element_identities: identities,
+            },
+            ObservationPartitionTarget::Volume {
+                element_indices: part_indices,
+                element_identities: part_identities,
+            },
+        )
+        | (
+            ResolvedObservationTarget::Boundary {
+                face_indices: indices,
+                face_identities: identities,
+            },
+            ObservationPartitionTarget::Boundary {
+                face_indices: part_indices,
+                face_identities: part_identities,
+            },
+        ) => {
+            indices.get(start..end) == Some(&part_indices[..])
+                && identities.get(start..end) == Some(&part_identities[..])
+        }
+        (
+            ResolvedObservationTarget::Elements {
+                domain,
+                indices,
+                identities,
+            },
+            ObservationPartitionTarget::Elements {
+                domain: part_domain,
+                indices: part_indices,
+                identities: part_identities,
+            },
+        ) => {
+            domain == part_domain
+                && indices.get(start..end) == Some(&part_indices[..])
+                && identities.get(start..end) == Some(&part_identities[..])
+        }
+        (
+            ResolvedObservationTarget::Points { samples },
+            ObservationPartitionTarget::Points {
+                sample_ordinals,
+                identities,
+            },
+        ) => {
+            sample_ordinals.iter().copied().eq(start..end)
+                && samples.get(start..end).is_some_and(|samples| {
+                    samples
+                        .iter()
+                        .map(|sample| sample.identity)
+                        .eq(identities.iter().copied())
+                })
+        }
+        _ => false,
     }
 }
 
