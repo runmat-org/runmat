@@ -60,7 +60,7 @@ impl NonlinearSolidBlockArtifact {
     }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.request.validate()?;
-        self.checkpoint.canonical_bytes().map_err(invalid)?;
+        self.checkpoint.validate_integrity().map_err(invalid)?;
         let r = &self.result;
         let n = r.load_factors.len();
         let element_count = r

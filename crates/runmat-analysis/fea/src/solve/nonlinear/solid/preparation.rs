@@ -28,7 +28,8 @@ impl<'a> SolidNewtonProblem<'a> {
             ));
         }
         let reduction = policy::constraint_reduction(summary)?;
-        let encoded = encode_contract(
+        // Streamed: the scope holds mesh-sized constraint and load data; no buffer of it is built.
+        let mut scope_identity = crate::contracts::canonical_digest::canonical_contract_digest(
             b"runmat-fea-small-strain-solid-equilibrium/v1\0",
             "canonical-solid-fixed-load-scope",
             &(
@@ -40,7 +41,7 @@ impl<'a> SolidNewtonProblem<'a> {
                 &summary.structural_sources,
                 &summary.structural_boundary_transfers,
             ),
-            CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32),
+            CanonicalLimits::new(0, 0, 65_536, 32),
         )
         .map_err(|e| SolidNewtonError::Invalid(e.to_string()))?;
         if coupling
@@ -56,7 +57,6 @@ impl<'a> SolidNewtonProblem<'a> {
         let contact = coupling
             .map(|input| contact::PreparedSolidContact::prepare(basis, &reduction, input, policy))
             .transpose()?;
-        let mut scope_identity = Digest::sha256(encoded);
         if let Some(contact) = &contact {
             let bytes = encode_contract(
                 b"runmat-fea-contact-solid-equilibrium/v1\0",
