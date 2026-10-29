@@ -102,7 +102,10 @@ fn configuration_is_admitted_separately_from_source_edits() {
             }],
         }))
         .unwrap_err();
-    assert!(error.contains("admitted .fea and .m"));
+    assert_eq!(
+        error,
+        "FEA source changes may only mutate admitted .fea/.m sources and CAD selection metadata"
+    );
 }
 
 #[test]

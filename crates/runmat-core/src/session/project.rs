@@ -465,6 +465,10 @@ impl RunMatSession {
         &mut self,
     ) -> std::result::Result<(), runmat_package::FrozenProjectHandoffError> {
         let Some(_) = self.project_handoff.as_ref() else {
+            // Working-source checks also retain project-scoped products when
+            // no frozen handoff is installed. Clearing the project retires
+            // those products without starting an unnecessary host retirement.
+            self.checked_fea_sources = Default::default();
             return Ok(());
         };
         let cache = self
