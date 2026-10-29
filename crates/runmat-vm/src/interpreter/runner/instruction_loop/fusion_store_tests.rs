@@ -41,12 +41,15 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
     let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("lower MIR");
     let bytecode = crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
         .expect("compile image source");
-    let mut ordinary_vars = Vec::new();
-    let mut ordinary = crate::interpreter::state::InterpreterState::new(
+    let ordinary_vars = Vec::new();
+    let mut ordinary = crate::interpreter::state::InterpreterState::from_owned_in_context(
         bytecode.clone(),
-        &mut ordinary_vars,
+        ordinary_vars,
         Some("<main>"),
         RuntimeInvocationArity::Script,
+        runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        )),
     );
     ordinary.fusion_plan = None;
     ordinary.fusion_accel_graph = None;
@@ -54,9 +57,9 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
     let (ordinary_runtime, ordinary_workspace) =
         crate::runtime::workspace_service::VmWorkspaceService::install(ordinary_runtime, None);
     let crate::interpreter::api::InterpreterOutcome::Completed(expected) =
-        futures::executor::block_on(ordinary_workspace.scope(ordinary_runtime.scope(
-            super::super::run_interpreter(Box::new(ordinary), &mut ordinary_vars),
-        )))
+        futures::executor::block_on(ordinary_workspace.scope(
+            ordinary_runtime.scope(super::super::run_interpreter_owned(Box::new(ordinary))),
+        ))
         .expect("independent ordinary selected image source");
     let expected = &expected.values;
     let publication_slots: Vec<_> = ["mu", "sigma", "out"]
@@ -83,12 +86,15 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
             &group.span,
         )
     );
-    let mut initial_vars = Vec::new();
-    let mut state = crate::interpreter::state::InterpreterState::new(
+    let initial_vars = Vec::new();
+    let mut state = crate::interpreter::state::InterpreterState::from_owned_in_context(
         bytecode,
-        &mut initial_vars,
+        initial_vars,
         Some("<main>"),
         RuntimeInvocationArity::Script,
+        runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        )),
     );
     state.completion_assigned_slots = Some(HashSet::new());
     state.fusion_plan = Some(Rc::new(FusionPlan::from_graph(&graph, &[group])));
@@ -97,9 +103,10 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
     let (selected_runtime, selected_workspace) =
         crate::runtime::workspace_service::VmWorkspaceService::install(selected_runtime, None);
     FUSION_EXECUTION_ENTRIES.with(|entries| entries.set(0));
-    let outcome = futures::executor::block_on(selected_workspace.scope(selected_runtime.scope(
-        super::super::run_interpreter(Box::new(state), &mut initial_vars),
-    )))
+    let outcome = futures::executor::block_on(
+        selected_workspace
+            .scope(selected_runtime.scope(super::super::run_interpreter_owned(Box::new(state)))),
+    )
     .expect("observable stores must take the ordinary interpreter path");
     assert_eq!(
         FUSION_EXECUTION_ENTRIES.with(std::cell::Cell::get),

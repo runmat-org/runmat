@@ -51,11 +51,6 @@ use runmat_time::{duration_ns_saturating, Instant};
 
 type VmResult<T> = Result<T, RuntimeError>;
 
-fn sync_initial_vars(initial: &mut Vec<Value>, vars: &InterpreterVars) {
-    initial.clear();
-    vars.for_each(|value| initial.push(value.clone()));
-}
-
 fn ensure_workspace_resolver_registered() {
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
@@ -951,93 +946,19 @@ fn output_sequence(
     }
 }
 
-pub async fn interpret_with_vars(
-    bytecode: &Bytecode,
-    initial_vars: &mut Vec<Value>,
-    current_function_name: Option<&str>,
-) -> VmResult<InterpreterOutcome> {
-    let runtime = active_or_standalone_runtime_context();
-    interpret_with_vars_in_context(bytecode, initial_vars, current_function_name, runtime).await
-}
-
-pub async fn interpret_with_vars_in_context(
-    bytecode: &Bytecode,
-    initial_vars: &mut Vec<Value>,
-    current_function_name: Option<&str>,
-    runtime: runmat_runtime::context::RuntimeContext,
-) -> VmResult<InterpreterOutcome> {
-    interpret_with_workspace_in_context(
-        bytecode,
-        initial_vars,
-        current_function_name,
-        runtime,
-        None,
-    )
-    .await
-    .outcome
-}
-
+#[derive(Debug)]
 pub struct WorkspaceInterpreterOutcome {
     pub outcome: VmResult<InterpreterOutcome>,
     pub workspace: Option<crate::runtime::workspace::WorkspaceExecutionCompletion>,
 }
 
-pub async fn interpret_with_workspace_in_context(
-    bytecode: &Bytecode,
-    initial_vars: &mut Vec<Value>,
-    current_function_name: Option<&str>,
-    runtime: runmat_runtime::context::RuntimeContext,
-    admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
-) -> WorkspaceInterpreterOutcome {
-    interpret_with_workspace_and_dynamic_admission_in_context(
-        bytecode,
-        initial_vars,
-        current_function_name,
-        runtime,
-        admission,
-        None,
-    )
-    .await
-}
-
-pub async fn interpret_with_workspace_and_dynamic_admission_in_context(
-    bytecode: &Bytecode,
-    initial_vars: &mut Vec<Value>,
-    current_function_name: Option<&str>,
-    runtime: runmat_runtime::context::RuntimeContext,
-    admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
-    dynamic_admission: Option<DynamicEvalAdmissionPort>,
-) -> WorkspaceInterpreterOutcome {
-    let arity = runtime
-        .invocation_arity()
-        .unwrap_or(RuntimeInvocationArity::Script);
-    let runtime = runtime.with_invocation_arity(arity);
-    let (runtime, workspace_activation) =
-        crate::runtime::workspace_service::VmWorkspaceService::install(runtime, admission);
-    let frame = workspace_activation.frame();
-    let runtime = with_default_acceleration_service(runtime);
-    let runtime = runtime_with_bytecode_debug_frame(
-        runtime,
-        bytecode,
-        current_function_name.unwrap_or("<main>"),
-    );
-    let execution = workspace_activation.scope(runmat_runtime::data::with_tx_registry_scope(
-        scope_vm_pc(interpret_with_vars_inner(
-            bytecode,
-            initial_vars,
-            current_function_name,
-            runtime.clone(),
-            dynamic_admission,
-        )),
-    ));
-    runtime
-        .scope(workspace_execution::PendingWorkspaceExecution::new(
-            execution, frame,
-        ))
-        .await
-}
-
-pub(crate) async fn interpret_with_workspace_vars_and_dynamic_admission_in_context(
+/// Execute one owned VM frame under explicit invocation/workspace authority.
+///
+/// The input owner is transferred, never synchronized into caller scratch.
+/// Ready hands the exact completion to the caller; abandonment closes and
+/// retires that frame. An embedding projection's terminal publication remains
+/// its host's obligation (WorkspaceProjectionPublication), not register replay.
+pub async fn interpret_workspace(
     bytecode: &Bytecode,
     initial_vars: InterpreterVars,
     current_function_name: Option<&str>,
@@ -1059,7 +980,7 @@ pub(crate) async fn interpret_with_workspace_vars_and_dynamic_admission_in_conte
         current_function_name.unwrap_or("<main>"),
     );
     let execution = workspace_activation.scope(runmat_runtime::data::with_tx_registry_scope(
-        scope_vm_pc(interpret_with_vars_owner_inner(
+        scope_vm_pc(interpret_workspace_inner(
             bytecode,
             initial_vars,
             current_function_name,
@@ -1351,62 +1272,7 @@ async fn interpret_resume_inner(
     }
 }
 
-async fn interpret_with_vars_inner(
-    bytecode: &Bytecode,
-    initial_vars: &mut Vec<Value>,
-    current_function_name: Option<&str>,
-    runtime: runmat_runtime::context::RuntimeContext,
-    dynamic_admission: Option<DynamicEvalAdmissionPort>,
-) -> VmResult<InterpreterOutcome> {
-    bytecode
-        .validate_selected_source_owners(&runtime)
-        .map_err(RuntimeError::new)?;
-    crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
-        .map_err(RuntimeError::new)?;
-    crate::bytecode::validate_stack_geometry(&bytecode.instructions, bytecode.stack_geometry)
-        .map_err(RuntimeError::new)?;
-    let source_id = bytecode
-        .source_id
-        .and_then(|source| source.resolve_in(&runtime));
-    let (source_owner, diagnostic_source) = selected_frame_source_basis(bytecode, &runtime)
-        .map_or((None, None), |(owner, diagnostic)| {
-            (Some(owner), Some(diagnostic))
-        });
-    let invocation_arity = runtime
-        .invocation_arity()
-        .unwrap_or(RuntimeInvocationArity::Script);
-    let _borrowed_inputs =
-        crate::runtime::gc::ManagedRoots::new(initial_vars).map_err(RuntimeError::new)?;
-    let owned_vars = std::mem::take(initial_vars);
-    let mut state = Box::new(InterpreterState::from_owned_in_context(
-        bytecode.clone(),
-        owned_vars,
-        current_function_name,
-        invocation_arity,
-        runtime,
-    ));
-    if let Err(error) = state.prepare_operand_stack() {
-        restore_unstarted_vars(state, initial_vars);
-        return Err(error);
-    }
-    state.context.dynamic_eval_admission = dynamic_admission;
-    match Box::pin(run_interpreter(state, initial_vars)).await {
-        Ok(outcome) => Ok(outcome),
-        Err(err) => {
-            let err = attach_span_from_pc(bytecode, err);
-            let current_name = current_function_name.unwrap_or("<main>");
-            Err(attach_call_frames(
-                current_name,
-                source_id,
-                source_owner,
-                diagnostic_source,
-                err,
-            ))
-        }
-    }
-}
-
-async fn interpret_with_vars_owner_inner(
+async fn interpret_workspace_inner(
     bytecode: &Bytecode,
     initial_vars: InterpreterVars,
     current_function_name: Option<&str>,
@@ -1433,6 +1299,7 @@ async fn interpret_with_vars_owner_inner(
     let initial_assigned_var_count = initial_vars.len();
     let borrowed_inputs =
         crate::runtime::gc::ManagedRoots::from_traced(&initial_vars).map_err(RuntimeError::new)?;
+    let initial_vars = initial_vars.prepare_extent(&runtime, bytecode.var_count)?;
     let mut state = Box::new(InterpreterState::from_vars_in_context(
         bytecode.clone(),
         initial_vars,
@@ -1525,145 +1392,6 @@ fn runtime_with_bytecode_debug_frame(
     })
 }
 
-fn run_interpreter<'a>(
-    state: Box<InterpreterState>,
-    initial_vars: &'a mut Vec<Value>,
-) -> impl std::future::Future<Output = VmResult<InterpreterOutcome>> + 'a {
-    let mut pending = PendingInitialVars {
-        state: Some(state),
-        initial_vars: Some(initial_vars),
-    };
-    async move {
-        let runtime = pending
-            .state
-            .as_ref()
-            .expect("unstarted interpreter has a frame")
-            .context
-            .runtime
-            .clone();
-        let owner = if pending
-            .state
-            .as_ref()
-            .is_some_and(|state| state.context.process_driver.is_none())
-        {
-            let owner = ProcessContinuationDriver::new_with_dynamic_admission_in_context(
-                &runtime,
-                pending
-                    .state
-                    .as_ref()
-                    .and_then(|state| state.context.dynamic_eval_admission.clone()),
-            )?;
-            pending
-                .state
-                .as_mut()
-                .expect("unstarted interpreter has a frame")
-                .context
-                .process_driver = Some(owner.handle());
-            Some(owner)
-        } else {
-            None
-        };
-        // The factory is invoked only after a managed driver has admitted its
-        // root future and queue control. The first VM poll remains separate.
-        let make_interpreter = move || {
-            let mut active = None;
-            futures::future::poll_fn(move |cx| {
-                if active.is_none() {
-                    let frame = pending
-                        .state
-                        .as_ref()
-                        .expect("interpreter future polled after completion");
-                    if let Err(error) = frame
-                        .bytecode
-                        .validate_catch_scope_metadata()
-                        .map_err(RuntimeError::new)
-                    {
-                        return std::task::Poll::Ready(Err(error));
-                    }
-                    if let Err(error) = frame
-                        .bytecode
-                        .validate_selected_source_owners(&frame.context.runtime)
-                        .map_err(RuntimeError::new)
-                    {
-                        return std::task::Poll::Ready(Err(error));
-                    }
-                    let state = pending
-                        .state
-                        .take()
-                        .expect("interpreter future polled after completion");
-                    let vars = pending
-                        .initial_vars
-                        .take()
-                        .expect("interpreter variables taken before first poll");
-                    active = Some(prepare_run_interpreter(state, vars));
-                }
-                let result = std::future::Future::poll(
-                    std::pin::Pin::new(active.as_mut().expect("interpreter future initialized")),
-                    cx,
-                );
-                if result.is_ready() {
-                    active.take();
-                }
-                result
-            })
-        };
-        if let Some(owner) = owner {
-            owner.drive_in_context(&runtime, make_interpreter)?.await
-        } else {
-            make_interpreter().await
-        }
-    }
-}
-
-/// Until the first VM poll takes the frame, all failures are admission or
-/// validation failures. Move the original values back without a payload copy.
-struct PendingInitialVars<'a> {
-    state: Option<Box<InterpreterState>>,
-    initial_vars: Option<&'a mut Vec<Value>>,
-}
-
-impl Drop for PendingInitialVars<'_> {
-    fn drop(&mut self) {
-        if let (Some(state), Some(initial_vars)) = (self.state.take(), self.initial_vars.take()) {
-            restore_unstarted_vars(state, initial_vars);
-        }
-    }
-}
-
-fn restore_unstarted_vars(state: Box<InterpreterState>, initial_vars: &mut Vec<Value>) {
-    let InterpreterState {
-        mut vars,
-        initial_assigned_var_count,
-        ..
-    } = *state;
-    vars.truncate(initial_assigned_var_count);
-    *initial_vars = vars
-        .into_owned()
-        .expect("unstarted interpreter retains unique original variables");
-}
-
-// This constructor runs on the first poll, then returns before the inner
-// interpreter is polled. Its temporary unboxed state must not remain in every
-// recursive Process call's native poll frame.
-#[inline(never)]
-fn prepare_run_interpreter<'a>(
-    state: Box<InterpreterState>,
-    initial_vars: &'a mut Vec<Value>,
-) -> impl std::future::Future<Output = VmResult<InterpreterOutcome>> + Unpin + 'a {
-    // The caller validates before moving the original vars into this future,
-    // so a pre-execution failure can still restore them without cloning.
-    let catch_runtime = state.context.runtime.clone();
-    let inherited_catch = catch_runtime.active_catch_exception_shared();
-    let run_span = info_span!("interpreter.run", function = state.bytecode.display_name());
-    #[cfg(feature = "native-accel")]
-    let fusion_plan = state.fusion_plan.clone();
-    let state = *state;
-    let future = run_interpreter_inner(state, Some(initial_vars)).instrument(run_span);
-    #[cfg(feature = "native-accel")]
-    let future = runmat_accelerate::scope_fusion_plan(fusion_plan, future);
-    catch_runtime.scope_active_catch_shared(inherited_catch, future)
-}
-
 async fn run_interpreter_owned(mut state: Box<InterpreterState>) -> VmResult<InterpreterOutcome> {
     let runtime = state.context.runtime.clone();
     let owner = if state.context.process_driver.is_none() {
@@ -1692,7 +1420,7 @@ async fn run_interpreter_owned(mut state: Box<InterpreterState>) -> VmResult<Int
     let make_interpreter = move || {
         let interpreter = catch_runtime.scope_active_catch_shared(
             inherited_catch,
-            run_interpreter_inner(*state, None).instrument(run_span),
+            run_interpreter_inner(*state).instrument(run_span),
         );
         #[cfg(feature = "native-accel")]
         let interpreter = runmat_accelerate::scope_fusion_plan(fusion_plan, interpreter);
@@ -1705,10 +1433,7 @@ async fn run_interpreter_owned(mut state: Box<InterpreterState>) -> VmResult<Int
     }
 }
 
-async fn run_interpreter_inner(
-    state: InterpreterState,
-    initial_vars: Option<&mut Vec<Value>>,
-) -> VmResult<InterpreterOutcome> {
+async fn run_interpreter_inner(state: InterpreterState) -> VmResult<InterpreterOutcome> {
     ensure_wasm_builtins_registered();
     ensure_workspace_resolver_registered();
     let InterpreterState {
@@ -2187,9 +1912,6 @@ async fn run_interpreter_inner(
         current_function_name,
     )?;
     crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
-    if let Some(initial_vars) = initial_vars {
-        sync_initial_vars(initial_vars, &vars);
-    }
     Ok(InterpreterOutcome::Completed(
         runmat_runtime::execution::RootedResult::new(
             crate::interpreter::state::InterpreterCompletion {
@@ -2207,8 +1929,18 @@ pub async fn interpret(
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     // Frame preparation reserves compiled slots. This entry supplies no
     // existing values: padding here would mark every binding as assigned.
-    let mut vars = Vec::new();
-    match interpret_with_vars(bytecode, &mut vars, Some("<main>")).await {
+    let runtime = active_or_standalone_runtime_context();
+    match interpret_workspace(
+        bytecode,
+        InterpreterVars::from_owned(Vec::new()),
+        Some("<main>"),
+        runtime,
+        None,
+        None,
+    )
+    .await
+    .outcome
+    {
         Ok(InterpreterOutcome::Completed(completion)) => completion.with_owned(|completion| {
             let values = completion.values.into_owned().map_err(|_| {
                 mex(
@@ -2714,7 +2446,7 @@ mod tests {
         run_interpreter,
     };
     #[cfg(feature = "native-accel")]
-    use super::{interpret_with_vars, run_interpreter_inner};
+    use super::{interpret_workspace, run_interpreter_inner, run_interpreter_owned};
     use crate::bytecode::program::Bytecode;
     use crate::bytecode::Instr;
     use crate::interpreter::api::{InterpreterResumeState, InterpreterState};
@@ -2791,32 +2523,41 @@ mod tests {
                 .validate_catch_scope_metadata()
                 .expect_err("fixture has invalid catch metadata"),
         );
-        let mut vars = Vec::new();
-        let state = Box::new(InterpreterState::new_in_context(
+        let state = Box::new(InterpreterState::from_owned_in_context(
             bytecode,
-            &mut vars,
+            Vec::new(),
             None,
             RuntimeInvocationArity::Script,
             runtime.clone(),
         ));
-        let future = run_interpreter(state, &mut vars);
-        drop(future);
-        assert!(vars.is_empty(), "an unpolled interpreter has no effects");
+        drop(run_interpreter_owned(state));
+        assert!(
+            crate::take_updated_workspace_state().is_none(),
+            "unpolled execution has no workspace effects"
+        );
 
-        // The borrowed call boundary has already moved its original values
-        // into the frame. Dropping before poll must move them back verbatim.
-        let mut moved_caller = Vec::new();
-        let moved_state = Box::new(InterpreterState::from_owned_in_context(
+        // Ownership is transferred, never synchronized into a borrowed Vec.
+        // Abandoning an unpolled execution retires that actual input lease.
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("physical input lease");
+        let state = Box::new(InterpreterState::from_owned_in_context(
             Bytecode::empty(),
-            vec![Value::Num(17.0)],
+            vec![Value::GpuTensor(allocation.handle)],
             None,
             RuntimeInvocationArity::Script,
             runtime.clone(),
         ));
-        drop(run_interpreter(moved_state, &mut moved_caller));
-        assert_eq!(moved_caller, vec![Value::Num(17.0)]);
+        let unpolled = run_interpreter_owned(state);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(unpolled);
+        assert_eq!(allocation.probe.retirements(), 1);
 
-        let state = Box::new(InterpreterState::new_in_context(
+        let state = Box::new(InterpreterState::from_owned_in_context(
             Bytecode::with_instructions(
                 vec![
                     Instr::EnterTry {
@@ -2828,14 +2569,14 @@ mod tests {
                 ],
                 0,
             ),
-            &mut vars,
+            Vec::new(),
             None,
             RuntimeInvocationArity::Script,
             runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
                 runmat_runtime::execution::RuntimeExecutionService::new(),
             )),
         ));
-        let mut future = std::pin::pin!(run_interpreter(state, &mut vars));
+        let mut future = std::pin::pin!(run_interpreter_owned(state));
         let waker = noop_waker();
         let mut context = Context::from_waker(&waker);
         let Poll::Ready(Err(error)) = Future::poll(future.as_mut(), &mut context) else {
@@ -3452,22 +3193,32 @@ mod tests {
             fusion_residency::mark(&handle);
             assert!(fusion_residency::is_resident(&handle));
 
-            let mut vars = vec![Value::GpuTensor(handle.clone())];
+            let vars = vec![Value::GpuTensor(handle.clone())];
             let bytecode = Bytecode::with_instructions(vec![Instr::Return], vars.len());
             let cancelled = runmat_execution::cancellation::CancellationSource::new();
             cancelled.cancel(runmat_execution::CancellationReason::User);
             let _interrupt_guard =
                 runmat_runtime::interrupt::replace_interrupt(Some(cancelled.token()));
 
-            let err = block_on(interpret_with_vars(&bytecode, &mut vars, Some("<main>")))
-                .expect_err("cancelled execution should return error");
+            let err = block_on(interpret_workspace(
+                &bytecode,
+                crate::interpreter::vars::InterpreterVars::from_owned(vars),
+                Some("<main>"),
+                runmat_runtime::context::RuntimeContext::with_cancellation(
+                    std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+                    cancelled.token(),
+                ),
+                None,
+                None,
+            ))
+            .outcome
+            .expect_err("cancelled execution should return error");
             assert_eq!(err.identifier(), Some("RunMat:Cancelled"));
             assert!(
                 fusion_residency::is_resident(&handle),
                 "cancellation must not invalidate a retained external view"
             );
             assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-            drop(vars);
             drop(handle);
             assert!(weak.acquire().is_err());
         });
@@ -3484,12 +3235,15 @@ mod tests {
             assert!(fusion_residency::is_resident(&handle));
 
             let bytecode = Bytecode::with_instructions(Vec::new(), 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state
                 .stack
@@ -3498,9 +3252,8 @@ mod tests {
             state.vars = vec![Value::Num(0.0)].into();
             drop(handle);
 
-            let mut result_vars = vec![Value::Num(0.0)];
-            let outcome = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
-                .expect("interpreter should complete");
+            let outcome =
+                block_on(run_interpreter_inner(state)).expect("interpreter should complete");
             assert!(matches!(
                 outcome,
                 crate::interpreter::api::InterpreterOutcome::Completed(_)
@@ -3524,12 +3277,15 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::Pop, Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state
                 .stack
@@ -3537,11 +3293,10 @@ mod tests {
                 .expect("test stack capacity");
             state.vars = vec![Value::Num(0.0)].into();
 
-            let mut result_vars = vec![Value::Num(0.0)];
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
-                .expect("interpreter should complete");
+            let _result_vars =
+                block_on(run_interpreter_inner(state)).expect("interpreter should complete");
             assert!(
                 weak.acquire().is_err(),
                 "the final VM-owned reference must retire"
@@ -3561,12 +3316,15 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::Pop, Instr::Return], 1);
-            let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::GpuTensor(handle.clone())];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state
                 .stack
@@ -3574,9 +3332,8 @@ mod tests {
                 .expect("test stack capacity");
             state.vars = vec![Value::GpuTensor(handle.clone())].into();
 
-            let mut result_vars = vec![Value::GpuTensor(handle.clone())];
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
-                .expect("interpreter should complete");
+            let _result_vars =
+                block_on(run_interpreter_inner(state)).expect("interpreter should complete");
             assert!(
                 fusion_residency::is_resident(&handle),
                 "pop should preserve residency for handles still referenced by vars"
@@ -3586,8 +3343,7 @@ mod tests {
                 "pop should not release provider storage for handles still referenced by vars"
             );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -3606,21 +3362,23 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state.context.locals.push(Value::GpuTensor(handle.clone()));
             state.vars = vec![Value::Num(0.0)].into();
 
-            let mut result_vars = vec![Value::Num(0.0)];
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
-                .expect("exit scope should complete");
+            let _result_vars =
+                block_on(run_interpreter_inner(state)).expect("exit scope should complete");
             assert!(
                 weak.acquire().is_err(),
                 "the final VM-owned reference must retire"
@@ -3640,19 +3398,21 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
-            let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::GpuTensor(handle.clone())];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state.context.locals.push(Value::GpuTensor(handle.clone()));
             state.vars = vec![Value::GpuTensor(handle.clone())].into();
 
-            let mut result_vars = vec![Value::GpuTensor(handle.clone())];
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
-                .expect("exit scope should complete");
+            let _result_vars =
+                block_on(run_interpreter_inner(state)).expect("exit scope should complete");
             assert!(
                 fusion_residency::is_resident(&handle),
                 "exit scope should preserve residency for handles still referenced by vars"
@@ -3662,8 +3422,7 @@ mod tests {
             "exit scope should not release provider storage for handles still referenced by vars"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -3682,12 +3441,15 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
             payload.insert("nested", Value::GpuTensor(handle.clone()));
@@ -3700,10 +3462,9 @@ mod tests {
             }));
             state.vars = vec![Value::Num(0.0)].into();
 
-            let mut result_vars = vec![Value::Num(0.0)];
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("exit scope should complete for nested handle-object local");
             runmat_gc::gc_collect_major().unwrap();
             assert!(
@@ -3725,12 +3486,15 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
             payload.insert("nested", Value::GpuTensor(handle.clone()));
@@ -3742,10 +3506,9 @@ mod tests {
                 valid: true,
             });
             state.context.locals.push(local_value.clone());
-            state.vars = vec![local_value.clone()].into();
+            state.vars = vec![local_value].into();
 
-            let mut result_vars = vec![local_value];
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("exit scope should complete for aliased nested handle-object local");
             assert!(
             fusion_residency::is_resident(&handle),
@@ -3756,8 +3519,7 @@ mod tests {
             "exit scope should not release provider storage for nested handle-object handles still referenced by vars"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -3776,15 +3538,18 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 2);
-            let mut seed_vars = vec![
+            let seed_vars = vec![
                 Value::GpuTensor(handle.clone()),
                 Value::GpuTensor(handle.clone()),
             ];
-            let mut state = InterpreterState::new(
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state
                 .stack
@@ -3796,9 +3561,8 @@ mod tests {
             ]
             .into();
 
-            let mut result_vars = state.vars.clone_values_for_test();
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
-                .expect("store var should complete");
+            let _result_vars =
+                block_on(run_interpreter_inner(state)).expect("store var should complete");
             assert!(
             fusion_residency::is_resident(&handle),
             "store var overwrite should preserve residency for handles still live in other vars"
@@ -3808,8 +3572,7 @@ mod tests {
             "store var overwrite should not release provider storage for handles still live in other vars"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -3828,12 +3591,15 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::GpuTensor(handle.clone())];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state
                 .stack
@@ -3842,8 +3608,7 @@ mod tests {
             state.vars = vec![Value::GpuTensor(handle.clone())].into();
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
-            let mut result_vars = state.vars.clone_values_for_test();
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("store var should complete when alias lives in locals");
             assert!(
                 fusion_residency::is_resident(&handle),
@@ -3854,8 +3619,7 @@ mod tests {
             "store var overwrite should not release provider storage for handles still live in locals"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -3874,12 +3638,15 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
             payload.insert("nested", Value::GpuTensor(handle.clone()));
@@ -3896,10 +3663,9 @@ mod tests {
                 .try_push(Value::Num(0.0))
                 .expect("test stack capacity");
 
-            let mut result_vars = state.vars.clone_values_for_test();
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("store var overwrite should complete for nested handle-object value");
             runmat_gc::gc_collect_major().unwrap();
             assert!(
@@ -3922,12 +3688,15 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 2);
-            let mut seed_vars = vec![Value::Num(0.0), Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0), Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
             payload.insert("nested", Value::GpuTensor(handle.clone()));
@@ -3944,8 +3713,7 @@ mod tests {
                 .try_push(Value::Num(0.0))
                 .expect("test stack capacity");
 
-            let mut result_vars = state.vars.clone_values_for_test();
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars))).expect(
+            let _result_vars = block_on(run_interpreter_inner(state)).expect(
                 "store var overwrite should complete for aliased nested handle-object values",
             );
             assert!(
@@ -3957,8 +3725,7 @@ mod tests {
             "store var overwrite should not release provider storage for nested handle-object handles still live in other vars"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -3977,12 +3744,15 @@ mod tests {
             fusion_residency::mark(&handle);
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
             payload.insert("nested", Value::GpuTensor(handle.clone()));
@@ -4000,8 +3770,7 @@ mod tests {
                 .expect("test stack capacity");
             state.context.locals.push(nested);
 
-            let mut result_vars = state.vars.clone_values_for_test();
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("store var overwrite should complete when alias lives in locals");
             assert!(
             fusion_residency::is_resident(&handle),
@@ -4012,8 +3781,7 @@ mod tests {
             "store var overwrite should not release provider storage for nested handle-object handles still live in locals"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -4033,12 +3801,15 @@ mod tests {
 
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::GpuTensor(handle.clone())];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state
                 .stack
@@ -4057,9 +3828,8 @@ mod tests {
                 });
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
-            let mut result_vars = state.vars.clone_values_for_test();
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
-                .expect("store local should complete");
+            let _result_vars =
+                block_on(run_interpreter_inner(state)).expect("store local should complete");
             assert!(
                 fusion_residency::is_resident(&handle),
                 "store local overwrite should preserve residency for handles still live in vars"
@@ -4069,8 +3839,7 @@ mod tests {
             "store local overwrite should not release provider storage for handles still live in vars"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -4090,12 +3859,15 @@ mod tests {
 
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state
                 .stack
@@ -4115,8 +3887,7 @@ mod tests {
             state.context.locals.push(Value::GpuTensor(handle.clone()));
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
-            let mut result_vars = state.vars.clone_values_for_test();
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("store local should complete when alias lives in other local");
             assert!(
             fusion_residency::is_resident(&handle),
@@ -4127,8 +3898,7 @@ mod tests {
             "store local overwrite should not release provider storage for handles still live in other locals"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -4148,12 +3918,15 @@ mod tests {
 
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             state
                 .stack
@@ -4172,10 +3945,9 @@ mod tests {
                 });
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
-            let mut result_vars = state.vars.clone_values_for_test();
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("store local overwrite should complete");
             assert!(
                 weak.acquire().is_err(),
@@ -4197,12 +3969,15 @@ mod tests {
 
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
             payload.insert("nested", Value::GpuTensor(handle.clone()));
@@ -4229,10 +4004,9 @@ mod tests {
                 valid: true,
             }));
 
-            let mut result_vars = state.vars.clone_values_for_test();
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("store local overwrite should complete for nested handle-object value");
             runmat_gc::gc_collect_major().unwrap();
             assert!(
@@ -4255,12 +4029,15 @@ mod tests {
 
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
             payload.insert("nested", Value::GpuTensor(handle.clone()));
@@ -4288,8 +4065,7 @@ mod tests {
                 });
             state.context.locals.push(local_value);
 
-            let mut result_vars = state.vars.clone_values_for_test();
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars))).expect(
+            let _result_vars = block_on(run_interpreter_inner(state)).expect(
                 "store local overwrite should complete for aliased nested handle-object value",
             );
             assert!(
@@ -4301,8 +4077,7 @@ mod tests {
             "store local overwrite should not release provider storage for nested handle-object handles still live in vars"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");
@@ -4322,12 +4097,15 @@ mod tests {
 
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
-            let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state = InterpreterState::new(
+            let seed_vars = vec![Value::Num(0.0)];
+            let mut state = InterpreterState::from_owned_in_context(
                 bytecode,
-                &mut seed_vars,
+                seed_vars,
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
+                runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
             );
             let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
             payload.insert("nested", Value::GpuTensor(handle.clone()));
@@ -4356,8 +4134,7 @@ mod tests {
             state.context.locals.push(nested.clone());
             state.context.locals.push(nested);
 
-            let mut result_vars = state.vars.clone_values_for_test();
-            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
+            let _result_vars = block_on(run_interpreter_inner(state))
                 .expect("store local overwrite should complete when alias lives in other local");
             assert!(
             fusion_residency::is_resident(&handle),
@@ -4368,8 +4145,7 @@ mod tests {
             "store local overwrite should not release provider storage for nested handle-object handles still live in other locals"
         );
             let weak = handle.downgrade();
-            drop(seed_vars);
-            drop(result_vars);
+            drop(_result_vars);
             drop(handle);
             runmat_gc::gc_collect_major().unwrap();
             assert!(weak.acquire().is_err(), "all actual owners were released");

@@ -139,15 +139,16 @@ fn compiled_fused_compute_then_ordinary_second_store_failure_is_caught_without_r
                 .with_workspace(workspace.clone())
                 .with_placement(placement),
         );
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
         let before = provider.fused_dispatches.load(Ordering::Relaxed);
         let runmat_vm::InterpreterOutcome::Completed(completion) =
-            block_on(runmat_vm::interpret_with_workspace_in_context(
+            block_on(runmat_vm::interpret_workspace(
                 &bytecode,
-                &mut vars,
+                runmat_vm::InterpreterVars::from_owned(vars),
                 None,
                 runtime,
                 Some(top_level_admission(&bytecode)),
+                None,
             ))
             .outcome
             .expect("language catch handles terminal publication failure");
@@ -229,15 +230,16 @@ fn compiled_fusion_hard_provider_failure_is_caught_without_cpu_replay() {
                     runmat_accelerate::placement::PlacementSession::default(),
                 )),
         );
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
         let before = provider.fused_dispatches.load(Ordering::Relaxed);
         let runmat_vm::InterpreterOutcome::Completed(completion) =
-            block_on(runmat_vm::interpret_with_workspace_in_context(
+            block_on(runmat_vm::interpret_workspace(
                 &bytecode,
-                &mut vars,
+                runmat_vm::InterpreterVars::from_owned(vars),
                 None,
                 runtime,
                 Some(top_level_admission(&bytecode)),
+                None,
             ))
             .outcome
             .expect("language catch handles exact hard provider error");

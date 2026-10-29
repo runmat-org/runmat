@@ -89,21 +89,27 @@ fn prepare(workload: Workload) -> PreparedBenchmark {
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_service_ports(RuntimeServicePorts::default().with_placement(placement.clone()));
-    let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    block_on(runmat_vm::interpret_with_vars_in_context(
-        &bytecode,
-        &mut vars,
-        None,
-        runtime.clone(),
-    ))
-    .expect("benchmark setup executes authentic folded reduction");
+    let vars = vec![Value::Num(0.0); bytecode.var_count];
+    let runmat_vm::InterpreterOutcome::Completed(completion) =
+        block_on(runmat_vm::interpret_workspace(
+            &bytecode,
+            runmat_vm::InterpreterVars::from_owned(vars),
+            None,
+            runtime.clone(),
+            None,
+            None,
+        ))
+        .outcome
+        .expect("benchmark setup executes authentic folded reduction");
+    let vars = &completion.values;
     block_on(runtime.scope(async {}));
     let output_slot = bytecode
         .var_names
         .iter()
         .find_map(|(slot, name)| (name == "z").then_some(*slot))
         .expect("gathered benchmark output");
-    let Value::Tensor(output) = &vars[output_slot] else {
+    let output_value = vars.get(output_slot).expect("completed output slot");
+    let Value::Tensor(output) = &*output_value else {
         panic!("benchmark setup must publish a host tensor");
     };
     let [rows, columns] = workload.shape();

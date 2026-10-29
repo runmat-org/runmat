@@ -58,20 +58,26 @@ fn execute_workload(
 ) -> MeasuredChoice {
     let prior_choices = placement.choices.borrow().len();
     let prior_receipts = placement.delivered.lock().unwrap().len();
-    let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    block_on(runmat_vm::interpret_with_vars_in_context(
-        bytecode,
-        &mut vars,
-        None,
-        runtime.clone(),
-    ))
-    .expect("authentic VM folded reduction workload");
+    let vars = vec![Value::Num(0.0); bytecode.var_count];
+    let runmat_vm::InterpreterOutcome::Completed(completion) =
+        block_on(runmat_vm::interpret_workspace(
+            bytecode,
+            runmat_vm::InterpreterVars::from_owned(vars),
+            None,
+            runtime.clone(),
+            None,
+            None,
+        ))
+        .outcome
+        .expect("authentic VM folded reduction workload");
+    let vars = &completion.values;
     let slot = bytecode
         .var_names
         .iter()
         .find_map(|(slot, name)| (name == "z").then_some(*slot))
         .expect("published gathered reduction output");
-    let Value::Tensor(output) = &vars[slot] else {
+    let output_value = vars.get(slot).expect("completed output slot");
+    let Value::Tensor(output) = &*output_value else {
         panic!("gathered output is a numeric tensor");
     };
     let [rows, columns] = workload.input_shape();
@@ -83,7 +89,8 @@ fn execute_workload(
         .iter()
         .find_map(|(slot, name)| (name == "x").then_some(*slot))
         .expect("published input owner");
-    let Value::Tensor(input) = &vars[input_slot] else {
+    let input_value = vars.get(input_slot).expect("completed input slot");
+    let Value::Tensor(input) = &*input_value else {
         panic!("folded reduction must retain its host input owner");
     };
     assert_eq!(input.shape(), [rows, columns]);

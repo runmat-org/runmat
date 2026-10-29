@@ -84,10 +84,8 @@ pub use interpreter::dynamic_admission::{
     DynamicEvalProductAdmission, DynamicEvalPublication, PendingClosureAdmissionRequest,
 };
 pub use interpreter::runner::{
-    interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
-    interpret_with_vars_in_context, interpret_with_workspace_and_dynamic_admission_in_context,
-    interpret_with_workspace_in_context, invoke_semantic_function_value,
-    invoke_semantic_function_value_in_context,
+    interpret, interpret_function, interpret_function_with_counts, interpret_workspace,
+    invoke_semantic_function_value, invoke_semantic_function_value_in_context,
     invoke_semantic_function_value_with_dynamic_admission_in_context,
     invoke_semantic_function_value_with_environment_in_context,
     invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context,

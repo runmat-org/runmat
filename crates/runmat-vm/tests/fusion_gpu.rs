@@ -2926,21 +2926,32 @@ fn fusion_feasibility_rejection_resumes_shared_runtime_before_provider_side_effe
             y = sin(x) .* x + 2;
             "#,
         );
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        block_on(runmat_vm::interpret_with_vars_in_context(
-            &bytecode, &mut vars, None, runtime,
-        ))
-        .expect("shared-runtime fusion after provider rejection");
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_workspace(
+                &bytecode,
+                runmat_vm::InterpreterVars::from_owned(vars),
+                None,
+                runtime,
+                None,
+                None,
+            ))
+            .outcome
+            .expect("shared-runtime fusion after provider rejection");
         let output_slot = *bytecode
             .var_names
             .iter()
             .find(|(_, name)| name.as_str() == "y")
             .expect("y output slot")
             .0;
-        let Value::Tensor(output) = &vars[output_slot] else {
+        let output_value = completion
+            .values
+            .get(output_slot)
+            .expect("completed output slot");
+        let Value::Tensor(output) = &*output_value else {
             panic!(
                 "shared runtime must return a host tensor: {:?}",
-                vars[output_slot]
+                &*output_value
             );
         };
         assert_eq!(output.shape(), vec![1, 3]);

@@ -57,12 +57,15 @@ fn strict_dot_store_updates_existing_handle_without_setfield_extension() {
                 .unwrap()
         ];
         variables[slot("obj")] = Value::HandleObject(handle.clone());
-        let result = futures::executor::block_on(runmat_vm::interpret_with_vars_in_context(
+        let result = futures::executor::block_on(runmat_vm::interpret_workspace(
             &bytecode,
-            &mut variables,
+            runmat_vm::InterpreterVars::from_owned(variables),
             None,
             runtime,
+            None,
+            None,
         ))
+        .outcome
         .unwrap();
         let runmat_vm::InterpreterOutcome::Completed(completion) = result;
         {

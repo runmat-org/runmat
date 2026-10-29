@@ -133,7 +133,6 @@ pub async fn evaluate_numeric_text_source_in_context(
     }
     let names = HashMap::new();
     let assigned = HashSet::new();
-    let mut values = Vec::new();
     let requires_product = |canonical: &crate::bytecode::Bytecode, inherited: &FunctionRegistry| {
         selected
             .port
@@ -144,7 +143,7 @@ pub async fn evaluate_numeric_text_source_in_context(
         builtin: "str2num",
         ast: &ast,
         workspace_bindings: &names,
-        workspace_value_count: values.len(),
+        workspace_value_count: 0,
         lowering_bindings: &names,
         function_registry,
         source_ref: Some(source_ref),
@@ -218,7 +217,7 @@ pub async fn evaluate_numeric_text_source_in_context(
                             builtin: "str2num",
                             ast: &ast,
                             workspace_bindings: &names,
-                            workspace_value_count: values.len(),
+                            workspace_value_count: 0,
                             lowering_bindings: &names,
                             function_registry,
                             source_ref: Some(source_ref),
@@ -277,9 +276,9 @@ pub async fn evaluate_numeric_text_source_in_context(
             assigned,
             runmat_runtime::workspace::bindings::FrameGlobalBindings::default(),
         );
-    let execution = interpret_with_workspace_and_dynamic_admission_in_context(
+    let execution = interpret_workspace(
         &bytecode,
-        &mut values,
+        crate::InterpreterVars::from_owned(Vec::new()),
         Some(&source_label),
         runtime.with_invocation_arity(runmat_runtime::context::RuntimeInvocationArity::Script),
         Some(admission),

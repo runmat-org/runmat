@@ -143,11 +143,18 @@ fn execute(
     context: RuntimeContext,
 ) -> Result<runmat_runtime::execution::RootedValues, Box<RuntimeError>> {
     runmat_vm::reset_thread_state_for_tests();
-    let mut variables = vec![];
-    let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
-        runmat_vm::interpret_with_vars_in_context(bytecode, &mut variables, None, context),
-    )
-    .map_err(Box::new)?;
+    let variables = vec![];
+    let runmat_vm::InterpreterOutcome::Completed(completion) =
+        block_on(runmat_vm::interpret_workspace(
+            bytecode,
+            runmat_vm::InterpreterVars::from_owned(variables),
+            None,
+            context,
+            None,
+            None,
+        ))
+        .outcome
+        .map_err(Box::new)?;
     completion
         .with_owned(|completion| {
             runmat_runtime::execution::RootedValues::new(

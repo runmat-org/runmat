@@ -67,16 +67,16 @@ fn compiled_elementwise_persistent_read_and_store_use_selected_session() {
             .expect("seed selected persistent tensor");
 
         for expected in [4.0, 13.0] {
-            let mut vars = Vec::new();
+            let vars = Vec::new();
             let (invocation_runtime, activation) =
                 crate::runtime::workspace_service::VmWorkspaceService::install(
                     runtime.clone(),
                     None,
                 );
             let frame = activation.frame();
-            let state = crate::interpreter::state::InterpreterState::new_in_context(
+            let state = crate::interpreter::state::InterpreterState::from_owned_in_context(
                 bytecode.clone(),
-                &mut vars,
+                vars,
                 Some("fusedPersistent"),
                 RuntimeInvocationArity::function(0, 1),
                 invocation_runtime.clone(),
@@ -90,7 +90,7 @@ fn compiled_elementwise_persistent_read_and_store_use_selected_session() {
             }));
             let before = super::fusion_store_tests::fusion_execution_entries();
             let outcome = futures::executor::block_on(activation.scope(
-                invocation_runtime.scope(super::super::run_interpreter(Box::new(state), &mut vars)),
+                invocation_runtime.scope(super::super::run_interpreter_owned(Box::new(state))),
             ))
             .expect("compiled persistent fusion candidate");
             let _ = crate::runtime::workspace::take_workspace_completion(frame);

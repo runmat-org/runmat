@@ -1,18 +1,18 @@
 use runmat_value::Value;
 
 mod base;
+pub mod bindings;
 mod checked;
 mod completion;
 mod detach;
 mod dynamic_target;
 mod logical_generation;
-mod retained;
-mod slot_read_lease;
 #[cfg(test)]
 #[path = "workspace/resolver_tests.rs"]
 mod resolver_tests;
+mod retained;
 pub mod session;
-pub mod bindings;
+mod slot_read_lease;
 
 pub use base::base_workspace_error_to_runtime;
 pub use base::{
@@ -21,9 +21,10 @@ pub use base::{
     BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
     BaseWorkspaceProjectionService, BaseWorkspaceReconciliation, BaseWorkspaceService,
     BaseWorkspaceSnapshot, PreparedWorkspaceCompletion, WorkspaceChange, WorkspaceChangeKind,
-    WorkspaceDelta, WorkspacePublicationBatch, WorkspacePublicationMutation,
-    WorkspacePublicationObserver, WorkspacePublicationOrigin, WorkspacePublicationProtocol,
-    WorkspacePublicationStamp, WorkspacePublicationToken, WorkspaceRevision,
+    WorkspaceDelta, WorkspaceProjectionPublication, WorkspacePublicationBatch,
+    WorkspacePublicationMutation, WorkspacePublicationObserver, WorkspacePublicationOrigin,
+    WorkspacePublicationProtocol, WorkspacePublicationStamp, WorkspacePublicationToken,
+    WorkspaceRevision,
 };
 pub use bindings::GlobalBindingTarget;
 pub use checked::{

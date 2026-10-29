@@ -1,13 +1,13 @@
 use super::*;
 use std::rc::Rc;
 
-mod preparation;
-#[path = "run/contextual.rs"]
-mod contextual;
 #[path = "run/command.rs"]
 mod command;
+#[path = "run/contextual.rs"]
+mod contextual;
 #[path = "run/phases.rs"]
 mod phases;
+mod preparation;
 mod request_scope;
 #[path = "run/selected_class_product.rs"]
 mod selected_class_product;
@@ -492,12 +492,12 @@ impl RunMatSession {
     async fn interpret_with_context(
         &mut self,
         bytecode: &runmat_vm::Bytecode,
-        variable_array: &mut Vec<Value>,
+        variable_array: runmat_vm::InterpreterVars,
         runtime: runmat_runtime::context::RuntimeContext,
         admission: Option<runmat_vm::PendingWorkspaceAdmission>,
     ) -> runmat_vm::WorkspaceInterpreterOutcome {
         let source_name = self.current_source_name().to_string();
-        runmat_vm::interpret_with_workspace_and_dynamic_admission_in_context(
+        runmat_vm::interpret_workspace(
             bytecode,
             variable_array,
             Some(source_name.as_str()),

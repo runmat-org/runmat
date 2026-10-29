@@ -123,13 +123,14 @@ fn interpret_in_context_with_admission(
 ) -> Result<RootedValues, RuntimeError> {
     let bytecode = bytecode.clone();
     run_with_stack(move || {
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        let execution = block_on(runmat_vm::interpret_with_workspace_in_context(
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let execution = block_on(runmat_vm::interpret_workspace(
             &bytecode,
-            &mut vars,
+            runmat_vm::InterpreterVars::from_owned(vars),
             Some("<main>"),
             runtime,
             admission,
+            None,
         ));
         let outcome = execution.outcome?;
         // The completed workspace aliases the same frame. Retire that unused

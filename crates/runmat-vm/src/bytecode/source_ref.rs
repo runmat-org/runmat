@@ -92,18 +92,23 @@ mod tests {
         let mut bytecode =
             Bytecode::with_instructions(vec![Instr::LoadConst(11.0), Instr::Return], 0);
         bytecode.source_id = Some(BytecodeSourceRef::Runtime(first_lease.source_ref()));
-        let mut values = Vec::new();
-        let rejected = futures::executor::block_on(
-            crate::interpreter::runner::interpret_with_vars_in_context(
+        let values = Vec::new();
+        let execution =
+            futures::executor::block_on(crate::interpreter::runner::interpret_workspace(
                 &bytecode,
-                &mut values,
+                crate::InterpreterVars::from_owned(values),
                 Some("first"),
                 second.clone(),
-            ),
-        )
-        .expect_err("foreign source owner must fail before executing bytecode");
+                None,
+                None,
+            ));
+        let rejected = execution
+            .outcome
+            .expect_err("foreign source owner must fail before executing bytecode");
         assert!(rejected.to_string().contains("another runtime owner"));
-        assert!(values.is_empty());
+        assert!(execution
+            .workspace
+            .is_none_or(|workspace| workspace.state.vars.is_empty()));
         assert_eq!(
             runmat_runtime::source_context::source_info_in_context(
                 &second,

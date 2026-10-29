@@ -388,13 +388,23 @@ fn fusion_submission_does_not_train_completed_provider_execution() {
             y = sin(x) .* x + 2;
             "#,
         );
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        block_on(runmat_vm::interpret_with_vars_in_context(
-            &bytecode, &mut vars, None, runtime,
-        ))
-        .expect("session-owned fusion execution");
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_workspace(
+                &bytecode,
+                runmat_vm::InterpreterVars::from_owned(vars),
+                None,
+                runtime,
+                None,
+                None,
+            ))
+            .outcome
+            .expect("session-owned fusion execution");
+        let vars = &completion.values;
         assert_fusion_numeric_output(
-            &vars[fusion_var_index(&bytecode, "y")],
+            &*vars
+                .get(fusion_var_index(&bytecode, "y"))
+                .expect("completed fusion output"),
             &(1..=4096).map(f64::from).collect::<Vec<_>>(),
         );
         assert_provider_fusion_was_submitted();
@@ -432,12 +442,25 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
         .with_service_ports(
             runmat_runtime::context::RuntimeServicePorts::default().with_placement(capture.clone()),
         );
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        block_on(runmat_vm::interpret_with_vars_in_context(
-            &bytecode, &mut vars, None, runtime,
-        ))
-        .expect("shared-runtime selection");
-        assert_fusion_numeric_output(&vars[fusion_var_index(&bytecode, "y")], &[0.25, 0.5]);
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_workspace(
+                &bytecode,
+                runmat_vm::InterpreterVars::from_owned(vars),
+                None,
+                runtime,
+                None,
+                None,
+            ))
+            .outcome
+            .expect("shared-runtime selection");
+        let vars = &completion.values;
+        assert_fusion_numeric_output(
+            &*vars
+                .get(fusion_var_index(&bytecode, "y"))
+                .expect("completed fusion output"),
+            &[0.25, 0.5],
+        );
         assert_one_cpu_full_call(&capture);
 
         let report = runmat_accelerate::placement_report();
@@ -502,11 +525,18 @@ fn compiled_general_private_chain_completes_on_shared_cpu_with_one_receipt() {
         .with_service_ports(
             runmat_runtime::context::RuntimeServicePorts::default().with_placement(capture.clone()),
         );
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
-            runmat_vm::interpret_with_vars_in_context(&bytecode, &mut vars, None, runtime.clone()),
-        )
-        .expect("ordinary VM shared CPU general chain");
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_workspace(
+                &bytecode,
+                runmat_vm::InterpreterVars::from_owned(vars),
+                None,
+                runtime.clone(),
+                None,
+                None,
+            ))
+            .outcome
+            .expect("ordinary VM shared CPU general chain");
         let output = completion
             .values
             .get(fusion_var_index(&bytecode, "y"))
@@ -712,10 +742,16 @@ fn cancellation_after_cpu_fusion_selection(reject_provider: bool, vm_full_call: 
         .with_service_ports(
             runmat_runtime::context::RuntimeServicePorts::default().with_placement(service.clone()),
         );
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        let outcome = block_on(runmat_vm::interpret_with_vars_in_context(
-            &bytecode, &mut vars, None, runtime,
-        ));
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let outcome = block_on(runmat_vm::interpret_workspace(
+            &bytecode,
+            runmat_vm::InterpreterVars::from_owned(vars),
+            None,
+            runtime,
+            None,
+            None,
+        ))
+        .outcome;
         if !vm_full_call {
             let _ =
                 outcome.expect("without an installed VM FullCall right, original instructions run");

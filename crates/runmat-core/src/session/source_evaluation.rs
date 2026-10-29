@@ -9,6 +9,10 @@ use runmat_runtime::context::{
 use runmat_runtime::execution::RootedValueSequence;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 
+#[cfg(test)]
+#[path = "source_evaluation/terminal_tests.rs"]
+mod terminal_tests;
+
 #[cfg(not(target_arch = "wasm32"))]
 type ForeignPreparation = crate::foreign_artifacts::SelectedForeignPreparation;
 #[cfg(not(target_arch = "wasm32"))]

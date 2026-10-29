@@ -117,11 +117,18 @@ async fn assert_chain_full_call(decoded_function: bool, original_power: bool, re
         .iter()
         .map(|trace| trace.correlation)
         .collect::<HashSet<_>>();
-    let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    let runmat_vm::InterpreterOutcome::Completed(completion) =
-        runmat_vm::interpret_with_vars_in_context(&bytecode, &mut vars, None, runtime.clone())
-            .await
-            .expect("ordinary VM general-chain invocation");
+    let vars = vec![Value::Num(0.0); bytecode.var_count];
+    let runmat_vm::InterpreterOutcome::Completed(completion) = runmat_vm::interpret_workspace(
+        &bytecode,
+        runmat_vm::InterpreterVars::from_owned(vars),
+        None,
+        runtime.clone(),
+        None,
+        None,
+    )
+    .await
+    .outcome
+    .expect("ordinary VM general-chain invocation");
     let published = completion
         .with_owned(|completion| {
             runmat_runtime::execution::RootedValues::new(

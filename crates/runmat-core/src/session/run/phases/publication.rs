@@ -1,12 +1,37 @@
 //! Original workspace/result publication after the selected child has retired.
 use super::*;
+fn completed_value(
+    completion: &Option<runmat_vm::InterpreterOutcome>,
+    slots: &HashMap<String, usize>,
+    #[cfg(not(target_arch = "wasm32"))] native: &Option<
+        Box<crate::generic_native::RootedNativeExecution>,
+    >,
+    slot: usize,
+) -> Option<Value> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(native) = native {
+        let snapshot = native.workspace.as_ref()?;
+        return slots
+            .iter()
+            .find_map(|(name, index)| (*index == slot).then(|| snapshot.get(name)).flatten())
+            .cloned();
+    }
+    let _ = slots;
+    match completion {
+        Some(runmat_vm::InterpreterOutcome::Completed(completion)) => {
+            completion.values.get(slot).map(|value| value.clone())
+        }
+        None => None,
+    }
+}
+
 pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, RunError> {
     let Active { session, state } = active;
     let _guards = state.data.guards;
     let State {
         // Declared before the remaining owners so they retire before this
         // guard, which itself still precedes the original `_guards` teardown.
-        workspace_publication: _workspace_publication,
+        mut workspace_publication,
         used_jit,
         execution_completed: _,
         mut result_value,
@@ -49,14 +74,11 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
         execution_vars,
         workspace_projection,
         fusion_snapshot,
-        variable_array,
+        variable_array: _unstarted_frame,
+        frame_extent,
         workspace_admission: _workspace_admission,
         ..
     } = workspace;
-    #[cfg(not(target_arch = "wasm32"))]
-    let mut variable_array = variable_array;
-    #[cfg(not(target_arch = "wasm32"))]
-    let mut execution_vars = execution_vars;
     #[cfg(not(target_arch = "wasm32"))]
     let mut ans_update = ans_update;
 
@@ -73,22 +95,34 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
             }
             if result_value.is_none() {
                 if let Some(var_id) = last_store_var_index(&bytecode) {
-                    if var_id < variable_array.len() {
-                        result_value = Some(variable_array[var_id].clone());
-                    }
+                    result_value = completed_value(
+                        &completed_vm_root,
+                        &execution_vars,
+                        #[cfg(not(target_arch = "wasm32"))]
+                        &completed_native_root,
+                        var_id,
+                    );
                 }
                 if result_value.is_none() {
                     if let Some(var_id) = last_assign_var {
-                        if var_id < variable_array.len() {
-                            result_value = Some(variable_array[var_id].clone());
-                        }
+                        result_value = completed_value(
+                            &completed_vm_root,
+                            &execution_vars,
+                            #[cfg(not(target_arch = "wasm32"))]
+                            &completed_native_root,
+                            var_id,
+                        );
                     }
                 }
                 if result_value.is_none() {
                     if let Some(var_id) = last_emit_var_index(&bytecode) {
-                        if var_id < variable_array.len() {
-                            result_value = Some(variable_array[var_id].clone());
-                        }
+                        result_value = completed_value(
+                            &completed_vm_root,
+                            &execution_vars,
+                            #[cfg(not(target_arch = "wasm32"))]
+                            &completed_native_root,
+                            var_id,
+                        );
                     }
                 }
             }
@@ -99,14 +133,9 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
     // Publish them even when a later statement fails so an ordinary script
     // preserves MATLAB workspace semantics without replacing concurrent
     // canonical state from an end-of-run snapshot.
-    if workspace_projection
-        .has_pending_changes()
-        .map_err(RunError::Runtime)?
-    {
-        workspace_projection
-            .publish_with_context(&execution_runtime)
-            .map_err(RunError::Runtime)?;
-    }
+    workspace_publication
+        .publish_pending()
+        .map_err(RunError::Runtime)?;
     let published_changes = workspace_projection
         .take_published_changes_with_context(&execution_runtime)
         .map_err(RunError::Runtime)?;
@@ -127,15 +156,7 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
     #[cfg(not(target_arch = "wasm32"))]
     if used_jit && is_expression_stmt {
         if let Some(value) = result_value.clone() {
-            let slot = execution_vars.get("ans").copied().unwrap_or_else(|| {
-                let slot = variable_array.len();
-                execution_vars.insert("ans".to_string(), slot);
-                slot
-            });
-            if variable_array.len() <= slot {
-                variable_array.resize(slot + 1, Value::Num(0.0));
-            }
-            variable_array[slot] = value.clone();
+            let slot = execution_vars.get("ans").copied().unwrap_or(frame_extent);
             ans_update = Some((slot, value));
         }
     }
@@ -169,50 +190,11 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
     let vm_workspace_state = (!used_jit)
         .then(|| vm_workspace_completion.map(|completion| completion.state))
         .flatten();
-    let mut completed_vm_aliases = None;
-    let mut completed_workspace = if let Some(workspace_state) = vm_workspace_state {
-        completed_vm_aliases = Some(workspace_state.global_aliases);
-        let mutated_names = workspace_state.names;
-        let assigned = workspace_state.assigned;
-        if debug_trace {
-            debug!(
-                ?mutated_names,
-                ?assigned,
-                "[repl] mutated names and assigned return values"
-            );
-        }
-        Some(
-            assigned
-                .into_iter()
-                .filter_map(|name| {
-                    let slot = mutated_names.get(&name).copied()?;
-                    let value = workspace_state.vars.get(slot)?.clone();
-                    Some((name.as_str().to_owned(), (slot, value)))
-                })
-                .collect::<HashMap<_, _>>(),
-        )
-    } else if used_jit && error.is_none() {
-        Some(
-            execution_vars
-                .iter()
-                .filter_map(|(name, slot)| {
-                    variable_array
-                        .get(*slot)
-                        .cloned()
-                        .map(|value| (name.clone(), (*slot, value)))
-                })
-                .collect::<HashMap<_, _>>(),
-        )
-    } else {
-        None
-    };
-
     // An unsuppressed expression updates `ans` only after successful
     // execution. This is a language-visible host write, so admit it
     // explicitly instead of inferring it from the completed register file.
     if error.is_none() {
-        if let (Some(workspace), Some((var_id, value))) = (completed_workspace.as_mut(), ans_update)
-        {
+        if let Some((var_id, value)) = ans_update {
             runmat_runtime::execution::validate_storable_value(&value)
                 .map_err(RunError::Runtime)?;
             runmat_runtime::context::RuntimeWorkspaceService::assign_executor_slot_ref(
@@ -223,8 +205,8 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
                 &value,
             )
             .map_err(RunError::Runtime)?;
-            workspace_projection
-                .publish_with_context(&execution_runtime)
+            workspace_publication
+                .publish_pending()
                 .map_err(RunError::Runtime)?;
             // The typed executor-slot origin above prepared the exact
             // compiler binding before this canonical publication. The
@@ -237,26 +219,44 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
                     workspace_updates.push(workspace_entry(name, value));
                 }
             }
-            workspace.insert("ans".to_string(), (var_id, value));
         }
     }
 
-    if let Some(completed_workspace) = completed_workspace {
-        // The executor has already admitted every language-visible
-        // mutation in source order. The completed register file now only
-        // refreshes VM slot metadata; it is never a second workspace
-        // authority and must not overwrite a newer canonical value.
-        let base_workspace = session.base_workspace.clone();
+    // Refresh only compiler metadata; the exact completed owner retains
+    // values. The register file/native snapshot is never a second workspace.
+    if let Some(workspace_state) = vm_workspace_state.as_ref() {
+        let bindings = workspace_state.assigned.iter().filter_map(|name| {
+            workspace_state
+                .names
+                .get(name)
+                .map(|slot| (name.as_str(), *slot))
+        });
         session
-            .refresh_workspace_binding_slots(&completed_workspace, |name, slot| {
-                match completed_vm_aliases.as_ref() {
-                    Some(aliases) => Ok(aliases.binding_handle_for_slot(slot)),
-                    None => base_workspace
-                        .global_target(name)
-                        .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime),
-                }
+            .refresh_workspace_binding_slots(bindings, |_, slot| {
+                Ok(workspace_state.global_aliases.binding_handle_for_slot(slot))
             })
             .map_err(RunError::Runtime)?;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if used_jit && error.is_none() {
+        if let Some(snapshot) = completed_native_root
+            .as_ref()
+            .and_then(|native| native.workspace.as_ref())
+        {
+            let bindings = execution_vars.iter().filter_map(|(name, slot)| {
+                snapshot
+                    .contains_key(name)
+                    .then_some((name.as_str(), *slot))
+            });
+            let base_workspace = session.base_workspace.clone();
+            session
+                .refresh_workspace_binding_slots(bindings, |name, _| {
+                    base_workspace
+                        .global_target(name)
+                        .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
+                })
+                .map_err(RunError::Runtime)?;
+        }
     }
     // Ingress reconciles external changes before execution. Every effect
     // in this invocation, including global declarations and a completed
@@ -295,9 +295,13 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
         && !display_var_ids.is_empty()
     {
         if let Some(var_id) = last_store_var_index(&bytecode) {
-            if var_id < variable_array.len() {
-                result_value = Some(variable_array[var_id].clone());
-            }
+            result_value = completed_value(
+                &completed_vm_root,
+                &execution_vars,
+                #[cfg(not(target_arch = "wasm32"))]
+                &completed_native_root,
+                var_id,
+            );
         }
     }
 

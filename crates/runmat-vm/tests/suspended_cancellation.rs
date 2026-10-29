@@ -45,7 +45,7 @@ fn execution_scope_preserves_normal_caught_language_errors_inner() {
         Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
         source.token(),
     );
-    let mut vars = vec![];
+    let vars = vec![];
     let admission = runmat_vm::workspace_admission(
         bytecode
             .var_names
@@ -55,12 +55,13 @@ fn execution_scope_preserves_normal_caught_language_errors_inner() {
         Default::default(),
     );
     assert!(runmat_runtime::context::legacy::active().is_none());
-    let execution = futures::executor::block_on(runmat_vm::interpret_with_workspace_in_context(
+    let execution = futures::executor::block_on(runmat_vm::interpret_workspace(
         &bytecode,
-        &mut vars,
+        runmat_vm::InterpreterVars::from_owned(vars),
         None,
         runtime,
         Some(admission),
+        None,
     ));
     assert!(runmat_runtime::context::legacy::active().is_none());
     let outcome = execution.outcome.expect("language catch remains available");
@@ -134,19 +135,32 @@ fn production_vm_cancellation_wakes_pending_dispatch_and_bypasses_catch_inner() 
         source.token(),
     )
     .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(PendingBuiltin)));
-    let mut vars = vec![];
-    let mut execution = Box::pin(runmat_vm::interpret_with_vars_in_context(
-        &bytecode, &mut vars, None, runtime,
+    let vars = vec![];
+    let mut execution = Box::pin(runmat_vm::interpret_workspace(
+        &bytecode,
+        runmat_vm::InterpreterVars::from_owned(vars),
+        None,
+        runtime,
+        None,
+        None,
     ));
     let wakes = Arc::new(Wakes::default());
     let waker = Waker::from(wakes.clone());
     let mut cx = Context::from_waker(&waker);
-    assert!(execution.as_mut().poll(&mut cx).is_pending());
+    assert!(execution
+        .as_mut()
+        .poll(&mut cx)
+        .map(|execution| execution.outcome)
+        .is_pending());
     assert_eq!(CALLS.load(Ordering::SeqCst), 1);
     assert_eq!(DROPS.load(Ordering::SeqCst), 0);
     source.cancel(CancellationReason::User);
     assert!(wakes.0.load(Ordering::SeqCst) > 0);
-    let Poll::Ready(Err(error)) = execution.as_mut().poll(&mut cx) else {
+    let Poll::Ready(Err(error)) = execution
+        .as_mut()
+        .poll(&mut cx)
+        .map(|execution| execution.outcome)
+    else {
         panic!("cancellation must terminalize suspended dispatch");
     };
     assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
@@ -201,22 +215,34 @@ fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
     let source = CancellationSource::new();
     let runtime = RuntimeContext::with_cancellation(service.clone(), source.token())
         .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(PendingBuiltin)));
-    let mut vars = vec![Value::Future(owned.clone().into())];
+    let vars = vec![Value::Future(owned.clone().into())];
     let calls_before = CALLS.load(Ordering::SeqCst);
     let drops_before = DROPS.load(Ordering::SeqCst);
-    let mut execution = Box::pin(runmat_vm::interpret_with_vars_in_context(
-        &bytecode, &mut vars, None, runtime,
+    let mut execution = Box::pin(runmat_vm::interpret_workspace(
+        &bytecode,
+        runmat_vm::InterpreterVars::from_owned(vars),
+        None,
+        runtime,
+        None,
+        None,
     ));
     let wakes = Arc::new(Wakes::default());
     let waker = Waker::from(wakes.clone());
     let mut cx = Context::from_waker(&waker);
-    assert!(execution.as_mut().poll(&mut cx).is_pending());
+    assert!(execution
+        .as_mut()
+        .poll(&mut cx)
+        .map(|execution| execution.outcome)
+        .is_pending());
     assert_eq!(CALLS.load(Ordering::SeqCst), calls_before + 1);
     if cancel {
         source.cancel(CancellationReason::User);
         assert!(wakes.0.load(Ordering::SeqCst) > 0);
         assert!(matches!(
-            execution.as_mut().poll(&mut cx),
+            execution
+                .as_mut()
+                .poll(&mut cx)
+                .map(|execution| execution.outcome),
             Poll::Ready(Err(_))
         ));
         assert!(matches!(

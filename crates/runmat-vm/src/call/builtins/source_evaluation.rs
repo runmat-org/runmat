@@ -7,7 +7,7 @@ use super::{
 };
 use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort;
-use crate::interpreter::runner::interpret_with_workspace_and_dynamic_admission_in_context;
+use crate::interpreter::runner::interpret_workspace;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
@@ -81,33 +81,32 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
             .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?,
         &runtime,
     );
-    let snapshot = projection.snapshot()?;
-    let mut names = HashMap::with_capacity(snapshot.len());
-    let mut assigned = HashSet::with_capacity(snapshot.len());
-    let mut values = Vec::with_capacity(snapshot.len());
-    for (slot, (name, value)) in snapshot.into_iter().enumerate() {
-        names.insert(name.clone(), slot);
-        assigned.insert(name);
-        values.push(value);
+    let generation = runmat_runtime::context::RuntimeWorkspaceService::capture_workspace_generation_with_context(
+        &projection, &runtime,
+    )?.ok_or_else(|| runmat_runtime::build_runtime_error("session source has no canonical workspace generation")
+        .with_identifier("RunMat:SourceEvaluation:WorkspaceGeneration").build())?;
+    let mut names = HashMap::new();
+    let mut assigned = HashSet::new();
+    for (slot, (name, _)) in generation.iter().enumerate() {
+        names.insert(name.to_owned(), slot);
+        assigned.insert(name.to_owned());
     }
     let global_aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
-    for name in
-        runmat_runtime::context::RuntimeWorkspaceService::base_global_binding_names(&projection)?
-    {
-        let Some(value) = runtime.session_global_value(&name)? else {
-            continue;
-        };
-        let slot = if let Some(slot) = names.get(&name).copied() {
-            values[slot] = value;
-            slot
-        } else {
-            let slot = values.len();
-            names.insert(name.clone(), slot);
-            values.push(value);
-            slot
-        };
-        assigned.insert(name.clone());
-        global_aliases.declare_named(slot, name);
+    for (name, target) in generation.global_bindings() {
+        if let Some(slot) = names.get(name).copied() {
+            let prepared = global_aliases
+                .prepare_target(&runtime, slot, target)
+                .map_err(|cause| {
+                    crate::runtime::workspace::frame_allocation_error_in_context(
+                        Some(&runtime),
+                        cause,
+                    )
+                })?;
+            prepared.checkpoint().map_err(|cause| {
+                crate::runtime::workspace::frame_allocation_error_in_context(Some(&runtime), cause)
+            })?;
+            prepared.commit();
+        }
     }
     let requires_product = |canonical: &crate::bytecode::Bytecode, inherited: &FunctionRegistry| {
         selected.as_ref().map_or(Ok(false), |selected| {
@@ -122,7 +121,7 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
         builtin: "source evaluation",
         ast: &ast,
         workspace_bindings: &names,
-        workspace_value_count: values.len(),
+        workspace_value_count: names.len(),
         lowering_bindings: &names,
         function_registry,
         source_ref: Some(source_ref),
@@ -177,14 +176,21 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
         .clone()
         .with_workspace(projection.clone());
     let execution_runtime = runtime.with_service_ports(services);
+    let mut publication = projection.terminal_publication(&execution_runtime)?;
+    let frame = crate::InterpreterVars::from_workspace_generation(
+        &execution_runtime,
+        &generation,
+        names.iter().map(|(name, slot)| (name.as_str(), *slot)),
+        bytecode.var_count,
+    )?;
     let admission = crate::runtime::workspace::detached_workspace_admission_with_global_bindings(
         names,
         assigned,
         global_aliases,
     );
-    let execution = interpret_with_workspace_and_dynamic_admission_in_context(
+    let execution = interpret_workspace(
         &bytecode,
-        &mut values,
+        frame,
         Some(&source_label),
         execution_runtime.clone(),
         Some(admission),
@@ -192,10 +198,7 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
     )
     .await;
 
-    let pending_changes = projection.has_pending_changes()?;
-    if pending_changes {
-        projection.publish_with_context(&execution_runtime)?;
-    }
+    publication.publish_pending()?;
     let InterpreterOutcome::Completed(completion) = execution.outcome?;
     if requested_outputs == 0 {
         return runmat_runtime::execution::RootedValueSequence::new(

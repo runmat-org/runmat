@@ -54,19 +54,23 @@ fn overlapping_function_futures_use_their_own_arity_after_the_other_suspends() {
         ));
         let (first_runtime, first_gate, first_reached) = runtime_with_gate(base.clone());
         let (second_runtime, second_gate, second_reached) = runtime_with_gate(base);
-        let mut first_vars = Vec::new();
-        let mut second_vars = Vec::new();
-        let mut first = Box::pin(runmat_vm::interpret_with_vars_in_context(
+        let first_vars = Vec::new();
+        let second_vars = Vec::new();
+        let mut first = Box::pin(runmat_vm::interpret_workspace(
             &first_bytecode,
-            &mut first_vars,
+            runmat_vm::InterpreterVars::from_owned(first_vars),
             Some("<main>"),
             first_runtime,
+            None,
+            None,
         ));
-        let mut second = Box::pin(runmat_vm::interpret_with_vars_in_context(
+        let mut second = Box::pin(runmat_vm::interpret_workspace(
             &second_bytecode,
-            &mut second_vars,
+            runmat_vm::InterpreterVars::from_owned(second_vars),
             Some("<main>"),
             second_runtime,
+            None,
+            None,
         ));
         expect_handler_reached(first.as_mut(), first_reached);
         expect_handler_reached(second.as_mut(), second_reached);
@@ -79,7 +83,7 @@ fn overlapping_function_futures_use_their_own_arity_after_the_other_suspends() {
             .send(())
             .expect("first invocation remains pending");
         let Ok(runmat_vm::InterpreterOutcome::Completed(first_result)) =
-            futures::executor::block_on(first.as_mut())
+            futures::executor::block_on(first.as_mut()).outcome
         else {
             panic!("first function did not complete after its own gate");
         };
@@ -92,7 +96,7 @@ fn overlapping_function_futures_use_their_own_arity_after_the_other_suspends() {
             .send(())
             .expect("second invocation remains pending");
         let Ok(runmat_vm::InterpreterOutcome::Completed(second_result)) =
-            futures::executor::block_on(second.as_mut())
+            futures::executor::block_on(second.as_mut()).outcome
         else {
             panic!("second function did not complete after its own gate");
         };
@@ -120,19 +124,23 @@ fn dropping_a_pending_function_does_not_change_sibling_function_arity() {
         let (abandoned_runtime, abandoned_gate, abandoned_reached) =
             runtime_with_gate(base.clone());
         let (live_runtime, live_gate, live_reached) = runtime_with_gate(base);
-        let mut abandoned_vars = Vec::new();
-        let mut live_vars = Vec::new();
-        let mut abandoned = Box::pin(runmat_vm::interpret_with_vars_in_context(
+        let abandoned_vars = Vec::new();
+        let live_vars = Vec::new();
+        let mut abandoned = Box::pin(runmat_vm::interpret_workspace(
             &bytecode,
-            &mut abandoned_vars,
+            runmat_vm::InterpreterVars::from_owned(abandoned_vars),
             Some("<main>"),
             abandoned_runtime,
+            None,
+            None,
         ));
-        let mut live = Box::pin(runmat_vm::interpret_with_vars_in_context(
+        let mut live = Box::pin(runmat_vm::interpret_workspace(
             &bytecode,
-            &mut live_vars,
+            runmat_vm::InterpreterVars::from_owned(live_vars),
             Some("<main>"),
             live_runtime,
+            None,
+            None,
         ));
         expect_handler_reached(abandoned.as_mut(), abandoned_reached);
         expect_handler_reached(live.as_mut(), live_reached);
@@ -146,7 +154,7 @@ fn dropping_a_pending_function_does_not_change_sibling_function_arity() {
         );
         live_gate.send(()).expect("sibling still owns its gate");
         let Ok(runmat_vm::InterpreterOutcome::Completed(result)) =
-            futures::executor::block_on(live.as_mut())
+            futures::executor::block_on(live.as_mut()).outcome
         else {
             panic!("sibling function did not complete after peer drop");
         };

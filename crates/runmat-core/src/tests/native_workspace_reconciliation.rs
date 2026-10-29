@@ -1,6 +1,5 @@
 use crate::{execute_text_request_for_testing, RunMatSession};
 use futures::executor::block_on;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -34,10 +33,7 @@ fn completed_register_metadata_cannot_overwrite_newer_canonical_state() {
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
 
         session
-            .refresh_workspace_binding_slots(
-                &HashMap::from([("x".to_string(), (0, runmat_value::Value::Num(1.0)))]),
-                |_, _| Ok(None),
-            )
+            .refresh_workspace_binding_slots([("x", 0)], |_, _| Ok(None))
             .expect("slot refresh");
 
         assert_eq!(

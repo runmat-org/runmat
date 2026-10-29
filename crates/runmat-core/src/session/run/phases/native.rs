@@ -26,7 +26,7 @@ pub(super) async fn run<'a>(
         display_var_ids,
         stmt_count,
         execution_vars,
-        max_var_id,
+        frame_extent,
         workspace_projection,
         workspace_admission,
         fusion_snapshot,
@@ -35,7 +35,7 @@ pub(super) async fn run<'a>(
     #[cfg(not(target_arch = "wasm32"))]
     let mut execution_vars = execution_vars;
     #[cfg(not(target_arch = "wasm32"))]
-    let mut variable_array = variable_array;
+    let mut frame_extent = frame_extent;
     #[cfg(not(target_arch = "wasm32"))]
     let mut used_jit = false;
     #[cfg(target_arch = "wasm32")]
@@ -84,8 +84,9 @@ pub(super) async fn run<'a>(
             .with_workspace(workspace_projection.clone())
             .with_base_workspace(observed_base),
     );
-    let workspace_publication =
-        PendingWorkspacePublication::new(&workspace_projection, &execution_runtime);
+    let workspace_publication = workspace_projection
+        .terminal_publication(&execution_runtime)
+        .map_err(RunError::Runtime)?;
 
     // Check if this is an expression statement (ends with Pop)
     let is_expression_stmt = bytecode
@@ -157,31 +158,41 @@ pub(super) async fn run<'a>(
                     )
                 })?;
                 execution_vars.retain(|name, _| snapshot.contains_key(name));
-                for (name, value) in snapshot.iter() {
-                    let slot = execution_vars.get(name).copied().unwrap_or_else(|| {
-                        let slot = variable_array.len();
-                        execution_vars.insert(name.to_owned(), slot);
-                        slot
-                    });
-                    if variable_array.len() <= slot {
-                        variable_array.resize(slot + 1, Value::Num(0.0));
+                for (name, _) in snapshot.iter() {
+                    if !execution_vars.contains_key(name) {
+                        execution_vars.insert(name.to_owned(), frame_extent);
+                        frame_extent = frame_extent.checked_add(1).ok_or_else(|| {
+                            RunError::Runtime(
+                                build_runtime_error("native workspace slot extent overflow")
+                                    .with_identifier("RunMat:WorkspaceBindingSlots")
+                                    .build(),
+                            )
+                        })?;
                     }
-                    variable_array[slot] = value.clone();
                 }
-                completed_native_root = Some(native);
-                used_jit = true;
-                execution_completed = true;
                 if !display_context.single_stmt_non_assign {
                     if let Some(var_id) = display_context.first_assign_var {
-                        if let Some(assignment_value) = variable_array.get(var_id).cloned() {
+                        let assignment = execution_vars
+                            .iter()
+                            .find_map(|(name, slot)| {
+                                (*slot == var_id).then(|| snapshot.get(name)).flatten()
+                            })
+                            .cloned();
+                        if let Some(value) = assignment {
                             if is_semicolon_suppressed {
-                                suppressed_value = Some(assignment_value);
+                                suppressed_value = Some(value);
                             } else {
-                                result_value = Some(assignment_value);
+                                result_value = Some(value);
                             }
                         }
                     }
                 }
+                // The native result already retains its authentic workspace.
+                // Retire the unused cold VM input instead of mirroring output
+                // Values into another frame or resizing after effects.
+                completed_native_root = Some(native);
+                used_jit = true;
+                execution_completed = true;
             }
             Ok(crate::session::executable::TieredInteractiveInvocation::Cold(selected)) => {
                 ready_route_selection = selected;
@@ -240,7 +251,7 @@ pub(super) async fn run<'a>(
                     display_var_ids,
                     stmt_count,
                     execution_vars,
-                    max_var_id,
+                    frame_extent,
                     workspace_projection,
                     workspace_admission,
                     fusion_snapshot,

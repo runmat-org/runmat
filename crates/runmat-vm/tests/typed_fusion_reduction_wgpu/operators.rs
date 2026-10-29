@@ -22,14 +22,21 @@ fn actual_resident_transposes_matrix_product_and_power_preserve_original_values(
                 .find_map(|(slot, actual)| (actual == name).then_some(*slot))
                 .expect("compiled operator binding")
         };
-        let mut values = Vec::new();
+        let values = Vec::new();
         let runtime = RuntimeContext::new(std::rc::Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
-            runmat_vm::interpret_with_vars_in_context(&bytecode, &mut values, None, runtime),
-        )
-        .expect("execute each operator through its original owner");
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_workspace(
+                &bytecode,
+                runmat_vm::InterpreterVars::from_owned(values),
+                None,
+                runtime,
+                None,
+                None,
+            ))
+            .outcome
+            .expect("execute each operator through its original owner");
         for (name, expected) in [
             ("A", source),
             ("T", [1.0, 2.0, 3.0, 4.0]),

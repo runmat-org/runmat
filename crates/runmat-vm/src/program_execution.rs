@@ -1081,14 +1081,16 @@ async fn execute_unit_script(
         .var_names
         .iter()
         .find_map(|(slot, name)| (name == "ans").then_some(*slot));
-    let mut variables = vec![runmat_value::Value::Num(0.0); bytecode.var_count];
-    let result = crate::interpret_with_vars_in_context(
+    let result = crate::interpret_workspace(
         &bytecode,
-        &mut variables,
+        crate::interpreter::vars::InterpreterVars::from_owned(Vec::new()),
         Some("<main>"),
         runtime.clone(),
+        None,
+        None,
     )
-    .await;
+    .await
+    .outcome;
     match result {
         Ok(crate::InterpreterOutcome::Completed(completion)) => {
             if requested_outputs == 0 {

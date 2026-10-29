@@ -6,9 +6,7 @@ mod interpreted;
 mod native;
 #[path = "phases/publication.rs"]
 mod publication;
-#[path = "phases/workspace_publication.rs"]
-mod workspace_publication;
-use workspace_publication::PendingWorkspacePublication;
+use runmat_runtime::workspace::WorkspaceProjectionPublication;
 struct Active<'a> {
     session: &'a mut RunMatSession,
     state: State<'a>,
@@ -40,7 +38,7 @@ struct State<'a> {
     final_stmt_emit: FinalStmtEmitDisposition,
     // The selected child retires before this guard publishes its admitted
     // projection prefix; original command/profiling guards in Data retire last.
-    workspace_publication: PendingWorkspacePublication,
+    workspace_publication: WorkspaceProjectionPublication,
     // Every result/workspace owner above retires before Data's original guards.
     data: command::Data<'a>,
 }

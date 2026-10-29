@@ -13,9 +13,9 @@ mod owner;
 mod prepared_write;
 mod projection;
 mod projection_service;
-mod storage;
 mod revision;
 mod service;
+mod storage;
 mod values;
 
 pub use crate::workspace::retained::WorkspaceName;
@@ -33,9 +33,10 @@ pub use owner::{
 pub(crate) use prepared_write::PreparedWorkspaceWrite;
 pub use projection::BaseWorkspaceProjection;
 pub use projection_service::{
-    BaseWorkspaceProjectionService, PreparedWorkspaceCompletion, WorkspacePublicationBatch,
-    WorkspacePublicationMutation, WorkspacePublicationObserver, WorkspacePublicationOrigin,
-    WorkspacePublicationProtocol, WorkspacePublicationStamp, WorkspacePublicationToken,
+    BaseWorkspaceProjectionService, PreparedWorkspaceCompletion, WorkspaceProjectionPublication,
+    WorkspacePublicationBatch, WorkspacePublicationMutation, WorkspacePublicationObserver,
+    WorkspacePublicationOrigin, WorkspacePublicationProtocol, WorkspacePublicationStamp,
+    WorkspacePublicationToken,
 };
 pub use revision::WorkspaceRevision;
 pub use service::base_workspace_error_to_runtime;

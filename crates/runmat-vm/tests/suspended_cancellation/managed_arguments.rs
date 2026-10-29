@@ -166,13 +166,22 @@ fn run_case(source_text: &str, cell_output: bool, terminal: Terminal) {
         cancellation.token(),
     )
     .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(Builtins)));
-    let mut vars = vec![];
-    let mut execution = Box::pin(runmat_vm::interpret_with_vars_in_context(
-        &bytecode, &mut vars, None, runtime,
+    let vars = vec![];
+    let mut execution = Box::pin(runmat_vm::interpret_workspace(
+        &bytecode,
+        runmat_vm::InterpreterVars::from_owned(vars),
+        None,
+        runtime,
+        None,
+        None,
     ));
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
     assert!(
-        execution.as_mut().poll(&mut context).is_pending(),
+        execution
+            .as_mut()
+            .poll(&mut context)
+            .map(|execution| execution.outcome)
+            .is_pending(),
         "{source_text}"
     );
     let target = state.borrow().target.expect("producer ran");
@@ -189,13 +198,20 @@ fn run_case(source_text: &str, cell_output: bool, terminal: Terminal) {
         Terminal::Cancel => {
             cancellation.cancel(runmat_execution::CancellationReason::User);
             assert!(matches!(
-                execution.as_mut().poll(&mut context),
+                execution
+                    .as_mut()
+                    .poll(&mut context)
+                    .map(|execution| execution.outcome),
                 Poll::Ready(Err(_))
             ));
         }
         Terminal::Error | Terminal::Success => {
             sender.send(matches!(terminal, Terminal::Success)).unwrap();
-            let Poll::Ready(result) = execution.as_mut().poll(&mut context) else {
+            let Poll::Ready(result) = execution
+                .as_mut()
+                .poll(&mut context)
+                .map(|execution| execution.outcome)
+            else {
                 panic!("consumer must finish")
             };
             if matches!(terminal, Terminal::Success) {
@@ -220,7 +236,7 @@ fn run_case(source_text: &str, cell_output: bool, terminal: Terminal) {
         }
     }
     drop(execution);
-    drop(vars);
+
     runmat_vm::reset_thread_state_for_tests();
     runmat_gc::gc_collect_major().unwrap();
     assert_eq!(

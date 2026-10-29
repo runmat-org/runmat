@@ -19,11 +19,12 @@ use super::{
     WorkspaceRevision,
 };
 
-mod publication;
-mod prospective;
-mod detach;
 mod completion_token;
+mod detach;
 mod private_live;
+mod prospective;
+mod publication;
+mod terminal_publication;
 pub use completion_token::PreparedWorkspaceCompletion;
 use publication::{PreparedPublishedWorkspaceCapacity, PublishedWorkspaceEffect};
 pub use publication::{
@@ -33,6 +34,7 @@ pub use publication::{
     WorkspacePublicationObserver, WorkspacePublicationOrigin, WorkspacePublicationProtocol,
     WorkspacePublicationToken,
 };
+pub use terminal_publication::WorkspaceProjectionPublication;
 
 /// Exact current-workspace authority for one admitted executor invocation.
 ///

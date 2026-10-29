@@ -159,10 +159,7 @@ fn source_store_and_effect_import_keep_distinct_keys_under_one_active_source() {
         _ => panic!("source publication retains its source binding"),
     };
     session
-        .refresh_workspace_binding_slots(
-            &HashMap::from([("requested".to_owned(), (5, Value::Num(7.0)))]),
-            |_, _| Ok(None),
-        )
+        .refresh_workspace_binding_slots([("requested", 5)], |_, _| Ok(None))
         .expect("slot refresh");
     let refreshed = session.workspace_bindings.borrow();
     assert_eq!(refreshed["requested"].slot, 5);
@@ -373,13 +370,7 @@ fn completed_register_metadata_cannot_restore_cleared_values() {
         .sync_workspace_binding_metadata()
         .expect("admit the live binding at invocation ingress");
     session
-        .refresh_workspace_binding_slots(
-            &HashMap::from([
-                ("live".into(), (2, Value::Num(-1.0))),
-                ("cleared".into(), (3, Value::Num(99.0))),
-            ]),
-            |_, _| Ok(None),
-        )
+        .refresh_workspace_binding_slots([("live", 2), ("cleared", 3)], |_, _| Ok(None))
         .expect("slot refresh");
     session
         .sync_workspace_binding_metadata()

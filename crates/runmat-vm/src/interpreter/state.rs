@@ -161,39 +161,6 @@ pub struct InterpreterState {
 }
 
 impl InterpreterState {
-    pub fn new(
-        bytecode: Bytecode,
-        initial_vars: &mut [Value],
-        current_function_name: Option<&str>,
-        invocation_arity: RuntimeInvocationArity,
-    ) -> Self {
-        Self::new_in_context(
-            bytecode,
-            initial_vars,
-            current_function_name,
-            invocation_arity,
-            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
-                runmat_runtime::execution::RuntimeExecutionService::new(),
-            )),
-        )
-    }
-
-    pub fn new_in_context(
-        bytecode: Bytecode,
-        initial_vars: &mut [Value],
-        current_function_name: Option<&str>,
-        invocation_arity: RuntimeInvocationArity,
-        runtime: runmat_runtime::context::RuntimeContext,
-    ) -> Self {
-        Self::from_owned_in_context(
-            bytecode,
-            initial_vars.to_vec(),
-            current_function_name,
-            invocation_arity,
-            runtime,
-        )
-    }
-
     pub fn from_owned_in_context(
         bytecode: Bytecode,
         initial_vars: Vec<Value>,
@@ -384,12 +351,15 @@ mod tests {
             kind: FusionInstructionKind::Elementwise,
         }];
 
-        let mut initial_vars = Vec::new();
-        let mut state = InterpreterState::new(
+        let initial_vars = Vec::new();
+        let mut state = InterpreterState::from_owned_in_context(
             bytecode,
-            &mut initial_vars,
+            initial_vars,
             Some("<main>"),
             RuntimeInvocationArity::Script,
+            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
         );
         let original_code = &*state.bytecode as *const Bytecode;
         state
@@ -435,12 +405,15 @@ mod tests {
             kind: FusionInstructionKind::Elementwise,
         }];
 
-        let mut initial_vars = Vec::new();
-        let state = InterpreterState::new(
+        let initial_vars = Vec::new();
+        let state = InterpreterState::from_owned_in_context(
             bytecode,
-            &mut initial_vars,
+            initial_vars,
             Some("<main>"),
             RuntimeInvocationArity::Script,
+            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
         );
         let graph = state
             .fusion_accel_graph

@@ -117,10 +117,22 @@ pub(crate) async fn assert_borrowed_nan_min(provider: &'static dyn AccelProvider
         .collect();
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
     vars[slot(&bytecode, "x")] = Value::GpuTensor(borrowed.clone());
-    runmat_vm::interpret_with_vars_in_context(&bytecode, &mut vars, None, runtime.clone())
-        .await
-        .expect("typed folded minimum with explicit NaN mode");
-    let Value::Tensor(output) = &vars[slot(&bytecode, "z")] else {
+    let runmat_vm::InterpreterOutcome::Completed(completion) = runmat_vm::interpret_workspace(
+        &bytecode,
+        runmat_vm::InterpreterVars::from_owned(vars),
+        None,
+        runtime.clone(),
+        None,
+        None,
+    )
+    .await
+    .outcome
+    .expect("typed folded minimum with explicit NaN mode");
+    let vars = &completion.values;
+    let output_value = vars
+        .get(slot(&bytecode, "z"))
+        .expect("completed output slot");
+    let Value::Tensor(output) = &*output_value else {
         panic!("folded result was not gathered");
     };
     assert_eq!(output.shape(), [1, 128]);
@@ -228,10 +240,22 @@ pub(crate) async fn assert_empty_min_ordinary_fallback() {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
     vars[slot(&bytecode, "x")] =
         Value::Tensor(runmat_value::Tensor::from_f32(Vec::new(), vec![0, 3]).unwrap());
-    runmat_vm::interpret_with_vars_in_context(&bytecode, &mut vars, None, runtime.clone())
-        .await
-        .expect("empty minimum follows ordinary domain dispatch");
-    let Value::Tensor(output) = &vars[slot(&bytecode, "z")] else {
+    let runmat_vm::InterpreterOutcome::Completed(completion) = runmat_vm::interpret_workspace(
+        &bytecode,
+        runmat_vm::InterpreterVars::from_owned(vars),
+        None,
+        runtime.clone(),
+        None,
+        None,
+    )
+    .await
+    .outcome
+    .expect("empty minimum follows ordinary domain dispatch");
+    let vars = &completion.values;
+    let output_value = vars
+        .get(slot(&bytecode, "z"))
+        .expect("completed output slot");
+    let Value::Tensor(output) = &*output_value else {
         panic!("empty minimum did not publish a numeric tensor");
     };
     assert_eq!(output.shape(), [0, 3]);

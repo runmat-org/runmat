@@ -32,9 +32,9 @@ impl RunMatSession {
 
     /// Refresh compiler/VM slot metadata from a completed invocation without
     /// treating the register file as a second base-workspace authority.
-    pub(crate) fn refresh_workspace_binding_slots(
+    pub(crate) fn refresh_workspace_binding_slots<'a>(
         &mut self,
-        completed: &HashMap<String, (usize, Value)>,
+        completed: impl IntoIterator<Item = (&'a str, usize)>,
         global_target: impl Fn(
             &str,
             usize,
@@ -50,13 +50,13 @@ impl RunMatSession {
         lease
             .checkpoint(Some(&self.runtime_context))
             .map_err(binding_control_error)?;
-        for (name, (slot, _)) in completed {
+        for (name, slot) in completed {
             // Every language write has already passed the canonical
             // publication observer. Imported external names are reconciled
             // at request ingress; a completed register file is
             // never authority to allocate a new binding after the effect.
-            let global = global_target(name, *slot)?;
-            self.refresh_existing_workspace_binding(&lease, name, *slot, global.as_ref())?;
+            let global = global_target(name, slot)?;
+            self.refresh_existing_workspace_binding(&lease, name, slot, global.as_ref())?;
         }
         Ok(())
     }

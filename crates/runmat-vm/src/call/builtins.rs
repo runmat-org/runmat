@@ -1541,7 +1541,7 @@ impl RootedDynamicEvalInput {
             &mut self.frame.vars,
             crate::interpreter::vars::InterpreterVars::from_owned(Vec::new()),
         );
-        self.frame.vars = vars.prepare_owned_extent(context, extent)?;
+        self.frame.vars = vars.prepare_extent(context, extent)?;
         Ok(self)
     }
 
@@ -1665,16 +1665,15 @@ async fn interpret_dynamic_workspace_eval_with_admission(
     ),
     RuntimeError,
 > {
-    let execution =
-        crate::interpreter::runner::interpret_with_workspace_vars_and_dynamic_admission_in_context(
-            &bytecode,
-            target_vars,
-            Some(&source_label),
-            selected.runtime,
-            Some(admission),
-            selected.admission,
-        )
-        .await;
+    let execution = crate::interpreter::runner::interpret_workspace(
+        &bytecode,
+        target_vars,
+        Some(&source_label),
+        selected.runtime,
+        Some(admission),
+        selected.admission,
+    )
+    .await;
     let mut outcome = execution.outcome;
     let updated_workspace = match execution.workspace {
         Some(completion) => {

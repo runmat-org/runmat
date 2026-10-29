@@ -1,4 +1,4 @@
-use super::{interpret_with_vars_in_context, InterpreterOutcome};
+use super::{interpret_workspace, InterpreterOutcome};
 use crate::bytecode::program::{Bytecode, FunctionBytecode, FunctionRegistry};
 use crate::bytecode::Instr;
 use futures::executor::block_on;
@@ -155,14 +155,17 @@ fn run_process_fixture_on_bounded_stack(depth: usize) {
                 RuntimeServicePorts::default().with_builtin(Rc::new(ProcessBuiltinService)),
             );
             let bytecode = nested_process_bytecode(depth);
-            let mut vars = Vec::new();
+            let vars = Vec::new();
             eprintln!("vm-process-dispatch depth={depth} phase: interpreter poll begins");
-            let outcome = block_on(interpret_with_vars_in_context(
+            let outcome = block_on(interpret_workspace(
                 &bytecode,
-                &mut vars,
+                crate::InterpreterVars::from_owned(vars),
                 Some("process_dispatch_fixture"),
                 runtime,
+                None,
+                None,
             ))
+            .outcome
             .expect("Process builtin execution");
             eprintln!("vm-process-dispatch depth={depth} phase: interpreter completed");
             let InterpreterOutcome::Completed(completion) = outcome;
@@ -218,12 +221,14 @@ fn nested_process_stack_calls_retire_a_pending_leaf_on_drop() {
                 RuntimeServicePorts::default().with_builtin(Rc::new(ProcessBuiltinService)),
             );
             let bytecode = nested_process_bytecode(NESTED_PROCESS_DEPTH);
-            let mut vars = Vec::new();
-            let mut pending = Box::pin(interpret_with_vars_in_context(
+            let vars = Vec::new();
+            let mut pending = Box::pin(interpret_workspace(
                 &bytecode,
-                &mut vars,
+                crate::InterpreterVars::from_owned(vars),
                 Some("process_dispatch_fixture"),
                 runtime,
+                None,
+                None,
             ));
             let waker = noop_waker();
             let mut cx = Context::from_waker(&waker);

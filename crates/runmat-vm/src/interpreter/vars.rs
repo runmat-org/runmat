@@ -12,6 +12,10 @@ use std::alloc::Layout;
 use std::cell::{Ref, RefCell};
 use std::ops::Deref;
 
+#[cfg(test)]
+mod extent_tests;
+mod workspace_input;
+
 #[derive(Clone, Debug)]
 pub(crate) enum InterpreterSlot {
     Owned(Value),
@@ -224,33 +228,19 @@ impl InterpreterVars {
         Ok(Self::from_retained(values))
     }
 
-    /// Move an ordinary owned frame into an exactly admitted retained-slot
+    /// Move an owned frame into an exactly admitted retained-slot
     /// backing large enough for compiler-private locals. The caller keeps the
     /// source Values rooted while this transfer runs; no payload is cloned.
-    pub(crate) fn prepare_owned_extent(
-        self,
+    pub fn prepare_extent(
+        mut self,
         context: &RuntimeContext,
         extent: usize,
     ) -> Result<Self, runmat_runtime::RuntimeError> {
         HostAllocationReceipt::policy(Some(context)).map_err(|error| {
             crate::runtime::workspace::frame_allocation_error_in_context(Some(context), error)
         })?;
-        let values = self.into_owned().map_err(|_| {
-            runmat_runtime::execution::ExecutionServiceError::Infrastructure(
-                "RunMat:Interpreter:OwnedFrameExtent: compiler extent preparation requires an owned interpreter frame"
-                    .to_owned(),
-            )
-            .into_runtime_error()
-        })?;
-        if extent < values.len() {
-            return Err(runmat_runtime::execution::ExecutionServiceError::Infrastructure(
-                "RunMat:Interpreter:OwnedFrameExtent: compiled interpreter frame is smaller than its captured namespace"
-                    .to_owned(),
-            )
-            .into_runtime_error());
-        }
-        if extent == values.len() {
-            return Ok(Self::from_owned(values));
+        if extent <= self.len() {
+            return Ok(self);
         }
 
         let layout = Layout::array::<InterpreterSlot>(extent)
@@ -295,15 +285,19 @@ impl InterpreterVars {
                 ),
             )
         })?;
-        retained_values.extend(values.into_iter().map(InterpreterSlot::Owned));
-        retained_values.resize_with(extent, || InterpreterSlot::Owned(Value::Num(0.0)));
         if let Some(receipt) = &receipt {
             receipt.checkpoint(context).map_err(|error| {
                 crate::runtime::workspace::frame_allocation_error_in_context(Some(context), error)
             })?;
         }
+        // Install under the same shared control, when present. The existing
+        // transfer owner moves slots and defers displaced block retirement
+        // until its shared-storage borrow has ended; no Value is cloned.
+        let retired = self.install_replacement(retained_values);
+        self.resize_owned(extent, Value::Num(0.0));
         drop(installed);
-        Ok(Self::from_retained(retained_values))
+        drop(retired);
+        Ok(self)
     }
 
     pub(crate) fn shared_control_retained_bytes() -> Result<u64, HostAllocationError> {

@@ -66,13 +66,16 @@ fn compiled_persistent_elementwise_executes_ordered_provider_store_numeric_resid
 
         for expected in [4.0, 13.0] {
             let dispatches_before = provider.fused_dispatches.load(Ordering::Relaxed);
-            let mut vars = Vec::new();
-            block_on(runmat_vm::interpret_with_vars_in_context(
+            let vars = Vec::new();
+            block_on(runmat_vm::interpret_workspace(
                 &bytecode,
-                &mut vars,
+                runmat_vm::InterpreterVars::from_owned(vars),
                 Some("fusedPersistent"),
                 runtime.clone(),
+                None,
+                None,
             ))
+            .outcome
             .expect("compiled fused persistent invocation");
             assert!(
                 provider.fused_dispatches.load(Ordering::Relaxed) > dispatches_before,

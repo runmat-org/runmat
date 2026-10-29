@@ -85,19 +85,29 @@ async fn assert_browser_full_call(case: BrowserCase) {
         .iter()
         .map(|trace| trace.correlation)
         .collect();
-    let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    runmat_vm::interpret_with_vars_in_context(&bytecode, &mut vars, None, runtime.clone())
-        .await
-        .expect("browser VM must execute folded typed minimum");
+    let vars = vec![Value::Num(0.0); bytecode.var_count];
+    let runmat_vm::InterpreterOutcome::Completed(completion) = runmat_vm::interpret_workspace(
+        &bytecode,
+        runmat_vm::InterpreterVars::from_owned(vars),
+        None,
+        runtime.clone(),
+        None,
+        None,
+    )
+    .await
+    .outcome
+    .expect("browser VM must execute folded typed minimum");
+    let vars = &completion.values;
     let slot = bytecode
         .var_names
         .iter()
         .find_map(|(slot, name)| (name == "z").then_some(*slot))
         .expect("published gathered output");
-    let Value::Tensor(output) = &vars[slot] else {
+    let output_value = vars.get(slot).expect("completed output slot");
+    let Value::Tensor(output) = &*output_value else {
         panic!(
             "browser VM did not publish gathered numeric output: {:?}",
-            vars[slot]
+            vars.get(slot).as_deref()
         );
     };
     assert_eq!(output.shape(), case.shape);

@@ -330,8 +330,6 @@ fn borrowed_initial_workspace_survives_pending_cancel_and_drop() {
                 .find(|(_, name)| name.as_str() == "x")
                 .unwrap()
                 .0;
-            let mut initial = vec![Value::Num(0.0); bytecode.var_count];
-            initial[slot] = Value::GpuTensor(input.clone());
             let source = runmat_execution::cancellation::CancellationSource::new();
             let runtime = runmat_runtime::context::RuntimeContext::with_cancellation(
                 Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
@@ -347,16 +345,34 @@ fn borrowed_initial_workspace_survives_pending_cancel_and_drop() {
                 .with(|slot| slot.replace(Some(probe.clone())))
                 .is_none());
             let _scope = Scope;
-            let mut execution = Box::pin(runmat_vm::interpret_with_vars_in_context(
-                &bytecode,
-                &mut initial,
-                None,
+            let consumed_values::CanonicalInput {
+                owner,
+                projection,
                 runtime,
+                vars,
+                admission,
+                source: source_lease,
+            } = consumed_values::canonical_input(&bytecode, runtime, &input);
+            assert!(
+                matches!(vars.get(slot).as_deref(), Some(Value::GpuTensor(handle)) if handle.buffer_id() == input.buffer_id())
+            );
+            let mut publication = projection.terminal_publication(&runtime).unwrap();
+            let mut execution = Box::pin(runmat_vm::interpret_workspace(
+                &bytecode,
+                vars,
+                None,
+                runtime.clone(),
+                Some(admission),
+                None,
             ));
             let wakes = Arc::new(Wakes::default());
             let waker = Waker::from(wakes.clone());
             let mut cx = Context::from_waker(&waker);
-            match execution.as_mut().poll(&mut cx) {
+            match execution
+                .as_mut()
+                .poll(&mut cx)
+                .map(|execution| execution.outcome)
+            {
                 Poll::Pending => {}
                 Poll::Ready(Err(error)) => panic!(
                     "borrowed production fusion failed before suspension: {error:?}; provider={:?}",
@@ -370,7 +386,11 @@ fn borrowed_initial_workspace_survives_pending_cancel_and_drop() {
             assert_eq!(probe.polls.get(), 1);
             if cancel {
                 source.cancel(runmat_execution::CancellationReason::User);
-                match execution.as_mut().poll(&mut cx) {
+                match execution
+                    .as_mut()
+                    .poll(&mut cx)
+                    .map(|execution| execution.outcome)
+                {
                     Poll::Ready(Err(error)) => {
                         assert!(error.to_string().to_lowercase().contains("cancel"))
                     }
@@ -381,15 +401,25 @@ fn borrowed_initial_workspace_survives_pending_cancel_and_drop() {
                 }
             }
             drop(execution);
+            publication.publish_pending().unwrap();
             assert_eq!(probe.drops.get(), 1);
             assert_buffers_equal(provider, &baseline);
-            let Value::GpuTensor(retained) = &initial[slot] else {
-                panic!("caller input changed")
-            };
-            assert_eq!(retained.buffer_id(), input.buffer_id());
-            assert_eq!(provider.pull(retained).unwrap().1, vec![1, 4096]);
+            {
+                let Value::GpuTensor(retained) = source_lease.value() else {
+                    panic!("caller input changed")
+                };
+                assert_eq!(retained.buffer_id(), input.buffer_id());
+                assert_eq!(provider.pull(retained).unwrap().1, vec![1, 4096]);
+            }
             assert_eq!(provider.frees.lock().unwrap().get(&input.buffer_id()), None);
-            drop(initial);
+            assert!(
+                matches!(owner.lookup("x").unwrap(), Some(Value::GpuTensor(handle)) if handle.buffer_id() == input.buffer_id())
+            );
+            drop(publication);
+            drop(source_lease);
+            drop(projection);
+            drop(runtime);
+            drop(owner);
             input
                 .release()
                 .expect("last caller view retires allocation");

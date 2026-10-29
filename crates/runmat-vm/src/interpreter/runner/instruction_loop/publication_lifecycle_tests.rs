@@ -103,32 +103,33 @@ fn runtime(
 
 fn state(
     bytecode: crate::bytecode::Bytecode,
-    vars: &mut [Value],
+    vars: crate::InterpreterVars,
     runtime: RuntimeContext,
     fault: Option<VmFusionPublicationFault>,
-) -> Box<InterpreterState> {
-    let mut state = InterpreterState::new_in_context(
+) -> Result<Box<InterpreterState>, runmat_runtime::RuntimeError> {
+    let supplied = vars.len();
+    let vars = vars.prepare_extent(&runtime, bytecode.var_count)?;
+    let mut state = InterpreterState::from_vars_in_context(
         bytecode,
         vars,
+        supplied,
         Some("<main>"),
         RuntimeInvocationArity::Script,
         runtime,
-    );
+    )?;
     assert!(
         state.fusion_installation.is_some(),
         "authentic VM installation"
     );
     state.fusion_publication_fault = fault;
-    Box::new(state)
+    Ok(Box::new(state))
 }
 
-/// The faultable private runner still needs the same workspace and Runtime
-/// poll scopes as `interpret_with_workspace_in_context`. Without them,
-/// StoreVar has no active checked workspace service and a transient carrier
-/// can escape the write before a later gather rejects it.
+/// Instrument the actual owned runner while retaining the same pending-frame
+/// completion owner and issuer scope used by the public interpret_workspace.
 async fn scoped_faultable_run(
     bytecode: crate::bytecode::Bytecode,
-    vars: &mut Vec<Value>,
+    vars: crate::InterpreterVars,
     runtime: RuntimeContext,
     fault: Option<VmFusionPublicationFault>,
 ) -> Result<crate::interpreter::state::InterpreterOutcome, runmat_runtime::RuntimeError> {
@@ -139,20 +140,19 @@ async fn scoped_faultable_run(
     let runtime = super::super::runtime_with_bytecode_debug_frame(runtime, &bytecode, "<main>");
     let selected_runtime = runtime.clone();
     let frame = workspace_activation.frame();
-    let outcome = workspace_activation
-        .scope(
-            runtime.scope(runmat_runtime::data::with_tx_registry_scope(async move {
-                crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
-                    .map_err(runmat_runtime::RuntimeError::new)?;
-                let _borrowed_inputs = crate::runtime::gc::ManagedRoots::new(vars)
-                    .map_err(runmat_runtime::RuntimeError::new)?;
-                let state = state(bytecode, vars, selected_runtime, fault);
-                super::super::run_interpreter(state, vars).await
-            })),
-        )
-        .await;
-    let _ = crate::runtime::workspace::take_workspace_completion(frame);
-    outcome
+    let execution =
+        workspace_activation.scope(runmat_runtime::data::with_tx_registry_scope(async move {
+            crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
+                .map_err(runmat_runtime::RuntimeError::new)?;
+            let _inputs = crate::runtime::gc::ManagedRoots::from_traced(&vars)
+                .map_err(runmat_runtime::RuntimeError::new)?;
+            let state = state(bytecode, vars, selected_runtime, fault)?;
+            super::super::run_interpreter_owned(state).await
+        }));
+    runtime
+        .scope(super::super::workspace_execution::PendingWorkspaceExecution::new(execution, frame))
+        .await
+        .outcome
 }
 
 fn assert_no_reduction_receipt(capture: &CapturingPlacement) {
@@ -214,11 +214,11 @@ fn real_store_rejection_and_caught_rejection_never_publish_reduction_feedback() 
                     .find_map(|(slot, name)| (name == "caught").then_some(*slot))
                     .expect("compiled catch identifier variable")
             });
-            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+            let vars = vec![Value::Num(0.0); bytecode.var_count];
             let reached = Rc::new(Cell::new(false));
             let result = block_on(scoped_faultable_run(
                 bytecode,
-                &mut vars,
+                crate::InterpreterVars::from_owned(vars),
                 runtime.clone(),
                 Some(VmFusionPublicationFault::Reject(
                     VmFusionPublicationFaultRoute::AnySelected,
@@ -231,7 +231,9 @@ fn real_store_rejection_and_caught_rejection_never_publish_reduction_feedback() 
                 capture.reduction_selection.borrow().len()
             );
             if caught {
-                result.expect("ordinary catch handles the real store failure");
+                let crate::InterpreterOutcome::Completed(completion) =
+                    result.expect("ordinary catch handles the real store failure");
+                let vars = &completion.values;
                 assert_eq!(
                     *vars
                         .get(caught_slot.expect("caught branch has slot"))
@@ -267,7 +269,7 @@ fn cancellation_and_drop_at_checked_store_do_not_publish_reduction_feedback() {
             let cancellation = CancellationSource::new();
             let runtime = runtime(capture.clone(), cancel.then_some(&cancellation));
             let bytecode = compile_source(FOLDED_MIN);
-            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+            let vars = vec![Value::Num(0.0); bytecode.var_count];
             let reached = Rc::new(Cell::new(false));
             let fault = if cancel {
                 VmFusionPublicationFault::Cancel(
@@ -284,7 +286,7 @@ fn cancellation_and_drop_at_checked_store_do_not_publish_reduction_feedback() {
             if cancel {
                 let error = match block_on(scoped_faultable_run(
                     bytecode,
-                    &mut vars,
+                    crate::InterpreterVars::from_owned(vars),
                     runtime.clone(),
                     Some(fault),
                 )) {
@@ -303,7 +305,7 @@ fn cancellation_and_drop_at_checked_store_do_not_publish_reduction_feedback() {
             } else {
                 let mut pending = Box::pin(scoped_faultable_run(
                     bytecode,
-                    &mut vars,
+                    crate::InterpreterVars::from_owned(vars),
                     runtime.clone(),
                     Some(fault),
                 ));
@@ -335,8 +337,13 @@ fn unpolled_vm_future_never_selects_or_publishes_reduction() {
         let (_session, capture) = placement();
         let runtime = runtime(capture.clone(), None);
         let bytecode = compile_source(FOLDED_MIN);
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        let unpolled = scoped_faultable_run(bytecode, &mut vars, runtime.clone(), None);
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let unpolled = scoped_faultable_run(
+            bytecode,
+            crate::InterpreterVars::from_owned(vars),
+            runtime.clone(),
+            None,
+        );
         drop(unpolled);
         block_on(runtime.scope(async {}));
         assert!(capture.reduction_selection.borrow().is_empty());

@@ -37,18 +37,24 @@ fn actual_vm_folded_min_learns_across_separate_invocations() {
 
         for call in 0..6 {
             let before = placement.delivered.lock().unwrap().len();
-            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-            block_on(runmat_vm::interpret_with_vars_in_context(
-                &bytecode,
-                &mut vars,
-                None,
-                runtime.clone(),
-            ))
-            .expect("actual independent VM installation must execute folded minimum");
-            let Value::Tensor(output) = &vars[output_slot] else {
+            let vars = vec![Value::Num(0.0); bytecode.var_count];
+            let runmat_vm::InterpreterOutcome::Completed(completion) =
+                block_on(runmat_vm::interpret_workspace(
+                    &bytecode,
+                    runmat_vm::InterpreterVars::from_owned(vars),
+                    None,
+                    runtime.clone(),
+                    None,
+                    None,
+                ))
+                .outcome
+                .expect("actual independent VM installation must execute folded minimum");
+            let vars = &completion.values;
+            let output_value = vars.get(output_slot).expect("completed output slot");
+            let Value::Tensor(output) = &*output_value else {
                 panic!(
                     "call {call} did not publish gathered tensor: {:?}",
-                    vars[output_slot]
+                    vars.get(output_slot).as_deref()
                 );
             };
             assert_eq!(output.shape(), vec![1, 128], "call {call} output shape");
@@ -227,20 +233,26 @@ fn actual_vm_selected_provider_invalidation_before_publication_suppresses_receip
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ))
         .with_service_ports(RuntimeServicePorts::default().with_placement(placement.clone()));
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        block_on(runmat_vm::interpret_with_vars_in_context(
-            &bytecode,
-            &mut vars,
-            None,
-            runtime.clone(),
-        ))
-        .expect("provider invalidation revokes learning, not the valid execution");
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_workspace(
+                &bytecode,
+                runmat_vm::InterpreterVars::from_owned(vars),
+                None,
+                runtime.clone(),
+                None,
+                None,
+            ))
+            .outcome
+            .expect("provider invalidation revokes learning, not the valid execution");
+        let vars = &completion.values;
         let slot = bytecode
             .var_names
             .iter()
             .find_map(|(slot, name)| (name == "z").then_some(*slot))
             .expect("published gathered output");
-        let Value::Tensor(output) = &vars[slot] else {
+        let output_value = vars.get(slot).expect("completed output slot");
+        let Value::Tensor(output) = &*output_value else {
             panic!("VM did not publish a numeric tensor");
         };
         assert_eq!(output.shape(), vec![1, 128]);

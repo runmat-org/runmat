@@ -17,11 +17,11 @@ pub(in crate::session::run) struct PreparedInteractiveWorkspace {
     pub display_var_ids: Vec<usize>,
     pub stmt_count: usize,
     pub execution_vars: HashMap<String, usize>,
-    pub max_var_id: usize,
+    pub frame_extent: usize,
     pub workspace_projection: Rc<runmat_runtime::workspace::BaseWorkspaceProjectionService>,
     pub workspace_admission: Option<runmat_vm::PendingWorkspaceAdmission>,
     pub fusion_snapshot: Option<FusionPlanSnapshot>,
-    pub variable_array: Vec<Value>,
+    pub variable_array: Option<runmat_vm::InterpreterVars>,
 }
 
 impl RunMatSession {
@@ -52,7 +52,6 @@ impl RunMatSession {
             }
         }
         let execution_vars = execution_workspace_mapping(&bytecode);
-        let max_var_id = execution_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
             debug!(?execution_vars, "[repl] execution vars");
         }
@@ -195,22 +194,22 @@ impl RunMatSession {
         #[cfg(target_arch = "wasm32")]
         let fusion_snapshot: Option<FusionPlanSnapshot> = None;
 
-        // Prepare variable array with existing values before execution
-        let variable_array =
-            tracing::info_span!("runtime.prepare_workspace.variables").in_scope(|| {
-                self.prepare_variable_array_for_execution(
-                    &bytecode,
-                    &execution_vars,
-                    &workspace_projection,
-                    debug_trace,
+        // Metadata only: the cold VM route acquires its actual frame once
+        // selected, before executing. Native results keep their own root.
+        let frame_extent = execution_vars
+            .values()
+            .copied()
+            .max()
+            .map(|slot| slot.checked_add(1))
+            .unwrap_or(Some(0))
+            .ok_or_else(|| {
+                RunError::Runtime(
+                    build_runtime_error("workspace slot extent overflow")
+                        .with_identifier("RunMat:WorkspaceBindingSlots")
+                        .build(),
                 )
-                .map_err(RunError::Runtime)
-            })?;
-
-        if self.verbose {
-            debug!("Variable array after preparation: {:?}", variable_array);
-            debug!("Bytecode instructions: {:?}", bytecode.instructions);
-        }
+            })?
+            .max(bytecode.var_count);
 
         Ok(PreparedInteractiveWorkspace {
             unit: interactive_unit,
@@ -223,11 +222,11 @@ impl RunMatSession {
             display_var_ids,
             stmt_count,
             execution_vars,
-            max_var_id,
+            frame_extent,
             workspace_projection,
             workspace_admission,
             fusion_snapshot,
-            variable_array,
+            variable_array: None,
         })
     }
 }

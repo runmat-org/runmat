@@ -1846,50 +1846,39 @@ impl RunMatSession {
         bytecode: &runmat_vm::Bytecode,
         updated_var_mapping: &HashMap<String, usize>,
         workspace: &runmat_runtime::workspace::BaseWorkspaceProjectionService,
+        runtime: &runmat_runtime::context::RuntimeContext,
         debug_trace: bool,
-    ) -> std::result::Result<Vec<Value>, RuntimeError> {
-        // Create a new variable array of the correct size
-        let max_var_id = updated_var_mapping.values().copied().max().unwrap_or(0);
-        let required_len = std::cmp::max(bytecode.var_count, max_var_id + 1);
-        let mut new_variable_array = vec![Value::Num(0.0); required_len];
+    ) -> std::result::Result<runmat_vm::InterpreterVars, RuntimeError> {
+        let max_var_id = updated_var_mapping.values().copied().max();
+        let required_len = max_var_id
+            .map(|slot| slot.checked_add(1))
+            .unwrap_or(Some(0))
+            .ok_or_else(|| {
+                build_runtime_error("workspace slot extent overflow")
+                    .with_identifier("RunMat:WorkspaceBindingSlots")
+                    .build()
+            })?
+            .max(bytecode.var_count);
+        let generation = runmat_runtime::context::RuntimeWorkspaceService::capture_workspace_generation_with_context(
+            workspace, runtime,
+        )?.ok_or_else(|| {
+            build_runtime_error("selected workspace has no canonical read generation")
+                .with_identifier("RunMat:Interpreter:WorkspaceGeneration").build()
+        })?;
         if debug_trace {
             debug!(
                 bytecode_var_count = bytecode.var_count,
-                required_len, max_var_id, "[repl] prepare variable array"
+                required_len, max_var_id, "[repl] prepare canonical workspace slot leases"
             );
         }
-
-        // Populate with existing values based on the variable mapping
-        let global_names = self.session_global_binding_names()?;
-        for (var_name, &new_var_id) in updated_var_mapping {
-            if new_var_id < new_variable_array.len() {
-                let value = if global_names.contains(var_name) {
-                    self.runtime_context.session_global_value(var_name)?
-                } else {
-                    workspace.lookup(var_name)?
-                };
-                if let Some(value) = value {
-                    if debug_trace {
-                        debug!(
-                            var_name,
-                            var_id = new_var_id,
-                            ?value,
-                            "[repl] prepare set var"
-                        );
-                    }
-                    new_variable_array[new_var_id] = value;
-                }
-            } else if debug_trace {
-                debug!(
-                    var_name,
-                    var_id = new_var_id,
-                    len = new_variable_array.len(),
-                    "[repl] prepare skipping var"
-                );
-            }
-        }
-
-        Ok(new_variable_array)
+        runmat_vm::InterpreterVars::from_workspace_generation(
+            runtime,
+            &generation,
+            updated_var_mapping
+                .iter()
+                .map(|(name, slot)| (name.as_str(), *slot)),
+            required_len,
+        )
     }
 }
 

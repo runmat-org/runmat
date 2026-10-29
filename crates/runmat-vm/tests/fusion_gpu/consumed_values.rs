@@ -11,6 +11,76 @@ pub(super) fn compile_borrowed_x(source: &str) -> runmat_vm::Bytecode {
 }
 
 struct InspectRootsOnFree(&'static TestProvider);
+
+pub(super) struct CanonicalInput {
+    pub owner: runmat_runtime::workspace::BaseWorkspaceOwner,
+    pub projection: Rc<runmat_runtime::workspace::BaseWorkspaceProjectionService>,
+    pub runtime: runmat_runtime::context::RuntimeContext,
+    pub vars: runmat_vm::InterpreterVars,
+    pub admission: runmat_vm::PendingWorkspaceAdmission,
+    pub source: runmat_runtime::workspace::WorkspaceValueReadLease,
+}
+
+pub(super) fn canonical_input(
+    bytecode: &runmat_vm::Bytecode,
+    runtime: runmat_runtime::context::RuntimeContext,
+    input: &GpuTensorHandle,
+) -> CanonicalInput {
+    use runmat_runtime::context::RuntimeWorkspaceService;
+    use runmat_runtime::workspace::{
+        BaseWorkspaceOwner, BaseWorkspaceProjectionService, BaseWorkspaceService,
+        LogicalWorkspaceGeneration,
+    };
+    let owner = BaseWorkspaceOwner::new();
+    let base = Rc::new(BaseWorkspaceService::new(owner.clone()));
+    base.assign("x", Value::GpuTensor(input.clone())).unwrap();
+    let projection = Rc::new(BaseWorkspaceProjectionService::new_for_context(
+        owner.begin_projection().unwrap(),
+        &runtime,
+    ));
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_workspace(projection.clone())
+        .with_base_workspace(base);
+    let runtime = runtime.with_service_ports(ports);
+    let generation = LogicalWorkspaceGeneration::capture(
+        &runtime,
+        &owner,
+        &runtime.session_variable_authority(),
+    )
+    .unwrap();
+    let source = generation
+        .read_lease("x")
+        .expect("canonical source read lease");
+    let vars = runmat_vm::InterpreterVars::from_workspace_generation(
+        &runtime,
+        &generation,
+        bytecode
+            .var_names
+            .iter()
+            .map(|(slot, name)| (name.as_str(), *slot)),
+        bytecode.var_count,
+    )
+    .unwrap();
+    drop(generation);
+    let admission = runmat_vm::workspace_admission(
+        bytecode
+            .var_names
+            .iter()
+            .map(|(slot, name)| (name.clone(), *slot))
+            .collect(),
+        HashSet::from(["x".to_string()]),
+    );
+    CanonicalInput {
+        owner,
+        projection,
+        runtime,
+        vars,
+        admission,
+        source,
+    }
+}
 impl Drop for InspectRootsOnFree {
     fn drop(&mut self) {
         self.0.inspect_roots_on_free.store(false, Ordering::Relaxed);
@@ -125,29 +195,73 @@ fn borrowed_initial_workspace_survives_error_and_retires_only_after_replacement(
                 .unwrap()
                 .0;
             let input = provider.push(vec![7.0], vec![1, 1]);
-            let mut initial = vec![Value::Num(0.0); bytecode.var_count];
-            initial[slot] = Value::GpuTensor(input.clone());
             let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
                 runmat_runtime::execution::RuntimeExecutionService::new(),
             ));
-            let result = block_on(runmat_vm::interpret_with_vars_in_context(
-                &bytecode,
-                &mut initial,
-                None,
+            let CanonicalInput {
+                owner,
+                projection,
                 runtime,
+                vars,
+                admission,
+                source: source_lease,
+            } = canonical_input(&bytecode, runtime, &input);
+            let mut publication = projection.terminal_publication(&runtime).unwrap();
+            let result = block_on(runmat_vm::interpret_workspace(
+                &bytecode,
+                vars,
+                None,
+                runtime.clone(),
+                Some(admission),
+                None,
             ));
-            assert_eq!(result.is_err(), fails, "source={source}; result={result:?}");
+            assert_eq!(
+                result.outcome.is_err(),
+                fails,
+                "source={source}; result={:?}",
+                result.outcome
+            );
+            assert_eq!(
+                projection.lookup("x").unwrap(),
+                Some(Value::Num(3.0)),
+                "staged prefix survives terminalization"
+            );
+            publication.publish_pending().unwrap();
+            assert_eq!(
+                owner.lookup("x").unwrap(),
+                Some(Value::Num(3.0)),
+                "canonical terminal prefix is published even on error"
+            );
+            if fails {
+                let closed = result
+                    .workspace
+                    .as_ref()
+                    .expect("exact failed frame completion");
+                assert_eq!(
+                    closed.state.vars.get(slot).as_deref(),
+                    Some(&Value::Num(3.0))
+                );
+            }
             if preserves {
                 assert_eq!(provider.pull(&input).unwrap(), (vec![7.0], vec![1, 1]));
                 assert_eq!(provider.frees.lock().unwrap().get(&input.buffer_id()), None);
-                let handles = resident_outputs(&initial);
-                assert!(handles
-                    .iter()
-                    .any(|handle| handle.buffer_id() == input.buffer_id()));
+                let retained = source_lease.value();
+                assert!(
+                    matches!(retained, Value::GpuTensor(handle) if handle.buffer_id() == input.buffer_id())
+                );
+                if !fails {
+                    assert!(
+                        matches!(owner.lookup("alias").unwrap(), Some(Value::GpuTensor(handle)) if handle.buffer_id() == input.buffer_id())
+                    );
+                }
             }
             let id = input.buffer_id();
             drop(result);
-            drop(initial);
+            drop(publication);
+            drop(source_lease);
+            drop(projection);
+            drop(runtime);
+            drop(owner);
             input.release().expect("last caller view retires input");
             assert!(!provider.buffers.lock().unwrap().contains_key(&id));
             assert_eq!(provider.frees.lock().unwrap().get(&id), Some(&1));

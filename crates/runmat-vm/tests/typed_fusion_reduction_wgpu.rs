@@ -86,11 +86,18 @@ fn assert_actual_folded_full_call_shape_with_dtype(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_service_ports(RuntimeServicePorts::default().with_placement(placement.clone()));
-    let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
-        runmat_vm::interpret_with_vars_in_context(bytecode, &mut vars, None, runtime.clone()),
-    )
-    .expect("actual VM typed folded reduction");
+    let vars = vec![Value::Num(0.0); bytecode.var_count];
+    let runmat_vm::InterpreterOutcome::Completed(completion) =
+        block_on(runmat_vm::interpret_workspace(
+            bytecode,
+            runmat_vm::InterpreterVars::from_owned(vars),
+            None,
+            runtime.clone(),
+            None,
+            None,
+        ))
+        .outcome
+        .expect("actual VM typed folded reduction");
     let vars = completion
         .with_owned(|completion| {
             runmat_runtime::execution::RootedValues::new(
