@@ -47,7 +47,7 @@ mod validate_sequence;
 mod validate_signals;
 
 pub use execution_policy::{
-    AcceleratorPreference, AuthoredExecutionPolicy, AuthoredExecutionPolicyError,
+    AcceleratorAdmissionPolicy, AcceleratorPreference, AuthoredExecutionPolicy, AuthoredExecutionPolicyError,
     AuthoredExecutionPolicyRef, BackendPreference, CheckpointPreference, CooperativePolicy,
     ExecutionResourceLimits, FanoutPolicy, InclusiveCountRange, OperatorPartitioner,
     ParallelismLimit, PartitionBalance, PlacementPreference, ResiliencePolicy,

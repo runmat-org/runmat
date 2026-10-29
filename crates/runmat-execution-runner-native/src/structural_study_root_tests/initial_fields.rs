@@ -96,6 +96,7 @@ pub(crate) fn verify_original_field_transport(fields: &[InitialFieldBinding]) {
         }),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         memory_per_worker_bytes: None,
+        accelerator_admission: Default::default(),
         analysis_accelerator_requests: Vec::new(),
         input_materializations: Vec::new(),
         initial_fields,

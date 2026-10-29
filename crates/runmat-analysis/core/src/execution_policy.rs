@@ -71,6 +71,40 @@ pub enum AcceleratorPreference {
     Required,
 }
 
+/// What execution does when a study requests accelerator placement and the accelerator path
+/// cannot run the solve (no device, or no device kernel for that physics family).
+///
+/// One policy for every physics family (owner decision 2026-10-28): by default the solve runs on
+/// the CPU reference path, publishes `cpu_reference` as its execution backend, and emits the
+/// `FEA_ACCELERATOR_ADMISSION_FALLBACK` diagnostic. `Required` fails closed instead. Authored
+/// sources spell the strict option `accelerators = required` in an execution policy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcceleratorAdmissionPolicy {
+    #[default]
+    FallbackToCpu,
+    Required,
+}
+
+impl AcceleratorAdmissionPolicy {
+    /// The default policy: a requested accelerator that cannot run falls back to `cpu_reference`.
+    pub fn is_fallback(&self) -> bool {
+        *self == Self::FallbackToCpu
+    }
+}
+
+impl ExecutionResourceLimits {
+    /// The admission policy the authored accelerator preference selects.
+    pub fn accelerator_admission(&self) -> AcceleratorAdmissionPolicy {
+        match self.accelerators {
+            AcceleratorPreference::Required => AcceleratorAdmissionPolicy::Required,
+            AcceleratorPreference::Disabled | AcceleratorPreference::Preferred => {
+                AcceleratorAdmissionPolicy::FallbackToCpu
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FanoutPolicy {

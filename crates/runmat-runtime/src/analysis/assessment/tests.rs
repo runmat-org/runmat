@@ -76,6 +76,7 @@ pub(in crate::analysis) fn fixture() -> (
         result_quality: crate::analysis::QualityGate::Pass,
         evidence_artifact_path: String::new(),
         result_manifest_artifact_path: None,
+        diagnostics: Vec::new(),
     };
     (compiled, published, definition)
 }

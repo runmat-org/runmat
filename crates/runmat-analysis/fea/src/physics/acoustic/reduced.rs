@@ -23,6 +23,11 @@ pub fn solve_reduced_harmonic(
     mode_count: usize,
     residual_warn_threshold: f64,
 ) -> Result<FeaRunResult, String> {
+    let admission = crate::contracts::accelerator_admission::admit_accelerator(
+        crate::contracts::accelerator_admission::AcceleratorFamily::Acoustic,
+        backend,
+    )
+    .map_err(|error| error.to_string())?;
     let node_count = domain::node_count(model);
     let material = medium::material_summary(model, mode_count);
     let boundary = medium::boundary_summary(model, material.characteristic_impedance_pa_s_per_m());
@@ -151,7 +156,7 @@ pub fn solve_reduced_harmonic(
     ];
     let acoustic_field_count = fields.len() + frequency_response_fields.len();
     fields.extend(frequency_response_fields);
-    let run = FeaRunResult {
+    let mut run = FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::Cpu,
@@ -189,6 +194,7 @@ pub fn solve_reduced_harmonic(
         }),
         fields,
     };
+    run.diagnostics.extend(admission.fallback);
     run.validate_solver_formulation()
         .map_err(|error| error.to_string())?;
     Ok(run)

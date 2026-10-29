@@ -13,7 +13,12 @@ use crate::results::field::{
 
 pub struct PreparedThermalSolve<'a> {
     pub(super) model: &'a AnalysisModel,
+    /// The backend the solve executes with (the admitted placement).
     pub(super) backend: ComputeBackend,
+    pub(super) accelerator: (
+        crate::contracts::accelerator_admission::AcceleratorFamily,
+        crate::contracts::accelerator_admission::AcceleratorAdmission,
+    ),
     pub(super) options: ThermalSolveOptions,
     pub(super) mesh: &'a SolverMeshArtifact,
     pub(super) step: &'a ProcedureStep,
@@ -128,7 +133,8 @@ impl PreparedThermalSolve<'_> {
     /// admission; their evaluation belongs to the shared published-field task chain.
     /// The authored model and producer identity are never rewritten to defer observations.
     pub fn execute_primary_fields(self) -> Result<FeaThermalRunResult, FeaRunError> {
-        physical::run(
+        let (family, admission) = self.accelerator;
+        let mut result = physical::run(
             self.model,
             self.backend,
             self.options,
@@ -136,7 +142,13 @@ impl PreparedThermalSolve<'_> {
             self.step,
             &self.schedule,
             &self.facts,
-        )
+        )?;
+        crate::contracts::accelerator_admission::complete_accelerator_admission(
+            family,
+            admission,
+            &mut result.run,
+        )?;
+        Ok(result)
     }
 }
 

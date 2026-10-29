@@ -26,6 +26,22 @@ pub const fn required(
     }
 }
 
+/// A trailing argument the caller may omit; `default` is the documented value used then.
+pub const fn optional(
+    name: &'static str,
+    ty: BuiltinParamType,
+    default: &'static str,
+    description: &'static str,
+) -> BuiltinParamDescriptor {
+    BuiltinParamDescriptor {
+        name,
+        ty,
+        arity: BuiltinParamArity::Optional,
+        default: Some(default),
+        description,
+    }
+}
+
 pub const fn output(name: &'static str, description: &'static str) -> BuiltinParamDescriptor {
     required(name, BuiltinParamType::Any, description)
 }

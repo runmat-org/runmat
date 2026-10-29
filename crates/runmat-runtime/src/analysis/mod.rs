@@ -109,6 +109,7 @@ pub mod value_admission;
 #[cfg(test)]
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
+pub use execution_error::ACCELERATOR_REQUIRED_ERROR_CODE;
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::RuntimeProxyFormulation;
 use linear_static_execution::analysis_run_linear_static_with_executor;

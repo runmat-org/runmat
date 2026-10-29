@@ -36,8 +36,28 @@ pub(super) fn execute_linear_static_with_executor(
     context: OperationContext,
     executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    use runmat_analysis_fea::accelerator_admission::{
+        admit_accelerator, complete_accelerator_admission, AcceleratorFamily,
+    };
     let _solver_context = install_fea_solver_context();
-    let prepared = analysis_prepare_linear_static_run_op(model, backend, options, context)?;
+    // A portable executor receives an already admitted workload: placement is decided here,
+    // with the one shared policy, before the task is prepared.
+    let admission = match executor {
+        Some(_) => Some(
+            admit_accelerator(AcceleratorFamily::StructuralStatic, backend).map_err(|error| {
+                map_fea_run_error(AnalysisOperation::LinearStatic, model, &context, error.into())
+            })?,
+        ),
+        None => None,
+    };
+    let mut prepared = analysis_prepare_linear_static_run_op(
+        model,
+        admission
+            .as_ref()
+            .map_or(backend, |admission| admission.effective),
+        options,
+        context,
+    )?;
     let run = if let Some(executor) = executor {
         let mesh = prepared.solver_mesh.as_ref().ok_or_else(|| {
             operation_error(
@@ -57,7 +77,7 @@ pub(super) fn execute_linear_static_with_executor(
                 )]),
             )
         })?;
-        executor
+        let run = executor
             .execute(&prepared.workload, mesh)
             .map_err(|message| {
                 operation_error(
@@ -77,7 +97,24 @@ pub(super) fn execute_linear_static_with_executor(
                     )]),
                 )
             })?
-            .run
+            .run;
+        if let Some(admission) = admission {
+            let mut run = run;
+            complete_accelerator_admission(AcceleratorFamily::StructuralStatic, admission, &mut run)
+                .map_err(|error| {
+                    map_fea_run_error(
+                        AnalysisOperation::LinearStatic,
+                        &prepared.workload.model,
+                        &prepared.context,
+                        error.into(),
+                    )
+                })?;
+            // The published result reports the requested placement next to the backend that ran.
+            prepared.workload.backend = run.requested_backend;
+            run
+        } else {
+            run
+        }
     } else {
         run_linear_static_with_options(
             &prepared.workload.model,

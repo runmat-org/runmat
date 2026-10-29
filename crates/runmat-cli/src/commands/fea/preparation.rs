@@ -35,6 +35,7 @@ pub(super) async fn prepare_study(
             workers: None,
             backend: compute.backend,
             accelerators: compute.accelerators.clone(),
+            accelerator_placement: compute.placement.clone(),
             ..Default::default()
         },
     )
@@ -47,6 +48,8 @@ pub(super) async fn prepare_study(
 pub(super) struct FeaComputeAllocation {
     pub backend: runmat_analysis_fea::ComputeBackend,
     pub accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
+    /// The admitted placement the published study records and settles.
+    pub placement: runmat_analysis_fea::accelerator_admission::AcceleratorPlacement,
 }
 
 pub(super) fn artifact_access(authority: &str) -> ArtifactAccess {

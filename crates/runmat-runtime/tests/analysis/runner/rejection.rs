@@ -64,10 +64,8 @@ pub(super) fn check(
     }
     let mut error_code = None;
     for (placement, result) in results {
-        let expected = match placement {
-            "gpu" => spec.expect_gpu_run_error.unwrap_or(expected),
-            _ => expected,
-        };
+        // GPU placement falls back to the CPU reference when the accelerator path cannot run
+        // the solve, so every placement reports the CPU reference's rejection.
         match result {
             Ok(_) => failures.push(format!(
                 "expected {placement} run error code {expected}, but run succeeded"

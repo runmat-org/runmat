@@ -105,6 +105,7 @@ pub(in crate::analysis) fn standalone_thermal_completion(
     let execution = AnalysisExecutionStep {
         step_id: step.step_id.clone(),
         backend: thermal.workload.backend,
+        accelerator_admission: Default::default(),
         solver_options: AnalysisSolverOptions::ThermalDiffusion(options.clone()),
     };
     PreparedStudyCompletion {

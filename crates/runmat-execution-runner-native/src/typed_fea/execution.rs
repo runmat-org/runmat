@@ -37,7 +37,10 @@ pub(super) async fn execute_prepared_with_source(
         }
         crate::LocalStudyCompletion::Family(result) => *result,
     };
-    let publication = prepare_study_publication(&result, "typed-local")?;
+    let mut publication = prepare_study_publication(&result, "typed-local")?;
+    publication
+        .admit_accelerator_placement(&options.accelerator_placement)
+        .map_err(|error| error.to_string())?;
     let publication = complete_prepared_publication(source, publication).await?;
     Ok(CompletedLocalFeaCase {
         case_id,

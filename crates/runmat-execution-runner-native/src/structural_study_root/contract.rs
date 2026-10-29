@@ -1,5 +1,6 @@
 //! Immutable authored root and client-held result authority.
 use super::*;
+use runmat_analysis_fea::accelerator_admission::AcceleratorPlacement;
 
 /// Family-specific planning carried by the one portable authored study root.
 ///
@@ -83,6 +84,14 @@ pub(super) struct StructuralStudyRootRequest {
     /// worker within it. Absent when not authored, so roots without it keep their bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) memory_per_worker_bytes: Option<u64>,
+    /// Execution policy accelerator admission (`accelerators = required` is strict): the worker
+    /// admits the study's placement under it before any meshing or solve. Absent for the
+    /// default fallback policy, so roots without it keep their bytes.
+    #[serde(
+        default,
+        skip_serializing_if = "runmat_analysis_core::AcceleratorAdmissionPolicy::is_fallback"
+    )]
+    pub(super) accelerator_admission: runmat_analysis_core::AcceleratorAdmissionPolicy,
     pub(super) analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub(super) input_materializations: Vec<InputMaterializationPlanRequest>,
     pub(super) geometry_meshing: ProgramExecutionDescriptor,
@@ -189,6 +198,8 @@ pub struct StructuralStudyRootPreparation {
     pub local_execution: LocalExecutionPlan,
     /// The execution policy's `memory_per_worker`, when authored.
     pub memory_per_worker_bytes: Option<u64>,
+    /// The execution policy's accelerator admission (`accelerators = required` is strict).
+    pub accelerator_admission: runmat_analysis_core::AcceleratorAdmissionPolicy,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<InputMaterializationPlan>,
     pub initial_fields: Vec<runmat_analysis_fea::execution::InitialFieldBinding>,
@@ -217,6 +228,9 @@ pub struct StructuralStudyResultExpectation {
     pub initial_fields: Vec<runmat_analysis_fea::execution::InitialFieldBinding>,
     pub geometry_request: runmat_analysis_execution::GeometryMaterializationRequest,
     pub expected_meshing_request: runmat_meshing_core::MeshingRequest,
+    /// The placement the submitting host admitted; settled when the result is published.
+    #[serde(default, skip_serializing_if = "AcceleratorPlacement::is_default")]
+    pub accelerator_placement: AcceleratorPlacement,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

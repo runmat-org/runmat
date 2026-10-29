@@ -91,6 +91,7 @@ fn execution_step(
     Ok(AnalysisExecutionStep {
         step_id: step.step_id.clone(),
         backend,
+        accelerator_admission: Default::default(),
         solver_options,
     })
 }

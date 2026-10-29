@@ -74,6 +74,8 @@ export type FeaGeometryUnits = import("./fea-semantic-contracts.js").LengthUnit;
 
 export type FeaComputeBackend = "cpu" | "gpu";
 
+export type FeaAcceleratorAdmissionPolicy = "fallback_to_cpu" | "required";
+
 export type FeaElementOrder = "tet4" | "tet10";
 
 export type FeaAnalysisProcedure = "static" | "modal_extraction" | "prestressed_modal_extraction" | "eigenvalue_buckling" | "transient_response" | "harmonic_response" | "prestressed_harmonic_response" | "modal_response_spectrum" | "random_response" | "nonlinear" | "adaptive";
@@ -526,4 +528,4 @@ export interface FeaDomainsInput { thermo_mechanical?: { reference_temperature: 
 
 export interface FeaCanonicalSequence { sequence_id: string; steps: FeaProcedureStep[]; dependencies: FeaSequenceDependency[]; transitions: FeaStateTransition[]; branches: FeaSequenceBranch[]; }
 
-export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend } & ({ solver: "structural_linear"; options: FeaStructuralLinearOptions } | { solver: "structural_modes"; options: FeaStructuralModesOptions } | { solver: "acoustic_helmholtz"; options: FeaAcousticHelmholtzOptions } | { solver: "thermal_diffusion"; options: FeaThermalDiffusionOptions } | { solver: "structural_transient"; options: FeaStructuralTransientOptions } | { solver: "incompressible_flow"; options: FeaIncompressibleFlowOptions } | { solver: "structural_nonlinear"; options: FeaStructuralNonlinearOptions } | { solver: "maxwell_harmonic"; options: FeaMaxwellHarmonicOptions } | { solver?: never; options?: never });
+export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; accelerator_admission?: FeaAcceleratorAdmissionPolicy } & ({ solver: "structural_linear"; options: FeaStructuralLinearOptions } | { solver: "structural_modes"; options: FeaStructuralModesOptions } | { solver: "acoustic_helmholtz"; options: FeaAcousticHelmholtzOptions } | { solver: "thermal_diffusion"; options: FeaThermalDiffusionOptions } | { solver: "structural_transient"; options: FeaStructuralTransientOptions } | { solver: "incompressible_flow"; options: FeaIncompressibleFlowOptions } | { solver: "structural_nonlinear"; options: FeaStructuralNonlinearOptions } | { solver: "maxwell_harmonic"; options: FeaMaxwellHarmonicOptions } | { solver?: never; options?: never });

@@ -24,7 +24,8 @@ pub(super) async fn execute_study_remotely(
     )
     .await?;
     let prepared_root = portable_root(placeholder.root)?;
-    let saved_expectation = prepared_root.result_expectation();
+    let mut saved_expectation = prepared_root.result_expectation();
+    saved_expectation.accelerator_placement = compute.placement.clone();
     let assessment_functions = runmat_execution_runner_native::freeze_fea_assessment_functions(
         &source.session_source,
         &saved_expectation.study.assessments,

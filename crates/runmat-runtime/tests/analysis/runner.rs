@@ -6228,17 +6228,34 @@ pub(super) fn run_fixture(
                             ));
                         }
                     }
-                    // The modal eigensolver runs on the shared CPU sparse layer; a GPU request
-                    // must say so rather than report a device solve.
-                    if spec.id.starts_with("modal_large_gpu_provider")
-                        && !gpu_envelope.data.run.diagnostics.iter().any(|diagnostic| {
-                            diagnostic.code == "FEA_MODAL_ACCELERATOR_ADMISSION_FALLBACK"
-                        })
-                    {
-                        failures.push(format!(
-                            "fixture {} must report FEA_MODAL_ACCELERATOR_ADMISSION_FALLBACK for a GPU modal request",
-                            spec.id
-                        ));
+                    // Shared accelerator admission: a GPU placement that ran on cpu_reference
+                    // publishes the solver-backend fallback event and exactly one fallback
+                    // diagnostic, whatever the physics family.
+                    if gpu_envelope.data.provenance.solver_backend.as_str() == "cpu_reference" {
+                        let fallback_diagnostics = gpu_envelope
+                            .data
+                            .run
+                            .diagnostics
+                            .iter()
+                            .filter(|diagnostic| {
+                                diagnostic.code == "FEA_ACCELERATOR_ADMISSION_FALLBACK"
+                            })
+                            .count();
+                        if fallback_diagnostics != 1 {
+                            failures.push(format!(
+                                "fixture {} must report FEA_ACCELERATOR_ADMISSION_FALLBACK once for a GPU placement that ran on cpu_reference; found {fallback_diagnostics}",
+                                spec.id
+                            ));
+                        }
+                        if !gpu_fallback_events
+                            .iter()
+                            .any(|event| event.stage == FallbackStage::Solver)
+                        {
+                            failures.push(format!(
+                                "fixture {} must publish a solver-backend fallback event for a GPU placement that ran on cpu_reference",
+                                spec.id
+                            ));
+                        }
                     }
                     if env_bool("RUNMAT_FEA_ENFORCE_SPEEDUP_GATES").unwrap_or(false) {
                         if let Some(min_speedup_ratio) = spec.min_gpu_speedup_ratio {

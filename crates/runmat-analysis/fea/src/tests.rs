@@ -2751,29 +2751,62 @@ fn deterministic_replay_for_fixture_is_stable() {
 }
 
 #[test]
-fn static_gpu_request_fails_before_assembly_without_native_admission() {
+fn static_gpu_request_falls_back_to_cpu_reference_with_parity_unless_required() {
+    use crate::contracts::accelerator_admission::{
+        with_accelerator_admission_policy, AcceleratorAdmissionPolicy,
+        ACCELERATOR_ADMISSION_FALLBACK_CODE,
+    };
     let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let options = |algebra_backend_kind| LinearStaticSolveOptions {
+        solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
+        algebra_backend_kind,
+        ..baseline_linear_static_options()
+    };
+    let cpu = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        options(crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference),
+    )
+    .expect("CPU reference static solve");
     for algebra_backend_kind in [
         crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         crate::solve::backend::kind::LinearAlgebraBackendKind::Accelerator,
     ] {
-        let mesh = single_tetrahedron_solver_mesh_for_model(&model);
-        let error = crate::run_linear_static_with_options(
+        let fallback = crate::run_linear_static_with_options(
             &model,
             ComputeBackend::Gpu,
-            LinearStaticSolveOptions {
-                solver_mesh: Some(mesh),
-                algebra_backend_kind,
-                ..baseline_linear_static_options()
-            },
+            options(algebra_backend_kind),
         )
-        .expect_err("GPU request must not silently execute a CPU static solve");
+        .expect("GPU placement falls back to the CPU reference static solve");
+        assert_eq!(fallback.requested_backend, ComputeBackend::Gpu);
+        assert_eq!(fallback.execution_backend, crate::ExecutionBackend::Cpu);
+        assert_eq!(
+            fallback.solver_backend,
+            crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference
+        );
+        let warnings = fallback
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == ACCELERATOR_ADMISSION_FALLBACK_CODE)
+            .collect::<Vec<_>>();
+        assert_eq!(warnings.len(), 1, "{:?}", fallback.diagnostics);
+        assert!(warnings[0].message.contains("structural static"));
+        assert_eq!(fallback.fields, cpu.fields, "fallback must be the CPU reference solve");
+
+        let error = with_accelerator_admission_policy(AcceleratorAdmissionPolicy::Required, || {
+            crate::run_linear_static_with_options(
+                &model,
+                ComputeBackend::Gpu,
+                options(algebra_backend_kind),
+            )
+        })
+        .expect_err("required accelerator placement fails closed");
         assert!(matches!(
-            error,
-            crate::contracts::FeaRunError::Resource(
-                crate::planning::resource::ResourcePlanningError::Invalid(message)
-            ) if message.contains("CPU fallback is not a GPU solve")
+            &error,
+            crate::contracts::FeaRunError::AcceleratorRequired(required)
+                if required.family == "structural static"
         ));
+        assert!(error.to_string().starts_with("FEA_ACCELERATOR_REQUIRED"));
     }
 }
 
@@ -5249,4 +5282,83 @@ fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
         assert!(*constrained >= unconstrained * (1.0 - 1.0e-9));
     }
     assert!(tied.frequencies_hz()[0] > free.frequencies_hz()[0] * (1.0 + 1.0e-6));
+}
+
+fn assert_one_fallback_warning(run: &crate::contracts::FeaRunResult, family: &str) {
+    let warnings = run
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code
+                == crate::contracts::accelerator_admission::ACCELERATOR_ADMISSION_FALLBACK_CODE
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(warnings.len(), 1, "{:?}", run.diagnostics);
+    assert!(warnings[0].message.contains(family), "{}", warnings[0].message);
+    assert_eq!(run.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(run.execution_backend, crate::ExecutionBackend::Cpu);
+}
+
+fn required<R>(body: impl FnOnce() -> R) -> R {
+    crate::contracts::accelerator_admission::with_accelerator_admission_policy(
+        crate::contracts::accelerator_admission::AcceleratorAdmissionPolicy::Required,
+        body,
+    )
+}
+
+#[test]
+fn modal_gpu_request_falls_back_to_cpu_reference_with_parity_unless_required() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps = vec![ProcedureStep::structural_modal("modal_1".to_string())];
+    let cpu =
+        crate::run_modal_with_options(&model, ComputeBackend::Cpu, baseline_modal_options())
+            .unwrap();
+    let gpu =
+        crate::run_modal_with_options(&model, ComputeBackend::Gpu, baseline_modal_options())
+            .unwrap();
+    assert_one_fallback_warning(&gpu.run, "structural modal");
+    assert_eq!(gpu.frequencies_hz(), cpu.frequencies_hz());
+    assert_eq!(gpu.mode_shapes, cpu.mode_shapes);
+    assert!(matches!(
+        required(|| crate::run_modal_with_options(
+            &model,
+            ComputeBackend::Gpu,
+            baseline_modal_options()
+        )),
+        Err(crate::contracts::FeaRunError::AcceleratorRequired(_))
+    ));
+}
+
+#[test]
+fn transient_gpu_request_without_a_device_falls_back_with_parity_unless_required() {
+    if crate::contracts::accelerator_admission::device_unavailable_reason().is_none() {
+        return;
+    }
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
+    let cpu = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        baseline_transient_options(),
+    )
+    .unwrap();
+    let gpu = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        baseline_transient_options(),
+    )
+    .unwrap();
+    assert_one_fallback_warning(&gpu.run, "structural transient");
+    assert_eq!(gpu.time_points_s, cpu.time_points_s);
+    assert_eq!(gpu.displacement_snapshots, cpu.displacement_snapshots);
+    assert!(matches!(
+        required(|| crate::run_transient_with_options(
+            &model,
+            ComputeBackend::Gpu,
+            baseline_transient_options()
+        )),
+        Err(crate::contracts::FeaRunError::AcceleratorRequired(_))
+    ));
 }

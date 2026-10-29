@@ -1043,6 +1043,7 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
             }],
         },
@@ -1075,6 +1076,7 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
             }],
         },

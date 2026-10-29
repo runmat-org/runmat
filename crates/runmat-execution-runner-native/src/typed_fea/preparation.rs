@@ -267,6 +267,13 @@ pub async fn prepare_study_with_role(
             .execution_policy
             .as_ref()
             .and_then(|policy| policy.resources.maximum_memory_bytes_per_worker),
+        // The authored admission policy travels the same way, so the worker admits a strict
+        // placement before it meshes or solves.
+        accelerator_admission: resolved
+            .execution_policy
+            .as_ref()
+            .map(|policy| policy.resources.accelerator_admission())
+            .unwrap_or_default(),
         analysis_accelerator_requests: options.accelerators.clone(),
         initial_fields,
         input_materializations,

@@ -305,3 +305,39 @@ fn numerical_intent_excludes_placement_and_admission_but_exact_workload_does_not
     let alternate_receipt = ThermalNumericalReceiptArtifact::new(&gpu, &alternate_request).unwrap();
     assert_ne!(cpu_receipt.identity(), alternate_receipt.identity());
 }
+
+#[test]
+fn linear_thermal_gpu_request_without_a_device_falls_back_with_parity_unless_required() {
+    use crate::contracts::accelerator_admission::{
+        device_unavailable_reason, with_accelerator_admission_policy,
+        AcceleratorAdmissionPolicy, ACCELERATOR_ADMISSION_FALLBACK_CODE,
+    };
+    if device_unavailable_reason().is_none() {
+        // A provider is registered in this process: the device path is exercised elsewhere.
+        return;
+    }
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let cpu = workload();
+    let reference = cpu.execute(&mesh).unwrap();
+    let mut gpu = cpu;
+    gpu.backend = ComputeBackend::Gpu;
+    let fallback = gpu.execute(&mesh).unwrap();
+    assert_eq!(fallback.run.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(fallback.run.execution_backend, crate::ExecutionBackend::Cpu);
+    let warnings = fallback
+        .run
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == ACCELERATOR_ADMISSION_FALLBACK_CODE)
+        .count();
+    assert_eq!(warnings, 1, "{:?}", fallback.run.diagnostics);
+    assert_eq!(fallback.temperature_snapshots, reference.temperature_snapshots);
+    fallback.validate_complete().unwrap();
+    let strict = with_accelerator_admission_policy(AcceleratorAdmissionPolicy::Required, || {
+        gpu.execute(&mesh)
+    });
+    assert!(matches!(
+        strict,
+        Err(crate::FeaRunError::AcceleratorRequired(ref required)) if required.family == "thermal"
+    ));
+}
