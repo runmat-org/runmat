@@ -81,6 +81,7 @@ fn fixture() -> (
         execution: super::super::AnalysisExecutionStep {
             step_id: step.step_id.clone(),
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
+            accelerator_admission: Default::default(),
             solver_options: super::super::AnalysisSolverOptions::defaults_for(&step).unwrap(),
         },
         procedure_step: step,

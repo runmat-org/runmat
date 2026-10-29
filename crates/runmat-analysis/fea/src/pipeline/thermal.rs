@@ -5,6 +5,7 @@ use runmat_analysis_core::{
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
+    contracts::accelerator_admission::{admit_accelerator, AcceleratorFamily},
     contracts::{
         ComputeBackend, FeaRunError, FeaThermalRunResult, ThermalProcedureControl,
         ThermalSolveOptions,
@@ -136,11 +137,14 @@ fn prepare_validated_model<'a>(
             runmat_analysis_core::BoundaryOperator::ThermalRadiation { .. }
         )
     });
-    if radiation && backend != ComputeBackend::Cpu {
-        return Err(FeaRunError::InvalidModel(
-            "nonlinear thermal radiation requires the admitted CPU backend".into(),
-        ));
-    }
+    // Strict placement fails here, before any assembly or solve, whenever admission can
+    // already tell the device will not run (radiation, or no provider on this worker).
+    let accelerator_family = if radiation {
+        AcceleratorFamily::ThermalRadiation
+    } else {
+        AcceleratorFamily::Thermal
+    };
+    let admission = admit_accelerator(accelerator_family, backend)?;
     crate::planning::resource::require_initial_field_ceiling(
         &options.initial_fields,
         crate::execution::THERMAL_WORKLOAD_LIMITS,
@@ -188,7 +192,8 @@ fn prepare_validated_model<'a>(
     facts.require_fits(step.accuracy.resources.resident_byte_budget())?;
     Ok(PreparedThermalSolve {
         model,
-        backend,
+        backend: admission.effective,
+        accelerator: (accelerator_family, admission),
         options,
         mesh,
         step,

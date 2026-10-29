@@ -212,6 +212,7 @@ export type {
   FeaFieldStorage,
   FeaFieldStorageRef,
   FeaObjectArtifactMetadata,
+  FeaAcceleratorAdmissionPolicy,
   FeaComputeBackend,
   FeaConnectorInput,
   FeaConstraintInput,

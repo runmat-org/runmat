@@ -1,7 +1,7 @@
 //! Static argument checks for typed FEA policy constructors.
 //!
-//! Every policy constructor has a fixed positional signature and returns one
-//! immutable host object of a known class. The checks below only reject
+//! Every policy constructor has a positional signature (required arguments,
+//! then optional trailing ones) and returns one immutable host object of a known class. The checks below only reject
 //! arguments whose kind, shape, or residency is proven incompatible with the
 //! runtime admission rules; unknown facts never produce a diagnostic.
 
@@ -49,6 +49,23 @@ pub enum PolicyArg {
         classes: &'static [StaticClassIdentity],
         minimum: usize,
     },
+    /// A trailing argument the caller may omit; when present it follows the inner rule.
+    /// Only trailing positions may be optional.
+    Optional(&'static PolicyArg),
+}
+
+impl PolicyArg {
+    pub const fn is_optional(self) -> bool {
+        matches!(self, PolicyArg::Optional(_))
+    }
+
+    /// The rule a supplied argument must satisfy.
+    pub const fn supplied(self) -> PolicyArg {
+        match self {
+            PolicyArg::Optional(inner) => *inner,
+            rule => rule,
+        }
+    }
 }
 
 /// The complete static call shape of one typed policy constructor.
@@ -58,21 +75,33 @@ pub struct PolicyCall {
     pub arguments: &'static [PolicyArg],
 }
 
+impl PolicyCall {
+    /// The number of leading arguments a call must supply.
+    pub fn required(&self) -> usize {
+        self.arguments
+            .iter()
+            .take_while(|rule| !rule.is_optional())
+            .count()
+    }
+}
+
 pub fn infer_policy(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
     call: &PolicyCall,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
-    if request.arguments.len() != call.arguments.len() {
+    let (required, maximum) = (call.required(), call.arguments.len());
+    if !(required..=maximum).contains(&request.arguments.len()) {
+        let expected = if required == maximum {
+            format!("exactly {maximum}")
+        } else {
+            format!("{required} to {maximum}")
+        };
         diagnostics.push(argument_error(
             ARITY,
-            format!(
-                "{} requires exactly {} argument(s)",
-                entry.identity.name,
-                call.arguments.len()
-            ),
-            request.arguments.len().min(call.arguments.len()),
+            format!("{} requires {expected} argument(s)", entry.identity.name),
+            request.arguments.len().min(maximum),
         ));
     }
     for (index, (fact, rule)) in request.arguments.iter().zip(call.arguments).enumerate() {
@@ -107,7 +136,8 @@ fn check_argument(fact: &ValueFact, rule: PolicyArg, index: usize) -> Option<Inf
             index,
         ));
     }
-    let failure = match rule {
+    let failure = match rule.supplied() {
+        PolicyArg::Optional(_) => unreachable!("optional rules wrap a supplied rule"),
         PolicyArg::Text => (!text_scalar(fact)).then_some((TEXT, "expected a text scalar")),
         PolicyArg::RealScalar | PolicyArg::Count => numeric(fact, Some(1..=1)),
         PolicyArg::RealVector => numeric(fact, None),

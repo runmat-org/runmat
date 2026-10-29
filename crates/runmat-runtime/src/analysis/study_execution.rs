@@ -7,14 +7,39 @@ use crate::operations::{
 
 use super::contracts::{AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverOptions};
 use super::{
-    analysis_run_cfd_with_options_op, execute_acoustic_with_options, execute_cht_with_options,
-    execute_fsi_with_options, execute_modal_with_options, execute_nonlinear_with_options,
-    execute_transient_with_options, linear_static_execution::execute_linear_static_with_executor,
+    analysis_run_cfd_with_options_op, execute_acoustic_with_options, execute_modal_with_options,
+    execute_nonlinear_with_options, execute_transient_with_options,
+    linear_static_execution::execute_linear_static_with_executor,
     thermal_execution::execute_thermal_with_options, StructuralLinearExecutor,
     ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
+/// Runs one authored step with its accelerator admission policy in scope, so every family solve
+/// it starts admits placement through the shared `accelerator_admission` decision.
 pub(super) fn execute_study_step(
+    model: &AnalysisModel,
+    procedure_step: &ProcedureStep,
+    execution: &AnalysisExecutionStep,
+    solver_mesh_artifact_path: Option<&str>,
+    context: &OperationContext,
+    structural_executor: Option<&dyn StructuralLinearExecutor>,
+) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
+    runmat_analysis_fea::accelerator_admission::with_accelerator_admission_policy(
+        execution.accelerator_admission,
+        || {
+            execute_admitted_study_step(
+                model,
+                procedure_step,
+                execution,
+                solver_mesh_artifact_path,
+                context,
+                structural_executor,
+            )
+        },
+    )
+}
+
+fn execute_admitted_study_step(
     model: &AnalysisModel,
     procedure_step: &ProcedureStep,
     execution: &AnalysisExecutionStep,
@@ -210,37 +235,6 @@ pub(super) fn execute_study_step(
                 context.clone(),
             )?;
             Ok((run, AnalysisSolverOptions::IncompressibleFlow(options)))
-        }
-        AnalysisSolverOptions::ConjugateHeatTransfer(authored_options) => {
-            let mut options = authored_options.clone();
-            attach_solver_mesh_artifact_path(
-                &mut options.solver_mesh_artifact_path,
-                solver_mesh_artifact_path,
-            );
-            let run = execute_cht_with_options(
-                &model,
-                execution.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((run, AnalysisSolverOptions::ConjugateHeatTransfer(options)))
-        }
-        AnalysisSolverOptions::FluidStructureInteraction(authored_options) => {
-            let mut options = authored_options.clone();
-            attach_solver_mesh_artifact_path(
-                &mut options.solver_mesh_artifact_path,
-                solver_mesh_artifact_path,
-            );
-            let run = execute_fsi_with_options(
-                &model,
-                execution.backend,
-                options.clone(),
-                context.clone(),
-            )?;
-            Ok((
-                run,
-                AnalysisSolverOptions::FluidStructureInteraction(options),
-            ))
         }
         AnalysisSolverOptions::StructuralNonlinear(authored_options) => {
             let mut options = authored_options.clone();

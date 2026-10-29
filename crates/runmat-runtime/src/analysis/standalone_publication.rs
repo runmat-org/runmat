@@ -94,30 +94,6 @@ pub fn analysis_run_acoustic_with_options_op(
     )
 }
 
-pub fn analysis_run_cht_with_options_op(
-    model: &AnalysisModel,
-    backend: ComputeBackend,
-    options: AnalysisChtRunOptions,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    publish_standalone_run(
-        execute_cht_with_options(model, backend, options, context)?,
-        "RM.FEA.RUN_CHT.ARTIFACT_STORE_FAILED",
-    )
-}
-
-pub fn analysis_run_fsi_with_options_op(
-    model: &AnalysisModel,
-    backend: ComputeBackend,
-    options: AnalysisFsiRunOptions,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    publish_standalone_run(
-        execute_fsi_with_options(model, backend, options, context)?,
-        "RM.FEA.RUN_FSI.ARTIFACT_STORE_FAILED",
-    )
-}
-
 pub fn analysis_run_transient_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,

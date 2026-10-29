@@ -109,6 +109,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         analysis_accelerator_requests: Vec::new(),
         local_execution,
         memory_per_worker_bytes: Some(3 << 30),
+        accelerator_admission: runmat_analysis_core::AcceleratorAdmissionPolicy::Required,
         input_materializations: Vec::new(),
         initial_fields: Vec::new(),
         geometry_meshing,
@@ -155,6 +156,26 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     assert_eq!(decoded.local_execution, local_execution);
     // memory_per_worker travels with the root, so a remote placement plans within it too.
     assert_eq!(decoded.memory_per_worker_bytes, Some(3 << 30));
+    // The strict admission policy travels with the root, so the worker admits placement itself.
+    assert_eq!(
+        decoded.accelerator_admission,
+        runmat_analysis_core::AcceleratorAdmissionPolicy::Required
+    );
+    // The worker admits that policy before meshing: a GPU request for a static step (no device
+    // path) fails closed under the strict policy and is left to the fallback otherwise.
+    assert!(decoded.admit_accelerator_placement().is_ok());
+    let mut gpu = decoded.clone();
+    let crate::StudyRootPlanning::Structural(policy) = &mut gpu.planning else {
+        panic!("structural fixture plans a structural study")
+    };
+    policy.backend = runmat_analysis_fea::ComputeBackend::Gpu;
+    let error = gpu.admit_accelerator_placement().unwrap_err();
+    assert!(
+        error.to_string().contains("FEA_ACCELERATOR_REQUIRED"),
+        "{error}"
+    );
+    gpu.accelerator_admission = runmat_analysis_core::AcceleratorAdmissionPolicy::FallbackToCpu;
+    assert!(gpu.admit_accelerator_placement().is_ok());
     assert!(decoded.analysis_accelerator_requests.is_empty());
     assert_eq!(
         prepared.transport_objects().unwrap().len(),
@@ -580,6 +601,7 @@ fn prepare_source(
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         memory_per_worker_bytes: None,
+        accelerator_admission: Default::default(),
         input_materializations: Vec::new(),
         initial_fields: Vec::new(),
         geometry_meshing,

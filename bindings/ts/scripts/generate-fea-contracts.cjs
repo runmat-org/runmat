@@ -27,6 +27,10 @@ const rustFeaDiagnosticPath = path.resolve(
   repoRoot,
   "crates/runmat-analysis/language/src/diagnostic.rs"
 );
+const rustCoreExecutionPolicyPath = path.resolve(
+  repoRoot,
+  "crates/runmat-analysis/core/src/execution_policy.rs"
+);
 const rustCoreIdentityPath = path.resolve(
   repoRoot,
   "crates/runmat-analysis/core/src/study/identity.rs"
@@ -116,8 +120,6 @@ const analysisStructTypes = [
   ["CanonicalFluidPolicy", "FeaCanonicalFluidPolicy", {}],
   ["AndersonOnePolicy", "FeaAndersonOnePolicy", {}],
   ["FiniteVolumeProjectionPolicy", "FeaFiniteVolumeProjectionPolicy", {}],
-  ["AnalysisChtRunOptions", "FeaConjugateHeatTransferOptions", {}],
-  ["AnalysisFsiRunOptions", "FeaFluidStructureInteractionOptions", {}],
   ["ContactEnforcementOptions", "FeaContactEnforcementOptions", {}],
   ["AnalysisNonlinearRunOptions", "FeaStructuralNonlinearOptions", {}],
   ["AnalysisMaxwellRunOptions", "FeaMaxwellHarmonicOptions", {}],
@@ -462,6 +464,7 @@ function main() {
   const sourceReportSource = fs.readFileSync(rustFeaSourceReportPath, "utf8");
   const diagnosticSource = fs.readFileSync(rustFeaDiagnosticPath, "utf8");
   const coreIdentitySource = fs.readFileSync(rustCoreIdentityPath, "utf8");
+  const coreExecutionPolicySource = fs.readFileSync(rustCoreExecutionPolicyPath, "utf8");
   const coreFormulationSource = fs.readFileSync(rustCoreFormulationPath, "utf8");
   const coreOutputSource = fs.readFileSync(rustCoreOutputPath, "utf8");
   const fieldLocationSource = fs.readFileSync(rustFieldLocationPath, "utf8");
@@ -521,6 +524,10 @@ function main() {
   const authoringEnums = [
     `export type FeaGeometryUnits = import("./fea-semantic-contracts.js").LengthUnit;`,
     formatTypeUnion("FeaComputeBackend", readEnumValues(feaContractsSource, "ComputeBackend")),
+    formatTypeUnion(
+      "FeaAcceleratorAdmissionPolicy",
+      readEnumValues(coreExecutionPolicySource, "AcceleratorAdmissionPolicy")
+    ),
     formatTypeUnion("FeaElementOrder", readEnumValues(meshingRequestSource, "ElementOrder")),
     formatTypeUnion("FeaAnalysisProcedure", readEnumValues(coreIdentitySource, "AnalysisProcedure")),
   ];
@@ -656,7 +663,7 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "export interface FeaResponseSpectrumInput { spectrum_id: string; abscissa: { frequency_hertz: number[] } | { period_seconds: number[] }; ordinates: number[]; damping: { ratio: number } | { quality_factor: number }; response: \"relative_displacement\" | \"relative_velocity\" | \"relative_acceleration\" | \"absolute_acceleration\" | \"pseudo_velocity\" | \"pseudo_acceleration\"; envelope: \"positive\" | \"negative\" | \"maximax\"; interpolation: \"linear_frequency\" | \"linear_period\" | \"log_log\"; extrapolation: \"reject\" | \"hold_endpoint\"; direction: { frame: FeaCoordinateFrame; vector: [number, number, number] }; modal_combination: \"srss\" | \"complete_quadratic_combination\" | \"ten_percent\" | \"absolute_sum\"; directional_combination: \"srss\" | \"absolute_sum\" | { percentage_rule: { primary: number; secondary: number } }; truncation: { minimum_cumulative_mass_ratio: number; include_residual_mode: boolean; include_rigid_response: boolean; include_missing_mass: boolean }; construction: \"authored_design\" | { derived_from_acceleration_history: { source_signal_id: string; method: \"exact_piecewise_linear\" | \"recursive_filter\" } }; evidence: { sampling_adequacy_ratio: number; max_interpolation_error: number | null }; provenance_digest: string; }",
     "export interface FeaDomainsInput { thermo_mechanical?: { reference_temperature: { kelvin: number } }; electro_thermal?: { reference_temperature: { kelvin: number } }; electromagnetic?: { static: { equation: \"electrostatics\" | \"steady_conduction\" } } | { harmonic: { reference_frequency: { hertz: number } } }; cfd?: { density: { kilograms_per_cubic_meter: number }; dynamic_viscosity: { pascal_seconds: number }; turbulence_intensity: { ratio: number } }; }",
     "export interface FeaCanonicalSequence { sequence_id: string; steps: FeaProcedureStep[]; dependencies: FeaSequenceDependency[]; transitions: FeaStateTransition[]; branches: FeaSequenceBranch[]; }",
-    "export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend } & ({ solver: \"structural_linear\"; options: FeaStructuralLinearOptions } | { solver: \"structural_modes\"; options: FeaStructuralModesOptions } | { solver: \"acoustic_helmholtz\"; options: FeaAcousticHelmholtzOptions } | { solver: \"thermal_diffusion\"; options: FeaThermalDiffusionOptions } | { solver: \"structural_transient\"; options: FeaStructuralTransientOptions } | { solver: \"incompressible_flow\"; options: FeaIncompressibleFlowOptions } | { solver: \"conjugate_heat_transfer\"; options: FeaConjugateHeatTransferOptions } | { solver: \"fluid_structure_interaction\"; options: FeaFluidStructureInteractionOptions } | { solver: \"structural_nonlinear\"; options: FeaStructuralNonlinearOptions } | { solver: \"maxwell_harmonic\"; options: FeaMaxwellHarmonicOptions } | { solver?: never; options?: never });",
+    "export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; accelerator_admission?: FeaAcceleratorAdmissionPolicy } & ({ solver: \"structural_linear\"; options: FeaStructuralLinearOptions } | { solver: \"structural_modes\"; options: FeaStructuralModesOptions } | { solver: \"acoustic_helmholtz\"; options: FeaAcousticHelmholtzOptions } | { solver: \"thermal_diffusion\"; options: FeaThermalDiffusionOptions } | { solver: \"structural_transient\"; options: FeaStructuralTransientOptions } | { solver: \"incompressible_flow\"; options: FeaIncompressibleFlowOptions } | { solver: \"structural_nonlinear\"; options: FeaStructuralNonlinearOptions } | { solver: \"maxwell_harmonic\"; options: FeaMaxwellHarmonicOptions } | { solver?: never; options?: never });",
   ].join("\n\n");
   const analysisInterfaces = analysisStructTypes.map(([rustName, tsName, options]) =>
     formatInterface(tsName, readStructFields(analysisSource, rustName, options))

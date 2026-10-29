@@ -597,6 +597,13 @@ study = fea.study("bracket", geometry, model, ...
     "Execution", execution);
 ```
 
+A step that requests `fea.ComputeBackend.gpu()` falls back to the CPU reference path with one
+`FEA_ACCELERATOR_ADMISSION_FALLBACK` warning when the accelerator path cannot run it. Pass
+`strict = true` as the optional fourth argument of
+`fea.ExecutionStep.new(step, backend, solverOptions, strict)` (omitted means `false`; the same policy
+as `accelerators = required` in a `.fea` execution policy) to fail closed with
+`RM.FEA.ACCELERATOR_REQUIRED` instead.
+
 For a heterogeneous sequence, construct one `fea.SolverOptions` and `fea.ExecutionStep` per
 procedure step, then pass the ordered entries to `fea.ExecutionPlan.new(sequence, steps)`. The
 sequence remains the authority for physical order and state flow; the execution plan only binds

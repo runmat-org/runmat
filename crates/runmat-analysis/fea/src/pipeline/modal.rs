@@ -160,6 +160,10 @@ fn execute_modal_core(
     >,
 ) -> Result<CompletedModalCore, FeaRunError> {
     let execution_step = super::admission::require_structural(model, procedure)?;
+    crate::contracts::accelerator_admission::admit_accelerator(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralModal,
+        backend,
+    )?;
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::RegionResolution,

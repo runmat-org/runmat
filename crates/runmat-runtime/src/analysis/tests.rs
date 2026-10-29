@@ -1086,6 +1086,7 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
             }],
         },
@@ -1118,6 +1119,7 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
             }],
         },
@@ -3849,20 +3851,10 @@ fn analysis_trends_omit_rejected_coupled_flow_runs() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     for _ in 0..3 {
-        analysis_run_cht_with_options_op(
-            &sample_cht_model(),
-            ComputeBackend::Cpu,
-            Default::default(),
-            OperationContext::new(None, None),
-        )
-        .expect_err("rejected CHT runs are not persisted");
-        analysis_run_fsi_with_options_op(
-            &sample_fsi_model(),
-            ComputeBackend::Cpu,
-            Default::default(),
-            OperationContext::new(None, None),
-        )
-        .expect_err("rejected FSI runs are not persisted");
+        analysis_run_cht_op(&sample_cht_model(), OperationContext::new(None, None))
+            .expect_err("rejected CHT runs are not persisted");
+        analysis_run_fsi_op(&sample_fsi_model(), OperationContext::new(None, None))
+            .expect_err("rejected FSI runs are not persisted");
     }
     let trends = analysis_trends_op(
         AnalysisTrendsQuery { window_size: 2 },
@@ -5262,13 +5254,8 @@ fn analysis_run_cht_requires_an_authored_study() {
     let mut moment = sample_cht_model();
     replace_with_moment_excitation(&mut moment, "cht_moment");
     for model in [sample_cht_model(), thermal_only, moment] {
-        let err = analysis_run_cht_with_options_op(
-            &model,
-            ComputeBackend::Cpu,
-            Default::default(),
-            OperationContext::new(None, None),
-        )
-        .expect_err("the removed reduced CHT endpoint must not fabricate a coupled run");
+        let err = analysis_run_cht_op(&model, OperationContext::new(None, None))
+            .expect_err("the removed reduced CHT endpoint must not fabricate a coupled run");
         assert_eq!(err.operation, "fea.run_cht");
         assert_eq!(err.op_version, "fea.run_cht/v1");
         assert_eq!(err.error_code, "RM.FEA.RUN_CHT.AUTHORED_STUDY_REQUIRED");
@@ -5284,13 +5271,8 @@ fn analysis_run_fsi_requires_an_authored_study() {
     let mut moment = sample_fsi_model();
     replace_with_moment_excitation(&mut moment, "fsi_moment");
     for model in [sample_fsi_model(), fluid_only, moment] {
-        let err = analysis_run_fsi_with_options_op(
-            &model,
-            ComputeBackend::Cpu,
-            Default::default(),
-            OperationContext::new(None, None),
-        )
-        .expect_err("the removed reduced FSI endpoint must not fabricate a coupled run");
+        let err = analysis_run_fsi_op(&model, OperationContext::new(None, None))
+            .expect_err("the removed reduced FSI endpoint must not fabricate a coupled run");
         assert_eq!(err.operation, "fea.run_fsi");
         assert_eq!(err.op_version, "fea.run_fsi/v1");
         assert_eq!(err.error_code, "RM.FEA.RUN_FSI.AUTHORED_STUDY_REQUIRED");

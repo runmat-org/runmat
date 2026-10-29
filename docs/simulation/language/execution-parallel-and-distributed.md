@@ -30,9 +30,15 @@ study bracket_response {
 `profile.engineering` resolves through project configuration. Cluster addresses, credentials,
 trust material, and queue implementation details do not belong in a study file.
 
-`backend = auto` permits an admitted backend chosen from available capabilities. A required
-accelerator fails if no qualified device is available; `preferred` may admit a CPU attempt. The
-result records the actual backend and device evidence rather than the preference alone.
+`backend = auto` permits an admitted backend chosen from available capabilities. When a study
+requests the accelerator and the accelerator path cannot run it (its solver has no device path,
+no accelerator can be allocated, or the device declines the system at solve time), every physics
+family runs on the CPU reference path: the result reports `cpu_reference` as its execution
+backend and carries exactly one `FEA_ACCELERATOR_ADMISSION_FALLBACK` warning, in the published
+study as well as on the command line. `accelerators = required` is the strict option: the study
+fails closed with `RM.FEA.ACCELERATOR_REQUIRED` instead, before any assembly or solve whenever the
+fallback is known in advance. The result records the actual backend and device evidence rather
+than the preference alone. See [accelerator placement](../../fea/accelerator-placement.md).
 
 ## Three distinct kinds of scale
 

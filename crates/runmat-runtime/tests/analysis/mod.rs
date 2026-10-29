@@ -16,12 +16,11 @@ use runmat_meshing_core::{
 };
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_acoustic_with_options_op,
-    analysis_run_cfd_with_options_op, analysis_run_cht_with_options_op,
-    analysis_run_fsi_with_options_op, analysis_run_linear_static_with_options,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
-    analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
-    analysis_validate, AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    analysis_run_cfd_with_options_op, analysis_run_cht_op, analysis_run_fsi_op,
+    analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_thermal_with_options_op,
+    analysis_run_transient_with_options_op, analysis_validate, AnalysisAcousticRunOptions,
+    AnalysisCfdRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
     AnalysisResultsQuery, AnalysisRunOptions, AnalysisSolverOptions,
     AnalysisStructuralTimeStepPolicy, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
     FallbackEvent, FallbackReason, FallbackStage, PrecisionMode, PreconditionerMode, QualityPolicy,
@@ -55,7 +54,6 @@ struct FixtureSpec {
     expect_run_error: Option<&'static str>,
     /// The GPU placement's rejection when it differs from the CPU placement's. Static GPU
     /// execution fails closed at backend admission before the model reaches assembly.
-    expect_gpu_run_error: Option<&'static str>,
     expected_numerically_acceptable: Option<bool>,
     parity_tolerance: Option<ParityTolerance>,
     gpu_mode: Option<GpuMode>,
@@ -78,7 +76,6 @@ struct FixtureManifestEntry {
     procedure_step: ProcedureStep,
     expect_validate_error: Option<String>,
     expect_run_error: Option<String>,
-    expect_gpu_run_error: Option<String>,
     expected_numerically_acceptable: Option<bool>,
     parity_tolerance_abs: Option<f64>,
     parity_tolerance_rel: Option<f64>,

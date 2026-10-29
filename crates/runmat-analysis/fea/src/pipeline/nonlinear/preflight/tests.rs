@@ -283,6 +283,7 @@ fn resource_scaling_preserves_codec_capacity_admission() {
             assert!(plan.request.memory_bytes > previous_memory);
             assert!(demand.additional_persistent_bytes.0 >= storage.point_history_bytes);
             assert!(demand.operator.publication.result_artifact_bytes.0 > 0);
+            assert!(plan.request.memory_bytes <= runmat_types::wire_integer::MAX_WIRE_INTEGER);
             previous_memory = plan.request.memory_bytes;
         }
     }

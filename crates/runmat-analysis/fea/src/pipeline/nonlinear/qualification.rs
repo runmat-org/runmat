@@ -238,9 +238,33 @@ fn check_public_manufactured_cube(quadratic: bool, increments: usize) {
 }
 
 #[test]
-fn public_nonlinear_rejects_gpu_missing_mesh_and_nonzero_initial_factor() {
+fn public_nonlinear_gpu_falls_back_and_rejects_missing_mesh_and_nonzero_initial_factor() {
+    use crate::contracts::accelerator_admission::{
+        with_accelerator_admission_policy, AcceleratorAdmissionPolicy,
+        ACCELERATOR_ADMISSION_FALLBACK_CODE,
+    };
     let (mut model, mesh, _) = reference::fixture::prepare(1, false);
-    assert!(run_nonlinear_with_options(&model, ComputeBackend::Gpu, options(&mesh, 1)).is_err());
+    let cpu = run_nonlinear_with_options(&model, ComputeBackend::Cpu, options(&mesh, 1)).unwrap();
+    let fallback =
+        run_nonlinear_with_options(&model, ComputeBackend::Gpu, options(&mesh, 1)).unwrap();
+    assert_eq!(fallback.run.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(fallback.run.execution_backend, crate::ExecutionBackend::Cpu);
+    assert_eq!(fallback.run.fields, cpu.run.fields);
+    assert_eq!(
+        fallback
+            .run
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == ACCELERATOR_ADMISSION_FALLBACK_CODE)
+            .count(),
+        1
+    );
+    assert!(matches!(
+        with_accelerator_admission_policy(AcceleratorAdmissionPolicy::Required, || {
+            run_nonlinear_with_options(&model, ComputeBackend::Gpu, options(&mesh, 1))
+        }),
+        Err(crate::FeaRunError::AcceleratorRequired(_))
+    ));
     let mut missing = options(&mesh, 1);
     missing.solver_mesh = None;
     assert!(run_nonlinear_with_options(&model, ComputeBackend::Cpu, missing).is_err());

@@ -25,7 +25,6 @@ fn magnetic_saddle_method_cannot_claim_electrical_or_harmonic_algebra() {
     assert!(method_is_compatible(
         TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve,
         SolutionSpace::Direct,
-        CouplingImplementation::Uncoupled,
         SolverMethod::SparseDirectLdlt,
     ));
     for method in [
@@ -36,14 +35,12 @@ fn magnetic_saddle_method_cannot_claim_electrical_or_harmonic_algebra() {
         assert!(!method_is_compatible(
             TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve,
             SolutionSpace::Direct,
-            CouplingImplementation::Uncoupled,
             method,
         ));
     }
     assert!(!method_is_compatible(
         TemporalImplementation::ElectrostaticPotentialLinearSolve,
         SolutionSpace::Direct,
-        CouplingImplementation::Uncoupled,
         SolverMethod::SparseDirectLdlt,
     ));
     assert!(preconditioner_is_compatible(
@@ -178,7 +175,6 @@ fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_cla
     assert!(!method_is_compatible(
         TemporalImplementation::SteadyConductionPotentialLinearSolve,
         SolutionSpace::Direct,
-        CouplingImplementation::Uncoupled,
         SolverMethod::GeneralGmres
     ));
 }
@@ -299,6 +295,9 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
             SolverMethod::GeneralGmres,
             SolverPreconditioner::Jacobi,
         ),
+        // Canonical CHT is the monolithic flow-advected conjugate energy realization; its
+        // publication reports the flow lifecycle's GMRES/Jacobi pair. The partitioned
+        // projection pair belonged to the removed reduced realization.
         (
             PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
             AnalysisProcedure::Static,

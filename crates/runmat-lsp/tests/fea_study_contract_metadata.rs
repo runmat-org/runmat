@@ -91,7 +91,7 @@ fn sequence_and_observation_signatures_are_available_during_authoring() {
         ),
         (
             "ExecutionStep.new",
-            "executionStep = fea.ExecutionStep.new(0, 0, 0, 0);",
+            "executionStep = fea.ExecutionStep.new(0, 0, 0, 0, 0);",
         ),
         (
             "ExecutionPlan.new",

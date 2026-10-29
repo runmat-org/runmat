@@ -65,6 +65,33 @@ impl PreparedStudyPublication {
         })
     }
 
+    /// Applies the placement the host admitted before submission: strict placement fails
+    /// closed when a requested accelerator step ran on `cpu_reference`; a study planned on
+    /// `cpu_reference` publishes its one fallback warning.
+    pub fn admit_accelerator_placement(
+        &mut self,
+        placement: &runmat_analysis_fea::accelerator_admission::AcceleratorPlacement,
+    ) -> Result<(), runmat_analysis_fea::accelerator_admission::AcceleratorRequiredError> {
+        let data = &mut self.completion.published.data;
+        let fallback = placement.settle_study(data.steps.iter().map(|step| {
+            (
+                step.procedure_step.step_id.as_str(),
+                step.provenance.requested_backend,
+                step.provenance.execution_backend,
+            )
+        }))?;
+        if let Some(fallback) = fallback {
+            if !data
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == fallback.code)
+            {
+                data.diagnostics.push(fallback);
+            }
+        }
+        Ok(())
+    }
+
     pub fn function_inputs(&self) -> impl Iterator<Item = &PublishedStudyAssessment> {
         self.completion
             .published

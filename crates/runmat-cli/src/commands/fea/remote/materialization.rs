@@ -66,7 +66,13 @@ pub(crate) async fn materialize_fea_study(
     expectation.validate()?;
     let cache = DownloadedResultCache::from_objects(objects);
     let result = import_study_result(&cache, response, &expectation)?;
-    let publication = publish_materialized_result(&result, run_id, functions).await?;
+    let publication = publish_materialized_result(
+        &result,
+        run_id,
+        functions,
+        &expectation.accelerator_placement,
+    )
+    .await?;
     Ok(MaterializedFeaStudy {
         result,
         publication,
@@ -132,6 +138,7 @@ pub(crate) async fn materialize_fea_sweep(
                         .get(entry.study_index)
                         .map(Vec::as_slice)
                         .unwrap_or(&[]),
+                    &study.accelerator_placement,
                 )
                 .await?;
                 MaterializedFeaSweepTerminal::Succeeded(Box::new(MaterializedFeaStudy {
@@ -159,12 +166,18 @@ async fn publish_materialized_result(
     result: &runmat_execution_runner_native::CompletedFeaStudyResult,
     run_id: &str,
     functions: &[runmat_analysis_execution::assessment_program::FrozenAssessmentCallable],
+    placement: &runmat_analysis_fea::accelerator_admission::AcceleratorPlacement,
 ) -> Result<AnalysisStudyRunData> {
-    let prepared = runmat_execution_runner_native::prepare_study_publication(
+    let mut prepared = runmat_execution_runner_native::prepare_study_publication(
         result,
         &format!("typed-remote:{run_id}"),
     )
     .map_err(anyhow::Error::msg)?;
+    // Strict placement settles the remote workers' solve-time declines here, before anything
+    // is published; a study planned on cpu_reference publishes its fallback warning.
+    prepared
+        .admit_accelerator_placement(placement)
+        .map_err(anyhow::Error::new)?;
     runmat_execution_runner_native::complete_frozen_fea_assessments(prepared, functions)
         .await
         .map_err(anyhow::Error::msg)

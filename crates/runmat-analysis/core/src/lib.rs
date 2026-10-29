@@ -47,11 +47,11 @@ mod validate_sequence;
 mod validate_signals;
 
 pub use execution_policy::{
-    AcceleratorPreference, AuthoredExecutionPolicy, AuthoredExecutionPolicyError,
-    AuthoredExecutionPolicyRef, BackendPreference, CheckpointPreference, CooperativePolicy,
-    ExecutionResourceLimits, FanoutPolicy, InclusiveCountRange, OperatorPartitioner,
-    ParallelismLimit, PartitionBalance, PlacementPreference, ResiliencePolicy,
-    MAX_CPU_THREADS_PER_WORKER,
+    AcceleratorAdmissionPolicy, AcceleratorPreference, AuthoredExecutionPolicy,
+    AuthoredExecutionPolicyError, AuthoredExecutionPolicyRef, BackendPreference,
+    CheckpointPreference, CooperativePolicy, ExecutionResourceLimits, FanoutPolicy,
+    InclusiveCountRange, OperatorPartitioner, ParallelismLimit, PartitionBalance,
+    PlacementPreference, ResiliencePolicy, MAX_CPU_THREADS_PER_WORKER,
 };
 pub use study::{
     attach_authored_outputs, authored_output_root, authored_output_types,

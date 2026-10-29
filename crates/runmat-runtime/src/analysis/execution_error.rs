@@ -12,6 +12,9 @@ use crate::operations::{
 use super::execution_dispatch::AnalysisOperation;
 use super::formulation_admission::{admit_runtime_proxy, RuntimeProxyFormulation};
 
+/// Strict accelerator placement (`accelerators = required`) could not run on the accelerator.
+pub const ACCELERATOR_REQUIRED_ERROR_CODE: &str = "RM.FEA.ACCELERATOR_REQUIRED";
+
 pub(super) fn map_fea_run_error(
     operation: AnalysisOperation,
     model: &AnalysisModel,
@@ -92,6 +95,19 @@ pub(super) fn map_fea_run_error(
                 model_details(),
             )
         }
+        FeaRunError::AcceleratorRequired(error) => operation_error(
+            operation.name(),
+            operation.version(),
+            context,
+            OperationErrorSpec {
+                error_code: ACCELERATOR_REQUIRED_ERROR_CODE,
+                error_type: OperationErrorType::Backend,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            error.to_string(),
+            model_details(),
+        ),
         FeaRunError::MissingElectromagneticSource { frequency_hz } => operation_error(
             operation.name(),
             operation.version(),

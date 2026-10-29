@@ -212,11 +212,38 @@ pub struct DecodedStructuralStudyRoot {
     pub local_execution: LocalExecutionPlan,
     /// The execution policy's `memory_per_worker`, when authored.
     pub memory_per_worker_bytes: Option<u64>,
+    /// The execution policy's accelerator admission, so the worker admits placement itself.
+    pub accelerator_admission: runmat_analysis_core::AcceleratorAdmissionPolicy,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<InputMaterializationPlan>,
     pub initial_fields: Vec<runmat_analysis_fea::execution::InitialFieldBinding>,
     pub geometry_meshing: ProgramExecutionRequest,
     pub artifact_access: ArtifactAccess,
+}
+
+impl DecodedStructuralStudyRoot {
+    /// Admits the study's accelerator placement on the worker under the root's policy, before
+    /// any meshing or solve: a requested accelerator that this worker cannot provide (no active
+    /// provider, or a family without a device path) fails a strict study here instead of after a
+    /// full remote run. Under the fallback policy the solve-time admission decides as usual.
+    pub fn admit_accelerator_placement(
+        &self,
+    ) -> Result<(), runmat_analysis_fea::accelerator_admission::AcceleratorRequiredError> {
+        if self.accelerator_admission != runmat_analysis_core::AcceleratorAdmissionPolicy::Required
+        {
+            return Ok(());
+        }
+        runmat_analysis_fea::accelerator_admission::admit_study_accelerator(
+            &self.study.sequence.steps,
+            self.planning.backend(),
+            self.accelerator_admission,
+            || match runmat_analysis_fea::accelerator_admission::device_unavailable_reason() {
+                Some(reason) => Err(reason.to_string()),
+                None => Ok(()),
+            },
+        )
+        .map(|_| ())
+    }
 }
 
 pub fn decode_structural_study_root(
@@ -339,6 +366,7 @@ pub fn decode_structural_study_root(
         planning: root.planning,
         local_execution: root.local_execution,
         memory_per_worker_bytes: root.memory_per_worker_bytes,
+        accelerator_admission: root.accelerator_admission,
         analysis_accelerator_requests: root.analysis_accelerator_requests,
         input_materializations,
         initial_fields,

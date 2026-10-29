@@ -66,7 +66,8 @@ fn cell_of(element: ValueFact, count: usize) -> ValueFact {
 }
 
 pub(crate) fn valid(rule: PolicyArg) -> ValueFact {
-    match rule {
+    match rule.supplied() {
+        PolicyArg::Optional(_) => unreachable!("optional rules wrap a supplied rule"),
         PolicyArg::Text => ValueFact::scalar(ValueKindFact::String),
         PolicyArg::RealScalar | PolicyArg::Count | PolicyArg::ScalarOrVector3 => {
             double(ShapeFact::Scalar)
@@ -81,7 +82,8 @@ pub(crate) fn valid(rule: PolicyArg) -> ValueFact {
 
 /// A proven-incompatible fact for the rule and the diagnostic code it must raise.
 pub(crate) fn wrong(rule: PolicyArg) -> (ValueFact, &'static str) {
-    match rule {
+    match rule.supplied() {
+        PolicyArg::Optional(_) => unreachable!("optional rules wrap a supplied rule"),
         PolicyArg::Text => (ValueFact::scalar(ValueKindFact::Logical), TEXT),
         PolicyArg::RealScalar
         | PolicyArg::Count
@@ -177,7 +179,33 @@ pub(crate) fn assert_conforms(entry: &BuiltinCatalogEntry, call: &PolicyCall) {
             "{name} argument {index}"
         );
     }
-    if let Some(missing) = arguments.len().checked_sub(1) {
+    let required = call.required();
+    assert!(
+        call.arguments[required..]
+            .iter()
+            .all(|rule| rule.is_optional()),
+        "{name}: only trailing arguments may be optional"
+    );
+    for (index, rule) in call.arguments.iter().enumerate() {
+        assert_eq!(
+            entry.descriptor.signatures[0].inputs[index].arity,
+            if rule.is_optional() {
+                crate::BuiltinParamArity::Optional
+            } else {
+                crate::BuiltinParamArity::Required
+            },
+            "{name} argument {index} arity disagrees with its static rule"
+        );
+    }
+    for supplied in required..arguments.len() {
+        let inference = run(entry, arguments[..supplied].to_vec());
+        assert!(
+            inference.diagnostics.is_empty(),
+            "{name} must accept {supplied} argument(s): {:?}",
+            inference.diagnostics
+        );
+    }
+    if let Some(missing) = required.checked_sub(1) {
         assert!(
             codes(&run(entry, arguments[..missing].to_vec())).contains(&ARITY),
             "{name} accepted a missing argument"

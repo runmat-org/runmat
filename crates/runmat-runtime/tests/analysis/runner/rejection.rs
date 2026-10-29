@@ -29,20 +29,10 @@ pub(super) fn check(
             let invoke = || {
                 boxed_fixture_run_result(match family {
                     PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => {
-                        analysis_run_cht_with_options_op(
-                            model,
-                            backend,
-                            AnalysisChtRunOptions::default(),
-                            OperationContext::new(None, None),
-                        )
+                        analysis_run_cht_op(model, OperationContext::new(None, None))
                     }
                     PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => {
-                        analysis_run_fsi_with_options_op(
-                            model,
-                            backend,
-                            AnalysisFsiRunOptions::default(),
-                            OperationContext::new(None, None),
-                        )
+                        analysis_run_fsi_op(model, OperationContext::new(None, None))
                     }
                     _ => analysis_run_cfd_with_options_op(
                         model,
@@ -68,10 +58,8 @@ pub(super) fn check(
     }
     let mut error_code = None;
     for (placement, result) in results {
-        let expected = match placement {
-            "gpu" => spec.expect_gpu_run_error.unwrap_or(expected),
-            _ => expected,
-        };
+        // GPU placement falls back to the CPU reference when the accelerator path cannot run
+        // the solve, so every placement reports the CPU reference's rejection.
         match result {
             Ok(_) => failures.push(format!(
                 "expected {placement} run error code {expected}, but run succeeded"

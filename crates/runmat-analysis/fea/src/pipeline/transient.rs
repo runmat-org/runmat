@@ -262,6 +262,15 @@ fn prepare_transient_scope_basis(
 pub fn run_transient_block(
     input: StructuralTransientRunBlockInput<'_>,
 ) -> Result<StructuralTransientSegment, FeaRunError> {
+    // Blocks keep the workload's placement identity (the requested backend) but have no device
+    // path: a GPU request solves each block on cpu_reference, and strict placement fails before
+    // the block assembles. The recovered run restores the requested backend and carries the one
+    // fallback warning (`recover_completed_transient_run`).
+    let solve_backend = crate::contracts::accelerator_admission::admit_accelerator(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransientBlock,
+        input.workload.backend,
+    )?
+    .effective;
     input
         .workload
         .validate()
@@ -330,7 +339,7 @@ pub fn run_transient_block(
         predecessor: input.predecessor,
         initial_summary: &basis.initial_assembly,
         options: &options,
-        backend: input.workload.backend,
+        backend: solve_backend,
         initial_conditions,
         observation_cursors: input.observation_cursors,
     };
@@ -344,7 +353,7 @@ pub fn run_transient_block(
                     summary: &basis.initial_assembly,
                     motions: &basis.motions,
                     options: &options,
-                    backend: input.workload.backend,
+                    backend: solve_backend,
                     request: input.request,
                     predecessor: input.predecessor,
                     initial_conditions: block_input.initial_conditions,
@@ -379,7 +388,7 @@ pub fn run_transient_block(
                         summary: &basis.initial_assembly,
                         motions: &basis.motions,
                         options: &options,
-                        backend: input.workload.backend,
+                        backend: solve_backend,
                         request: input.request,
                         predecessor: input.predecessor,
                         initial_conditions: block_input.initial_conditions,
@@ -408,6 +417,28 @@ pub fn run_transient_with_options(
 
 /// Execute dynamics from explicitly bound original nodal displacement/velocity fields.
 pub fn run_transient_with_fields(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: TransientSolveOptions,
+    initial_fields: &[crate::execution::InitialFieldBinding],
+) -> Result<FeaTransientRunResult, FeaRunError> {
+    use crate::contracts::accelerator_admission::{
+        admit_accelerator, complete_accelerator_admission, AcceleratorFamily,
+    };
+    // Strict placement fails before any assembly when admission already knows the device
+    // will not run; a solve-time decline is settled after the run.
+    let admission = admit_accelerator(AcceleratorFamily::StructuralTransient, backend)?;
+    let mut result =
+        execute_transient_with_fields(model, admission.effective, options, initial_fields)?;
+    complete_accelerator_admission(
+        AcceleratorFamily::StructuralTransient,
+        admission,
+        &mut result.run,
+    )?;
+    Ok(result)
+}
+
+fn execute_transient_with_fields(
     model: &AnalysisModel,
     backend: ComputeBackend,
     options: TransientSolveOptions,

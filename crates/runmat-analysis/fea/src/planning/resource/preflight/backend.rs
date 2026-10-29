@@ -1,13 +1,14 @@
 use crate::planning::resource::ResourcePlanningError;
 
-/// Execution capability gate shared by portable task preparation and numerical preassembly.
-/// The estimator may still model future GPU demand, but it is not an executable admission.
+/// Protocol guard for portable static task preparation. Accelerator placement is decided once by
+/// `contracts::accelerator_admission` where the authored placement is resolved; a static workload
+/// that still carries the GPU backend here skipped that admission.
 pub fn require_executable_static_backend(
     backend: crate::ComputeBackend,
 ) -> Result<(), ResourcePlanningError> {
     if backend == crate::ComputeBackend::Gpu {
         return Err(ResourcePlanningError::Invalid(
-            "static GPU execution requires a native sparse solver and accelerator-bound admission; CPU fallback is not a GPU solve"
+            "static GPU workloads must be resolved by accelerator admission before task preparation; CPU fallback is not a GPU solve"
                 .into(),
         ));
     }

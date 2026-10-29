@@ -137,18 +137,18 @@ use runmat_runtime::analysis::storage;
 use runmat_runtime::analysis::{
     analysis_plan_study_op, analysis_plan_study_sweep_op, analysis_results_by_run_id_op,
     analysis_results_compare_op, analysis_results_op, analysis_run_acoustic_with_options_op,
-    analysis_run_cfd_with_options_op, analysis_run_cht_with_options_op,
-    analysis_run_fsi_with_options_op, analysis_run_linear_static_op,
-    analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
-    analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
-    analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
-    analysis_trends_op, analysis_validate, analysis_validate_study_op,
-    analysis_validate_study_sweep_op, AnalysisExecutionPlan, AnalysisExecutionStep,
-    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery,
-    AnalysisResultsQuery, AnalysisRunOptions, AnalysisRunResult, AnalysisSolverOptions,
-    AnalysisStructuralTimeStepPolicy, AnalysisStudySpec, AnalysisStudySweepSpec,
-    AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis, ModalFrequencyUnits,
-    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReasonCode, RunStatus,
+    analysis_run_cfd_with_options_op, analysis_run_cht_op, analysis_run_fsi_op,
+    analysis_run_linear_static_op, analysis_run_linear_static_with_options,
+    analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
+    analysis_run_study_op, analysis_run_study_sweep_op, analysis_run_thermal_with_options_op,
+    analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
+    analysis_validate_study_op, analysis_validate_study_sweep_op, AnalysisExecutionPlan,
+    AnalysisExecutionStep, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisRunOptions, AnalysisRunResult,
+    AnalysisSolverOptions, AnalysisStructuralTimeStepPolicy, AnalysisStudySpec,
+    AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis,
+    ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy,
+    QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -312,6 +312,7 @@ fn contract_study_spec(
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
                 solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
             }],
         },
@@ -1362,10 +1363,8 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
 #[test]
 fn analysis_run_cht_contract_requires_an_authored_study() {
     let model = contract_cht_model("contract_cht_model");
-    let envelope = analysis_run_cht_with_options_op(
+    let envelope = analysis_run_cht_op(
         &model,
-        ComputeBackend::Cpu,
-        Default::default(),
         OperationContext::new(Some("trace-contract-cht-3".to_string()), None),
     )
     .expect_err("the removed reduced executor cannot publish fields");
@@ -1531,10 +1530,8 @@ fn analysis_run_fsi_contract_requires_an_authored_study() {
     });
     append_inlet_velocity_history(&mut model, "fsi_inlet_velocity", [(0.0, 2.4), (1.0, 4.0)]);
 
-    let envelope = analysis_run_fsi_with_options_op(
+    let envelope = analysis_run_fsi_op(
         &model,
-        ComputeBackend::Cpu,
-        Default::default(),
         OperationContext::new(Some("trace-contract-fsi-1".to_string()), None),
     )
     .expect_err("the removed reduced executor cannot publish fields");

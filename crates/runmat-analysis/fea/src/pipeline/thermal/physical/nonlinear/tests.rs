@@ -137,10 +137,31 @@ fn cold_initial_guess_uses_real_backtracking_and_rejected_runs_publish_nothing()
     assert!(invalid.execute(&mesh).is_err());
     let mut gpu = input.clone();
     gpu.backend = ComputeBackend::Gpu;
-    assert!(
-        gpu.execute(&mesh).is_err(),
-        "radiation must reject GPU before any CPU fallback"
+    // Radiation has no device path: the request falls back to cpu_reference with one warning
+    // and the same numbers, and strict placement fails closed before any solve.
+    let fallback = gpu.execute(&mesh).unwrap();
+    assert_eq!(fallback.run.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(fallback.run.execution_backend, crate::ExecutionBackend::Cpu);
+    assert_eq!(
+        fallback
+            .run
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code
+                == crate::contracts::accelerator_admission::ACCELERATOR_ADMISSION_FALLBACK_CODE)
+            .count(),
+        1
     );
+    assert_eq!(
+        fallback.temperature_snapshots[0].as_host_f64().unwrap(),
+        result.temperature_snapshots[0].as_host_f64().unwrap()
+    );
+    fallback.validate_complete().unwrap();
+    let strict = crate::contracts::accelerator_admission::with_accelerator_admission_policy(
+        crate::contracts::accelerator_admission::AcceleratorAdmissionPolicy::Required,
+        || gpu.execute(&mesh),
+    );
+    assert!(matches!(strict, Err(FeaRunError::AcceleratorRequired(_))));
     let mut inadmissible = input;
     inadmissible.model.sequence.steps[0]
         .accuracy

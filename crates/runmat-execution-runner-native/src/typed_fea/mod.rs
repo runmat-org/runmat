@@ -106,6 +106,10 @@ pub struct LocalFeaExecutionOptions {
     pub max_concurrent_cases: Option<std::num::NonZeroU16>,
     pub backend: runmat_analysis_fea::ComputeBackend,
     pub accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
+    /// The placement the host admitted for the study: the authored admission policy and the
+    /// fallback warning of a study planned on `cpu_reference` although the accelerator was
+    /// requested. Applied when the study publication is prepared.
+    pub accelerator_placement: runmat_analysis_fea::accelerator_admission::AcceleratorPlacement,
     /// Receives coarse, ordered pipeline progress directly from local execution.
     /// This avoids relying on thread-local propagation across async/native boundaries.
     pub progress_observer: Option<LocalFeaProgressObserver>,
@@ -122,6 +126,7 @@ impl Default for LocalFeaExecutionOptions {
             max_concurrent_cases: None,
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
             accelerators: Vec::new(),
+            accelerator_placement: Default::default(),
             progress_observer: None,
             mesh_observer: None,
         }

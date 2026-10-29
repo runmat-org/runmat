@@ -480,6 +480,69 @@ fn execute_transient_workload(
     .unwrap()
 }
 
+/// Block segments of a GPU-requested transient solve on cpu_reference when no accelerator is
+/// assigned: the recovered run restores the requested backend and carries exactly one fallback
+/// warning, with results identical to the CPU request; strict placement fails before the first
+/// block assembles.
+#[test]
+fn transient_blocks_fall_back_to_cpu_reference_with_one_warning_unless_required() {
+    use crate::contracts::accelerator_admission::{
+        device_unavailable_reason, with_accelerator_admission_policy, AcceleratorAdmissionPolicy,
+        ACCELERATOR_ADMISSION_FALLBACK_CODE,
+    };
+    if device_unavailable_reason().is_none() {
+        return;
+    }
+    let model = support_motion_model();
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let options = TransientSolveOptions {
+        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 12 },
+        residual_target: 1.0e-10,
+        solver_mesh: Some(mesh.clone()),
+        ..baseline_transient_options()
+    };
+    let cpu_workload = transient_workload(&model, &options);
+    let mut gpu_workload = cpu_workload.clone();
+    gpu_workload.backend = ComputeBackend::Gpu;
+    let cpu = execute_transient_workload(&cpu_workload, &mesh, None, 5);
+    let gpu = execute_transient_workload(&gpu_workload, &mesh, None, 5);
+    let warnings = gpu
+        .run
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == ACCELERATOR_ADMISSION_FALLBACK_CODE)
+        .count();
+    assert_eq!(warnings, 1, "{:?}", gpu.run.diagnostics);
+    assert_eq!(gpu.run.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(gpu.run.execution_backend, crate::ExecutionBackend::Cpu);
+    assert_eq!(gpu.time_points_s, cpu.time_points_s);
+    assert_eq!(gpu.displacement_snapshots, cpu.displacement_snapshots);
+
+    let scope =
+        crate::pipeline::transient::prepare_transient_checkpoint_scope(&gpu_workload, &mesh, None)
+            .unwrap();
+    let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 5).unwrap();
+    let strict = with_accelerator_admission_policy(AcceleratorAdmissionPolicy::Required, || {
+        crate::pipeline::transient::run_transient_block(
+            crate::pipeline::transient::StructuralTransientRunBlockInput {
+                workload: &gpu_workload,
+                solver_mesh: &mesh,
+                request: &request,
+                predecessor: None,
+                modal_state: None,
+                observation_cursors: Vec::new(),
+            },
+        )
+    });
+    assert!(
+        matches!(
+            strict,
+            Err(crate::contracts::FeaRunError::AcceleratorRequired(_))
+        ),
+        "{strict:?}"
+    );
+}
+
 // witness: FEA-DYNAMICS-GOVERNANCE-001/motion_restart_branches @
 //   linear_structural_dynamics/tet4/numerical_kernel; coverage: partial;
 //   boundary: Modal support motion matches direct physics and restarts exactly; durable and remote

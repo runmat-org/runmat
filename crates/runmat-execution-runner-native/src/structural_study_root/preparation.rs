@@ -14,6 +14,7 @@ pub fn prepare_structural_study_root(
         planning,
         local_execution,
         memory_per_worker_bytes,
+        accelerator_admission,
         analysis_accelerator_requests,
         input_materializations,
         initial_fields,
@@ -74,6 +75,7 @@ pub fn prepare_structural_study_root(
         planning,
         local_execution,
         memory_per_worker_bytes,
+        accelerator_admission,
         analysis_accelerator_requests,
         input_materializations: input_materializations
             .iter()
@@ -194,6 +196,7 @@ pub fn prepare_structural_study_root(
         initial_fields,
         geometry_request,
         expected_meshing_request,
+        accelerator_placement: Default::default(),
     };
     expectation.validate()?;
     Ok(PreparedStructuralStudyRoot {

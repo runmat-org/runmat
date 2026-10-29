@@ -372,7 +372,7 @@ fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_owne
     })];
 
     let compiled = compile_property_map(&model, None).expect("compiled laminate property map");
-    super::identity::tests::assert_legacy_identity(&compiled);
+    super::identity::tests::assert_reference_identity(&compiled);
     assert_eq!(compiled.shell_properties().len(), 1);
     assert!(matches!(
         compiled.shell_properties().next().unwrap().owner,

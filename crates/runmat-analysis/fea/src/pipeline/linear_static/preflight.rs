@@ -6,10 +6,10 @@ use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     contracts::{ComputeBackend, FeaRunError, LinearStaticSolveOptions},
     planning::resource::{
-        build_static_resource_plan_selecting, require_executable_static_backend,
-        verify_assembled_structural_storage, FeaResourceDemand, ResourcePlanningError,
-        SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticResourcePreflight,
-        StaticSolvePath, StaticSolveSelection,
+        build_static_resource_plan_selecting, verify_assembled_structural_storage,
+        FeaResourceDemand, ResourcePlanningError, SolveResourcePolicy,
+        SolverAdmissionResourcePolicy, StaticResourcePreflight, StaticSolvePath,
+        StaticSolveSelection,
     },
     post::fields::structural_static_observable_field_definitions,
     results::observation::{
@@ -30,8 +30,8 @@ pub(super) struct StaticPreassembly {
 
 /// Direct and prepared CPU physical solves derive observations and recovery demand before
 /// assembly. Prepared execution retains its worker-verified constraint identity and independently
-/// derives the same numerical solver envelope. Static GPU execution is unavailable until a native
-/// sparse solver and an accelerator-bound admission can be carried through this boundary.
+/// derives the same numerical solver envelope. The caller admits accelerator placement first
+/// (`accelerator_admission`), so this boundary only sees the host backend.
 pub(super) fn prepare_static_preassembly(
     model: &AnalysisModel,
     step: &ProcedureStep,
@@ -40,7 +40,11 @@ pub(super) fn prepare_static_preassembly(
     prepared_constraints: Option<&CanonicalStructuralConstraintPlan>,
     admitted: Option<StaticResourceAdmission<'_>>,
 ) -> Result<StaticPreassembly, FeaRunError> {
-    require_executable_static_backend(backend)?;
+    debug_assert_eq!(
+        backend,
+        ComputeBackend::Cpu,
+        "static preassembly runs after accelerator admission resolved the host backend"
+    );
     if options.solver_mesh.is_none() && !model_has_explicit_structural_elements(model) {
         if admitted.is_some() {
             return Err(ResourcePlanningError::Invalid(

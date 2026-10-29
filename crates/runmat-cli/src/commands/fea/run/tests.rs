@@ -51,6 +51,7 @@ fn remote_accelerator_planning_requires_and_retains_exact_profile_allocation() {
     };
     let allocation = resolve_compute_allocation(
         Some(&policy(AcceleratorPreference::Required)),
+        &thermal_steps(),
         &remote_target(),
         Some(&profile),
     )
@@ -66,10 +67,63 @@ fn remote_accelerator_planning_requires_and_retains_exact_profile_allocation() {
         16 << 30
     );
 
-    assert!(resolve_compute_allocation(
+    let error = resolve_compute_allocation(
         Some(&policy(AcceleratorPreference::Required)),
+        &thermal_steps(),
         &remote_target(),
         None,
     )
-    .is_err());
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("FEA_ACCELERATOR_REQUIRED"));
+    // Without the strict option a missing device falls back to the CPU reference.
+    let fallback = resolve_compute_allocation(
+        Some(&policy(AcceleratorPreference::Preferred)),
+        &thermal_steps(),
+        &remote_target(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(fallback.backend, runmat_analysis_fea::ComputeBackend::Cpu);
+    assert!(fallback.accelerators.is_empty());
+}
+
+fn thermal_steps() -> Vec<runmat_analysis_core::ProcedureStep> {
+    vec![runmat_analysis_core::ProcedureStep::thermal_transient(
+        "thermal_1",
+    )]
+}
+
+#[test]
+fn families_without_a_device_path_fall_back_unless_the_accelerator_is_required() {
+    let profile = ProjectExecutionProfile {
+        cluster: "gpu-cluster".into(),
+        queue: Some("gpu".into()),
+        trust_identity: Some("sha256:worker".into()),
+        accelerator: Some(ProjectAcceleratorProfile {
+            class: "metal".into(),
+            memory_bytes: 16 << 30,
+        }),
+    };
+    let steps = vec![runmat_analysis_core::ProcedureStep::structural_static(
+        "static_1",
+    )];
+    let fallback = resolve_compute_allocation(
+        Some(&policy(AcceleratorPreference::Preferred)),
+        &steps,
+        &remote_target(),
+        Some(&profile),
+    )
+    .unwrap();
+    assert_eq!(fallback.backend, runmat_analysis_fea::ComputeBackend::Cpu);
+    assert!(fallback.accelerators.is_empty());
+    let error = resolve_compute_allocation(
+        Some(&policy(AcceleratorPreference::Required)),
+        &steps,
+        &remote_target(),
+        Some(&profile),
+    )
+    .unwrap_err();
+    let message = format!("{error:#}");
+    assert!(message.contains("FEA_ACCELERATOR_REQUIRED"), "{message}");
+    assert!(message.contains("structural static"), "{message}");
 }

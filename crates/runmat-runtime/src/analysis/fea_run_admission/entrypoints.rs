@@ -117,18 +117,6 @@ standalone!(
     standalone_publication
 );
 standalone!(
-    analysis_run_cht_with_options_op,
-    AnalysisChtRunOptions,
-    Cht,
-    standalone_publication
-);
-standalone!(
-    analysis_run_fsi_with_options_op,
-    AnalysisFsiRunOptions,
-    Fsi,
-    standalone_publication
-);
-standalone!(
     analysis_run_transient_with_options_op,
     AnalysisTransientRunOptions,
     Transient,

@@ -1232,10 +1232,11 @@ impl RuntimeExecutionServices for NativeExecutionService {
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("native service poisoned");
-        if !matches!(
-            state.futures.get(&future.id),
-            Some(FutureState::ExecutingInCaller)
-        ) {
+        let record = state
+            .futures
+            .get(&future.id)
+            .ok_or(ExecutionServiceError::UnknownHandle)?;
+        if !matches!(record, FutureState::ExecutingInCaller) {
             return Err(ExecutionServiceError::Failed(
                 "future is not executing in its caller".into(),
             ));

@@ -62,7 +62,7 @@ fn exact_admission_boundary_preserves_owned_properties_and_identities() {
                 &model.materials[0]
             );
         }
-        super::super::identity::tests::assert_legacy_identity(&actual);
+        super::super::identity::tests::assert_reference_identity(&actual);
     }
 }
 
@@ -168,7 +168,7 @@ fn selected_metadata_scales_with_actual_material_occurrences() {
                     expected
                 );
             }
-            super::super::identity::tests::assert_legacy_identity(&compiled);
+            super::super::identity::tests::assert_reference_identity(&compiled);
         }
         // The direct encoding writes the grown name once per selected occurrence; held-buffer
         // peaks are not additive, so growth is bounded below by the written bytes.
@@ -277,7 +277,7 @@ fn explicit_profile_envelopes_cover_beam_shell_and_repeated_laminate_materials()
         let required = prepared.estimated_resident_bytes;
         let compiled = prepared.materialize().unwrap();
         assert_profile_envelope(&compiled, required);
-        super::super::identity::tests::assert_legacy_identity(&compiled);
+        super::super::identity::tests::assert_reference_identity(&compiled);
     }
     let model = laminate_model();
     let baseline = PreparedProperties::prepare(&model, None, u64::MAX)
@@ -292,7 +292,7 @@ fn explicit_profile_envelopes_cover_beam_shell_and_repeated_laminate_materials()
         let required = grown.estimated_resident_bytes;
         let compiled = grown.materialize().unwrap();
         assert_profile_envelope(&compiled, required);
-        super::super::identity::tests::assert_legacy_identity(&compiled);
+        super::super::identity::tests::assert_reference_identity(&compiled);
     }
     // Material 0 fills two plies and material 1 one ply of every element.
     assert!(deltas[1] >= 1000);
@@ -306,7 +306,7 @@ fn invalid_last_laminate_ply_emits_no_selected_owner() {
         .unwrap()
         .materialize()
         .unwrap();
-    super::super::identity::tests::assert_legacy_identity(&compiled);
+    super::super::identity::tests::assert_reference_identity(&compiled);
     for missing in [false, true] {
         let mut model = valid.clone();
         if missing {
@@ -485,7 +485,7 @@ fn changed_topology_gets_fresh_cache_and_cannot_use_another_models_identities() 
         compiled.identity.explicit_topology_digest,
         Some(fresh_digest)
     );
-    super::super::identity::tests::assert_legacy_identity(&compiled);
+    super::super::identity::tests::assert_reference_identity(&compiled);
 }
 
 // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @

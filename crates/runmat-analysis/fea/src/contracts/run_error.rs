@@ -26,6 +26,8 @@ pub enum FeaRunError {
     FormulationAvailability(#[from] crate::admission::FormulationAvailabilityRejection),
     #[error(transparent)]
     SolverFormulationCompatibility(#[from] SolverFormulationCompatibilityError),
+    #[error(transparent)]
+    AcceleratorRequired(#[from] super::accelerator_admission::AcceleratorRequiredError),
     #[error("FEA_CANCELLED: execution cancelled by user")]
     Cancelled,
 }
