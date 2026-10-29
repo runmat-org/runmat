@@ -1,9 +1,9 @@
 use super::*;
+use crate::wgsl::f64_math::PreparationError;
 use runmat_accelerate_api::observation::{observe_provider_future, ProviderOperationReceipt};
 use runmat_accelerate_api::{
     AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostLogicalTensorView,
     HostNumericDataOwned, HostNumericDataView, HostNumericTensorView, NumericElementType,
-    WgpuScopeErrorKind, WgpuScopeErrors,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -183,16 +183,17 @@ async fn scoped_cold_warm_numeric_and_invalid_scope() {
     )
     .await
     .err()
-    .expect("invalid cold shader must fail scoped validation");
+    .expect("invalid WGSL must fail typed compiler preparation before driver effects");
     let mut cause: &(dyn std::error::Error + 'static) = &error;
-    while !cause.is::<WgpuScopeErrors>() {
-        cause = cause.source().expect("typed scoped validation cause");
+    while !cause.is::<PreparationError>() {
+        cause = cause
+            .source()
+            .expect("original typed shader compiler cause");
     }
-    assert!(cause
-        .downcast_ref::<WgpuScopeErrors>()
-        .unwrap()
-        .kinds()
-        .contains(&WgpuScopeErrorKind::Validation));
+    assert!(matches!(
+        cause.downcast_ref::<PreparationError>().unwrap(),
+        PreparationError::Parse(_)
+    ));
     assert_eq!(
         failure_receipt.recorder().submission_checkpoint(),
         checkpoint
@@ -351,16 +352,17 @@ async fn scoped_cold_warm_numeric_and_invalid_scope() {
     )
     .await
     .err()
-    .expect("invalid comparison shader must fail scoped validation");
+    .expect("invalid WGSL must fail typed compiler preparation before driver effects");
     let mut cause: &(dyn std::error::Error + 'static) = &error;
-    while !cause.is::<WgpuScopeErrors>() {
-        cause = cause.source().expect("typed comparison validation cause");
+    while !cause.is::<PreparationError>() {
+        cause = cause
+            .source()
+            .expect("original typed shader compiler cause");
     }
-    assert!(cause
-        .downcast_ref::<WgpuScopeErrors>()
-        .unwrap()
-        .kinds()
-        .contains(&WgpuScopeErrorKind::Validation));
+    assert!(matches!(
+        cause.downcast_ref::<PreparationError>().unwrap(),
+        PreparationError::Parse(_)
+    ));
     assert_eq!(operation.recorder().submission_checkpoint(), checkpoint);
     assert_eq!(
         provider.validated_fusion_cache.lock().unwrap().len(),

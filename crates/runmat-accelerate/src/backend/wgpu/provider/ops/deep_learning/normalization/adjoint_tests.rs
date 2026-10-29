@@ -360,32 +360,158 @@ fn extreme_normalization_adjoint_keeps_representable_gradients(precision: Provid
         precision,
         "set RUNMAT_WGPU_FORCE_PRECISION to the test precision; F64 requires SHADER_F64"
     );
-    let magnitude = match precision {
-        ProviderPrecision::F32 => 1e38,
-        ProviderPrecision::F64 => 1e300,
+    let magnitudes = match precision {
+        ProviderPrecision::F32 => [1e38, f64::from(f32::MAX)],
+        ProviderPrecision::F64 => [1e300, f64::MAX],
     };
-    let seed_scale = match precision {
-        ProviderPrecision::F32 => 1e20,
-        ProviderPrecision::F64 => 1e200,
-    };
-    let dy = [1.0, 0.5, -1.0 / 3.0, 0.25, -0.2, 1.0 / 6.0].map(|v| v * seed_scale);
-    let gamma = [1.0; 3];
-    let beta = [0.0; 3];
+    for magnitude in magnitudes {
+        let seed_scale = match precision {
+            ProviderPrecision::F32 => 1e20,
+            ProviderPrecision::F64 => 1e200,
+        };
+        let dy = [1.0, 0.5, -1.0 / 3.0, 0.25, -0.2, 1.0 / 6.0].map(|v| v * seed_scale);
+        let gamma = [1.0; 3];
+        let beta = [0.0; 3];
+        let request = DeepLearningLayerNormRequest {
+            shape: vec![2, 3, 1],
+            reduce_mask: 0b011,
+            channel_axis: 1,
+            scale_shape: vec![1, 3],
+            offset_shape: vec![1, 3],
+            epsilon: 1e-5,
+        };
+        let scale = upload(&provider, &gamma, &[1, 3]);
+        let offset = upload(&provider, &beta, &[1, 3]);
+        let upstream = upload(&provider, &dy, &[2, 3, 1]);
+        let alternating = [
+            magnitude, -magnitude, magnitude, -magnitude, magnitude, -magnitude,
+        ];
+        let input = upload(&provider, &alternating, &[2, 3, 1]);
+        let recorded = provider
+            .deep_learning_layer_norm_recorded_exec(&input, &scale, &offset, &request)
+            .unwrap();
+        let gradients = provider
+            .deep_learning_layer_norm_adjoint_exec(
+                &input,
+                &scale,
+                &offset,
+                &recorded.statistics,
+                &upstream,
+                &request,
+            )
+            .unwrap();
+        let actual = download(&provider, &gradients.input);
+        assert_eq!(actual.len(), dy.len());
+        let signed_xhat = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+        let sum_dy = dy.iter().sum::<f64>();
+        let sum_weighted = dy
+            .iter()
+            .zip(signed_xhat)
+            .map(|(seed, xhat)| seed * xhat)
+            .sum::<f64>();
+        let tolerance = match precision {
+            ProviderPrecision::F32 => 2e-2,
+            ProviderPrecision::F64 => 2e-10,
+        };
+        for index in 0..dy.len() {
+            let expected =
+                (6.0 * dy[index] - sum_dy - signed_xhat[index] * sum_weighted) / magnitude / 6.0;
+            assert!(
+                expected != 0.0 && actual[index] != 0.0,
+                "large finite dX must not underflow to zero"
+            );
+            assert!(
+                ((actual[index] - expected) / expected).abs() < tolerance,
+                "dX[{index}]={} != {expected}",
+                actual[index]
+            );
+        }
+
+        let small_upstream = upload(&provider, &[1., 2., 3., 4., 5., 6.], &[2, 3, 1]);
+        if magnitude == magnitudes[1] {
+            balanced_native_max_adjoint(&provider, magnitude, seed_scale, tolerance);
+        }
+        for constant_value in [magnitude, -magnitude] {
+            let constant = [constant_value; 6];
+            let constant_input = upload(&provider, &constant, &[2, 3, 1]);
+            let constant_recorded = provider
+                .deep_learning_layer_norm_recorded_exec(&constant_input, &scale, &offset, &request)
+                .unwrap();
+            let constant_gradients = provider
+                .deep_learning_layer_norm_adjoint_exec(
+                    &constant_input,
+                    &scale,
+                    &offset,
+                    &constant_recorded.statistics,
+                    &small_upstream,
+                    &request,
+                )
+                .unwrap();
+            let constant_dx = download(&provider, &constant_gradients.input);
+            assert_eq!(
+                download(&provider, &constant_recorded.statistics)[2],
+                0.0,
+                "exact constant groups must retain the zero-variance sentinel"
+            );
+            assert_eq!(download(&provider, &constant_recorded.output), vec![0.0; 6]);
+            assert_eq!(download(&provider, &constant_gradients.scale), vec![0.0; 3]);
+            assert_eq!(
+                download(&provider, &constant_gradients.offset),
+                vec![3.0, 7.0, 11.0]
+            );
+            assert_eq!(constant_dx.len(), 6);
+            let inv_epsilon = request.epsilon.sqrt().recip();
+            for (index, actual) in constant_dx.iter().enumerate() {
+                let expected = (index as f64 + 1.0 - 3.5) * inv_epsilon;
+                assert!(
+            (actual - expected).abs()
+                < match precision {
+                    ProviderPrecision::F32 => 2e-2,
+                    ProviderPrecision::F64 => 1e-10,
+                },
+            "constant {precision:?} dX[{index}]={actual} != {expected} at magnitude {constant_value}"
+        );
+            }
+        }
+    }
+}
+
+fn balanced_native_max_adjoint(
+    provider: &WgpuProvider,
+    magnitude: f64,
+    seed_scale: f64,
+    tolerance: f64,
+) {
+    // This exact balanced ordering makes a plain IEEE F32 shifted reduction
+    // round Var(X)/M^2 to 1.000000119, beyond its mathematical upper bound.
+    let signs = (0..50)
+        .map(|index| {
+            if (index * 3 + 11) % 50 < 25 {
+                1.0
+            } else {
+                -1.0
+            }
+        })
+        .collect::<Vec<_>>();
+    let input_values = signs
+        .iter()
+        .map(|sign| sign * magnitude)
+        .collect::<Vec<_>>();
+    let seed = (0..50)
+        .map(|index| (index as f64 % 7.0 - 2.3) * seed_scale)
+        .collect::<Vec<_>>();
+    let input = upload(provider, &input_values, &[2, 5, 5]);
+    let upstream = upload(provider, &seed, &[2, 5, 5]);
+    let scale = upload(provider, &[1.0; 5], &[1, 5]);
+    let offset = upload(provider, &[0.0; 5], &[1, 5]);
     let request = DeepLearningLayerNormRequest {
-        shape: vec![2, 3, 1],
-        reduce_mask: 0b011,
+        shape: vec![2, 5, 5],
+        reduce_mask: 0b111,
         channel_axis: 1,
-        scale_shape: vec![1, 3],
-        offset_shape: vec![1, 3],
+        scale_shape: vec![1, 5],
+        offset_shape: vec![1, 5],
         epsilon: 1e-5,
     };
-    let scale = upload(&provider, &gamma, &[1, 3]);
-    let offset = upload(&provider, &beta, &[1, 3]);
-    let upstream = upload(&provider, &dy, &[2, 3, 1]);
-    let alternating = [
-        magnitude, -magnitude, magnitude, -magnitude, magnitude, -magnitude,
-    ];
-    let input = upload(&provider, &alternating, &[2, 3, 1]);
     let recorded = provider
         .deep_learning_layer_norm_recorded_exec(&input, &scale, &offset, &request)
         .unwrap();
@@ -399,61 +525,26 @@ fn extreme_normalization_adjoint_keeps_representable_gradients(precision: Provid
             &request,
         )
         .unwrap();
-    let actual = download(&provider, &gradients.input);
-    assert_eq!(actual.len(), dy.len());
-    let signed_xhat = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
-    let sum_dy = dy.iter().sum::<f64>();
-    let sum_weighted = dy
+    let actual_dx = download(provider, &gradients.input);
+    let actual_forward = download(provider, &recorded.output);
+    let sum_seed = seed.iter().sum::<f64>();
+    let sum_weighted = seed
         .iter()
-        .zip(signed_xhat)
-        .map(|(seed, xhat)| seed * xhat)
+        .zip(&signs)
+        .map(|(seed, sign)| seed * sign)
         .sum::<f64>();
-    let tolerance = match precision {
-        ProviderPrecision::F32 => 2e-2,
-        ProviderPrecision::F64 => 2e-10,
-    };
-    for index in 0..dy.len() {
+    for index in 0..50 {
+        assert!((actual_forward[index] - signs[index]).abs() < tolerance);
         let expected =
-            (6.0 * dy[index] - sum_dy - signed_xhat[index] * sum_weighted) / magnitude / 6.0;
+            (50.0 * seed[index] - sum_seed - signs[index] * sum_weighted) / magnitude / 50.0;
         assert!(
-            expected != 0.0 && actual[index] != 0.0,
-            "large finite dX must not underflow to zero"
+            expected != 0.0 && actual_dx[index] != 0.0,
+            "native MAX derivative must remain normal and nonzero"
         );
         assert!(
-            ((actual[index] - expected) / expected).abs() < tolerance,
-            "dX[{index}]={} != {expected}",
-            actual[index]
-        );
-    }
-
-    let constant = [magnitude; 6];
-    let small_upstream = upload(&provider, &[1., 2., 3., 4., 5., 6.], &[2, 3, 1]);
-    let constant_input = upload(&provider, &constant, &[2, 3, 1]);
-    let constant_recorded = provider
-        .deep_learning_layer_norm_recorded_exec(&constant_input, &scale, &offset, &request)
-        .unwrap();
-    let constant_gradients = provider
-        .deep_learning_layer_norm_adjoint_exec(
-            &constant_input,
-            &scale,
-            &offset,
-            &constant_recorded.statistics,
-            &small_upstream,
-            &request,
-        )
-        .unwrap();
-    let constant_dx = download(&provider, &constant_gradients.input);
-    assert_eq!(constant_dx.len(), 6);
-    let inv_epsilon = request.epsilon.sqrt().recip();
-    for (index, actual) in constant_dx.iter().enumerate() {
-        let expected = (index as f64 + 1.0 - 3.5) * inv_epsilon;
-        assert!(
-            (actual - expected).abs()
-                < match precision {
-                    ProviderPrecision::F32 => 2e-2,
-                    ProviderPrecision::F64 => 1e-10,
-                },
-            "constant {precision:?} dX[{index}]={actual} != {expected} at magnitude {magnitude}"
+            ((actual_dx[index] - expected) / expected).abs() < tolerance,
+            "balanced native MAX dx[{index}]={} != {expected}",
+            actual_dx[index]
         );
     }
 }
@@ -462,6 +553,98 @@ fn extreme_normalization_adjoint_keeps_representable_gradients(precision: Provid
 #[ignore = "requires actual WGPU; RUNMAT_WGPU_FORCE_PRECISION=f32"]
 fn extreme_normalization_adjoint_f32() {
     extreme_normalization_adjoint_keeps_representable_gradients(ProviderPrecision::F32);
+}
+
+fn adjacent_extreme_normalization_matches_spacing_oracle(precision: ProviderPrecision) {
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU adapter required");
+    assert_eq!(provider.precision(), precision);
+    let (values, spacing) = match precision {
+        ProviderPrecision::F32 => {
+            let bits = 1e38_f32.to_bits();
+            let values = (0..6)
+                .map(|step| f64::from(f32::from_bits(bits + step)))
+                .collect::<Vec<_>>();
+            let spacing = f64::from(f32::from_bits(bits + 1)) - f64::from(f32::from_bits(bits));
+            (values, spacing)
+        }
+        ProviderPrecision::F64 => {
+            let bits = 1e300_f64.to_bits();
+            let values = (0..6)
+                .map(|step| f64::from_bits(bits + step))
+                .collect::<Vec<_>>();
+            let spacing = f64::from_bits(bits + 1) - f64::from_bits(bits);
+            (values, spacing)
+        }
+    };
+    let seed = [1.0, 0.0, -2.0, 3.0, 0.5, -1.0];
+    let request = DeepLearningLayerNormRequest {
+        shape: vec![2, 3, 1],
+        reduce_mask: 0b011,
+        channel_axis: 1,
+        scale_shape: vec![1, 3],
+        offset_shape: vec![1, 3],
+        epsilon: 1e-5,
+    };
+    let scale = upload(&provider, &[1.0; 3], &[1, 3]);
+    let offset = upload(&provider, &[0.0; 3], &[1, 3]);
+    let upstream = upload(&provider, &seed, &[2, 3, 1]);
+    // This independent oracle uses exact native ulp offsets 0..5 and their
+    // integer sum, not subtraction of a rounded enormous mean or x*x.
+    let sigma_steps = (35.0_f64 / 12.0).sqrt();
+    let xhat = [0., 1., 2., 3., 4., 5.].map(|step| (step - 2.5) / sigma_steps);
+    let mean_seed = seed.iter().sum::<f64>() / 6.0;
+    let mean_weighted = seed.iter().zip(xhat).map(|(dy, x)| dy * x).sum::<f64>() / 6.0;
+    let tolerance = match precision {
+        ProviderPrecision::F32 => 2e-4,
+        ProviderPrecision::F64 => 2e-10,
+    };
+    for sign in [1.0, -1.0] {
+        let input_values = values.iter().map(|value| sign * value).collect::<Vec<_>>();
+        let input = upload(&provider, &input_values, &[2, 3, 1]);
+        let recorded = provider
+            .deep_learning_layer_norm_recorded_exec(&input, &scale, &offset, &request)
+            .unwrap();
+        let gradients = provider
+            .deep_learning_layer_norm_adjoint_exec(
+                &input,
+                &scale,
+                &offset,
+                &recorded.statistics,
+                &upstream,
+                &request,
+            )
+            .unwrap();
+        let actual_forward = download(&provider, &recorded.output);
+        let actual_dx = download(&provider, &gradients.input);
+        for index in 0..6 {
+            assert!(
+                (actual_forward[index] - sign * xhat[index]).abs() < tolerance,
+                "adjacent {precision:?} forward[{index}]={} != {}",
+                actual_forward[index],
+                sign * xhat[index]
+            );
+            let expected_dx =
+                (seed[index] - mean_seed - xhat[index] * mean_weighted) / spacing / sigma_steps;
+            assert!(expected_dx != 0.0 && actual_dx[index] != 0.0);
+            assert!(
+                ((actual_dx[index] - expected_dx) / expected_dx).abs() < tolerance,
+                "adjacent {precision:?} dx[{index}]={} != {expected_dx}",
+                actual_dx[index]
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires actual WGPU; RUNMAT_WGPU_FORCE_PRECISION=f32"]
+fn adjacent_extreme_normalization_adjoint_f32() {
+    adjacent_extreme_normalization_matches_spacing_oracle(ProviderPrecision::F32);
+}
+
+#[test]
+#[ignore = "requires SHADER_F64 WGPU; RUNMAT_WGPU_FORCE_PRECISION=f64"]
+fn adjacent_extreme_normalization_adjoint_f64() {
+    adjacent_extreme_normalization_matches_spacing_oracle(ProviderPrecision::F64);
 }
 
 #[test]

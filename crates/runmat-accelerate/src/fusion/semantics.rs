@@ -555,9 +555,10 @@ impl ResolvedProgram {
                         ));
                     }
                     let evidence = result.ok_or_else(|| anyhow!(
-                        "fusion operation requires unavailable domain evidence: binding={:?}, output={output:?}, inputs={:?}, represented_operands={:?}",
+                        "fusion operation requires unavailable domain evidence: binding={:?}, output={output:?}, inputs={:?}, represented_operands={:?}, operand_facts={:?}, output_fact={:?}",
                         snapshot.declaration.binding, inferred.input_ids,
-                        values.iter().map(Option::is_some).collect::<Vec<_>>()
+                        values.iter().map(Option::is_some).collect::<Vec<_>>(),
+                        inferred.arguments, inferred.fact
                     ))?;
                     Some((evidence, work))
                 } else {

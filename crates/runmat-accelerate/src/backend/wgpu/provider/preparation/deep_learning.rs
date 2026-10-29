@@ -74,7 +74,7 @@ fn dynamic_pipeline_warmth_uses_its_typed_cache_owner() {
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 enum FixedPipeline {
     Fill,
-    Scalar,
+    ScalarMax,
     Binary,
     BinaryBroadcast,
     Matmul,
@@ -90,7 +90,7 @@ impl FixedPipeline {
     const fn tag(self) -> u8 {
         match self {
             Self::Fill => 0,
-            Self::Scalar => 1,
+            Self::ScalarMax => 1,
             Self::Binary => 2,
             Self::BinaryBroadcast => 3,
             Self::Matmul => 4,
@@ -106,7 +106,7 @@ impl FixedPipeline {
     fn is_initialized(self, provider: &WgpuProvider) -> bool {
         match self {
             Self::Fill => provider.pipelines.fill.is_initialized(),
-            Self::Scalar => provider.pipelines.scalar.is_initialized(),
+            Self::ScalarMax => provider.pipelines.scalar_max.is_initialized(),
             Self::Binary => provider.pipelines.binary.is_initialized(),
             Self::BinaryBroadcast => provider.pipelines.binary_broadcast.is_initialized(),
             Self::Matmul => provider.pipelines.matmul.is_initialized(),
@@ -239,7 +239,7 @@ impl WgpuProvider {
                         }
                     }
                     DeepLearningFeedForwardStage::Relu { elements } if *elements != 0 => {
-                        fixed.push(FixedPipeline::Scalar);
+                        fixed.push(FixedPipeline::ScalarMax);
                     }
                     DeepLearningFeedForwardStage::Relu { .. } => {}
                     DeepLearningFeedForwardStage::Elu { elements } if *elements != 0 => {

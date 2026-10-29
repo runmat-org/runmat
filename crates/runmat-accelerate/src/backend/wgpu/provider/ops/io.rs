@@ -1261,6 +1261,12 @@ mod tests {
             WholeWorkConstraint, WholeWorkPlacementRequest,
         };
         let digest = Digest::sha256(b"actual-empty-wgpu-readback");
+        // Zero payload staging/queue demand still owns the returned shape
+        // metadata. Fund its exact canonical quote rather than zero host RAM.
+        let host_workspace = provider.download_numeric_host_workspace_bound(handle);
+        let ResourceByteBound::Known(host_bytes) = host_workspace else {
+            panic!("empty download must have a known host workspace bound");
+        };
         let candidate = WholeWorkCandidate {
             kind: ExecutionCandidateKind::SharedRuntime,
             execution_location: CandidateExecutionLocation::Host,
@@ -1276,7 +1282,7 @@ mod tests {
             resources: CandidateResourceDemand {
                 cpu_millicores: 1_000,
                 retained_bytes: ResourceByteBound::Known(0),
-                scratch_bytes: provider.download_numeric_host_workspace_bound(handle),
+                scratch_bytes: host_workspace,
                 provider_host_workspace: None,
                 provider_input_stages: None,
                 queue_slots: 0,
@@ -1310,7 +1316,7 @@ mod tests {
             candidates: vec![candidate],
             resources: PlacementResourceSnapshot {
                 cpu_millicores_available: 1_000,
-                memory_available_bytes: Some(0),
+                memory_available_bytes: Some(host_bytes),
                 cancellation_requested: false,
                 providers: vec![owner],
                 epoch: 0,
@@ -1318,9 +1324,9 @@ mod tests {
             deterministic: true,
             require_transactional_results: true,
         };
-        assert!(crate::placement::PlacementSession::default()
+        crate::placement::PlacementSession::default()
             .select_whole_work(request)
-            .is_ok());
+            .unwrap_or_else(|error| panic!("empty download admission failed: {error:?}"));
     }
 
     #[test]

@@ -38,6 +38,16 @@ fn real_linalg_fallback_preserves_physical_source_class() {
                 storage: GpuTensorStorage::Real,
             })
             .unwrap();
+        if provider.precision() == ProviderPrecision::F64 {
+            let before = provider.telemetry_snapshot();
+            let allocations = provider.allocations.record_count().unwrap();
+            let error = provider
+                .qr_factor_device(&source, 2, 2, "unsupported-double-owner", true)
+                .unwrap_err();
+            assert!(runmat_accelerate_api::is_unsupported_provider_operation(&error));
+            assert_eq!(provider.telemetry_snapshot(), before);
+            assert_eq!(provider.allocations.record_count().unwrap(), allocations);
+        }
         let inverse = futures::executor::block_on(provider.inv_exec(&source)).unwrap();
         let norm = futures::executor::block_on(provider.norm_exec(&source, ProviderNormOrder::Fro))
             .unwrap();

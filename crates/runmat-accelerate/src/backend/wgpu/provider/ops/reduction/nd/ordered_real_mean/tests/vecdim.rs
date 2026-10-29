@@ -78,11 +78,21 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
 
     let mut changed = control.clone();
     changed.nan_mode = ProviderRealMeanNaNMode::Omit;
-    forged.push(ProviderOrderedRealMeanRecipe::new(
+    // A handle-free recipe proposes an operation; it cannot authenticate the
+    // intent of a different call. Omit selects a distinct valid operation with
+    // the same resources, whereas the physical mutations below are invalid.
+    let alternate = ProviderOrderedRealMeanRecipe::new(
         source_facts.clone(),
         changed,
         resources.clone(),
-    ));
+    );
+    assert_ne!(alternate, symbolic);
+    let prepared_alternate = provider
+        .prepare_ordered_real_mean_against_recipe(&input, &alternate)
+        .unwrap()
+        .expect("a distinct valid NaN mode has its own exact proposal");
+    assert_eq!(prepared_alternate.recipe(), &alternate);
+    drop(prepared_alternate);
     let mut changed = control.clone();
     changed.output_precision = ProviderPrecision::F64;
     forged.push(ProviderOrderedRealMeanRecipe::new(
@@ -170,11 +180,11 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
         changed,
     ));
 
-    for candidate in &forged {
+    for (index, candidate) in forged.iter().enumerate() {
         assert!(provider
             .prepare_ordered_real_mean_against_recipe(&input, candidate)
             .unwrap()
-            .is_none());
+            .is_none(), "mutated recipe {index} must be rejected");
         assert!(provider
             .execute_ordered_real_mean(
                 ProviderOrderedRealMean::new(input.clone(), candidate.clone(),),

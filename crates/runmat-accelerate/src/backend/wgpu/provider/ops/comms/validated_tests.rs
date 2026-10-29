@@ -1,8 +1,8 @@
 use super::*;
+use crate::wgsl::f64_math::PreparationError;
 use runmat_accelerate_api::observation::{observe_provider_future, ProviderOperationReceipt};
 use runmat_accelerate_api::{
-    AccelProvider, ProviderBitModulationRequest, ProviderModulationRequest, WgpuScopeErrorKind,
-    WgpuScopeErrors,
+    AccelProvider, ProviderBitModulationRequest, ProviderModulationRequest,
 };
 
 fn operation_receipt(provider: &WgpuProvider) -> ProviderOperationReceipt {
@@ -119,16 +119,17 @@ async fn cold_warm_and_failed_scope(provider: &'static WgpuProvider) {
     )
     .await
     .err()
-    .expect("invalid shader must fail scoped validation");
+    .expect("invalid WGSL must fail typed compiler preparation before driver effects");
     let mut cause: &(dyn std::error::Error + 'static) = &error;
-    while !cause.is::<WgpuScopeErrors>() {
-        cause = cause.source().expect("typed scoped validation source");
+    while !cause.is::<PreparationError>() {
+        cause = cause
+            .source()
+            .expect("original typed shader compiler cause");
     }
-    assert!(cause
-        .downcast_ref::<WgpuScopeErrors>()
-        .unwrap()
-        .kinds()
-        .contains(&WgpuScopeErrorKind::Validation));
+    assert!(matches!(
+        cause.downcast_ref::<PreparationError>().unwrap(),
+        PreparationError::Parse(_)
+    ));
     assert_eq!(receipt.recorder().submission_checkpoint(), checkpoint);
     assert_eq!(provider.allocations.record_count().unwrap(), before_records);
     assert_eq!(

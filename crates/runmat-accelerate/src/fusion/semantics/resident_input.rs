@@ -38,7 +38,6 @@ impl AuthenticatedResidentInput<'_> {
     pub(crate) fn floating_eligibility(&self) -> FloatingFusionEligibility {
         if self.handle.view().is_logical()
             || self.handle.physical().storage() != GpuTensorStorage::Real
-            || self.handle.view().layout() != GpuTensorLayout::Contiguous
         {
             return FloatingFusionEligibility::Ineligible;
         }
@@ -107,9 +106,16 @@ impl<'a> FusionResidentInput<'a> {
         // precision for the immutable physical element class.
         let representation = tensor_representation(value, precision)?;
         let actual_fact = runmat_runtime::value_fact::value_fact(value);
+        // The admitted view API has two layouts. A matrix transpose is an
+        // authenticated dense carrier with different logical coordinates, not
+        // an arbitrary strided descriptor supplied by a caller.
+        let layout = match handle.view().layout() {
+            GpuTensorLayout::Contiguous => ProviderLayout::ColumnMajorContiguous,
+            GpuTensorLayout::Transpose(_) => ProviderLayout::Strided,
+        };
         if representation.element_type != element_type
             || representation.storage != ProviderStorage::DenseReal
-            || representation.layout != ProviderLayout::ColumnMajorContiguous
+            || representation.layout != layout
             || representation.residency != ProviderResidency::Device
             || representation.checked_byte_len().is_none()
             || !matches!(&actual_fact.kind, ValueKindFact::Numeric(numeric)

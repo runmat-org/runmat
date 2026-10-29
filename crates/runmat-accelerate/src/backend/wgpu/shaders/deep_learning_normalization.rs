@@ -69,7 +69,7 @@ fn epsilon() -> $SCALAR$ { $EPSILON$ }
 fn quiet_nan() -> $SCALAR$ { $NAN$ }
 fn is_special(value: $SCALAR$) -> bool { $SPECIAL$ }
 
-// The divisor is finite, positive and at least sqrt(epsilon). Splitting
+// The divisors used below are finite, positive normal values. Splitting
 // its binary exponent keeps both scale factors normal. Explicit fused
 // operations prevent a reciprocal of a large divisor from becoming a
 // subnormal intermediate even when the quotient itself is normal.
@@ -78,6 +78,17 @@ fn scaled_ratio(value: $SCALAR$, divisor: $SCALAR$) -> $SCALAR$ {
   let numerator = fma(fma(value, first, $SCALAR$(0.0)), second, $SCALAR$(0.0));
   let denominator = fma(fma(divisor, first, $SCALAR$(0.0)), second, $SCALAR$(0.0));
   return numerator / denominator;
+}
+
+// Subtract before scaling when signs agree: the difference cannot overflow,
+// and nearby samples retain their original representable spacing. Opposite
+// signs use scaled subtraction to keep even +/-maximum finite.
+fn shifted_ratio(value: $SCALAR$, reference: $SCALAR$, divisor: $SCALAR$) -> $SCALAR$ {
+  if ((value >= $SCALAR$(0.0) && reference >= $SCALAR$(0.0)) ||
+      (value <= $SCALAR$(0.0) && reference <= $SCALAR$(0.0))) {
+    return scaled_ratio(value - reference, divisor);
+  }
+  return scaled_ratio(value, divisor) - scaled_ratio(reference, divisor);
 }
 "#;
 
@@ -94,6 +105,7 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let sqrt_epsilon = sqrt(epsilon());
   var maximum = sqrt_epsilon;
   var special = false;
+  let reference = input.data[physical_index(group, 0u)];
   for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
     let value = input.data[physical_index(group, sample)];
     special = special || is_special(value);
@@ -108,24 +120,35 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let count = $SCALAR$(params.group_size);
   var mean = $SCALAR$(0.0);
   for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
-    let value = scaled_ratio(input.data[physical_index(group, sample)], maximum);
-    // Online centering preserves the scaled value of a constant group exactly.
-    // Summing first can round the mean away from every sample, manufacturing
-    // variance which overwhelms epsilon for large finite constant inputs.
+    let value = shifted_ratio(input.data[physical_index(group, sample)], reference, maximum);
+    // Store the shifted mean, not a value near +/-1. Exact constants reduce
+    // only zeros; adjacent large samples retain their small nonzero spacing.
     mean = mean + (value - mean) / $SCALAR$(sample + 1u);
   }
   var variance = $SCALAR$(0.0);
   for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
-    let delta = scaled_ratio(input.data[physical_index(group, sample)], maximum) - mean;
+    let delta = shifted_ratio(input.data[physical_index(group, sample)], reference, maximum) - mean;
     variance = variance + delta * delta;
   }
   let epsilon_ratio = scaled_ratio(sqrt_epsilon, maximum);
-  let denominator = sqrt(variance / count + epsilon_ratio * epsilon_ratio);
+  // For |X| <= maximum, population Var(X) / maximum^2 <= 1 exactly.
+  // Enforce that analytical bound against reduction rounding; do not clip epsilon.
+  var variance_unit = variance / count;
+  if (variance_unit > $SCALAR$(1.0)) { variance_unit = $SCALAR$(1.0); }
+  let denominator_squared = variance_unit + epsilon_ratio * epsilon_ratio;
+  let denominator = sqrt(denominator_squared);
   var inv_std_scaled = $SCALAR$(0.0);
   if (denominator != $SCALAR$(0.0)) {
     inv_std_scaled = $SCALAR$(1.0) / denominator;
+    // D^2 <= 1 implies 1/sqrt(D^2) >= 1. Keep approximate sqrt/reciprocal
+    // from violating that exact bound and overflowing maximum / inv_std_scaled.
+    if (denominator_squared <= $SCALAR$(1.0) && inv_std_scaled < $SCALAR$(1.0)) {
+      inv_std_scaled = $SCALAR$(1.0);
+    }
   }
   statistics.data[3u * group] = maximum;
+  // Native saved layout: maximum, shifted scaled mean, inverse scaled std.
+  // The immutable input's first sample supplies the same reference in every pass.
   statistics.data[3u * group + 1u] = mean;
   statistics.data[3u * group + 2u] = inv_std_scaled;
 }
@@ -150,7 +173,7 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
     output.data[index] = quiet_nan();
     return;
   }
-  let normalized = (scaled_ratio(input.data[index], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
+  let normalized = (shifted_ratio(input.data[index], input.data[physical_index(position.x, 0u)], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
   output.data[index] = normalized * scale.data[position.y] + offset.data[position.y];
 }
 "#;
@@ -174,7 +197,7 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
     let index = physical_index(group, sample);
     let channel = group_and_channel(index).y;
-    let xhat = (scaled_ratio(input.data[index], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
+    let xhat = (shifted_ratio(input.data[index], input.data[physical_index(group, 0u)], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
     let dxhat = upstream.data[index] * gamma.data[channel];
     sum_dxhat = sum_dxhat + dxhat;
     sum_dxhat_xhat = sum_dxhat_xhat + dxhat * xhat;
@@ -209,7 +232,7 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let index = (item / inner_stride) * inner_stride * channels + channel * inner_stride + item % inner_stride;
     let group = group_and_channel(index).x;
     let base = 3u * group;
-    let xhat = (scaled_ratio(input.data[index], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
+    let xhat = (shifted_ratio(input.data[index], input.data[physical_index(group, 0u)], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
     gamma_sum = gamma_sum + upstream.data[index] * xhat;
     beta_sum = beta_sum + upstream.data[index];
   }
@@ -234,18 +257,18 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let index = params.chunk_offset + local;
   let position = group_and_channel(index);
   let base = 3u * position.x;
-  let xhat = (scaled_ratio(input.data[index], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
+  let xhat = (shifted_ratio(input.data[index], input.data[physical_index(position.x, 0u)], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
   let dxhat = upstream.data[index] * gamma.data[position.y];
   let count = $SCALAR$(params.group_size);
   let centered = count * dxhat - sums.data[2u * position.x] - xhat * sums.data[2u * position.x + 1u];
   if (statistics.data[base + 2u] == $SCALAR$(0.0)) {
     dx.data[index] = ($SCALAR$(1.0) / sqrt(epsilon())) / count * centered;
   } else {
-    // Divide the complete derivative numerator by the same scaled input
-    // maximum used by forward. Forming inv_std_scaled / maximum first can
-    // underflow even when the final gradient is representable.
-    dx.data[index] = scaled_ratio(centered, statistics.data[base]) *
-        (statistics.data[base + 2u] / count);
+    // Reconstitute the physical standard deviation before dividing the complete
+    // derivative numerator. Neither inv_std_scaled / maximum nor centered /
+    // maximum is necessarily representable when the final derivative is.
+    let standard_deviation = scaled_ratio(statistics.data[base], statistics.data[base + 2u]);
+    dx.data[index] = scaled_ratio(centered, standard_deviation) / count;
   }
 }
 "#;

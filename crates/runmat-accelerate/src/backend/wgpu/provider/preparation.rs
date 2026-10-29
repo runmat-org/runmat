@@ -78,10 +78,13 @@ impl WgpuProvider {
                     )
                     .key()]
                 };
+                // Floating-cast execution uses the validated recipe cache,
+                // never the legacy fusion cache, even for an ordinary cast.
+                let validated_cast_key = keys.first().copied();
                 return self.preparation_keys_snapshot(
                     "wgpu-floating-cast-preparation-v1",
                     keys,
-                    None,
+                    validated_cast_key,
                 );
             }
             ProviderPreparationProgram::Sum => {
@@ -167,14 +170,14 @@ impl WgpuProvider {
             validated_keys.push(key);
         }
         if work.input_cast {
-            keys.push(
-                PipelineRecipe::floating_cast(
-                    NumericPrecision::F32,
-                    NumericPrecision::F64,
-                    self.workgroup_config.scalar,
-                )
-                .key(),
-            );
+            let key = PipelineRecipe::floating_cast(
+                NumericPrecision::F32,
+                NumericPrecision::F64,
+                self.workgroup_config.scalar,
+            )
+            .key();
+            keys.push(key);
+            validated_keys.push(key);
         }
         if work.integer_input_cast {
             let key = PipelineRecipe::integer_sum_cast(self.workgroup_config.scalar).key();
@@ -193,14 +196,14 @@ impl WgpuProvider {
             );
         }
         if work.output_cast {
-            keys.push(
-                PipelineRecipe::floating_cast(
-                    NumericPrecision::F64,
-                    NumericPrecision::F32,
-                    self.workgroup_config.scalar,
-                )
-                .key(),
-            );
+            let key = PipelineRecipe::floating_cast(
+                NumericPrecision::F64,
+                NumericPrecision::F32,
+                self.workgroup_config.scalar,
+            )
+            .key();
+            keys.push(key);
+            validated_keys.push(key);
         }
         keys.sort_unstable();
         keys.dedup();

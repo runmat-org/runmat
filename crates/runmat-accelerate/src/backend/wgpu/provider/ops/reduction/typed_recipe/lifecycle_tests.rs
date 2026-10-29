@@ -18,6 +18,22 @@ use runmat_accelerate_api::{
 use runmat_value::{Tensor, Value};
 use std::{collections::HashMap, sync::Weak};
 
+fn owner() -> &'static WgpuProvider {
+    let provider = Box::leak(Box::new(
+        block_on(WgpuProvider::new_async(
+            crate::backend::wgpu::provider::WgpuProviderOptions {
+                precision: crate::backend::wgpu::provider::WgpuPrecisionPolicy::RequireF32,
+                ..Default::default()
+            },
+        ))
+        .expect("actual F32 WGPU adapter required; unavailable is not a pass"),
+    ));
+    // SAFETY: this unique actual device facade lives for the process and is
+    // never mutated after publishing its exact allocation-owner identity.
+    unsafe { runmat_accelerate_api::register_device_provider(provider) };
+    provider
+}
+
 #[derive(Default)]
 struct Trace {
     output: Option<Weak<wgpu::Buffer>>,
@@ -132,10 +148,7 @@ fn checked_recipe(a: &GpuTensorHandle, b: &GpuTensorHandle) -> ReductionRecipe {
 #[test]
 #[ignore = "requires actual WGPU adapter; unavailable is failure"]
 fn authentic_checked_candidate_probe_matches_enabled_limits_without_effects() {
-    let mut provider = block_on(WgpuProvider::new_async(
-        crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-    ))
-    .expect("actual WGPU adapter required; unavailable is not a pass");
+    let provider = owner();
     let values = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
     let upload = || {
         provider
@@ -176,24 +189,21 @@ fn authentic_checked_candidate_probe_matches_enabled_limits_without_effects() {
         .typed_reduction_candidates(wrong_recipe.physical())
         .unwrap_err()
         .is_unsupported());
-    provider.reduction_two_pass_mode = runmat_accelerate_api::ReductionTwoPassMode::ForceOff;
+    let (preferred, feasible) = provider
+        .typed_reduction_feasible_candidates(recipe.physical())
+        .unwrap();
+    let select = |mode| {
+        super::super::typed_selection::select_candidates(mode, preferred, &feasible).unwrap()
+    };
     assert_eq!(
-        provider
-            .typed_reduction_candidates(recipe.physical())
-            .unwrap(),
+        select(runmat_accelerate_api::ReductionTwoPassMode::ForceOff),
         vec![ReductionStrategy::SinglePass],
     );
-    provider.reduction_two_pass_mode = runmat_accelerate_api::ReductionTwoPassMode::ForceOn;
     assert_eq!(
-        provider
-            .typed_reduction_candidates(recipe.physical())
-            .unwrap(),
+        select(runmat_accelerate_api::ReductionTwoPassMode::ForceOn),
         vec![ReductionStrategy::TwoPass],
     );
-    provider.reduction_two_pass_mode = runmat_accelerate_api::ReductionTwoPassMode::Auto;
-    let auto = provider
-        .typed_reduction_candidates(recipe.physical())
-        .unwrap();
+    let auto = select(runmat_accelerate_api::ReductionTwoPassMode::Auto);
     assert_eq!(auto.len(), 2);
     assert!(auto.contains(&ReductionStrategy::SinglePass));
     assert!(auto.contains(&ReductionStrategy::TwoPass));
@@ -208,10 +218,7 @@ fn authentic_checked_candidate_probe_matches_enabled_limits_without_effects() {
 #[test]
 #[ignore = "requires actual WGPU adapter; unavailable is failure"]
 fn authentic_two_pass_tracks_final_id_and_drains_after_first_stage_fault() {
-    let provider = block_on(WgpuProvider::new_async(
-        crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-    ))
-    .expect("actual WGPU adapter required; unavailable is not a pass");
+    let provider = owner();
     assert_eq!(provider.precision(), ProviderPrecision::F32);
     let left = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
     let right = [10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0];
@@ -295,10 +302,7 @@ fn authentic_two_pass_tracks_final_id_and_drains_after_first_stage_fault() {
 #[test]
 #[ignore = "requires actual WGPU adapter; unavailable is failure"]
 fn same_class_transpose_binds_the_source_buffer_and_uses_checked_strides() {
-    let provider = block_on(WgpuProvider::new_async(
-        crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-    ))
-    .expect("actual WGPU adapter required; unavailable is not a pass");
+    let provider = owner();
     assert_eq!(provider.precision(), ProviderPrecision::F32);
     let upload = |values: &[f32], shape: &[usize]| {
         provider

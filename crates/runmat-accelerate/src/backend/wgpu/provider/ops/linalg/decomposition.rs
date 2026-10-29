@@ -230,6 +230,19 @@ impl WgpuProvider {
         label: &str,
         retain_r_inv: bool,
     ) -> Result<(GpuTensorHandle, GpuTensorHandle, Option<GpuTensorHandle>)> {
+        // This private Gram/Cholesky shader has a binary32 storage ABI. Public
+        // Double factorization uses the native-class host path; it must never
+        // reach this kernel with binary64 bytes or publish mislabeled results.
+        if self.precision != NumericPrecision::F32
+            || matrix.physical().element_type()
+                != runmat_accelerate_api::NumericElementType::F32
+            || matrix.physical().storage() != GpuTensorStorage::Real
+            || matrix.view().is_logical()
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "device Gram QR requires an owning binary32 real route",
+            ));
+        }
         ensure!(rows >= cols, "qr: rows must be >= cols for device path");
         ensure!(
             cols > 0,

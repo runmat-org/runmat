@@ -1741,10 +1741,40 @@ impl WgpuProvider {
                 self.require_ieee_words(entry_a.precision)
                     .map_err(ProviderExecutionError::from)?;
             }
+            if entry_a.shape != entry_b.shape {
+                complex_broadcast::admit_shapes(&entry_a.shape, &entry_b.shape)?;
+            }
         } else if complex {
-            let _ = (self.get_entry(a)?, self.get_entry(b)?);
+            let (entry_a, entry_b) = (self.get_entry(a)?, self.get_entry(b)?);
+            if entry_a.shape != entry_b.shape {
+                // Pure shape admission retains its typed Unsupported cause.
+                // Discovering the same refusal inside the unphased executor
+                // cannot authorize replay because later work may have effects.
+                complex_broadcast::admit_shapes(&entry_a.shape, &entry_b.shape)?;
+            }
         } else {
-            let _ = self.real_floating_binary_inputs(a, b)?;
+            let (entry_a, entry_b) = self.real_floating_binary_inputs(a, b)?;
+            let broadcast = entry_a.shape != entry_b.shape;
+            // Select the exact physical pipeline before entering the legacy
+            // executor. In particular Max's IEEE feature gate also applies to
+            // empty outputs, which still allocate a physical buffer.
+            let pipeline = self.real_binary_pipeline(entry_a.precision, broadcast, op)?;
+            let len = if broadcast {
+                broadcast_plan::BroadcastRoute::with_launch(
+                    &entry_a.shape,
+                    &entry_b.shape,
+                    crate::backend::wgpu::params::BCAST_MAX_RANK,
+                    entry_a.element_type.element_size() as u64,
+                    self.binary_linear_launch()?,
+                )?
+                .len
+            } else {
+                entry_a.len
+            };
+            self.validate_real_floating_output_extent(len, entry_a.precision)?;
+            if len != 0 || op == BinaryOpCode::Max {
+                pipeline.preflight()?;
+            }
         }
         // This inherited synchronous floating route can allocate or submit;
         // its unphased errors are never certified pre-effect replay causes.

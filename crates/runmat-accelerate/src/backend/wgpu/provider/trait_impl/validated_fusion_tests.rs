@@ -1,8 +1,9 @@
 use super::*;
+use crate::wgsl::f64_math::PreparationError;
 use runmat_accelerate_api::observation::{observe_provider_future, ProviderOperationReceipt};
 use runmat_accelerate_api::{
     AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView, ProviderElementType,
-    ProviderShaderRequirements, WgpuScopeErrorKind, WgpuScopeErrors,
+    ProviderShaderRequirements,
 };
 
 async fn owner() -> &'static WgpuProvider {
@@ -101,14 +102,15 @@ async fn exercise_cold_and_warm(provider: &'static WgpuProvider) {
     assert_eq!(receipt.recorder().submission_checkpoint(), checkpoint);
     assert!(!error.is_unsupported());
     let mut cause: &(dyn std::error::Error + 'static) = &error;
-    while !cause.is::<WgpuScopeErrors>() {
-        cause = cause.source().expect("typed scoped validation source");
+    while !cause.is::<PreparationError>() {
+        cause = cause
+            .source()
+            .expect("original typed shader compiler cause");
     }
-    assert!(cause
-        .downcast_ref::<WgpuScopeErrors>()
-        .unwrap()
-        .kinds()
-        .contains(&WgpuScopeErrorKind::Validation));
+    assert!(matches!(
+        cause.downcast_ref::<PreparationError>().unwrap(),
+        PreparationError::Parse(_)
+    ));
     assert_eq!(
         provider.validated_fusion_cache.lock().unwrap().len(),
         before

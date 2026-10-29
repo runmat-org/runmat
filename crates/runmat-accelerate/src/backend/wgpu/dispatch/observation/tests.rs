@@ -619,6 +619,14 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
                     .expect("native progress accepted");
             }
         }
+        // Query permits are released before the allocation bundle within the
+        // same physical-completion callback. Await its exact retirement signal,
+        // not a concurrent quota observation, before asserting bundle cleanup.
+        assert_eq!(
+            futures::executor::block_on(retirement).is_ok(),
+            !stopped && !panicking,
+            "retirement proof follows exact queue progress, never semantic-map completion"
+        );
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             if budget
@@ -637,11 +645,6 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
             retention_drops.load(std::sync::atomic::Ordering::SeqCst),
             1,
             "submitted allocation retention releases exactly once after settlement"
-        );
-        assert_eq!(
-            futures::executor::block_on(retirement).is_ok(),
-            !stopped && !panicking,
-            "retirement proof follows exact queue progress, never semantic-map completion"
         );
         if matched_provider {
             assert!(matches!(

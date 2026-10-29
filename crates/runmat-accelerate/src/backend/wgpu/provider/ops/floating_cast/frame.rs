@@ -118,8 +118,17 @@ impl FloatingCastFrame {
     ) -> Result<Self> {
         input.allocation_lease().validate_live()?;
         let entry = provider.get_entry_raw(input)?;
+        let lanes = match entry.storage {
+            GpuTensorStorage::Real => 1,
+            GpuTensorStorage::ComplexInterleaved => 2,
+        };
+        // BufferEntry counts native scalar lanes; shape counts logical values.
+        // A complex value owns two lanes, not two independent logical values.
+        let scalar_len = product_checked(&entry.shape)
+            .and_then(|logical_len| logical_len.checked_mul(lanes))
+            .ok_or_else(|| anyhow!("floating cast scalar count overflow"))?;
         ensure!(
-            input.shape() == entry.shape && product_checked(&entry.shape) == Some(entry.len),
+            input.shape() == entry.shape && scalar_len == entry.len,
             "floating cast source view does not match its allocation"
         );
         let transpose = runmat_accelerate_api::handle_transpose_info(input);
@@ -149,14 +158,6 @@ impl FloatingCastFrame {
                 "floating cast requires shader-f64 support",
             ));
         }
-        let scalar_len = entry
-            .len
-            .checked_mul(if entry.storage == GpuTensorStorage::ComplexInterleaved {
-                2
-            } else {
-                1
-            })
-            .ok_or_else(|| anyhow!("floating cast scalar count overflow"))?;
         let needs_pipeline = entry.precision != target && scalar_len != 0;
         if needs_pipeline && scalar_len > u32::MAX as usize {
             return Err(unsupported_provider_operation(

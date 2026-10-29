@@ -26,6 +26,26 @@ fn ordered_strategies(
     }
 }
 
+/// Pure policy selection over an already authenticated device-feasible set.
+/// It cannot manufacture a feasible route or launch a preparation trial.
+pub(super) fn select_candidates(
+    mode: ReductionTwoPassMode,
+    preferred: ReductionStrategy,
+    feasible: &[ReductionStrategy],
+) -> ProviderExecutionResult<Vec<ReductionStrategy>> {
+    let candidates: Vec<_> = ordered_strategies(mode, preferred)
+        .into_iter()
+        .flatten()
+        .filter(|strategy| feasible.contains(strategy))
+        .collect();
+    if candidates.is_empty() {
+        return Err(typed_recipe::preflight::unsupported(
+            "no executable typed reduction strategy on this device",
+        ));
+    }
+    Ok(candidates)
+}
+
 impl WgpuProvider {
     pub(crate) fn typed_reduction_config(
         &self,
@@ -66,6 +86,15 @@ impl WgpuProvider {
         &self,
         recipe: &ProviderReductionRecipe,
     ) -> ProviderExecutionResult<Vec<ReductionStrategy>> {
+        let mode = self.reduction_two_pass_mode;
+        let (preferred, feasible) = self.typed_reduction_feasible_candidates(recipe)?;
+        select_candidates(mode, preferred, &feasible)
+    }
+
+    pub(super) fn typed_reduction_feasible_candidates(
+        &self,
+        recipe: &ProviderReductionRecipe,
+    ) -> ProviderExecutionResult<(ReductionStrategy, Vec<ReductionStrategy>)> {
         let d = recipe.descriptor();
         let config = self.typed_reduction_config(d.geometry.reduce_elements, d.geometry.slices)?;
         if d.config != config {
@@ -84,22 +113,16 @@ impl WgpuProvider {
             ReductionMode::SinglePass => ReductionStrategy::SinglePass,
             ReductionMode::TwoPass { .. } => ReductionStrategy::TwoPass,
         };
-        let order = ordered_strategies(self.reduction_two_pass_mode, preferred);
-        let mut candidates = Vec::new();
-        for strategy in order.into_iter().flatten() {
+        let mut feasible = Vec::new();
+        for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
             let Ok(selected) = ReductionSelection::new(recipe, strategy) else {
                 continue;
             };
             if self.admit_reduction_selection(&selected).is_ok() {
-                candidates.push(strategy);
+                feasible.push(strategy);
             }
         }
-        if candidates.is_empty() {
-            return Err(typed_recipe::preflight::unsupported(
-                "no executable typed reduction strategy on this device",
-            ));
-        }
-        Ok(candidates)
+        Ok((preferred, feasible))
     }
 }
 
@@ -124,5 +147,22 @@ mod tests {
             ordered_strategies(ReductionTwoPassMode::ForceOn, ReductionStrategy::SinglePass),
             [Some(ReductionStrategy::TwoPass), None]
         );
+        let feasible = [ReductionStrategy::SinglePass];
+        assert_eq!(
+            select_candidates(
+                ReductionTwoPassMode::Auto,
+                ReductionStrategy::TwoPass,
+                &feasible
+            )
+            .unwrap(),
+            feasible
+        );
+        assert!(select_candidates(
+            ReductionTwoPassMode::ForceOn,
+            ReductionStrategy::SinglePass,
+            &feasible,
+        )
+        .unwrap_err()
+        .is_unsupported());
     }
 }
