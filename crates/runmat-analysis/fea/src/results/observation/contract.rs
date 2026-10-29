@@ -180,9 +180,12 @@ pub enum ResolvedComponentProjection {
     MinimumPrincipalSymmetricTensor,
 }
 
+/// The content of a resolved observation plan. Building or editing contents grants nothing:
+/// only `ResolvedObservationPlan::try_from` (which checks the identity and every observation) or
+/// the resolver turns contents into a plan.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, try_from = "ResolvedObservationPlanWire")]
-pub struct ResolvedObservationPlan {
+#[serde(deny_unknown_fields)]
+pub struct ResolvedObservationPlanContents {
     pub schema_version: u16,
     pub identity: ResolvedObservationPlanIdentity,
     pub topology_digest: Digest,
@@ -191,10 +194,8 @@ pub struct ResolvedObservationPlan {
     pub observations: Vec<ResolvedObservation>,
 }
 
-impl ResolvedObservationPlan {
-    pub(super) fn derive_identity(
-        &self,
-    ) -> Result<ResolvedObservationPlanIdentity, ObservationError> {
+impl ResolvedObservationPlanContents {
+    pub fn derive_identity(&self) -> Result<ResolvedObservationPlanIdentity, ObservationError> {
         let bytes = encode_contract(
             OBSERVATION_PREFIX,
             "resolved-observation-plan",
@@ -210,8 +211,18 @@ impl ResolvedObservationPlan {
         Ok(ResolvedObservationPlanIdentity(Digest::sha256(bytes)))
     }
 
-    pub fn validate_identity(&self) -> Result<(), ObservationError> {
-        if self.schema_version != 1 || self.identity != self.derive_identity()? {
+    fn validate(&self) -> Result<(), ObservationError> {
+        if self.identity != self.derive_identity()? {
+            return Err(ObservationError::Identity(
+                "observation plan identity does not converge",
+            ));
+        }
+        self.validate_observations()
+    }
+
+    /// Everything but the identity hash.
+    fn validate_observations(&self) -> Result<(), ObservationError> {
+        if self.schema_version != 1 {
             return Err(ObservationError::Identity(
                 "observation plan identity does not converge",
             ));
@@ -235,9 +246,49 @@ impl ResolvedObservationPlan {
         }
         Ok(())
     }
+}
+
+/// A resolved observation plan whose identity, schema, unique identifiers, sampling domain and
+/// per-observation contracts were checked exactly once, when it was resolved or decoded. The
+/// contents are private and read-only (through `Deref`), so holders never re-validate it: the
+/// canonical encode behind the identity runs once per plan, not once per consumer.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(try_from = "ResolvedObservationPlanContents")]
+pub struct ResolvedObservationPlan {
+    contents: ResolvedObservationPlanContents,
+}
+
+/// Encodes exactly as its contents (the wire form is unchanged).
+impl Serialize for ResolvedObservationPlan {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.contents.serialize(serializer)
+    }
+}
+
+impl std::ops::Deref for ResolvedObservationPlan {
+    type Target = ResolvedObservationPlanContents;
+
+    fn deref(&self) -> &Self::Target {
+        &self.contents
+    }
+}
+
+impl ResolvedObservationPlan {
+    /// Seal contents whose identity the caller derived from these same contents.
+    pub(super) fn seal_derived(
+        mut contents: ResolvedObservationPlanContents,
+    ) -> Result<Self, ObservationError> {
+        contents.identity = contents.derive_identity()?;
+        contents.validate_observations()?;
+        Ok(Self { contents })
+    }
+
+    /// Give up the seal to edit the contents; re-sealing validates them again.
+    pub fn into_contents(self) -> ResolvedObservationPlanContents {
+        self.contents
+    }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
-        self.validate_identity()?;
         Ok(encode_contract(
             OBSERVATION_PREFIX,
             "resolved-observation-plan",
@@ -257,31 +308,12 @@ impl ResolvedObservationPlan {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ResolvedObservationPlanWire {
-    schema_version: u16,
-    identity: ResolvedObservationPlanIdentity,
-    topology_digest: Digest,
-    step_id: ProcedureStepId,
-    independent_domain: IndependentDomain,
-    observations: Vec<ResolvedObservation>,
-}
-
-impl TryFrom<ResolvedObservationPlanWire> for ResolvedObservationPlan {
+impl TryFrom<ResolvedObservationPlanContents> for ResolvedObservationPlan {
     type Error = ObservationError;
 
-    fn try_from(wire: ResolvedObservationPlanWire) -> Result<Self, Self::Error> {
-        let plan = Self {
-            schema_version: wire.schema_version,
-            identity: wire.identity,
-            topology_digest: wire.topology_digest,
-            step_id: wire.step_id,
-            independent_domain: wire.independent_domain,
-            observations: wire.observations,
-        };
-        plan.validate_identity()?;
-        Ok(plan)
+    fn try_from(contents: ResolvedObservationPlanContents) -> Result<Self, Self::Error> {
+        contents.validate()?;
+        Ok(Self { contents })
     }
 }
 

@@ -111,5 +111,6 @@ pub(super) fn admit_sampled(
         workload,
         mesh: Some(mesh),
         accelerator_requests: Vec::new(),
+        volume_mesh: None,
     })
 }

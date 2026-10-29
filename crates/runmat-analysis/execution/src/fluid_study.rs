@@ -101,6 +101,72 @@ pub struct FluidStudyPreparation {
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
 }
 
+/// Everything a fluid study preparation holds except the planned product.
+pub struct FluidStudyPreparationParts {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    pub policy: FluidStudyPlanningPolicy,
+    pub mesh: SolverMeshArtifact,
+    pub frozen_project_digest: Option<Digest>,
+    pub artifact_access: ArtifactAccess,
+    pub program_revision: ProgramRevision,
+    pub output_policy: AnalysisOutputPolicy,
+    pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
+}
+
+/// A preparation whose product is the canonical plan of its own compiled study on its own
+/// mesh under its own policy. Only planning constructs it ([`Self::plan`] in process, or
+/// [`Self::verify`], which re-plans a preparation assembled elsewhere), so
+/// [`FluidStudyCoordinator::planned`] takes it without planning the product a second time.
+#[derive(Clone)]
+pub struct PlannedFluidStudyPreparation(FluidStudyPreparation);
+
+impl PlannedFluidStudyPreparation {
+    /// Plan `compiled` on `parts.mesh` under `parts.policy`; the product stays with them.
+    pub fn plan(
+        compiled: CompiledAnalysisStudy,
+        parts: FluidStudyPreparationParts,
+    ) -> AnalysisBridgeResult<Self> {
+        // Planning validates the compiled study against the mesh first.
+        let product = plan_fluid_study_product(compiled, &parts.mesh, parts.policy)
+            .map_err(|error| invalid(error.to_string()))?;
+        Ok(Self(FluidStudyPreparation {
+            local_execution: parts.local_execution,
+            policy: parts.policy,
+            product,
+            mesh: parts.mesh,
+            frozen_project_digest: parts.frozen_project_digest,
+            artifact_access: parts.artifact_access,
+            program_revision: parts.program_revision,
+            output_policy: parts.output_policy,
+            required_capabilities: parts.required_capabilities,
+        }))
+    }
+
+    /// Re-plan a preparation assembled elsewhere and require exactly its product.
+    pub fn verify(preparation: FluidStudyPreparation) -> AnalysisBridgeResult<Self> {
+        let expected = plan_fluid_study_product(
+            preparation.product.compiled.clone(),
+            &preparation.mesh,
+            preparation.policy,
+        )
+        .map_err(|error| invalid(error.to_string()))?;
+        if expected != preparation.product {
+            return Err(AnalysisBridgeError::Identity(
+                "fluid workload differs from the compiled authored study",
+            ));
+        }
+        Ok(Self(preparation))
+    }
+
+    pub fn preparation(&self) -> &FluidStudyPreparation {
+        &self.0
+    }
+
+    pub fn into_preparation(self) -> FluidStudyPreparation {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FluidStudyPhase {
     ReadyForSolve,
@@ -135,19 +201,14 @@ pub struct FluidStudyCoordinator {
 }
 
 impl FluidStudyCoordinator {
+    /// For a preparation assembled elsewhere: re-plans it first ([`PlannedFluidStudyPreparation::verify`]).
     pub fn new(preparation: FluidStudyPreparation) -> AnalysisBridgeResult<Self> {
-        // Re-planning validates the compiled study against the mesh first.
-        let expected = plan_fluid_study_product(
-            preparation.product.compiled.clone(),
-            &preparation.mesh,
-            preparation.policy,
-        )
-        .map_err(|error| invalid(error.to_string()))?;
-        if expected != preparation.product {
-            return Err(AnalysisBridgeError::Identity(
-                "fluid workload differs from the compiled authored study",
-            ));
-        }
+        Self::planned(PlannedFluidStudyPreparation::verify(preparation)?)
+    }
+
+    /// For a preparation planned in process: its product is canonical by construction.
+    pub fn planned(preparation: PlannedFluidStudyPreparation) -> AnalysisBridgeResult<Self> {
+        let preparation = preparation.into_preparation();
         let definition_digest = preparation
             .product
             .compiled

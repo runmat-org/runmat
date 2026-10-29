@@ -190,7 +190,7 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
         understated_receipt,
     )
     .is_err());
-    let mut substituted_observations = observations.clone();
+    let mut substituted_observations = observations.clone().into_contents();
     let mut understated_profiles = prepared(&mesh, &constraints, &small_workload);
     understated_profiles
         .state_profiles_output
@@ -207,6 +207,16 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
     )
     .is_err());
     substituted_observations.step_id = ProcedureStepId("another-step".into());
+    assert!(
+        crate::results::observation::ResolvedObservationPlan::try_from(
+            substituted_observations.clone()
+        )
+        .is_err()
+    );
+    substituted_observations.identity = substituted_observations.derive_identity().unwrap();
+    let substituted_observations =
+        crate::results::observation::ResolvedObservationPlan::try_from(substituted_observations)
+            .unwrap();
     assert!(build_structural_modal_resource_plan(
         Some(&mesh),
         &constraints,

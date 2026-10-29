@@ -1045,7 +1045,9 @@ fn volume_and_boundary_reductions_use_finite_element_quadrature() {
     let mut boundary = spec(
         "boundary_average",
         ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector))),
+            runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector)),
+            ),
         )),
     );
     boundary.reduction = volume.reduction.clone();
@@ -1302,8 +1304,12 @@ fn history_checkpoint_restart_preserves_exact_lineage_without_gaps_or_duplicates
     let restarted = final_attempt.finish().unwrap();
     assert_eq!(restarted, uninterrupted);
 
-    let mut stale_plan = plan.clone();
+    let mut stale_plan = plan.clone().into_contents();
     stale_plan.identity = ResolvedObservationPlanIdentity(Digest::sha256("stale-plan"));
+    assert!(ResolvedObservationPlan::try_from(stale_plan.clone()).is_err());
+    stale_plan.step_id = runmat_analysis_core::ProcedureStepId("another-step".into());
+    stale_plan.identity = stale_plan.derive_identity().unwrap();
+    let stale_plan = ResolvedObservationPlan::try_from(stale_plan).unwrap();
     assert!(
         BoundedObservationHistory::resume(&stale_plan, &observation_id, final_checkpoint).is_err()
     );
@@ -2596,7 +2602,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         .unwrap_err()
         .to_string()
         .contains("execution policy differs"));
-    let mut forged = plan;
+    let mut forged = plan.into_contents();
     let ResolvedObservationTarget::Nodes { indices, .. } = &mut forged.observations[0].target
     else {
         unreachable!()
@@ -2605,7 +2611,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         *index += 1;
     }
     forged.identity = forged.derive_identity().unwrap();
-    forged.validate_identity().unwrap();
+    let forged = ResolvedObservationPlan::try_from(forged).unwrap();
     assert!(source
         .validate_structural_plan(&forged, &model, None)
         .is_err());
@@ -2811,7 +2817,8 @@ fn direct_deserialization_rejects_semantically_invalid_resolved_plans() {
         &[definition],
         ObservationLimits::default(),
     )
-    .unwrap();
+    .unwrap()
+    .into_contents();
     let ResolvedObservationTarget::Nodes {
         indices,
         identities,
@@ -2849,7 +2856,8 @@ fn resolved_path_identity_rejects_interpolation_weight_substitution() {
         &[definition],
         ObservationLimits::default(),
     )
-    .unwrap();
+    .unwrap()
+    .into_contents();
     let ResolvedObservationTarget::Points { samples } = &mut plan.observations[0].target else {
         panic!("path must resolve to finite-element point samples")
     };
@@ -2902,13 +2910,15 @@ fn evaluation_rejects_plan_targets_rebound_to_another_topology_entity() {
         std::slice::from_ref(&definition),
         ObservationLimits::default(),
     )
-    .unwrap();
+    .unwrap()
+    .into_contents();
     let ResolvedObservationTarget::Nodes { identities, .. } = &mut plan.observations[0].target
     else {
         panic!("whole-model nodal field must resolve to nodes");
     };
     identities.swap(0, 1);
     plan.identity = plan.derive_identity().unwrap();
+    let plan = ResolvedObservationPlan::try_from(plan).unwrap();
     let fields = catalog(&projection, &definition, vec![4], vec![1.0, 2.0, 3.0, 4.0]);
 
     let error = evaluate_observations(&plan, &projection, &fields).unwrap_err();
@@ -2950,9 +2960,12 @@ fn element_field_point_sample_reads_the_containing_element() {
         let position = std::array::from_fn(|axis| {
             0.7 * element.centroid_m[axis] + 0.3 * corner.canonical_value()[axis]
         });
-        let mut request = spec("sample", ObservationTarget::Point {
-            position: Position::new(position),
-        });
+        let mut request = spec(
+            "sample",
+            ObservationTarget::Point {
+                position: Position::new(position),
+            },
+        );
         request.quantity = ObservationQuantity::Stress;
         request.value_shape = ObservationValueShape::SymmetricTensor3;
         request.source_location = FieldLocation::Element;
@@ -3029,8 +3042,16 @@ fn element_field_over_a_boundary_region_reads_the_face_owners() {
     {
         let [a, b, c] = [0, 1, 2].map(|k| projection.nodes[face.node_indices[k]].coordinates_m);
         let (u, v) = (
-            [b.canonical_value()[0] - a.canonical_value()[0], b.canonical_value()[1] - a.canonical_value()[1], b.canonical_value()[2] - a.canonical_value()[2]],
-            [c.canonical_value()[0] - a.canonical_value()[0], c.canonical_value()[1] - a.canonical_value()[1], c.canonical_value()[2] - a.canonical_value()[2]],
+            [
+                b.canonical_value()[0] - a.canonical_value()[0],
+                b.canonical_value()[1] - a.canonical_value()[1],
+                b.canonical_value()[2] - a.canonical_value()[2],
+            ],
+            [
+                c.canonical_value()[0] - a.canonical_value()[0],
+                c.canonical_value()[1] - a.canonical_value()[1],
+                c.canonical_value()[2] - a.canonical_value()[2],
+            ],
         );
         let cross = [
             u[1] * v[2] - u[2] * v[1],
@@ -3046,10 +3067,23 @@ fn element_field_over_a_boundary_region_reads_the_face_owners() {
     }
     assert!(owners.len() >= 1 && area > 0.0);
     for (id, operation, output_location, expected) in [
-        ("mean", SpatialReduction::Average, FieldLocation::Global, weighted / area),
-        ("peak", SpatialReduction::Maximum, FieldLocation::Element, peak),
+        (
+            "mean",
+            SpatialReduction::Average,
+            FieldLocation::Global,
+            weighted / area,
+        ),
+        (
+            "peak",
+            SpatialReduction::Maximum,
+            FieldLocation::Element,
+            peak,
+        ),
     ] {
-        let mut request = spec(id, ObservationTarget::Spatial(ExcitationTarget::Region(region.clone())));
+        let mut request = spec(
+            id,
+            ObservationTarget::Spatial(ExcitationTarget::Region(region.clone())),
+        );
         request.quantity = ObservationQuantity::Stress;
         request.value_shape = ObservationValueShape::SymmetricTensor3;
         request.source_location = FieldLocation::Element;
@@ -3111,8 +3145,9 @@ fn node_located_von_mises_binds_its_declared_transfer_and_interpolates() {
     let fields = catalog(&projection, &definition, vec![values.len()], values);
     let element = &projection.elements[1];
     let corner = projection.nodes[element.node_indices[0]].coordinates_m;
-    let position =
-        std::array::from_fn(|axis| 0.6 * element.centroid_m[axis] + 0.4 * corner.canonical_value()[axis]);
+    let position = std::array::from_fn(|axis| {
+        0.6 * element.centroid_m[axis] + 0.4 * corner.canonical_value()[axis]
+    });
     let mut request = spec(
         "surface_sample",
         ObservationTarget::Point {
@@ -3137,7 +3172,10 @@ fn node_located_von_mises_binds_its_declared_transfer_and_interpolates() {
     let result = evaluate_observations(&plan, &projection, &fields).unwrap();
     let value = result[0].field.as_host_f64().unwrap()[0];
     let expected = 1.0e6 * position[0] + 3.0e6;
-    assert!((value - expected).abs() <= 1e-9 * expected, "{value} vs {expected}");
+    assert!(
+        (value - expected).abs() <= 1e-9 * expected,
+        "{value} vs {expected}"
+    );
 }
 
 // witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
@@ -3164,7 +3202,12 @@ fn reaction_resultant_over_a_face_region_sums_its_nodes_once() {
     let values = (0..projection.nodes.len())
         .flat_map(|node| [node as f64 + 1.0, 2.0 * node as f64, -1.0])
         .collect::<Vec<_>>();
-    let fields = catalog(&projection, &definition, vec![projection.nodes.len(), 3], values.clone());
+    let fields = catalog(
+        &projection,
+        &definition,
+        vec![projection.nodes.len(), 3],
+        values.clone(),
+    );
     let entity = projection.boundary_faces[0].provenance[0].clone();
     let mut region = RegionTarget::new(
         "supports",
@@ -3179,10 +3222,12 @@ fn reaction_resultant_over_a_face_region_sums_its_nodes_once() {
         .filter(|face| face.provenance.contains(&entity))
         .flat_map(|face| face.node_indices.iter().copied())
         .collect::<std::collections::BTreeSet<_>>();
-    let expected: [f64; 3] = std::array::from_fn(|axis| {
-        nodes.iter().map(|node| values[node * 3 + axis]).sum()
-    });
-    let mut request = spec("support_reaction", ObservationTarget::Spatial(ExcitationTarget::Region(region)));
+    let expected: [f64; 3] =
+        std::array::from_fn(|axis| nodes.iter().map(|node| values[node * 3 + axis]).sum());
+    let mut request = spec(
+        "support_reaction",
+        ObservationTarget::Spatial(ExcitationTarget::Region(region)),
+    );
     request.quantity = ObservationQuantity::ReactionForce;
     request.value_shape = ObservationValueShape::Vector3;
     request.source_location = FieldLocation::Node;
@@ -3205,6 +3250,9 @@ fn reaction_resultant_over_a_face_region_sums_its_nodes_once() {
     let result = evaluate_observations(&plan, &projection, &fields).unwrap();
     let value = result[0].field.as_host_f64().unwrap();
     for axis in 0..3 {
-        assert!((value[axis] - expected[axis]).abs() < 1e-12, "{value:?} vs {expected:?}");
+        assert!(
+            (value[axis] - expected[axis]).abs() < 1e-12,
+            "{value:?} vs {expected:?}"
+        );
     }
 }

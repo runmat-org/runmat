@@ -54,14 +54,19 @@ fn sample_coverage_never_discharges_a_history_and_rejects_duplicate_or_unknown_c
 
 #[test]
 fn original_declarations_must_match_the_plan_before_coverage_is_accepted() {
-    let (mut declarations, mut plan) = original();
+    let (mut declarations, plan) = original();
     assert!(PublicationCoverage::derive(&declarations[..1], &plan).is_err());
     declarations.swap(0, 1);
     assert!(PublicationCoverage::derive(&declarations, &plan).is_err());
-    plan.observations.swap(0, 1);
+    let mut contents = plan.into_contents();
+    contents.observations.swap(0, 1);
+    contents.identity = contents.derive_identity().unwrap();
+    let plan = ResolvedObservationPlan::try_from(contents).unwrap();
     assert!(PublicationCoverage::derive(&declarations, &plan).is_ok());
-    declarations[1] = declarations[0].clone();
-    plan.observations[1] = plan.observations[0].clone();
-    assert!(PublicationCoverage::derive(&declarations, &plan).is_err());
+    // A plan with a duplicated observation cannot be sealed, so coverage never sees one.
+    let mut contents = plan.into_contents();
+    contents.observations[1] = contents.observations[0].clone();
+    contents.identity = contents.derive_identity().unwrap();
+    assert!(ResolvedObservationPlan::try_from(contents).is_err());
     assert!(PublicationCoverage::resident_bytes(usize::MAX).is_err());
 }

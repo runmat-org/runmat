@@ -14,7 +14,9 @@ mod tests;
 pub enum ObservationSelectionCoordinate {
     SampledRecovery,
     StructuralRecovery,
-    ThermalSample { ordinal: usize },
+    ThermalSample {
+        ordinal: usize,
+    },
     /// Native canonical-mesh fields; the selection's projection digest is the plan topology.
     VolumeMeshRecovery,
 }
@@ -29,7 +31,6 @@ impl ObservationFieldCatalog {
         coordinate: ObservationSelectionCoordinate,
     ) -> AnalysisExecutionResult<ObservationFieldSelection> {
         self.validate()?;
-        plan.validate_identity().map_err(invalid)?;
         let selected = self.canonical_selected_fields(plan, coordinate)?;
         match (&self.source, coordinate) {
             (

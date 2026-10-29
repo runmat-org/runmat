@@ -48,7 +48,26 @@ pub fn build_fluid_steady_resource_plan(
     mesh: &SolverMeshArtifact,
     prepared: PreparedFluidSteadyResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    build_fluid_steady_resource_plan_with(workload, mesh, |_| Ok(prepared))
+}
+
+/// Derive the resource projection of `workload` on `mesh` once, let the caller size its
+/// prepared facts from it, and build the plan on that same projection.
+pub fn build_fluid_steady_resource_plan_with<E: From<ResourcePlanningError>>(
+    workload: &FluidSteadyWorkload,
+    mesh: &SolverMeshArtifact,
+    prepare: impl FnOnce(&FluidSteadyResourceProjection) -> Result<PreparedFluidSteadyResourceFacts, E>,
+) -> Result<FeaResourcePlan, E> {
     let projection = derive_fluid_steady_resource_projection(workload, mesh)?;
+    let prepared = prepare(&projection)?;
+    Ok(build_on_projection(workload, projection, prepared)?)
+}
+
+fn build_on_projection(
+    workload: &FluidSteadyWorkload,
+    projection: FluidSteadyResourceProjection,
+    prepared: PreparedFluidSteadyResourceFacts,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let receipt_profile = crate::execution::fluid_receipt_encoding_profile().map_err(invalid)?;
     validate_fluid_steady_prepared_facts(
         &projection,

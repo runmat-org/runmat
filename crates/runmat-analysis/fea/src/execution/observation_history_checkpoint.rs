@@ -133,9 +133,6 @@ impl ObservationHistoryCheckpointRequest {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        self.plan
-            .validate_identity()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         let observation = self
             .plan
             .observations

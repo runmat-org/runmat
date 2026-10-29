@@ -23,7 +23,8 @@ use super::contract::{
     observation_result_storage_component_count, shape_component_count,
     validate_output_numeric_contract, ObservationError, ObservationLimits, ObservationSampleBounds,
     ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationPlanIdentity, ResolvedObservationPoint, ResolvedObservationTarget,
+    ResolvedObservationPlanContents, ResolvedObservationPlanIdentity, ResolvedObservationPoint,
+    ResolvedObservationTarget,
 };
 use super::history::resolve_history_sample_bounds;
 use super::topology::ObservationTopology;
@@ -44,8 +45,8 @@ use validation::{
     validate_numeric_representation, validate_resolved_spatial_reduction, validate_supported_spec,
 };
 pub(crate) use verification::{
-    verify_authored_observations,
-    verify_observation_plan, verify_sampled_observation_plan, verify_structural_observation_plan,
+    verify_authored_observations, verify_observation_plan, verify_sampled_observation_plan,
+    verify_structural_observation_plan,
 };
 
 pub fn resolve_structural_observation_plan(
@@ -172,17 +173,14 @@ pub(super) fn resolve_observation_plan_for_topology(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut plan = ResolvedObservationPlan {
+    ResolvedObservationPlan::seal_derived(ResolvedObservationPlanContents {
         schema_version: 1,
         identity: ResolvedObservationPlanIdentity(Digest::sha256([])),
         topology_digest: topology.digest(),
         step_id: step.step_id.clone(),
         independent_domain: step.independent_domain.clone(),
         observations,
-    };
-    plan.identity = plan.derive_identity()?;
-    plan.validate_identity()?;
-    Ok(plan)
+    })
 }
 
 fn resolve_request<'a>(
@@ -533,7 +531,6 @@ fn target_error(spec: &ObservationSpec, reason: impl Into<String>) -> Observatio
     }
 }
 
-
 /// A region-supported field is observed only where it carries values: volume, element and node
 /// targets keep their entities inside the support, and an empty intersection fails closed.
 fn restrict_to_support(
@@ -544,9 +541,11 @@ fn restrict_to_support(
     if field.support().is_complete() {
         return Ok(target);
     }
-    let support_topology = topology.support_topology().ok_or(ObservationError::Identity(
-        "a region-supported field needs a mesh projection topology",
-    ))?;
+    let support_topology = topology
+        .support_topology()
+        .ok_or(ObservationError::Identity(
+            "a region-supported field needs a mesh projection topology",
+        ))?;
     let resolve = |domain| {
         field
             .support()

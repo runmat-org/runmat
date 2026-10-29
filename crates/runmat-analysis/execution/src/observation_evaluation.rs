@@ -97,6 +97,9 @@ pub(crate) struct AdmittedObservation {
     pub workload: AdmittedObservationWorkload,
     pub mesh: Option<SolverMeshArtifact>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
+    /// The sealed catalog/plan pair of a volume-mesh source, carried to publication.
+    pub volume_mesh:
+        Option<runmat_analysis_fea::results::observation::VolumeMeshObservationAuthority>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -297,6 +300,7 @@ fn admit_structural(
         workload,
         mesh,
         accelerator_requests: preparation.accelerator_requests.clone(),
+        volume_mesh: None,
     })
 }
 

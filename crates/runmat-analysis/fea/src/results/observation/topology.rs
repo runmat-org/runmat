@@ -68,7 +68,8 @@ impl<'a> ObservationTopology<'a> {
         definitions: impl IntoIterator<Item = &'f crate::results::field::RecoveredFieldDefinition>,
     ) -> bool {
         definitions.into_iter().any(|definition| {
-            definition.entity_domain() == crate::results::field::RecoveredFieldEntityDomain::OrientedFaces
+            definition.entity_domain()
+                == crate::results::field::RecoveredFieldEntityDomain::OrientedFaces
                 || definition.location() == runmat_analysis_core::FieldLocation::Cell
         })
     }
@@ -90,17 +91,22 @@ impl<'a> ObservationTopology<'a> {
     /// boundary face. Faces are derived from the projection alone, so the topology digest stays
     /// the projection digest.
     pub(crate) fn with_projection_faces(mut self) -> Result<Self, ObservationError> {
-        let projection = self.solid_projection.as_deref().ok_or(ObservationError::Identity(
-            "mesh faces need the topology's projection",
-        ))?;
+        let projection = self
+            .solid_projection
+            .as_deref()
+            .ok_or(ObservationError::Identity(
+                "mesh faces need the topology's projection",
+            ))?;
         let geometry = crate::topology::FiniteVolumeTopology::derive_selected(
             projection,
             crate::topology::FiniteVolumeProjectionPolicy::covering(projection),
             crate::topology::FiniteVolumeCellSelection::AllElements,
         )
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-        let layout = crate::results::field::FiniteVolumeFieldTopology::derive(projection, &geometry)
-            .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+        // `geometry` was derived from `projection` just above.
+        let layout =
+            crate::results::field::FiniteVolumeFieldTopology::from_derived(projection, &geometry)
+                .map_err(|error| ObservationError::Invalid(error.to_string()))?;
         self.oriented_faces = layout
             .oriented_faces()
             .iter()

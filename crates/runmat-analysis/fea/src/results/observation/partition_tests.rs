@@ -491,7 +491,9 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
     let mut observation = spec(
         "boundary_average",
         ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector))),
+            runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(face_selector)),
+            ),
         )),
     );
     observation.reduction = Some(ReductionPolicy {
@@ -771,7 +773,9 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
     )
     .unwrap();
     let target = ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
-        runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector))),
+        runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_boundary_selection(&(selector)),
+        ),
     ));
     let mut resultant = spec("pressure_resultant", target.clone());
     resultant.quantity = ObservationQuantity::ContactPressure;
@@ -1461,14 +1465,18 @@ fn reduction_rejects_missing_duplicate_and_substituted_contributions() {
     duplicate[2] = duplicate[1].clone();
     assert!(combine_observation_partitions(&plan, &partition_plan, duplicate).is_err());
 
-    let mut substituted_plan = partition_plan.clone();
+    // Tampered partition plans cannot be sealed, so `validate_for` never sees one.
+    let mut substituted_plan = partition_plan.clone().into_contents();
     substituted_plan.observation_id = ObservationId("other".into());
-    assert!(substituted_plan.validate_for(&plan).is_err());
+    assert!(ObservationPartitionPlan::try_from(substituted_plan).is_err());
 
-    let mut substituted_cost = partition_plan.clone();
+    let mut substituted_cost = partition_plan.clone().into_contents();
     substituted_cost.resource_cost.transfer_bytes += 1;
-    assert!(substituted_cost.validate_for(&plan).is_err());
-    assert!(substituted_cost.canonical_bytes().is_err());
+    assert!(ObservationPartitionPlan::try_from(substituted_cost.clone()).is_err());
+    assert!(serde_json::from_value::<ObservationPartitionPlan>(
+        serde_json::to_value(&substituted_cost).unwrap()
+    )
+    .is_err());
 }
 
 #[test]

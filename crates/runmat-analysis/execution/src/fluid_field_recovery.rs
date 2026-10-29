@@ -146,11 +146,9 @@ pub fn prepare_fluid_field_recovery(
             "fluid original result exceeds solved output admission",
         ));
     }
-    let workload = FluidSteadyWorkload::from_canonical_bytes(&source_inputs[0].payload())?;
-    let mesh =
-        SolverMeshArtifact::canonical_decode(&source_inputs[1].payload()).map_err(invalid)?;
-    let result =
-        decode_fluid_recovery_source(&source_inputs[0], &source_inputs[1], &p.source_result)?;
+    let source =
+        decode_fluid_recovery_source_parts(&source_inputs[0], &source_inputs[1], &p.source_result)?;
+    let (workload, mesh, result) = &source;
     let numerical = NumericalPlanIdentity::from_fluid_steady_workload(
         workload.identity()?,
         Digest::from_bytes(*mesh.canonical_digest.bytes()),
@@ -168,7 +166,7 @@ pub fn prepare_fluid_field_recovery(
     {
         return Err(invalid("fluid source numerical lineage differs"));
     }
-    let request = result.native_field_request(&workload, &mesh)?;
+    let request = result.native_field_request(workload, mesh)?;
     let object = |kind, id, bytes: &[u8]| {
         prepare_analysis_objects(
             kind,
@@ -189,8 +187,7 @@ pub fn prepare_fluid_field_recovery(
         source_inputs.remove(0),
         p.source_result,
     ];
-    let resource_plan =
-        build_prepared_fluid_field_recovery_resource_plan(&request, &inputs, p.output_policy)?;
+    let resource_plan = build_plan_with_source(&request, &inputs, p.output_policy, Some(&source))?;
     inputs.push(crate::portable_task_support::resource_plan_objects(
         &resource_plan,
         p.output_policy.chunk_bytes(),
@@ -225,17 +222,39 @@ pub fn build_prepared_fluid_field_recovery_resource_plan(
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
+    build_plan_with_source(request, inputs, policy, None)
+}
+
+type DecodedSource = (
+    FluidSteadyWorkload,
+    SolverMeshArtifact,
+    FluidSteadySolverResult,
+);
+
+/// `decoded` is the source `decode_fluid_recovery_source_parts` already authenticated from
+/// these same workload, mesh and result inputs; it is not decoded a second time.
+fn build_plan_with_source(
+    request: &FieldRecoveryRequest,
+    inputs: &[PreparedAnalysisObjects],
+    policy: AnalysisOutputPolicy,
+    decoded: Option<&DecodedSource>,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
     static MEMO: crate::fluid_phase_plan_memo::PlanMemo =
         crate::fluid_phase_plan_memo::PlanMemo::new();
-    MEMO.get_or_derive("fluid-field-recovery", &request.canonical_bytes()?, inputs, policy, || {
-        derive_prepared_fluid_field_recovery_resource_plan(request, inputs, policy)
-    })
+    MEMO.get_or_derive(
+        "fluid-field-recovery",
+        &request.canonical_bytes()?,
+        inputs,
+        policy,
+        || derive_prepared_fluid_field_recovery_resource_plan(request, inputs, policy, decoded),
+    )
 }
 
 fn derive_prepared_fluid_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
+    decoded: Option<&DecodedSource>,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     admission::validate_inventory_shape(inputs)?;
     if inputs.len() == 5 {
@@ -252,10 +271,15 @@ fn derive_prepared_fluid_field_recovery_resource_plan(
     let w_input = unique(inputs, AnalysisNumericalObjectKind::FluidSteadyWorkload)?;
     let m_input = unique(inputs, AnalysisNumericalObjectKind::Mesh)?;
     let r_input = unique(inputs, AnalysisNumericalObjectKind::SolverResult)?;
-    let workload = FluidSteadyWorkload::from_canonical_bytes(&w_input.payload())?;
-    let mesh = SolverMeshArtifact::canonical_decode(&m_input.payload()).map_err(invalid)?;
-    let result = decode_fluid_recovery_source(w_input, m_input, r_input)?;
-    if result.native_field_request(&workload, &mesh)? != *request {
+    let owned;
+    let (workload, mesh, result) = match decoded {
+        Some(source) => source,
+        None => {
+            owned = decode_fluid_recovery_source_parts(w_input, m_input, r_input)?;
+            &owned
+        }
+    };
+    if result.native_field_request(workload, mesh)? != *request {
         return Err(invalid(
             "fluid recovery request differs from exact original native inventory",
         ));
@@ -313,9 +337,9 @@ fn derive_prepared_fluid_field_recovery_resource_plan(
     let profile = profiler.finish(AnalysisNumericalObjectKind::Field)?;
     crate::thermal_execution::require_inventory(&profile, policy.inventory_limits())?;
     let plan = build_fluid_field_recovery_resource_plan(
-        &workload,
-        &mesh,
-        &result,
+        workload,
+        mesh,
+        result,
         request,
         PreparedPhaseResourceFacts {
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
@@ -343,6 +367,15 @@ pub fn decode_fluid_recovery_source(
     mesh: &PreparedAnalysisObjects,
     source: &PreparedAnalysisObjects,
 ) -> AnalysisBridgeResult<FluidSteadySolverResult> {
+    Ok(decode_fluid_recovery_source_parts(workload, mesh, source)?.2)
+}
+
+/// The authenticated original workload, mesh and result, each decoded once.
+fn decode_fluid_recovery_source_parts(
+    workload: &PreparedAnalysisObjects,
+    mesh: &PreparedAnalysisObjects,
+    source: &PreparedAnalysisObjects,
+) -> AnalysisBridgeResult<DecodedSource> {
     authenticate_source_objects(workload, AnalysisNumericalObjectKind::FluidSteadyWorkload)?;
     authenticate_source_objects(mesh, AnalysisNumericalObjectKind::Mesh)?;
     authenticate_source_objects(source, AnalysisNumericalObjectKind::SolverResult)?;
@@ -362,7 +395,7 @@ pub fn decode_fluid_recovery_source(
     if result.identity()?.digest() != source.manifest.logical_identity {
         return Err(invalid("fluid retained result logical identity differs"));
     }
-    Ok(result)
+    Ok((w, m, result))
 }
 
 pub fn import_fluid_recovered_fields(
