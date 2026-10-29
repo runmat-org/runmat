@@ -93,9 +93,13 @@ fn spectral_envelope_transpose_preserves_logical_order_and_retires_materializati
         let before = provider.telemetry_snapshot();
         let actual = envelope(&provider, &lazy, method);
         let after = provider.telemetry_snapshot();
+        // The input-domain check reduces finiteness on device and reads one
+        // native scalar. No signal payload may cross to the host to materialize
+        // the transpose; account for the validation transfer separately.
         assert_eq!(
-            after.download_bytes, before.download_bytes,
-            "materialization must stay on device"
+            after.download_bytes - before.download_bytes,
+            provider.element_size as u64,
+            "only the finite-validation scalar may download; materialization stays on device"
         );
         let expected_upload = match method {
             ProviderEnvelopeMethod::AnalyticFir { filter_len } => {
