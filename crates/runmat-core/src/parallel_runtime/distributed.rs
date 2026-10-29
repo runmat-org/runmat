@@ -841,7 +841,10 @@ fn validate_value_contract(
     } else if expected.storage != runmat_types::StorageFact::Unknown
         && value.storage != expected.storage
     {
-        Some("storage")
+        return Err(error(format!(
+            "distributed runtime value disagrees with its compiler-owned storage contract (expected {:?}, actual {:?})",
+            expected.storage, value.storage
+        )));
     } else if expected.layout != runmat_types::LayoutFact::Unknown
         && value.layout != expected.layout
     {
