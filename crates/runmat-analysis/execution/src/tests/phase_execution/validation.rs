@@ -16,7 +16,8 @@ fn cold_phase_preserves_known_retry_and_observed_interval_independently_of_lease
         &response,
         Some(true),
         29,
-    );
+    )
+    .unwrap();
     original
         .validate_for(&task.host, &task.resource_plan, &response)
         .unwrap();
@@ -72,10 +73,10 @@ fn unknown_retry_blocks_completion_and_cold_decode_rejects_missing_or_zero_inter
         Some(false),
         29,
     );
-    assert!(unknown
-        .validate_for(&task.host, &task.resource_plan, &response)
-        .is_err());
-    assert!(unknown.resource_graph(&task.resource_plan).is_err());
+    assert!(
+        unknown.is_err(),
+        "an indeterminate attempt cannot become completed phase evidence"
+    );
     let valid = phase_execution(
         &task.host,
         &task.program,

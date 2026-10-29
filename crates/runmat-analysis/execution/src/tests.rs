@@ -217,9 +217,10 @@ fn portable_static_preparation_admits_connector_target_observation() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .expect("connector-target observation must be admitted in the portable resource plan");
     let demand = prepared.resource_plan.input.structural_operator().unwrap();
@@ -1608,7 +1609,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     }
     let assignment = solve.model.material_assignments.first().unwrap();
     let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
-        assignment.selected_region_id().expect("fixture uses selected material region"),
+        assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region"),
     )
     .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();
@@ -1629,9 +1632,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     assert_eq!(prepared.inputs.len(), 4);
@@ -1880,15 +1884,17 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         0,
     )
     .unwrap();
-    let overrun_usage = prepare_structural_resource_usage(
-        &prepared,
-        &imported_completion,
-        &overrun_success,
-        4096,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    assert!(!overrun_usage.evidence.overruns.is_empty());
+    assert!(
+        prepare_structural_resource_usage(
+            &prepared,
+            &imported_completion,
+            &overrun_success,
+            4096,
+            ObjectInventoryLimits::default(),
+        )
+        .is_err(),
+        "publication accounting must reject consumption beyond the original grant"
+    );
     let decoded = import_structural_linear_result(
         &store,
         response.clone(),
@@ -2745,16 +2751,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .unwrap();
 
-    assert!(prepare_result_publication(ResultPublicationPreparation {
-        accuracy_host: accuracy_prepared.host.clone(),
-        source_accuracy: accuracy_completed.outputs[0].clone(),
-        source_resource_usage: overrun_usage.objects,
-        source_observations: Some(publication_catalog.clone()),
-        program_revision: revision(),
-        chunk_bytes: 4096,
-        inventory_limits: ObjectInventoryLimits::default(),
-    })
-    .is_err());
     let mut publication_prepared = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),
@@ -2956,9 +2952,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     assert_eq!(branch.inputs.len(), 5);
@@ -3010,9 +3007,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             required_capabilities: BTreeSet::new(),
             accelerator_requests: Vec::new(),
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-            solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-                machine_memory_bytes: None,
-            },
+            solve_selection:
+                runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                    machine_memory_bytes: None,
+                },
         })
         .is_err()
     );
@@ -3052,9 +3050,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     assert_eq!(prepared.host.workload, access_variant.host.workload);
@@ -3089,9 +3088,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .unwrap();
     assert_eq!(
@@ -3164,9 +3164,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             required_features: BTreeSet::new(),
         }],
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        solve_selection: runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
-            machine_memory_bytes: None,
-        },
+        solve_selection:
+            runmat_analysis_fea::planning::resource::StaticSolveSelection::WithinCeiling {
+                machine_memory_bytes: None,
+            },
     })
     .err()
     .expect("unsupported GPU static work must be rejected before scheduler preparation");
@@ -3308,7 +3309,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
     }
     let assignment = workload.model.material_assignments.first().unwrap();
     let region = runmat_meshing_core::fixtures::fixture_entity_for_selection(
-        assignment.selected_region_id().expect("fixture uses selected material region"),
+        assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region"),
     )
     .expect("fixture material target is a fixture selector");
     mesh.topology.volume_elements[0].region_id = region.clone();

@@ -70,15 +70,20 @@ fn changed_frozen_admission_source_limits_and_foreign_resolved_expectations_reje
     let expected = frozen();
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let resolved = expected.resolve(&mesh).unwrap();
-    let original = serde_json::to_value(&expected).unwrap();
-    let mut changed = original.clone();
-    changed["admitted"]["sample_points"] = serde_json::json!([0.0, 2.0]);
-    let changed: FrozenDeferredSignal = serde_json::from_value(changed).unwrap();
+    let mut changed = expected.clone();
+    let descriptor = changed.admitted.sample_points.descriptor();
+    changed
+        .admitted
+        .sample_points
+        .try_replace(
+            1,
+            runmat_types::physical::Quantity::try_from_descriptor(descriptor, 2.0).unwrap(),
+        )
+        .unwrap();
     assert!(changed.validate().is_err());
     for bound in [0, 4096, usize::MAX] {
-        let mut changed = original.clone();
-        changed["maximum_inline_result_bytes"] = serde_json::json!(bound);
-        let changed: FrozenDeferredSignal = serde_json::from_value(changed).unwrap();
+        let mut changed = expected.clone();
+        changed.maximum_inline_result_bytes = bound;
         assert!(changed.validate().is_err());
     }
     let mut changed = expected.clone();
@@ -95,7 +100,18 @@ fn changed_frozen_admission_source_limits_and_foreign_resolved_expectations_reje
         .validate_resolved_expectation(&expectation, &foreign)
         .is_err());
     let mut substituted = expectation.clone();
-    substituted.admitted.sample_points.try_replace(1, runmat_types::physical::Quantity::try_from_descriptor(substituted.admitted.sample_points.descriptor(), 0.125).unwrap()).unwrap();
+    substituted
+        .admitted
+        .sample_points
+        .try_replace(
+            1,
+            runmat_types::physical::Quantity::try_from_descriptor(
+                substituted.admitted.sample_points.descriptor(),
+                0.125,
+            )
+            .unwrap(),
+        )
+        .unwrap();
     assert!(expected
         .validate_resolved_expectation(&substituted, &mesh)
         .is_err());

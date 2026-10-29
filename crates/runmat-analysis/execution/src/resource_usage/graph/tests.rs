@@ -128,7 +128,23 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
                 AttemptResourceAccounting::for_attempt(&request, 2, 17, 19, 23).unwrap(),
             ));
         }
-        request = launch(driver.handle(DriverCommand::BackendReport(report)).unwrap());
+        let actions = driver.handle(DriverCommand::BackendReport(report)).unwrap();
+        if matches!(first, FirstAttempt::UnknownLoss) {
+            assert!(!actions
+                .iter()
+                .any(|action| matches!(action, DriverAction::Launch(_))));
+            let evidence = driver
+                .snapshot()
+                .task_execution_evidence(request.task_id)
+                .unwrap();
+            assert_eq!(
+                evidence.task.state,
+                runmat_execution::state::TaskState::Indeterminate
+            );
+            assert!(evidence.task.committed.is_none());
+            return evidence;
+        }
+        request = launch(actions);
     }
     driver
         .handle(DriverCommand::Tick { now_millis: 1 })
@@ -166,7 +182,7 @@ fn complete_original_usage_rejects_unknown_retry_and_plan_substitution() {
             .unwrap()
     );
     let lost = original(plan, FirstAttempt::UnknownLoss);
-    assert_eq!(lost.attempts.len(), 2);
+    assert_eq!(lost.attempts.len(), 1);
     assert!(PlannedResourceUsageGraph::from_execution(plan, &lost, 1).is_err());
     let mut foreign = success;
     foreign.task.submission.request.resources.memory_bytes += 1;

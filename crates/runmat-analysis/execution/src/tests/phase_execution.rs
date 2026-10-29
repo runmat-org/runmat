@@ -25,7 +25,7 @@ pub(crate) fn phase_execution(
     allocation: &ResourceRequest,
     response: &ProgramExecutionResponse,
 ) -> AnalysisPhaseExecutionEvidence {
-    phase_execution_with_retry(host, program, allocation, response, None, 1)
+    phase_execution_with_retry(host, program, allocation, response, None, 1).unwrap()
 }
 
 /// Some(true) reports a failed attempt's known usage; Some(false) reports unknown loss.
@@ -36,7 +36,7 @@ fn phase_execution_with_retry(
     response: &ProgramExecutionResponse,
     first: Option<bool>,
     graph_wall_millis: u64,
-) -> AnalysisPhaseExecutionEvidence {
+) -> crate::AnalysisBridgeResult<AnalysisPhaseExecutionEvidence> {
     static GENERATION: AtomicU64 = AtomicU64::new(1);
     let fence = GENERATION.fetch_add(1, Ordering::Relaxed);
     let scope = ExecutionScopeId::derive(&[b"phase-fixture", &fence.to_be_bytes()]);
@@ -149,9 +149,23 @@ fn phase_execution_with_retry(
                 .unwrap(),
             ));
         }
-        request = driver
-            .handle(DriverCommand::BackendReport(report))
-            .unwrap()
+        let actions = driver.handle(DriverCommand::BackendReport(report)).unwrap();
+        if !known {
+            assert!(!actions
+                .iter()
+                .any(|action| matches!(action, DriverAction::Launch(_))));
+            let evidence = driver
+                .snapshot()
+                .task_execution_evidence(request.task_id)
+                .unwrap();
+            assert_eq!(
+                evidence.task.state,
+                runmat_execution::state::TaskState::Indeterminate
+            );
+            assert!(evidence.task.committed.is_none());
+            return AnalysisPhaseExecutionEvidence::new(evidence, graph_wall_millis);
+        }
+        request = actions
             .into_iter()
             .find_map(|action| match action {
                 DriverAction::Launch(request) => Some(request),
@@ -181,7 +195,6 @@ fn phase_execution_with_retry(
             .unwrap(),
         graph_wall_millis,
     )
-    .unwrap()
 }
 
 mod validation;
