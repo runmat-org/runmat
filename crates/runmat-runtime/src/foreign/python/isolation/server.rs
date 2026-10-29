@@ -328,7 +328,7 @@ impl RuntimeCallService for HostCallbackRouter {
 
     fn invoke(
         &self,
-        _runtime: RuntimeContext,
+        runtime: RuntimeContext,
         request: RuntimeCallRequest,
     ) -> Pin<
         Box<
@@ -337,7 +337,7 @@ impl RuntimeCallService for HostCallbackRouter {
         >,
     > {
         let result = self
-            .invoke_now(request)
+            .invoke_now(&runtime, request)
             .map_err(super::client::runtime_error);
         Box::pin(async move { result })
     }
@@ -346,6 +346,7 @@ impl RuntimeCallService for HostCallbackRouter {
 impl HostCallbackRouter {
     fn invoke_now(
         &self,
+        runtime: &RuntimeContext,
         request: RuntimeCallRequest,
     ) -> Result<crate::execution::RootedValueSequence, PythonWireError> {
         let descriptor = request.descriptor();
@@ -448,10 +449,12 @@ impl HostCallbackRouter {
                     PythonDriverMessage::Invoke(nested) => {
                         let nested_id = nested.request_id;
                         let adapter = current_python_adapter()?;
-                        let context = current_python_context()?;
                         let outcome = invoke_nested_request(
                             &adapter,
-                            &context,
+                            // This callback generation owns the interpreter's
+                            // reentry mailbox. The bootstrap context cannot
+                            // dispatch onto a lane waiting for this callback.
+                            runtime,
                             nested,
                             &self.snapshots,
                             &self.resources,
@@ -531,17 +534,6 @@ fn current_python_adapter() -> Result<Rc<PythonAdapter>, PythonWireError> {
             wire_error(
                 "RunMat:Python:HostProtocol",
                 "Python host adapter is unavailable",
-            )
-        })
-}
-
-fn current_python_context() -> Result<RuntimeContext, PythonWireError> {
-    ACTIVE_HOST
-        .with(|host| host.borrow().as_ref().map(|value| value.1.clone()))
-        .ok_or_else(|| {
-            wire_error(
-                "RunMat:Python:HostProtocol",
-                "Python host context is unavailable",
             )
         })
 }

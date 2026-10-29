@@ -182,10 +182,14 @@ fn restore_field(
     object: &mut serde_json::Map<String, Value>,
 ) -> Result<(), String> {
     if matches!(shape, Shape::Null) {
-        if object.contains_key(key) {
-            return Err("typed object projection collides with an existing property".into());
+        if let Some(presentation) = object.get_mut(key) {
+            // An explicitly exposed absent choice uses the same canonical
+            // empty presentation as an array null. Provenance still permits
+            // only null/[], never overwriting a nonempty public property.
+            restore(shape, presentation)?;
+        } else {
+            object.insert(key.to_owned(), Value::Null);
         }
-        object.insert(key.to_owned(), Value::Null);
     } else {
         restore(
             shape,

@@ -101,7 +101,17 @@ fn select_bound(
         .ok_or_else(|| mex("UnavailableBoundFunction", "selected bound body is absent"))?;
     let (runtime, selected_method) = registry.prepare_selected_receiver_method(runtime, binding)?;
     let (runtime, super_body) = consume_super_body(runtime, binding, body)?;
-    let runtime = if selected_method || super_body {
+    // A selected graph constructor already carries unit-qualified method
+    // bindings. Preserve only facts for this exact constructor; the product's
+    // existing definition/seal checks still authenticate them before allocation.
+    let selected_constructor = body.class_method_owner.as_ref().is_some_and(|owner| {
+        owner.role == runmat_types::ClassMethodRole::Constructor
+            && !owner.is_static
+            && runtime.selected_object_class().is_some_and(|facts| {
+                facts.constructor() == binding && facts.class() == &owner.declaring_class
+            })
+    });
+    let runtime = if selected_method || super_body || selected_constructor {
         runtime
     } else {
         runtime.without_selected_object_class()

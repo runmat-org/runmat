@@ -119,10 +119,7 @@ fn context(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_service_ports(RuntimeServicePorts::default().with_placement(selection.clone()));
-    (
-        runmat_accelerate::native_auto::install_preparation_service(context),
-        selection,
-    )
+    (context, selection)
 }
 
 fn execute(

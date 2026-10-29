@@ -29,6 +29,9 @@ use crate::presentation;
 use crate::telemetry::{capture_provider_snapshot, TelemetryRunKind};
 use crate::AlreadyReportedCliError;
 
+#[path = "script/lifecycle.rs"]
+mod lifecycle;
+
 pub async fn execute_script(
     script: PathBuf,
     emit_bytecode_path: Option<PathBuf>,
@@ -323,7 +326,15 @@ async fn execute_script_request(
         .context("failed to flush native graphics")?;
     let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
     engine.shutdown_local_tasks();
-    foreign_lifecycle.context("failed to finish foreign runtime lifecycle")?;
+    let lifecycle_failure = match lifecycle::complete(&outcome, foreign_lifecycle) {
+        Ok(()) => None,
+        Err(error) if outcome.has_errors() => Some(error),
+        Err(error) => {
+            return Err(
+                anyhow::Error::new(error).context("failed to finish foreign runtime lifecycle")
+            )
+        }
+    };
 
     let execution_time = start_time.elapsed();
     emit_execution_streams(&outcome.streams);
@@ -370,6 +381,13 @@ async fn execute_script_request(
             "{}",
             format_script_runtime_diagnostic(diagnostic, &source_context)
         );
+        if let Some(failure) = lifecycle_failure {
+            if let Some(cleanup) = failure.source {
+                // Original structured diagnostic is rendered above, unchanged.
+                // The canonical composition retains the cleanup as secondary.
+                eprintln!("{cleanup}");
+            }
+        }
         return Err(AlreadyReportedCliError.into());
     } else {
         if outcome.used_jit {

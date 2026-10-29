@@ -161,9 +161,10 @@ fn prepare_selected_bound(
 > {
     let (caller_runtime, selected_method) =
         caller_runtime.take_selected_method_body_for(binding)?;
+    let retained_super_body = caller_runtime.has_retained_super_body_for(binding);
     let caller_runtime = if selected_method.is_some()
         || caller_runtime.has_admitted_selected_method_frame_for(binding)
-        || caller_runtime.has_retained_super_body_for(binding)
+        || retained_super_body
     {
         caller_runtime
     } else {
@@ -185,7 +186,28 @@ fn prepare_selected_bound(
             Rc::clone(product),
         )
         .map_err(graph_error)?;
-        runtime = product.invocation_runtime(runtime)?;
+        runtime = if retained_super_body {
+            // A parent body operates on the existing Derived receiver. It is
+            // not a fresh Base construction and must not replace those facts.
+            product.invocation_runtime(runtime)?
+        } else {
+            let facts = selected
+                .object_classes
+                .get(&owner)
+                .ok_or_else(|| graph_error("selected constructor receiver facts are absent"))?;
+            if facts.constructor() != binding || facts.class() != product.class() {
+                return Err(graph_error(
+                    "selected constructor receiver facts differ from its exact graph binding",
+                ));
+            }
+            // Cross-unit ordinary methods have independently admitted bindings.
+            // Carry that sealed owner rather than rebuilding from this unit's view.
+            product.invocation_runtime_with_binding(
+                runtime.with_selected_object_class(Rc::clone(facts)),
+                &view,
+                binding,
+            )?
+        };
     }
     if let Some((facts, method_owner, dispatch)) = selected_method {
         let constructor = selected

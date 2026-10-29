@@ -25,11 +25,14 @@ fn main() {
             .expect("stdio execution worker");
         return;
     }
+    let class_worker_only = std::env::args_os()
+        .skip(1)
+        .any(|argument| argument == OsStr::new("--class-worker-only"));
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime")
-        .block_on(roundtrip());
+        .block_on(roundtrip(class_worker_only));
 }
 
 async fn execute(session: &mut RunMatSession, name: &str, source: &str) {
@@ -60,7 +63,7 @@ async fn execute(session: &mut RunMatSession, name: &str, source: &str) {
     );
 }
 
-async fn roundtrip() {
+async fn roundtrip(class_worker_only: bool) {
     let temporary = tempfile::tempdir().expect("isolated worker state");
     let mut config = NativeExecutionConfig::for_current_executable().expect("host inventory");
     config.executable = std::env::current_exe().expect("test executable");
@@ -72,6 +75,15 @@ async fn roundtrip() {
     let service = Rc::new(NativeExecutionService::new(config).expect("native worker service"));
     let mut session = RunMatSession::with_options(false, false).expect("session");
     session.install_execution_services(service.clone());
+    if class_worker_only {
+        execute(&mut session, "class_worker_pool.m", "pool = parpool(1);").await;
+        retained_constructorless_class_uses_selected_worker_products(
+            &mut session,
+            temporary.path(),
+        )
+        .await;
+        return;
+    }
 
     execute(
         &mut session,

@@ -36,6 +36,10 @@ use crate::{build_runtime_error, RuntimeError};
 
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[path = "client/invocation_read.rs"]
+mod invocation_read;
+use invocation_read::{read_invocation_message, InvocationRead};
+
 pub struct NestedPythonCall {
     pub call: ForeignCall,
     pub reply: oneshot::Sender<Result<RootedValues, RuntimeError>>,
@@ -102,9 +106,15 @@ pub enum PythonClientRetirement {
 impl IsolatedPythonClient {
     #[cfg(all(test, unix))]
     pub(crate) async fn pending_test_client() -> Self {
+        Self::pending_test_client_with_evidence(ProcessSpawnEvidence::default()).await
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) async fn pending_test_client_with_evidence(
+        unverified: ProcessSpawnEvidence,
+    ) -> Self {
         let mut command = HostCommand::new("/bin/sh");
         command.arguments = vec!["-c".into(), "exec /bin/sleep 30".into()];
-        let unverified = ProcessSpawnEvidence::default();
         let child = command
             .spawn_observed(&unverified)
             .await
@@ -322,18 +332,21 @@ impl IsolatedPythonClient {
         nested: &NestedPythonQueue,
     ) -> Result<RootedValues, RuntimeError> {
         loop {
-            if runtime.is_cancelled() {
-                let _ = self.child.terminate_contained_child().await;
-                return Err(runtime_error(wire_error(
-                    "RunMat:Python:Cancelled",
-                    "isolated Python invocation was cancelled",
-                )));
-            }
-            let message = tokio::select! {
-                message = read_message(&mut self.reader, self.limits) => message,
-                _ = tokio::time::sleep(Duration::from_millis(10)) => continue,
-            }
-            .map_err(runtime_error)?;
+            let message = match read_invocation_message(&mut self.reader, self.limits, &runtime)
+                .await
+                .map_err(runtime_error)?
+            {
+                InvocationRead::Message(message) => message,
+                InvocationRead::Cancelled => {
+                    // The unfinished read is gone before child retirement.
+                    // This transport is never reused after cancellation.
+                    let _ = self.child.terminate_contained_child().await;
+                    return Err(runtime_error(wire_error(
+                        "RunMat:Python:Cancelled",
+                        "isolated Python invocation was cancelled",
+                    )));
+                }
+            };
             match message {
                 PythonHostMessage::Invocation(result) if result.request_id == request_id => {
                     let values = result.outcome.map_err(runtime_error)?;

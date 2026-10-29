@@ -56,11 +56,10 @@ impl PythonAdapter {
             }
         }
 
-        if self.spawn_unverified.is_unverified() && self.isolated_client.borrow().is_none() {
-            return Err(invalid_call(
-                "Python child spawn or containment remains unverified",
-            ));
-        }
+        super::isolated::admit_missing_client(
+            &self.spawn_unverified,
+            self.isolated_client.borrow().is_some(),
+        )?;
         if self.isolated_client.borrow().is_none() {
             return Ok(VerifiedPythonProjectRetirement {
                 owner: self,

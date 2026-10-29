@@ -9,6 +9,11 @@ fn sparse_null_provenance_restores_nested_enum_maps_and_array_slots() {
     }}],"numeric":[1,2,3]});
     let mut projected = original.clone();
     let shape = Projection::capture(&mut projected).unwrap();
+    // Public nullable properties can expose the canonical empty Value rather
+    // than remain omitted. Both nested fields must restore by their original
+    // null provenance; the independently authored [] slot remains an array.
+    projected["steps"][0]["Completed"]["maximum_resident_bytes"] = json!([]);
+    projected["steps"][0]["Completed"]["slots"][2]["x"] = json!([]);
     let metadata = shape.to_json().unwrap();
     assert!(!metadata.to_string().contains("numeric"));
     let cold = Projection::from_json(metadata).unwrap();
@@ -31,8 +36,24 @@ fn malformed_unknown_and_conflicting_provenance_is_rejected() {
     ] {
         assert!(Projection::from_json(metadata).is_err());
     }
-    let mut json = json!({"x":null});
-    let shape = Projection::capture(&mut json).unwrap();
-    json["x"] = json!(7);
-    assert!(shape.restore(&mut json).is_err());
+    for conflict in [
+        json!(7),
+        json!(false),
+        json!(""),
+        json!({}),
+        json!([null]),
+        json!([[]]),
+    ] {
+        let mut json = json!({"x":null});
+        let shape = Projection::capture(&mut json).unwrap();
+        json["x"] = conflict;
+        assert!(shape.restore(&mut json).is_err());
+    }
+    for presentation in [json!(null), json!([])] {
+        let mut json = json!({"x":null, "authored_empty":[]});
+        let shape = Projection::capture(&mut json).unwrap();
+        json["x"] = presentation;
+        shape.restore(&mut json).unwrap();
+        assert_eq!(json, json!({"x":null, "authored_empty":[]}));
+    }
 }

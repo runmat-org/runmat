@@ -19,8 +19,8 @@ use runmat_types::{
 use runmat_value::{ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
 
 mod callback_admission;
-mod in_process;
 mod environment;
+mod in_process;
 mod isolated;
 mod prepared;
 mod project_replacement;
@@ -396,10 +396,11 @@ impl PythonAdapter {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         }
-        if self.spawn_unverified.is_unverified() && self.isolated_client.borrow().is_none() {
-            return PythonAdapterRetirement::Retained(invalid_call(
-                "Python child spawn or containment remains unverified",
-            ));
+        if let Err(error) = isolated::admit_missing_client(
+            &self.spawn_unverified,
+            self.isolated_client.borrow().is_some(),
+        ) {
+            return PythonAdapterRetirement::Retained(error);
         }
         if self.isolated_client.borrow().is_none() {
             self.selected_byte_lease.borrow_mut().take();
@@ -442,11 +443,7 @@ impl PythonAdapter {
             }
             PythonClientRetirement::Retired { scope, result } => {
                 let result = result.map_err(super::isolation::runtime_error);
-                let result = crate::runtime_error::complete_with_cleanup(
-                    result,
-                    state.handles.restart_host(&state.host_identity).map(|_| ()),
-                );
-                guard.finish_terminated();
+                let result = guard.finish_terminal(result);
                 self.selected_byte_lease.borrow_mut().take();
                 PythonAdapterRetirement::Retired {
                     scope: Some(scope),
@@ -1010,6 +1007,7 @@ async fn invoke_isolated(
         return isolated_outputs(outputs, requested_outputs);
     }
     let mut guard = IsolatedCallGuard::begin(state.clone());
+    guard.admit_replacement_spawn()?;
     if guard.client().is_none() {
         let configuration = state.configuration.borrow().clone();
         *guard.client() = Some(
@@ -1053,12 +1051,11 @@ async fn invoke_isolated(
         )
     });
     if terminal {
-        state.handles.restart_host(&state.host_identity)?;
-        guard.finish_terminated();
+        guard.finish_terminal(outcome)
     } else {
         guard.finish_running();
+        outcome
     }
-    outcome
 }
 
 fn isolated_outputs(
@@ -1139,9 +1136,7 @@ async fn terminate_isolated(
         }
         None => Ok(()),
     };
-    let restart = state.handles.restart_host(&state.host_identity).map(|_| ());
-    guard.finish_terminated();
-    crate::runtime_error::complete_with_cleanup(shutdown, restart)?;
+    guard.finish_terminal(shutdown)?;
     let configuration = state.configuration.borrow().clone();
     issued_python_status_value(
         context.as_ref(),

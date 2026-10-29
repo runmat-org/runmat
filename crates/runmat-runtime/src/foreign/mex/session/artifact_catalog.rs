@@ -10,10 +10,10 @@ use std::path::Path;
 // The same single-object and manifest byte ceilings used for immutable
 // executable archive capture. MEX bytes are retained twice while a private
 // copy is verified, so admission must happen before allocating either Vec.
-const MAX_MEX_MODULE_BYTES: u64 = 512 * 1024 * 1024;
+pub(super) const MAX_MEX_MODULE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MEX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 
-fn read_bounded(path: &Path, limit: u64, label: &str) -> Result<Vec<u8>, RuntimeError> {
+pub(super) fn read_bounded(path: &Path, limit: u64, label: &str) -> Result<Vec<u8>, RuntimeError> {
     let file = std::fs::File::open(path).map_err(|error| {
         runtime_error(
             "MEX:Artifact",

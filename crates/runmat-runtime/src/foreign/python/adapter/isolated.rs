@@ -4,6 +4,24 @@ use std::rc::Rc;
 
 use super::{IsolatedPythonClient, IsolatedPythonState, NestedPythonQueue};
 
+/// A missing client is reusable only after the process owner proved retirement.
+/// Retained private bytes and unverified evidence must not be overwritten by
+/// spawning a replacement which could later clear the same evidence flag.
+pub(super) fn admit_missing_client(
+    evidence: &runmat_process_host::ProcessSpawnEvidence,
+    has_client: bool,
+) -> Result<(), crate::RuntimeError> {
+    if evidence.is_unverified() && !has_client {
+        return Err(super::super::isolation::runtime_error(
+            super::super::isolation::wire_error(
+                "RunMat:Python:RetirementUnverified",
+                "Python child spawn or containment remains unverified",
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Removes a not-yet-dispatched callback reentrant call when its waiter dies.
 /// Once dispatched, dropping the oneshot receiver wakes the client-side
 /// terminal branch instead.
@@ -48,6 +66,12 @@ impl IsolatedCallGuard {
         &mut self.client
     }
 
+    pub(super) fn admit_replacement_spawn(&self) -> Result<(), crate::RuntimeError> {
+        // Inspect this actual guard's owned client, not the shared slot which
+        // is empty while a callback's parent invocation owns that same client.
+        admit_missing_client(&self.state.spawn_unverified, self.client.is_some())
+    }
+
     pub(super) fn finish_running(mut self) {
         *self.state.client.borrow_mut() = self.client.take();
         self.state.call_active.set(false);
@@ -63,6 +87,26 @@ impl IsolatedCallGuard {
         self.state.terminated.set(true);
         self.state.call_active.set(false);
         self.finished = true;
+    }
+
+    /// Preserve the invocation's primary failure while retaining registry
+    /// restart failure as cleanup evidence. On restart failure the existing
+    /// Drop path still revokes old handles through abandon_host_sync.
+    pub(super) fn finish_terminal<T>(
+        self,
+        outcome: Result<T, crate::RuntimeError>,
+    ) -> Result<T, crate::RuntimeError> {
+        let restart = self
+            .state
+            .handles
+            .restart_host(&self.state.host_identity)
+            .map(|_| ());
+        if restart.is_ok() {
+            self.finish_terminated();
+        } else {
+            drop(self);
+        }
+        crate::runtime_error::complete_with_cleanup(outcome, restart)
     }
 }
 
@@ -132,6 +176,10 @@ impl ProjectRetirementGuard {
         self.state.call_active.set(false);
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "isolated/tests.rs"]
+mod tests;
 
 impl Drop for ProjectRetirementGuard {
     fn drop(&mut self) {

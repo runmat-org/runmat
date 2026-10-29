@@ -19,12 +19,16 @@ use crate::source_context::SelectedProgramSourceOwner;
 use crate::user_functions::{DynamicFunctionClearRequest, NativeNameFact, NativeNameObserver};
 use crate::RuntimeError;
 
+#[path = "ordinary_admission/captured.rs"]
+mod captured;
+use captured::{CapturedOrdinaryMex, OrdinaryMexEvidence};
+
 pub(super) struct AdmittedOrdinaryMexArtifact {
     source: PathBuf,
     declared_name: String,
     callable_names: BTreeSet<String>,
     module_digest: Digest,
-    manifest_digest: Digest,
+    evidence: OrdinaryMexEvidence,
     identity: runmat_types::ForeignArtifactIdentity,
     private_module: PathBuf,
     lease: PrivateByteLease,
@@ -39,7 +43,7 @@ struct OrdinaryMexInvocationReceipt {
     origin: FileCandidateOrigin,
     path_revision: Option<u64>,
     module_digest: Digest,
-    manifest_digest: Digest,
+    evidence: OrdinaryMexEvidence,
     identity: runmat_types::ForeignArtifactIdentity,
 }
 
@@ -72,7 +76,7 @@ impl OrdinaryMexInvocationReceipt {
     fn matches_artifact(&self, artifact: &AdmittedOrdinaryMexArtifact) -> bool {
         self.source == artifact.source
             && self.module_digest == artifact.module_digest
-            && self.manifest_digest == artifact.manifest_digest
+            && self.evidence == artifact.evidence
             && self.identity == artifact.identity
     }
 }
@@ -288,22 +292,25 @@ impl MexRuntimeSession {
                         artifact.private_module.clone(),
                         artifact.declared_name.clone(),
                         artifact.module_digest,
-                        artifact.manifest_digest,
+                        artifact.evidence.clone(),
                         artifact.identity.clone(),
                     )
                 })
         };
-        let (private_module, declared_name, module_digest, manifest_digest, identity, pending) =
+        let (private_module, declared_name, module_digest, evidence, identity, pending) =
             match cached {
-                Some((path, declared_name, module, manifest, identity)) => {
-                    (path, declared_name, module, manifest, identity, None)
+                Some((path, declared_name, module, evidence, identity)) => {
+                    (path, declared_name, module, evidence, identity, None)
                 }
                 None => {
-                    let captured = match artifact_catalog::capture_artifact(&source, None) {
+                    let captured = match CapturedOrdinaryMex::capture(
+                        &source,
+                        self.isolation_policy.borrow().unmanifested,
+                    ) {
                         Ok(captured) => captured,
                         Err(error) => return Some(Err(error)),
                     };
-                    if captured.name != base_name {
+                    if captured.name() != base_name {
                         return Some(Err(runtime_error(
                             "MEX:Artifact",
                             "selected MEX module name differs from the invoked callable",
@@ -312,32 +319,22 @@ impl MexRuntimeSession {
                     let mut descriptor = self.descriptor();
                     descriptor
                         .artifact_identities
-                        .insert(captured.installed.identity.clone());
+                        .insert(captured.identity().clone());
                     if let Err(error) = admit_interop_manifest(
-                        &captured.manifest.interop_manifest(),
+                        &captured.interop_manifest(),
                         &BTreeMap::from([(descriptor.adapter.clone(), descriptor)]),
                         ForeignPlatform::Native,
                     ) {
                         return Some(Err(error));
                     }
-                    // A path cannot provide the declared-project CUDA lease.
-                    match captured.manifest.accelerator_requirements() {
-                        Ok(requirements) if !requirements.is_empty() => {
-                            return Some(Err(runtime_error(
-                                "MEX:Capability",
-                                "ordinary CUDA MEX requires an admitted accelerator resource lease",
-                            )));
-                        }
-                        Err(error) => {
-                            return Some(Err(runtime_error("MEX:Capability", error.to_string())))
-                        }
-                        Ok(_) => {}
+                    if let Err(error) = captured.require_ordinary_resources() {
+                        return Some(Err(error));
                     }
                     let lease = match PrivateByteLease::new_private("runmat-ordinary-mex-") {
                         Ok(lease) => lease,
                         Err(error) => return Some(Err(runtime_error("MEX:Artifact", error))),
                     };
-                    let Some(file_name) = captured.installed.path.file_name() else {
+                    let Some(file_name) = source.file_name() else {
                         return Some(Err(runtime_error(
                             "MEX:Artifact",
                             "MEX module has no filename",
@@ -346,47 +343,57 @@ impl MexRuntimeSession {
                     let private_module = lease.path().join(file_name);
                     let private_manifest =
                         runmat_mex::MexArtifactManifest::path_for_module(&private_module);
-                    if let Err(error) = write_private(&private_module, &captured.module_bytes)
-                        .and_then(|()| write_private(&private_manifest, &captured.manifest_bytes))
-                    {
+                    let materialized = (|| {
+                        write_private(&private_module, captured.bytes())?;
+                        if let Some(bytes) = captured.manifest_bytes() {
+                            write_private(&private_manifest, bytes)?;
+                        }
+                        Ok::<(), String>(())
+                    })();
+                    if let Err(error) = materialized {
                         return Some(Err(runtime_error("MEX:Artifact", error)));
                     }
                     // Compare the materialized copy in fixed-size chunks. A
                     // second capture would retain another full module Vec while
                     // the original admission buffers are still live.
-                    if verify_private(&private_module, &captured.module_bytes).is_err()
-                        || verify_private(&private_manifest, &captured.manifest_bytes).is_err()
+                    if verify_private(&private_module, captured.bytes()).is_err()
+                        || captured
+                            .manifest_bytes()
+                            .is_some_and(|bytes| verify_private(&private_manifest, bytes).is_err())
                     {
                         return Some(Err(runtime_error(
                             "MEX:Artifact",
                             "private MEX bytes differ from the admitted source artifact",
                         )));
                     }
-                    let module_digest = Digest::sha256(&captured.module_bytes);
-                    let manifest_digest = Digest::sha256(&captured.manifest_bytes);
-                    let identity = captured.installed.identity.clone();
+                    let module_digest = Digest::sha256(captured.bytes());
+                    let evidence = captured.evidence();
+                    let identity = captured.identity().clone();
                     let pending = AdmittedOrdinaryMexArtifact {
                         source: source.clone(),
-                        declared_name: captured.name.clone(),
+                        declared_name: captured.name().to_owned(),
                         callable_names: BTreeSet::from([name.to_owned()]),
                         module_digest,
-                        manifest_digest,
+                        evidence: evidence.clone(),
                         identity: identity.clone(),
                         private_module: private_module.clone(),
                         lease,
                     };
                     (
                         private_module,
-                        captured.name,
+                        captured.name().to_owned(),
                         module_digest,
-                        manifest_digest,
+                        evidence,
                         identity,
                         Some(pending),
                     )
                 }
             };
+        if let Err(error) = evidence.admit_policy(self.isolation_policy.borrow().unmanifested) {
+            return Some(Err(error));
+        }
         // A canonical path can be reached through another selected alias or
-        // symlink. The pinned manifest's callable name, not the selected path
+        // symlink. The pinned module's callable name, not the selected path
         // alone, remains the admission authority on every cache hit.
         if declared_name != base_name {
             return Some(Err(runtime_error(
@@ -427,7 +434,7 @@ impl MexRuntimeSession {
             origin,
             path_revision,
             module_digest,
-            manifest_digest,
+            evidence,
             identity,
         };
         if !receipt.source_owner.is_bound_in(&runtime)
