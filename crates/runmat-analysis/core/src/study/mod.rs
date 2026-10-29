@@ -30,7 +30,11 @@ pub use authoring::{
     AuthoredGeometryInstance, AuthoredMeshRef, AuthoredModelArgument, AuthoredModelArgumentValue,
     AuthoredModelInstance, AuthoredStudy, AuthoredStudyError, AuthoredStudyInputRef,
 };
-pub use compatibility::is_exposed_analysis_identity;
+pub use compatibility::{
+    analysis_identity_status, family_label, is_exposed_analysis_identity, procedure_label,
+    render_analysis_identity_matrix, AnalysisIdentity, AnalysisIdentityStatus,
+    ANALYSIS_IDENTITIES,
+};
 pub use formulation::{
     BoundaryTransferImplementation, ConstitutiveImplementation, CouplingImplementation,
     ExactFormulationComponent, ExactFormulationRealization, FormulationAdmissionRejectionReason,

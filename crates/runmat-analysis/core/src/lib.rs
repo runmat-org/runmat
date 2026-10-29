@@ -230,7 +230,11 @@ pub use study::accuracy::{
     AccuracyTarget, AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy,
     RequiredAccuracyEvidence, UnavailableEvidencePolicy,
 };
-pub use study::is_exposed_analysis_identity;
+pub use study::{
+    analysis_identity_status, family_label, is_exposed_analysis_identity, procedure_label,
+    render_analysis_identity_matrix, AnalysisIdentity, AnalysisIdentityStatus,
+    ANALYSIS_IDENTITIES,
+};
 pub use study::output::{
     AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy, DiagnosticKind,
     DiagnosticObservation, ExtremaTiePolicy, FieldLocation, MonitorCadence, MonitorObservation,
