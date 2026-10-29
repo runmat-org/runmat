@@ -3,6 +3,12 @@
 //! The installed parallel service remains the only finite-capacity authority.
 //! This module supplies checked workload bounds and an allocation receipt; it
 //! neither estimates process RSS nor certifies host I/O effects or placement.
+//!
+//! The receipt covers explicitly admitted RunMat-owned blocks, not allocations
+//! internal to Naga, WGPU or external driver/browser compilers. Their memory is
+//! outside this byte limit; it must not be assigned a fabricated finite quote.
+//! RunMat-owned preparation/retirement/cache backing must retain its own claim.
+//! See docs/gpu/wgpu.md, "Memory budget boundary".
 
 mod aligned;
 mod checkpoint;

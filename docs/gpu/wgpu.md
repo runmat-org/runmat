@@ -102,6 +102,28 @@ Both calls are observational. Providers must not allocate buffers, compile pipel
 
 `placement_resources()` is the corresponding side-effect-free admission snapshot. It reports live allocations, pooled allocations that may be reclaimed, scratch and queue availability when known, loss state, and a resource epoch without allocating or polling by execution. WebGPU does not expose a trustworthy total device-memory budget or queue backlog, so the WGPU provider leaves total capacity, scratch availability, and queue occupancy explicitly unknown while still reporting observed allocation pressure; placement never substitutes the maximum single-buffer size as total VRAM or fabricates queue telemetry.
 
+## Memory budget boundary
+
+RunMat's managed memory budget covers allocations admitted through its own
+allocation owners. It is not a limit on total process memory. Device-buffer
+accounting and host-memory accounting are separate; a maximum buffer size does
+not establish either total device capacity or a host-memory allowance.
+
+Memory allocated internally by Naga, WGPU, graphics drivers and browser shader
+compilers is outside the enforced RunMat-managed host-byte budget. Shader
+compilation can therefore consume additional memory even when the managed
+allocations fit. Source-size limits, cache hits and measured compiler peaks do
+not establish a hard bound on that additional memory. GPU execution remains
+available under this boundary; successful admission is not a guarantee that
+the complete process cannot run out of memory.
+
+Errors returned by fallible shader preparation and resource admission retain
+their causes through the operation's error path. This does not promise recovery
+from backend panics, a host allocator abort or an operating-system process
+termination. Applications requiring a hard limit on
+the entire process need an independently enforced isolation mechanism; a
+RunMat-managed budget alone does not supply that guarantee.
+
 ## Operation Categories
 
 | Category | Examples |
