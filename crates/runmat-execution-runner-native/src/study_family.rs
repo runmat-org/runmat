@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_analysis_core::{AnalysisModel, AuthoredMaterialRef, MaterialModel, RealizedStudy};
 use runmat_analysis_execution::{
     AcousticResponseStudyPreparation, AcousticStudyPreparation, AnalysisCapabilityRequirement, AnalysisOutputPolicy,
-    CompletedAcousticResponseStudy, CompletedAcousticStudy, CompletedElectricalStudy, CompletedFluidStudy, CompletedMagneticStudy,
+    CompletedAcousticResponseStudy, CompletedAcousticStudy, CompletedElectricalStudy, CompletedMagneticStudy,
     CompletedMaxwellStudy, CompletedNonlinearSolidStudy, CompletedThermalStudy,
     ElectricalStudyPreparation, FluidStudyPreparation, MagneticStudyPreparation,
     MaxwellStudyPreparation, NonlinearSolidStudyPreparation, ThermalStudyPreparation,
@@ -478,7 +478,7 @@ pub enum CompletedFamilyStudy {
     Maxwell(Box<CompletedMaxwellStudy>),
     Acoustic(Box<CompletedAcousticStudy>),
     AcousticResponse(Box<CompletedAcousticResponseStudy>),
-    Fluid(Box<CompletedFluidStudy>),
+    Fluid(Box<runmat_analysis_execution::VerifiedFluidStudy>),
     NonlinearSolid(Box<CompletedNonlinearSolidStudy>),
 }
 
@@ -681,7 +681,10 @@ impl CompletedFamilyStudy {
                 runmat_analysis_execution::prepare_acoustic_response_study_root(completed)
             ),
             Self::Fluid(completed) => {
-                root!(runmat_analysis_execution::prepare_fluid_study_root(completed))
+                root!(runmat_analysis_execution::prepare_fluid_study_root_for(
+                    completed,
+                    completed.preparation()
+                ))
             }
             Self::NonlinearSolid(completed) => root!(
                 runmat_analysis_execution::prepare_nonlinear_solid_study_root(completed)

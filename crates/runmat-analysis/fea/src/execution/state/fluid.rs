@@ -128,19 +128,22 @@ fn requests_on(
         .collect()
 }
 
+/// Validate `request` against `result` and return the result's native field topology.
 pub(super) fn validate_request(
     request: &SemanticStatePublicationRequest,
     workload: &FluidSteadyWorkload,
     mesh: &SolverMeshArtifact,
     result: &FluidSteadySolverResult,
-) -> AnalysisExecutionResult<()> {
+) -> AnalysisExecutionResult<FiniteVolumeFieldTopology> {
     request.validate()?;
-    if !fluid_state_publication_requests(workload, mesh, result)?.contains(request) {
+    result.validate_for(workload, mesh)?;
+    let topology = result.native_field_topology(workload, mesh)?;
+    if !requests_on(workload, result, &topology)?.contains(request) {
         return Err(invalid(
             "fluid publication differs from original complete authored declaration",
         ));
     }
-    Ok(())
+    Ok(topology)
 }
 
 /// The size certificate of exactly one declared fluid state publication, bound to the exact
@@ -158,20 +161,10 @@ pub fn fluid_state_publication_profile(
             "fluid state profile source payload differs from original immutable result",
         ));
     }
-    request.validate()?;
-    result.validate_for(workload, mesh)?;
-    let topology = result.native_field_topology(workload, mesh)?;
-    if !requests_on(workload, result, &topology)?.contains(request) {
-        return Err(invalid(
-            "fluid publication differs from original complete authored declaration",
-        ));
-    }
-    let profile = request.encoding_profile(
-        SemanticStatePublicationProfileSource::FluidPrimaryFields {
-            workload,
-            mesh,
-            result,
-        },
+    let topology = validate_request(request, workload, mesh, result)?;
+    // The request, result and topology were validated just above: profile from them.
+    let profile = super::resource_profile::fluid::profile_validated(
+        request, workload, mesh, &bytes, &topology,
     )?;
     StatePublicationProfiles::new(
         result.producer_identity(),
@@ -189,9 +182,8 @@ impl CanonicalSemanticState {
         mesh: &SolverMeshArtifact,
         result: &FluidSteadySolverResult,
     ) -> AnalysisExecutionResult<Self> {
-        validate_request(request, workload, mesh, result)?;
+        let topology = validate_request(request, workload, mesh, result)?;
         let result_bytes = result.canonical_bytes()?;
-        let topology = result.native_field_topology(workload, mesh)?;
         fluid_state_publication_workspace_bytes(workload, mesh, &result_bytes)?;
         Self::new(CanonicalSemanticStateInput {
             producer: request.producer,

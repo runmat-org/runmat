@@ -8,10 +8,21 @@ pub(super) fn profile(
     mesh: &SolverMeshArtifact,
     result: &FluidSteadySolverResult,
 ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
-    super::super::fluid::validate_request(request, workload, mesh, result)?;
+    let topology = super::super::fluid::validate_request(request, workload, mesh, result)?;
     let result_bytes = result.canonical_bytes()?;
-    let topology = result.native_field_topology(workload, mesh)?;
-    super::super::fluid::fluid_state_publication_workspace_bytes(workload, mesh, &result_bytes)?;
+    profile_validated(request, workload, mesh, &result_bytes, &topology)
+}
+
+/// The profile of a request already validated against `result`, from that result's canonical
+/// bytes and native field topology as the caller derived them.
+pub(in crate::execution::state) fn profile_validated(
+    request: &SemanticStatePublicationRequest,
+    workload: &FluidSteadyWorkload,
+    mesh: &SolverMeshArtifact,
+    result_bytes: &[u8],
+    topology: &crate::results::field::FiniteVolumeFieldTopology,
+) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
+    super::super::fluid::fluid_state_publication_workspace_bytes(workload, mesh, result_bytes)?;
     // The state is owned typed storage built and encoded by the direct codec (no value tree):
     // charge its direct materialization, so the embedded result bytes cost their typed decode
     // rather than value-tree nodes.
@@ -23,8 +34,8 @@ pub(super) fn profile(
             value: &FluidStatePayloadProjection {
                 workload,
                 mesh,
-                result_bytes: &result_bytes,
-                topology: &topology,
+                result_bytes,
+                topology,
             },
         },
     )

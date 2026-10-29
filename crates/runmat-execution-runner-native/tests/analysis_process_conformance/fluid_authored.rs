@@ -410,7 +410,7 @@ pub(super) async fn run() {
         .unwrap();
         // Exact retained codec regression: the transport builder excludes the
         // separately reserved canonical partition/materialization workspace.
-        let recovery_plan = reopened.field_recovery_resource_plan(&cold).unwrap();
+        let recovery_plan = reopened.field_recovery_resource_plan();
         let runmat_analysis_fea::planning::resource::FeaResourceDemand::FluidFieldRecovery(
             recovery_demand,
         ) = &recovery_plan.input.demand
