@@ -31,10 +31,14 @@ impl RemoteFrameRoute for BrokenRoute {
 
 #[tokio::test]
 async fn original_receive_and_decode_failures_reach_waiters_and_reject_later_requests() {
-    for malformed in [false, true] {
+    for rejected_payload in [
+        None,
+        Some(b"not a JSON reply".as_slice()),
+        Some(br#"{"schemaVersion":5}"#.as_slice()),
+    ] {
         let run_key = RunKeyMaterial::from_entropy([13; 32]).unwrap();
         let limits = FrameLimits::default();
-        let malformed_reply = if malformed {
+        let malformed_reply = if let Some(payload) = rejected_payload {
             let mut sender = EncryptedFrameSession::new(
                 "reply-failure",
                 [17; 16],
@@ -43,11 +47,7 @@ async fn original_receive_and_decode_failures_reach_waiters_and_reject_later_req
                 run_key.clone(),
             )
             .unwrap();
-            Some(
-                sender
-                    .seal(FrameKind::Control, b"not a JSON reply", limits)
-                    .unwrap(),
-            )
+            Some(sender.seal(FrameKind::Control, payload, limits).unwrap())
         } else {
             None
         };
@@ -82,10 +82,15 @@ async fn original_receive_and_decode_failures_reach_waiters_and_reject_later_req
         let NativeExecutionError::RemoteChannel { source: original } = first else {
             panic!("channel must carry the original typed failure");
         };
-        if malformed {
+        if let Some(payload) = rejected_payload {
+            let diagnostic = if payload.starts_with(b"not") {
+                "invalid remote worker envelope: expected ident"
+            } else {
+                "unsupported remote worker protocol 5; expected 7"
+            };
             assert!(
                 matches!(original.as_ref(), NativeExecutionError::Protocol(message)
-                if message.contains("expected ident"))
+                if message.contains(diagnostic))
             );
         } else {
             assert!(
@@ -191,7 +196,7 @@ async fn foreign_or_late_progress_cannot_allocate_history_or_refresh_a_live_requ
             outcome: RemoteWorkerOutcome::Progress {
                 attempt_id: runmat_execution::identity::AttemptId::derive(&[b"foreign-attempt"]),
                 progress: crate::ProgramProgress {
-                    schema_version: 1,
+                    schema_version: crate::protocol::NATIVE_WORKER_MESSAGE_SCHEMA_V2,
                     sequence: 1,
                     media_type: "application/json".into(),
                     value_schema: "fixture.progress.v1".into(),

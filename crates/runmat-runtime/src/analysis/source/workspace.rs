@@ -372,11 +372,15 @@ mod tests {
             FeaWorkspaceCandidate::new(
                 capture(),
                 vec![FeaWorkspaceEdit::Write {
-                    path: path("packages/other/source.m"),
+                    // Logical paths are now host-root-relative, not a reserved
+                    // `project/` versus `packages/` namespace. The root itself
+                    // is never a writable file in the captured workspace.
+                    path: LogicalSourcePath::root(),
                     bytes: vec![]
                 }]
             ),
             Err(FeaWorkspaceError::OutOfScope(_))
         ));
+        assert!(LogicalSourcePath::new("../outside/source.m").is_err());
     }
 }

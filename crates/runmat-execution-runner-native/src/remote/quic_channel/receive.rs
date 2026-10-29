@@ -37,9 +37,9 @@ pub(super) async fn run(
     loop {
         let frame = route.receive().await?;
         let plaintext = receiver.open(&frame, limits).map_err(protocol)?;
-        if super::super::protocol_schema::admit_remote_worker_bytes(&plaintext).is_err() {
-            continue;
-        }
+        // AEAD has authenticated this peer/frame. A malformed or unsupported envelope is
+        // the original channel failure, not ignorable traffic that may strand all waiters.
+        super::super::protocol_schema::admit_remote_worker_bytes(&plaintext).map_err(protocol)?;
         let reply: RemoteWorkerReply = serde_json::from_slice(&plaintext).map_err(protocol)?;
         if reply.schema_version != REMOTE_WORKER_PROTOCOL_VERSION {
             return Err(protocol("remote worker reply has an unsupported schema"));

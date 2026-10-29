@@ -31,17 +31,16 @@ pub(super) fn assemble_explicit_structural_system(
     let canonical_node_indices = (0..node_count).collect::<Vec<_>>();
     validate_explicit_topology(structural, &canonical_node_indices)?;
     let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_explicit(structural)
-        .map_err(|error| StructuralAssemblyError::ExplicitTopologyIdentity(error.to_string()))?;
+        .map_err(StructuralAssemblyError::from)?;
     let compiled_constraint_plan;
     let constraint_plan = if let Some(plan) = supplied_constraint_plan {
         plan.validate_against_explicit(model)
-            .map_err(|error| StructuralAssemblyError::InvalidConstraintPlan(error.to_string()))?;
+            .map_err(StructuralAssemblyError::from)?;
         plan
     } else {
         compiled_constraint_plan =
-            CanonicalStructuralConstraintPlan::compile_for_model(model, None).map_err(|error| {
-                StructuralAssemblyError::InvalidConstraintPlan(error.to_string())
-            })?;
+            CanonicalStructuralConstraintPlan::compile_for_model(model, None)
+                .map_err(StructuralAssemblyError::from)?;
         &compiled_constraint_plan
     };
     let structural_dof_layout = StructuralDofLayout::from_node_sets(vec![

@@ -70,6 +70,7 @@ use runmat_meshing_core::{
 use super::*;
 
 mod admission_roots;
+mod admission_validation;
 mod nonlinear_physical;
 mod persisted_record_shape;
 mod static_admission;
@@ -251,11 +252,11 @@ fn sample_cfd_constraints(
 pub(super) struct AnalysisTestHost {
     // Restore admission before releasing the shared host-state lock (field drop order).
     _admission: fea_run_admission::FeaRunAdmissionGuard,
-    _storage: std::sync::MutexGuard<'static, ()>,
+    _storage: storage::test_support::IsolatedArtifactStore,
 }
 
 pub(super) fn analysis_test_guard() -> AnalysisTestHost {
-    let storage = storage::artifact_store_test_guard();
+    let storage = storage::test_support::isolated_artifact_store();
     let admission = fea_run_admission::replace_fea_run_admission(Some(
         fea_run_admission::entrypoints::test_admission(),
     ))
@@ -2614,11 +2615,11 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
     assert_eq!(
         envelope.data.provenance.solver_method,
-        SolverMethod::MatrixFreePcg
+        SolverMethod::SparseDirectCholesky
     );
     assert_eq!(
         envelope.data.provenance.preconditioner,
-        SolverPreconditioner::Jacobi
+        SolverPreconditioner::None
     );
     assert!(envelope.data.provenance.fallback_events.is_empty());
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
@@ -3018,7 +3019,7 @@ fn native_sparse_fea_cancellation_is_terminal_and_releases_resources() {
 }
 
 #[test]
-fn native_sparse_provider_serves_modal_and_transient_routes() {
+fn native_sparse_provider_preserves_modal_fallback_and_transient_device_evidence() {
     let _guard = analysis_test_guard();
     let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
         Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
@@ -3036,15 +3037,20 @@ fn native_sparse_provider_serves_modal_and_transient_routes() {
     .expect("native sparse modal solve");
     assert_eq!(
         modal.data.run.solver_backend,
-        LinearAlgebraBackendKind::Accelerator
+        LinearAlgebraBackendKind::CpuReference
     );
-    assert!(!modal.data.run.accelerator_evidence.is_empty());
-    assert!(modal
-        .data
-        .run
-        .accelerator_evidence
-        .iter()
-        .all(|evidence| evidence.validate().is_ok() && evidence.satisfies_tolerance()));
+    assert!(modal.data.run.accelerator_evidence.is_empty());
+    assert_eq!(
+        modal
+            .data
+            .run
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code
+                == runmat_analysis_fea::accelerator_admission::ACCELERATOR_ADMISSION_FALLBACK_CODE)
+            .count(),
+        1
+    );
     assert_eq!(provider.placement_resources().live_bytes, 0);
 
     let mut transient_model = sample_model();
@@ -3992,6 +3998,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics_rejects_unsupporte
 #[test]
 fn analysis_run_nonlinear_rejects_explicit_connectivity_that_drops_thermo_coupling() {
     let _guard = analysis_test_guard();
+    let published = storage::list_run_metadata().unwrap().len();
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::coupled(
         "nonlinear_explicit_thermo_mechanical",
@@ -4018,10 +4025,12 @@ fn analysis_run_nonlinear_rejects_explicit_connectivity_that_drops_thermo_coupli
 
     assert_eq!(
         error.error_code,
-        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+        "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED"
     );
-    assert!(error.message.contains("requests Coupled(Thermomechanical)"));
-    assert!(error.message.contains("realizes Structural"));
+    // This authored nonlinear coupled family has no available formulation.
+    // It must fail before attempting to substitute the structural realization.
+    assert!(!error.retryable);
+    assert_eq!(storage::list_run_metadata().unwrap().len(), published);
 }
 
 #[test]
@@ -4035,14 +4044,11 @@ fn analysis_trends_ignore_noncanonical_artifacts() {
     })
     .expect("configure filesystem artifact store");
 
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        Default::default(),
+        options,
         OperationContext::new(None, None),
     )
     .expect("seed nonlinear run should succeed");
@@ -4410,14 +4416,11 @@ fn analysis_results_by_run_id_rejects_unwrapped_artifacts() {
     })
     .expect("configure filesystem artifact store");
 
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        Default::default(),
+        options,
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
@@ -4467,14 +4470,11 @@ fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
     })
     .expect("configure filesystem artifact store");
 
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        Default::default(),
+        options,
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
@@ -4654,16 +4654,13 @@ fn analysis_artifact_retention_prunes_old_runs_per_kind() {
     std::env::set_var("RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND", "2");
     std::env::remove_var("RUNMAT_FEA_ARTIFACT_MAX_RUNS");
 
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
     let mut run_ids = Vec::new();
     for _ in 0..5 {
         let run = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            Default::default(),
+            options.clone(),
             OperationContext::new(None, None),
         )
         .expect("nonlinear run should succeed");
@@ -4702,14 +4699,11 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
     })
     .expect("configure filesystem artifact store");
 
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        Default::default(),
+        options,
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
@@ -4740,7 +4734,7 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
 }
 
 #[test]
-fn requested_preconditioner_fallback_is_recorded() {
+fn requested_amg_preconditioner_records_execution_without_a_false_fallback() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("preconditioner-fallback");
@@ -4761,9 +4755,9 @@ fn requested_preconditioner_fallback_is_recorded() {
 
     assert_eq!(
         envelope.data.provenance.preconditioner,
-        SolverPreconditioner::Jacobi
+        SolverPreconditioner::Amg
     );
-    assert!(envelope
+    assert!(!envelope
         .data
         .provenance
         .fallback_events
@@ -4844,7 +4838,7 @@ fn ilu_preconditioner_provenance_reports_the_executed_ilu_solver() {
     );
     assert_eq!(
         envelope.data.provenance.solver_method,
-        SolverMethod::MatrixFreePcg
+        SolverMethod::AssembledPcg
     );
     assert!(envelope.data.provenance.fallback_events.is_empty());
     assert!(envelope.data.run.diagnostics.iter().any(|diagnostic| {
@@ -5189,7 +5183,8 @@ fn analysis_run_thermal_rejects_invalid_heat_source_values() {
     )
     .expect_err("thermal run should reject non-finite heat source values");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.SOLVER_MODEL_INVALID");
+    assert!(err.message.contains("signal"));
 }
 
 #[test]
@@ -5463,7 +5458,9 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     ]
     .into_iter()
     .map(|(region, material)| MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::solid(region),
+        target: runmat_analysis_core::PropertyRegionTarget::solid(
+            runmat_meshing_core::fixtures::fixture_region(region),
+        ),
         expected_material_id: material.into(),
         assigned_material_id: material.into(),
         confidence: EvidenceConfidence::Verified,
@@ -5971,7 +5968,7 @@ fn analysis_run_cfd_rejects_vector_boundaries_without_fabricated_payload() {
 }
 
 #[test]
-fn canonical_cfd_wire_options_reject_channel_controls_and_transient_dispatch() {
+fn canonical_cfd_wire_options_reject_channel_controls_and_nonfluid_procedures() {
     let options = AnalysisCfdRunOptions::default();
     let encoded = serde_json::to_value(&options).unwrap();
     assert_eq!(
@@ -5992,8 +5989,10 @@ fn canonical_cfd_wire_options_reject_channel_controls_and_transient_dispatch() {
     let mut step = ProcedureStep::fluid_static("flow");
     assert!(AnalysisSolverOptions::defaults_for(&step).is_ok());
     step.procedure = AnalysisProcedure::TransientResponse;
-    assert!(AnalysisSolverOptions::defaults_for(&step).is_err());
-    assert!(!AnalysisSolverOptions::IncompressibleFlow(options).supports(&step));
+    assert!(AnalysisSolverOptions::defaults_for(&step).is_ok());
+    assert!(AnalysisSolverOptions::IncompressibleFlow(options.clone()).supports(&step));
+    let structural = ProcedureStep::structural_modal("not-fluid");
+    assert!(!AnalysisSolverOptions::IncompressibleFlow(options).supports(&structural));
 }
 
 #[test]
@@ -6111,7 +6110,9 @@ fn analysis_run_transient_with_options_controls_timeline() {
 #[test]
 fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("nonlinear-temperature-target");
+    let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
         "nonlinear_1".to_string(),
     )];
@@ -6131,7 +6132,10 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::solid_recommended(),
+        AnalysisNonlinearRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisNonlinearRunOptions::solid_recommended()
+        },
         OperationContext::new(None, None),
     )
     .expect_err("unknown thermo expected region should be rejected");
@@ -6141,6 +6145,7 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     assert!(err
         .message
         .contains("temperature field targets unknown model region missing_region"));
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]

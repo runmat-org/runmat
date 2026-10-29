@@ -93,8 +93,12 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
         self.inner.drain_progress(attempt_id)
     }
 
-    async fn cancel(&self, request: &AttemptRequest) -> NativeExecutionResult<()> {
-        self.inner.cancel(request).await
+    async fn cancel(
+        &self,
+        request: &AttemptRequest,
+        reason: runmat_execution::CancellationReason,
+    ) -> NativeExecutionResult<()> {
+        self.inner.cancel(request, reason).await
     }
 
     async fn drain(&self) -> NativeExecutionResult<()> {

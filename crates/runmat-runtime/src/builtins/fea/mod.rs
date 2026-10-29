@@ -3814,7 +3814,7 @@ mod tests {
 
     #[test]
     fn material_and_plan_objects_match_their_portable_schemas() {
-        let _guard = crate::analysis::storage::artifact_store_test_guard();
+        let _guard = crate::analysis::storage::test_support::isolated_artifact_store();
         ensure_value_classes_registered();
         let material = block_on(fea_material_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![
@@ -4378,7 +4378,7 @@ mod tests {
 
     #[test]
     fn fea_results_field_exposes_values_metadata_and_plot_context() {
-        let _guard = crate::analysis::storage::artifact_store_test_guard();
+        let _guard = crate::analysis::storage::test_support::isolated_artifact_store();
         let (run_value, _study, run_id) = synthetic_plot_run_value();
 
         let results = block_on(fea_results_builtin(
@@ -4517,7 +4517,7 @@ mod tests {
     #[cfg(feature = "plot-core")]
     #[test]
     fn plot_and_mesh_overloads_return_figure_handles_for_fea_objects() {
-        let _guard = crate::analysis::storage::artifact_store_test_guard();
+        let _guard = crate::analysis::storage::test_support::isolated_artifact_store();
         let (run_value, _study, _run_id) = synthetic_plot_run_value();
 
         let mesh_handle = block_on(crate::call_builtin_async(
@@ -4552,7 +4552,7 @@ mod tests {
     #[cfg(feature = "plot-core")]
     #[test]
     fn mesh_request_defaults_to_solver_edges_and_accepts_cad_reference() {
-        let _guard = crate::analysis::storage::artifact_store_test_guard();
+        let _guard = crate::analysis::storage::test_support::isolated_artifact_store();
         let (run_value, _study, _run_id) = synthetic_plot_run_value();
         let default = mesh_request_from_args(std::slice::from_ref(&run_value))
             .expect("default mesh request should parse");
@@ -4580,7 +4580,7 @@ mod tests {
     #[cfg(feature = "plot-core")]
     #[test]
     fn fea_plot_request_accepts_solver_mesh_edge_option() {
-        let _guard = crate::analysis::storage::artifact_store_test_guard();
+        let _guard = crate::analysis::storage::test_support::isolated_artifact_store();
         let (run_value, _study, _run_id) = synthetic_plot_run_value();
         let results = block_on(fea_results_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![run_value]),
@@ -4932,7 +4932,7 @@ mod tests {
 
     #[test]
     fn fea_results_translates_successful_snapshot_selectors_once() {
-        let _guard = crate::analysis::storage::artifact_store_test_guard();
+        let _guard = crate::analysis::storage::test_support::isolated_artifact_store();
         let run_id = persist_synthetic_indexed_results();
         let selected = block_on(fea_results_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![

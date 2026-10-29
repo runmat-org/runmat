@@ -171,36 +171,43 @@ fn run_linear_static_with_constraint_plan(
     );
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.assembly");
+    check_cancelled("fea.run_linear_static")?;
     let elastic_path = preassembly.solve_path
         == Some(crate::planning::resource::StaticSolvePath::ElasticRigidityMultigrid);
     // The elastic rigidity path checks every element block as it is assembled; no global
     // factor is ever formed.
     let mut elastic_capture =
         elastic_path.then(crate::assembly::solver_solid::SolidEnergyPreparation::elastic);
-    let summary = assemble_structural_system_with_execution(
-        model,
-        &excitations,
-        options.solver_mesh.clone(),
-        if options.solver_mesh.is_some() || preflight::model_has_explicit_structural_elements(model)
-        {
-            StructuralFormulationRequirement::PhysicalDiscretization
-        } else {
-            StructuralFormulationRequirement::SyntheticOperator
-        },
-        assembly_constraint_plan,
-        options.local_execution,
-        thermal_transfer
-            .as_ref()
-            .map(|transfer| &transfer.temperature),
-        elastic_capture.as_mut(),
-    )
-    .map_err(|err| match err {
-        LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
-        | LinearAssemblyError::Structural(crate::assembly::StructuralAssemblyError::Cancelled) => {
-            FeaRunError::Cancelled
-        }
-        other => FeaRunError::Assembly(other.to_string()),
-    })?;
+    let summary =
+        assemble_structural_system_with_execution(
+            model,
+            &excitations,
+            options.solver_mesh.clone(),
+            if options.solver_mesh.is_some()
+                || preflight::model_has_explicit_structural_elements(model)
+            {
+                StructuralFormulationRequirement::PhysicalDiscretization
+            } else {
+                StructuralFormulationRequirement::SyntheticOperator
+            },
+            assembly_constraint_plan,
+            options.local_execution,
+            thermal_transfer
+                .as_ref()
+                .map(|transfer| &transfer.temperature),
+            elastic_capture.as_mut(),
+        )
+        .map_err(|err| match err {
+            LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
+            | LinearAssemblyError::Structural(
+                crate::assembly::StructuralAssemblyError::Cancelled,
+            )
+            | LinearAssemblyError::ConstraintPlan(
+                crate::constraints::ConstraintPlanError::Cancelled,
+            ) => FeaRunError::Cancelled,
+            LinearAssemblyError::CouplingRealization(message) => FeaRunError::InvalidModel(message),
+            other => FeaRunError::Assembly(other.to_string()),
+        })?;
     // Element recovery now owns the temperatures it needs. Release the aligned global
     // field before solving; only the canonical transition must survive into the result.
     let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
@@ -229,7 +236,10 @@ fn run_linear_static_with_constraint_plan(
                 model,
                 options.solver_mesh.as_ref(),
             )
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            .map_err(|error| match error {
+                crate::constraints::ConstraintPlanError::Cancelled => FeaRunError::Cancelled,
+                other => FeaRunError::Assembly(other.to_string()),
+            })?;
             &compiled_constraint_plan
         }
     };

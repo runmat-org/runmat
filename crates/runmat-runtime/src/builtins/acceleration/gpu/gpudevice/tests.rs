@@ -325,6 +325,10 @@ mod native {
     fn gpu_device_public_member_getters_preserve_issued_handle_identity() {
         fixture(|runtime, supervisor, host| {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let (selected, index) = current_device(&runtime).unwrap();
+            assert!(runmat_accelerate_api::same_provider_instance(
+                selected, &DEVICE
+            ));
             let value = call(&runtime, &supervisor, &host, vec![]).unwrap();
             let read = |context: &RuntimeContext, receiver: Value, name: &str| {
                 host.block_on(supervisor.drive_until(context.scope(
@@ -343,7 +347,7 @@ mod native {
                     "Name",
                     Value::CharArray(runmat_value::CharArray::new_row("typed fixture")),
                 ),
-                ("Index", Value::Num(1.0)),
+                ("Index", Value::Num(f64::from(index))),
                 ("TotalMemory", Value::Num(1024.0)),
                 ("SupportsDouble", Value::Bool(true)),
                 ("DeviceAvailable", Value::Bool(true)),

@@ -91,6 +91,7 @@ pub enum RemoteWorkerCommand {
     },
     Cancel {
         attempt_id: AttemptId,
+        reason: runmat_execution::CancellationReason,
     },
     Drain,
 }

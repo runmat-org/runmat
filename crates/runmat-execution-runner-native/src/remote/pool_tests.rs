@@ -198,6 +198,7 @@ impl RemoteWorkerChannel for ExecutingWorker {
     async fn cancel(
         &self,
         _request: &runmat_execution_runner::AttemptRequest,
+        _reason: runmat_execution::CancellationReason,
     ) -> NativeExecutionResult<()> {
         Ok(())
     }
@@ -272,6 +273,7 @@ impl RemoteWorkerChannel for FailingRouteWorker {
     async fn cancel(
         &self,
         _request: &runmat_execution_runner::AttemptRequest,
+        _reason: runmat_execution::CancellationReason,
     ) -> NativeExecutionResult<()> {
         Ok(())
     }
@@ -360,6 +362,7 @@ impl RemoteWorkerChannel for ResultObjectWorker {
     async fn cancel(
         &self,
         _request: &runmat_execution_runner::AttemptRequest,
+        _reason: runmat_execution::CancellationReason,
     ) -> NativeExecutionResult<()> {
         Ok(())
     }
@@ -438,6 +441,7 @@ impl RemoteWorkerChannel for FakeWorker {
     async fn cancel(
         &self,
         _request: &runmat_execution_runner::AttemptRequest,
+        _reason: runmat_execution::CancellationReason,
     ) -> NativeExecutionResult<()> {
         self.cancellations.fetch_add(1, Ordering::SeqCst);
         if let Some(gate) = &self.cancel_ack_gate {
@@ -1311,18 +1315,27 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     ));
     assert_eq!(
         pool.snapshot().tasks.get(&task_id).unwrap().state,
-        runmat_execution::state::TaskState::Cancelled
+        runmat_execution::state::TaskState::Indeterminate
     );
     assert_eq!(cancellations.load(Ordering::SeqCst), 1);
     let snapshot = pool.snapshot();
-    assert!(snapshot.pools[&pool_id]
+    assert!(!snapshot.pools[&pool_id]
         .allocated
         .leased_accelerator_domains
         .is_empty());
     assert!(snapshot.pools[&pool_id]
         .workers
         .values()
-        .all(|worker| worker.allocated.leased_accelerator_domains.is_empty()));
+        .any(|worker| !worker.allocated.leased_accelerator_domains.is_empty()));
+    let evidence = pool.task_execution_evidence(task_id).unwrap();
+    assert!(evidence.attempts[0].terminal.is_none());
+    assert!(evidence.attempts[0]
+        .unverified_retirement
+        .as_ref()
+        .unwrap()
+        .retired_at_driver_millis
+        .is_none());
+    assert!(evidence.resource_aggregate(1).is_err());
 
     let scope_id = ExecutionScopeId::derive(&[b"remote-loss-scope"]);
     let pool_id = PoolId::derive(&[b"remote-loss-pool"]);
@@ -1839,7 +1852,7 @@ async fn remote_pool_tick_enforces_task_deadlines() {
     assert_eq!(cancellations.load(Ordering::SeqCst), 1);
     assert_eq!(
         pool.snapshot().tasks[&task_id].state,
-        runmat_execution::state::TaskState::Cancelled
+        runmat_execution::state::TaskState::Indeterminate
     );
 }
 
@@ -2302,7 +2315,11 @@ async fn execute_encrypted_spmd_program(
             .unwrap();
         let result = completion.wait().await;
         for worker in workers {
-            pool.remove_worker(worker.id, false).await.unwrap();
+            // A rank fault may already fence its route. Cleanup must not
+            // turn Lost back into Draining or release unresolved capacity.
+            let lost = pool.snapshot().pools[&pool_id].workers[&worker.id].lifecycle
+                == runmat_execution_runner::pool::WorkerLifecycle::Lost;
+            pool.remove_worker(worker.id, lost).await.unwrap();
         }
         result
     };

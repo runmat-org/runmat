@@ -246,6 +246,15 @@ mod tests {
         include_bytes!("../../runmat-geometry/io/tests/fixtures/independent_contact.step");
 
     #[cfg(feature = "occt-native")]
+    fn authored_meter_options() -> ExactCadImportOptions {
+        ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            source_units_authority: runmat_geometry_io::SourceUnitsAuthority::Authored,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(feature = "occt-native")]
     fn session() -> (tempfile::TempDir, NativeProgramSession) {
         let directory = tempfile::tempdir().unwrap();
         let session = NativeProgramSession::new(NativeExecutionConfig {
@@ -299,7 +308,7 @@ mod tests {
         let prepared = prepare_exact_geometry_admission(
             "box.brep",
             BOX,
-            &ExactCadImportOptions::default(),
+            &authored_meter_options(),
             &[],
             &GeometryImportContext::new(),
             limits,
@@ -362,7 +371,7 @@ mod tests {
         let prepared = prepare_exact_geometry_admission(
             "disconnected_solids.brep",
             DISCONNECTED_SOLIDS,
-            &ExactCadImportOptions::default(),
+            &authored_meter_options(),
             &[],
             &GeometryImportContext::new(),
             ObjectInventoryLimits::default(),

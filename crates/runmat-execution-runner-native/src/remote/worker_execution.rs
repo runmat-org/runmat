@@ -19,10 +19,9 @@ pub(super) struct AttemptCancellation {
 }
 
 impl AttemptCancellation {
-    pub(super) fn cancel(&self) {
+    pub(super) fn cancel(&self, reason: runmat_execution::CancellationReason) {
         self.flag.store(true, Ordering::Release);
-        self.source
-            .cancel(runmat_execution::CancellationReason::User);
+        self.source.cancel(reason);
     }
 
     pub(super) fn token(&self) -> runmat_execution::cancellation::CancellationToken {
@@ -449,8 +448,43 @@ mod tests {
         let attempt_id = AttemptId::derive(&[b"analysis-cancellation-test"]);
         let _guard = install_analysis_cancellation(attempt_id, &cancellation);
         assert!(!runmat_analysis_fea::is_fea_cancelled());
-        cancellation.cancel();
+        cancellation.cancel(runmat_execution::CancellationReason::User);
         assert!(runmat_analysis_fea::is_fea_cancelled());
+    }
+
+    #[test]
+    fn remote_original_stop_reason_reaches_worker_token_and_first_cause_wins() {
+        use runmat_execution::CancellationReason;
+        for reason in [CancellationReason::Deadline, CancellationReason::User] {
+            let command = super::super::protocol::RemoteWorkerCommand::Cancel {
+                attempt_id: AttemptId::derive(&[b"original-stop-reason"]),
+                reason,
+            };
+            let encoded = serde_json::to_vec(&command).unwrap();
+            let mut missing_reason = serde_json::to_value(&command).unwrap();
+            missing_reason.as_object_mut().unwrap().remove("reason");
+            assert!(
+                serde_json::from_value::<super::super::protocol::RemoteWorkerCommand>(
+                    missing_reason
+                )
+                .is_err()
+            );
+            let super::super::protocol::RemoteWorkerCommand::Cancel {
+                reason: decoded, ..
+            } = serde_json::from_slice(&encoded).unwrap()
+            else {
+                panic!("cancel command")
+            };
+            let cancellation = AttemptCancellation::default();
+            cancellation.cancel(decoded);
+            cancellation.cancel(CancellationReason::Shutdown);
+            assert_eq!(cancellation.token().stop_reason(), Some(reason));
+            assert!(cancellation.was_cancelled());
+            let staged = runmat_execution::cancellation::CancellationSource::new();
+            staged.cancel(decoded);
+            staged.cancel(CancellationReason::Shutdown);
+            assert_eq!(staged.token().stop_reason(), Some(reason));
+        }
     }
 
     #[test]

@@ -830,6 +830,11 @@ mod tests {
         use runmat_meshing_execution::import_exact_geometry_input;
 
         const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
+        let import_options = ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            source_units_authority: runmat_geometry_io::SourceUnitsAuthority::Authored,
+            ..Default::default()
+        };
 
         let directory = tempfile::tempdir().unwrap();
         let mut store =
@@ -839,7 +844,7 @@ mod tests {
             artifact_access: access(),
             source_name: "box.brep",
             source_bytes: BOX,
-            import_options: ExactCadImportOptions::default(),
+            import_options,
             contact_definitions: Vec::new(),
             meshing_request: meshing_request(),
             preferred_edges_per_partition: 8,
@@ -870,7 +875,7 @@ mod tests {
             result_objects,
         } = response
         else {
-            panic!("raw CAD admission did not externalize exact geometry")
+            panic!("raw CAD admission did not externalize exact geometry: {response:?}")
         };
         let [ValuePayload::Object(admission_root)] = outputs.as_slice() else {
             panic!("raw CAD admission returned an invalid root")
@@ -931,6 +936,11 @@ mod tests {
         };
 
         const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
+        let import_options = ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            source_units_authority: runmat_geometry_io::SourceUnitsAuthority::Authored,
+            ..Default::default()
+        };
         let project_root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project_root.path().join("src")).unwrap();
         std::fs::write(
@@ -977,7 +987,7 @@ mod tests {
             artifact_access: access.clone(),
             source_name: "box.brep",
             source_bytes: BOX,
-            import_options: ExactCadImportOptions::default(),
+            import_options: import_options.clone(),
             contact_definitions: Vec::new(),
             meshing_request: request.clone(),
             preferred_edges_per_partition: 3,
@@ -1007,7 +1017,7 @@ mod tests {
             "box.brep",
             BOX,
             GeometryFormat::Brep,
-            &ExactCadImportOptions::default(),
+            &import_options,
             &GeometryImportContext::new(),
         )
         .unwrap();

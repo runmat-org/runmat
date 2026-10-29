@@ -1050,7 +1050,9 @@ fn structural_study_intent_continuation_rejects_semantic_tampering() {
     assert!(PreparedStructuralStudyIntent::from_continuation_bytes(&[]).is_err());
 
     let mut wrong_schema: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    wrong_schema["schema_version"] = serde_json::Value::from(2);
+    let supported_schema = wrong_schema["schema_version"].as_u64().unwrap();
+    wrong_schema["schema_version"] =
+        serde_json::Value::from(supported_schema.checked_add(1).unwrap());
     assert!(PreparedStructuralStudyIntent::from_continuation_bytes(
         &serde_json::to_vec(&wrong_schema).unwrap()
     )

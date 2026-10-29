@@ -34,7 +34,7 @@ fn transient_assessment_preserves_sampled_peak_and_store_parity() {
             target: AuthoredRegionSource::Geometry(runmat_geometry_core::GeometryRegionRef {
                 module_path: "study.fea".into(),
                 geometry_id: model.geometry_id.clone(),
-                region_id: "region".into(),
+                region_id: runmat_meshing_core::fixtures::fixture_region("region"),
                 role: runmat_geometry_core::GeometryRegionRole::Solid,
             }),
             ties: AuthoredExtremaTiePolicy::FirstCanonical,

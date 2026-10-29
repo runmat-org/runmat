@@ -37,8 +37,9 @@ impl RemoteWorkerChannel for DeliveryWorker {
     async fn cancel(
         &self,
         request: &runmat_execution_runner::AttemptRequest,
+        reason: runmat_execution::CancellationReason,
     ) -> NativeExecutionResult<()> {
-        self.original.cancel(request).await
+        self.original.cancel(request, reason).await
     }
     async fn drain(&self) -> NativeExecutionResult<()> {
         self.original.drain().await
@@ -135,7 +136,9 @@ async fn failed_result_delivery_preserves_valid_original_accounting_through_cold
             )
             .unwrap();
             assert_eq!(terminal.resources.as_deref(), producer.resources());
-            evidence.resource_aggregate(1).unwrap();
+            // Producer accounting is retained, but unknown retirement prevents
+            // claiming a complete terminal consumption aggregate.
+            assert!(evidence.resource_aggregate(1).is_err());
         }
         let snapshot = pool.snapshot();
         let cold: runmat_execution_runner::DriverSnapshot =

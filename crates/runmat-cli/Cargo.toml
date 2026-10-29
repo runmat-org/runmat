@@ -115,6 +115,7 @@ occt-native = [
 ]
 
 [dev-dependencies]
+ed25519-dalek = "2"
 runmat-geometry-ops = { workspace = true }
 libc = "0.2"
 tempfile = "3.20"

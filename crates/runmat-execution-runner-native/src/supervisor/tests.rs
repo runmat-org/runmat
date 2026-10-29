@@ -456,8 +456,11 @@ async fn failed_detached_launch_retains_original_unknown_attempt_accounting() {
     history.validate().unwrap();
     assert_eq!(history.task.submission, original_task);
     assert_eq!(history.attempts.len(), 1);
-    let terminal = history.attempts[0].terminal.as_ref().unwrap();
-    assert!(terminal.resources.is_none());
+    assert!(history.attempts[0].terminal.is_none());
+    let unresolved = history.attempts[0].unverified_retirement.as_ref().unwrap();
+    assert!(unresolved.resources.is_none());
+    assert!(unresolved.retired_at_driver_millis.is_none());
+    assert!(history.resource_aggregate(1).is_err());
     drop(supervisor);
     let reopened = LocalSupervisor::open(config).unwrap();
     assert_eq!(

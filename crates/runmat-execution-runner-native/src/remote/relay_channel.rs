@@ -142,8 +142,12 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         self.protocol.download_object(reference).await
     }
 
-    async fn cancel(&self, request: &AttemptRequest) -> NativeExecutionResult<()> {
-        self.protocol.cancel(request).await
+    async fn cancel(
+        &self,
+        request: &AttemptRequest,
+        reason: runmat_execution::CancellationReason,
+    ) -> NativeExecutionResult<()> {
+        self.protocol.cancel(request, reason).await
     }
 
     async fn drain(&self) -> NativeExecutionResult<()> {

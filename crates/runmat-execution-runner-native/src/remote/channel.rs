@@ -158,7 +158,13 @@ pub trait RemoteWorkerChannel: Send + Sync {
         ))
     }
 
-    async fn cancel(&self, request: &AttemptRequest) -> NativeExecutionResult<()>;
+    /// Deliver the scheduler's original cause; acknowledgement is not a
+    /// physical-retirement certificate and cannot release its reservation.
+    async fn cancel(
+        &self,
+        request: &AttemptRequest,
+        reason: runmat_execution::CancellationReason,
+    ) -> NativeExecutionResult<()>;
 
     async fn drain(&self) -> NativeExecutionResult<()>;
 }

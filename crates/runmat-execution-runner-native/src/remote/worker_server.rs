@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,7 +34,7 @@ struct WorkerState {
     attempts: HashMap<AttemptId, ActiveAttempt>,
     /// Capacity reserved by active attempts, not sampled process utilization.
     allocated: ResourceAllocation,
-    cancelled_attempts: HashSet<AttemptId>,
+    cancelled_attempts: HashMap<AttemptId, runmat_execution::CancellationReason>,
     values: HashMap<runmat_execution::identity::ValueId, runmat_execution::value::ValuePayload>,
     objects: super::object_transfer::RemoteObjectStore,
     draining: bool,
@@ -218,7 +218,7 @@ pub(super) async fn run_worker_loop(
         bundle_digest: None,
         attempts: HashMap::new(),
         allocated: ResourceAllocation::default(),
-        cancelled_attempts: HashSet::new(),
+        cancelled_attempts: HashMap::new(),
         values: HashMap::new(),
         objects: super::object_transfer::RemoteObjectStore::new()?,
         draining: false,
@@ -382,7 +382,7 @@ pub(super) async fn run_worker_loop(
                     // before allocating decoded copies or a private stage.
                     let manifest_peak = (encrypted_manifest.len() as u64).checked_mul(3);
                     state.draining
-                        || state.cancelled_attempts.contains(&attempt_id)
+                        || state.cancelled_attempts.contains_key(&attempt_id)
                         || state.graph_staging.contains_key(&attempt_id)
                         || manifest_peak.is_none_or(|peak| {
                             graph_stage_scratch_bytes(&state, 0, peak)
@@ -415,7 +415,7 @@ pub(super) async fn run_worker_loop(
                                 true,
                             );
                             let outcome = if state.draining
-                                || state.cancelled_attempts.contains(&attempt_id)
+                                || state.cancelled_attempts.contains_key(&attempt_id)
                                 || state.graph_staging.contains_key(&attempt_id)
                             {
                                 RemoteWorkerOutcome::Rejected {
@@ -528,7 +528,7 @@ pub(super) async fn run_worker_loop(
                 let writer = {
                     let mut state = state.lock().await;
                     if state.draining
-                        || state.cancelled_attempts.contains(&attempt_id)
+                        || state.cancelled_attempts.contains_key(&attempt_id)
                         || state
                             .graph_stage_download_in_flight
                             .contains_key(&attempt_id)
@@ -632,7 +632,7 @@ pub(super) async fn run_worker_loop(
                 let slot = {
                     let mut state = state.lock().await;
                     if state.draining
-                        || state.cancelled_attempts.contains(&attempt_id)
+                        || state.cancelled_attempts.contains_key(&attempt_id)
                         || state
                             .graph_stage_download_in_flight
                             .contains_key(&attempt_id)
@@ -659,7 +659,7 @@ pub(super) async fn run_worker_loop(
                                 };
                                 let incoming = Arc::new(program);
                                 let mut state = state.lock().await;
-                                if state.draining || state.cancelled_attempts.contains(&attempt_id)
+                                if state.draining || state.cancelled_attempts.contains_key(&attempt_id)
                                 {
                                     RemoteWorkerOutcome::Rejected {
                                         message:
@@ -709,7 +709,7 @@ pub(super) async fn run_worker_loop(
                     Some(slot) => {
                         let mut state = state.lock().await;
                         if slot.program_digest == program_digest
-                            && !state.cancelled_attempts.contains(&attempt_id)
+                            && !state.cancelled_attempts.contains_key(&attempt_id)
                         {
                             state.graph_staging.insert(attempt_id, slot);
                         }
@@ -1057,7 +1057,7 @@ pub(super) async fn run_worker_loop(
                 };
                 reply(connection.as_ref(), &sender, limits, response).await?;
             }
-            RemoteWorkerCommand::Cancel { attempt_id } => {
+            RemoteWorkerCommand::Cancel { attempt_id, reason } => {
                 let mut state = state.lock().await;
                 let mut cancelled_reply = None;
                 let mut completion = None;
@@ -1065,13 +1065,14 @@ pub(super) async fn run_worker_loop(
                 // A Cancel may overtake Execute while the driver streams a
                 // staged Graph. Retain that exact attempt's cancellation so
                 // a later Execute cannot start foreign effects.
-                if !state.cancelled_attempts.contains(&attempt_id)
+                if !state.cancelled_attempts.contains_key(&attempt_id)
                     && state.cancelled_attempts.len() >= MAX_PREEXECUTION_CANCELLATIONS
                 {
                     state.draining = true;
                 } else {
-                    state.cancelled_attempts.insert(attempt_id);
+                    state.cancelled_attempts.entry(attempt_id).or_insert(reason);
                 }
+                let reason = state.cancelled_attempts.get(&attempt_id).copied().unwrap_or(reason);
                 let retired_stage = state.graph_staging.remove(&attempt_id);
                 let retired_program = state.graph_programs.remove(&attempt_id);
                 let stage_cancellation = state
@@ -1079,7 +1080,7 @@ pub(super) async fn run_worker_loop(
                     .get(&attempt_id)
                     .cloned();
                 if let Some(active) = state.attempts.get(&attempt_id) {
-                    active.cancellation.cancel();
+                    active.cancellation.cancel(reason);
                     if active.cooperative {
                         completion = Some(active.finished.clone());
                     } else if let Some(active) = state.finish_attempt(attempt_id) {
@@ -1093,7 +1094,7 @@ pub(super) async fn run_worker_loop(
                 }
                 drop(state);
                 if let Some(stage_cancellation) = stage_cancellation {
-                    stage_cancellation.cancel(runmat_execution::CancellationReason::User);
+                    stage_cancellation.cancel(reason);
                 }
                 drop(retired_stage);
                 drop(retired_program);
@@ -1220,7 +1221,7 @@ async fn resolve_attempt(
         {
             return Err("attempt is outside live worker authority".into());
         }
-        if state.cancelled_attempts.contains(&scheduling.id) {
+        if state.cancelled_attempts.contains_key(&scheduling.id) {
             return Err("attempt was cancelled before execution".into());
         }
         match &program {

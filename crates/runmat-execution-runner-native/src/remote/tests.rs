@@ -45,6 +45,7 @@ struct FakeState {
     artifact_kinds: BTreeMap<String, String>,
     stored: Vec<FakeStoredArtifact>,
     transitions: Vec<(DriverRunTarget, Option<String>)>,
+    diagnostics: Vec<(Option<String>, Option<String>)>,
     usage: Vec<u64>,
     fail_store_at: Option<usize>,
 }
@@ -170,9 +171,11 @@ impl DriverControlPlane for FakeControl {
         _authority: &DriverAuthority,
         transition: DriverRunTransition,
     ) -> TransportResult<()> {
-        self.state
-            .lock()
-            .unwrap()
+        let mut state = self.state.lock().unwrap();
+        state
+            .diagnostics
+            .push((transition.reason_code, transition.diagnostic_artifact_id));
+        state
             .transitions
             .push((transition.target, transition.result_artifact_id));
         Ok(())
@@ -182,75 +185,39 @@ impl DriverControlPlane for FakeControl {
 #[tokio::test]
 async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
     let run_id = "run-remote-conformance";
-    let (_project_root, project, revision) =
-        project_fixture("function y = remote_answer(); y = 42; end\n");
-    let mut registry = runmat_vm::FunctionRegistry::default();
-    registry.insert_replacing_name(runmat_vm::FunctionBytecode {
-        display_name: "remote_answer".into(),
-        instructions: vec![
-            runmat_vm::Instr::LoadConst(42.0),
-            runmat_vm::Instr::StoreVar(0),
-            runmat_vm::Instr::Return,
-        ],
-        var_count: 1,
-        output_slots: vec![0],
-        ..Default::default()
-    });
-    let recipe = recipe(revision.clone());
-    let artifact = ProgramArtifact::materialize(
-        &recipe,
-        ExecutableForm::InterpreterBytecodeV2,
-        runmat_vm::encode_interpreter_program_v2(&registry).unwrap(),
+    let (program, _, bytes) = super::pool_tests::executable_bundle().await;
+    let bundle =
+        runmat_execution_artifact::archive::read_bundle(&bytes, ArchiveLimits::default()).unwrap();
+    let response = run_encrypted_remote_request_with_prior_sequence(
+        run_id,
+        bundle,
+        None,
+        Some(program.callable),
     )
-    .unwrap();
-    let bundle = ExecutionBundleBuilder::native(&project, revision)
-        .unwrap()
-        .with_materialized_program(
-            recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV2,
-            artifact.executable_bytes.clone(),
-        )
-        .build()
-        .unwrap();
-    let response = run_encrypted_remote_request(run_id, bundle).await;
-    assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+    .await;
+    assert!(
+        matches!(response, ProgramExecutionResponse::Success { .. }),
+        "{response:?}"
+    );
 }
 
 #[tokio::test]
 async fn replacement_driver_consumes_an_exact_resume_safe_checkpoint() {
     let run_id = "run-remote-replacement";
-    let (_project_root, project, revision) =
-        project_fixture("function y = remote_answer(); y = 42; end\n");
-    let mut registry = runmat_vm::FunctionRegistry::default();
-    registry.insert_replacing_name(runmat_vm::FunctionBytecode {
-        display_name: "remote_answer".into(),
-        instructions: vec![
-            runmat_vm::Instr::LoadConst(42.0),
-            runmat_vm::Instr::StoreVar(0),
-            runmat_vm::Instr::Return,
-        ],
-        var_count: 1,
-        output_slots: vec![0],
-        ..Default::default()
-    });
-    let recipe = recipe(revision.clone());
-    let artifact = ProgramArtifact::materialize(
-        &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        serde_json::to_vec(&registry).unwrap(),
+    let (program, _, bytes) = super::pool_tests::executable_bundle().await;
+    let bundle =
+        runmat_execution_artifact::archive::read_bundle(&bytes, ArchiveLimits::default()).unwrap();
+    let response = run_encrypted_remote_request_with_prior_sequence(
+        run_id,
+        bundle,
+        Some(7),
+        Some(program.callable),
     )
-    .unwrap();
-    let bundle = ExecutionBundleBuilder::native(&project, revision)
-        .unwrap()
-        .with_materialized_program(
-            recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV1,
-            artifact.executable_bytes.clone(),
-        )
-        .build()
-        .unwrap();
-    let response = run_encrypted_remote_request_from_safe_checkpoint(run_id, bundle).await;
-    assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+    .await;
+    assert!(
+        matches!(response, ProgramExecutionResponse::Success { .. }),
+        "{response:?}"
+    );
 }
 
 #[tokio::test]
@@ -880,20 +847,14 @@ async fn run_encrypted_remote_request(
     run_id: &str,
     bundle: ExecutionBundle,
 ) -> ProgramExecutionResponse {
-    run_encrypted_remote_request_with_prior_sequence(run_id, bundle, None).await
-}
-
-async fn run_encrypted_remote_request_from_safe_checkpoint(
-    run_id: &str,
-    bundle: ExecutionBundle,
-) -> ProgramExecutionResponse {
-    run_encrypted_remote_request_with_prior_sequence(run_id, bundle, Some(7)).await
+    run_encrypted_remote_request_with_prior_sequence(run_id, bundle, None, None).await
 }
 
 async fn run_encrypted_remote_request_with_prior_sequence(
     run_id: &str,
     bundle: ExecutionBundle,
     prior_checkpoint_sequence: Option<u64>,
+    callable: Option<ProgramCallable>,
 ) -> ProgramExecutionResponse {
     let revision = bundle.manifest.program_revision.clone();
     let recipe = bundle.manifest.recipes.first().cloned().unwrap();
@@ -909,7 +870,7 @@ async fn run_encrypted_remote_request_with_prior_sequence(
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+        callable: callable.unwrap_or_else(|| ProgramCallable::semantic(ProgramFunctionId(0), None)),
         requested_outputs: 1,
     };
     let inputs_contract = ProgramExecutionInputs {
@@ -1031,12 +992,35 @@ async fn run_encrypted_remote_request_with_prior_sequence(
     run_remote_driver(config, control.clone()).await.unwrap();
 
     let state = control.state.lock().unwrap();
+    let diagnostics = state
+        .diagnostics
+        .iter()
+        .map(|(reason, id)| {
+            (
+                reason,
+                id.as_ref().map(|id| {
+                    let encrypted = state
+                        .downloads
+                        .get(id)
+                        .expect("original diagnostic artifact retained");
+                    open_object(
+                        &run_key,
+                        encrypted,
+                        run_id,
+                        EncryptionPurpose::DetailedEvent,
+                    )
+                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                }),
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
         state.transitions,
         vec![
             (DriverRunTarget::Running, None),
             (DriverRunTarget::Succeeded, Some("stored-3".into()))
-        ]
+        ],
+        "original remote driver diagnostics: {diagnostics:?}"
     );
     assert_eq!(state.usage.len(), 1);
     assert_eq!(state.usage[0], 1);

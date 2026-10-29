@@ -67,6 +67,7 @@ impl RemoteWorkerChannel for InputWorker {
     async fn cancel(
         &self,
         _: &runmat_execution_runner::AttemptRequest,
+        _: runmat_execution::CancellationReason,
     ) -> NativeExecutionResult<()> {
         Ok(())
     }

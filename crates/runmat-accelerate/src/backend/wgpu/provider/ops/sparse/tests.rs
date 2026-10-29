@@ -173,6 +173,67 @@ fn download_vector(provider: &WgpuProvider, handle: &GpuTensorHandle) -> Vec<f64
     }
 }
 
+/// Identity has an exact zero residual either initially or after one CG step;
+/// zero rho is then convergence, not an attempted division/breakdown.
+fn assert_exact_zero_residual_converges(provider: &WgpuProvider) {
+    let (pattern, matrix) = upload_csr(
+        provider,
+        2,
+        &ROW_OFFSETS,
+        &COLUMN_INDICES,
+        &[1.0, 0.0, 0.0, 1.0],
+    );
+    let preconditioner = block_on(provider.prepare_sparse_preconditioner(
+        &SparsePreconditionerRequest {
+            matrix: &matrix,
+            kind: SparsePreconditionerKind::Jacobi,
+        },
+    ))
+    .expect("prepare exact-zero Jacobi");
+    let capability = provider.capability_snapshot();
+    let cancellation = ProviderCancellationToken::new();
+    for (rhs_values, expected_iterations) in [([0.0, 0.0], 0_u32), ([1.0, 2.0], 1_u32)] {
+        let rhs = upload_vector(provider, rhs_values);
+        let case = expected_iterations.to_le_bytes();
+        let request = SparseKrylovRequest {
+            matrix: &matrix,
+            rhs: &rhs,
+            initial_guess: None,
+            preconditioner: Some(&preconditioner),
+            method: SparseKrylovMethod::ConjugateGradient,
+            relative_tolerance: 1.0e-12,
+            absolute_tolerance: 0.0,
+            max_iterations: 4,
+            execution: SparseExecutionContext {
+                attempt_id: AttemptId::derive(&[b"wgpu-sparse-cg-exact-zero".as_slice(), &case]),
+                operator_identity: Digest::sha256(b"wgpu-sparse-cg-identity"),
+                provider_capability_schema_version: capability.schema_version,
+                provider_capability_revision: capability.revision,
+                cancellation: &cancellation,
+            },
+        };
+        let result = block_on(provider.sparse_krylov_solve(&request)).expect("solve exact-zero CG");
+        result
+            .validate(request, &capability)
+            .expect("validate exact-zero CG evidence");
+        assert_eq!(result.termination, SparseKrylovTermination::Converged);
+        assert_eq!(result.iterations, expected_iterations);
+        assert_eq!(result.final_residual_norm, Some(0.0));
+        assert_eq!(
+            download_vector(provider, result.solution.as_ref().unwrap()),
+            rhs_values
+        );
+        assert!(!result.evidence.used_host_fallback);
+        drop(result);
+        drop(rhs);
+    }
+    provider
+        .free_sparse_preconditioner(&preconditioner)
+        .unwrap();
+    provider.free_sparse_matrix(&matrix).unwrap();
+    provider.free_sparse_pattern(&pattern).unwrap();
+}
+
 #[test]
 fn sparse_admission_is_exact_and_side_effect_free() {
     let Some(session) = test_session() else {
@@ -628,6 +689,7 @@ fn exact_f64_sparse_cg_is_executed_or_rejected_by_adapter_capability() {
         Err(_) => return,
     };
     assert_eq!(provider.precision, NumericPrecision::F64);
+    assert_exact_zero_residual_converges(&provider);
     let pattern = upload_pattern(&provider);
     let matrix = bind_matrix(&provider, &pattern);
     let preconditioner = block_on(provider.prepare_sparse_preconditioner(
@@ -669,7 +731,14 @@ fn exact_f64_sparse_cg_is_executed_or_rejected_by_adapter_capability() {
     result
         .validate(request, &capability)
         .expect("validate exact-f64 CG evidence");
-    assert_eq!(result.termination, SparseKrylovTermination::Converged);
+    assert_eq!(
+        result.termination,
+        SparseKrylovTermination::Converged,
+        "iterations={}, initial residual={:?}, final residual={:?}",
+        result.iterations,
+        result.initial_residual_norm,
+        result.final_residual_norm
+    );
     let solution = result.solution.as_ref().expect("exact-f64 solution");
     let downloaded = block_on(provider.download_numeric(solution)).expect("download f64 solution");
     let HostNumericDataOwned::F64(values) = downloaded.data else {
@@ -779,6 +848,7 @@ fn sparse_cg_reports_iteration_limit_and_numerical_breakdown() {
         return;
     };
     let provider = session.provider();
+    assert_exact_zero_residual_converges(provider);
     let capability = provider.capability_snapshot();
     let cancellation = ProviderCancellationToken::new();
 

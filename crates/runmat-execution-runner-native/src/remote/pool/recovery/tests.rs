@@ -84,6 +84,79 @@ fn launch(pool: &RemotePoolDriver) -> runmat_execution_runner::AttemptRequest {
 }
 
 #[tokio::test]
+async fn restoration_reproves_software_without_releasing_original_physical_authority() {
+    let (pool, _, task) = fixture().await;
+    let original = launch(&pool);
+    let checkpoint = pool.capture_checkpoint(1).unwrap();
+    let saved_pool = &checkpoint.scheduler.snapshot.pools[&checkpoint.pool_id];
+    assert!(!saved_pool.spec.resource_limit.capabilities.is_empty());
+    let allocation = saved_pool.allocated.clone();
+    let mut replacement = authority(&checkpoint);
+    // Bootstrap knows physical allocation, not a replacement binary's software proof.
+    replacement.pool.resource_limit.capabilities.clear();
+    let bundle = Arc::clone(&pool.direct_bundle.as_ref().unwrap().bytes);
+    let restored = RemotePoolDriver::restore_checkpoint(checkpoint, replacement, bundle, |_| {
+        panic!("inline task must have no object inventory")
+    })
+    .unwrap();
+    let snapshot = restored.snapshot();
+    snapshot.validate().unwrap();
+    let restored_pool = &snapshot.pools[&pool.pool_id];
+    assert!(restored_pool.spec.resource_limit.capabilities.is_empty());
+    assert_eq!(restored_pool.allocated, allocation);
+    assert_eq!(
+        restored_pool.workers[&original.worker_id].lifecycle,
+        runmat_execution_runner::pool::WorkerLifecycle::Lost
+    );
+    let attempt = &snapshot.attempts[&original.id];
+    assert_eq!(attempt.request, original);
+    assert!(attempt.terminal.is_none());
+    assert!(attempt
+        .unverified_retirement
+        .as_ref()
+        .unwrap()
+        .retired_at_driver_millis
+        .is_none());
+    assert_eq!(
+        snapshot.tasks[&task.request.id].active_attempt,
+        Some(original.id)
+    );
+    assert_eq!(
+        snapshot.tasks[&task.request.id].state,
+        runmat_execution::state::TaskState::Indeterminate
+    );
+}
+
+#[tokio::test]
+async fn software_reproof_exception_never_changes_physical_pool_capacity_or_policy() {
+    let (pool, _, _) = unsubmitted_fixture().await;
+    let checkpoint = pool.capture_checkpoint(1).unwrap();
+    let bundle = Arc::clone(&pool.direct_bundle.as_ref().unwrap().bytes);
+    let mutations: [fn(&mut PoolSpec); 6] = [
+        |pool| pool.resource_limit.cpu_millicores += 1,
+        |pool| pool.resource_limit.memory_bytes += 1,
+        |pool| pool.resource_limit.scratch_bytes += 1,
+        |pool| pool.min_workers += 1,
+        |pool| pool.max_workers += 1,
+        |pool| pool.max_in_flight += 1,
+    ];
+    for mutate in mutations {
+        let mut replacement = authority(&checkpoint);
+        replacement.pool.resource_limit.capabilities.clear();
+        mutate(&mut replacement.pool);
+        let result = RemotePoolDriver::restore_checkpoint(
+            checkpoint.clone(),
+            replacement,
+            Arc::clone(&bundle),
+            |_| panic!("authority mismatch must reject before object IO"),
+        );
+        assert!(
+            matches!(result, Err(NativeExecutionError::Protocol(message)) if message == "checkpoint differs from replacement allocation authority")
+        );
+    }
+}
+
+#[tokio::test]
 async fn committed_download_survives_cold_restore_and_gc_but_pending_download_is_excluded() {
     use crate::remote::pool_tests::ResultObjectWorker;
     let (pool, _, _) = fixture().await;

@@ -3127,13 +3127,15 @@ mod tests {
 
     #[test]
     fn mesh_result_figures_include_authored_boundary_region_figure() {
+        let loaded_region = runmat_meshing_core::fixtures::fixture_face("loaded");
+        let fixed_region = runmat_meshing_core::fixtures::fixture_face("fixed");
         let run = simple_run_result(Vec::new(), {
             let mut topology = mapped_render_topology(
                 vec![Some(0), Some(1), Some(2), Some(3)],
                 vec![Some(0), Some(0), Some(0)],
             );
             topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
-                region_id: "loaded".to_string(),
+                region_id: loaded_region.clone(),
                 label: None,
                 tag: Some("boundary".to_string()),
                 triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
@@ -3153,20 +3155,19 @@ mod tests {
 
         assert_eq!(figures.len(), 1);
         assert_eq!(figures[0].title, "FEA boundary regions");
-        assert!(figures[0]
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("authored constraint region 'fixed'")));
+        assert!(figures[0].warnings.iter().any(
+            |warning| warning.contains(&format!("authored constraint region '{fixed_region}'"))
+        ));
         assert!(!figures[0]
             .warnings
             .iter()
             .any(|warning| warning.contains("volume_only")));
         let plot = analysis_mesh_plot(&figures[0].figure);
-        assert_eq!(plot.highlighted_region_id(), Some("loaded"));
+        assert_eq!(plot.highlighted_region_id(), Some(loaded_region.as_str()));
         assert_eq!(
             plot.region_for_triangle(1)
                 .map(|region| region.region_id.as_str()),
-            Some("loaded")
+            Some(loaded_region.as_str())
         );
         let vector_field = plot
             .vector_field()
@@ -3187,7 +3188,7 @@ mod tests {
                 vec![Some(0), Some(0), Some(0)],
             );
             topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
-                region_id: "axis_region".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_face("axis_region"),
                 label: None,
                 tag: Some("boundary".to_string()),
                 triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
@@ -3226,7 +3227,7 @@ mod tests {
                 vec![Some(0), Some(0), Some(0)],
             );
             topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
-                region_id: "wrench_axis_region".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_face("wrench_axis_region"),
                 label: None,
                 tag: Some("boundary".to_string()),
                 triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
@@ -3265,7 +3266,7 @@ mod tests {
                 vec![Some(0), Some(0), Some(0)],
             );
             topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
-                region_id: "pressurized".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_face("pressurized"),
                 label: None,
                 tag: Some("boundary".to_string()),
                 triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {

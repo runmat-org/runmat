@@ -71,12 +71,27 @@ pub(in crate::analysis) fn run_model<T>(
     context: &OperationContext,
     work: impl FnOnce() -> Result<T, OperationErrorEnvelope>,
 ) -> Result<T, OperationErrorEnvelope> {
-    // Model serialization is canonical for these typed, ordered contracts.
-    let bytes = serde_json::to_vec(model).map_err(|_| {
-        super::FeaRunDenied::LicenseInvalid.into_operation_error(
-            operation.name(),
-            operation.version(),
+    // This is a pure trust boundary, not solver execution. Reuse the owning
+    // domain validators before encoding identity or requesting a paid lease;
+    // malformed physical quantities are not an account/license defect.
+    if matches!(operation, AnalysisOperation::Thermal) {
+        crate::analysis::validate_thermal_run_model(model, context)?;
+    }
+    runmat_analysis_core::validate_model(model).map_err(|error| {
+        crate::analysis::map_fea_run_error(
+            operation,
+            model,
             context,
+            runmat_analysis_fea::FeaRunError::InvalidModel(error.to_string()),
+        )
+    })?;
+    // Model serialization is canonical for these typed, ordered contracts.
+    let bytes = serde_json::to_vec(model).map_err(|error| {
+        crate::analysis::map_fea_run_error(
+            operation,
+            model,
+            context,
+            runmat_analysis_fea::FeaRunError::InvalidModel(error.to_string()),
         )
     })?;
     run(

@@ -127,10 +127,13 @@ fn main() {{
     State.rho = Rho.data[0];
     State.tolerance_sq = max(State.absolute_tolerance_sq,
         State.relative_tolerance_sq * State.initial_rr);
-    if (!finite(State.initial_rr) || State.initial_rr < 0.0 || !finite(State.rho) || State.rho <= 0.0) {{
+    // A solved system has zero residual and rho; positivity is needed only to continue CG.
+    if (!finite(State.initial_rr) || State.initial_rr < 0.0 || !finite(State.rho) || State.rho < 0.0) {{
         State.termination = 3u;
     }} else if (State.initial_rr <= State.tolerance_sq) {{
         State.termination = 1u;
+    }} else if (State.rho == 0.0) {{
+        State.termination = 3u;
     }}
 }}
 "#
@@ -200,10 +203,13 @@ fn main() {{
     State.iterations = State.iterations + 1u;
     State.final_rr = ResidualSquared.data[0];
     let new_rho = NewRho.data[0];
-    if (!finite(State.final_rr) || State.final_rr < 0.0 || !finite(new_rho) || new_rho <= 0.0) {{
+    // Exact convergence sets new_rho to zero before another direction/division is needed.
+    if (!finite(State.final_rr) || State.final_rr < 0.0 || !finite(new_rho) || new_rho < 0.0) {{
         State.termination = 3u;
     }} else if (State.final_rr <= State.tolerance_sq) {{
         State.termination = 1u;
+    }} else if (new_rho == 0.0) {{
+        State.termination = 3u;
     }} else if (State.iterations >= State.max_iterations) {{
         State.termination = 2u;
     }} else {{

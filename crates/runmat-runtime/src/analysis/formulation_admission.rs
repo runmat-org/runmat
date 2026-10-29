@@ -109,13 +109,19 @@ mod tests {
     }
 
     #[test]
-    fn production_requirement_rejects_unqualified_proxy_branch() {
+    fn proxy_branch_cannot_be_reused_for_another_physics_family() {
         let error = admit_runtime_proxy(
-            PhysicsFamily::Acoustic,
+            PhysicsFamily::Structural,
             AnalysisProcedure::HarmonicResponse,
             RuntimeProxyFormulation::AcousticHashedTargetGraphProjection,
         )
-        .expect_err("current acoustic proxy is not production-qualified");
-        assert!(matches!(error, RuntimeProxyAdmissionError::Rejected(_)));
+        .expect_err("an acoustic realization must not qualify a structural request");
+        assert!(matches!(
+            error,
+            RuntimeProxyAdmissionError::UnregisteredActualBranch {
+                family: PhysicsFamily::Structural,
+                ..
+            }
+        ));
     }
 }

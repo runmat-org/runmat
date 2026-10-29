@@ -903,3 +903,6 @@ pub(crate) fn artifact_store_test_guard() -> MutexGuard<'static, ()> {
 #[cfg(test)]
 #[path = "storage/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod test_support;

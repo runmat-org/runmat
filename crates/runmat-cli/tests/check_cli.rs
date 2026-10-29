@@ -8,8 +8,12 @@ use tempfile::TempDir;
 use runmat_analysis_core::{AnalysisModel, ExcitationTarget, PropertyRegionScope};
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshArtifact};
 
+#[path = "support/fea_admission.rs"]
+mod fea_admission;
+
 fn runmat(temp: &TempDir, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
+    fea_admission::configure(&mut command, temp.path());
     command.current_dir(temp.path()).args(args);
     command
         .env_remove("RUNMAT_CONFIG")
@@ -26,6 +30,7 @@ fn runmat(temp: &TempDir, args: &[&str]) -> Output {
 
 fn runmat_with_env(temp: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
+    fea_admission::configure(&mut command, temp.path());
     command.current_dir(temp.path()).args(args);
     command
         .env_remove("RUNMAT_CONFIG")
@@ -40,8 +45,34 @@ fn runmat_with_env(temp: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Outpu
     command.output().expect("run runmat check")
 }
 
-fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
+fn repository_fixture(temp: &TempDir) -> PathBuf {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture = temp.path().join("repository");
+    let destination = fixture.join("docs/simulation/examples");
+    if !destination.exists() {
+        fn copy_sources(source: &std::path::Path, destination: &std::path::Path) {
+            fs::create_dir_all(destination).unwrap();
+            for entry in fs::read_dir(source).unwrap() {
+                let entry = entry.unwrap();
+                // Saved selections/caches belong to their current operator/CAD revision,
+                // not this independent documentation fixture. Never mutate the originals.
+                if entry.file_name().to_string_lossy().starts_with('.') {
+                    continue;
+                }
+                if entry.file_type().unwrap().is_dir() {
+                    copy_sources(&entry.path(), &destination.join(entry.file_name()));
+                } else if entry.file_type().unwrap().is_file() {
+                    fs::copy(entry.path(), destination.join(entry.file_name())).unwrap();
+                }
+            }
+        }
+        copy_sources(&repository.join("docs/simulation/examples"), &destination);
+    }
+    fixture
+}
+
+fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
+    let repository = repository_fixture(temp);
     let config = temp.path().join("runmat.toml");
     let artifact_root =
         toml::Value::String(temp.path().join("artifacts").to_string_lossy().into_owned());
@@ -58,7 +89,9 @@ fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
         ),
     )
     .unwrap();
-    Command::new(env!("CARGO_BIN_EXE_runmat"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
+    fea_admission::configure(&mut command, temp.path());
+    command
         .current_dir(repository)
         .args(args)
         .env("RUNMAT_CONFIG", config)
@@ -817,15 +850,16 @@ fn fea_human_path_uses_the_shared_color_policy() {
     let styled = runmat_with_env(&temp, &["--color=always", "check", "invalid.fea"], &[]);
     assert!(!styled.status.success(), "{styled:?}");
     assert!(
-        styled.stderr.windows(2).any(|bytes| bytes == b"\x1b["),
+        styled.stdout.windows(2).any(|bytes| bytes == b"\x1b["),
         "FEA human output did not contain ANSI styling: {}",
-        String::from_utf8_lossy(&styled.stderr)
+        String::from_utf8_lossy(&styled.stdout)
     );
-    assert!(String::from_utf8_lossy(&styled.stderr).contains("Checking"));
+    assert!(String::from_utf8_lossy(&styled.stdout).contains("checked"));
 
     let plain = runmat_with_env(&temp, &["--color=never", "check", "invalid.fea"], &[]);
     assert!(!plain.status.success(), "{plain:?}");
-    assert!(!plain.stderr.windows(2).any(|bytes| bytes == b"\x1b["));
+    assert!(!plain.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+    assert_eq!(strip_ansi(&styled.stdout), plain.stdout);
 }
 
 #[test]
@@ -1022,7 +1056,7 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
 #[test]
 fn a_script_running_the_same_study_twice_publishes_two_attempts() {
     let temp = TempDir::new().unwrap();
-    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let repository = repository_fixture(&temp);
     let study = repository.join("docs/simulation/examples/modal-random-response.fea");
     let script_path = temp.path().join("twice.m");
     fs::write(

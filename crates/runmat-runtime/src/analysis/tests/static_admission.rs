@@ -3,21 +3,28 @@ use super::*;
 
 fn assert_gpu_rejected_without_publication() {
     let before = storage::list_run_metadata().unwrap().len();
-    let error = analysis_run_linear_static_with_options(
-        &sample_model(),
-        ComputeBackend::Gpu,
-        Default::default(),
-        OperationContext::new(None, None),
+    let error = runmat_analysis_fea::accelerator_admission::with_accelerator_admission_policy(
+        runmat_analysis_core::AcceleratorAdmissionPolicy::Required,
+        || {
+            analysis_run_linear_static_with_options(
+                &sample_model(),
+                ComputeBackend::Gpu,
+                Default::default(),
+                OperationContext::new(None, None),
+            )
+        },
     )
     .expect_err("static GPU pipeline must remain closed before accelerator-bound admission");
-    assert_eq!(error.error_code, "RM.FEA.RESOURCE_PLANNING_FAILED");
+    assert_eq!(error.error_code, ACCELERATOR_REQUIRED_ERROR_CODE);
     assert!(!error.retryable);
-    assert!(format!("{error:?}").contains("accelerator-bound admission"));
+    assert!(error
+        .message
+        .contains("accelerator-bound native sparse admission"));
     assert_eq!(storage::list_run_metadata().unwrap().len(), before);
 }
 
 #[test]
-fn static_gpu_without_provider_rejects_instead_of_falling_back() {
+fn required_static_gpu_without_provider_rejects_instead_of_falling_back() {
     let _guard = analysis_test_guard();
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(None);
     assert_gpu_rejected_without_publication();

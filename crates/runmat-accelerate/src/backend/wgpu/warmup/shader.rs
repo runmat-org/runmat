@@ -75,7 +75,9 @@ mod tests {
     fn persisted_shader_admission_checks_language_and_enabled_numeric_features() {
         let single = "@compute @workgroup_size(1) fn main() { let x = f32(1.0); }";
         assert!(validate(single, wgpu::Features::empty()).is_ok());
-        let double = "@compute @workgroup_size(1) fn main() { let x = f64(1.0); }";
+        // An unused constant is folded out by the frontend and has no runtime
+        // numeric capability requirement. Retain an observable binary64 type.
+        let double = "@group(0) @binding(0) var<storage, read_write> out: array<f64>; @compute @workgroup_size(1) fn main() { out[0] = f64(1.0); }";
         assert!(matches!(
             validate(double, wgpu::Features::empty()),
             Err(CachedShaderAdmissionError::IncompatibleAdapter(_))

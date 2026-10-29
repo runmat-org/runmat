@@ -588,9 +588,14 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
         }
     }
 
-    async fn cancel(&self, request: &AttemptRequest) -> NativeExecutionResult<()> {
+    async fn cancel(
+        &self,
+        request: &AttemptRequest,
+        reason: runmat_execution::CancellationReason,
+    ) -> NativeExecutionResult<()> {
         self.ack(RemoteWorkerCommand::Cancel {
             attempt_id: request.id,
+            reason,
         })
         .await
     }

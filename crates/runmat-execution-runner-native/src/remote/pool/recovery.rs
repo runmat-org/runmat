@@ -314,16 +314,26 @@ impl RemotePoolDriver {
             || checkpoint.pool_id != authority.pool.id
             || checkpoint.value_scope != authority.value_scope
             || checkpoint.bundle_digest != Digest::sha256(&bundle)
-            || checkpoint.scheduler.snapshot.pools[&checkpoint.pool_id].spec != authority.pool
+            || !same_allocation_authority(
+                &checkpoint.scheduler.snapshot.pools[&checkpoint.pool_id].spec,
+                &authority.pool,
+            )
         {
             return Err(invalid(
                 "checkpoint differs from replacement allocation authority",
             ));
         }
-        let driver = checkpoint
+        let mut driver = checkpoint
             .scheduler
             .clone()
             .restore_at_fence(authority.driver_fence)?;
+        // Reconciliation retains old attempts and reservations, but no worker is Ready.
+        // Historic software proofs cannot authorize the replacement worker executable.
+        driver.handle(
+            runmat_execution_runner::DriverCommand::RefreshPoolCapabilities {
+                pool_id: authority.pool.id,
+            },
+        )?;
         let mut pool = Self::new_with_value_scope(
             authority.scope_id,
             authority.pool,
@@ -431,6 +441,16 @@ impl RemotePoolDriver {
 
 fn invalid(message: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(message.to_string())
+}
+
+fn same_allocation_authority(saved: &PoolSpec, replacement: &PoolSpec) -> bool {
+    let mut saved = saved.clone();
+    let mut replacement = replacement.clone();
+    // Capabilities are a derived ceiling from authenticated Ready workers, not allocation
+    // capacity. Preserve exact comparison of every physical resource and pool policy field.
+    saved.resource_limit.capabilities.clear();
+    replacement.resource_limit.capabilities.clear();
+    saved == replacement
 }
 
 fn same_object(left: &ValueRef, right: &ValueRef) -> bool {

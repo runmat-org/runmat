@@ -38,6 +38,28 @@ impl CacheImport for MemoryStore {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.0.get(&digest).cloned())
     }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.read_verified_bounded_with_admission(digest, maximum_bytes, &mut |_| Ok(()))
+    }
+
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        runmat_execution_artifact::cache::copy_verified_bounded_with_admission(
+            digest,
+            self.0.get(&digest).map(Vec::as_slice),
+            maximum_bytes,
+            admit,
+        )
+    }
 }
 
 impl CacheExport for MemoryStore {

@@ -198,7 +198,7 @@ pub(super) async fn execute_geometry_for_composition(
     let result = match execute_exact_meshing_dag_async(
         ExactMeshingDagRun {
             geometry: &geometry,
-            ceilings: crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits),
+            ceilings: policy::execution_ceilings(resources, &meshing_request.limits)?,
             request: meshing_request,
             artifact_access: decoded.artifact_access,
             capability_cohort: Some(platform.capability_cohort.clone()),
@@ -336,7 +336,7 @@ pub(super) async fn execute_for_composition(
     let result = match execute_exact_meshing_dag_async(
         ExactMeshingDagRun {
             geometry: &geometry,
-            ceilings: crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits),
+            ceilings: policy::execution_ceilings(resources, &meshing_request.limits)?,
             request: meshing_request,
             artifact_access: decoded.artifact_access,
             capability_cohort: Some(capability_cohort),

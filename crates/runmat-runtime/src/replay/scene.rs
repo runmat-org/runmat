@@ -724,6 +724,23 @@ mod tests {
     }
 
     #[cfg(feature = "plot-core")]
+    fn published_scene_chunk(dataset: &Path, array: &str) -> PathBuf {
+        let manifest = futures::executor::block_on(crate::data::read_manifest_async(dataset))
+            .expect("read published scene manifest");
+        let index_path = manifest.arrays[array]
+            .chunk_index_path
+            .as_ref()
+            .expect("published array has a chunk index");
+        let bytes =
+            futures::executor::block_on(runmat_filesystem::read_async(dataset.join(index_path)))
+                .expect("read published chunk index");
+        let index: crate::data::DataChunkIndex =
+            serde_json::from_slice(&bytes).expect("decode published chunk index");
+        assert_eq!(index.chunks.len(), 1, "fixture writes one complete chunk");
+        dataset.join(&index.chunks[0].data_path)
+    }
+
+    #[cfg(feature = "plot-core")]
     fn make_surface_ref_payload(dataset_path: &str) -> Vec<u8> {
         let surface = runmat_plot::plots::SurfacePlot::new(
             vec![0.0, 1.0],
@@ -889,7 +906,7 @@ mod tests {
             ],
         )
         .expect("write scene dataset");
-        let missing_chunk = dataset_path.join("arrays/z/chunks/obj_0.json");
+        let missing_chunk = published_scene_chunk(&dataset_path, "z");
         futures::executor::block_on(runmat_filesystem::remove_file_async(&missing_chunk))
             .expect("remove z chunk");
         let bytes = make_surface_ref_payload(&dataset_str);
@@ -924,7 +941,7 @@ mod tests {
             ],
         )
         .expect("write scene dataset");
-        let corrupt_chunk = dataset_path.join("arrays/z/chunks/obj_0.json");
+        let corrupt_chunk = published_scene_chunk(&dataset_path, "z");
         futures::executor::block_on(runmat_filesystem::write_async(&corrupt_chunk, b"not-json"))
             .expect("corrupt z chunk");
         let bytes = make_surface_ref_payload(&dataset_str);

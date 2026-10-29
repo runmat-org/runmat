@@ -904,29 +904,42 @@ fn memory_provider_run_publication_is_linearizable() {
     )
     .unwrap();
 
+    let root = PathBuf::from("/analysis-memory-cas");
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem { root })
+        .unwrap();
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let handles = [first.clone(), second.clone()].map(|run| {
         let barrier = Arc::clone(&barrier);
         std::thread::spawn(move || {
-            let store = storage::FilesystemAnalysisArtifactStore::new(PathBuf::from(
-                "/analysis-memory-cas",
-            ));
-            barrier.wait();
-            storage::AnalysisArtifactStore::persist_run(&store, &run)
+            // Both operations capture the original provider revision before
+            // either prepares its private result. Only conditional commit can
+            // make the winning result visible on this asynchronous provider.
+            futures::executor::block_on(storage::with_artifact_access(true, |store| {
+                barrier.wait();
+                store.persist_run(&run)
+            }))
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
         })
     });
     let outcomes = handles.map(|handle| handle.join().unwrap());
-    assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+    assert_eq!(
+        outcomes.iter().filter(|outcome| outcome.is_ok()).count(),
+        1,
+        "{outcomes:?}"
+    );
     assert_eq!(
         outcomes.iter().filter(|outcome| outcome.is_err()).count(),
         1
     );
 
-    let store =
-        storage::FilesystemAnalysisArtifactStore::new(PathBuf::from("/analysis-memory-cas"));
-    let persisted = storage::AnalysisArtifactStore::load_run(&store, &first.run_id)
-        .unwrap()
-        .unwrap();
+    let persisted = futures::executor::block_on(storage::with_artifact_access(false, |store| {
+        store.load_run(&first.run_id)
+    }))
+    .unwrap()
+    .unwrap()
+    .unwrap();
     assert_eq!(persisted, if outcomes[0].is_ok() { first } else { second });
 }
 

@@ -153,7 +153,35 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
                 relative_tolerance: 1e-10,
             },
         }));
+    model.excitation_cases.push(ExcitationCase {
+        case_id: ExcitationCaseId("traction.case".into()),
+        action_ids: vec![ExcitationId("traction".into())],
+        activation: ExcitationCaseActivation::Always,
+    });
     (model, mesh)
+}
+
+/// A real Tet4/J2 seed for artifact-store tests, which do not exercise the
+/// retired mesh-free beam nonlinear proxy. The caller already owns/cleans root.
+pub(super) fn artifact_seed(root: &Path) -> (AnalysisModel, AnalysisNonlinearRunOptions) {
+    fs::create_dir_all(root).expect("create physical nonlinear seed root");
+    let (model, mesh) = fixture(ElementOrder::Tet4, root);
+    let path = root.join("physical_nonlinear_seed.cbor");
+    fs::write(
+        &path,
+        mesh.canonical_encode().expect("encode physical seed mesh"),
+    )
+    .expect("write physical seed mesh");
+    (
+        model,
+        AnalysisNonlinearRunOptions {
+            solver_mesh_artifact_path: Some(path.to_string_lossy().into_owned()),
+            increment_count: 4,
+            tolerance: 1e-9,
+            linear_tolerance: 1e-12,
+            ..Default::default()
+        },
+    )
 }
 
 fn values(field: &AnalysisField) -> &[f64] {

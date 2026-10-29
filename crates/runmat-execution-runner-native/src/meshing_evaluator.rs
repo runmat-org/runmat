@@ -58,7 +58,11 @@ mod tests {
             "box.brep",
             BOX,
             GeometryFormat::Brep,
-            &ExactCadImportOptions::default(),
+            &ExactCadImportOptions {
+                source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+                source_units_authority: runmat_geometry_io::SourceUnitsAuthority::Authored,
+                ..Default::default()
+            },
             &GeometryImportContext::new(),
         )
         .unwrap();

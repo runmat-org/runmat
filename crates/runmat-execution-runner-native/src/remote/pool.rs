@@ -349,10 +349,36 @@ impl RemotePoolDriver {
     }
 
     fn cancel_attempt(self: &Arc<Self>, request: AttemptRequest) {
+        let reason = self
+            .driver
+            .lock()
+            .expect("remote driver poisoned")
+            .task_record(request.task_id)
+            .map_err(|error| error.to_string())
+            .and_then(|task| {
+                task.cancellation
+                    .ok_or_else(|| "scheduler stop has no original cancellation cause".to_string())
+            })
+            .and_then(|cancellation| {
+                crate::process_provider::cancellation::reason(&request, cancellation.cause)
+            });
+        let reason = match reason {
+            Ok(reason) => reason,
+            Err(message) => {
+                self.cancellation_ownership_failed
+                    .store(true, Ordering::Release);
+                self.apply_report(BackendReport::for_request(
+                    &request,
+                    AttemptReport::RetirementUnverified { message },
+                ));
+                return;
+            }
+        };
         // A remote Cancel acknowledgement proves delivery of a request, not
         // that an active Graph worker has retired its foreign host or private
         // staging. Only its eventual attempt report may close the Graph
-        // attempt; Direct keeps its immediate completion.
+        // attempt. Direct may report delivery immediately, but that ordinary
+        // Cancelled report still cannot certify physical retirement.
         let graph_attempt = matches!(
             &request.task.callable.program,
             runmat_execution::ProgramCallable::GraphTarget { .. }
@@ -364,7 +390,7 @@ impl RemotePoolDriver {
             .get(&request.id)
             .cloned()
         {
-            source.cancel(CancellationReason::User);
+            source.cancel(reason);
         }
         self.cancellation_in_flight.fetch_add(1, Ordering::AcqRel);
         let this = Arc::clone(self);
@@ -378,7 +404,7 @@ impl RemotePoolDriver {
                 .map(|route| Arc::clone(&route.channel));
             match channel {
                 Some(channel) => {
-                    if channel.cancel(&request).await.is_err() {
+                    if channel.cancel(&request, reason).await.is_err() {
                         if this.remove_worker(request.worker_id, true).await.is_err() {
                             this.apply_report(BackendReport::for_request(
                                 &request,

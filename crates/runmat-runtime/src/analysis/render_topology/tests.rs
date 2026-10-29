@@ -38,10 +38,11 @@ fn canonical_quadratic_mesh_keeps_node_element_and_region_bindings() {
     assert!(used.into_iter().all(|used| used));
     for face in &original.topology.boundary_faces {
         for entity in &face.provenance {
+            let selection = entity.analysis_selection_id().unwrap();
             let region = boundary
                 .regions
                 .iter()
-                .find(|region| region.region_id == entity.source_topology_id)
+                .find(|region| region.region_id == selection)
                 .unwrap();
             assert_eq!(
                 region
