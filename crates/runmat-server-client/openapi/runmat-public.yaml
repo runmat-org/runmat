@@ -9664,8 +9664,8 @@ components:
       - runningRuns
       - terminalRunsLast24Hours
       - failedRunsLast24Hours
-      - reservedMicrousd
-      - settledMicrousd
+      - reservedCoreMicroHours
+      - settledCoreMicroHours
       - runs
       properties:
         activeRuns:
@@ -9685,7 +9685,7 @@ components:
           type: integer
           format: int64
           minimum: 0
-        reservedMicrousd:
+        reservedCoreMicroHours:
           type: integer
           format: int64
           minimum: 0
@@ -9697,7 +9697,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RunResponse'
-        settledMicrousd:
+        settledCoreMicroHours:
           type: integer
           format: int64
           minimum: 0
@@ -11936,36 +11936,6 @@ components:
             - free
       - type: object
         required:
-        - trialPlanKey
-        - endsAt
-        - kind
-        properties:
-          endsAt:
-            type: string
-            format: date-time
-          kind:
-            type: string
-            enum:
-            - trial
-          trialPlanKey:
-            type: string
-      - type: object
-        required:
-        - trialPlanKey
-        - endsAt
-        - kind
-        properties:
-          endsAt:
-            type: string
-            format: date-time
-          kind:
-            type: string
-            enum:
-            - lapsedTrial
-          trialPlanKey:
-            type: string
-      - type: object
-        required:
         - kind
         properties:
           kind:
@@ -12437,10 +12407,6 @@ components:
         support:
           type: string
           description: Community, Email or Dedicated.
-          nullable: true
-        trialDays:
-          type: integer
-          format: int32
           nullable: true
     PublicPricingQuoteResponse:
       type: object
@@ -13943,7 +13909,7 @@ components:
       - workerCount
       - workerResources
       - billingState
-      - reservedMicrousd
+      - reservedCoreMicroHours
       - state
       - version
       - createdAt
@@ -14000,7 +13966,7 @@ components:
         recoveryRecipientFingerprint:
           type: string
           nullable: true
-        reservedMicrousd:
+        reservedCoreMicroHours:
           type: integer
           format: int64
           minimum: 0
@@ -14009,7 +13975,7 @@ components:
         resultArtifactId:
           type: string
           nullable: true
-        settledMicrousd:
+        settledCoreMicroHours:
           type: integer
           format: int64
           nullable: true
@@ -14042,19 +14008,19 @@ components:
       type: object
       required:
       - runId
-      - reservedMicrousd
+      - reservedCoreMicroHours
       - usage
       properties:
         pricingVersion:
           type: string
           nullable: true
-        reservedMicrousd:
+        reservedCoreMicroHours:
           type: integer
           format: int64
           minimum: 0
         runId:
           type: string
-        settledMicrousd:
+        settledCoreMicroHours:
           type: integer
           format: int64
           nullable: true
