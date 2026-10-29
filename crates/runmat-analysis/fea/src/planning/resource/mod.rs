@@ -82,7 +82,8 @@ pub use contract::SemanticStatePublicationResourceDemand;
 pub use contract::StructuralLinearPipelineResourceDemand;
 pub use contract::{
     NonlinearSolidBlockTransportDemand, PreparedNonlinearSolidBlockResourceFacts,
-    StructuralNonlinearPipelineResourceDemand, StructuralNonlinearRecoveryResourceDemand,
+    NonlinearHistoryLimits, StructuralNonlinearPipelineResourceDemand,
+    StructuralNonlinearRecoveryResourceDemand,
 };
 mod nonlinear;
 mod numeric_profile;

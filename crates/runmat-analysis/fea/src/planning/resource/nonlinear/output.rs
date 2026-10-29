@@ -1,12 +1,22 @@
 //! Numeric history uses structural codec profiling, not the worst-density map
 //! multiplier applied to already over-reserved typed heap capacity.
 use super::ResourcePlanningError;
+use crate::planning::resource::{ByteCount, Count, NonlinearHistoryLimits};
+
+pub(super) struct NonlinearOutputProjection {
+    /// Wire bound of the complete result, including point-history metadata.
+    pub wire: u64,
+    /// Construction residency of the canonical content identity.
+    pub resident: u64,
+    pub history_limits: NonlinearHistoryLimits,
+}
+
 pub(super) fn projection(
     dofs: usize,
     elements: usize,
     accepted_cap: usize,
     point_history_bytes: u64,
-) -> Result<(u64, u64), ResourcePlanningError> {
+) -> Result<NonlinearOutputProjection, ResourcePlanningError> {
     let overflow = || ResourcePlanningError::Overflow("nonlinear content profile");
     // Raw event source: two DOF histories, stress/total-strain/plastic tensors, alpha/mises,
     // five scalar histories. Twelve additional nodes per step cover nested arrays,
@@ -36,16 +46,27 @@ pub(super) fn projection(
         .and_then(|n| n.checked_add(65_536))
         .ok_or_else(overflow)?;
     let metadata_resident = metadata_wire.checked_mul(2).ok_or_else(overflow)?;
-    Ok((
-        profile
-            .encoded_bytes_upper_bound
-            .checked_add(metadata_wire)
-            .ok_or_else(overflow)?,
-        profile
-            .materialization_resident_bytes_estimate
-            .checked_add(metadata_resident)
-            .ok_or_else(overflow)?,
-    ))
+    let wire = profile
+        .encoded_bytes_upper_bound
+        .checked_add(metadata_wire)
+        .ok_or_else(overflow)?;
+    let resident = profile
+        .materialization_resident_bytes_estimate
+        .checked_add(metadata_resident)
+        .ok_or_else(overflow)?;
+    // Every point-history metadata item occupies at least one wire byte.
+    let collection_items = u64::try_from(count)
+        .ok()
+        .and_then(|n| n.checked_add(metadata_wire))
+        .ok_or_else(overflow)?;
+    Ok(NonlinearOutputProjection {
+        wire,
+        resident,
+        history_limits: NonlinearHistoryLimits {
+            encoded_bytes: ByteCount(wire),
+            collection_items: Count(collection_items),
+        },
+    })
 }
 
 #[cfg(test)]
@@ -59,7 +80,7 @@ mod tests {
         topology::{CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule},
         ComputeBackend,
     };
-    use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
+    use runmat_canonical_codec::profile_serialized;
 
     #[test]
     fn output_projection_covers_actual_complete_driver_content_for_both_orders() {
@@ -90,20 +111,24 @@ mod tests {
                 true,
             )
             .unwrap();
-            let (wire, resident) =
+            let projected =
                 projection(dofs, plan.elements().len(), 8, storage.point_history_bytes).unwrap();
-            // The full result additionally includes diagnostics excluded from the
-            // numerical content digest; testing it is a stronger bounded witness.
-            let actual = profile_serialized(
+            let (wire, resident) = (projected.wire, projected.resident);
+            // The plan's history limits admit the actual event source and its digest.
+            crate::solve::nonlinear::nonlinear_solver_content_digest(
                 &result,
-                CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32),
+                projected.history_limits,
             )
             .unwrap();
+            // The full result additionally includes diagnostics excluded from the
+            // numerical content digest; testing it is a stronger bounded witness.
+            let actual =
+                profile_serialized(&result, projected.history_limits.canonical().unwrap()).unwrap();
             assert!(wire >= actual.encoded_bytes_upper_bound);
             // Results are encoded directly into reserved output; no value tree is built.
             let encoding = runmat_canonical_codec::profile_canonical_encoding(
                 &result,
-                CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32),
+                projected.history_limits.canonical().unwrap(),
             )
             .unwrap();
             assert!(
@@ -113,7 +138,11 @@ mod tests {
             );
             let larger =
                 projection(dofs, plan.elements().len(), 16, storage.point_history_bytes).unwrap();
-            assert!(larger.0 > wire && larger.1 > resident);
+            assert!(larger.wire > wire && larger.resident > resident);
+            assert!(
+                larger.history_limits.collection_items.0
+                    > projected.history_limits.collection_items.0
+            );
         }
     }
 }
