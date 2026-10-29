@@ -7,6 +7,8 @@ use runmat_mir::{
     MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 
+mod snapshots;
+
 pub(super) struct MirStochasticEvolutionPlan {
     pub(super) iteration_binding: MirLocalId,
     pub(super) noise: MirLocalId,
@@ -111,11 +113,8 @@ pub(super) fn detect(
     {
         return None;
     }
-    let [noise_stmt, scaled_stmt, argument_stmt, exponent_stmt, state_stmt] =
-        block.statements.as_slice()
-    else {
-        return None;
-    };
+    let mut source = snapshots::SourceBody::parse(body, &block.statements)?;
+    let [noise_stmt, scaled_stmt, argument_stmt, exponent_stmt, state_stmt] = source.statements;
     let assignments = [
         assigned_local(noise_stmt)?,
         assigned_local(scaled_stmt)?,
@@ -123,13 +122,23 @@ pub(super) fn detect(
         assigned_local(exponent_stmt)?,
         assigned_local(state_stmt)?,
     ];
-    let written = assignments.map(|(id, _)| id);
+    let mut written = [binding; 7];
+    let mut written_count = 0;
+    for id in assignments
+        .iter()
+        .map(|(id, _)| *id)
+        .chain(source.snapshot_targets())
+    {
+        written[written_count] = id;
+        written_count += 1;
+    }
+    let written = &written[..written_count];
     if written.contains(&binding)
         || written
             .iter()
             .enumerate()
             .any(|(index, id)| written[..index].contains(id))
-        || !invariant(end, &written, binding)
+        || !invariant(end, written, binding)
     {
         return None;
     }
@@ -148,7 +157,13 @@ pub(super) fn detect(
     else {
         return None;
     };
-    if noise != noise_use || scaled != scaled_use || state != state_use || exponent != exponent_use
+    let state_source = source.state_source(*state_use)?;
+    let drift = source.drift_source(drift)?;
+    if !source.all_consumed()
+        || noise != noise_use
+        || scaled != scaled_use
+        || *state != state_source
+        || exponent != exponent_use
     {
         return None;
     }
@@ -165,12 +180,12 @@ pub(super) fn detect(
     }
     if !single_output_builtin(randn, "randn")
         || !randn.args.iter().all(
-            |arg| matches!(arg, MirCallArg::Single(value) if invariant(value, &written, binding)),
+            |arg| matches!(arg, MirCallArg::Single(value) if invariant(value, written, binding)),
         )
         || !single_output_builtin(exp, "exp")
         || !matches!(exp.args.as_slice(), [MirCallArg::Single(MirOperand::Local(id))] if id == argument)
-        || !invariant(scale, &written, binding)
-        || !invariant(drift, &written, binding)
+        || !invariant(scale, written, binding)
+        || !invariant(&drift, written, binding)
         || !source_binding(body, *noise)
         || !source_binding(body, *state)
     {
@@ -188,7 +203,7 @@ pub(super) fn detect(
         iteration_binding: binding,
         noise: *noise,
         state: *state,
-        drift: drift.clone(),
+        drift,
         scale: scale.clone(),
         steps: end.clone(),
         randn_args,

@@ -183,6 +183,26 @@ fn stochastic_evolution_keeps_original_for_when_body_has_other_effects() {
 }
 
 #[test]
+fn stochastic_snapshots_do_not_erase_named_aliases_or_shadowed_callbacks() {
+    for source in [
+        "M=2; S=ones(M,1,'single'); drift=single(0.1); scale=single(0.2); \
+         for t=1:3; Z=randn(M,1,'single'); saved=S; S=S.*exp(drift+scale.*Z); end",
+        "M=2; S=ones(M,1,'single'); drift=single(0.1); scale=single(0.2); \
+         for t=1:3; Z=randn(M,1,'single'); S=S.*exp(drift+scale.*Z); end; \
+         function y=exp(x); y=x; end",
+    ] {
+        let bytecode = compile_source(source).unwrap();
+        assert!(
+            !bytecode
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::StochasticEvolution { .. })),
+            "only compiler-private copies and authenticated builtin calls may be selected: {source}"
+        );
+    }
+}
+
+#[test]
 fn stochastic_evolution_loop_preserves_native_single_state() {
     let vars = execute_program(
         "
