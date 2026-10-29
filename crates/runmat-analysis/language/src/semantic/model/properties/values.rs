@@ -289,6 +289,20 @@ pub(in crate::semantic::model) fn required_vector(
 ) -> Option<[f64; 3]> {
     let dimension = dimension.into();
     let value = required_assignment(declaration, statements, name, diagnostics)?;
+    if let CheckedExpressionKind::Quantity { value: inner, .. } = &value.kind {
+        if matches!(inner.kind, CheckedExpressionKind::List(_)) {
+            diagnostic(
+                declaration,
+                value.span,
+                format!(
+                    "definition member `{name}` takes a unit on each component (`[0 m, 0 m, 0 m]`); \
+                     one trailing unit on the vector is not accepted yet [pending:language.vector.trailing-unit]"
+                ),
+                diagnostics,
+            );
+            return None;
+        }
+    }
     let CheckedExpressionKind::List(values) = &value.kind else {
         invalid(
             declaration,

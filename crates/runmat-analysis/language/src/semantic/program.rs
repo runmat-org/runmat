@@ -540,14 +540,34 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                         statements,
                     }
                 }
-                FeaStatementKind::Include(value) => CheckedFeaStatementKind::Include(check_value(
-                    catalog,
-                    path,
-                    source,
-                    scope,
-                    value,
-                    diagnostics,
-                )),
+                FeaStatementKind::Include(value) => {
+                    // `include model.m(name = value, ...)`: the model reference checks as usual;
+                    // binding its inputs by name is a planned feature.
+                    let value = match &value.kind {
+                        runmat_fea_syntax::FeaExpressionKind::Call { callee, .. } => {
+                            diagnostics.push(FeaDiagnostic::error(
+                                "fea.semantic.include_arguments",
+                                "an include binds no inputs yet; include the model by reference \
+                                 and set its inputs inside it [pending:language.include.parameterized]",
+                                FeaDiagnosticPhase::Semantic,
+                                Some(FeaDiagnosticLocation {
+                                    path: path.clone(),
+                                    span: value.span,
+                                }),
+                            ));
+                            callee.as_ref()
+                        }
+                        _ => value,
+                    };
+                    CheckedFeaStatementKind::Include(check_value(
+                        catalog,
+                        path,
+                        source,
+                        scope,
+                        value,
+                        diagnostics,
+                    ))
+                }
                 FeaStatementKind::Retain(value) => CheckedFeaStatementKind::Retain(check_value(
                     catalog,
                     path,
