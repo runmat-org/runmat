@@ -88,9 +88,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
                 "execution = fea.ExecutionStep.new(step, fea.ComputeBackend.gpu(), ...\n",
                 "    fea.SolverOptions.defaults(step), true);",
             ),
-            concat!(
-                "assert(execution.accelerator_admission == \"required\");",
-            ),
+            "assert(execution.accelerator_admission == \"required\");",
         ),
     ],
     faqs: &[
