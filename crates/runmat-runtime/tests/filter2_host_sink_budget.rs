@@ -2,43 +2,13 @@
 //! resident readback route and its shared placement service.
 
 use futures::executor::block_on;
-use runmat_accelerate::{placement::PlacementSession, simple_provider::InProcessProvider};
+use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{AccelProvider, ThreadProviderGuard};
-use runmat_runtime::{
-    builtins::common::gpu_helpers,
-    call_builtin_async_in_context,
-    context::{
-        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
-        RuntimeServicePorts,
-    },
-};
+use runmat_runtime::{builtins::common::gpu_helpers, call_builtin_async_in_context};
 use runmat_value::{NumericDType, Tensor, Value};
-use std::rc::Rc;
-
-struct HostBudget(u64);
-impl RuntimeParallelService for HostBudget {
-    fn supports(&self, _: ParallelCapability) -> bool {
-        false
-    }
-    fn placement_resources(&self) -> RuntimeParallelResources {
-        RuntimeParallelResources {
-            cpu_millicores_available: 1_000,
-            memory_available_bytes: Some(self.0),
-            epoch: 0,
-        }
-    }
-}
-
-fn context(session: Rc<PlacementSession>, host_bytes: u64) -> RuntimeContext {
-    RuntimeContext::new(Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
-    .with_service_ports(
-        RuntimeServicePorts::default()
-            .with_placement(session)
-            .with_parallel(Rc::new(HostBudget(host_bytes))),
-    )
-}
+#[path = "support/budgeted_placement.rs"]
+mod budgeted_placement;
+use budgeted_placement::{assert_capacity_denied, context, session};
 
 #[test]
 fn resident_h_host_image_is_one_admitted_readback_and_no_effect_below_budget() {
@@ -50,9 +20,9 @@ fn resident_h_host_image_is_one_admitted_readback_and_no_effect_below_budget() {
     let args = [Value::GpuTensor(resident_h.clone()), Value::Tensor(image)];
 
     provider.reset_telemetry();
-    let session = Rc::new(PlacementSession::new(Default::default()));
+    let placement = session();
     let result = block_on(call_builtin_async_in_context(
-        &context(session.clone(), 1_000_000),
+        &context(placement.clone(), 1_000_000),
         "filter2",
         &args,
     ))
@@ -64,7 +34,7 @@ fn resident_h_host_image_is_one_admitted_readback_and_no_effect_below_budget() {
     assert_eq!(result.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
     assert!(provider.telemetry_snapshot().download_bytes > 0);
     assert_eq!(
-        session
+        placement
             .profile_snapshot()
             .feedback
             .iter()
@@ -76,23 +46,18 @@ fn resident_h_host_image_is_one_admitted_readback_and_no_effect_below_budget() {
 
     provider.reset_telemetry();
     let error = block_on(call_builtin_async_in_context(
-        &context(Rc::new(PlacementSession::new(Default::default())), 1),
+        &context(session(), 1),
         "filter2",
         &args,
     ))
     .expect_err("finite host quota must reject before H readback");
-    assert!(error
-        .identifier()
-        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    assert_capacity_denied(&error);
     assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     assert!(resident_h.allocation_lease().validate_live().is_ok());
 
     provider.reset_telemetry();
     let invalid = block_on(call_builtin_async_in_context(
-        &context(
-            Rc::new(PlacementSession::new(Default::default())),
-            1_000_000,
-        ),
+        &context(session(), 1_000_000),
         "filter2",
         &[
             Value::GpuTensor(resident_h.clone()),
@@ -115,9 +80,9 @@ fn integer_host_h_with_resident_x_uses_admitted_host_route_without_upload() {
     let args = [Value::Tensor(kernel), Value::GpuTensor(resident_x.clone())];
 
     provider.reset_telemetry();
-    let session = Rc::new(PlacementSession::new(Default::default()));
+    let placement = session();
     let result = block_on(call_builtin_async_in_context(
-        &context(session.clone(), 1_000_000),
+        &context(placement.clone(), 1_000_000),
         "filter2",
         &args,
     ))
@@ -131,7 +96,7 @@ fn integer_host_h_with_resident_x_uses_admitted_host_route_without_upload() {
     assert!(telemetry.download_bytes > 0);
     assert_eq!(telemetry.upload_bytes, 0);
     assert_eq!(
-        session
+        placement
             .profile_snapshot()
             .feedback
             .iter()
@@ -143,14 +108,12 @@ fn integer_host_h_with_resident_x_uses_admitted_host_route_without_upload() {
 
     provider.reset_telemetry();
     let rejected = block_on(call_builtin_async_in_context(
-        &context(Rc::new(PlacementSession::new(Default::default())), 1),
+        &context(session(), 1),
         "filter2",
         &args,
     ))
     .expect_err("finite quota rejects before X readback");
-    assert!(rejected
-        .identifier()
-        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    assert_capacity_denied(&rejected);
     let telemetry = provider.telemetry_snapshot();
     assert_eq!(telemetry.download_bytes, 0);
     assert_eq!(telemetry.upload_bytes, 0);

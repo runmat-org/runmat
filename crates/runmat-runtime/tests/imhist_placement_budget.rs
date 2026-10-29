@@ -2,53 +2,13 @@
 //! placement service. A unit-test crate would duplicate the runtime trait that
 //! `runmat-accelerate` implements.
 use futures::executor::block_on;
-use runmat_accelerate::{placement::PlacementSession, simple_provider::InProcessProvider};
+use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{AccelProvider, ThreadProviderGuard};
-use runmat_runtime::{
-    builtins::common::gpu_helpers,
-    call_builtin_async_with_outputs_in_context,
-    context::{
-        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
-        RuntimeServicePorts,
-    },
-};
+use runmat_runtime::{builtins::common::gpu_helpers, call_builtin_async_with_outputs_in_context};
 use runmat_value::{NumericDType, Tensor, Value};
-use std::rc::Rc;
-
-struct HostBudget(runmat_runtime::context::host_effect::ManagedHostEffectLedger);
-
-impl RuntimeParallelService for HostBudget {
-    fn supports(&self, _: ParallelCapability) -> bool {
-        false
-    }
-
-    fn placement_resources(&self) -> RuntimeParallelResources {
-        let snapshot = self.0.snapshot();
-        RuntimeParallelResources {
-            cpu_millicores_available: 1_000,
-            memory_available_bytes: Some(snapshot.free_bytes()),
-            epoch: snapshot.epoch,
-        }
-    }
-    fn managed_host_effect_ledger(
-        &self,
-    ) -> Option<runmat_runtime::context::host_effect::ManagedHostEffectLedger> {
-        Some(self.0.clone())
-    }
-}
-
-fn budgeted_context(host_bytes: u64) -> RuntimeContext {
-    RuntimeContext::new(Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
-    .with_service_ports(
-        RuntimeServicePorts::default()
-            .with_placement(Rc::new(PlacementSession::new(Default::default())))
-            .with_parallel(Rc::new(HostBudget(
-                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(host_bytes),
-            ))),
-    )
-}
+#[path = "support/budgeted_placement.rs"]
+mod budgeted_placement;
+use budgeted_placement::{assert_capacity_denied, context, session};
 
 #[test]
 fn finite_host_budget_admits_bound_and_rejects_before_gather() {
@@ -61,7 +21,7 @@ fn finite_host_budget_admits_bound_and_rejects_before_gather() {
 
     provider.reset_telemetry();
     let admitted = block_on(call_builtin_async_with_outputs_in_context(
-        &budgeted_context(1024),
+        &context(session(), 1_000_000),
         "imhist",
         &args,
         1,
@@ -75,15 +35,13 @@ fn finite_host_budget_admits_bound_and_rejects_before_gather() {
 
     provider.reset_telemetry();
     let rejected = block_on(call_builtin_async_with_outputs_in_context(
-        &budgeted_context(1),
+        &context(session(), 1),
         "imhist",
         &args,
         1,
     ))
     .expect_err("finite budget must reject selected route before gather");
-    assert!(rejected
-        .identifier()
-        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    assert_capacity_denied(&rejected);
     assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     assert!(source.allocation_lease().validate_live().is_ok());
 }

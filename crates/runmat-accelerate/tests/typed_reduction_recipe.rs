@@ -478,7 +478,17 @@ fn f64_zero_sign_encoding_is_exact_without_narrowing_nonzero_comparisons() {
             ));
             assert!(!source.contains("bitcast<f32>(0x"));
             assert!(!source.contains("bitcast<vec2<u32>>"));
-            assert!(!source.contains("bitcast<f64>"));
+            // The shared IEEE word prelude legitimately reconstructs F64.
+            // The zero/NaN helpers themselves must not use an unsupported
+            // scalar-f64/two-u32 bitcast or narrow a nonzero comparison.
+            let zero_nan_helpers = source
+                .split_once("fn rr_nan()")
+                .unwrap()
+                .1
+                .split_once("fn rr_empty()")
+                .unwrap()
+                .0;
+            assert!(!zero_nan_helpers.contains("bitcast<f64>"));
             // Infinity and every nonzero comparison still use native F64
             // operands, never the sign helper's temporary f32 zero.
             assert!(source.contains(if name == "min" {

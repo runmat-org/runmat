@@ -155,11 +155,11 @@ fn stage_contract(
     } else {
         input_class
     });
-    // mean_host converts any one-element Double scratch tensor into Num,
-    // regardless of its rank. Final Single publication then reconstructs
-    // a [1,1] tensor from that scalar; a final Double result remains Num.
-    // Intermediate stages retain their tensor geometry until the next axis.
-    if final_output_class.is_some() {
+    // Only Double scratch/publication collapses a singleton into Num. An
+    // out-of-rank Single identity returns its original full-rank tensor;
+    // a native/default Single template preserves that carrier and shape.
+    // Intermediate stages retain their geometry until final publication.
+    if final_output_class.is_some() && (raw_double || output_class == NumericClass::Double) {
         output_shape = mean_public_shape(&output_shape, count);
     }
     Some(FusionReductionContract {
@@ -331,6 +331,42 @@ mod tests {
 
     #[test]
     fn vecdim_singleton_shape_tracks_tensor_until_publication() {
+        for input in [
+            single(vec![-0.0], vec![1, 1, 1]),
+            Value::Tensor(Tensor::new(vec![-0.0], vec![1, 1, 1]).unwrap()),
+        ] {
+            for template in [None, Some("native"), Some("double")] {
+                let mut controls = vec![Value::Num(4.0)];
+                if let Some(template) = template {
+                    controls.push(Value::String(template.into()));
+                }
+                let contract = receipt(&input, &controls).unwrap();
+                assert!(contract.identity);
+                assert!(contract.axes.is_empty());
+                assert_eq!(contract.accumulator_class, NumericClass::Double);
+                let expected_shape = if contract.output_class == NumericClass::Single {
+                    vec![1, 1, 1]
+                } else {
+                    vec![1, 1]
+                };
+                assert_eq!(contract.output_shape, expected_shape);
+                let actual = futures::executor::block_on(mean_builtin(
+                    input.clone(),
+                    crate::builtins::common::test_support::builtin_arguments(controls),
+                ))
+                .unwrap();
+                let fact = value_fact(&actual);
+                assert_eq!(fact.numeric().unwrap().class, contract.output_class);
+                let shape: Option<Vec<_>> = fact.shape.known_dims().unwrap().into_iter().collect();
+                assert_eq!(shape.unwrap(), contract.output_shape);
+                let bits = match actual {
+                    Value::Num(value) => value.to_bits(),
+                    Value::Tensor(tensor) => tensor.materialize_f64()[0].to_bits(),
+                    other => panic!("unexpected mean identity carrier {other:?}"),
+                };
+                assert_eq!(bits, (-0.0f64).to_bits());
+            }
+        }
         let input = single(vec![3.0, 5.0], vec![1, 1, 2]);
         let axes = |dims: Vec<f64>| Value::Tensor(Tensor::new(dims, vec![1, 2]).unwrap());
         let one = stages(&input, &[Value::Num(3.0)]).unwrap();

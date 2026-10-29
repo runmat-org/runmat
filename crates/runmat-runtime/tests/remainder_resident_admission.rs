@@ -3,7 +3,7 @@ use futures::executor::block_on;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use runmat_value::{IntValue, LogicalArray, Value};
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 #[test]
 fn remainder_pair_errors_precede_provider_lookup_but_not_invalid_storage() {
@@ -66,7 +66,7 @@ fn remainder_pair_errors_precede_provider_lookup_but_not_invalid_storage() {
 
 struct LogicalProvider {
     owner: TestAllocationOwner,
-    probe: Mutex<Option<RetirementProbe>>,
+    probes: Mutex<HashMap<u64, RetirementProbe>>,
 }
 impl AccelProvider for LogicalProvider {
     fn elem_rem<'a>(
@@ -90,16 +90,40 @@ impl AccelProvider for LogicalProvider {
         "logical U8 admission fixture".into()
     }
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation("host result only"))
+        panic!("restoration must preserve its exact typed numeric carrier")
+    }
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        // Explicit resident intent restores the actual host result on this
+        // same owner. This is a transfer, never an integer remainder hook.
+        let data = match host.data {
+            HostNumericDataView::F64(data) => HostNumericDataOwned::F64(data.to_vec()),
+            HostNumericDataView::U8(data) => HostNumericDataOwned::U8(data.to_vec()),
+            _ => panic!("unexpected logical remainder publication class"),
+        };
+        let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
+            data,
+            shape: host.shape.to_vec(),
+            storage: host.storage,
+        })?;
+        self.probes
+            .lock()
+            .unwrap()
+            .insert(allocation.handle.buffer_id(), allocation.probe);
+        Ok(allocation.handle)
     }
     fn download<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
             let host = self.download_numeric(input).await?;
-            let HostNumericDataOwned::U8(data) = host.data else {
-                panic!("logical U8 payload")
+            let data = match host.data {
+                HostNumericDataOwned::U8(data) => data.into_iter().map(f64::from).collect(),
+                HostNumericDataOwned::F64(data) => data,
+                _ => panic!("logical input or exact restored host output"),
             };
             Ok(HostTensorOwned {
-                data: data.into_iter().map(f64::from).collect(),
+                data,
                 shape: host.shape,
                 storage: host.storage,
             })
@@ -110,13 +134,21 @@ impl AccelProvider for LogicalProvider {
         input: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
-            let probe = self.probe.lock().unwrap().as_ref().unwrap().clone();
+            let probe = self
+                .probes
+                .lock()
+                .unwrap()
+                .get(&input.buffer_id())
+                .unwrap()
+                .clone();
             probe.with_data(input, |data| {
-                let HostNumericDataView::U8(data) = data else {
-                    panic!("logical U8 payload")
+                let data = match data {
+                    HostNumericDataView::U8(data) => HostNumericDataOwned::U8(data.to_vec()),
+                    HostNumericDataView::F64(data) => HostNumericDataOwned::F64(data.to_vec()),
+                    _ => panic!("logical input or exact restored host output"),
                 };
                 HostNumericTensorOwned {
-                    data: HostNumericDataOwned::U8(data.to_vec()),
+                    data,
                     shape: input.shape().to_vec(),
                     storage: GpuTensorStorage::Real,
                 }
@@ -129,14 +161,18 @@ impl AccelProvider for LogicalProvider {
 fn public_logical_u8_remainder_with_logical_or_bool_matches_host_domain() {
     let provider = Box::leak(Box::new(LogicalProvider {
         owner: TestAllocationOwner::new(),
-        probe: Mutex::new(None),
+        probes: Mutex::new(HashMap::new()),
     }));
     let _selected = ThreadProviderGuard::set(Some(provider));
     let input = provider
         .owner
         .allocate_logical(vec![1, 1], vec![2, 1])
         .unwrap();
-    *provider.probe.lock().unwrap() = Some(input.probe.clone());
+    provider
+        .probes
+        .lock()
+        .unwrap()
+        .insert(input.handle.buffer_id(), input.probe.clone());
     let host = Value::LogicalArray(LogicalArray::new(vec![1, 1], vec![2, 1]).unwrap());
     let resident = Value::GpuTensor(input.handle.clone());
     for name in ["rem", "mod"] {
@@ -156,6 +192,10 @@ fn public_logical_u8_remainder_with_logical_or_bool_matches_host_domain() {
         ] {
             let expected = runmat_runtime::call_builtin(name, &host_args).unwrap();
             let actual = runmat_runtime::call_builtin(name, &args).unwrap();
+            let Value::GpuTensor(output) = actual.value() else {
+                panic!("explicit resident input must restore on its exact owner");
+            };
+            assert_eq!(output.device_id(), input.handle.device_id());
             let actual = block_on(runmat_runtime::gather_if_needed_async(&actual)).unwrap();
             assert_eq!(
                 &actual,

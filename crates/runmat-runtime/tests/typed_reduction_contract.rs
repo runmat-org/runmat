@@ -231,7 +231,8 @@ fn output_classes_and_nd_axes_match_actual_host_dispatch() {
             let sum = compare("sum", &input, &[], &[3., 7., 11., 15.]);
             assert_eq!(sum.axes, vec![0]);
             assert_eq!(sum.output_shape, vec![1, 2, 2]);
-            assert_eq!(sum.output_class, NumericClass::Double);
+            assert_eq!(sum.output_class, class);
+            assert_eq!(sum.accumulator_class, NumericClass::Double);
             assert_eq!(
                 compare("sum", &input, &[text("native")], &[3., 7., 11., 15.]).output_class,
                 class
