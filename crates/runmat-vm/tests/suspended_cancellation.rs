@@ -46,10 +46,24 @@ fn execution_scope_preserves_normal_caught_language_errors_inner() {
         source.token(),
     );
     let mut vars = vec![];
-    let outcome = futures::executor::block_on(runmat_vm::interpret_with_vars_in_context(
-        &bytecode, &mut vars, None, runtime,
-    ))
-    .expect("language catch remains available");
+    let admission = runmat_vm::workspace_admission(
+        bytecode
+            .var_names
+            .iter()
+            .map(|(slot, name)| (name.clone(), *slot))
+            .collect(),
+        Default::default(),
+    );
+    assert!(runmat_runtime::context::legacy::active().is_none());
+    let execution = futures::executor::block_on(runmat_vm::interpret_with_workspace_in_context(
+        &bytecode,
+        &mut vars,
+        None,
+        runtime,
+        Some(admission),
+    ));
+    assert!(runmat_runtime::context::legacy::active().is_none());
+    let outcome = execution.outcome.expect("language catch remains available");
     let runmat_vm::InterpreterOutcome::Completed(completion) = outcome;
     let slot = bytecode
         .var_names
@@ -61,6 +75,17 @@ fn execution_scope_preserves_normal_caught_language_errors_inner() {
         .get(slot)
         .expect("completed value remains in its compiled slot");
     assert_eq!(*value, runmat_value::Value::Num(42.0));
+    let workspace = execution
+        .workspace
+        .expect("rich public caller receives exact closed frame without ambient context");
+    assert_eq!(
+        *workspace
+            .state
+            .vars
+            .get(slot)
+            .expect("closed workspace slot"),
+        runmat_value::Value::Num(42.0)
+    );
     assert!(!source.token().is_cancelled());
 }
 

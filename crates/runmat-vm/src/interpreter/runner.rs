@@ -34,6 +34,8 @@ mod bound_invocation;
 mod instruction_loop;
 #[path = "runner/super_constructor.rs"]
 mod super_constructor;
+#[path = "runner/workspace_execution.rs"]
+mod workspace_execution;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::future::Future;
@@ -1019,21 +1021,20 @@ pub async fn interpret_with_workspace_and_dynamic_admission_in_context(
         bytecode,
         current_function_name.unwrap_or("<main>"),
     );
-    let outcome = workspace_activation
-        .scope(
-            runtime.scope(runmat_runtime::data::with_tx_registry_scope(scope_vm_pc(
-                interpret_with_vars_inner(
-                    bytecode,
-                    initial_vars,
-                    current_function_name,
-                    runtime.clone(),
-                    dynamic_admission,
-                ),
-            ))),
-        )
-        .await;
-    let workspace = crate::runtime::workspace::take_workspace_completion(frame);
-    WorkspaceInterpreterOutcome { outcome, workspace }
+    let execution = workspace_activation.scope(runmat_runtime::data::with_tx_registry_scope(
+        scope_vm_pc(interpret_with_vars_inner(
+            bytecode,
+            initial_vars,
+            current_function_name,
+            runtime.clone(),
+            dynamic_admission,
+        )),
+    ));
+    runtime
+        .scope(workspace_execution::PendingWorkspaceExecution::new(
+            execution, frame,
+        ))
+        .await
 }
 
 pub(crate) async fn interpret_with_workspace_vars_and_dynamic_admission_in_context(
@@ -1057,21 +1058,20 @@ pub(crate) async fn interpret_with_workspace_vars_and_dynamic_admission_in_conte
         bytecode,
         current_function_name.unwrap_or("<main>"),
     );
-    let outcome = workspace_activation
-        .scope(
-            runtime.scope(runmat_runtime::data::with_tx_registry_scope(scope_vm_pc(
-                interpret_with_vars_owner_inner(
-                    bytecode,
-                    initial_vars,
-                    current_function_name,
-                    runtime.clone(),
-                    dynamic_admission,
-                ),
-            ))),
-        )
-        .await;
-    let workspace = crate::runtime::workspace::take_workspace_completion(frame);
-    WorkspaceInterpreterOutcome { outcome, workspace }
+    let execution = workspace_activation.scope(runmat_runtime::data::with_tx_registry_scope(
+        scope_vm_pc(interpret_with_vars_owner_inner(
+            bytecode,
+            initial_vars,
+            current_function_name,
+            runtime.clone(),
+            dynamic_admission,
+        )),
+    ));
+    runtime
+        .scope(workspace_execution::PendingWorkspaceExecution::new(
+            execution, frame,
+        ))
+        .await
 }
 
 pub async fn interpret_resume_in_context(

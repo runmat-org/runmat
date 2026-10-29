@@ -433,6 +433,12 @@ fn cleanup_callback_gate_prevents_command_publication_until_drained() {
 
 #[test]
 fn cancelled_source_command_seals_its_owner_and_later_command_admits_fresh_work() {
+    for cancel in [false, true] {
+        cancelled_source_command_preserves_workspace_and_seals_owner(cancel);
+    }
+}
+
+fn cancelled_source_command_preserves_workspace_and_seals_owner(cancel: bool) {
     let mut session = session();
     let (entered_tx, entered_rx) = futures::channel::oneshot::channel::<()>();
     let entered_tx = Arc::new(Mutex::new(Some(entered_tx)));
@@ -456,12 +462,28 @@ fn cancelled_source_command_seals_its_owner_and_later_command_admits_fresh_work(
             Ok(crate::execution::InputResponse::Line("1".into()))
         }
     });
-    let first = request(&session, "<profiling-cancelled>", "x = input('first: ');");
     let host = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("single-lane test host");
     host.block_on(async {
+        let seed = request(&session, "<profiling-original>", "original = [11 12];");
+        assert_measured_total(session.execute_request(seed).await);
+        let original_storage = {
+            let workspace = session
+                .base_workspace_snapshot()
+                .expect("original workspace");
+            let Some(Value::Tensor(original)) = workspace.get("original") else {
+                panic!("original tensor was not published")
+            };
+            original.as_f64_slice().expect("double original").as_ptr()
+        };
+        let first = request(
+            &session,
+            "<profiling-cancelled>",
+            "prefix = 91; x = input('first: '); after_suspend = 99;",
+        );
+        let interrupt = session.interrupt_handle();
         let mut pending = Box::pin(session.execute_request(first));
         tokio::time::timeout(Duration::from_secs(10), async {
             match futures::future::select(pending.as_mut(), entered_rx).await {
@@ -476,7 +498,47 @@ fn cancelled_source_command_seals_its_owner_and_later_command_admits_fresh_work(
         })
         .await
         .expect("pending command watchdog");
+        if cancel {
+            interrupt.cancel(runmat_execution::CancellationReason::User);
+            let response = pending.as_mut().await;
+            match response.result {
+                Ok(outcome) => assert!(outcome.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "RunMat:ExecutionCancelled"
+                        || diagnostic.code == "ExecutionCancelled"
+                })),
+                Err(crate::RunError::Runtime(error)) => assert!(matches!(
+                    error.identifier(),
+                    Some("RunMat:ExecutionCancelled" | "ExecutionCancelled")
+                )),
+                Err(error) => panic!("unexpected cancellation error: {error}"),
+            }
+        }
         drop(pending);
+        {
+            let workspace = session
+                .base_workspace_snapshot()
+                .expect("retained workspace");
+            let Some(Value::Tensor(original)) = workspace.get("original") else {
+                panic!("abandonment lost original workspace owner")
+            };
+            assert_eq!(original.as_f64_slice().unwrap().as_ptr(), original_storage);
+            assert_eq!(original.shape(), &[1, 2]);
+            assert_eq!(original.as_f64_slice(), Some([11.0, 12.0].as_slice()));
+            assert_eq!(workspace.get("prefix"), Some(&Value::Num(91.0)));
+            assert!(workspace.get("x").is_none());
+            assert!(workspace.get("after_suspend").is_none());
+        }
+        // A completed error returns its moved owner through the ordinary rich
+        // outcome; Drop must retire that same exact frame without leaving its
+        // register file rooted in the legacy thread-local completion handoff.
+        session
+            .runtime_context()
+            .clone()
+            .scope(async {
+                assert!(runmat_vm::take_updated_workspace_state().is_none());
+                assert!(runmat_vm::take_updated_workspace_assigned_report().is_none());
+            })
+            .await;
         let old = session
             .runtime_context()
             .command_profiling()
