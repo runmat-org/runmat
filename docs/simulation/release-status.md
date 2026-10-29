@@ -30,7 +30,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electromagnetic nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### electromagnetic.transient
 
@@ -38,7 +38,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electromagnetic transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### magnetic.harmonic.vector-potential
 
@@ -64,7 +64,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `acoustic nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### acoustic.periodic.rotational
 
@@ -81,7 +81,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `acoustic static` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
 - Scope: awaiting a product decision on whether this procedure belongs in the final system.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ## Fluid flow
 
@@ -92,7 +92,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
 - Scope: awaiting a product decision on whether this procedure belongs in the final system.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### fluid.nonlinear
 
@@ -100,7 +100,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### fluid.periodic
 
@@ -118,7 +118,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `thermomechanical harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### thermomechanical.transient
 
@@ -126,7 +126,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `thermomechanical transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ## Electrothermal
 
@@ -136,7 +136,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electrothermal harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### electrothermal.nonlinear
 
@@ -144,7 +144,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electrothermal nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ## Conjugate heat transfer
 
@@ -154,7 +154,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `conjugate_heat_transfer harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### conjugate-heat-transfer.nonlinear
 
@@ -162,7 +162,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `conjugate_heat_transfer nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ## Fluid–structure interaction
 
@@ -172,7 +172,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid_structure_interaction harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ### fluid-structure-interaction.nonlinear
 
@@ -180,7 +180,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid_structure_interaction nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ## The `.fea` language
 
