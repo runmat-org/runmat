@@ -893,7 +893,7 @@ fn test_await_passes_through_non_spawn_operand_at_runtime() {
 }
 
 #[test]
-fn test_spawn_handle_is_consumed_after_await() {
+fn test_spawn_handle_retains_its_completed_result_after_await() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
         engine.set_compat_mode(CompatMode::RunMat);
@@ -912,28 +912,10 @@ fn test_spawn_handle_is_consumed_after_await() {
         assert_eq!(first.value, Some(runmat_value::Value::Num(42.0)));
 
         let second_await =
-            runmat_core::execute_text_request_for_testing(&mut engine, "second = await(t);");
-        match second_await {
-            Err(RunError::Runtime(err)) => {
-                assert_eq!(err.identifier(), Some("RunMat:ExecutionService"));
-            }
-            Err(other) => panic!("expected runtime await-handle error, got: {other:?}"),
-            Ok(exec) => {
-                if let Some(err) = &exec.error {
-                    assert_eq!(err.identifier(), Some("RunMat:ExecutionService"));
-                } else {
-                    let second =
-                        runmat_core::execute_text_request_for_testing(&mut engine, "second")
-                            .expect_err(
-                                "second binding should be absent when consumed handle is ignored",
-                            );
-                    let RunError::Semantic(err) = second else {
-                        panic!("expected semantic undefined-variable error");
-                    };
-                    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
-                }
-            }
-        }
+            runmat_core::execute_text_request_for_testing(&mut engine, "second = await(t); second")
+                .expect("completed task can be awaited again");
+        assert!(second_await.error.is_none(), "{:?}", second_await.error);
+        assert_eq!(second_await.value, first.value);
     });
 }
 

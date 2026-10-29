@@ -1341,7 +1341,11 @@ mod tests {
                 .expect("register collecting observer");
             service
                 .cancel(&Value::Future(future.into()), CancellationReason::User)
-                .expect("retire service state");
+                .expect("completed cancellation preserves the terminal result");
+            // Completed aliases retain their original result. Retire the
+            // service owner, not that immutable outcome, while the claimant
+            // independently keeps its managed result rooted.
+            drop(service);
             control.unroot().expect("trigger collecting observer");
             assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
             runmat_gc::gc_collect_major().expect("collect while claimant owns result");

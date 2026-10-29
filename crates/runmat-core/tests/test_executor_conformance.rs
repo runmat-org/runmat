@@ -310,21 +310,10 @@ async fn executable_unit_retains_exact_program_point_analysis() {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let binding_names = unit.binding_names();
-        let native =
-            runmat_native_codegen::lower_executable(runmat_native_codegen::NativeLoweringInput {
-                mir: unit.mir(),
-                analysis: unit.analysis(),
-                manifest: &envelope.manifest,
-                entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
-                    unit.mir(),
-                    *unit.mir().entrypoints.first().expect("fixture entrypoint"),
-                    envelope.manifest.identity.entrypoint_function.unwrap(),
-                )
-                .unwrap(),
-                binding_names: Some(&binding_names),
-                target: runmat_native_codegen::NativeTarget::current(),
-            })
+        let native = unit
+            .prepare_native_compilation()
+            .unwrap()
+            .lower(runmat_native_codegen::NativeTarget::current())
             .unwrap();
         assert_eq!(native.requirements.regions, envelope.manifest.regions);
         let native_region_ids = native
@@ -402,7 +391,7 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let unit = session
         .compile_executable_unit(
-            ExecutableSource::new("path:portable-script", "script.m", "answer = 42;\n"),
+            ExecutableSource::new("path:portable-script", "script.m", "answer = 42;\nanswer\n"),
             None,
         )
         .await
@@ -412,10 +401,15 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
         envelope.manifest.identity.entrypoint_kind,
         runmat_execution::ExecutableEntrypointKind::Script
     );
-    assert!(matches!(
-        execute_portable_envelope(&envelope).await,
-        runmat_execution_artifact::ProgramExecutionResponse::Success { .. }
-    ));
+    let response = execute_portable_envelope(&envelope).await;
+    let runmat_execution_artifact::ProgramExecutionResponse::Success { outputs } = response else {
+        panic!("portable script did not complete: {response:?}");
+    };
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(
+        runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0]).unwrap(),
+        runmat_value::Value::Num(42.0)
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
