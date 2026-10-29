@@ -178,11 +178,10 @@ impl SolverMeshArtifact {
         &self,
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<(), MeshingContractError> {
-        self.validate_payload_with_cancellation(cancellation)?;
+        let digest = self.admitted_identity_digest_with_cancellation(cancellation)?;
         self.canonical_digest
             .validate_nonzero("artifact.canonical_digest")?;
-        if self.canonical_digest != artifact_identity_digest_with_cancellation(self, cancellation)?
-        {
+        if self.canonical_digest != digest {
             return Err(MeshingContractError::invalid(
                 "artifact.canonical_digest",
                 "does not match the canonical artifact payload",
@@ -216,7 +215,58 @@ impl SolverMeshArtifact {
         &self,
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<StableDigest, MeshingContractError> {
+        if let Some(identity) = self.topology.admitted(
+            self.schema_version,
+            &self.geometry,
+            &self.resolved_request,
+        ) {
+            return Ok(identity.digest());
+        }
         artifact_identity_digest_with_cancellation(self, cancellation)
+    }
+
+    /// Validated payload identity: the topology's admitted identity when it was derived under
+    /// this exact header, otherwise full payload validation and a fresh digest, which is then
+    /// recorded on the topology. The cheap header checks always run.
+    fn admitted_identity_digest_with_cancellation(
+        &self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<StableDigest, MeshingContractError> {
+        if let Some(identity) = self.topology.admitted(
+            self.schema_version,
+            &self.geometry,
+            &self.resolved_request,
+        ) {
+            self.validate_header()?;
+            return Ok(identity.digest());
+        }
+        self.validate_payload_with_cancellation(cancellation)?;
+        let digest = artifact_identity_digest_with_cancellation(self, cancellation)?;
+        self.topology.admit(
+            self.schema_version,
+            &self.geometry,
+            &self.resolved_request,
+            digest,
+        );
+        Ok(digest)
+    }
+
+    /// Canonical encoded size of this validated artifact, derived once per admitted identity.
+    pub fn canonical_encoded_len(&self) -> Result<u64, MeshingContractError> {
+        self.validate_canonical()?;
+        let Some(identity) = self.topology.admitted(
+            self.schema_version,
+            &self.geometry,
+            &self.resolved_request,
+        ) else {
+            return Ok(self.canonical_encode()?.len() as u64);
+        };
+        if let Some(length) = identity.encoded_len().get() {
+            return Ok(*length);
+        }
+        let length = super::encode_contract(Self::DOMAIN, self, Self::LIMITS)?.len() as u64;
+        let _ = identity.encoded_len().set(length);
+        Ok(length)
     }
 
     pub fn seal_canonical_digest(&mut self) -> Result<StableDigest, MeshingContractError> {
@@ -227,8 +277,7 @@ impl SolverMeshArtifact {
         &mut self,
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<StableDigest, MeshingContractError> {
-        self.validate_payload_with_cancellation(cancellation)?;
-        let digest = artifact_identity_digest_with_cancellation(self, cancellation)?;
+        let digest = self.admitted_identity_digest_with_cancellation(cancellation)?;
         self.canonical_digest = digest;
         Ok(digest)
     }

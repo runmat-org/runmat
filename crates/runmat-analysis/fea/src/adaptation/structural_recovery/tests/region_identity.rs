@@ -47,14 +47,15 @@ fn check_layout(integration_points: bool) {
         assert!(blended.total_error > 0.0);
         let original_region = mesh.topology.volume_elements[0].region_id.clone();
         mesh.topology.regions.clear();
-        for (index, element) in mesh.topology.volume_elements.iter_mut().enumerate() {
+        let topo = &mut *mesh.topology;
+        for (index, element) in topo.volume_elements.iter_mut().enumerate() {
             let mut occurrence = original_region.clone();
             if index > 0 {
                 occurrence.assembly_path = vec!["root".to_owned(), format!("part_{index}")];
             }
             element.region_id = occurrence.clone();
             element.provenance = vec![occurrence.clone()];
-            mesh.topology.regions.push(MeshRegion {
+            topo.regions.push(MeshRegion {
                 region_id: occurrence,
                 element_ids: vec![element.element_id],
             });

@@ -197,7 +197,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
                     ordered_entity_ids: vec![20, 21, 22, 23, 24, 25],
                 },
             ],
-        },
+        }.into(),
     };
     artifact.seal_canonical_digest().unwrap();
     artifact
@@ -363,7 +363,7 @@ fn solver_projection_validation_forms_an_acyclic_final_artifact_chain() {
         schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
         geometry: expected.geometry.clone(),
         resolved_request: expected.resolved_request.clone(),
-        topology: expected.topology.clone(),
+        topology: (*expected.topology).clone(),
     };
     let encoded = projection.canonical_encode().unwrap();
     let decoded = SolverMeshProjection::canonical_decode(&encoded).unwrap();
@@ -400,7 +400,7 @@ fn solver_projection_and_validation_reject_incompatible_contracts() {
         schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
         geometry: source.geometry,
         resolved_request: source.resolved_request,
-        topology: source.topology,
+        topology: source.topology.into_topology(),
     };
     let validation = SolverMeshValidation::from_validated_projection(&projection).unwrap();
 
@@ -646,12 +646,13 @@ fn quadratic_solver_topology_requires_shared_exact_midside_connectivity() {
                 }),
         );
         sort_solver_node_exact_parameters(&mut exact_parameters);
+        let stable_identity = solver_midside_node_identity(
+            TETRAHEDRON_MIDSIDE_EDGE_CORNERS[index]
+                .map(|corner| quadratic.topology.nodes[corner].stable_identity),
+        );
         quadratic.topology.nodes.push(SolverMeshNode {
             node_id: index as u64 + 5,
-            stable_identity: solver_midside_node_identity(
-                TETRAHEDRON_MIDSIDE_EDGE_CORNERS[index]
-                    .map(|corner| quadratic.topology.nodes[corner].stable_identity),
-            ),
+            stable_identity,
             coordinates_m: runmat_types::physical::Quantity::<
                 runmat_types::physical::kind::Position,
                 _,

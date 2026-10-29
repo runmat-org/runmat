@@ -115,7 +115,7 @@ fn projection_and_artifact_share_the_same_nested_capacity_inventory() {
             schema_version: crate::SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
             geometry: artifact.geometry,
             resolved_request: artifact.resolved_request,
-            topology: artifact.topology,
+            topology: artifact.topology.into_topology(),
         };
         assert_eq!(
             projection

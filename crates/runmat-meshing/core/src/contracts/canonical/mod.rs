@@ -5,6 +5,7 @@ mod artifact_order;
 mod artifact_parameters;
 mod artifact_resources;
 mod artifact_storage;
+mod artifact_topology;
 mod artifact_types;
 mod topology_wire;
 mod artifact_workspace;
@@ -34,6 +35,7 @@ pub use artifact_identity::{
     solver_volume_element_identity,
 };
 pub use artifact_parameters::sort_solver_node_exact_parameters;
+pub use artifact_topology::SharedSolverMeshTopology;
 pub use artifact_types::{
     BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, ConformalInterface, ContactPair,
     FieldTopologyLocation, FieldTopologyMap, MeshNeighbor, MeshRegion, SolverBoundaryEdge,

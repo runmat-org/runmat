@@ -28,9 +28,10 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
     let right_region = entity(PersistentEntityKind::Region, "right_material");
     let mut left_elements = Vec::new();
     let mut right_elements = Vec::new();
-    for element in &mut mesh.topology.volume_elements {
+    let topo = &mut *mesh.topology;
+    for element in &mut topo.volume_elements {
         let left = element.node_ids.iter().all(|node_id| {
-            mesh.topology.nodes[*node_id as usize - 1]
+            topo.nodes[*node_id as usize - 1]
                 .coordinates_m
                 .canonical_value()[0]
                 <= 0.5

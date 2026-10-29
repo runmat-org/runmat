@@ -139,14 +139,15 @@ fn refine(
         }
         mesh.topology.regions[0].element_ids =
             (1..=mesh.topology.volume_elements.len() as u64).collect();
-        for topology in &mut mesh.topology.field_topologies {
+        let topo = &mut *mesh.topology;
+        for topology in &mut topo.field_topologies {
             match topology.location {
                 FieldTopologyLocation::Node => {
-                    topology.ordered_entity_ids = (1..=mesh.topology.nodes.len() as u64).collect();
+                    topology.ordered_entity_ids = (1..=topo.nodes.len() as u64).collect();
                 }
                 FieldTopologyLocation::VolumeElement => {
                     topology.ordered_entity_ids =
-                        (1..=mesh.topology.volume_elements.len() as u64).collect();
+                        (1..=topo.volume_elements.len() as u64).collect();
                 }
                 FieldTopologyLocation::BoundaryFace | FieldTopologyLocation::BoundaryEdge => {}
             }
