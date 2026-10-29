@@ -3,6 +3,7 @@
 use super::{
     backend_types::WgpuProvider,
     linalg::{selected_matmul_pipeline, MatmulPipelineRoute},
+    pipeline_cache::PipelineCache,
     pipeline_recipe::{FusionPipelineLayout, PipelineRecipe},
 };
 use crate::backend::wgpu::types::NumericPrecision;
@@ -22,7 +23,7 @@ enum DynamicPipeline {
 impl DynamicPipeline {
     fn is_warm<L, V>(
         self,
-        legacy: Option<&std::collections::HashMap<u64, L>>,
+        legacy: Option<&PipelineCache<L>>,
         validated: Option<&std::collections::HashMap<u64, V>>,
     ) -> Option<bool> {
         match self {
@@ -36,7 +37,13 @@ impl DynamicPipeline {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn dynamic_pipeline_warmth_uses_its_typed_cache_owner() {
-    let legacy = std::collections::HashMap::from([(7u64, ())]);
+    let mut legacy = PipelineCache::default();
+    legacy
+        .insert_unbounded(
+            7,
+            &super::super::pipeline_cache::PipelineOwner::unbounded(()),
+        )
+        .unwrap();
     let validated = std::collections::HashMap::from([(8u64, ())]);
     assert_eq!(
         DynamicPipeline::Legacy(7)
@@ -44,17 +51,11 @@ fn dynamic_pipeline_warmth_uses_its_typed_cache_owner() {
         Some(true)
     );
     assert_eq!(
-        DynamicPipeline::Validated(7).is_warm(
-            None::<&std::collections::HashMap<u64, ()>>,
-            Some(&validated)
-        ),
+        DynamicPipeline::Validated(7).is_warm(None::<&PipelineCache<()>>, Some(&validated)),
         Some(false)
     );
     assert_eq!(
-        DynamicPipeline::Validated(8).is_warm(
-            None::<&std::collections::HashMap<u64, ()>>,
-            Some(&validated)
-        ),
+        DynamicPipeline::Validated(8).is_warm(None::<&PipelineCache<()>>, Some(&validated)),
         Some(true)
     );
     assert_eq!(
@@ -63,10 +64,7 @@ fn dynamic_pipeline_warmth_uses_its_typed_cache_owner() {
         Some(false)
     );
     assert_eq!(
-        DynamicPipeline::Legacy(7).is_warm(
-            None::<&std::collections::HashMap<u64, ()>>,
-            Some(&validated)
-        ),
+        DynamicPipeline::Legacy(7).is_warm(None::<&PipelineCache<()>>, Some(&validated)),
         None
     );
 }
