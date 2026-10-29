@@ -1,9 +1,8 @@
 use std::sync::Once;
 
 use super::*;
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::builtins::fea::object_projection::register_value_class;
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 use runmat_analysis_core::{ResponseSpectrum, ResponseSpectrumId};
 
 pub(super) const RESPONSE_SPECTRUM_CLASS: &str =
@@ -103,17 +102,18 @@ pub(super) fn ensure_response_spectrum_class_registered() {
             RESPONSE_SPECTRUM_CLASS,
         ));
     PORTABLE_SCHEMA.call_once(|| {
-        crate::execution::value_codec::register_immutable_value_class(
-            crate::execution::value_codec::ImmutableValueClassSchema {
-                class_name: RESPONSE_SPECTRUM_CLASS,
-                type_identity: "runmat.fea.response-spectrum",
-                schema_version: 1,
-                allowed_fields: FIELDS,
-                required_fields: FIELDS,
-                validate: validate_object,
-            },
-        )
-        .unwrap_or_else(|error| panic!("failed to register {RESPONSE_SPECTRUM_CLASS}: {error}"));
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let schemas = vec![crate::execution::value_codec::ImmutableValueClassSchema {
+            class_name: RESPONSE_SPECTRUM_CLASS,
+            type_identity: "runmat.fea.response-spectrum",
+            schema_version: 1,
+            allowed_fields: FIELDS,
+            required_fields: FIELDS,
+            validate: validate_object,
+        }];
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASS.ensure(|| {
         register_value_class(
@@ -125,6 +125,7 @@ pub(super) fn ensure_response_spectrum_class_registered() {
 }
 
 fn validate_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     let missing = FIELDS
         .iter()
         .filter(|field| !object.properties().contains_key(field))

@@ -1,13 +1,12 @@
 use std::sync::Once;
 
 use super::*;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{
     quantity_scalar, RAYLEIGH_MASS_COEFFICIENT_CLASS, RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS,
 };
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
-use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
+use crate::execution::value_codec::ImmutableValueClassSchema;
 
 pub(super) const MECHANICAL_DAMPING_CLASS: &str =
     runmat_builtins::fea_contract::model_types::classes::FEA_MECHANICAL_DAMPING_CLASS
@@ -157,15 +156,18 @@ pub(super) fn ensure_damping_class_registered() {
             MECHANICAL_DAMPING_CLASS,
         ));
     PORTABLE_SCHEMA.call_once(|| {
-        register_immutable_value_class(ImmutableValueClassSchema {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let schemas = vec![ImmutableValueClassSchema {
             class_name: MECHANICAL_DAMPING_CLASS,
             type_identity: "runmat.fea.mechanical-damping",
             schema_version: 1,
             allowed_fields: FIELDS,
             required_fields: REQUIRED_FIELDS,
             validate: validate_damping_object,
-        })
-        .unwrap_or_else(|error| panic!("failed to register mechanical damping class: {error}"));
+        }];
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASS.ensure(|| {
         register_value_class(
@@ -180,6 +182,7 @@ pub(super) fn ensure_damping_class_registered() {
 }
 
 fn validate_damping_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     let Some(Value::String(kind)) = object.properties().get(KIND) else {
         return Err("fea.MechanicalDamping requires a string `kind`".into());
     };

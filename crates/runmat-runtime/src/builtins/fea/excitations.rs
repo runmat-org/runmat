@@ -3,10 +3,9 @@ use std::sync::Once;
 
 use super::*;
 use crate::builtins::fea::constraints::require_geometry_binding;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::geometry::region::region_ref_from_value;
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 use runmat_analysis_core::{
     AnalysisExcitation, ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution,
     ExcitationId, ExcitationKinematics, ProjectionRequirement,
@@ -611,32 +610,29 @@ pub(super) fn ensure_excitation_classes_registered() {
             STRUCTURAL_EXCITATION_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for (class_name, type_identity) in excitation_schemas() {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: EXCITATION_FIELDS,
-                    required_fields: EXCITATION_FIELDS,
-                    validate: validate_excitation_object,
-                },
-            )
-            .unwrap_or_else(|error| {
-                panic!("failed to register immutable FEA excitation class {class_name}: {error}")
+            schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+                class_name,
+                type_identity,
+                schema_version: 1,
+                allowed_fields: EXCITATION_FIELDS,
+                required_fields: EXCITATION_FIELDS,
+                validate: validate_excitation_object,
             });
         }
-        crate::execution::value_codec::register_immutable_value_class(
-            crate::execution::value_codec::ImmutableValueClassSchema {
-                class_name: EXCITATION_CASE_CLASS,
-                type_identity: "runmat.fea.excitation-case",
-                schema_version: 1,
-                allowed_fields: CASE_FIELDS,
-                required_fields: CASE_FIELDS,
-                validate: validate_case_object,
-            },
-        )
-        .unwrap_or_else(|error| panic!("failed to register {EXCITATION_CASE_CLASS}: {error}"));
+        schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+            class_name: EXCITATION_CASE_CLASS,
+            type_identity: "runmat.fea.excitation-case",
+            schema_version: 1,
+            allowed_fields: CASE_FIELDS,
+            required_fields: CASE_FIELDS,
+            validate: validate_case_object,
+        });
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         for (class_name, _) in excitation_schemas() {
@@ -721,6 +717,7 @@ fn excitation_methods(class_name: &str) -> HashMap<MethodName, RuntimeMethod> {
 }
 
 fn validate_excitation_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     if !matches!(object.properties().get("geometry_id"), Some(Value::String(value)) if !value.is_empty())
     {
         return Err(format!(
@@ -747,6 +744,7 @@ fn validate_excitation_object(object: &ObjectInstance) -> Result<(), String> {
 }
 
 fn validate_case_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     if !matches!(object.properties().get("case_id"), Some(Value::String(value)) if !value.is_empty())
         || !matches!(
             object.properties().get("action_ids"),

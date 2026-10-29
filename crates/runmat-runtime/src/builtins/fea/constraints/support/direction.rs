@@ -1,11 +1,10 @@
 use std::sync::Once;
 
 use super::super::*;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::finite_numeric_vector3;
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
-use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
+use crate::execution::value_codec::ImmutableValueClassSchema;
 
 const DIRECTION_CLASS: &str =
     runmat_builtins::fea_contract::model_types::classes::FEA_DIRECTION_CLASS.display_name();
@@ -99,15 +98,18 @@ pub(super) fn ensure_direction_class_registered() {
             DIRECTION_CLASS,
         ));
     PORTABLE_SCHEMA.call_once(|| {
-        register_immutable_value_class(ImmutableValueClassSchema {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let schemas = vec![ImmutableValueClassSchema {
             class_name: DIRECTION_CLASS,
             type_identity: "runmat.fea.direction",
             schema_version: 1,
             allowed_fields: DIRECTION_FIELDS,
             required_fields: DIRECTION_FIELDS,
             validate: validate_direction_object,
-        })
-        .unwrap_or_else(|error| panic!("failed to register typed direction class: {error}"));
+        }];
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASS.ensure(|| {
         register_value_class(
@@ -119,6 +121,7 @@ pub(super) fn ensure_direction_class_registered() {
 }
 
 fn validate_direction_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     let Some(value) = object.properties().get("components") else {
         return Err("fea.Direction.components is required".into());
     };

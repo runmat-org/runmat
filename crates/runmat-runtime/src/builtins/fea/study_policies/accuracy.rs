@@ -267,7 +267,11 @@ pub(super) fn ensure_classes_registered() {
         crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
             CONTRIBUTION_CLASS,
         ));
-    SCHEMAS.call_once(|| register_immutable_schemas(&ACCURACY_POLICY_CLASSES));
+    SCHEMAS.call_once(|| {
+        static FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        register_immutable_schemas(&FIELDS, &ACCURACY_POLICY_CLASSES);
+    });
     RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&ACCURACY_POLICY_CLASSES));
 }
 

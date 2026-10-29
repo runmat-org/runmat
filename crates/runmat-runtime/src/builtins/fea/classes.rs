@@ -327,41 +327,23 @@ type FeaClassSchema = (
 pub(crate) fn ensure_fea_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     PORTABLE_SCHEMAS.call_once(|| {
-        // The registry has process lifetime. Keep the optional projection field
-        // lists under one static owner rather than leaking each registration.
-        static FIELDS: std::sync::OnceLock<Vec<Vec<&'static str>>> = std::sync::OnceLock::new();
-        let schemas = fea_class_schemas();
-        let fields = FIELDS.get_or_init(|| {
-            schemas
-                .iter()
-                .map(|(_, _, fields, _, _)| {
-                    fields
-                        .iter()
-                        .copied()
-                        .chain(std::iter::once(
-                            crate::builtins::common::json::typed_object_projection::PROPERTY,
-                        ))
-                        .collect()
+        static FIELDS: super::object_projection::ProjectionFields = std::sync::OnceLock::new();
+        super::object_projection::register_schemas(
+            &FIELDS,
+            fea_class_schemas()
+                .into_iter()
+                .map(|(class_name, type_identity, fields, required, validate)| {
+                    crate::execution::value_codec::ImmutableValueClassSchema {
+                        class_name,
+                        type_identity,
+                        schema_version: 1,
+                        allowed_fields: fields,
+                        required_fields: required,
+                        validate,
+                    }
                 })
-                .collect()
-        });
-        for ((class_name, type_identity, _, required, validate), fields) in
-            schemas.into_iter().zip(fields)
-        {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: fields.as_slice(),
-                    required_fields: required,
-                    validate,
-                },
-            )
-            .unwrap_or_else(|error| {
-                panic!("failed to register immutable FEA class {class_name}: {error}")
-            });
-        }
+                .collect(),
+        );
     });
     FEA_CLASSES_REGISTERED.ensure(|| {
         for (class_name, _, fields, _, _) in fea_class_schemas() {
@@ -1312,9 +1294,8 @@ fn fea_class_schemas() -> [FeaClassSchema; 50] {
 use std::collections::HashMap;
 use std::sync::Once;
 
-use crate::class_registry::declaration::{
-    immutable_property, register_value_class, static_methods,
-};
+use crate::builtins::fea::object_projection::register_value_class;
+use crate::class_registry::declaration::{immutable_property, static_methods};
 use crate::class_registry::RuntimeMethod;
 use runmat_types::{MemberAccess, MethodName, StaticClassIdentity};
 use runmat_value::{IntValue, ObjectInstance, Value};

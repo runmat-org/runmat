@@ -874,7 +874,11 @@ pub(super) fn ensure_classes_registered() {
     static SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
         crate::class_registry::ClassRegistration::new(classes::OBSERVATION_QUANTITY);
-    SCHEMAS.call_once(|| register_immutable_schemas(&OBSERVATION_POLICY_CLASSES));
+    SCHEMAS.call_once(|| {
+        static FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        register_immutable_schemas(&FIELDS, &OBSERVATION_POLICY_CLASSES);
+    });
     RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&OBSERVATION_POLICY_CLASSES));
 }
 

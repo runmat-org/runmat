@@ -1,10 +1,9 @@
 use std::sync::Once;
 
 use super::*;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{finite_numeric_scalar, finite_numeric_vector};
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 use runmat_analysis_core::{GeneratorDomain, SignalSamplingPolicy};
 
 use runmat_builtins::fea_contract::policy_types::classes;
@@ -241,6 +240,9 @@ pub(super) fn ensure_generator_policy_classes_registered() {
             DOMAIN_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for (class_name, type_identity, fields) in [
             (DOMAIN_CLASS, "runmat.fea.signal-domain", DOMAIN_FIELDS),
             (
@@ -249,20 +251,17 @@ pub(super) fn ensure_generator_policy_classes_registered() {
                 SAMPLING_FIELDS,
             ),
         ] {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: fields,
-                    required_fields: fields,
-                    validate: validate_policy_object,
-                },
-            )
-            .unwrap_or_else(|error| {
-                panic!("failed to register immutable signal generator policy {class_name}: {error}")
+            schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+                class_name,
+                type_identity,
+                schema_version: 1,
+                allowed_fields: fields,
+                required_fields: fields,
+                validate: validate_policy_object,
             });
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         register_value_class(
@@ -291,7 +290,14 @@ pub(super) fn ensure_generator_policy_classes_registered() {
 }
 
 fn validate_policy_object(object: &ObjectInstance) -> Result<(), String> {
-    if object.properties().len() != 1 {
+    crate::builtins::fea::object_projection::validate(object)?;
+    if object
+        .properties()
+        .keys()
+        .filter(|name| *name != crate::builtins::common::json::typed_object_projection::PROPERTY)
+        .count()
+        != 1
+    {
         return Err(format!("{} has malformed policy data", object.class_name()));
     }
     Ok(())

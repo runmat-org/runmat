@@ -2,6 +2,61 @@
 use super::*;
 use crate::builtins::common::json::typed_object_projection::{Projection, PROPERTY};
 
+/// Family-owned process-lifetime field lists. Metadata is optional, never part
+/// of the domain's required fields, and every schema retains its own validator.
+pub(in crate::builtins::fea) type ProjectionFields = std::sync::OnceLock<Vec<Vec<&'static str>>>;
+
+pub(in crate::builtins::fea) fn register_schemas(
+    owner: &'static ProjectionFields,
+    schemas: Vec<crate::execution::value_codec::ImmutableValueClassSchema>,
+) {
+    let fields = owner.get_or_init(|| {
+        schemas
+            .iter()
+            .map(|schema| {
+                schema
+                    .allowed_fields
+                    .iter()
+                    .copied()
+                    .filter(|field| *field != PROPERTY)
+                    .chain(std::iter::once(PROPERTY))
+                    .collect()
+            })
+            .collect()
+    });
+    assert_eq!(
+        fields.len(),
+        schemas.len(),
+        "FEA projection schema inventory changed"
+    );
+    for (mut schema, fields) in schemas.into_iter().zip(fields) {
+        schema.allowed_fields = fields.as_slice();
+        crate::execution::value_codec::register_immutable_value_class(schema)
+            .unwrap_or_else(|error| panic!("failed to register projected FEA schema: {error}"));
+    }
+}
+
+/// FEA-local registration: private constant shape provenance is not a public
+/// property and does not grant other host value classes permission to carry it.
+pub(in crate::builtins::fea) fn register_value_class(
+    name: impl Into<runmat_types::ClassIdentity>,
+    mut properties: std::collections::HashMap<
+        runmat_types::MemberName,
+        crate::class_registry::RuntimeProperty,
+    >,
+    methods: std::collections::HashMap<
+        runmat_types::MethodName,
+        crate::class_registry::RuntimeMethod,
+    >,
+) {
+    let (name_field, property) = crate::class_registry::declaration::immutable_property(
+        PROPERTY,
+        runmat_types::MemberAccess::Private,
+    );
+    properties.insert(name_field, property);
+    crate::class_registry::declaration::register_value_class(name, properties, methods);
+}
+
 pub(super) fn to_json(
     builtin: &'static str,
     object: &ObjectInstance,

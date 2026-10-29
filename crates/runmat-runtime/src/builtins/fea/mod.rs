@@ -4909,6 +4909,8 @@ mod tests {
         assert!(object
             .properties()
             .keys()
-            .all(|name| !name.starts_with("__runmat_")));
+            .all(|name| !name.starts_with("__runmat_")
+                || name == crate::builtins::common::json::typed_object_projection::PROPERTY));
+        object_projection::validate(object).expect("only validated shape provenance is permitted");
     }
 }

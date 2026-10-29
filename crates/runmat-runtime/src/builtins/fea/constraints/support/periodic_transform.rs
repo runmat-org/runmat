@@ -3,14 +3,13 @@ use std::sync::Once;
 
 use super::super::*;
 use super::direction_from_value;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{
     position_meters, quantity_scalar, translation_meters, POSITION_CLASS, ROTATION_CLASS,
     TRANSLATION_CLASS,
 };
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
-use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
+use crate::execution::value_codec::ImmutableValueClassSchema;
 
 const PERIODIC_TRANSFORM_CLASS: &str =
     runmat_builtins::fea_contract::model_types::classes::FEA_PERIODIC_TRANSFORM_CLASS
@@ -164,6 +163,9 @@ pub(super) fn ensure_periodic_transform_classes_registered() {
             PERIODIC_TRANSFORM_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for schema in [
             ImmutableValueClassSchema {
                 class_name: IDENTITY_TRANSFORM_CLASS,
@@ -190,9 +192,10 @@ pub(super) fn ensure_periodic_transform_classes_registered() {
                 validate: validate_rotation,
             },
         ] {
-            register_immutable_value_class(schema)
-                .unwrap_or_else(|error| panic!("failed to register periodic transform: {error}"));
+            schemas.push(schema);
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         register_value_class(
@@ -222,15 +225,18 @@ pub(super) fn ensure_periodic_transform_classes_registered() {
     });
 }
 
-fn validate_identity(_: &ObjectInstance) -> Result<(), String> {
+fn validate_identity(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     Ok(())
 }
 
 fn validate_translation(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     validate_nested_classes(object, &[("translation", TRANSLATION_CLASS)])
 }
 
 fn validate_rotation(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     validate_nested_classes(
         object,
         &[

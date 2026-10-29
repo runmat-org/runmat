@@ -1,7 +1,6 @@
 use super::*;
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::builtins::fea::object_projection::register_value_class;
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 
 pub(super) const SIGNAL_KNOT_CLASS: &str =
     runmat_builtins::fea_contract::policy_types::classes::SIGNAL_KNOT.display_name();
@@ -221,6 +220,7 @@ fn validate_runtime_knot(knot: &RuntimeSignalKnot) -> Result<(), String> {
 }
 
 fn validate_signal_knot_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     let payload = object_payload::<SignalKnotObject>(
         "fea.SignalKnot portable value",
         &Value::Object(object.clone()),
@@ -513,17 +513,18 @@ pub(super) fn ensure_signal_knot_class_registered() {
             SIGNAL_KNOT_CLASS,
         ));
     PORTABLE_SCHEMA.call_once(|| {
-        crate::execution::value_codec::register_immutable_value_class(
-            crate::execution::value_codec::ImmutableValueClassSchema {
-                class_name: SIGNAL_KNOT_CLASS,
-                type_identity: "runmat.fea.signal-knot",
-                schema_version: 1,
-                allowed_fields: SIGNAL_KNOT_FIELDS,
-                required_fields: SIGNAL_KNOT_FIELDS,
-                validate: validate_signal_knot_object,
-            },
-        )
-        .unwrap_or_else(|error| panic!("failed to register immutable signal knot: {error}"));
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let schemas = vec![crate::execution::value_codec::ImmutableValueClassSchema {
+            class_name: SIGNAL_KNOT_CLASS,
+            type_identity: "runmat.fea.signal-knot",
+            schema_version: 1,
+            allowed_fields: SIGNAL_KNOT_FIELDS,
+            required_fields: SIGNAL_KNOT_FIELDS,
+            validate: validate_signal_knot_object,
+        }];
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASS.ensure(|| {
         register_value_class(

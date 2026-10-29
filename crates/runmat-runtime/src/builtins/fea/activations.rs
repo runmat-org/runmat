@@ -231,6 +231,10 @@ pub(super) fn ensure_activation_classes_registered() {
         crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
             OBJECT_REF_CLASS,
         ));
-    SCHEMAS.call_once(|| register_immutable_schemas(&ACTIVATION_STUDY_CLASSES));
+    SCHEMAS.call_once(|| {
+        static FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        register_immutable_schemas(&FIELDS, &ACTIVATION_STUDY_CLASSES);
+    });
     RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&ACTIVATION_STUDY_CLASSES));
 }

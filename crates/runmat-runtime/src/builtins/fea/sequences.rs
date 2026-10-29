@@ -7,13 +7,14 @@ use runmat_analysis_core::{
 };
 
 use super::*;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::observations::study_outputs;
 use crate::builtins::fea::study_policies::sequence as policy;
 use crate::builtins::fea::study_values::{
     from_typed_value, nonempty_id, object_or_cell, register_immutable_runtime_classes,
     register_immutable_schemas, to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
-use crate::class_registry::declaration::{register_value_class, static_methods};
+use crate::class_registry::declaration::static_methods;
 use runmat_builtins::fea_contract::study_types::{
     classes::{
         FEA_ANALYSIS_SEQUENCE_CLASS, FEA_INDEPENDENT_DOMAIN_CLASS, FEA_PROCEDURE_STEP_CLASS,
@@ -707,7 +708,11 @@ pub(super) fn ensure_sequence_classes_registered() {
     static SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
         crate::class_registry::ClassRegistration::new(FEA_INDEPENDENT_DOMAIN_CLASS);
-    SCHEMAS.call_once(|| register_immutable_schemas(&SEQUENCE_STUDY_CLASSES));
+    SCHEMAS.call_once(|| {
+        static FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        register_immutable_schemas(&FIELDS, &SEQUENCE_STUDY_CLASSES);
+    });
     RUNTIME_CLASSES.ensure(|| {
         register_immutable_runtime_classes(&SEQUENCE_STUDY_CLASSES);
         register_value_class(

@@ -3,11 +3,10 @@ use std::sync::Once;
 
 use super::super::*;
 use super::direction_from_value;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::position_meters;
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
-use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
+use crate::execution::value_codec::ImmutableValueClassSchema;
 use runmat_analysis_core::{
     validate_coordinate_frame, AxialFrame, CartesianFrame, Position, SphericalFrame,
 };
@@ -275,6 +274,9 @@ pub(super) fn ensure_frame_classes_registered() {
             COORDINATE_FRAME_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for (class_name, identity, fields, validate) in [
             (
                 GLOBAL_FRAME_CLASS,
@@ -319,16 +321,17 @@ pub(super) fn ensure_frame_classes_registered() {
                 validate_spherical_frame as _,
             ),
         ] {
-            register_immutable_value_class(ImmutableValueClassSchema {
+            schemas.push(ImmutableValueClassSchema {
                 class_name,
                 type_identity: identity,
                 schema_version: 1,
                 allowed_fields: fields,
                 required_fields: fields,
                 validate,
-            })
-            .unwrap_or_else(|error| panic!("failed to register typed coordinate frame: {error}"));
+            });
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         for (class_name, fields) in [
@@ -361,19 +364,23 @@ pub(super) fn ensure_frame_classes_registered() {
     });
 }
 
-fn validate_empty_frame(_: &ObjectInstance) -> Result<(), String> {
+fn validate_empty_frame(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     Ok(())
 }
 
 fn validate_cartesian_frame(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     validate_axis_frame_object(object, "x_axis", "y_axis")
 }
 
 fn validate_cylindrical_frame(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     validate_axis_frame_object(object, "axis", "radial_reference")
 }
 
 fn validate_spherical_frame(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     validate_axis_frame_object(object, "polar_axis", "azimuth_reference")
 }
 

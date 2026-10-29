@@ -2,9 +2,8 @@ use runmat_value::{ObjectInstance, Value};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::*;
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::builtins::fea::object_projection::register_value_class;
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 
 pub(super) const VALUE_FIELD: &[&str] = &["value"];
 
@@ -46,10 +45,26 @@ pub(super) struct ImmutableStudyClass {
 }
 
 /// Register the process-global portable codec schemas once per process.
-pub(super) fn register_immutable_schemas(classes: &[ImmutableStudyClass]) {
-    for class in classes {
-        register_immutable_schema(class.class_name, class.type_identity, class.fields);
-    }
+pub(super) fn register_immutable_schemas(
+    fields: &'static object_projection::ProjectionFields,
+    classes: &[ImmutableStudyClass],
+) {
+    object_projection::register_schemas(
+        fields,
+        classes
+            .iter()
+            .map(
+                |class| crate::execution::value_codec::ImmutableValueClassSchema {
+                    class_name: class.class_name,
+                    type_identity: class.type_identity,
+                    schema_version: 1,
+                    allowed_fields: class.fields,
+                    required_fields: class.fields,
+                    validate: validate_immutable_value,
+                },
+            )
+            .collect(),
+    );
 }
 
 /// Register the runtime classes in the current class registry. Callers guard
@@ -64,30 +79,12 @@ pub(super) fn register_immutable_runtime_classes(classes: &[ImmutableStudyClass]
     }
 }
 
-fn register_immutable_schema(
-    class_name: &'static str,
-    type_identity: &'static str,
-    fields: &'static [&'static str],
-) {
-    crate::execution::value_codec::register_immutable_value_class(
-        crate::execution::value_codec::ImmutableValueClassSchema {
-            class_name,
-            type_identity,
-            schema_version: 1,
-            allowed_fields: fields,
-            required_fields: fields,
-            validate: validate_immutable_value,
-        },
-    )
-    .unwrap_or_else(|error| panic!("failed to register {class_name}: {error}"));
-}
-
 fn validate_immutable_value(object: &ObjectInstance) -> Result<(), String> {
-    if object
-        .properties()
-        .keys()
-        .any(|name| name.starts_with("__runmat_"))
-    {
+    object_projection::validate(object)?;
+    if object.properties().keys().any(|name| {
+        name.starts_with("__runmat_")
+            && name != crate::builtins::common::json::typed_object_projection::PROPERTY
+    }) {
         return Err(format!(
             "immutable study value `{}` contains an opaque runtime property",
             object.class_name()

@@ -2,11 +2,10 @@ use std::collections::HashMap;
 use std::sync::Once;
 
 use super::super::*;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{quantity_scalar, LENGTH_CLASS};
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
-use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
+use crate::execution::value_codec::ImmutableValueClassSchema;
 use runmat_analysis_core::Length;
 
 const PAIRING_CLASS: &str =
@@ -118,6 +117,9 @@ pub(super) fn ensure_pairing_classes_registered() {
             PAIRING_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for schema in [
             ImmutableValueClassSchema {
                 class_name: MATCHING_PAIRING_CLASS,
@@ -136,9 +138,10 @@ pub(super) fn ensure_pairing_classes_registered() {
                 validate: validate_geometric,
             },
         ] {
-            register_immutable_value_class(schema)
-                .unwrap_or_else(|error| panic!("failed to register periodic pairing: {error}"));
+            schemas.push(schema);
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         register_value_class(
@@ -162,11 +165,13 @@ pub(super) fn ensure_pairing_classes_registered() {
     });
 }
 
-fn validate_matching(_: &ObjectInstance) -> Result<(), String> {
+fn validate_matching(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     Ok(())
 }
 
 fn validate_geometric(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     if !matches!(
         object.properties().get("tolerance"),
         Some(Value::Object(value)) if value.class_name().display_name() == LENGTH_CLASS

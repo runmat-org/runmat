@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Once;
 
 use super::super::*;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{quantity_scalar, DISPLACEMENT_CLASS, ROTATION_CLASS};
-use crate::class_registry::declaration::{immutable_properties, method, register_value_class};
+use crate::class_registry::declaration::{immutable_properties, method};
 use crate::class_registry::RuntimeMethod;
-use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use crate::execution::value_codec::ImmutableValueClassSchema;
 use runmat_types::MethodName;
 
 const STRUCTURAL_DOF_CLASS: &str =
@@ -305,6 +306,9 @@ pub(super) fn ensure_dof_classes_registered() {
             STRUCTURAL_DOF_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for schema in [
             ImmutableValueClassSchema {
                 class_name: TRANSLATION_DOF_CLASS,
@@ -339,10 +343,10 @@ pub(super) fn ensure_dof_classes_registered() {
                 validate: validate_rotation_value_object,
             },
         ] {
-            register_immutable_value_class(schema).unwrap_or_else(|error| {
-                panic!("failed to register typed structural DOF class: {error}")
-            });
+            schemas.push(schema);
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         register_value_class(STRUCTURAL_DOF_CLASS, HashMap::new(), dof_methods());
@@ -389,6 +393,7 @@ fn dof_value_methods() -> HashMap<MethodName, RuntimeMethod> {
 }
 
 fn validate_axis_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     match object.properties().get("axis") {
         Some(Value::Int(IntValue::U8(0..=2))) => Ok(()),
         _ => Err(format!(
@@ -399,10 +404,12 @@ fn validate_axis_object(object: &ObjectInstance) -> Result<(), String> {
 }
 
 fn validate_translation_value_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     validate_dof_value_object(object, TRANSLATION_DOF_CLASS, DISPLACEMENT_CLASS)
 }
 
 fn validate_rotation_value_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     validate_dof_value_object(object, ROTATION_DOF_CLASS, ROTATION_CLASS)
 }
 

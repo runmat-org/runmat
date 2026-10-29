@@ -2,10 +2,9 @@ use std::sync::Once;
 
 use super::*;
 use crate::builtins::fea::constraints::require_geometry_binding;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::geometry::region::region_ref_from_value;
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 use runmat_analysis_core::{
     InitialCondition, InitialConditionTarget, InitialConditionValue, InitialValue, PhysicalSignal,
     SignalId, SignalShape,
@@ -352,30 +351,28 @@ pub(super) fn ensure_initial_condition_classes_registered() {
             TARGET_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
-        crate::execution::value_codec::register_immutable_value_class(
-            crate::execution::value_codec::ImmutableValueClassSchema {
-                class_name: TARGET_CLASS,
-                type_identity: "runmat.fea.initial-condition-target",
-                schema_version: 1,
-                allowed_fields: TARGET_FIELDS,
-                required_fields: TARGET_FIELDS,
-                validate: validate_target_object,
-            },
-        )
-        .unwrap_or_else(|error| panic!("failed to register {TARGET_CLASS}: {error}"));
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = vec![crate::execution::value_codec::ImmutableValueClassSchema {
+            class_name: TARGET_CLASS,
+            type_identity: "runmat.fea.initial-condition-target",
+            schema_version: 1,
+            allowed_fields: TARGET_FIELDS,
+            required_fields: TARGET_FIELDS,
+            validate: validate_target_object,
+        }];
         for (class_name, type_identity, _) in condition_schemas() {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: CONDITION_FIELDS,
-                    required_fields: CONDITION_REQUIRED_FIELDS,
-                    validate: validate_condition_object,
-                },
-            )
-            .unwrap_or_else(|error| panic!("failed to register {class_name}: {error}"));
+            schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+                class_name,
+                type_identity,
+                schema_version: 1,
+                allowed_fields: CONDITION_FIELDS,
+                required_fields: CONDITION_REQUIRED_FIELDS,
+                validate: validate_condition_object,
+            });
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         register_value_class(
@@ -451,6 +448,7 @@ fn condition_schemas() -> [ConditionSchema; 6] {
 }
 
 fn validate_target_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     if matches!(
         object.properties().get("whole_model"),
         Some(Value::Bool(true))
@@ -462,6 +460,7 @@ fn validate_target_object(object: &ObjectInstance) -> Result<(), String> {
 }
 
 fn validate_condition_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     let binding_valid = matches!(
         (
             object.properties().get("geometry_id"),

@@ -365,7 +365,11 @@ pub(super) fn ensure_accuracy_classes_registered() {
     static SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
         crate::class_registry::ClassRegistration::new(classes::ACCURACY_TARGET);
-    SCHEMAS.call_once(|| register_immutable_schemas(&ACCURACY_STUDY_CLASSES));
+    SCHEMAS.call_once(|| {
+        static FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        register_immutable_schemas(&FIELDS, &ACCURACY_STUDY_CLASSES);
+    });
     RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&ACCURACY_STUDY_CLASSES));
 }
 

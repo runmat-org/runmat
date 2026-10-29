@@ -2,13 +2,12 @@ use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{
     finite_numeric_scalar, finite_numeric_vector, finite_numeric_vector3,
     finite_numeric_vector3_samples,
 };
-use crate::class_registry::declaration::{
-    immutable_property, register_value_class, static_methods,
-};
+use crate::class_registry::declaration::{immutable_property, static_methods};
 use crate::class_registry::RuntimeProperty;
 use runmat_analysis_core::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, ElectricCharge,
@@ -559,21 +558,21 @@ pub(super) fn ensure_signal_classes_registered() {
             DISPLACEMENT_SIGNAL_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for (class_name, type_identity, _, _) in signal_schemas() {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: SIGNAL_FIELDS,
-                    required_fields: SIGNAL_REQUIRED_FIELDS,
-                    validate: validate_signal_object,
-                },
-            )
-            .unwrap_or_else(|error| {
-                panic!("failed to register immutable FEA signal class {class_name}: {error}")
+            schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+                class_name,
+                type_identity,
+                schema_version: 1,
+                allowed_fields: SIGNAL_FIELDS,
+                required_fields: SIGNAL_REQUIRED_FIELDS,
+                validate: validate_signal_object,
             });
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         for (class_name, _, method_name, builtin_name) in signal_schemas() {
@@ -652,6 +651,7 @@ fn time_sample_builtin(class_name: &str) -> &'static str {
 }
 
 fn validate_signal_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     if !matches!(object.properties().get("signal"), Some(Value::Struct(_))) {
         return Err(format!(
             "{}.signal must be a typed structure",

@@ -1,11 +1,10 @@
 use std::sync::Once;
 
 use super::super::*;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{position_meters, POSITION_CLASS};
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
-use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
+use crate::execution::value_codec::ImmutableValueClassSchema;
 use runmat_analysis_core::{Position, ReferencePoint};
 
 const REFERENCE_POINT_CLASS: &str =
@@ -95,15 +94,18 @@ pub(super) fn ensure_reference_point_class_registered() {
             REFERENCE_POINT_CLASS,
         ));
     PORTABLE_SCHEMA.call_once(|| {
-        register_immutable_value_class(ImmutableValueClassSchema {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let schemas = vec![ImmutableValueClassSchema {
             class_name: REFERENCE_POINT_CLASS,
             type_identity: "runmat.fea.reference-point",
             schema_version: 1,
             allowed_fields: REFERENCE_POINT_FIELDS,
             required_fields: REFERENCE_POINT_FIELDS,
             validate: validate_reference_point_object,
-        })
-        .unwrap_or_else(|error| panic!("failed to register typed reference point: {error}"));
+        }];
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASS.ensure(|| {
         register_value_class(
@@ -115,6 +117,7 @@ pub(super) fn ensure_reference_point_class_registered() {
 }
 
 fn validate_reference_point_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     let id_valid = matches!(
         object.properties().get("reference_point_id"),
         Some(Value::String(value)) if !value.trim().is_empty()

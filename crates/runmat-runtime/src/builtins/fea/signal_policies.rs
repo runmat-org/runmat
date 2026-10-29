@@ -1,9 +1,8 @@
 use std::sync::Once;
 
 use super::*;
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::builtins::fea::object_projection::register_value_class;
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 use runmat_analysis_core::{
     SignalExtrapolation, SignalInterpolation, SignalPointContinuity, SignalSampleApproach,
 };
@@ -188,6 +187,9 @@ pub(super) fn ensure_signal_policy_classes_registered() {
             INTERPOLATION_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for (class_name, type_identity, fields) in [
             (
                 INTERPOLATION_CLASS,
@@ -210,20 +212,17 @@ pub(super) fn ensure_signal_policy_classes_registered() {
                 POINT_CONTINUITY_FIELDS,
             ),
         ] {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: fields,
-                    required_fields: fields,
-                    validate: validate_policy_object,
-                },
-            )
-            .unwrap_or_else(|error| {
-                panic!("failed to register immutable signal policy {class_name}: {error}")
+            schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+                class_name,
+                type_identity,
+                schema_version: 1,
+                allowed_fields: fields,
+                required_fields: fields,
+                validate: validate_policy_object,
             });
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         register_value_class(
@@ -265,9 +264,11 @@ pub(super) fn ensure_signal_policy_classes_registered() {
 }
 
 fn validate_policy_object(object: &ObjectInstance) -> Result<(), String> {
-    if object.properties().len() != 1
-        || !matches!(object.properties().values().next(), Some(Value::String(_)))
-    {
+    crate::builtins::fea::object_projection::validate(object)?;
+    let mut properties = object.properties().iter().filter(|(name, _)| {
+        *name != crate::builtins::common::json::typed_object_projection::PROPERTY
+    });
+    if !matches!(properties.next(), Some((_, Value::String(_)))) || properties.next().is_some() {
         return Err(format!(
             "{} has a malformed policy value",
             object.class_name()

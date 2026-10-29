@@ -552,7 +552,11 @@ pub(super) fn ensure_classes_registered() {
         crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
             STATE_KIND_CLASS,
         ));
-    SCHEMAS.call_once(|| register_immutable_schemas(&SEQUENCE_POLICY_CLASSES));
+    SCHEMAS.call_once(|| {
+        static FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        register_immutable_schemas(&FIELDS, &SEQUENCE_POLICY_CLASSES);
+    });
     RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&SEQUENCE_POLICY_CLASSES));
 }
 

@@ -3,11 +3,10 @@ use std::sync::Once;
 
 use super::super::*;
 use super::dof::translation_dof_from_value;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{quantity_scalar, DISPLACEMENT_CLASS, VELOCITY_CLASS};
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
-use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
+use crate::execution::value_codec::ImmutableValueClassSchema;
 use runmat_analysis_core::{
     AccelerationSignalId, CoordinateFrame, Displacement, PhysicalQuantityKind, SignalDomainKind,
     SignalPrecision, SignalShape, StructuralKinematicHistory, StructuralMotionReconstruction,
@@ -124,15 +123,18 @@ pub(super) fn ensure_motion_classes_registered() {
             MOTION_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
-        register_immutable_value_class(ImmutableValueClassSchema {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let schemas = vec![ImmutableValueClassSchema {
             class_name: TRANSLATION_MOTION_CLASS,
             type_identity: "runmat.fea.structural-translation-motion",
             schema_version: 1,
             allowed_fields: MOTION_FIELDS,
             required_fields: MOTION_FIELDS,
-            validate: |_| Ok(()),
-        })
-        .unwrap_or_else(|error| panic!("failed to register structural motion class: {error}"));
+            validate: crate::builtins::fea::object_projection::validate,
+        }];
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         register_value_class(

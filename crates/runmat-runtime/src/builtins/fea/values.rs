@@ -5,9 +5,8 @@ use super::*;
 use crate::analysis::value_admission::{
     admit_borrowed_real64, AdmittedReal64Array, AnalysisValueAdmissionPolicy,
 };
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::builtins::fea::object_projection::register_value_class;
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 use runmat_builtins::fea_contract::identities;
 
 pub(super) const DISPLACEMENT_CLASS: &str = identities::FEA_DISPLACEMENT_CLASS.display_name();
@@ -382,21 +381,21 @@ pub(super) fn ensure_quantity_classes_registered() {
             DISPLACEMENT_CLASS,
         ));
     PORTABLE_SCHEMAS.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for (class_name, type_identity, fields) in quantity_schemas() {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: fields,
-                    required_fields: fields,
-                    validate: validate_quantity_object,
-                },
-            )
-            .unwrap_or_else(|error| {
-                panic!("failed to register immutable FEA quantity class {class_name}: {error}")
+            schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+                class_name,
+                type_identity,
+                schema_version: 1,
+                allowed_fields: fields,
+                required_fields: fields,
+                validate: validate_quantity_object,
             });
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME_CLASSES.ensure(|| {
         for (class_name, _, fields) in quantity_schemas() {
@@ -573,6 +572,7 @@ fn quantity_methods(class_name: &str) -> HashMap<MethodName, RuntimeMethod> {
 }
 
 fn validate_quantity_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     let fields = quantity_schemas()
         .into_iter()
         .find(|(class_name, _, _)| *class_name == object.class_name().display_name())

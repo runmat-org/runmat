@@ -2,12 +2,11 @@ use std::sync::Once;
 
 use super::*;
 use crate::builtins::fea::constraints::support::frame::coordinate_frame_from_value;
+use crate::builtins::fea::object_projection::register_value_class;
 use crate::builtins::fea::values::{
     finite_numeric_scalar, finite_numeric_vector, finite_numeric_vector3,
 };
-use crate::class_registry::declaration::{
-    immutable_properties, register_value_class, static_methods,
-};
+use crate::class_registry::declaration::{immutable_properties, static_methods};
 use runmat_analysis_core::{
     DirectionalCombination, ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy,
     RigidResponsePolicy, ShockResponseSpectrumMethod, SpectrumAbscissa, SpectrumConstruction,
@@ -271,19 +270,21 @@ pub(super) fn ensure_spectrum_policy_classes_registered() {
             AXIS_CLASS,
         ));
     PORTABLE.call_once(|| {
+        static PROJECTION_FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        let mut schemas = Vec::new();
         for (class_name, type_identity, _) in schemas() {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: VALUE_FIELDS,
-                    required_fields: VALUE_FIELDS,
-                    validate: validate_value_object,
-                },
-            )
-            .unwrap_or_else(|error| panic!("failed to register {class_name}: {error}"));
+            schemas.push(crate::execution::value_codec::ImmutableValueClassSchema {
+                class_name,
+                type_identity,
+                schema_version: 1,
+                allowed_fields: VALUE_FIELDS,
+                required_fields: VALUE_FIELDS,
+                validate: validate_value_object,
+            });
         }
+
+        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, schemas);
     });
     RUNTIME.ensure(|| {
         for (class_name, _, methods) in schemas() {
@@ -297,6 +298,7 @@ pub(super) fn ensure_spectrum_policy_classes_registered() {
 }
 
 fn validate_value_object(object: &ObjectInstance) -> Result<(), String> {
+    crate::builtins::fea::object_projection::validate(object)?;
     if object.properties().contains_key("value") {
         Ok(())
     } else {

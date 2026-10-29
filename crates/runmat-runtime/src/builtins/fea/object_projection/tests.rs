@@ -120,17 +120,72 @@ fn omitted_host_bindings_are_not_evaluated_during_projection_validation_or_decod
 
 #[test]
 fn implementation_private_projection_is_constant_with_private_access() {
-    ensure_fea_classes_registered();
-    let class =
-        crate::class_registry::get_class(ObjectInstance::new(FEA_RUN_RESULT_CLASS).class_name())
-            .unwrap();
-    let property = class
-        .properties
-        .iter()
-        .find(|(name, _)| name.display_name() == PROPERTY)
-        .unwrap()
-        .1;
-    assert!(property.is_constant);
-    assert_eq!(property.get_access, runmat_types::MemberAccess::Private);
-    assert_eq!(property.set_access, runmat_types::MemberAccess::Private);
+    ensure_value_classes_registered();
+    for name in [
+        FEA_RUN_RESULT_CLASS,
+        "fea.StructuralExcitation",
+        "fea.AcousticExcitation",
+        "fea.SignalDomain",
+        "fea.StructuralInitialCondition",
+        "fea.ReductionPolicy",
+        "fea.AnalysisSequence",
+        "fea.AccelerationSignal",
+        "fea.ForceSignal",
+        "fea.VolumeFlowSignal",
+    ] {
+        let class = crate::class_registry::get_class(ObjectInstance::new(name).class_name())
+            .unwrap_or_else(|| panic!("class {name} must be registered"));
+        let property = class
+            .properties
+            .iter()
+            .find(|(name, _)| name.display_name() == PROPERTY)
+            .unwrap_or_else(|| panic!("class {name} lacks projection declaration"))
+            .1;
+        assert!(property.is_constant, "{name}");
+        assert_eq!(
+            property.get_access,
+            runmat_types::MemberAccess::Private,
+            "{name}"
+        );
+        assert_eq!(
+            property.set_access,
+            runmat_types::MemberAccess::Private,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn auxiliary_signal_schema_validates_shape_without_admitting_opaque_payloads() {
+    let value = futures::executor::block_on(super::super::signals::force_constant(
+        "projection.force".into(),
+        Value::Tensor(runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0], 1, 3).unwrap()),
+    ))
+    .unwrap();
+    assert_eq!(
+        decode_inline_value(&encode_inline_value(&value).unwrap()).unwrap(),
+        value
+    );
+    let Value::Object(mut invalid) = value.clone() else {
+        panic!("expected force signal")
+    };
+    super::super::object_api::replace(
+        "fea.test",
+        &mut invalid,
+        PROPERTY,
+        Value::String("opaque data is not shape".into()),
+    )
+    .unwrap();
+    assert!(encode_inline_value(&Value::Object(invalid)).is_err());
+    let Value::Object(mut opaque) = value else {
+        panic!("expected force signal")
+    };
+    super::super::object_api::replace(
+        "fea.test",
+        &mut opaque,
+        "__runmat_payload",
+        Value::String("forbidden".into()),
+    )
+    .unwrap();
+    assert!(encode_inline_value(&Value::Object(opaque)).is_err());
 }

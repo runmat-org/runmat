@@ -195,7 +195,11 @@ pub(super) fn ensure_execution_classes_registered() {
     static SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
         crate::class_registry::ClassRegistration::new(classes::COMPUTE_BACKEND);
-    SCHEMAS.call_once(|| register_immutable_schemas(&EXECUTION_STUDY_CLASSES));
+    SCHEMAS.call_once(|| {
+        static FIELDS: crate::builtins::fea::object_projection::ProjectionFields =
+            std::sync::OnceLock::new();
+        register_immutable_schemas(&FIELDS, &EXECUTION_STUDY_CLASSES);
+    });
     RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&EXECUTION_STUDY_CLASSES));
 }
 
