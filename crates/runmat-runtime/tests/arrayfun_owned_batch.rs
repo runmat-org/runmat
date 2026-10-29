@@ -349,8 +349,20 @@ fn rank_zero_owned_singleton_maps_to_the_same_uniform_shape_as_host() {
 #[test]
 fn asymmetric_mixed_class_batches_preserve_column_order_and_all_original_intents() {
     use runmat_accelerate_api::GpuHandleProvenance::{Automatic, Explicit};
+    use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
+    use std::rc::Rc;
     runmat_gc::gc_test_context(|| {
         let _provider = ThreadProviderGuard::set(Some(provider()));
+        // Mixed floating classes need the same canonical operand preparation
+        // and placement owners as a native session, not the legacy raw hook.
+        let context = runmat_accelerate::native_auto::install_preparation_service(
+            RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ))
+            .with_service_ports(RuntimeServicePorts::default().with_placement(
+                Rc::new(runmat_accelerate::placement::PlacementSession::default()),
+            )),
+        );
         for (left_intent, right_intent) in [
             (Automatic, Explicit),
             (Explicit, Automatic),
@@ -367,13 +379,16 @@ fn asymmetric_mixed_class_batches_preserve_column_order_and_all_original_intents
             .with_provenance(right_intent)
             .unwrap();
             for name in ["plus", "minus", "times", "rdivide", "ldivide"] {
-                let output = mapped(
-                    name,
-                    vec![
+                let output = block_on(runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &context,
+                    "arrayfun",
+                    &[
+                        Value::FunctionHandle(name.into()),
                         Value::GpuTensor(left.clone()),
                         Value::GpuTensor(right.clone()),
                     ],
-                )
+                    1,
+                ))
                 .unwrap();
                 let Value::GpuTensor(handle) = output.value() else {
                     panic!("native class-capable owner must preserve resident output for {name}")

@@ -9,41 +9,23 @@ use futures::executor::block_on;
 use runmat_accelerate::placement::{PlacementEventKind, PlacementVariant};
 use runmat_execution::{
     Digest, ExecutionCandidateKind, PlacementDecision, PlacementFeedback, PlacementPlanRequest,
-    SelectedExecutionCandidate,
+    WholeWorkDecision, WholeWorkPlacementRequestRef,
 };
 use runmat_runtime::{
     context::{
-        RuntimeContext, RuntimeGraphObservationPermit, RuntimeGraphPlacementSelection,
-        RuntimePlacementService, RuntimeServicePorts,
+        RuntimeContext, RuntimePlacementFeedbackSource, RuntimePlacementService,
+        RuntimeServicePorts, RuntimeWholeWorkSelection,
     },
     RuntimeError,
 };
 use runmat_value::Value;
-use std::{cell::RefCell, rc::Rc, sync::Arc};
-
-#[derive(Debug)]
-struct SelectedLogicalPermit {
-    signature: Digest,
-    candidate: String,
-    kind: ExecutionCandidateKind,
-}
-
-impl RuntimeGraphObservationPermit for SelectedLogicalPermit {
-    fn authorizes(
-        &self,
-        signature: &runmat_execution::PlacementSignature,
-        candidate: &str,
-        kind: ExecutionCandidateKind,
-    ) -> bool {
-        self.signature == signature.cache_key() && self.candidate == candidate && self.kind == kind
-    }
-}
+use std::{cell::RefCell, rc::Rc};
 
 struct Selection {
     session: runmat_accelerate::placement::PlacementSession,
     operation: &'static str,
     kind: ExecutionCandidateKind,
-    requests: RefCell<Vec<PlacementPlanRequest>>,
+    requests: RefCell<Vec<WholeWorkDecision>>,
     feedback: RefCell<Vec<PlacementFeedback>>,
 }
 
@@ -62,62 +44,60 @@ impl RuntimePlacementService for Selection {
         )
     }
 
-    fn plan_with_observation_permit(
+    fn select_whole_work_borrowed(
         &self,
-        request: PlacementPlanRequest,
-    ) -> Result<RuntimeGraphPlacementSelection, RuntimeError> {
-        let decision = self.plan(request)?;
-        let chosen = &decision.selections[0];
-        let observation_permit = Some(Arc::new(SelectedLogicalPermit {
-            signature: decision.signature.cache_key(),
-            candidate: chosen.candidate.clone(),
-            kind: chosen.kind,
-        }) as Arc<dyn RuntimeGraphObservationPermit>);
-        Ok(RuntimeGraphPlacementSelection {
-            decision,
-            observation_permit,
-        })
+        request: WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
+        // This fixture covers both real routes, not profitability policy. The
+        // candidate must originate in this invocation's admitted offers; the
+        // actual session still validates its resources and issues the permit.
+        let candidates = if request.signature.operation == self.operation {
+            std::slice::from_ref(
+                request
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.kind == self.kind)
+                    .expect("intended route must be offered by the actual operation"),
+            )
+        } else {
+            request.candidates
+        };
+        let selected = RuntimePlacementService::select_whole_work_borrowed(
+            &self.session,
+            WholeWorkPlacementRequestRef {
+                candidates,
+                ..request
+            },
+        )?;
+        assert_eq!(selected.decision.signature, request.signature.to_owned());
+        assert!(candidates.iter().any(|candidate| {
+            candidate.selected(request.signature.operation) == selected.decision.selected
+        }));
+        assert!(selected.observation_is_current());
+        self.requests.borrow_mut().push(selected.decision.clone());
+        Ok(selected)
     }
 
     fn plan(&self, request: PlacementPlanRequest) -> Result<PlacementDecision, RuntimeError> {
-        let kind = if request.signature.operation == self.operation {
-            self.kind
-        } else {
-            ExecutionCandidateKind::SharedRuntime
-        };
-        let node = &request.graph.nodes[0];
-        let candidate = &node
-            .candidates
-            .iter()
-            .find(|candidate| candidate.descriptor.kind == kind)
-            .unwrap_or_else(|| {
-                panic!(
-                    "{} lacks admitted {kind:?} candidate",
-                    request.signature.operation
-                )
-            })
-            .descriptor;
-        let decision = PlacementDecision {
-            signature: request.signature.clone(),
-            selections: vec![SelectedExecutionCandidate {
-                node: node.identity.clone(),
-                candidate: candidate.identity.clone(),
-                kind,
-            }],
-            predicted_total_ns: 1,
-            from_cache: false,
-            used_local_fallback: false,
-            explored_states: node.candidates.len() as u32,
-            pruned_states: 0,
-        };
-        self.requests.borrow_mut().push(request);
-        Ok(decision)
+        RuntimePlacementService::plan(&self.session, request)
     }
     fn observe(&self, feedback: PlacementFeedback) -> Result<(), RuntimeError> {
+        RuntimePlacementService::observe(&self.session, feedback.clone())?;
         self.feedback.borrow_mut().push(feedback);
         Ok(())
     }
-    fn invalidate(&self, _: runmat_execution::PlacementInvalidation) {}
+    fn defer_feedback(
+        &self,
+        source: Box<dyn RuntimePlacementFeedbackSource>,
+    ) -> Result<(), Box<dyn RuntimePlacementFeedbackSource>> {
+        RuntimePlacementService::defer_feedback(&self.session, source)
+    }
+    fn drain_feedback(&self) {
+        RuntimePlacementService::drain_feedback(&self.session);
+    }
+    fn invalidate(&self, invalidation: runmat_execution::PlacementInvalidation) {
+        RuntimePlacementService::invalidate(&self.session, invalidation);
+    }
 }
 
 fn context(
