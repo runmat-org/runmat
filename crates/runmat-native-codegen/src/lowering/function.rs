@@ -572,6 +572,8 @@ fn statement_rvalue_outputs(
 
 fn expression_produces_value(value: &runmat_mir::MirRvalue) -> bool {
     !matches!(value, runmat_mir::MirRvalue::Call(call) if call.requested_outputs.known_count() == Some(0))
+        && !matches!(value, runmat_mir::MirRvalue::SubscriptChain(chain)
+            if chain.sequence_use == runmat_types::SequenceUse::Discard)
         && !matches!(
             value,
             runmat_mir::MirRvalue::Member {

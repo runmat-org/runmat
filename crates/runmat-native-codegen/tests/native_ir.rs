@@ -384,6 +384,62 @@ fn lower(mir: &MirAssembly) -> runmat_native_codegen::NativeAssembly {
     lower_with(mir, &analysis, &manifest).unwrap()
 }
 
+#[test]
+fn dotted_statement_discard_has_no_ssa_result_while_expression_keeps_one() {
+    let span = Span { start: 0, end: 8 };
+    for (sequence_use, expected_outputs) in
+        [(SequenceUse::Discard, 0), (SequenceUse::RequireSingle, 1)]
+    {
+        let mir = function(vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::Use(MirOperand::Constant(MirConstant::Bool(true))),
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Expr(MirRvalue::SubscriptChain(runmat_mir::MirSubscriptChain {
+                    root: MirOperand::Local(MirLocalId(0)),
+                    steps: vec![runmat_mir::MirSubscriptStep::DottedInvoke {
+                        member: runmat_types::MemberName("method".into()),
+                        arguments: Vec::new(),
+                        semantic_fallback: None,
+                    }],
+                    sequence_use,
+                    context: runmat_types::ObjectIndexingContext::Statement,
+                })),
+                span,
+            },
+        ]);
+        let native = lower(&mir);
+        let instructions = &native.functions[0].blocks[0].instructions;
+        let call = instructions
+            .iter()
+            .find(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    runmat_native_codegen::NativeOperation::Rvalue {
+                        value: MirRvalue::SubscriptChain(_),
+                        ..
+                    }
+                )
+            })
+            .expect("retained dotted invocation");
+        assert_eq!(call.outputs.len(), expected_outputs);
+        let statement = instructions
+            .iter()
+            .find(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    runmat_native_codegen::NativeOperation::Statement(MirStmtKind::Expr(_))
+                )
+            })
+            .expect("retained expression statement");
+        assert_eq!(statement.inputs.len(), expected_outputs);
+    }
+}
+
 fn phased_fixed_destination_mir() -> MirAssembly {
     let span = Span { start: 0, end: 8 };
     let place = MirPlace::Index(
