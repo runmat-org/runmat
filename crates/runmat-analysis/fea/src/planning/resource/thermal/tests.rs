@@ -4,7 +4,9 @@ use crate::{
     ComputeBackend, ThermalProcedureControl,
 };
 use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
-use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+use runmat_meshing_core::{
+    fixtures::canonical_tetrahedron_solver_mesh, CanonicalMeshingContract as _, ElementOrder,
+};
 
 fn fixture(
     order: ElementOrder,
