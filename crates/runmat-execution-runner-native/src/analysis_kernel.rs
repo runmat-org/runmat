@@ -296,6 +296,17 @@ fn execute_result_publication(
     )])
 }
 
+/// The local execution plan a post-process phase was admitted with: its plan's CPU request,
+/// the same authority `with_admitted_cpu_pool` sizes the pool from.
+pub(crate) fn admitted_local_execution(
+    resource_plan: &FeaResourcePlan,
+) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::LocalExecutionPlan> {
+    runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+        resource_plan.request.cpu_millicores,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+}
+
 /// Runs one kernel's numerical work on the admitted CPU pool sized by its resource plan.
 ///
 /// The declared plan's CPU request is the single thread authority: host planning derived it

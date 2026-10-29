@@ -8,7 +8,7 @@ use crate::{
     },
     pipeline::transient::prepare_transient_preassembly,
 };
-use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
     build_resource_plan, build_structural_transient_scope_resource_plan, post_process,
@@ -114,12 +114,8 @@ pub fn build_structural_transient_block_resource_plan(
         ))?;
     let encoded_inputs = [
         count(workload_bytes.len(), "transient workload payload")?,
-        count(
-            mesh.canonical_encode()
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
-                .len(),
-            "transient mesh payload",
-        )?,
+        mesh.canonical_encoded_len()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
         count(
             request
                 .canonical_bytes()

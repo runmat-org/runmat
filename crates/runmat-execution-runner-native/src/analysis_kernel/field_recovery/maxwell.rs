@@ -64,6 +64,7 @@ pub(super) fn execute(
                 invocation.inputs,
                 invocation.output_policy,
                 demand.source_validation_workspace_bytes,
+                crate::analysis_kernel::admitted_local_execution(&plan)?,
             )?
     {
         return Err(invalid(
@@ -75,6 +76,7 @@ pub(super) fn execute(
             &request,
             invocation.inputs,
             invocation.output_policy,
+            crate::analysis_kernel::admitted_local_execution(&plan)?,
         )?
     {
         return Err(invalid(

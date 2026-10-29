@@ -111,7 +111,7 @@ pub(in crate::commands::fea) fn verify_saved_fields(snapshot: &Path, output: &Pa
             field_id: descriptor.field_id,
             scalar_count: offset,
             pages,
-            scalar_bytes_sha256: format!("{:x}", hash.finalize()),
+            scalar_bytes_sha256: hex::encode(hash.finalize()),
         });
     }
     std::fs::write(

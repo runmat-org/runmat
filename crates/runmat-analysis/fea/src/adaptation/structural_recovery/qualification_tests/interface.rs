@@ -41,11 +41,12 @@ fn interface_mesh(divisions: usize, order: ElementOrder) -> SolverMeshArtifact {
     let left_region = entity(PersistentEntityKind::Region, "left_layer");
     let right_region = entity(PersistentEntityKind::Region, "right_layer");
     let mut groups: BTreeMap<_, Vec<u64>> = BTreeMap::new();
-    for element in &mut mesh.topology.volume_elements {
+    let topo = &mut *mesh.topology;
+    for element in &mut topo.volume_elements {
         let x = element.node_ids[..4]
             .iter()
             .map(|id| {
-                mesh.topology.nodes[*id as usize - 1]
+                topo.nodes[*id as usize - 1]
                     .coordinates_m
                     .canonical_value()[0]
             })

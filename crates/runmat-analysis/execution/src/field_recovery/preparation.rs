@@ -178,6 +178,7 @@ pub fn prepare_structural_field_recovery(
         &compilation,
         inputs.iter().map(|(i, _)| i),
         policy,
+        preparation.local_execution,
     )?;
     inputs.push((
         prepare_analysis_objects(
@@ -228,5 +229,6 @@ pub fn prepare_structural_field_recovery(
         program,
         inputs,
         resource_plan,
+        local_execution: preparation.local_execution,
     })
 }

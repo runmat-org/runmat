@@ -58,6 +58,7 @@ fn magnetic_recovery_profiles_cover_actual_catalog_identity_and_storage_both_ord
                     encoded_bytes_upper_bound: ByteCount(1024),
                 },
             },
+            crate::planning::resource::LocalExecutionPlan::serial(),
         )
         .unwrap();
         assert_eq!(

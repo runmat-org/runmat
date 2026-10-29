@@ -84,26 +84,28 @@ mod tests {
     };
 
     fn append_node(mesh: &mut SolverMeshArtifact, node_id: u64, coordinates_m: [f64; 3]) {
-        mesh.topology.nodes.push(SolverMeshNode {
+        let topo = &mut *mesh.topology;
+        topo.nodes.push(SolverMeshNode {
             node_id,
             stable_identity: StableDigest([node_id as u8; 32]),
             coordinates_m: runmat_types::physical::Quantity::<
                 runmat_types::physical::kind::Position,
                 _,
             >::new(coordinates_m),
-            provenance: mesh.topology.nodes[0].provenance.clone(),
+            provenance: topo.nodes[0].provenance.clone(),
             exact_parameters: Vec::new(),
         });
     }
 
     fn append_tet(mesh: &mut SolverMeshArtifact, element_id: u64, node_ids: [u64; 4]) {
-        mesh.topology.volume_elements.push(SolverVolumeElement {
+        let topo = &mut *mesh.topology;
+        topo.volume_elements.push(SolverVolumeElement {
             element_id,
             stable_identity: StableDigest([element_id as u8; 32]),
             order: ElementOrder::Tet4,
             node_ids: node_ids.into(),
-            region_id: mesh.topology.volume_elements[0].region_id.clone(),
-            provenance: mesh.topology.volume_elements[0].provenance.clone(),
+            region_id: topo.volume_elements[0].region_id.clone(),
+            provenance: topo.volume_elements[0].provenance.clone(),
         });
     }
 

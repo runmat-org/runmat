@@ -216,12 +216,13 @@ pub(super) fn two_medium(
         entity(PersistentEntityKind::Region, "transmitted_medium"),
     ];
     let mut elements = [Vec::new(), Vec::new()];
-    for element in &mut mesh.topology.volume_elements {
+    let topo = &mut *mesh.topology;
+    for element in &mut topo.volume_elements {
         let mean = element.node_ids[..4]
             .iter()
             .map(|id| {
                 axial(
-                    mesh.topology.nodes[*id as usize - 1]
+                    topo.nodes[*id as usize - 1]
                         .coordinates_m
                         .canonical_value(),
                     direction,

@@ -78,6 +78,14 @@ impl FilesystemAccess<'_> {
             )
         })
     }
+    /// One group commit for the immutable files of an operation: every file is staged, then
+    /// one durability barrier and one commit record make all of them visible together.
+    pub(super) fn immutable_objects(&self) -> std::io::Result<ImmutableObjects<'_, '_>> {
+        Ok(ImmutableObjects {
+            access: self,
+            batch: self.workspace.immutable_batch()?,
+        })
+    }
     pub(super) fn fs_read(&self, path: impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
         self.workspace
             .read(self.relative(path.as_ref())?, self.remaining_bytes())
@@ -432,3 +440,44 @@ mod records;
 
 #[cfg(test)]
 mod tests;
+
+/// Immutable files staged under one access scope and committed together.
+pub(super) struct ImmutableObjects<'s, 'a> {
+    access: &'s FilesystemAccess<'a>,
+    batch: Box<dyn runmat_filesystem::workspace_access::ImmutableBatch + 's>,
+}
+impl ImmutableObjects<'_, '_> {
+    /// Stages one immutable file; an existing name must already hold exactly these bytes.
+    pub(super) fn put(
+        &mut self,
+        path: impl AsRef<Path>,
+        bytes: &[u8],
+    ) -> Result<(), AnalysisPublicationError> {
+        match self
+            .batch
+            .stage(
+                self.access
+                    .relative(path.as_ref())
+                    .map_err(AnalysisPublicationError::from_io)?,
+                bytes,
+                self.access.remaining_bytes(),
+            )
+            .map_err(AnalysisPublicationError::from_io)?
+        {
+            runmat_filesystem::workspace_access::ImmutableStage::Staged => Ok(()),
+            runmat_filesystem::workspace_access::ImmutableStage::Existing(existing)
+                if existing == bytes =>
+            {
+                Ok(())
+            }
+            runmat_filesystem::workspace_access::ImmutableStage::Existing(_) => {
+                Err("immutable publication content collision".into())
+            }
+        }
+    }
+    pub(super) fn commit(self) -> Result<(), AnalysisPublicationError> {
+        self.batch
+            .commit()
+            .map_err(AnalysisPublicationError::from_io)
+    }
+}

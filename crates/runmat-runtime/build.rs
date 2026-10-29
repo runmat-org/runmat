@@ -249,7 +249,7 @@ fn validate_wasm_registry(
 
     manifest_rows.sort_unstable();
     let manifest_json = wasm_manifest_json(&manifest_rows, &mut errors);
-    let digest = format!("{:x}", Sha256::digest(manifest_json.as_bytes()));
+    let digest = hex::encode(Sha256::digest(manifest_json.as_bytes()));
     let expected_digest = format!("pub const REGISTRY_MANIFEST_DIGEST: &str = \"{digest}\";");
     if !registry.contains(&expected_digest) {
         errors.push("typed registration manifest digest metadata does not match".to_string());
@@ -371,5 +371,5 @@ fn wasm_registry_fingerprint(inputs: &[(String, PathBuf)]) -> String {
         hash.update((bytes.len() as u64).to_le_bytes());
         hash.update(&bytes);
     }
-    format!("sha256:{:x}", hash.finalize())
+    format!("sha256:{}", hex::encode(hash.finalize()))
 }

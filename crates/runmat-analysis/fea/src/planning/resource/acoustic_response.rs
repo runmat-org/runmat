@@ -8,7 +8,7 @@ use crate::{
 use runmat_analysis_core::IndependentDomain;
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 use runmat_execution::Digest;
-use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+use runmat_meshing_core::SolverMeshArtifact;
 
 const LIMITS: CanonicalLimits = CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 /// Fixed result keys, identities, formulation and scalar evidence.
@@ -119,8 +119,10 @@ pub fn build_acoustic_response_resource_plan(
         ))
         .map_err(invalid)?;
     let workload_bytes = workload.canonical_bytes().map_err(invalid)?;
-    let mesh_bytes = mesh.canonical_encode().map_err(invalid)?;
-    let input_bytes = add(count(workload_bytes.len())?, count(mesh_bytes.len())?)?;
+    let input_bytes = add(
+        count(workload_bytes.len())?,
+        mesh.canonical_encoded_len().map_err(invalid)?,
+    )?;
     if prepared.inputs.encoded_payload_bytes.0 != input_bytes
         || prepared.result_output.encoded_payload_bytes_upper_bound.0 != payload
         || prepared.receipt_output.encoded_payload_bytes_upper_bound.0

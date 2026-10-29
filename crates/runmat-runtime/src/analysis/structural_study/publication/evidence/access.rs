@@ -26,20 +26,21 @@ impl StudyEvidenceAccess {
         bytes: &[u8],
         maximum: u64,
     ) -> Result<String, Error> {
-        self.immutable_objects(maximum, bytes.len() as u64)?
-            .persist(relative, bytes)
+        self.persist_immutable_batch(maximum, bytes.len() as u64, |batch| {
+            batch.persist(relative, bytes)
+        })
     }
 
-    /// One workspace scope (one journal lock and recovery) for a run of immutable objects
-    /// written one at a time, none larger than `largest` bytes: each object's buffer and its
-    /// existing-content comparison stay within `maximum`, as for a single object. The
-    /// allowance is checked here; the workspace opens with the first object written, so a
-    /// run rejected before any write leaves no directory behind.
-    pub(in crate::analysis) fn immutable_objects(
+    /// One workspace scope and one group commit for a run of immutable objects staged one at
+    /// a time, none larger than `largest` bytes: each object's buffer and its existing-content
+    /// comparison stay within `maximum`, as for a single object. The objects become durable
+    /// and visible together once `stage` returns; nothing is published if it fails.
+    pub(in crate::analysis) fn persist_immutable_batch<T>(
         &self,
         maximum: u64,
         largest: u64,
-    ) -> Result<ImmutableObjectScope<'_>, Error> {
+        stage: impl FnOnce(&mut ImmutableObjectBatch<'_>) -> Result<T, Error>,
+    ) -> Result<T, Error> {
         let available = maximum
             .checked_sub(largest)
             .filter(|available| *available > 0 && *available >= largest)
@@ -50,11 +51,23 @@ impl StudyEvidenceAccess {
                     ),
                 }
             })?;
-        Ok(ImmutableObjectScope {
-            access: self,
-            scope: None,
+        let scope = self
+            .provider
+            .workspace_access(&self.root, true, available)?;
+        let mut batch = ImmutableObjectBatch {
+            root: &self.root,
+            batch: scope.immutable_batch()?,
             available,
-        })
+        };
+        let value = stage(&mut batch)?;
+        batch
+            .batch
+            .commit()
+            .map_err(|error| Error::EvidenceDurabilityIndeterminate {
+                path: self.root.clone(),
+                cause: error.to_string(),
+            })?;
+        Ok(value)
     }
     pub(super) fn persist(
         &self,
@@ -130,13 +143,14 @@ fn limited(message: &str) -> Error {
     }
 }
 
-pub(in crate::analysis) struct ImmutableObjectScope<'a> {
-    access: &'a StudyEvidenceAccess,
-    scope: Option<Box<dyn runmat_filesystem::workspace_access::WorkspaceAccess>>,
+pub(in crate::analysis) struct ImmutableObjectBatch<'a> {
+    root: &'a std::path::Path,
+    batch: Box<dyn runmat_filesystem::workspace_access::ImmutableBatch + 'a>,
     available: u64,
 }
 
-impl ImmutableObjectScope<'_> {
+impl ImmutableObjectBatch<'_> {
+    /// Stages one immutable object; its returned path is visible once the batch commits.
     pub(in crate::analysis) fn persist(
         &mut self,
         relative: &str,
@@ -152,28 +166,17 @@ impl ImmutableObjectScope<'_> {
             });
         }
         let path = std::path::Path::new(relative);
-        let scope = match &mut self.scope {
-            Some(scope) => scope,
-            empty => empty.insert(self.access.provider.workspace_access(
-                &self.access.root,
-                true,
-                self.available,
-            )?),
-        };
-        scope.create_dir_all(path.parent().ok_or("immutable object path has no parent")?)?;
-        match scope.atomic_create_new(path, bytes, self.available)? {
-            runmat_filesystem::AtomicCreateResult::Published { .. } => {}
-            runmat_filesystem::AtomicCreateResult::Existing(existing) if existing == bytes => {}
-            runmat_filesystem::AtomicCreateResult::Existing(_) => {
+        if path.parent().is_none() {
+            return Err("immutable object path has no parent".into());
+        }
+        match self.batch.stage(path, bytes, self.available)? {
+            runmat_filesystem::workspace_access::ImmutableStage::Staged => {}
+            runmat_filesystem::workspace_access::ImmutableStage::Existing(existing)
+                if existing == bytes => {}
+            runmat_filesystem::workspace_access::ImmutableStage::Existing(_) => {
                 return Err("immutable object identity already contains different content".into())
             }
         }
-        scope.synchronize_immutable(path).map_err(|error| {
-            Error::EvidenceDurabilityIndeterminate {
-                path: self.access.root.join(path),
-                cause: error.to_string(),
-            }
-        })?;
-        Ok(self.access.root.join(path).display().to_string())
+        Ok(self.root.join(path).display().to_string())
     }
 }

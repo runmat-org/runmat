@@ -4,7 +4,8 @@ use std::io::{Read, Write};
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use sha2::Sha256;
+// HMAC/HKDF 0.12 take the digest-0.10 SHA-256.
+use sha2_mac::Sha256;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use zeroize::Zeroize;
 

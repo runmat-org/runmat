@@ -62,7 +62,7 @@ pub(super) async fn download_artifact(
     if bytes.len() as u64 != artifact.byte_len {
         return Err(RegistryClientError::LengthMismatch);
     }
-    let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
+    let digest = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
     if digest != artifact.digest {
         return Err(RegistryClientError::DigestMismatch);
     }

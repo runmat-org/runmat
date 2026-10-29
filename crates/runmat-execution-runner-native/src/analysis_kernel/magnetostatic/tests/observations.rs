@@ -249,6 +249,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
             source_result: solved.objects.clone(),
             program_revision: task.program.request.recipe.program_revision.clone(),
             output_policy: task.output_policy,
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .unwrap();
         let invoke = |inputs: &[runmat_analysis_execution::PreparedAnalysisObjects], policy| {
@@ -266,6 +267,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
             &recovery.inputs,
             AnalysisOutputPolicy::new(recovery.output_policy.chunk_bytes(), tight).unwrap(),
             runmat_analysis_fea::planning::resource::ByteCount(0),
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         )
         .unwrap_err();
         assert!(error

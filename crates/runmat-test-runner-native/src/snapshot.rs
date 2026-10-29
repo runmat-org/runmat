@@ -79,7 +79,7 @@ pub fn source_catalog_digest(sources: &[SavedRunSource]) -> String {
             hasher.update(field);
         }
     }
-    format!("sha256:{:x}", hasher.finalize())
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 pub fn source_prefix(project_root: &Path, target: &Path) -> Option<String> {
@@ -124,8 +124,8 @@ fn source_identity(project_root: &Path, path: &Path) -> (String, String) {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     (
         format!(
-            "path:external:{:x}",
-            Sha256::digest(parent.to_string_lossy().as_bytes())
+            "path:external:{}",
+            hex::encode(Sha256::digest(parent.to_string_lossy().as_bytes())),
         ),
         path.file_name()
             .unwrap_or_default()

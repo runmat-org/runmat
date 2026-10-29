@@ -180,7 +180,7 @@ fn contact_pair(
     ExactContactPair {
         id: PersistentEntityId::new(
             PersistentEntityKind::Contact,
-            format!("contact:{identity:x}"),
+            format!("contact:{}", hex::encode(identity)),
             root_assembly_path.to_vec(),
         ),
         side_a_face_ids,

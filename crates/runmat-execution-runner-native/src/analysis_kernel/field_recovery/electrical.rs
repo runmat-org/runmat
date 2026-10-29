@@ -32,17 +32,19 @@ pub(super) fn execute(
                 &request,
                 invocation.inputs,
                 invocation.output_policy,
+                crate::analysis_kernel::admitted_local_execution(&plan)?,
             )?
     {
         return Err(invalid(
             "electrical recovery admission differs before source decoding",
         ));
     }
-    let (workload, mesh, result) = decode_electrical_recovery_source(
+    let source = decode_electrical_recovery_source(
         unique_input(&invocation, Workload)?,
         unique_input(&invocation, Mesh)?,
         unique_input(&invocation, SolverResult)?,
     )?;
+    let (workload, mesh, result) = (source.workload(), source.mesh(), source.result());
     let numerical = NumericalPlanIdentity::from_electrical_static_workload(
         workload.identity()?,
         runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
@@ -50,13 +52,13 @@ pub(super) fn execute(
     if invocation.host.workload.execution_plan
         != ExecutionPlanIdentity::new(numerical, plan.identity.digest())?
         || request.producer != invocation.host.workload.step
-        || request != result.native_field_request(&workload, &mesh)?
+        || request != source.native_field_request()?
     {
         return Err(invalid(
             "electrical field task original numerical source differs",
         ));
     }
-    let fields = result.recover_native_fields(&workload, &mesh, &request)?;
+    let fields = result.recover_native_fields(workload, mesh, &request)?;
     recovered_field_output(&fields)
 }
 fn invalid(error: impl std::fmt::Display) -> AnalysisBridgeError {

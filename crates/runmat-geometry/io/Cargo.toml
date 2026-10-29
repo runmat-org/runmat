@@ -15,7 +15,8 @@ runmat-geometry-core = { workspace = true }
 runmat-geometry-ops = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
 

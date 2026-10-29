@@ -129,7 +129,11 @@ target-lexicon = "0.12"
 tower-lsp = "0.20"
 once_cell = "1"
 semver = { version = "1", features = ["serde"] }
-sha2 = "0.10"
+# SHA-256 in hardware where the CPU has it (0.10 needs the uncached sha2-asm on aarch64).
+sha2 = { version = "0.11", default-features = false }
+# HMAC and HKDF 0.12 are built on digest 0.10.
+sha2-mac = { package = "sha2", version = "0.10" }
+hex = "0.4"
 hmac = "0.12"
 url = { version = "2", features = ["serde"] }
 

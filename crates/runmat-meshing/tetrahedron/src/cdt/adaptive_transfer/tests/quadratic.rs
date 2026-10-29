@@ -7,15 +7,16 @@ use std::collections::BTreeMap;
 // Test-only straight-sided elevation of the CDT fixture, without boundary charts.
 fn elevate(mut mesh: SolverMeshArtifact) -> SolverMeshArtifact {
     let mut midsides = BTreeMap::new();
-    for element in &mut mesh.topology.volume_elements {
+    let topo = &mut *mesh.topology;
+    for element in &mut topo.volume_elements {
         let corners = element.node_ids.clone();
         for [a, b] in TETRAHEDRON_MIDSIDE_EDGE_CORNERS {
             let mut edge = [corners[a], corners[b]];
             edge.sort_unstable();
             let id = *midsides.entry(edge).or_insert_with(|| {
-                let endpoints = edge.map(|id| &mesh.topology.nodes[id as usize - 1]);
+                let endpoints = edge.map(|id| &topo.nodes[id as usize - 1]);
                 let node = SolverMeshNode {
-                    node_id: mesh.topology.nodes.len() as u64 + 1,
+                    node_id: topo.nodes.len() as u64 + 1,
                     stable_identity: solver_midside_node_identity(
                         endpoints.map(|n| n.stable_identity),
                     ),
@@ -30,7 +31,7 @@ fn elevate(mut mesh: SolverMeshArtifact) -> SolverMeshArtifact {
                     exact_parameters: Vec::new(),
                 };
                 let id = node.node_id;
-                mesh.topology.nodes.push(node);
+                topo.nodes.push(node);
                 id
             });
             element.node_ids.push(id);
@@ -38,8 +39,8 @@ fn elevate(mut mesh: SolverMeshArtifact) -> SolverMeshArtifact {
         element.order = ElementOrder::Tet10;
     }
     mesh.resolved_request.element_order = ElementOrder::Tet10;
-    mesh.topology.field_topologies[0].ordered_entity_ids =
-        mesh.topology.nodes.iter().map(|n| n.node_id).collect();
+    topo.field_topologies[0].ordered_entity_ids =
+        topo.nodes.iter().map(|n| n.node_id).collect();
     mesh.seal_canonical_digest().unwrap();
     mesh
 }

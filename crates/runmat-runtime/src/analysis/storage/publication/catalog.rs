@@ -20,8 +20,10 @@ impl AnalysisPublicationBuilder {
         Ok(paths.remove(0))
     }
 
-    /// Persist catalog objects read one at a time through one immutable-object scope: one
-    /// journal lock and recovery for the run, not one per object.
+    /// Persist catalog objects read and verified one at a time through one workspace scope
+    /// and one group commit: one journal lock, recovery and durability barrier for the run,
+    /// not one per object. The first object is verified before the scope opens, so a
+    /// mismatched catalog creates nothing.
     pub(in crate::analysis) fn persist_catalog_objects(
         &self,
         definition: Digest,
@@ -31,38 +33,50 @@ impl AnalysisPublicationBuilder {
         if definition != self.definition {
             return Err("catalog object belongs to another publication definition".into());
         }
-        let Some(largest) = references
+        let verified = |reference: &ValueRef| {
+            let bytes = read(reference)?;
+            if bytes.len() as u64 != reference.encoded_length
+                || Digest::sha256(&bytes) != reference.logical_digest
+            {
+                return Err::<_, AnalysisPublicationError>(
+                    "study catalog object digest or length mismatch".into(),
+                );
+            }
+            Ok(bytes)
+        };
+        // The sealed whole-study manifest carries the original catalog, including access,
+        // media and schema metadata. Each file is its exact immutable content object.
+        let relative = |reference: &ValueRef| {
+            format!(
+                "sha256_{}/objects/sha256_{}.object",
+                definition.to_string().trim_start_matches("sha256:"),
+                reference
+                    .logical_digest
+                    .to_string()
+                    .trim_start_matches("sha256:"),
+            )
+        };
+        let Some((first, rest)) = references.split_first() else {
+            return Ok(Vec::new());
+        };
+        let first_bytes = verified(first)?;
+        let largest = references
             .iter()
             .map(|reference| reference.encoded_length)
             .max()
-        else {
-            return Ok(Vec::new());
-        };
-        let mut scope = self
-            .evidence_access
-            .immutable_objects(self.source_workspace_limit()?, largest)?;
-        references
-            .iter()
-            .map(|reference| {
-                let bytes = read(reference)?;
-                if bytes.len() as u64 != reference.encoded_length
-                    || Digest::sha256(&bytes) != reference.logical_digest
-                {
-                    return Err("study catalog object digest or length mismatch".into());
+            .unwrap_or(0);
+        self.evidence_access.persist_immutable_batch(
+            self.source_workspace_limit()?,
+            largest,
+            |batch| {
+                let mut paths = Vec::with_capacity(references.len());
+                paths.push(batch.persist(&relative(first), &first_bytes)?);
+                drop(first_bytes);
+                for reference in rest {
+                    paths.push(batch.persist(&relative(reference), &verified(reference)?)?);
                 }
-                // The sealed whole-study manifest carries the original catalog, including
-                // access, media and schema metadata. This file is its exact immutable content
-                // object.
-                let relative = format!(
-                    "sha256_{}/objects/sha256_{}.object",
-                    definition.to_string().trim_start_matches("sha256:"),
-                    reference
-                        .logical_digest
-                        .to_string()
-                        .trim_start_matches("sha256:"),
-                );
-                scope.persist(&relative, &bytes)
-            })
-            .collect()
+                Ok(paths)
+            },
+        )
     }
 }

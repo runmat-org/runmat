@@ -1,6 +1,8 @@
 //! Scoped synchronous access shares the native workspace journal and recovery fence.
+mod immutable_batch;
 mod resource;
 mod transaction;
+pub use immutable_batch::{ImmutableBatch, ImmutableStage};
 pub use transaction::WorkspaceTransaction;
 use crate::workspace::{
     WorkspaceCaptureRequest, WorkspacePublicationOutcome, WorkspacePublicationRequest,
@@ -43,6 +45,15 @@ pub trait WorkspaceAccess: Send + Sync {
             io::ErrorKind::Unsupported,
             "provider cannot confirm immutable durability",
         ))
+    }
+    /// Group commit of immutable files: stage each, then make all of them durable and
+    /// visible together. Providers without a native group commit publish and confirm each
+    /// file on its own.
+    fn immutable_batch(&self) -> io::Result<Box<dyn ImmutableBatch + '_>> {
+        Ok(Box::new(immutable_batch::SequentialImmutableBatch {
+            access: self,
+            staged: Vec::new(),
+        }))
     }
     /// Capture and conditional publication reuse the scope's recovery fence.
     /// The request root must be `/` or `.`, relative to this admitted scope.
@@ -166,6 +177,7 @@ impl NativeAccess {
         // A prior durable commit may have stopped while materializing. Never expose
         // its partially updated namespace, including through the same held scope.
         crate::workspace_native::recover_locked_admitted(&self.root, self.maximum_resident_bytes)?;
+        immutable_batch::recover(&self.root, self.maximum_resident_bytes)?;
         action()
     }
     fn path(&self, relative: &Path, writing: bool) -> io::Result<std::path::PathBuf> {
@@ -270,6 +282,15 @@ impl WorkspaceAccess for NativeAccess {
     }
     fn remove_dir(&self, path: &Path) -> io::Result<()> {
         self.access(true, || std::fs::remove_dir(self.path(path, true)?))
+    }
+    fn immutable_batch(&self) -> io::Result<Box<dyn ImmutableBatch + '_>> {
+        if !cfg!(unix) {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "durable immutable workspace batches require directory synchronization",
+            ));
+        }
+        Ok(Box::new(immutable_batch::NativeImmutableBatch::new(self)))
     }
     fn synchronize_immutable(&self, relative: &Path) -> io::Result<()> {
         if !cfg!(unix) {

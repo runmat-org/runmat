@@ -4019,14 +4019,15 @@ fn subdivide_fixture_tetrahedron(mesh: &mut SolverMeshArtifact, model: &Analysis
     identity_hasher.update(model.geometry_id.as_bytes());
     let interior_identity = StableDigest::from_bytes(identity_hasher.finalize().into());
     let interior_node_id = 5;
-    mesh.topology.nodes.push(SolverMeshNode {
+    let topo = &mut *mesh.topology;
+    topo.nodes.push(SolverMeshNode {
         node_id: interior_node_id,
         stable_identity: interior_identity,
         coordinates_m:
             runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
                 0.25, 0.25, 0.25,
             ]),
-        provenance: mesh.topology.nodes[0].provenance.clone(),
+        provenance: topo.nodes[0].provenance.clone(),
         exact_parameters: Vec::new(),
     });
 

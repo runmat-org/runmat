@@ -133,7 +133,7 @@ fn compact_topology_decode_peak_stays_within_its_typed_admission() {
             state.set((false, 0, 0));
             record
         });
-        assert_eq!(decoded, mesh.topology);
+        assert_eq!(decoded, *mesh.topology);
         println!(
             "decode elements={} peak={peak} admitted={admitted} typed={}",
             mesh.topology.volume_elements.len(),

@@ -21,13 +21,14 @@ fn two_tetrahedron_artifact() -> SolverMeshArtifact {
         provenance: vec![region.clone()],
         exact_parameters: Vec::new(),
     });
-    artifact.topology.volume_elements.push(SolverVolumeElement {
+    let topo = &mut *artifact.topology;
+    topo.volume_elements.push(SolverVolumeElement {
         element_id: 2,
         stable_identity: solver_volume_element_identity([
-            artifact.topology.nodes[1].stable_identity,
-            artifact.topology.nodes[2].stable_identity,
-            artifact.topology.nodes[3].stable_identity,
-            artifact.topology.nodes[4].stable_identity,
+            topo.nodes[1].stable_identity,
+            topo.nodes[2].stable_identity,
+            topo.nodes[3].stable_identity,
+            topo.nodes[4].stable_identity,
         ]),
         order: ElementOrder::Tet4,
         node_ids: vec![2, 3, 4, 5],

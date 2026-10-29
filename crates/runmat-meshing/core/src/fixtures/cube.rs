@@ -183,14 +183,15 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
     };
     let mut mesh = slab_mesh(cell_count);
     let mut midsides = BTreeMap::new();
-    for element in &mesh.topology.volume_elements {
+    let topo = &mut *mesh.topology;
+    for element in &topo.volume_elements {
         for [a, b] in TETRAHEDRON_MIDSIDE_EDGE_CORNERS {
             let mut edge = [element.node_ids[a], element.node_ids[b]];
             edge.sort_unstable();
             if midsides.contains_key(&edge) {
                 continue;
             }
-            let endpoints = edge.map(|id| &mesh.topology.nodes[id as usize - 1]);
+            let endpoints = edge.map(|id| &topo.nodes[id as usize - 1]);
             let coordinates_m = std::array::from_fn(|axis| {
                 (endpoints[0].coordinates_m.canonical_value()[axis]
                     + endpoints[1].coordinates_m.canonical_value()[axis])
@@ -198,8 +199,8 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
             });
             let stable_identity =
                 solver_midside_node_identity(endpoints.map(|n| n.stable_identity));
-            let node_id = mesh.topology.nodes.len() as u64 + 1;
-            mesh.topology.nodes.push(SolverMeshNode {
+            let node_id = topo.nodes.len() as u64 + 1;
+            topo.nodes.push(SolverMeshNode {
                 node_id,
                 stable_identity,
                 coordinates_m: runmat_types::physical::Quantity::<
@@ -217,19 +218,19 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
         edge.sort_unstable();
         midsides[&edge]
     };
-    for element in &mut mesh.topology.volume_elements {
+    for element in &mut topo.volume_elements {
         let corners = element.node_ids.clone();
         element.node_ids.extend(
             TETRAHEDRON_MIDSIDE_EDGE_CORNERS.map(|[a, b]| midpoint(corners[a], corners[b])),
         );
         element.order = ElementOrder::Tet10;
     }
-    for face in &mut mesh.topology.boundary_faces {
+    for face in &mut topo.boundary_faces {
         let corners = face.node_ids.clone();
         let midsides = [[0, 1], [1, 2], [2, 0]].map(|[a, b]| midpoint(corners[a], corners[b]));
         // Planar fixture charts use physical tangent coordinates and actual source IDs.
         let coordinates = [0, 1, 2].map(|i| {
-            mesh.topology.nodes[corners[i] as usize - 1]
+            topo.nodes[corners[i] as usize - 1]
                 .coordinates_m
                 .canonical_value()
         });
@@ -242,7 +243,7 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
             _ => [0, 1],
         };
         for id in midsides {
-            let node = &mut mesh.topology.nodes[id as usize - 1];
+            let node = &mut topo.nodes[id as usize - 1];
             for source_face_id in &face.provenance {
                 node.provenance.push(source_face_id.clone());
                 node.exact_parameters
@@ -260,13 +261,13 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
         face.node_ids.extend(midsides);
         face.order = BoundaryTriangleOrder::Tri6;
     }
-    for field in &mut mesh.topology.field_topologies {
+    for field in &mut topo.field_topologies {
         if field.location == FieldTopologyLocation::Node {
-            field.ordered_entity_ids = mesh.topology.nodes.iter().map(|n| n.node_id).collect();
+            field.ordered_entity_ids = topo.nodes.iter().map(|n| n.node_id).collect();
         }
     }
     mesh.resolved_request.element_order = ElementOrder::Tet10;
-    mesh.resolved_request.limits.maximum_nodes = mesh.topology.nodes.len() as u64;
+    mesh.resolved_request.limits.maximum_nodes = topo.nodes.len() as u64;
     mesh.seal_canonical_digest().unwrap();
     mesh
 }

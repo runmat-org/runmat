@@ -401,7 +401,7 @@ pub fn artifact_identity(metadata: &NativeLibraryMetadata) -> Result<String, Met
     validate_metadata(&normalized)?;
     let bytes = serde_json::to_vec(&normalized).map_err(MetadataError::Serialize)?;
     let digest = Sha256::digest(bytes);
-    Ok(format!("native-ffi-metadata-v1:{digest:x}"))
+    Ok(format!("native-ffi-metadata-v1:{}", hex::encode(digest)))
 }
 
 fn canonical_artifact_metadata(

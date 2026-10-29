@@ -42,7 +42,7 @@ impl ArtifactStore for FilesystemArtifactStore {
                 name: name.clone(),
                 media_type: media_type.into(),
                 byte_len: bytes.len() as u64,
-                content_digest: format!("sha256:{:x}", Sha256::digest(bytes)),
+                content_digest: format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
                 store_key: target
                     .strip_prefix(&self.root)
                     .unwrap_or(&target)

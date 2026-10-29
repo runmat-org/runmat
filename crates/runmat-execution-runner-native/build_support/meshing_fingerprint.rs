@@ -82,5 +82,5 @@ pub fn fingerprint(
             hash.update(&block[..count]);
         }
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hex::encode(hash.finalize()))
 }

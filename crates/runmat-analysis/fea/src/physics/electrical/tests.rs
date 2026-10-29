@@ -187,11 +187,12 @@ fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux
                 runmat_meshing_core::PersistentEntityKind::Solid,
                 "layer_right",
             );
-            for element in &mut mesh.topology.volume_elements {
+            let topo = &mut *mesh.topology;
+            for element in &mut topo.volume_elements {
                 let x = element.node_ids[..4]
                     .iter()
                     .map(|id| {
-                        mesh.topology
+                        topo
                             .nodes
                             .iter()
                             .find(|node| node.node_id == *id)

@@ -74,6 +74,7 @@ pub fn build_structural_recovery_metadata_resource_plan(
     compilation: &ConstraintCompilation<'_>,
     inputs: &[PreparedAnalysisObjects],
     policy: crate::AnalysisOutputPolicy,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     build_from_refs(
         request,
@@ -83,6 +84,7 @@ pub fn build_structural_recovery_metadata_resource_plan(
         compilation,
         inputs.iter(),
         policy,
+        local_execution,
     )
 }
 pub(super) fn build_from_refs<'a>(
@@ -93,6 +95,7 @@ pub(super) fn build_from_refs<'a>(
     compilation: &ConstraintCompilation<'_>,
     inputs: impl Iterator<Item = &'a PreparedAnalysisObjects>,
     policy: crate::AnalysisOutputPolicy,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let (partitions, _) = structural_field_recovery_shape(request, result)?;
     let mut profiler = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
@@ -115,6 +118,7 @@ pub(super) fn build_from_refs<'a>(
                 output: crate::projected_transport_output_resource_facts(&profile)?,
                 output_set: crate::projected_output_set_resource_facts(),
             },
+            local_execution,
         },
     )?)
 }
@@ -124,6 +128,7 @@ pub fn build_prepared_structural_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: crate::AnalysisOutputPolicy,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let unique = |kind| {
         let mut found = inputs.iter().filter(|i| i.manifest.kind == kind);
@@ -195,5 +200,6 @@ pub fn build_prepared_structural_recovery_resource_plan(
         &compilation,
         inputs,
         policy,
+        local_execution,
     )
 }

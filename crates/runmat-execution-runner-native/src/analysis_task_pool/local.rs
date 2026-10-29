@@ -51,11 +51,11 @@ impl AnalysisTaskPool for LocalAnalysisTaskPool {
         objects: &runmat_analysis_execution::PreparedAnalysisObjects,
         _access: &ArtifactAccess,
     ) -> NativeExecutionResult<()> {
-        for object in &objects.objects {
-            runmat_execution_artifact::cache::CacheExport::write_verified(&mut self.store, object)
-                .map_err(protocol)?;
-        }
-        Ok(())
+        runmat_execution_artifact::cache::CacheExport::write_verified_batch(
+            &mut self.store,
+            &objects.objects,
+        )
+        .map_err(protocol)
     }
 
     fn register_recovery_object(

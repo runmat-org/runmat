@@ -10,20 +10,6 @@ pub(in crate::analysis::storage) fn directory(
 ) -> PathBuf {
     store.root.join("publications").join(digest_hex(identity))
 }
-fn put(
-    store: &access::FilesystemAccess<'_>,
-    path: impl AsRef<Path>,
-    bytes: &[u8],
-) -> Result<(), AnalysisPublicationError> {
-    match store
-        .atomic_create_new(path, bytes)
-        .map_err(AnalysisPublicationError::from_io)?
-    {
-        AtomicCreateResult::Published { .. } => Ok(()),
-        AtomicCreateResult::Existing(existing) if existing == bytes => Ok(()),
-        AtomicCreateResult::Existing(_) => Err("immutable publication content collision".into()),
-    }
-}
 pub(super) fn descriptor(
     store: &access::FilesystemAccess<'_>,
     identity: Digest,
@@ -126,20 +112,37 @@ pub(in crate::analysis::storage) fn commit(
     for id in prepared.runs.keys() {
         store.reserve_study(id, identity)?;
     }
+    // Every content object, observation and the manifest share one group commit: they are
+    // staged, made durable by one barrier and become visible together, before the run
+    // records and the journaled descriptor that references them.
+    let mut objects = store
+        .immutable_objects()
+        .map_err(AnalysisPublicationError::from_io)?;
     for (digest, bytes) in &prepared.chunks {
         if Digest::sha256(bytes.as_ref()) != *digest {
             return Err("publication chunk digest differs".into());
         }
-        put(store, store.object_path(*digest), bytes)?;
+        objects.put(store.object_path(*digest), bytes)?;
     }
-    // Streamed field chunks are read back and written one at a time.
+    // Streamed field chunks are read back and staged one at a time.
     for digest in prepared.spilled.digests() {
         let bytes = prepared
             .spilled
             .read(&digest)?
             .ok_or("publication spilled chunk is absent")?;
-        put(store, store.object_path(digest), &bytes)?;
+        objects.put(store.object_path(digest), &bytes)?;
     }
+    for (id, attachment) in &prepared.observations {
+        objects.put(
+            root.join("observations").join(format!("{id}.json")),
+            &resources::json(attachment, prepared.maximum_bytes)?,
+        )?;
+    }
+    objects.put(
+        &manifest_path,
+        &resources::json(&prepared.manifest, prepared.maximum_bytes)?,
+    )?;
+    objects.commit()?;
     for (id, record) in &prepared.runs {
         let path = root.join("runs").join(format!("{id}.json"));
         // Written straight from the typed record; no JSON tree is built.
@@ -156,18 +159,6 @@ pub(in crate::analysis::storage) fn commit(
             }
         }
     }
-    for (id, attachment) in &prepared.observations {
-        put(
-            store,
-            root.join("observations").join(format!("{id}.json")),
-            &resources::json(attachment, prepared.maximum_bytes)?,
-        )?;
-    }
-    put(
-        store,
-        &manifest_path,
-        &resources::json(&prepared.manifest, prepared.maximum_bytes)?,
-    )?;
     if crate::interrupt::is_cancelled() {
         return Err("study publication was cancelled".into());
     }

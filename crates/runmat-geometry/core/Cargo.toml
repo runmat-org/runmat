@@ -17,6 +17,7 @@ schemars = { version = "0.8", optional = true }
 runmat-canonical-codec = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 sha2 = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
