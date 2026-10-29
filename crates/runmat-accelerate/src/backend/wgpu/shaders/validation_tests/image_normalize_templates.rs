@@ -42,6 +42,46 @@ fn image_normalize_production_templates_validate_bootstrap_and_tuned_geometries(
             assert!(!source.contains("@BV@"));
             assert!(!source.contains("@ST@"));
             validate_generated(&label, &source, lane_count, 8, caps);
+            // Syntax validation alone cannot prove the pipeline layout admits
+            // the shader. Reflect the exact production source against the same
+            // entries used by bootstrap and reused by tuned pipelines.
+            let module = naga::front::wgsl::parse_str(&source).unwrap();
+            let entries = crate::backend::wgpu::bindings::image_normalize_entries();
+            let mut reflected = BTreeSet::new();
+            for (_, global) in module.global_variables.iter() {
+                let Some(binding) = &global.binding else {
+                    continue;
+                };
+                assert_eq!(binding.group, 0, "{label}");
+                assert!(
+                    reflected.insert(binding.binding),
+                    "{label}: duplicate binding"
+                );
+                let entry = entries
+                    .iter()
+                    .find(|entry| entry.binding == binding.binding)
+                    .unwrap_or_else(|| panic!("{label}: missing binding {}", binding.binding));
+                let expected = match global.space {
+                    naga::AddressSpace::Uniform => wgpu::BufferBindingType::Uniform,
+                    naga::AddressSpace::Storage { access } => wgpu::BufferBindingType::Storage {
+                        read_only: !access.contains(naga::StorageAccess::STORE),
+                    },
+                    other => panic!("{label}: unexpected resource space {other:?}"),
+                };
+                assert_eq!(
+                    entry.ty,
+                    wgpu::BindingType::Buffer {
+                        ty: expected,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    "{label}: binding {}",
+                    binding.binding
+                );
+                assert_eq!(entry.visibility, wgpu::ShaderStages::COMPUTE);
+            }
+            assert_eq!(reflected, BTreeSet::from([0, 1, 2, 3, 4]), "{label}");
+            assert_eq!(entries.len(), reflected.len(), "{label}");
         }
     }
     assert_eq!(labels.len(), 6);

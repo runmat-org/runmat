@@ -1924,11 +1924,7 @@ impl WgpuPipelines {
             "runmat-image-normalize-layout",
             "runmat-image-normalize-shader",
             "runmat-image-normalize-pipeline",
-            vec![
-                storage_read_entry(0),
-                storage_read_write_entry(1),
-                uniform_entry(2),
-            ],
+            crate::backend::wgpu::bindings::image_normalize_entries(),
             image_norm_source,
         );
 

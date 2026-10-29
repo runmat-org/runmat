@@ -156,6 +156,18 @@ pub fn uniform_entry(binding: u32) -> BindGroupLayoutEntry {
     }
 }
 
+/// Scalar and vector views share the production image-normalization layout.
+/// Bootstrap and tuned pipelines must admit all five declared shader bindings.
+pub(crate) fn image_normalize_entries() -> Vec<BindGroupLayoutEntry> {
+    vec![
+        storage_read_entry(0),
+        storage_read_write_entry(1),
+        uniform_entry(2),
+        storage_read_entry(3),
+        storage_read_write_entry(4),
+    ]
+}
+
 pub fn build_bgl_for_layout_tag(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     tag: &str,
