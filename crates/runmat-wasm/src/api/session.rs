@@ -73,6 +73,7 @@ pub struct RunMatWasm {
     #[cfg(target_arch = "wasm32")]
     input_handler: RefCell<Option<JsInputHandler>>,
     pub(crate) fea_selection: RefCell<Option<super::fea_execution::BrowserFeaSelection>>,
+    pub(crate) fea_run_admission: RefCell<Option<JsValue>>,
     clear_workspace_after_flight: Cell<bool>,
     #[cfg(target_arch = "wasm32")]
     local_tasks: RefCell<std::rc::Rc<runmat_runtime::context::BrowserLocalTaskSupervisor>>,
@@ -200,6 +201,7 @@ impl RunMatWasm {
             #[cfg(target_arch = "wasm32")]
             input_handler: RefCell::new(None),
             fea_selection: RefCell::new(None),
+            fea_run_admission: RefCell::new(None),
             clear_workspace_after_flight: Cell::new(false),
             #[cfg(target_arch = "wasm32")]
             local_tasks,

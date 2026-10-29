@@ -1143,7 +1143,12 @@ export interface GeometryPreviewResult extends GeometryInspectResult {
   previewMessage?: string | null;
 }
 
+export type { FeaRunRequest, FeaRunDenied, FeaRunUsage, FeaRunOutcome, FeaRunAdmission, FeaRunDelegation, FeaRunWorkerAdmission } from "./fea-run-admission.js";
+import type { FeaRunAdmission, FeaRunWorkerAdmission } from "./fea-run-admission.js";
+
 export interface RunMatSessionHandle {
+  /** Install the browser host lease adapter; unset admission denies mesh/solve. */
+  setFeaRunAdmission(admission: FeaRunAdmission): void;
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
@@ -1248,6 +1253,7 @@ interface NativeInitOptions {
 }
 
 interface RunMatNativeSession {
+  setFeaRunAdmission?: (admission: FeaRunAdmission) => void;
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
@@ -1490,7 +1496,8 @@ interface RunMatNativeModule {
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
-  executePreparedFeaStudy?: (json: string, memoryBytes: number) => string;
+  executePreparedFeaStudy?: (json: string, memoryBytes: number, admission?: FeaRunWorkerAdmission) => Promise<string>;
+  feaRunAdmissionSupported?: () => boolean;
   executeWorkerProgram?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
@@ -1722,11 +1729,14 @@ export async function executeProgramArtifact(
   return native.executeProgramArtifact(request);
 }
 
-/** Execute a previously admitted worker request inside the worker realm. */
-export async function executePreparedFeaStudy(json: string, memoryBytes: number, wasmModule?: WasmInitInput): Promise<string> {
+/** Execute a worker request only after asynchronous host admission. */
+export async function executePreparedFeaStudy(json: string, memoryBytes: number, wasmModule?: WasmInitInput, admission?: FeaRunWorkerAdmission): Promise<string> {
+  if (!admission?.admission) {
+    throw Object.assign(new Error("Meshing and solving need a signed-in RunMat account. Run `runmat login`, then run this study again."), { identifier: "RM.FEA.SignInRequired" });
+  }
   const native = await loadNativeModule(wasmModule);
-  if (!native.executePreparedFeaStudy) throw new Error("Rebuild the browser numerical runtime assets.");
-  return native.executePreparedFeaStudy(json, memoryBytes);
+  if (!native.executePreparedFeaStudy || native.feaRunAdmissionSupported?.() !== true) throw new Error("Rebuild the browser numerical runtime assets with FEA admission support.");
+  return native.executePreparedFeaStudy(json, memoryBytes, admission);
 }
 
 export async function executeWorkerProgram(
@@ -2502,6 +2512,12 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     if (!this.native.runFeaSource) throw new Error("Reload the current runtime to run this simulation.");
     return this.native.runFeaSource(path, planId, inputManifest);
+  }
+
+  setFeaRunAdmission(admission: FeaRunAdmission): void {
+    this.ensureActive();
+    if (!this.native.setFeaRunAdmission) throw new Error("Reload the current runtime to configure FEA admission.");
+    this.native.setFeaRunAdmission(admission);
   }
 
   async checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult> {

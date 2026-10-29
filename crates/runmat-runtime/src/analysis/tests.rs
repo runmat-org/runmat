@@ -245,8 +245,24 @@ fn sample_cfd_constraints(
     ]
 }
 
-pub(super) fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
-    storage::artifact_store_test_guard()
+/// Explicit test host: numerical tests opt into admission while holding the same
+/// lock used for their process-wide artifact store and runtime configuration.
+pub(super) struct AnalysisTestHost {
+    // Restore admission before releasing the shared host-state lock (field drop order).
+    _admission: fea_run_admission::FeaRunAdmissionGuard,
+    _storage: std::sync::MutexGuard<'static, ()>,
+}
+
+pub(super) fn analysis_test_guard() -> AnalysisTestHost {
+    let storage = storage::artifact_store_test_guard();
+    let admission = fea_run_admission::replace_fea_run_admission(Some(
+        fea_run_admission::entrypoints::test_admission(),
+    ))
+    .expect("install explicit numerical-test FEA host");
+    AnalysisTestHost {
+        _admission: admission,
+        _storage: storage,
+    }
 }
 
 fn test_electrical_material() -> MaterialElectricalModel {
@@ -1746,6 +1762,9 @@ struct CanonicalStudyPlacement {
 }
 
 impl StructuralStudyPlacementExecutor for CanonicalStudyPlacement {
+    fn allocated_cpu_millicores(&self, _study_count: usize) -> u32 {
+        1000
+    }
     fn execute<'a>(
         &'a self,
         entries: &'a [StructuralStudyPlacementEntry<'a>],
@@ -1788,6 +1807,9 @@ impl StructuralStudyPlacementExecutor for CanonicalStudyPlacement {
 struct CancelledStudyPlacement;
 
 impl StructuralStudyPlacementExecutor for CancelledStudyPlacement {
+    fn allocated_cpu_millicores(&self, _study_count: usize) -> u32 {
+        1000
+    }
     fn execute<'a>(
         &'a self,
         entries: &'a [StructuralStudyPlacementEntry<'a>],
@@ -1809,6 +1831,9 @@ struct FailingStudyPlacement {
 }
 
 impl StructuralStudyPlacementExecutor for FailingStudyPlacement {
+    fn allocated_cpu_millicores(&self, _study_count: usize) -> u32 {
+        1000
+    }
     fn execute<'a>(
         &'a self,
         entries: &'a [StructuralStudyPlacementEntry<'a>],

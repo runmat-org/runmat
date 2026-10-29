@@ -64,6 +64,7 @@ pub async fn prepare_study_with_role(
     options: &LocalFeaExecutionOptions,
     role: PreparationRole,
 ) -> Result<PreparedFeaStudy, String> {
+    let allocation = super::run_admission::study_allocation(&resolved, options)?;
     let realized: RealizedStudy = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
@@ -133,30 +134,8 @@ pub async fn prepare_study_with_role(
             preferred_faces_per_partition: partition.preferred_faces_per_partition,
         })
         .map_err(|error| error.to_string())?;
-    let workers = options
-        .workers
-        .or_else(|| {
-            resolved
-                .execution_policy
-                .as_ref()
-                .and_then(|policy| policy.resources.workers)
-                .map(|range| range.maximum.max(1))
-        })
-        // One worker by default: a single study's numerical tasks take every core through the
-        // thread plan; additional co-located workers are an explicit fan-out choice.
-        .unwrap_or(1);
-    let cpu_threads_per_worker = crate::machine_capacity::study_allocation(
-        workers,
-        options
-            .cpu_threads_per_worker
-            .map(|count| u32::from(count.get()))
-            .or_else(|| {
-                resolved
-                    .execution_policy
-                    .as_ref()
-                    .and_then(|policy| policy.resources.cpu_threads_per_worker)
-            }),
-    )?;
+    let workers = allocation.workers;
+    let cpu_threads_per_worker = allocation.threads;
     let local_thread_count = u16::try_from(cpu_threads_per_worker)
         .map_err(|_| "CPU threads per worker exceed the FEA contract maximum".to_string())?;
     let local_execution =

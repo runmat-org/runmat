@@ -5,6 +5,7 @@
 //! without interpreting authoring syntax or introducing host-specific physics defaults.
 
 mod assessment;
+mod run_admission;
 mod callable;
 mod chain;
 mod execution;
@@ -231,6 +232,17 @@ pub enum LocalFeaExecution {
     },
 }
 
+impl LocalFeaExecution {
+    /// A completed sweep can carry failed cases even when orchestration itself
+    /// returned Ok. Hosts must not classify that envelope as a successful run.
+    pub fn is_successful(&self) -> bool {
+        match self {
+            Self::Study(_) => true,
+            Self::Sweep { cases, .. } => cases.iter().all(|case| case.outcome.is_ok()),
+        }
+    }
+}
+
 /// One sweep case: its authored identity and its own success or failure. A failed case never
 /// disappears from the sweep and never hides the results of its siblings.
 #[derive(Debug)]
@@ -246,6 +258,20 @@ pub async fn execute_checked_fea_locally(
     let root = source
         .resolve_root(options.root.as_ref())
         .map_err(|error| error.to_string())?;
+    let (scope, options) = run_admission::admit_root(source, &root, options)?;
+    let result = scope
+        .run_future(execute_admitted_root(source, root, options))
+        .await;
+    let outcome = run_admission::outcome(&result);
+    scope.settle(outcome);
+    result
+}
+
+async fn execute_admitted_root(
+    source: &runmat_core::CheckedFeaSessionSource,
+    root: ResolvedFeaRoot,
+    options: LocalFeaExecutionOptions,
+) -> Result<LocalFeaExecution, String> {
     match root {
         ResolvedFeaRoot::Study(study) => {
             let frequencies = harmonic_frequency_cases(&study);
@@ -267,8 +293,13 @@ pub async fn execute_checked_fea_locally(
             } else {
                 frequencies
             };
-            let available = std::thread::available_parallelism().map_or(1, usize::from);
-            let concurrency = available.min(frequencies.len()).max(1);
+            let allocation = run_admission::study_allocation(&study, &options)?;
+            let concurrency = crate::machine_capacity::case_concurrency(
+                allocation.workers,
+                allocation.threads,
+                frequencies.len(),
+                options.max_concurrent_cases.map(|v| usize::from(v.get())),
+            );
             let run_group = |(index, frequency): (usize, f64)| {
                 let case = if frequency.is_nan() {
                     study.clone()
@@ -442,14 +473,20 @@ fn sweep_concurrency(
     // Per-case threads come from the same authority as the case's own plan.
     let threads_per_worker = crate::machine_capacity::study_allocation(
         workers_per_case,
-        policy.and_then(|policy| policy.resources.cpu_threads_per_worker),
+        options
+            .cpu_threads_per_worker
+            .map(|v| u32::from(v.get()))
+            .or_else(|| policy.and_then(|policy| policy.resources.cpu_threads_per_worker)),
     )
     .unwrap_or(1);
     crate::machine_capacity::case_concurrency(
         workers_per_case,
         threads_per_worker,
         case_count,
-        requested,
+        options
+            .max_concurrent_cases
+            .map(|v| usize::from(v.get()))
+            .or(requested),
     )
 }
 

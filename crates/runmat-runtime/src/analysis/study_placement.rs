@@ -39,6 +39,13 @@ pub struct StructuralStudyPlacementResult {
 /// Implementations choose process, durable, or remote placement. They do not validate authored
 /// semantics, apply sweep policy, persist runs, or reorder results for publication.
 pub trait StructuralStudyPlacementExecutor: Send + Sync {
+    /// Aggregate CPU capacity reserved by this placement, not per-task CPU time.
+    fn allocated_cpu_millicores(&self, study_count: usize) -> u32;
+
+    fn run_site(&self) -> super::fea_run_admission::FeaRunSite {
+        super::fea_run_admission::FeaRunSite::Local
+    }
+
     fn execute<'a>(
         &'a self,
         entries: &'a [StructuralStudyPlacementEntry<'a>],
@@ -46,6 +53,27 @@ pub trait StructuralStudyPlacementExecutor: Send + Sync {
 }
 
 pub async fn analysis_execute_structural_study_with_placement(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+    executor: &dyn StructuralStudyPlacementExecutor,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let scope = admit_placement(
+        super::analysis_study_content_digest(spec),
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        &context,
+        executor,
+        1,
+    )?;
+    let result = scope
+        .run_future(execute_study_admitted(spec, context, executor))
+        .await;
+    let outcome = placement_outcome(&result);
+    scope.settle(outcome);
+    result
+}
+
+async fn execute_study_admitted(
     spec: &AnalysisStudySpec,
     context: OperationContext,
     executor: &dyn StructuralStudyPlacementExecutor,
@@ -75,6 +103,35 @@ pub async fn analysis_execute_structural_sweep_with_placement(
     context: OperationContext,
     executor: &dyn StructuralStudyPlacementExecutor,
 ) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
+    let identity = analysis_study_sweep_identity(spec, &context)?;
+    let scope = admit_placement(
+        identity.digest(),
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        &context,
+        executor,
+        if spec.fail_fast {
+            1
+        } else {
+            spec.studies.len()
+        },
+    )?;
+    let result = scope
+        .run_future(execute_sweep_admitted(spec, context, executor))
+        .await;
+    let outcome = match &result {
+        Ok(value) => super::fea_run_admission::entrypoints::sweep_outcome(&value.data),
+        Err(_) => placement_outcome(&result),
+    };
+    scope.settle(outcome);
+    result
+}
+
+async fn execute_sweep_admitted(
+    spec: &AnalysisStudySweepSpec,
+    context: OperationContext,
+    executor: &dyn StructuralStudyPlacementExecutor,
+) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
     analysis_study_sweep_identity(spec, &context)?;
     let mut prepared = spec
         .studies
@@ -82,7 +139,18 @@ pub async fn analysis_execute_structural_sweep_with_placement(
         .map(
             |study| match analysis_prepare_structural_study_op(study, context.clone()) {
                 Ok(prepared) => (Some(prepared), None),
-                Err(error) => (None, Some(AnalysisStudySweepRunOutcome::Failed(error))),
+                Err(error) => (
+                    None,
+                    Some(
+                        if error.error_type == OperationErrorType::Cancelled
+                            || crate::interrupt::is_cancelled()
+                        {
+                            AnalysisStudySweepRunOutcome::Cancelled(error)
+                        } else {
+                            AnalysisStudySweepRunOutcome::Failed(error)
+                        },
+                    ),
+                ),
             },
         )
         .collect::<Vec<_>>();
@@ -119,6 +187,41 @@ pub async fn analysis_execute_structural_sweep_with_placement(
         .map(|(_, outcome)| outcome.unwrap_or(AnalysisStudySweepRunOutcome::NotRun))
         .collect();
     analysis_complete_study_sweep_op(spec, context, outcomes)
+}
+
+fn admit_placement(
+    identity: runmat_execution::Digest,
+    operation: &str,
+    version: &str,
+    context: &OperationContext,
+    executor: &dyn StructuralStudyPlacementExecutor,
+    study_count: usize,
+) -> Result<super::fea_run_admission::FeaRunScope, OperationErrorEnvelope> {
+    use super::fea_run_admission::{FeaRunKind, FeaRunRequest, FeaRunScope};
+    let mut request = FeaRunRequest::local(
+        FeaRunKind::MeshAndSolve,
+        u64::from(executor.allocated_cpu_millicores(study_count)),
+        identity,
+    )
+    .map_err(|e| e.into_operation_error(operation, version, context))?;
+    request.site = executor.run_site();
+    FeaRunScope::admit(request).map_err(|e| e.into_operation_error(operation, version, context))
+}
+
+fn placement_outcome<T>(
+    result: &Result<T, OperationErrorEnvelope>,
+) -> super::fea_run_admission::FeaRunOutcome {
+    use super::fea_run_admission::FeaRunOutcome;
+    match result {
+        Ok(_) => FeaRunOutcome::Completed,
+        Err(error)
+            if error.error_type == OperationErrorType::Cancelled
+                || crate::interrupt::is_cancelled() =>
+        {
+            FeaRunOutcome::Cancelled
+        }
+        Err(_) => FeaRunOutcome::Failed,
+    }
 }
 
 async fn execute_fail_fast(

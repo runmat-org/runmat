@@ -49,6 +49,17 @@ pub(crate) use thermal::convert_completed_thermal_study;
 pub use thermal::thermal_study_completion_from_source;
 
 impl NativeStructuralStudyPlacement {
+    fn allocation_for(&self, study_count: usize) -> (u32, usize) {
+        let available_workers = self.config.max_workers.max(1);
+        let workers_per_study = if study_count == 1 {
+            available_workers
+        } else {
+            1
+        };
+        let concurrent_studies = (available_workers as usize).min(study_count);
+        (workers_per_study, concurrent_studies)
+    }
+
     pub fn new(config: NativeExecutionConfig, program_environment: ProgramEnvironment) -> Self {
         Self {
             config,
@@ -67,6 +78,18 @@ impl NativeStructuralStudyPlacement {
 }
 
 impl StructuralStudyPlacementExecutor for NativeStructuralStudyPlacement {
+    fn allocated_cpu_millicores(&self, study_count: usize) -> u32 {
+        let (workers, concurrent) = self.allocation_for(study_count);
+        workers
+            .saturating_mul(concurrent as u32)
+            .saturating_mul(1000)
+            .min(
+                self.config
+                    .local_cpu_capacity_millicores
+                    .unwrap_or(u32::MAX),
+            )
+    }
+
     fn execute<'a>(
         &'a self,
         entries: &'a [StructuralStudyPlacementEntry<'a>],
@@ -75,15 +98,7 @@ impl StructuralStudyPlacementExecutor for NativeStructuralStudyPlacement {
             if entries.is_empty() {
                 return Err("native structural placement requires at least one study".into());
             }
-            let available_workers = self.config.max_workers.max(1);
-            let workers_per_study = if entries.len() == 1 {
-                available_workers
-            } else {
-                1
-            };
-            let concurrent_studies = usize::try_from(available_workers)
-                .unwrap_or(usize::MAX)
-                .min(entries.len());
+            let (workers_per_study, concurrent_studies) = self.allocation_for(entries.len());
             let mut results = Vec::with_capacity(entries.len());
             for batch in entries.chunks(concurrent_studies) {
                 let pending = FuturesUnordered::new();

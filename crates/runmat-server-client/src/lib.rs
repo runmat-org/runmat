@@ -4,3 +4,4 @@ pub mod package_snapshot;
 pub mod packages;
 pub mod public_api;
 pub mod ids;
+pub mod usage;

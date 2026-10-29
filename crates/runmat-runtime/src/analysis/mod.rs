@@ -46,6 +46,7 @@ use policy::{
 };
 
 mod artifact_root;
+pub mod fea_run_admission;
 mod evidence_filesystem;
 use evidence_filesystem::{atomic_write_bytes, fs_create_dir_all};
 mod modal_run_admission;
@@ -99,11 +100,11 @@ mod study_result;
 pub mod study_result_manifest;
 mod study_sweep;
 mod thermal_execution;
+pub use fea_run_admission::entrypoints::analysis_run_thermal_with_options_op;
 pub use response_study_result::{
     StructuralStudyModalResponseSpectrumNumericalResult,
     StructuralStudyRandomResponseNumericalResult,
 };
-pub use thermal_execution::analysis_run_thermal_with_options_op;
 pub mod value_admission;
 
 #[cfg(test)]
@@ -472,7 +473,7 @@ fn reject_moment_loads_for_run_family(
 }
 
 mod standalone_publication;
-pub use standalone_publication::{
+pub use fea_run_admission::entrypoints::{
     analysis_run_acoustic_with_options_op, analysis_run_cht_with_options_op,
     analysis_run_fsi_with_options_op, analysis_run_modal_with_options_op,
     analysis_run_nonlinear_with_options_op, analysis_run_transient_with_options_op,
@@ -1353,6 +1354,27 @@ fn analysis_run_study_with_structural_executor(
     context: OperationContext,
     structural_executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    fea_run_admission::entrypoints::run(
+        fea_run_admission::FeaRunKind::MeshAndSolve,
+        analysis_study_content_digest(spec),
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        &context,
+        || {
+            analysis_run_study_with_structural_executor_admitted(
+                spec,
+                context.clone(),
+                structural_executor,
+            )
+        },
+    )
+}
+
+fn analysis_run_study_with_structural_executor_admitted(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+    structural_executor: Option<&dyn StructuralLinearExecutor>,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let prepared = prepare_study_run(spec, context)?;
     if prepared
         .steps
@@ -1842,13 +1864,36 @@ pub fn analysis_run_study_sweep_op(
     spec: &AnalysisStudySweepSpec,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
-    analysis_study_sweep_identity(spec, &context)?;
+    let identity = analysis_study_sweep_identity(spec, &context)?;
+    fea_run_admission::entrypoints::run_classified(
+        fea_run_admission::FeaRunKind::MeshAndSolve,
+        identity.digest(),
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        &context,
+        || analysis_run_study_sweep_admitted(spec, context.clone()),
+        |result| fea_run_admission::entrypoints::sweep_outcome(&result.data),
+    )
+}
+
+fn analysis_run_study_sweep_admitted(
+    spec: &AnalysisStudySweepSpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
     let mut outcomes = Vec::with_capacity(spec.studies.len());
     for study in &spec.studies {
         match analysis_run_study_op(study, context.clone()) {
             Ok(run) => outcomes.push(AnalysisStudySweepRunOutcome::Succeeded(Box::new(run))),
             Err(error) => {
-                outcomes.push(AnalysisStudySweepRunOutcome::Failed(error));
+                outcomes.push(
+                    if error.error_type == OperationErrorType::Cancelled
+                        || crate::interrupt::is_cancelled()
+                    {
+                        AnalysisStudySweepRunOutcome::Cancelled(error)
+                    } else {
+                        AnalysisStudySweepRunOutcome::Failed(error)
+                    },
+                );
                 if spec.fail_fast {
                     outcomes
                         .resize_with(spec.studies.len(), || AnalysisStudySweepRunOutcome::NotRun);
@@ -2398,6 +2443,17 @@ pub fn analysis_run_cfd_op(
 }
 
 pub fn analysis_run_cfd_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: AnalysisCfdRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    fea_run_admission::entrypoints::run_model(model, AnalysisOperation::Cfd, &context, || {
+        execute_cfd_with_options(model, backend, options, context.clone())
+    })
+}
+
+fn execute_cfd_with_options(
     model: &AnalysisModel,
     _backend: ComputeBackend,
     _options: AnalysisCfdRunOptions,
@@ -3480,7 +3536,12 @@ pub fn analysis_run_linear_static_with_options(
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_linear_static_with_executor(model, backend, options, context, None)
+    fea_run_admission::entrypoints::run_model(
+        model,
+        AnalysisOperation::LinearStatic,
+        &context,
+        || analysis_run_linear_static_with_executor(model, backend, options, context.clone(), None),
+    )
 }
 
 pub fn analysis_prepare_linear_static_run_op(

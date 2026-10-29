@@ -24,3 +24,5 @@ pub(crate) mod testing;
 
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod fea_execution;
+#[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod fea_run_admission;

@@ -1,4 +1,5 @@
 //! Browser adapter for checked-source serial execution.
+use super::fea_run_admission::{self, BrowserFeaPermit, BrowserFeaRunRequest};
 use super::session::RunMatWasm;
 use crate::wire::errors::{js_error, js_value_to_string};
 use runmat_analysis_execution::{
@@ -7,6 +8,7 @@ use runmat_analysis_execution::{
 };
 use runmat_core::{FeaGeometryExecutionHost, PreparedSerialFeaStudy};
 use runmat_execution::Digest;
+use runmat_runtime::analysis::fea_run_admission::{FeaRunKind, FeaRunOutcome};
 use runmat_runtime::analysis::{
     AnalysisExecutionCandidate, AnalysisExecutionChoices, AnalysisExecutionMode,
     AnalysisExecutionReadiness,
@@ -27,20 +29,26 @@ pub(crate) struct BrowserFeaSelection {
     path: String,
     checked_revision: [u8; 32],
 }
-struct BrowserGeometryHost;
+struct BrowserGeometryHost<'a> {
+    permit: &'a BrowserFeaPermit,
+}
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(catch,js_name=__runmatOcctExecute)]
-    async fn exact_execute(json: &str) -> Result<JsValue, JsValue>;
+    async fn exact_execute(json: &str, delegation: JsValue) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch,js_name=__runmatExecutePreparedFeaStudy)]
-    async fn execute_prepared(json: &str, memory_bytes: f64) -> Result<JsValue, JsValue>;
+    async fn execute_prepared(
+        json: &str,
+        memory_bytes: f64,
+        delegation: JsValue,
+    ) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch,js_name=__runmatOcctResidentBytes)]
     fn exact_resident_bytes() -> Result<f64, JsValue>;
 }
-impl FeaGeometryExecutionHost for BrowserGeometryHost {
+impl FeaGeometryExecutionHost for BrowserGeometryHost<'_> {
     async fn provider_profile(&self) -> Result<GeometryProviderProfile, String> {
         serde_json::from_str(
-            &exact_execute("{\"operation\":\"profile\"}")
+            &exact_execute("{\"operation\":\"profile\"}", JsValue::UNDEFINED)
                 .await
                 .map_err(js_value_to_string)?
                 .as_string()
@@ -58,11 +66,16 @@ impl FeaGeometryExecutionHost for BrowserGeometryHost {
         objects.push(program.descriptor);
         let json=serde_json::to_string(&serde_json::json!({"operation":"materialize_and_mesh","program":program.program,"objects":objects,"settings":settings})).map_err(|e|e.to_string())?;
         serde_json::from_str(
-            &exact_execute(&json)
-                .await
-                .map_err(preparation_error_from_js)?
-                .as_string()
-                .ok_or("Invalid geometry execution response.")?,
+            &exact_execute(
+                &json,
+                self.permit
+                    .delegation(&json)
+                    .map_err(preparation_error_from_js)?,
+            )
+            .await
+            .map_err(preparation_error_from_js)?
+            .as_string()
+            .ok_or("Invalid geometry execution response.")?,
         )
         .map_err(|e| e.to_string().into())
     }
@@ -93,6 +106,18 @@ fn resident_bytes() -> u64 {
 }
 #[wasm_bindgen]
 impl RunMatWasm {
+    /// Install the host's asynchronous lease adapter. Clearing it fails closed.
+    #[wasm_bindgen(js_name=setFeaRunAdmission)]
+    pub fn set_fea_run_admission_js(&self, admission: JsValue) -> Result<(), JsValue> {
+        if admission.is_null() || admission.is_undefined() {
+            self.fea_run_admission.borrow_mut().take();
+        } else {
+            fea_run_admission::validate_admission(&admission)?;
+            *self.fea_run_admission.borrow_mut() = Some(admission);
+        }
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name=planFeaSource)]
     pub async fn plan_fea_source_js(
         &self,
@@ -235,6 +260,18 @@ impl RunMatWasm {
             .borrow_mut()
             .take()
             .ok_or_else(|| js_error("The selected execution options are no longer available."))?;
+        // Source checks/planning remain open. The single lease covers the first
+        // mesh, every frequency/load case, solving and result publication.
+        let request = fea_run_admission::new_request(
+            FeaRunKind::MeshAndSolve,
+            checked_study_identity(&fresh)?,
+        )?;
+        let admission = self.fea_run_admission.borrow().clone();
+        let permit = BrowserFeaPermit::admit(admission, request, true).await?;
+        if let Err(error) = ensure_not_cancelled(&cancellation) {
+            permit.settle(FeaRunOutcome::Cancelled);
+            return Err(error);
+        }
         let observation = session
             .fea_execution_timing_profile()
             .for_source(&fresh, runmat_core::FeaTimingRoute::BrowserCheckedSource, 1)
@@ -246,7 +283,7 @@ impl RunMatWasm {
             if resident_bytes().saturating_add((512 + 128 + 64) << 20) > BROWSER_MEMORY_BYTES {
                 return Err(js_error("Not enough browser memory to prepare this simulation. Continue in the desktop app."));
             }
-            let study = fresh.prepare_serial_fea_study(&BrowserGeometryHost, &format!("browser-fea:{plan_id}"))
+            let study = fresh.prepare_serial_fea_study(&BrowserGeometryHost { permit: &permit }, &format!("browser-fea:{plan_id}"))
                 .await.map_err(|error| crate::wire::json_contract_to_js(&error.diagnostic()).unwrap_or_else(|_| js_error(&error.to_string())))?;
             ensure_not_cancelled(&cancellation)?;
             let available_memory = BROWSER_MEMORY_BYTES.saturating_sub(resident_bytes()).saturating_sub(ARTIFACT_BYTES).saturating_sub(64 << 20);
@@ -259,6 +296,7 @@ impl RunMatWasm {
             let json = execute_prepared(
                 &request,
                 available_memory as f64,
+                permit.delegation(&request)?,
             )
             .await?
             .as_string()
@@ -302,8 +340,36 @@ impl RunMatWasm {
                 observation.complete(outcome.is_ok());
             }
         }
+        permit.settle(if cancellation.token().is_cancelled() {
+            FeaRunOutcome::Cancelled
+        } else if outcome.is_ok() {
+            FeaRunOutcome::Completed
+        } else {
+            FeaRunOutcome::Failed
+        });
         outcome
     }
+}
+
+/// Reuse the authored study's canonical digest, before materializing geometry.
+fn checked_study_identity(
+    source: &runmat_core::CheckedFeaSessionSource,
+) -> Result<Digest, JsValue> {
+    let runmat_runtime::analysis::ResolvedFeaRoot::Study(resolved) = source
+        .resolve_root(None)
+        .map_err(|error| js_error(&error.to_string()))?
+    else {
+        return Err(js_error("Run this simulation group in the desktop app."));
+    };
+    let realized = resolved
+        .study
+        .realize_with_models(&resolved.models, &resolved.geometry, &[])
+        .map_err(|error| js_error(&error.to_string()))?;
+    runmat_analysis_fea::study::structural_study_source_digest(
+        &realized,
+        &resolved.material_catalog,
+    )
+    .map_err(|error| js_error(&error.to_string()))
 }
 
 fn pin_inputs(inputs: JsValue) -> Result<Option<runmat_filesystem::ProviderGuard>, JsValue> {
@@ -335,9 +401,99 @@ fn forward_progress(event: runmat_analysis_fea::FeaProgressEvent) {
 
 /// Runs inside an owned worker. Its scheduler, receipts and result validation
 /// are the same as the in-process serial host; termination belongs to the host.
+#[wasm_bindgen(js_name=feaRunAdmissionSupported)]
+pub fn fea_run_admission_supported() -> bool {
+    true
+}
+
 #[wasm_bindgen(js_name=executePreparedFeaStudy)]
-pub fn execute_prepared_fea_study(json: String, memory_bytes: f64) -> Result<String, JsValue> {
-    if json.len() > 128 << 20
+pub async fn execute_prepared_fea_study(
+    json: String,
+    memory_bytes: f64,
+    worker_admission: JsValue,
+) -> Result<String, JsValue> {
+    // No raw boolean or bearer object bypasses admission. An owned worker must
+    // ask its host to authorize the exact parent identity before numerical work.
+    let admission = js_sys::Reflect::get(&worker_admission, &"admission".into())
+        .ok()
+        .filter(|value| !value.is_null() && !value.is_undefined());
+    if admission.is_none() {
+        return Err(fea_run_admission::sign_in_required());
+    }
+    let delegation = js_sys::Reflect::get(&worker_admission, &"delegation".into())
+        .ok()
+        .filter(|value| !value.is_null() && !value.is_undefined());
+    let prepared_digest = Digest::sha256(json.as_bytes());
+    let prepared_identity = prepared_digest.to_string();
+    let parent = if let Some(delegation) = delegation {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Delegation {
+            request: BrowserFeaRunRequest,
+            permit_id: String,
+            prepared_study_identity: String,
+        }
+        let parent: Delegation = serde_wasm_bindgen::from_value(delegation)
+            .map_err(|_| fea_run_admission::lease_invalid("Invalid FEA delegation."))?;
+        if parent.prepared_study_identity != prepared_identity
+            || parent.request.allocated_cpu_millicores != 1000
+            || parent.request.run_id.is_empty()
+            || parent.request.study_identity.is_empty()
+            || parent.permit_id.is_empty()
+        {
+            return Err(fea_run_admission::lease_invalid(
+                "FEA delegation does not match this worker request.",
+            ));
+        }
+        Some((parent.request, parent.permit_id))
+    } else {
+        None
+    };
+    validate_numerical_input(json.len(), memory_bytes)?;
+    let study: PreparedSerialFeaStudy =
+        serde_json::from_str(&json).map_err(|error| js_error(&error.to_string()))?;
+    let (request, parent_permit_id) = if let Some((request, permit_id)) = parent {
+        if request.study_identity != study.authored_study_digest.to_string()
+            || request.kind == FeaRunKind::Meshing
+        {
+            return Err(fea_run_admission::lease_invalid(
+                "FEA delegation does not match the canonical study identity.",
+            ));
+        }
+        (request, Some(permit_id))
+    } else {
+        (
+            fea_run_admission::new_request(FeaRunKind::Solve, study.authored_study_digest)?,
+            None,
+        )
+    };
+    let permit = BrowserFeaPermit::admit(admission, request, parent_permit_id.is_none()).await?;
+    if parent_permit_id
+        .as_deref()
+        .is_some_and(|expected| expected != permit.permit_id())
+    {
+        permit.reject_delegation();
+        return Err(fea_run_admission::lease_invalid(
+            "Worker admission did not authorize the parent permit.",
+        ));
+    }
+    let scope = permit.native_scope()?;
+    let result =
+        scope.run_sync(|| execute_prepared_fea_study_admitted(study, memory_bytes, &permit));
+    let outcome = if runmat_runtime::interrupt::is_cancelled() {
+        FeaRunOutcome::Cancelled
+    } else if result.is_ok() {
+        FeaRunOutcome::Completed
+    } else {
+        FeaRunOutcome::Failed
+    };
+    scope.settle(outcome);
+    permit.settle(outcome);
+    result
+}
+
+fn validate_numerical_input(json_len: usize, memory_bytes: f64) -> Result<(), JsValue> {
+    if json_len > 128 << 20
         || !memory_bytes.is_finite()
         || memory_bytes < 1.0
         || memory_bytes > BROWSER_MEMORY_BYTES as f64
@@ -346,14 +502,21 @@ pub fn execute_prepared_fea_study(json: String, memory_bytes: f64) -> Result<Str
         return Err(js_error("Invalid browser numerical execution allowance."));
     }
     let available_memory = memory_bytes as u64;
-    if (json.len() as u64).saturating_mul(4) > available_memory {
+    if (json_len as u64).saturating_mul(4) > available_memory {
         return Err(js_error(
             "Preparing this simulation requires a larger execution budget. Use the desktop app.",
         ));
     }
+    Ok(())
+}
+
+fn execute_prepared_fea_study_admitted(
+    study: PreparedSerialFeaStudy,
+    memory_bytes: f64,
+    permit: &BrowserFeaPermit,
+) -> Result<String, JsValue> {
+    let available_memory = memory_bytes as u64;
     runmat_runtime::builtins::wasm_registry::register_all();
-    let study: PreparedSerialFeaStudy =
-        serde_json::from_str(&json).map_err(|e| js_error(&e.to_string()))?;
     let _progress = runmat_analysis_fea::replace_fea_progress_context(
         runmat_analysis_fea::FeaProgressContext {
             handler: Some(std::sync::Arc::new(forward_progress)),
@@ -392,7 +555,10 @@ pub fn execute_prepared_fea_study(json: String, memory_bytes: f64) -> Result<Str
         .execute(
             &mut host,
             &mut store,
-            &|| js_sys::Date::now() as u64,
+            &|| {
+                permit.heartbeat_if_due();
+                js_sys::Date::now() as u64
+            },
             &runmat_runtime::interrupt::is_cancelled,
         )
         .map_err(|e| js_error(&e))?;

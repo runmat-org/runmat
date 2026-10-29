@@ -8,7 +8,31 @@ pub async fn execute_prepared_fea_study_locally(
     prepared: PreparedFeaStudy,
     options: &LocalFeaExecutionOptions,
 ) -> Result<CompletedLocalFeaCase, String> {
-    execute_prepared_with_source(prepared, options, None).await
+    use runmat_runtime::analysis::fea_run_admission::{
+        FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope,
+    };
+    let workers = options.workers.unwrap_or(prepared.workers).max(1);
+    let threads = prepared.root.local_execution.thread_count();
+    crate::machine_capacity::study_allocation(workers, Some(u32::from(threads.get())))?;
+    let request = FeaRunRequest::local(
+        FeaRunKind::MeshAndSolve,
+        u64::from(workers) * u64::from(threads.get()) * 1000,
+        prepared.root.authored_study_digest,
+    )
+    .map_err(|e| format!("{}: {e}", e.error_code()))?;
+    let scope = FeaRunScope::admit(request).map_err(|e| format!("{}: {e}", e.error_code()))?;
+    let result = scope
+        .run_future(execute_prepared_with_source(prepared, options, None))
+        .await;
+    let outcome = if runmat_runtime::interrupt::is_cancelled() {
+        FeaRunOutcome::Cancelled
+    } else if result.is_ok() {
+        FeaRunOutcome::Completed
+    } else {
+        FeaRunOutcome::Failed
+    };
+    scope.settle(outcome);
+    result
 }
 
 pub(super) async fn execute_prepared_with_source(

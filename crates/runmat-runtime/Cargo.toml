@@ -43,6 +43,7 @@ runmat-analysis-fea = { workspace = true }
 runmat-analysis-language = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-time = { workspace = true }
+runmat-cpu-execution = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_path_to_error = "0.1.20"

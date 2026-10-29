@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 use std::fmt::{self, Write};
 use std::ops::Range;
 
-use super::intrinsic::{Intrinsic, Shape};
 use super::include_family;
+use super::intrinsic::{Intrinsic, Shape};
 
 #[derive(Debug)]
 pub(crate) enum PreparationError {
@@ -50,6 +50,7 @@ pub(crate) struct PreparedShader {
 }
 
 impl PreparedShader {
+    #[cfg(any(test, all(feature = "wgpu", not(target_arch = "wasm32"))))]
     pub(crate) fn source(&self) -> &str {
         &self.source
     }

@@ -42,7 +42,8 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
         expected_source_sha256: crate::meshing::parse_source_sha256(&spec.geometry.source.sha256)?,
         settings,
         contact_definitions: meshing_contact_definitions(spec),
-    })?;
+    })
+    .map_err(|error| error.to_string())?;
     output
         .evidence
         .validate(&output.artifact)

@@ -36,6 +36,14 @@ pub struct MeshingExecutionOutput {
     pub evidence: MeshingEvidence,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum MeshingExecutionError {
+    #[error("{0}")]
+    Admission(#[from] crate::analysis::fea_run_admission::FeaRunDenied),
+    #[error("{0}")]
+    Provider(String),
+}
+
 pub type MeshingExecutionProvider = Arc<
     dyn Fn(&MeshingExecutionRequest) -> Result<MeshingExecutionOutput, String>
         + Send
@@ -71,6 +79,41 @@ pub fn replace_meshing_execution_provider(
 }
 
 pub fn execute_meshing(
+    request: &MeshingExecutionRequest,
+) -> Result<MeshingExecutionOutput, MeshingExecutionError> {
+    use crate::analysis::fea_run_admission::{
+        FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope,
+    };
+
+    // Native standalone meshing reserves this worker budget. Under a study (or a browser
+    // host's scope), the provider must honor the already admitted parent allocation.
+    let allocation = FeaRunScope::current_allocation().unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+            .min(runmat_cpu_execution::MAX_THREADS) as u64
+            * 1000
+    });
+    let admission = FeaRunRequest::local(
+        FeaRunKind::Meshing,
+        allocation,
+        runmat_execution::Digest::from_bytes(request.expected_source_sha256),
+    )?;
+    let scope = FeaRunScope::admit(admission)?;
+    let result = scope
+        .run_sync(|| execute_meshing_admitted(request))
+        .map_err(MeshingExecutionError::Provider);
+    scope.settle(if crate::interrupt::is_cancelled() {
+        FeaRunOutcome::Cancelled
+    } else if result.is_ok() {
+        FeaRunOutcome::Completed
+    } else {
+        FeaRunOutcome::Failed
+    });
+    result
+}
+
+fn execute_meshing_admitted(
     request: &MeshingExecutionRequest,
 ) -> Result<MeshingExecutionOutput, String> {
     let provider = provider_slot()

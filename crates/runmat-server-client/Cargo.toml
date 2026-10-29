@@ -13,6 +13,8 @@ anyhow = { workspace = true }
 base64 = "0.22"
 chrono = { workspace = true }
 dirs = "5.0"
+ed25519-dalek = { workspace = true }
+fs2 = "0.4"
 keyring = "2.3"
 rand = "0.8"
 runmat-execution = { workspace = true }
@@ -26,7 +28,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["net", "time"] }
+tokio = { workspace = true, features = ["net", "time", "sync"] }
 url = "2.5"
 uuid = { workspace = true, features = ["serde"] }
 webbrowser = "0.8"
@@ -35,3 +37,6 @@ webbrowser = "0.8"
 openapiv3 = "2.0"
 progenitor = "0.11"
 serde_yaml = "0.9"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt"] }

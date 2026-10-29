@@ -48,6 +48,9 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
 
+    // Also covers the native graphics lane, which returns before ordinary dispatch.
+    let _fea_run_admission = super::fea_run_admission::install()?;
+
     let compilation_only = matches!(
         cli.command,
         Some(Commands::Compile { .. } | Commands::Mesh { .. } | Commands::NativeInterface { .. })

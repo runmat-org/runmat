@@ -63,7 +63,15 @@ pub async fn generate_builtin(args: crate::call::BuiltinArguments) -> BuiltinRes
         settings,
         contact_definitions: Vec::new(),
     })
-    .map_err(|message| error(GENERATE_NAME, message))?;
+    .map_err(|failure| match failure {
+        crate::meshing::MeshingExecutionError::Admission(denied) => {
+            build_runtime_error(denied.to_string())
+                .with_builtin(GENERATE_NAME)
+                .with_identifier(denied.error_code())
+                .build()
+        }
+        crate::meshing::MeshingExecutionError::Provider(message) => error(GENERATE_NAME, message),
+    })?;
     output
         .evidence
         .validate(&output.artifact)

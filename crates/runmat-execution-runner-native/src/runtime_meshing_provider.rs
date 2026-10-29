@@ -35,6 +35,8 @@ pub struct NativeMeshingPartitionPolicy {
 
 #[derive(Debug, thiserror::Error)]
 pub enum NativeMeshingSourceError {
+    #[error("{code}: {0}", code = .0.error_code())]
+    RunAdmission(#[from] runmat_runtime::analysis::fea_run_admission::FeaRunDenied),
     #[error("failed to read {path}: {reason}")]
     SourceRead { path: PathBuf, reason: String },
     #[error("geometry source {path} changed after geometry.load; load the geometry again before meshing")]
@@ -133,29 +135,70 @@ pub fn mesh_source_with_native_execution(
     )
     .map_err(|error| NativeMeshingSourceError::InvalidRequest(error.to_string()))?;
     let source_name = request.source.to_string_lossy().into_owned();
-    mesh_exact_geometry(
-        NativeExecutionConfig::for_current_executable()
-            .map_err(NativeMeshingSourceError::WorkerConfiguration)?,
-        NativeExactMeshingJob {
-            source_name: &source_name,
-            source_bytes: &source_bytes,
-            import_options,
-            contact_definitions: &request.contact_definitions,
-            request: canonical_request,
-            program_revision,
-            capability_cohort: Some(cohort.clone()),
-            preferred_edges_per_partition: request.partition_policy.preferred_edges_per_partition,
-            preferred_faces_per_partition: request.partition_policy.preferred_faces_per_partition,
-            inventory_limits: ObjectInventoryLimits::default(),
-            evidence: MeshingRunEvidenceContext {
-                platform: native_meshing_platform(Some(&cohort), None),
-                sizing: Vec::new(),
-                cache_admission: CacheAdmissionDecision::Admitted,
+    use runmat_runtime::analysis::fea_run_admission::{
+        FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope,
+    };
+    let mut execution = MeshingExecutionPolicy::default();
+    if let Some(allocation) = FeaRunScope::current_allocation() {
+        execution.cpu_millicores = u32::try_from(allocation).map_err(|_| {
+            NativeMeshingSourceError::InvalidRequest(
+                "meshing CPU allocation exceeds its bound".into(),
+            )
+        })?;
+    }
+    let admission_request = FeaRunRequest::local(
+        FeaRunKind::Meshing,
+        u64::from(execution.cpu_millicores),
+        Digest::sha256(&request_bytes),
+    )?;
+    let scope = FeaRunScope::admit(admission_request)?;
+    let mut config = NativeExecutionConfig::for_current_executable()
+        .map_err(NativeMeshingSourceError::WorkerConfiguration)?;
+    // A per-stage budget is not an aggregate limit: independently ready stages
+    // share the same admitted pool, rather than each spending the whole lease.
+    config.local_cpu_capacity_millicores = Some(execution.cpu_millicores);
+    config.worker_cpu_millicores = execution.cpu_millicores;
+    config.max_workers = config
+        .max_workers
+        .min(execution.cpu_millicores / 1000)
+        .max(1);
+    let result = scope.run_sync(|| {
+        mesh_exact_geometry(
+            config,
+            NativeExactMeshingJob {
+                source_name: &source_name,
+                source_bytes: &source_bytes,
+                import_options,
+                contact_definitions: &request.contact_definitions,
+                request: canonical_request,
+                program_revision,
+                capability_cohort: Some(cohort.clone()),
+                preferred_edges_per_partition: request
+                    .partition_policy
+                    .preferred_edges_per_partition,
+                preferred_faces_per_partition: request
+                    .partition_policy
+                    .preferred_faces_per_partition,
+                inventory_limits: ObjectInventoryLimits::default(),
+                evidence: MeshingRunEvidenceContext {
+                    platform: native_meshing_platform(Some(&cohort), None),
+                    sizing: Vec::new(),
+                    cache_admission: CacheAdmissionDecision::Admitted,
+                },
+                execution,
             },
-            execution: MeshingExecutionPolicy::default(),
-        },
-    )
-    .map_err(NativeMeshingSourceError::from)
+        )
+        .map_err(NativeMeshingSourceError::from)
+    });
+    let outcome = if runmat_runtime::interrupt::is_cancelled() {
+        FeaRunOutcome::Cancelled
+    } else if result.is_ok() {
+        FeaRunOutcome::Completed
+    } else {
+        FeaRunOutcome::Failed
+    };
+    scope.settle(outcome);
+    result
 }
 
 pub fn resolve_native_meshing_request(
