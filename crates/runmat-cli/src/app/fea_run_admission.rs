@@ -58,7 +58,9 @@ pub(super) fn install() -> Result<Installation> {
                     return;
                 }
             };
-            work_loop(receiver, &reactor, None);
+            work_loop(receiver, &reactor, || {
+                reactor.block_on(CoreHourLeaseClient::from_environment())
+            });
         })
         .context("failed to start core-hour lease worker")?;
     let mut installation = Installation {
@@ -76,22 +78,20 @@ pub(super) fn install() -> Result<Installation> {
 fn work_loop(
     receiver: mpsc::Receiver<Work>,
     reactor: &tokio::runtime::Runtime,
-    mut client: Option<std::result::Result<CoreHourLeaseClient, AdmissionError>>,
+    mut resolve_client: impl FnMut() -> std::result::Result<CoreHourLeaseClient, AdmissionError>,
 ) {
     for work in receiver {
         match work {
             Work::Admit(request, response) => {
-                // Non-FEA commands must not refresh credentials, contact the
-                // Server, or wait for a network timeout merely to shut down.
-                if client.is_none() {
-                    client = Some(reactor.block_on(CoreHourLeaseClient::from_environment()));
-                }
-                let result = match client.as_ref().expect("initialized on admission") {
+                // Resolve current sign-in/org/server for every new run. Already-owned
+                // permits keep their original client and journal context. No resolution
+                // occurs for idle startup, reporting, or dispatched runs.
+                let result = match resolve_client() {
                     Ok(client) => reactor
                         .block_on(client.admit(request))
-                        .map(|permit| (client.clone(), permit))
+                        .map(|permit| (client, permit))
                         .map_err(map_denial),
-                    Err(error) => Err(map_denial_ref(error)),
+                    Err(error) => Err(map_denial(error)),
                 };
                 let _ = response.send(result);
             }
@@ -268,26 +268,37 @@ mod tests {
     }
 
     #[test]
-    fn signed_out_denies_without_interactive_login() {
+    fn signed_out_denies_without_login_and_next_admission_resolves_current_context() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
         let (sender, receiver) = mpsc::channel();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let worker_resolutions = Arc::clone(&resolutions);
         let worker = std::thread::spawn(move || {
             let reactor = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap();
-            work_loop(
-                receiver,
-                &reactor,
-                Some(Err(AdmissionError::SignInRequired)),
-            );
+            work_loop(receiver, &reactor, || {
+                match worker_resolutions.fetch_add(1, Ordering::SeqCst) {
+                    0 => Err(AdmissionError::SignInRequired),
+                    // A later attempt sees changed auth/context rather than the
+                    // first denial; no interactive or real network work is involved.
+                    _ => Err(AdmissionError::ServerUnreachable),
+                }
+            });
         });
         let admission = CliAdmission(sender.clone());
         assert!(matches!(
             admission.admit(&request(FeaRunSite::Local)),
             Err(FeaRunDenied::SignInRequired)
         ));
+        assert!(matches!(
+            admission.admit(&request(FeaRunSite::Local)),
+            Err(FeaRunDenied::ServerUnreachable)
+        ));
         sender.send(Work::Shutdown).unwrap();
         worker.join().unwrap();
+        assert_eq!(resolutions.load(Ordering::SeqCst), 2);
     }
 
     #[test]
