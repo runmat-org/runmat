@@ -1,15 +1,24 @@
 use super::*;
 
-fn isolated(limit: u32) -> (NativeObservationProgress, std::sync::mpsc::Receiver<Job>) {
+fn isolated(
+    limit: u32,
+) -> (
+    NativeObservationProgress,
+    std::sync::mpsc::Receiver<Command>,
+) {
     let (sender, receiver) = sync_channel(limit as usize);
+    let state = Arc::new(State {
+        used: AtomicU32::new(0),
+        limit,
+        stopped: Arc::new(AtomicBool::new(false)),
+    });
     (
         NativeObservationProgress {
-            sender,
-            state: Arc::new(State {
-                used: AtomicU32::new(0),
-                limit,
-                stopped: Arc::new(AtomicBool::new(false)),
+            control: Arc::new(Control {
+                sender,
+                state: state.clone(),
             }),
+            state,
         },
         receiver,
     )
@@ -62,7 +71,9 @@ fn readback_reserves_before_registration_and_commit_races_retire_once() {
             assert!(statuses.lock().unwrap().is_empty());
             let state = progress.state.clone();
             drop(progress);
-            drive(receiver, &state, |submission| assert!(submission.is_none()));
+            drive(commands(receiver, &state), &state, |submission| {
+                assert!(submission.is_none())
+            });
             assert!(weak.upgrade().is_none());
             assert_eq!(*statuses.lock().unwrap(), vec![Ok(())]);
             assert_eq!(state.used.load(Ordering::Acquire), 0);
@@ -264,7 +275,8 @@ fn readiness_does_not_retire_the_physically_running_callback_tail() {
     let state = progress.state.clone();
     drop(progress);
     let worker_state = state.clone();
-    let worker = std::thread::spawn(move || drive(receiver, &worker_state, |_| {}));
+    let worker =
+        std::thread::spawn(move || drive(commands(receiver, &worker_state), &worker_state, |_| {}));
     ready_rx.recv().unwrap();
     assert!(
         weak.upgrade().is_some(),
@@ -275,4 +287,30 @@ fn readiness_does_not_retire_the_physically_running_callback_tail() {
     worker.join().unwrap();
     assert!(weak.upgrade().is_none());
     assert_eq!(state.used.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn explicit_shutdown_retires_queued_owners_with_a_live_sender() {
+    for full in [false, true] {
+        let (progress, receiver) = isolated(1);
+        let completed = Arc::new(AtomicU32::new(0));
+        if full {
+            let observed = completed.clone();
+            progress
+                .complete_queue_tail(Box::new(move |status| {
+                    assert_eq!(status, Err(WgpuObservationProgressError::Stopped));
+                    observed.fetch_add(1, Ordering::AcqRel);
+                }))
+                .unwrap();
+        }
+        progress.control.stop();
+        // Keep progress (and its sender) live. A full queue cannot accept the
+        // wake command, and an empty queue can: both must terminate normally.
+        drive(commands(receiver, &progress.state), &progress.state, |_| {
+            panic!("shutdown must not start another device poll");
+        });
+        assert_eq!(completed.load(Ordering::Acquire), u32::from(full));
+        assert_eq!(progress.state.used.load(Ordering::Acquire), 0);
+        assert!(progress.reserve_slot().is_err());
+    }
 }

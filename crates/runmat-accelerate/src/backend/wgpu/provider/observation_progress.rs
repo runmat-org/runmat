@@ -1,5 +1,6 @@
 //! One bounded sleeping progress owner per native device. Runtime callers never
-//! wait or join. Timings describe prompt completion delivery, not GPU timestamps.
+//! wait or join; process shutdown retires workers before driver finalization.
+//! Timings describe prompt completion delivery, not GPU timestamps.
 use runmat_accelerate_api::observation::{
     WgpuObservationProgress, WgpuObservationProgressError, WgpuObservationProgressReservation,
 };
@@ -10,6 +11,9 @@ use std::sync::{
     mpsc::{sync_channel, SyncSender},
     Arc,
 };
+
+#[path = "observation_progress/shutdown.rs"]
+mod shutdown;
 
 struct State {
     used: AtomicU32,
@@ -69,7 +73,41 @@ struct Job<I = Option<wgpu::SubmissionIndex>> {
     _slot: Slot,
 }
 
-fn drive<I>(receiver: std::sync::mpsc::Receiver<Job<I>>, state: &State, mut poll: impl FnMut(&I)) {
+enum Command<I = Option<wgpu::SubmissionIndex>> {
+    Observe(Job<I>),
+    Shutdown,
+}
+
+struct Control {
+    sender: SyncSender<Command>,
+    state: Arc<State>,
+}
+
+impl Control {
+    fn stop(&self) {
+        self.state.stopped.store(true, Ordering::Release);
+        // A full queue already wakes the receiver. The iterator checks stopped
+        // before every receive, so a failed wake cannot strand an idle worker.
+        let _ = self.sender.try_send(Command::Shutdown);
+    }
+}
+
+fn commands<'a, I: 'a>(
+    receiver: std::sync::mpsc::Receiver<Command<I>>,
+    state: &'a State,
+) -> impl Iterator<Item = Job<I>> + 'a {
+    std::iter::from_fn(move || {
+        if state.stopped.load(Ordering::Acquire) {
+            return None;
+        }
+        match receiver.recv().ok()? {
+            Command::Observe(job) => Some(job),
+            Command::Shutdown => None,
+        }
+    })
+}
+
+fn drive<I>(receiver: impl IntoIterator<Item = Job<I>>, state: &State, mut poll: impl FnMut(&I)) {
     for mut job in receiver {
         if state.stopped.load(Ordering::Acquire) {
             continue;
@@ -86,7 +124,7 @@ fn drive<I>(receiver: std::sync::mpsc::Receiver<Job<I>>, state: &State, mut poll
 }
 
 pub(super) struct NativeObservationProgress {
-    sender: SyncSender<Job>,
+    control: Arc<Control>,
     state: Arc<State>,
 }
 
@@ -100,34 +138,37 @@ impl NativeObservationProgress {
         limit: NonZeroU32,
         stopped: Arc<AtomicBool>,
     ) -> std::io::Result<Arc<Self>> {
-        let (sender, receiver) = sync_channel::<Job>(limit.get() as usize);
+        shutdown::prepare()?;
+        let (sender, receiver) = sync_channel::<Command>(limit.get() as usize);
         let state = Arc::new(State {
             used: AtomicU32::new(0),
             limit: limit.get(),
             stopped,
         });
+        let control = Arc::new(Control {
+            sender,
+            state: state.clone(),
+        });
         let worker_state = state.clone();
-        // Detached worker owns device access, not Provider or a sender. Closing all
-        // senders drains queued work and exits; runtime Drop never joins it.
-        let worker = std::thread::Builder::new()
-            .name("runmat-gpu-observation".into())
-            .spawn(move || {
-                drive(receiver, &worker_state, |submission| {
-                    // Poll drives callbacks and may wait: never hold an emission
-                    // permit here. A native poll fatal is caught by `drive`,
-                    // separately from the device-lost callback's state.
-                    access.poll(match submission {
-                        Some(index) => wgpu::Maintain::WaitForSubmissionIndex(index.clone()),
-                        // Device control synchronizes existing queue work; it
-                        // does not manufacture an ordinary submission while
-                        // the session's emission admission is fenced. This
-                        // wait runs only on this existing device worker.
-                        None => wgpu::Maintain::Wait,
-                    });
+        // The worker owns device access, not Provider or a sender. Closing all
+        // senders drains queued work; only the process exit boundary joins it.
+        shutdown::spawn(&control, move || {
+            let jobs = commands(receiver, &worker_state);
+            drive(jobs, &worker_state, |submission| {
+                // Poll drives callbacks and may wait: never hold an emission
+                // permit here. A native poll fatal is caught by `drive`,
+                // separately from the device-lost callback's state.
+                access.poll(match submission {
+                    Some(index) => wgpu::Maintain::WaitForSubmissionIndex(index.clone()),
+                    // Device control synchronizes existing queue work; it
+                    // does not manufacture an ordinary submission while
+                    // the session's emission admission is fenced. This
+                    // wait runs only on this existing device worker.
+                    None => wgpu::Maintain::Wait,
                 });
-            })?;
-        drop(worker);
-        Ok(Arc::new(Self { sender, state }))
+            });
+        })?;
+        Ok(Arc::new(Self { control, state }))
     }
 
     pub(super) fn complete_queue_tail(
@@ -152,7 +193,7 @@ impl NativeObservationProgress {
             return Err(WgpuObservationProgressError::Stopped);
         }
         Ok(Reservation {
-            sender: self.sender.clone(),
+            control: self.control.clone(),
             slot,
         })
     }
@@ -167,7 +208,7 @@ impl WgpuObservationProgress for NativeObservationProgress {
 }
 
 pub(super) struct Reservation {
-    sender: SyncSender<Job>,
+    control: Arc<Control>,
     slot: Slot,
 }
 
@@ -185,9 +226,9 @@ impl Reservation {
         self,
         completion: Completion,
     ) -> Result<(), WgpuObservationProgressError> {
-        let Self { sender, slot } = self;
+        let Self { control, slot } = self;
         commit_job(
-            &sender,
+            &control.sender,
             Job {
                 submission: None,
                 completion,
@@ -205,7 +246,7 @@ pub(super) fn reservation_host_upper_bytes() -> Option<u64> {
 }
 
 fn commit_job<I>(
-    sender: &SyncSender<Job<I>>,
+    sender: &SyncSender<Command<I>>,
     job: Job<I>,
 ) -> Result<(), WgpuObservationProgressError> {
     if job._slot.0.stopped.load(Ordering::Acquire) {
@@ -213,7 +254,7 @@ fn commit_job<I>(
     }
     // On rejection the owned job runs completion outside the emission gate.
     sender
-        .try_send(job)
+        .try_send(Command::Observe(job))
         .map_err(|_| WgpuObservationProgressError::Stopped)
 }
 
@@ -223,7 +264,7 @@ impl WgpuObservationProgressReservation for Reservation {
         submission: wgpu::SubmissionIndex,
         completion: CompletionCallback,
     ) -> Result<(), WgpuObservationProgressError> {
-        let Self { sender, slot } = *self;
+        let Self { control, slot } = *self;
         let job = Job {
             submission: Some(submission),
             completion: Completion::ordinary(completion),
@@ -231,7 +272,7 @@ impl WgpuObservationProgressReservation for Reservation {
         };
         // Reservation accounts for queued AND active jobs. Disconnect drops Job,
         // running cleanup and releasing the slot, without a blocking send.
-        commit_job(&sender, job)
+        commit_job(&control.sender, job)
     }
 }
 

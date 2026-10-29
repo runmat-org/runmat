@@ -7687,6 +7687,7 @@ dependencies = [
  "futures",
  "hashbrown 0.16.1",
  "js-sys",
+ "libc",
  "libloading 0.8.9",
  "libm",
  "log",
