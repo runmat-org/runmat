@@ -287,8 +287,8 @@ fn sparse_admission_is_exact_and_side_effect_free() {
         }
     ));
     let snapshot = provider.capability_snapshot();
-    // Revision 23 is the F64 provider without IEEE-word reductions.
-    assert!(matches!(snapshot.revision, 22 | 23));
+    // Revision 25 is the F64 provider without IEEE-word reductions.
+    assert!(matches!(snapshot.revision, 24 | 25));
     snapshot
         .sparse
         .expect("WGPU sparse capability envelope")

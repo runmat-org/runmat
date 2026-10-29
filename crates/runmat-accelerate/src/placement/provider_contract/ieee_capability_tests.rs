@@ -59,7 +59,7 @@ fn missing_ieee_words_changes_only_wgpu_selected_reduction_capabilities() {
 
     let missing_wgpu = wgpu_capability_snapshot(&missing, 1 << 20);
     let available_wgpu = wgpu_capability_snapshot(&available, 1 << 20);
-    assert_eq!((missing_wgpu.revision, available_wgpu.revision), (23, 22));
+    assert_eq!((missing_wgpu.revision, available_wgpu.revision), (25, 24));
     for kind in [
         FusionKind::Reduction,
         FusionKind::MatmulEpilogue,

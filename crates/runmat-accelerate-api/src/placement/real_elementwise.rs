@@ -37,6 +37,8 @@ pub enum ProviderRealElementwiseOperation {
     Sqrt,
     /// IEEE spacing at each real element's magnitude.
     Spacing,
+    /// Native real exp(x)-1, without widening Single storage.
+    Expm1,
     /// Ordinary real unary execution only. The recipe supplies physical work,
     /// not the operation owner's separate numerical-domain admission.
     UnaryMath(runmat_types::ScalarUnaryMath),
@@ -173,6 +175,7 @@ impl ProviderRealElementwiseRecipe {
             ),
             ProviderRealElementwiseOperation::Sqrt => (1, None, None, None),
             ProviderRealElementwiseOperation::Spacing => (6, None, None, None),
+            ProviderRealElementwiseOperation::Expm1 => (7, None, None, None),
             ProviderRealElementwiseOperation::FloatingCast { target } => {
                 (2, None, None, Some(target))
             }
@@ -370,6 +373,7 @@ fn native_request(request: &ProviderRealElementwiseRequest) -> bool {
         ProviderRealElementwiseOperation::FloatingCast { .. } => true,
         ProviderRealElementwiseOperation::Sqrt
         | ProviderRealElementwiseOperation::Spacing
+        | ProviderRealElementwiseOperation::Expm1
         | ProviderRealElementwiseOperation::UnaryMath(_) => true,
         ProviderRealElementwiseOperation::ScalarMul { control }
         | ProviderRealElementwiseOperation::ScalarMax { control } => matches!(
@@ -414,6 +418,7 @@ fn output_projection(
         | ProviderRealElementwiseOperation::ScalarMax { .. }
         | ProviderRealElementwiseOperation::Sqrt
         | ProviderRealElementwiseOperation::Spacing
+        | ProviderRealElementwiseOperation::Expm1
         | ProviderRealElementwiseOperation::UnaryMath(_) => {
             output.layout = ProviderLayout::ColumnMajorContiguous;
             ProviderRealElementwiseOutputRoute::FreshAllocation

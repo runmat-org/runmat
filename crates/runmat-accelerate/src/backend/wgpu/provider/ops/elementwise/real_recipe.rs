@@ -114,6 +114,7 @@ fn unary_opcode(operation: Operation) -> Option<crate::backend::wgpu::types::Una
     Some(match operation {
         Operation::Sqrt => Code::Sqrt,
         Operation::Spacing => Code::Spacing,
+        Operation::Expm1 => Code::Expm1,
         Operation::UnaryMath(operation) => match operation {
             Math::Exp => Code::Exp,
             Math::Sin => Code::Sin,
@@ -163,6 +164,7 @@ fn native_scalar_control(operation: Operation, precision: NumericPrecision) -> b
         ),
         Operation::Sqrt
         | Operation::Spacing
+        | Operation::Expm1
         | Operation::UnaryMath(_)
         | Operation::FloatingCast { .. }
         | Operation::ExactSingleBasePower { .. } => false,
@@ -260,6 +262,7 @@ impl WgpuProvider {
                         }
                         Operation::Sqrt
                         | Operation::Spacing
+                        | Operation::Expm1
                         | Operation::UnaryMath(_)
                         | Operation::FloatingCast { .. }
                         | Operation::ExactSingleBasePower { .. } => {
@@ -286,6 +289,7 @@ impl WgpuProvider {
                 }
                 Operation::Sqrt
                 | Operation::Spacing
+                | Operation::Expm1
                 | Operation::UnaryMath(_)
                 | Operation::ExactSingleBasePower { .. } => {
                     if !scalar_uniform_available(&self.adapter_limits) {
@@ -366,6 +370,7 @@ impl WgpuProvider {
             request.operation,
             Operation::Sqrt
                 | Operation::Spacing
+                | Operation::Expm1
                 | Operation::UnaryMath(_)
                 | Operation::ExactSingleBasePower { .. }
         ) {
@@ -453,6 +458,7 @@ impl WgpuProvider {
                     Operation::ScalarMax { .. } => crate::backend::wgpu::types::ScalarOpCode::Max,
                     Operation::Sqrt
                     | Operation::Spacing
+                    | Operation::Expm1
                     | Operation::UnaryMath(_)
                     | Operation::FloatingCast { .. }
                     | Operation::ExactSingleBasePower { .. } => {
@@ -542,8 +548,8 @@ impl WgpuProvider {
                     })
                 }
             }
-            Operation::Sqrt | Operation::Spacing | Operation::UnaryMath(_) => self
-                .unary_op_exec_recorded(
+            Operation::Sqrt | Operation::Spacing | Operation::Expm1 | Operation::UnaryMath(_) => {
+                self.unary_op_exec_recorded(
                     unary_opcode(recipe.request().operation)
                         .expect("matched ordinary unary operation"),
                     input,
@@ -557,7 +563,8 @@ impl WgpuProvider {
                     } else {
                         error
                     }
-                }),
+                })
+            }
             Operation::FloatingCast { target } => {
                 self.execute_real_floating_cast(input, target, &observed, admission)
                     .await

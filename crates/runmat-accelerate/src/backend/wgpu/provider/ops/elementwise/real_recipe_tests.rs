@@ -6,6 +6,8 @@ mod mixed_add;
 mod casts;
 #[path = "real_recipe/exact_layout_tests.rs"]
 mod exact_layouts;
+#[path = "real_recipe/exponential_tests.rs"]
+mod exponentials;
 use super::*;
 use crate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate_api::{
@@ -167,6 +169,7 @@ fn scalar_recipe_requires_one_enabled_uniform_binding_before_effects() {
 }
 
 async fn qualify(provider: &'static WgpuProvider, len: usize) {
+    exponentials::qualify(provider, false).await;
     let values = vec![4.0_f32; len];
     let input = provider
         .upload_numeric_raw(&HostNumericTensorView {
@@ -320,6 +323,7 @@ async fn native_class_mul_max_share_ordinary_scalar_physical_execution() {
                 Operation::ScalarAdd { .. }
                 | Operation::Sqrt
                 | Operation::Spacing
+                | Operation::Expm1
                 | Operation::UnaryMath(_)
                 | Operation::FloatingCast { .. }
                 | Operation::ExactSingleBasePower { .. } => {
@@ -345,6 +349,7 @@ async fn actual_f64_owner_keeps_native_single_recipe_class() {
         runmat_accelerate_api::ProviderPrecision::F64
     );
     qualify(provider, 65).await;
+    exponentials::qualify(provider, true).await;
 }
 
 #[cfg(not(target_arch = "wasm32"))]

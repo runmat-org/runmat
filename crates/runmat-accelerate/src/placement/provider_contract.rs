@@ -12,6 +12,7 @@ use runmat_value::{NumericDType, Value};
 mod arithmetic;
 mod bounded_transfer;
 mod complex_components;
+mod exponentials;
 pub(crate) mod convolution;
 pub(crate) mod extrema;
 pub(crate) mod fusion_reduction;
@@ -257,7 +258,7 @@ fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
 pub(crate) fn in_process_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 15, IN_PROCESS_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 16, IN_PROCESS_OPERATIONS);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);
@@ -267,6 +268,7 @@ pub(crate) fn in_process_capability_snapshot(
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
+    exponentials::append(&mut snapshot);
     floating_conversion::append(&mut snapshot);
     trigonometry::append(&mut snapshot);
     power::append(&mut snapshot);
@@ -281,8 +283,8 @@ pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
     max_buffer_bytes: u64,
 ) -> ProviderCapabilitySnapshot {
-    // Revision 22 advertises governed dense reductions and native sparse capability.
-    let mut snapshot = dense_capability_snapshot(provider, 22, WGPU_OPERATIONS);
+    // Revision 24 includes the exact native real exponential hook inventory.
+    let mut snapshot = dense_capability_snapshot(provider, 24, WGPU_OPERATIONS);
     // This operation has its own typed F32/F64 feasibility. Do not widen the
     // general element-type inventory: unrelated hooks retain their preferred
     // precision contracts.
@@ -305,7 +307,7 @@ pub(crate) fn wgpu_capability_snapshot(
                 operation.identity != ProviderOperationIdentity::new(fusion_operation_token(kind))
             })
         });
-        snapshot.revision = 23;
+        snapshot.revision = 25;
     }
     // WebGPU's adapter limit is a maximum for one buffer. It does not
     // establish a total device-memory capacity.
@@ -341,6 +343,7 @@ pub(crate) fn wgpu_capability_snapshot(
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
+    exponentials::append(&mut snapshot);
     floating_conversion::append(&mut snapshot);
     trigonometry::append(&mut snapshot);
     power::append(&mut snapshot);
@@ -408,6 +411,9 @@ pub(crate) fn in_process_feasibility(
         return result;
     }
     let snapshot = exact_float_upload_snapshot(in_process_capability_snapshot(provider), query);
+    if let Some(result) = exponentials::validate(provider, false, &snapshot, query) {
+        return result;
+    }
     if let Some(result) = logarithm_roots::feasibility(
         real_unary::HookProfile::InProcess,
         provider.precision(),
@@ -514,6 +520,9 @@ pub(crate) fn wgpu_feasibility(
         && query.family == ProviderOperationFamily::Upload)
         .then(|| exact_float_upload_snapshot(inventory.clone(), query));
     let snapshot = upload.as_ref().unwrap_or(inventory);
+    if let Some(result) = exponentials::validate(provider, true, snapshot, query) {
+        return result;
+    }
     if let Some(result) = logarithm_roots::feasibility(
         real_unary::HookProfile::Wgpu,
         provider.precision(),

@@ -7154,19 +7154,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            ensure!(
-                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
-                "unary_expm1 does not support complex-interleaved buffers"
-            );
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.exp_m1()).collect();
-            drop(guard);
-            self.allocate_tensor_with_storage(out, a.shape().to_vec(), GpuTensorStorage::Real)
-        })
+        Box::pin(async move { self.native_unary(a, unary::Unary::Expm1) })
     }
 
     fn activation_relu<'a>(

@@ -28,7 +28,7 @@ impl StagedProvider {
         request: &ProviderRealElementwiseRequest,
     ) -> ProviderExecutionResult<Option<ProviderRealElementwisePhysicalProposal>> {
         let sqrt = match request.operation {
-            Operation::UnaryMath(_) | Operation::Spacing => return Ok(None),
+            Operation::UnaryMath(_) | Operation::Spacing | Operation::Expm1 => return Ok(None),
             Operation::ExactSingleBasePower { .. } => return Ok(None),
             Operation::ScalarAdd { .. }
             | Operation::ScalarMul { .. }
@@ -95,7 +95,7 @@ impl StagedProvider {
         Box::pin(async move {
             let operation = recipe.request().operation;
             let sqrt = match operation {
-                Operation::UnaryMath(_) | Operation::Spacing => {
+                Operation::UnaryMath(_) | Operation::Spacing | Operation::Expm1 => {
                     return Err(ProviderExecutionError::from(
                         runmat_accelerate_api::unsupported_provider_operation(
                             "fixture has no ordinary unary kernel",
@@ -162,7 +162,7 @@ impl StagedProvider {
                         Operation::ScalarMul { .. } => StageHook::Mul,
                         Operation::ScalarMax { .. } => StageHook::Max,
                         Operation::FloatingCast { .. } => unreachable!("handled cast"),
-                        Operation::UnaryMath(_) | Operation::Spacing => {
+                        Operation::UnaryMath(_) | Operation::Spacing | Operation::Expm1 => {
                             unreachable!("unary recipe rejected before execution")
                         }
                     },

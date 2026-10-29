@@ -7,6 +7,7 @@ pub(super) enum Unary {
     Cos,
     Abs,
     Exp,
+    Expm1,
     Log,
     Sqrt,
     Conj,
@@ -62,7 +63,10 @@ impl InProcessProvider {
                 return Err(runmat_accelerate_api::unsupported_provider_operation("floating unary requires numeric F32 or F64 input; class promotion belongs to the domain"));
             }
             if storage == GpuTensorStorage::ComplexInterleaved
-                && matches!(operation, Unary::Exp | Unary::Log | Unary::Sqrt)
+                && matches!(
+                    operation,
+                    Unary::Exp | Unary::Expm1 | Unary::Log | Unary::Sqrt
+                )
             {
                 // Canonical domains retain their complex host implementation.
                 // No direct complex kernel is advertised by this reference hook.
@@ -148,6 +152,7 @@ fn map_f32(values: &[f32], storage: GpuTensorStorage, operation: Unary) -> Vec<f
                 Unary::Cos => x.cos(),
                 Unary::Abs => x.abs(),
                 Unary::Exp => x.exp(),
+                Unary::Expm1 => x.exp_m1(),
                 Unary::Log => x.ln(),
                 Unary::Conj => x,
                 Unary::Sqrt => {
@@ -191,6 +196,7 @@ fn map_f64(values: &[f64], storage: GpuTensorStorage, operation: Unary) -> Vec<f
                 Unary::Cos => x.cos(),
                 Unary::Abs => x.abs(),
                 Unary::Exp => x.exp(),
+                Unary::Expm1 => x.exp_m1(),
                 Unary::Log => x.ln(),
                 Unary::Conj => x,
                 Unary::Sqrt => {
