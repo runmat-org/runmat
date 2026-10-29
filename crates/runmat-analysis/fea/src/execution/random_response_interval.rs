@@ -12,7 +12,7 @@ use super::{
 
 const INTERVAL_PREFIX: &[u8] = b"runmat-structural-random-response-interval-task\0";
 const INTERVAL_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 40_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(

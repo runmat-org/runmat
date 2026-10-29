@@ -19,7 +19,9 @@ fn workload(phase: [f64; 2]) -> MaxwellHarmonicWorkload {
             .push(AnalysisConstraint::Electrical(ElectricalConstraint {
                 constraint_id: boundary.into(),
                 kind: ElectricalConstraintKind::ElectricPerfectConductor {
-                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary))),
+                    target: RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),
+                    ),
                 },
             }));
     }
@@ -76,7 +78,8 @@ fn both_orders_cold_native_fields_preserve_exact_complex_phase_and_sample_author
             VolumeFieldSamplingRule::TetrahedronKeastFifteen
         );
         for (original, sample) in original_sampling
-            .integration_samples()
+            .integration_samples_for(&mesh)
+            .unwrap()
             .iter()
             .zip(&retained.response().samples)
         {
@@ -240,6 +243,11 @@ fn cold_result_rejects_sample_and_constitutive_phase_corruption() {
             &mut value["response"]["samples"][0][field][0]["imaginary"]
         };
         *slot = serde_json::json!(slot.as_f64().unwrap() + 1.0);
-        assert!(serde_json::from_value::<MaxwellHarmonicSolverResult>(value).is_err());
+        // Sample geometry is derived from the mesh, so a moved sample is rejected against it.
+        let decoded = serde_json::from_value::<MaxwellHarmonicSolverResult>(value);
+        assert!(
+            decoded.is_err() || decoded.unwrap().validate_for(&w, &mesh).is_err(),
+            "accepted corrupt {field}"
+        );
     }
 }

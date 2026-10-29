@@ -20,7 +20,7 @@ use super::{
 
 const FREQUENCY_RECEIPT_PREFIX: &[u8] = b"runmat-structural-frequency-receipt/v1\0";
 const FREQUENCY_RECEIPT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Numerical coordinate space used to produce a method-neutral physical response.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

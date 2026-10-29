@@ -45,18 +45,20 @@ fn native_magnetic_nonzero_reference_converges_without_reference_solver_outputs(
     let exact_energy = reference::energy(mu, 255);
     let mut errors = Vec::new();
     for cells in [1, 2, 4] {
-        let (_, _, task) = fixture::task(ElementOrder::Tet4, cells, 1.0, 1.0, 8192);
+        let (_, mesh, task) = fixture::task(ElementOrder::Tet4, cells, 1.0, 1.0, 8192);
         let retained = result(&task);
         let response = retained.response();
+        let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
         let mut potential = 0.0;
         let mut flux = 0.0;
-        for sample in &response.samples {
+        for sample in &response.samples(&projection).unwrap() {
             let [x, y, _] = sample.position_m;
             let (a, b) = reference::fields(x, y, mu, 1023);
             for axis in 0..3 {
                 potential += sample.volume_weight_m3
                     * (sample.vector_potential_wb_per_m.canonical_value()[axis] - a[axis]).powi(2);
-                flux += sample.volume_weight_m3 * (sample.flux_density_t.canonical_value()[axis] - b[axis]).powi(2);
+                flux += sample.volume_weight_m3
+                    * (sample.flux_density_t.canonical_value()[axis] - b[axis]).powi(2);
             }
         }
         let error = (
@@ -95,7 +97,8 @@ fn native_magnetic_signed_material_scaling_and_affine_orders_are_transport_neutr
                 for (a, b) in cold
                     .response()
                     .edge_circulations_wb
-                    .canonical_values().iter()
+                    .canonical_values()
+                    .iter()
                     .zip(base.response().edge_circulations_wb.canonical_values())
                 {
                     assert!((a - scale * b).abs() <= 1e-13 * scale.abs().max(1.0));

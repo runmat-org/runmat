@@ -18,7 +18,7 @@ use super::{
 
 const BUCKLING_RESULT_PREFIX: &[u8] = b"runmat-structural-buckling-result/v1\0";
 const BUCKLING_RESULT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 20_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -95,7 +95,11 @@ impl MaxwellInput {
     }
     pub fn validate_for_mesh(&self, mesh: &SolverMeshArtifact) -> Result<(), MaxwellError> {
         self.ordered_volumes(mesh)?;
-        if self.grounded_faces.windows(2).any(|pair| pair[0] >= pair[1]) {
+        if self
+            .grounded_faces
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
             return Err(invalid("grounded faces must be sorted and unique"));
         }
         let elements: std::collections::BTreeSet<_> =
@@ -141,13 +145,15 @@ impl MaxwellInput {
             ));
         }
         self.sampling.validate_for_mesh(mesh).map_err(topology)?;
-        if self.source_current.len() != self.sampling.integration_samples().len()
+        if self.source_current.len() != self.sampling.integration_sample_count()
             || self
                 .source_current
                 .iter()
-                .zip(self.sampling.integration_samples())
-                .any(|(source, sample)| {
-                    source.sample_identity != sample.identity
+                .enumerate()
+                .any(|(index, source)| {
+                    self.sampling
+                        .integration_sample_identity(index)
+                        .map_or(true, |identity| source.sample_identity != identity)
                         || source
                             .current_density_a_per_m2
                             .canonical_value()

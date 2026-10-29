@@ -49,7 +49,9 @@ fn validated_spaces(
     Ok((edges, boundary))
 }
 pub use input::{solve_canonical_static, validate_canonical_input};
-pub use response::{MagneticFieldSample, MagnetostaticResponse};
+pub use response::{
+    element_mean, MagneticFieldSample, MagnetostaticResponse, MAGNETIC_SAMPLES_PER_ELEMENT,
+};
 
 use runmat_meshing_core::StableDigest;
 

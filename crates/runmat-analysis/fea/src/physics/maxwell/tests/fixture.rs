@@ -26,7 +26,8 @@ pub(super) fn problem(
         })
         .collect();
     let source_current = sampling
-        .integration_samples()
+        .integration_samples_for(&mesh)
+        .unwrap()
         .iter()
         .map(|sample| {
             let e = electric(sample.position_m, phase);

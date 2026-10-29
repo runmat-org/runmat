@@ -30,7 +30,7 @@ fn original_topology_requested_allocations_fit_inventory_and_cap_rejects_before_
         assert!(matches!(topology.solid_projection, Some(Cow::Borrowed(_))));
         assert_eq!(topology.nodes.len(), projection.nodes.len());
         assert_eq!(
-            topology.volume_integration_points.len(),
+            topology.volume_integration_point_count(),
             4 * projection.elements.len()
         );
         for (index, node) in projection.nodes.iter().enumerate() {

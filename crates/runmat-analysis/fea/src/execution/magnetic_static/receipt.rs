@@ -74,7 +74,7 @@ impl MagneticNumericalReceiptArtifact {
             nodes: mesh.topology.nodes.len(),
             elements: mesh.topology.volume_elements.len(),
             oriented_edges: r.edge_circulations_wb.canonical_values().len(),
-            integration_samples: r.samples.len(),
+            integration_samples: r.sample_count(),
             iterations: r.iterations,
             relative_physical_residual: r.relative_physical_residual,
             relative_gauge_residual: r.relative_gauge_residual,

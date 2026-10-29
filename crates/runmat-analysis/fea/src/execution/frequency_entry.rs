@@ -13,7 +13,7 @@ use super::{
 
 const FREQUENCY_ENTRY_PREFIX: &[u8] = b"runmat-structural-frequency-entry/v1\0";
 const FREQUENCY_ENTRY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// One independently executable member of a structural frequency plan.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

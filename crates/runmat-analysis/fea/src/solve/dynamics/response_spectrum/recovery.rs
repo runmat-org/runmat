@@ -15,7 +15,7 @@ use super::{
 
 const FIELD_RECOVERY_PREFIX: &[u8] = b"runmat-modal-response-spectrum-field-recovery\0";
 const FIELD_RECOVERY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 40_000_000, 65_536, 24);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 24));
 
 mod deformation;
 mod nodal;

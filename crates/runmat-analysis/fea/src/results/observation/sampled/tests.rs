@@ -46,7 +46,7 @@ fn native_field(sampling: &SampledVolumeFieldTopology, edge: bool) -> RecoveredF
             FieldLocation::IntegrationPoint,
             RecoveredFieldEntityDomain::VolumeIntegrationPoints,
             ObservationValueShape::Vector3,
-            sampling.integration_samples().len(),
+            sampling.integration_sample_count(),
         )
     };
     let definition = RecoveredFieldDefinition::new(
@@ -211,10 +211,12 @@ fn sampled_native_fields_keep_exact_samples_edges_values_and_partition_independe
                         .map(|e| ObservationEntity::OrientedEdge(e.identity))
                         .collect::<Vec<_>>()
                 } else {
-                    sampling
-                        .integration_samples()
-                        .iter()
-                        .map(|s| ObservationEntity::IntegrationPoint(s.identity))
+                    (0..sampling.integration_sample_count())
+                        .map(|i| {
+                            ObservationEntity::IntegrationPoint(
+                                sampling.integration_sample_identity(i).unwrap(),
+                            )
+                        })
                         .collect()
                 };
                 assert_eq!(full.entities, expected);
@@ -334,7 +336,7 @@ fn sampled_region_cardinality_counts_parents_but_limits_count_actual_samples() {
                 serial(&region_plan, &sampling, &mesh, &field)
                     .entities
                     .len(),
-                sampling.integration_samples().len()
+                sampling.integration_sample_count()
             );
             let ObservationTarget::Spatial(ExcitationTarget::Region(region)) = &mut request.target
             else {
@@ -350,7 +352,7 @@ fn sampled_region_cardinality_counts_parents_but_limits_count_actual_samples() {
             )
             .is_err());
             let limits = ObservationLimits {
-                maximum_selected_entities: sampling.integration_samples().len() - 1,
+                maximum_selected_entities: sampling.integration_sample_count() - 1,
                 ..ObservationLimits::default()
             };
             assert!(resolve_sampled_observation_plan(
@@ -406,7 +408,7 @@ fn sampled_foreign_layout_mesh_weighted_requests_probes_and_histories_fail_close
     )
     .is_err());
     let mut malformed = serde_json::to_value(&sampling).unwrap();
-    malformed["data"]["integration_samples"][0]["position_m"][0] = serde_json::json!(99.0);
+    malformed["data"]["element_corner_nodes"][0][0] = serde_json::json!(u32::MAX);
     assert!(serde_json::from_value::<SampledVolumeFieldTopology>(malformed).is_err());
     let edge = native_field(&sampling, true);
     let mut weighted = native_spec(&edge);

@@ -35,17 +35,16 @@ pub struct ContactOperatorPolicy {
     pub maximum_coordinates: usize,
     pub maximum_patches_per_trial: u64,
     pub maximum_refinement_evaluations_per_trial: u64,
-    pub maximum_identity_bytes: usize,
     pub maximum_preparation_resident_bytes: u64,
     pub maximum_preparation_scalar_operations: u64,
 }
 impl ContactOperatorPolicy {
+    /// The identity source grows with the contact support (node rows, interfaces); its
+    /// construction bytes are charged to `maximum_preparation_resident_bytes`, so the codec
+    /// bounds it only by the wire range.
     fn identity_limits(self) -> runmat_canonical_codec::CanonicalLimits {
-        runmat_canonical_codec::CanonicalLimits::new(
-            self.maximum_identity_bytes,
-            1_000_000,
-            65536,
-            32,
+        crate::contracts::canonical_digest::wire_bounded(
+            runmat_canonical_codec::CanonicalLimits::new(0, 0, 65536, 32),
         )
     }
 }

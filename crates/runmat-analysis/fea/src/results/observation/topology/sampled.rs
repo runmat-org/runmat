@@ -8,15 +8,6 @@ impl ObservationTopology<'_> {
     ) -> Result<Self, ObservationError> {
         sampling.validate_for_mesh(mesh).map_err(invalid)?;
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
-        let element_indices = SortedValues::derive(
-            projection
-                .elements
-                .iter()
-                .enumerate()
-                .map(|(i, element)| (element.stable_identity, i)),
-            projection.elements.len(),
-        )
-        .map_err(storage_error)?;
         let node_coordinates = SortedValues::derive(
             projection
                 .nodes
@@ -25,28 +16,8 @@ impl ObservationTopology<'_> {
             projection.nodes.len(),
         )
         .map_err(storage_error)?;
-        let mut integration_points_by_parent = vec![Vec::new(); projection.elements.len()];
-        let volume_integration_points = sampling
-            .integration_samples()
-            .iter()
-            .enumerate()
-            .map(|(index, sample)| {
-                let parent = *element_indices.get(&sample.element_identity).ok_or(
-                    ObservationError::Identity(
-                        "sampled observation parent is absent from canonical projection",
-                    ),
-                )?;
-                integration_points_by_parent[parent].push(index);
-                Ok(ObservationElement {
-                    identity: sample.identity,
-                    region_id: projection.elements[parent]
-                        .region_id
-                        .source_topology_id
-                        .clone(),
-                    centroid_m: sample.position_m,
-                })
-            })
-            .collect::<Result<Vec<_>, ObservationError>>()?;
+        let points = sampling.rule().points_per_element();
+        let parents = projection.elements.len();
         let oriented_edges = sampling
             .oriented_edges()
             .iter()
@@ -93,7 +64,10 @@ impl ObservationTopology<'_> {
                     centroid_m: element.centroid_m,
                 })
                 .collect(),
-            volume_integration_points,
+            volume_integration_points: IntegrationPoints::Sampled {
+                count: sampling.integration_sample_count(),
+                points: std::sync::OnceLock::new(),
+            },
             oriented_edges,
             oriented_faces: Vec::new(),
             finite_volume: None,
@@ -112,8 +86,43 @@ impl ObservationTopology<'_> {
             .map_err(storage_error)?,
             solid_projection: Some(Cow::Owned(projection)),
             sampling: Some(sampling.clone()),
-            integration_points_by_parent,
+            integration_points_by_parent: ParentIntegrationPoints::Uniform {
+                parents,
+                per_parent: points,
+            },
         })
+    }
+}
+
+/// Sample records of a sampled layout: identity from (rule, element, ordinal), parent region and
+/// rule position from the projection.
+pub(super) fn integration_points(
+    sampling: &SampledVolumeFieldTopology,
+    projection: &AnalysisProjection,
+) -> Result<Vec<ObservationElement>, ObservationError> {
+    let mut volume_integration_points = Vec::new();
+    volume_integration_points
+        .try_reserve_exact(sampling.integration_sample_count())
+        .map_err(|_| ObservationError::Limit("sampled integration-point allocation"))?;
+    let mut failure = None;
+    sampling
+        .visit_integration_geometry(projection, |point| {
+            match sampling.integration_sample_identity(point.index) {
+                Ok(identity) => volume_integration_points.push(ObservationElement {
+                    identity,
+                    region_id: projection.elements[point.element]
+                        .region_id
+                        .source_topology_id
+                        .clone(),
+                    centroid_m: point.position_m,
+                }),
+                Err(error) => failure = failure.take().or(Some(error)),
+            }
+        })
+        .map_err(invalid)?;
+    match failure {
+        Some(error) => Err(invalid(error)),
+        None => Ok(volume_integration_points),
     }
 }
 

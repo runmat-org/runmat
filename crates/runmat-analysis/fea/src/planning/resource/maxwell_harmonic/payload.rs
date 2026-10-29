@@ -5,9 +5,7 @@ use crate::physics::maxwell::{
     ComplexPhasor, MaxwellCurrentSample, MaxwellDriveExcitation, MaxwellDriveResponse,
     MaxwellElementVector, MaxwellFieldSample, MaxwellVolumeData,
 };
-use crate::results::field::{
-    SampledOrientedEdge, VolumeFieldIntegrationSample, VolumeFieldSamplingRule,
-};
+use crate::results::field::VolumeFieldSamplingRule;
 use runmat_meshing_core::StableDigest;
 use serde::{Serialize, Serializer};
 struct Repeated<'a, T> {
@@ -18,23 +16,6 @@ impl<T: Serialize> Serialize for Repeated<'_, T> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.collect_seq(std::iter::repeat_n(self.value, self.count))
     }
-}
-#[derive(Serialize)]
-struct SamplingData<'a> {
-    schema_version: u16,
-    mesh_digest: StableDigest,
-    projection_digest: Digest,
-    rule: VolumeFieldSamplingRule,
-    node_identities: Repeated<'a, StableDigest>,
-    element_identities: Repeated<'a, StableDigest>,
-    element_corner_identities: Repeated<'a, [StableDigest; 4]>,
-    oriented_edges: Repeated<'a, SampledOrientedEdge>,
-    integration_samples: Repeated<'a, VolumeFieldIntegrationSample>,
-}
-#[derive(Serialize)]
-struct Sampling<'a> {
-    data: SamplingData<'a>,
-    sampling_digest: Digest,
 }
 #[derive(Serialize)]
 struct Drive<'a> {
@@ -49,7 +30,7 @@ struct Input<'a> {
     #[serde(with = "runmat_types::physical::canonical_storage")]
     angular_frequency_rad_per_s:
         runmat_types::physical::Quantity<runmat_types::physical::kind::AngularFrequency, f64>,
-    sampling: Sampling<'a>,
+    sampling: crate::results::field::SampledTopologyShape,
     volumes: Repeated<'a, MaxwellVolumeData>,
     source_current: Repeated<'a, MaxwellCurrentSample>,
     grounded_faces: Repeated<'a, StableDigest>,
@@ -116,19 +97,7 @@ pub(super) fn profile(
     let stable = StableDigest::from_bytes([0; 32]);
     let digest = Digest::from_bytes([0; 32]);
     let pair = [stable; 2];
-    let corners = [stable; 4];
     let zero = ComplexPhasor::ZERO;
-    let edge = SampledOrientedEdge {
-        identity: stable,
-        node_identities: pair,
-    };
-    let point = VolumeFieldIntegrationSample {
-        identity: stable,
-        element_identity: stable,
-        ordinal: 0,
-        position_m: [0.0; 3],
-        volume_weight_m3: 0.0,
-    };
     let volume = MaxwellVolumeData {
         element_identity: stable,
         permeability_h_per_m: runmat_types::physical::MagneticPermeability::new(0.0),
@@ -209,35 +178,11 @@ pub(super) fn profile(
                 runmat_types::physical::kind::AngularFrequency,
                 _,
             >::new(0.0),
-            sampling: Sampling {
-                sampling_digest: digest,
-                data: SamplingData {
-                    schema_version: 1,
-                    mesh_digest: stable,
-                    projection_digest: digest,
-                    rule: VolumeFieldSamplingRule::TetrahedronKeastFifteen,
-                    node_identities: Repeated {
-                        value: &stable,
-                        count: m.topology.nodes.len(),
-                    },
-                    element_identities: Repeated {
-                        value: &stable,
-                        count: elements,
-                    },
-                    element_corner_identities: Repeated {
-                        value: &corners,
-                        count: elements,
-                    },
-                    oriented_edges: Repeated {
-                        value: &edge,
-                        count: edges,
-                    },
-                    integration_samples: Repeated {
-                        value: &point,
-                        count: samples,
-                    },
-                },
-            },
+            sampling: crate::results::field::SampledTopologyShape::new(
+                m.topology.nodes.len(),
+                elements,
+                VolumeFieldSamplingRule::TetrahedronKeastFifteen,
+            ),
             volumes: Repeated {
                 value: &volume,
                 count: elements,

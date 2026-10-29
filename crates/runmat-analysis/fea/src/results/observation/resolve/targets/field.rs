@@ -180,7 +180,7 @@ pub(super) fn resolve_field_target(
                         RecoveredFieldEntityDomain::VolumeElements,
                         topology,
                         limits,
-                        selection_output_bytes(topology.volume_integration_points.len(), maximum)?,
+                        selection_output_bytes(topology.volume_integration_point_count(), maximum)?,
                     )?;
                     enforce_cardinality(region.cardinality, parents.clone().count(), spec)?;
                     elements_target(
