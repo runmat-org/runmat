@@ -114,7 +114,7 @@ fn request(plan: &FusionGroupPlan, exponent: Value) -> FusionExecutionRequest<'_
 }
 
 #[test]
-fn mixed_square_deopts_before_reduction_placement_or_upload_but_native_single_reaches_placement() {
+fn mixed_and_native_single_power_preserve_sum_accumulator_before_provider_placement() {
     runmat_gc::gc_test_context(|| {
         let _selected = ThreadProviderGuard::set(Some(&PROVIDER));
         PROVIDER.queries.store(0, Ordering::SeqCst);
@@ -140,22 +140,31 @@ fn mixed_square_deopts_before_reduction_placement_or_upload_but_native_single_re
         assert!(matches!(mixed, FusionExecutionOutcome::SharedRuntime(_)));
         assert_eq!(PROVIDER.queries.load(Ordering::SeqCst), 0);
         let native_exponent = Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap());
-        let _ = execute_reduction_with_shape_placed(
+        let native = request(&source, native_exponent.clone());
+        let bindings = AdmittedBindings::new(&native).unwrap();
+        assert!(admitted_static(&native, &bindings, ProviderPrecision::F32)
+            .unwrap()
+            .is_some());
+        let result = execute_reduction_with_shape_placed(
             request(&source, native_exponent.clone()),
             2,
             1,
             &[1, 1],
             64,
-        );
-        assert_eq!(PROVIDER.queries.load(Ordering::SeqCst), 1);
-        let _ = futures::executor::block_on(execute_reduction_with_shape_placed_async(
+        )
+        .unwrap();
+        assert!(matches!(result, FusionExecutionOutcome::SharedRuntime(_)));
+        assert_eq!(PROVIDER.queries.load(Ordering::SeqCst), 0);
+        let result = futures::executor::block_on(execute_reduction_with_shape_placed_async(
             request(&source, native_exponent),
             2,
             1,
             &[1, 1],
             64,
-        ));
-        assert_eq!(PROVIDER.queries.load(Ordering::SeqCst), 2);
+        ))
+        .unwrap();
+        assert!(matches!(result, FusionExecutionOutcome::SharedRuntime(_)));
+        assert_eq!(PROVIDER.queries.load(Ordering::SeqCst), 0);
     });
 }
 
@@ -177,13 +186,16 @@ fn synchronous_probe_required_power_stops_before_placement_or_provider_effect() 
             placement: None,
             runtime: None,
         };
-        assert!(execute_reduction_with_shape_placed(request, 2, 1, &[1, 1], 64).is_err());
+        assert!(matches!(
+            execute_reduction_with_shape_placed(request, 2, 1, &[1, 1], 64).unwrap(),
+            FusionExecutionOutcome::SharedRuntime(_)
+        ));
         assert_eq!(PROVIDER.queries.load(Ordering::SeqCst), 0);
     });
 }
 
 #[test]
-fn ordinary_nonrequired_multiply_reduction_keeps_placement_route() {
+fn single_multiply_sum_never_uses_a_legacy_single_accumulator() {
     runmat_gc::gc_test_context(|| {
         let _selected = ThreadProviderGuard::set(Some(&PROVIDER));
         PROVIDER.queries.store(0, Ordering::SeqCst);
@@ -200,14 +212,35 @@ fn ordinary_nonrequired_multiply_reduction_keeps_placement_route() {
             placement: None,
             runtime: None,
         };
-        let _ = futures::executor::block_on(execute_reduction_with_shape_placed_async(
+        let program = futures::executor::block_on(super::super::resolve_reduction_program(
+            &request,
+            ProviderPrecision::F32,
+        ))
+        .unwrap()
+        .expect("ordinary multiplication has an admitted mathematical contract");
+        assert_eq!(
+            program.contract().input_class,
+            runmat_types::NumericClass::Single
+        );
+        assert_eq!(
+            program.contract().accumulator_class,
+            runmat_types::NumericClass::Double
+        );
+        assert_eq!(
+            program.contract().output_class,
+            runmat_types::NumericClass::Single
+        );
+        drop(program);
+        let result = futures::executor::block_on(execute_reduction_with_shape_placed_async(
             request,
             2,
             1,
             &[1, 1],
             64,
-        ));
-        assert_eq!(PROVIDER.queries.load(Ordering::SeqCst), 1);
+        ))
+        .unwrap();
+        assert!(matches!(result, FusionExecutionOutcome::SharedRuntime(_)));
+        assert_eq!(PROVIDER.queries.load(Ordering::SeqCst), 0);
     });
 }
 

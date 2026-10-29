@@ -237,7 +237,7 @@ mod tests {
             vec![Value::String("AlL".into())],
             vec![Value::CharArray(runmat_value::CharArray::new_row("ALL"))],
             vec![
-                Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+                Value::Tensor(Tensor::new(vec![], vec![1, 0]).unwrap()),
                 Value::Num(2.0),
             ],
             vec![
@@ -270,6 +270,16 @@ mod tests {
                 Prepared(original).resolve(&fact).unwrap()
             );
         }
+        let nonvector = [Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap())];
+        assert!(lexical_plan(&FusionReductionControls {
+            values: &nonvector,
+            requested_outputs: 1,
+        })
+        .is_none());
+        assert!(futures::executor::block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&nonvector),
+        ))
+        .is_err());
         let duplicate = [
             Value::String("default".into()),
             Value::String("DEFAULT".into()),

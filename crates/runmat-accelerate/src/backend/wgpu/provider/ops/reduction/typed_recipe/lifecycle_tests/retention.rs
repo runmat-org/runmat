@@ -215,6 +215,15 @@ pub(super) fn prove_exact_owners(provider: &'static WgpuProvider) {
                 assert!(trace.partial.as_ref().unwrap().upgrade().is_none());
             }
             assert_eq!(provider.allocations.retained_bytes(), baseline);
+            // Weak probes do not retain device payload, but their shared lease
+            // headers remain physical host allocations with their original
+            // claims. Finish probing before expecting all host backing gone.
+            drop(weak_a);
+            drop(weak_b);
+            drop(weak_output);
+            drop(trace);
+            drop(receipt);
+            drop(gate);
             let old_cache = {
                 let mut cache = provider.fused_pipeline_cache.lock().unwrap();
                 std::mem::take(&mut *cache)
@@ -227,7 +236,8 @@ pub(super) fn prove_exact_owners(provider: &'static WgpuProvider) {
             while ledger.snapshot().live_reserved_bytes != 0 {
                 assert!(
                     std::time::Instant::now() < deadline,
-                    "exact completion/cache backing must eventually refund control funding"
+                    "exact completion/cache backing must refund funding: observed={observed}, strategy={strategy:?}, fail_after_first={fail_after_first}, live={}",
+                    ledger.snapshot().live_reserved_bytes,
                 );
                 std::thread::yield_now();
             }
