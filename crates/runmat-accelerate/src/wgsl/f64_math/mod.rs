@@ -9,6 +9,7 @@ pub(crate) use legalize::{prepare, PreparationError, PreparedShader};
 
 /// Original source plus this compiler domain is the pipeline identity. Change
 /// when helper algorithms, legalization or arithmetic controls change.
+#[cfg(feature = "wgpu")]
 pub(crate) const COMPILER_REVISION: u32 = 1;
 
 use intrinsic::Intrinsic;
