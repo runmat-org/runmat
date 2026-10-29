@@ -286,12 +286,12 @@ where
             prepared_output_set.validate_resource_facts(admitted)?;
         }
     }
-    for output in &outputs {
-        for object in &output.objects {
-            store.write_verified(object)?;
-        }
-    }
-    store.write_verified(&prepared_output_set.object)?;
+    store.write_verified_batch(
+        outputs
+            .iter()
+            .flat_map(|output| &output.objects)
+            .chain(std::iter::once(&prepared_output_set.object)),
+    )?;
     let output_set = prepared_output_set.output_set;
     let output_set_root = prepared_output_set.root;
     crate::object::retain_unique_references(&mut result_objects);

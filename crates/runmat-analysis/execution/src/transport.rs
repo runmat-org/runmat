@@ -67,9 +67,7 @@ impl PreparedAnalysisProgram {
         &self,
         store: &mut impl runmat_execution_artifact::cache::CacheExport,
     ) -> AnalysisBridgeResult<()> {
-        for object in &self.logical_objects {
-            store.write_verified(object)?;
-        }
+        store.write_verified_batch(&self.logical_objects)?;
         Ok(())
     }
 

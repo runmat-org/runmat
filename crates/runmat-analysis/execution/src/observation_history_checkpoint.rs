@@ -161,9 +161,7 @@ impl ObservationHistoryCheckpointPublisher {
                     )
                 })
         })?;
-        for object in &pending {
-            store.write_verified(object)?;
-        }
+        store.write_verified_batch(pending.iter().copied())?;
         let written_object_count = pending.len();
         drop(pending);
         self.previous_closure_digests = objects
