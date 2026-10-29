@@ -43,7 +43,17 @@ impl CoreHourLeaseClient {
         let credential = crate::auth::resolve_auth_token(&mut config, &server)
             .await
             .map_err(|_| AdmissionError::SignInRequired)?;
-        let org = crate::auth::resolve_public_org_id(&config, None)
+        Self::from_auth_context(&config, &server, &credential)
+    }
+
+    /// Reuse an already-resolved command credential without resolving auth again.
+    /// This constructor does no network I/O and never starts interactive sign-in.
+    pub fn from_auth_context(
+        config: &crate::auth::RemoteConfig,
+        server: &str,
+        credential: &str,
+    ) -> Result<Self, AdmissionError> {
+        let org = crate::auth::resolve_public_org_id(config, None)
             .map_err(|_| AdmissionError::SignInRequired)?
             .to_string();
         let config = crate::auth::config_path().map_err(|_| AdmissionError::LicenseInvalid)?;
@@ -56,7 +66,8 @@ impl CoreHourLeaseClient {
             .ok_or(AdmissionError::LicenseInvalid)?
             .join("core-hour-usage")
             .join(format!("{scope}.json"));
-        Self::new(server, org, credential, path).map_err(|_| AdmissionError::LicenseInvalid)
+        Self::new(server.to_owned(), org, credential.to_owned(), path)
+            .map_err(|_| AdmissionError::LicenseInvalid)
     }
 
     /// Explicit context constructor, also useful for embedded hosts and contract stubs.

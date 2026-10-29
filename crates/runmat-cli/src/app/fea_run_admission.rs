@@ -17,10 +17,9 @@ use runmat_server_client::usage::{
 enum Work {
     Admit(
         CreateLeaseRequest,
-        mpsc::SyncSender<std::result::Result<LeasePermit, FeaRunDenied>>,
+        mpsc::SyncSender<std::result::Result<(CoreHourLeaseClient, LeasePermit), FeaRunDenied>>,
     ),
-    Heartbeat(LeasePermit, UsageReport),
-    Settle(LeasePermit, LeaseOutcome, UsageReport),
+    Replay(CoreHourLeaseClient),
     Shutdown,
 }
 
@@ -88,23 +87,17 @@ fn work_loop(
                     client = Some(reactor.block_on(CoreHourLeaseClient::from_environment()));
                 }
                 let result = match client.as_ref().expect("initialized on admission") {
-                    Ok(client) => reactor.block_on(client.admit(request)).map_err(map_denial),
+                    Ok(client) => reactor
+                        .block_on(client.admit(request))
+                        .map(|permit| (client.clone(), permit))
+                        .map_err(map_denial),
                     Err(error) => Err(map_denial_ref(error)),
                 };
                 let _ = response.send(result);
             }
-            Work::Heartbeat(permit, usage) => {
-                if let Some(Ok(client)) = &client {
-                    if let Err(error) = reactor.block_on(client.heartbeat(&permit, usage)) {
-                        log::debug!("core-hour heartbeat deferred: {error}");
-                    }
-                }
-            }
-            Work::Settle(permit, outcome, usage) => {
-                if let Some(Ok(client)) = &client {
-                    if let Err(error) = reactor.block_on(client.settle(&permit, outcome, usage)) {
-                        log::debug!("core-hour settlement deferred: {error}");
-                    }
+            Work::Replay(client) => {
+                if let Err(error) = reactor.block_on(client.replay_pending()) {
+                    log::debug!("core-hour usage replay deferred: {error}");
                 }
             }
             Work::Shutdown => break,
@@ -126,10 +119,11 @@ impl FeaRunAdmission for CliAdmission {
         self.0
             .send(Work::Admit(request, sender))
             .map_err(|_| FeaRunDenied::ServerUnreachable)?;
-        let lease = receiver
+        let (client, lease) = receiver
             .recv()
             .map_err(|_| FeaRunDenied::ServerUnreachable)??;
         Ok(Box::new(CliPermit {
+            client,
             sender: self.0.clone(),
             lease: Some(lease),
             last_usage: Cell::new((0, 0)),
@@ -163,9 +157,25 @@ fn usage_report(usage: &ResourceUsage) -> UsageReport {
 }
 
 struct CliPermit {
+    client: CoreHourLeaseClient,
     sender: mpsc::Sender<Work>,
     lease: Option<LeasePermit>,
     last_usage: Cell<(u64, u64)>,
+}
+
+impl CliPermit {
+    fn replay(&self) {
+        if self.sender.send(Work::Replay(self.client.clone())).is_err() {
+            log::debug!("core-hour reporting worker unavailable; durable usage will replay later");
+        }
+    }
+
+    fn record_settlement(&self, lease: &LeasePermit, outcome: LeaseOutcome, usage: UsageReport) {
+        match self.client.record_settlement(lease, outcome, usage) {
+            Ok(()) => self.replay(),
+            Err(error) => log::error!("core-hour settlement persistence failed: {error}"),
+        }
+    }
 }
 
 impl FeaRunPermit for CliPermit {
@@ -173,9 +183,11 @@ impl FeaRunPermit for CliPermit {
         self.last_usage
             .set((usage.wall_millis, usage.cpu_core_millis));
         if let Some(lease) = &self.lease {
-            let _ = self
-                .sender
-                .send(Work::Heartbeat(lease.clone(), usage_report(usage)));
+            // Persistence is synchronous; only HTTP waits in the reporting queue.
+            match self.client.record_heartbeat(lease, usage_report(usage)) {
+                Ok(()) => self.replay(),
+                Err(error) => log::error!("core-hour heartbeat persistence failed: {error}"),
+            }
         }
     }
 
@@ -186,9 +198,7 @@ impl FeaRunPermit for CliPermit {
                 FeaRunOutcome::Cancelled => LeaseOutcome::Cancelled,
                 FeaRunOutcome::Failed => LeaseOutcome::Failed,
             };
-            let _ = self
-                .sender
-                .send(Work::Settle(lease, outcome, usage_report(usage)));
+            self.record_settlement(&lease, outcome, usage_report(usage));
         }
     }
 }
@@ -197,14 +207,14 @@ impl Drop for CliPermit {
     fn drop(&mut self) {
         if let Some(lease) = self.lease.take() {
             let (wall_millis, cpu_core_millis) = self.last_usage.get();
-            let _ = self.sender.send(Work::Settle(
-                lease,
+            self.record_settlement(
+                &lease,
                 LeaseOutcome::Failed,
                 UsageReport {
                     wall_millis,
                     cpu_core_millis,
                 },
-            ));
+            );
         }
     }
 }
