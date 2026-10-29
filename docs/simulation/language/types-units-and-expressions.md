@@ -13,16 +13,16 @@ Inputs, model parameters and `let` bindings are declared with a type: `input thi
 
 | Group | Types |
 | --- | --- |
-| Plain values | `boolean` (also `bool`), `integer`, `real`, `scalar`, `dimensionless`, `complex`, `string` |
+| Plain values | `boolean`, `integer`, `real`, `dimensionless`, `complex`, `string` |
 | Geometry and kinematics | `length`, `displacement`, `area`, `volume`, `angle`, `rotation`, `velocity`, `acceleration`, `angular_velocity`, `angular_acceleration` |
-| Mass and time | `mass`, `mass_density`, `density`, `time`, `frequency`, `mass_flow_rate`, `volume_flow_rate` |
+| Mass and time | `mass`, `mass_density`, `time`, `frequency`, `mass_flow_rate`, `volume_flow_rate` |
 | Mechanics | `force`, `moment`, `pressure`, `stress`, `body_force_density`, `energy`, `power` |
 | Heat | `temperature`, `temperature_difference`, `heat_flux`, `heat_generation_density`, `heat_transfer_coefficient`, `thermal_conductivity` |
 | Electromagnetics | `electric_potential`, `electric_current`, `electric_current_density`, `electric_charge`, `electric_charge_density`, `magnetic_flux_density`, `magnetic_vector_potential` |
 | Declarations | `geometry`, `mesh`, `material`, `model`, `study`, `execution` |
-| Regions | `region<solid>`, `region<face>`, `region<edge>`, `region<vertex>`, `region<cell>`, `region<anything>` |
+| Regions | `region<solid>`, `region<face>`, `region<edge>`, `region<vertex>`, `region<cell>` |
 
-The region's topology is part of its type: a face region cannot be passed where `region<solid>` is expected, even when it holds one entity.
+Type names are exact: there are no aliases, so `bool`, `scalar` and `density` are errors. The region's topology is part of its type: a face region cannot be passed where `region<solid>` is expected, even when it holds one entity, and a region type always names one topology.
 
 ```fea fragment
 model bracket(region body : region<solid>, region pad : region<face>) {
@@ -40,7 +40,8 @@ A quantity is a number followed by a unit: `8 mm`, `1.5 kN`, `2700 kg/m^3`. Thes
 | Length | `m`, `mm`, `um`, `nm`, `cm`, `km`, `in` (also `inch`), `ft` |
 | Time | `s`, `ms`, `us`, `ns` |
 | Frequency | `Hz`, `kHz`, `MHz`, `GHz` |
-| Mass | `kg`, `g` (also `gram`) |
+| Mass | `kg`, `gram` |
+| Acceleration | `g` (standard gravity, 9.806 65 m/s²) |
 | Force | `N`, `kN` |
 | Pressure and stress | `Pa`, `kPa`, `MPa`, `GPa` |
 | Energy | `J` |
