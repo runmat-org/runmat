@@ -270,16 +270,24 @@
       "path": "docs/simulation/evidence.md"
     },
     {
-      "id": "doc:fea/validation",
-      "path": "docs/simulation/validation.md"
-    },
-    {
       "id": "doc:fea/trust",
       "path": "docs/simulation/trust.md"
     },
     {
       "id": "doc:fea/status",
       "path": "docs/simulation/status.md"
+    },
+    {
+      "id": "doc:fea/release-status",
+      "path": "docs/simulation/release-status.md"
+    },
+    {
+      "id": "doc:fea/glossary",
+      "path": "docs/simulation/glossary.md"
+    },
+    {
+      "id": "doc:fea/validation/records",
+      "path": "docs/simulation/validation/records.md"
     },
     {
       "id": "doc:fea/operation-reference",

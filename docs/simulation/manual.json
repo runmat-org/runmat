@@ -3,7 +3,7 @@
   "topics": [
     {
       "id": "linear-static",
-      "route": "/docs/simulation/physics/structural",
+      "route": "/docs/simulation/guides/linear-static",
       "title": "Linear static analysis",
       "summary": "Predict deformation and stress under steady loading. Create a structural study, explore its results, and open the complete example in RunMat Desktop.",
       "keywords": [
@@ -17,7 +17,7 @@
       ],
       "group": "Guides",
       "order": 1,
-      "narrative": "docs/simulation/physics/structural-static.md",
+      "narrative": "docs/simulation/guides/linear-static.md",
       "requirements": [
         "FEA-STRUCTURAL-SOLID-001",
         "FEA-STRUCTURAL-REFERENCE-001",
@@ -68,7 +68,7 @@
       "related_topics": [
         {
           "title": "Linear static analysis guide",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
@@ -99,7 +99,7 @@
       "related_topics": [
         {
           "title": "Linear static analysis guide",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
@@ -141,7 +141,7 @@
         },
         {
           "title": "Linear static analysis",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
@@ -177,7 +177,7 @@
         },
         {
           "title": "Linear static analysis",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
@@ -214,7 +214,7 @@
         },
         {
           "title": "Linear static analysis",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {

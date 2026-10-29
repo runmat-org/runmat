@@ -16,7 +16,7 @@ export function buildSourceDocs({ source, output, requirementsPath, builtinDescr
         throw new Error("Docs export output must be inside the source target directory");
     const ajv = new Ajv({ allErrors: true });
     const schemas = new Map();
-    for (const name of ["document", "fea-manual", "evidence-index", "example-package"])
+    for (const name of ["document", "fea-manual", "evidence-index", "example-package", "pending-features"])
         schemas.set(name, ajv.compile(readJson(join(source, `docs/schema/${name}.schema.json`))));
     const validate = (name, value) => { const check = schemas.get(name); if (!check(value))
         throw new Error(`${name}: ${ajv.errorsText(check.errors)}`); };

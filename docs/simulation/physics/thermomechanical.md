@@ -433,7 +433,7 @@ before multiplication and retains the original nullspace/anchor checks. Reconstr
 authoritative prescribed temperatures exactly; free-node increments are not clamped or overwritten.
 Thermal solver stopping uses the tighter of the shared default and authored acceptance target;
 the latter cannot relax the established numerical stopping policy. The shared sparse solver layer
-(see [Linear solvers](../linear-solvers)) propagates this tolerance through its direct-refinement,
+propagates this tolerance through its direct-refinement,
 CG and accelerator final-residual checks. Fixed-step transients reuse one Cholesky factorization
 for every step whose effective operator is unchanged. No new successful
 GPU execution envelope is inferred. Linear and global energy normalizations differ, so converged

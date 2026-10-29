@@ -31,7 +31,10 @@ export function collectFea(source, output, register, examples, evidence, validat
         if (!obligation?.required_envelopes.some(scope => Object.keys(scope).every(key => scope[key] === record.scope[key])))
             throw new Error("Evidence claims an undeclared scope");
     }
+    // The pending-feature registry drives the site's "Not yet in RunMat" flags and its release-status page.
+    const pending = readJson(join(source, "docs/simulation/pending-features.json"));
+    validate("pending-features", pending);
     mkdirSync(join(output, "fea"), { recursive: true });
-    for (const [name, value] of [["requirements", register], ["manual", manual], ["evidence-index", evidence]])
+    for (const [name, value] of [["requirements", register], ["manual", manual], ["evidence-index", evidence], ["pending-features", pending]])
         writeFileSync(join(output, `fea/${name}.json`), JSON.stringify(value, null, 2) + "\n");
 }

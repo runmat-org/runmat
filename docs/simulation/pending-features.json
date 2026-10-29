@@ -1,0 +1,324 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "electromagnetic.transient",
+      "title": "Electromagnetic transient (eddy-current A–φ time stepping)",
+      "area": "electromagnetic",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `electromagnetic transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row electromagnetic/transient status runs",
+        "runmat run <example>.fea (electromagnetic transient)"
+      ],
+      "gaps": [
+        "G-B7",
+        "PHY-01"
+      ],
+      "owner": "q-em",
+      "landed_in": null
+    },
+    {
+      "id": "electromagnetic.nonlinear",
+      "title": "Nonlinear magnetics with B–H curves",
+      "area": "electromagnetic",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `electromagnetic nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row electromagnetic/nonlinear status runs",
+        "runmat run <example>.fea (electromagnetic nonlinear)"
+      ],
+      "gaps": [
+        "G-B8",
+        "PHY-02"
+      ],
+      "owner": "q-em",
+      "landed_in": null
+    },
+    {
+      "id": "acoustic.static",
+      "title": "Acoustic static (pressure-only Laplace) procedure",
+      "area": "acoustic",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `acoustic static` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row acoustic/static status runs",
+        "runmat run <example>.fea (acoustic static)"
+      ],
+      "gaps": [
+        "G-B10",
+        "PHY-04",
+        "Q16"
+      ],
+      "owner": "q-fluid",
+      "decision": "owner",
+      "landed_in": null
+    },
+    {
+      "id": "acoustic.nonlinear",
+      "title": "Nonlinear acoustics procedure",
+      "area": "acoustic",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `acoustic nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row acoustic/nonlinear status runs",
+        "runmat run <example>.fea (acoustic nonlinear)"
+      ],
+      "gaps": [
+        "G-B10",
+        "PHY-04"
+      ],
+      "owner": "q-fluid",
+      "landed_in": null
+    },
+    {
+      "id": "fluid.harmonic",
+      "title": "Fluid harmonic (linearized flow about a base state) procedure",
+      "area": "fluid",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `fluid harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row fluid/harmonic status runs",
+        "runmat run <example>.fea (fluid harmonic)"
+      ],
+      "gaps": [
+        "G-B11",
+        "PHY-07",
+        "Q16"
+      ],
+      "owner": "q-fluid",
+      "decision": "owner",
+      "landed_in": null
+    },
+    {
+      "id": "fluid.nonlinear",
+      "title": "Fluid nonlinear procedure",
+      "area": "fluid",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `fluid nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row fluid/nonlinear status runs",
+        "runmat run <example>.fea (fluid nonlinear)"
+      ],
+      "gaps": [
+        "G-B11",
+        "PHY-07"
+      ],
+      "owner": "q-fluid",
+      "landed_in": null
+    },
+    {
+      "id": "thermomechanical.transient",
+      "title": "Thermomechanical transient with two-way coupling",
+      "area": "thermomechanical",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `thermomechanical transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row thermomechanical/transient status runs",
+        "runmat run <example>.fea (thermomechanical transient)"
+      ],
+      "gaps": [
+        "G-B9",
+        "PHY-03"
+      ],
+      "owner": "q-em",
+      "landed_in": null
+    },
+    {
+      "id": "thermomechanical.harmonic",
+      "title": "Thermomechanical harmonic procedure",
+      "area": "thermomechanical",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `thermomechanical harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row thermomechanical/harmonic status runs",
+        "runmat run <example>.fea (thermomechanical harmonic)"
+      ],
+      "gaps": [
+        "G-B9"
+      ],
+      "owner": "q-em",
+      "landed_in": null
+    },
+    {
+      "id": "electrothermal.harmonic",
+      "title": "Electrothermal harmonic procedure",
+      "area": "electrothermal",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `electrothermal harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row electrothermal/harmonic status runs",
+        "runmat run <example>.fea (electrothermal harmonic)"
+      ],
+      "gaps": [
+        "G-B8"
+      ],
+      "owner": "q-em",
+      "landed_in": null
+    },
+    {
+      "id": "electrothermal.nonlinear",
+      "title": "Electrothermal nonlinear procedure (temperature-dependent two-way coupling)",
+      "area": "electrothermal",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `electrothermal nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row electrothermal/nonlinear status runs",
+        "runmat run <example>.fea (electrothermal nonlinear)"
+      ],
+      "gaps": [
+        "G-B8",
+        "PHY-15"
+      ],
+      "owner": "q-em",
+      "landed_in": null
+    },
+    {
+      "id": "conjugate-heat-transfer.harmonic",
+      "title": "Conjugate heat transfer harmonic procedure",
+      "area": "conjugate-heat-transfer",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `conjugate_heat_transfer harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row conjugate_heat_transfer/harmonic status runs",
+        "runmat run <example>.fea (conjugate-heat-transfer harmonic)"
+      ],
+      "gaps": [
+        "G-B12"
+      ],
+      "owner": "q-fluid",
+      "landed_in": null
+    },
+    {
+      "id": "conjugate-heat-transfer.nonlinear",
+      "title": "Conjugate heat transfer with temperature-dependent properties",
+      "area": "conjugate-heat-transfer",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `conjugate_heat_transfer nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row conjugate_heat_transfer/nonlinear status runs",
+        "runmat run <example>.fea (conjugate-heat-transfer nonlinear)"
+      ],
+      "gaps": [
+        "G-B12",
+        "PHY-10b"
+      ],
+      "owner": "q-fluid",
+      "landed_in": null
+    },
+    {
+      "id": "fluid-structure-interaction.harmonic",
+      "title": "Fluid–structure interaction harmonic procedure",
+      "area": "fluid-structure-interaction",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `fluid_structure_interaction harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row fluid_structure_interaction/harmonic status runs",
+        "runmat run <example>.fea (fluid-structure-interaction harmonic)"
+      ],
+      "gaps": [
+        "G-B2"
+      ],
+      "owner": "q-fluid",
+      "landed_in": null
+    },
+    {
+      "id": "fluid-structure-interaction.nonlinear",
+      "title": "Fluid–structure interaction nonlinear procedure",
+      "area": "fluid-structure-interaction",
+      "kind": "procedure",
+      "acceptance": "`runmat check` and `runmat run` admit `fluid_structure_interaction nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.",
+      "witness": [
+        "ANALYSIS_IDENTITIES row fluid_structure_interaction/nonlinear status runs",
+        "runmat run <example>.fea (fluid-structure-interaction nonlinear)"
+      ],
+      "gaps": [
+        "G-B2"
+      ],
+      "owner": "q-fluid",
+      "landed_in": null
+    },
+    {
+      "id": "structural.nonlinear.sequence",
+      "title": "Nonlinear structural steps inside procedure graphs (preload → nonlinear → modal; thermal prefix → nonlinear)",
+      "area": "structural",
+      "kind": "procedure",
+      "acceptance": "A study whose nonlinear step follows or precedes other steps (`after`) passes `runmat check` and runs to completion; state transfers into and out of the nonlinear step are tested.",
+      "witness": [
+        "runmat run docs/simulation/examples/<preload-nonlinear-modal>.fea"
+      ],
+      "gaps": [
+        "G-B6",
+        "PHY-12",
+        "PHY-03b"
+      ],
+      "owner": "q-structural-linear",
+      "landed_in": null
+    },
+    {
+      "id": "fluid.periodic",
+      "title": "Periodic fluid boundary pairs (`fluid.periodic`)",
+      "area": "fluid",
+      "kind": "constraint",
+      "acceptance": "A study with `fluid.periodic` on matching face pairs checks and runs; a periodic channel matches the infinite-channel Poiseuille profile.",
+      "witness": [
+        "runmat run <periodic-channel>.fea"
+      ],
+      "gaps": [
+        "G-C4",
+        "MOD-21"
+      ],
+      "owner": "q-fluid",
+      "landed_in": null
+    },
+    {
+      "id": "magnetic.periodic",
+      "title": "Periodic and phase-shifted periodic magnetic boundaries for motor and transformer sectors",
+      "area": "electromagnetic",
+      "kind": "constraint",
+      "acceptance": "`magnetic.periodic` and `magnetic.phase_shifted_periodic` run in magnetostatic and harmonic studies; a sector model matches the full model.",
+      "witness": [
+        "runmat run <motor-sector>.fea"
+      ],
+      "gaps": [
+        "G-C3",
+        "MOD-19",
+        "MOD-20"
+      ],
+      "owner": "q-em",
+      "landed_in": null
+    },
+    {
+      "id": "magnetic.harmonic.vector-potential",
+      "title": "Nonzero prescribed magnetic vector potential in harmonic and magnetostatic studies",
+      "area": "electromagnetic",
+      "kind": "constraint",
+      "acceptance": "A nonzero `magnetic.vector_potential` boundary value runs in magnetostatic and harmonic studies and matches a closed-form field.",
+      "witness": [
+        "runmat run <prescribed-a>.fea"
+      ],
+      "gaps": [
+        "G-C3",
+        "MOD-19"
+      ],
+      "owner": "q-em",
+      "landed_in": null
+    },
+    {
+      "id": "acoustic.periodic.rotational",
+      "title": "Rotational (cyclic) acoustic periodicity, and periodicity in acoustic transient studies",
+      "area": "acoustic",
+      "kind": "constraint",
+      "acceptance": "Rotated periodic pairs and transient periodic pairs run; a cyclic sector matches the full annulus modes.",
+      "witness": [
+        "runmat run <cyclic-sector>.fea"
+      ],
+      "gaps": [
+        "G-C5",
+        "MOD-22"
+      ],
+      "owner": "q-fluid",
+      "landed_in": null
+    }
+  ]
+}

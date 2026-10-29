@@ -22,8 +22,49 @@ The requirement register lists every acceptance obligation and the execution env
 
 The catalog is regenerated, never edited by hand: `evidence_report` in `crates/runmat-analysis/qualification` writes the evidence catalog at `docs/simulation/qualification/generated/evidence-catalog.md` (markdown and JSON, with one page per requirement) and the scope traceability table, which maps every capability the website and plans state to the obligations that hold it to account.
 
+## Correctness layers
+
+No single test validates a physics family. Confidence is earned per formulation and per intended use, in layers:
+
+| Layer | Question | Evidence |
+| --- | --- | --- |
+| Input checking | Is the `.fea` source or model well formed? | `runmat check` diagnostics: syntax, types, units, region resolution, material coverage, family and procedure admission. |
+| Contract correctness | Does the public operation behave as specified? | Versioned result envelopes, typed errors, payload snapshots, builtin tests. |
+| Solver verification | Does the implementation solve the intended discrete problem? | Residual checks, deterministic replay, convergence diagnostics, execution-provider provenance. |
+| Numerical verification | Does the discretization converge toward known answers? | Closed-form cases, manufactured solutions, patch tests, mesh and time-step convergence. |
+| Physical validation | Does the model match trusted external behavior? | Published benchmarks, independent solver comparisons, measured references. |
+
+Model checks run before any assembly. They reject non-finite or inadmissible material properties, duplicate materials, material gaps and overlaps, unresolved regions, wrong formulation roles, cross-geometry assignments, and mismatched signal, excitation, constraint, boundary and interface quantities. Invalid material data and invalid assignments carry distinct diagnostics, so a solver failure is never the way an input error is reported.
+
+## Adding a validation case
+
+1. State the engineering question, the physics family and the procedure.
+2. Choose the reference: closed form, manufactured solution, patch test, published benchmark, independent solver, or measurement.
+3. Record geometry, units, materials, loads, constraints, assumptions and the acceptance tolerance.
+4. Add the study to the example package or the qualification harness.
+5. Assert physical quantities (displacement, reaction, frequency, temperature, flux), not only the result shape.
+6. Add a convergence sequence when the quantity depends on mesh density, time step, mode count or load increments.
+7. Tag the test with the requirement obligation it supports, so the evidence catalog picks it up.
+8. Regenerate the evidence catalog and link the case from its family's validation page.
+
+## Terms
+
+| Term | Use for |
+| --- | --- |
+| Input checking | Syntax, types, units, regions, materials, loads and options in a `.fea` source, reported by `runmat check`. |
+| Evidence | Diagnostics, provenance, receipts and test records attached to a result. |
+| Verification | Showing the implementation solves the intended discrete equations correctly. |
+| Validation | Showing the model matches known physical or trusted external behavior for a stated use. |
+
+Never call a whole family "validated". Name the formulation, the procedure and the envelope (element order, mesh, execution provider) a case covers.
+
 ## Validation by domain
 
 - [Structural mechanics](/docs/simulation/validation/structural)
 - [Thermal analysis](/docs/simulation/validation/thermal)
 - [Modal analysis](/docs/simulation/validation/modal)
+- [Electromagnetics](/docs/simulation/validation/electromagnetic)
+
+## Validation records
+
+Each qualification record describes one capability's acceptance obligations and the tests that hold it to account. The [records index](/docs/simulation/validation/records) lists them all.

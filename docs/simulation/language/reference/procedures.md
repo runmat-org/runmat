@@ -43,7 +43,7 @@ acoustic and electrical procedures, and reject malformed or ambiguous settings.
 | `structural prestressed_harmonic` | retained `prestress` plus frequencies; optional retained `basis` selects modal reduction |
 | `structural modal_response_spectrum` | retained `basis` and one or more model spectra |
 | `structural random_response` | retained `basis`, random excitation, frequency domain, and accuracy controls |
-| `structural nonlinear` | load-factor domain and nonlinear controls |
+| `structural nonlinear` | load-factor domain and nonlinear controls; inside a procedure graph (after a preload, before a modal step) [not yet in the current release](pending:structural.nonlinear.sequence) |
 
 ## Thermal procedures
 

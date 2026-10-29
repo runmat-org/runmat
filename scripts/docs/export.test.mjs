@@ -8,14 +8,14 @@ import { hash, verifyArtifact, inventory, writeManifest } from "./manifest.mjs";
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "runmat-docs-export-test-"));
     const source = resolve(import.meta.dirname, "../..");
-    for (const file of ["docs/catalog.json", "docs/simulation/manual.json", "docs/simulation/examples/catalog.json", "docs/simulation/physics/structural-static.md", "docs/simulation/validation/methodology.md", "docs/simulation/validation/structural.md", "docs/simulation/examples/structural-static.fea", "docs/simulation/examples/geometry/two-box-assembly.step"]) {
+    for (const file of ["docs/catalog.json", "docs/simulation/manual.json", "docs/simulation/pending-features.json", "docs/simulation/examples/catalog.json", "docs/simulation/guides/linear-static.md", "docs/simulation/validation/methodology.md", "docs/simulation/validation/structural.md", "docs/simulation/examples/structural-static.fea", "docs/simulation/examples/geometry/two-box-assembly.step"]) {
         mkdirSync(join(root, file, ".."), { recursive: true });
         cpSync(join(source, file), join(root, file));
     }
     cpSync(join(source, "docs/schema"), join(root, "docs/schema"), { recursive: true });
     mkdirSync(join(root, "docs/builtins/reference"), { recursive: true });
     writeFileSync(join(root, "docs/builtins/reference/disp.json"), '{"title":"disp"}');
-    writeFileSync(join(root, "docs/catalog.json"), JSON.stringify({ schema_version: 1, documents: [{ id: "manual", path: "docs/simulation/physics/structural-static.md" }] }));
+    writeFileSync(join(root, "docs/catalog.json"), JSON.stringify({ schema_version: 1, documents: [{ id: "manual", path: "docs/simulation/guides/linear-static.md" }] }));
     const manual = JSON.parse(readFileSync(join(root, "docs/simulation/manual.json")));
     manual.topics = manual.topics.filter(topic => ["linear-static", "validation-methodology", "structural-validation"].includes(topic.id));
     const register = { schema_version: 1, posture: "discovery_only", requirements: manual.topics[0].requirements.map(id => ({ id, obligations: [], witnesses: [] })) };

@@ -127,7 +127,7 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Load and excitation guides](./simulation/loads/)
 - [Solves, Studies, and Sweeps](./simulation/solves.md)
 - [Evidence & Artifacts](./simulation/evidence.md)
-- [Verification & Validation](./simulation/validation.md)
+- [Validation methodology](./simulation/validation/methodology.md)
 - [Results & Trust](./simulation/trust.md)
 - [Current Status](./simulation/status.md)
 - [Operation Reference](./simulation/operation-reference.md)

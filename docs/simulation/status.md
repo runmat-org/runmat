@@ -54,7 +54,7 @@ flow) and fluid–structure interaction (steady and transient) run through the t
 whole-study executor on conformal Tet4 meshes; see [fluid flow](./physics/fluid),
 [conjugate heat transfer](./physics/conjugate-heat-transfer) and
 [fluid–structure interaction](./physics/fluid-structure-interaction) for their envelopes and
-[fluid validation](./validation/fluid) for the reference comparisons.
+the [validation methodology](./validation/methodology.md) for the reference comparisons.
 
 `docs/simulation/examples/acoustic-cavity-harmonic.fea` is an acoustic harmonic study of a 1 m air cavity with incident pressure on its walls at 100, 200 and 400 Hz. It checks and plans as an authored acoustic contract. The native whole-study executor does not yet run this multi-frequency acoustic study, and rejects it rather than running a substitute.
 

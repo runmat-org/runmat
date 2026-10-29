@@ -169,7 +169,7 @@ propagation vector.
 
 ## How do I model acoustic cyclic symmetry around an axis?
 
-Use a rotational transform on the periodic pair. The axis, angle, and paired sector faces must
+Use a rotational transform on the periodic pair [not yet in the current release](pending:acoustic.periodic.rotational). The axis, angle, and paired sector faces must
 describe one complete primary-to-secondary map. For a traveling circumferential wave, use
 `acoustic.phase_shifted_periodic` and supply the sector phase as well. Do not constrain both faces
 independently after pairing them: that over-specifies the same pressure degrees of freedom.

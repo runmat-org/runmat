@@ -8,9 +8,12 @@ fn collect(root: &Path, dir: &Path, entries: &mut Vec<(String, PathBuf)>) {
     for entry in fs::read_dir(dir).expect("FEA reference directory") {
         let path = entry.expect("FEA reference entry").path();
         if path.is_dir() {
+            // Example packages are studies, not reference pages. Qualification records are
+            // engineering evidence: they are listed on the Validation records page and kept out
+            // of the agent's reading budget.
             if !matches!(
                 path.file_name().and_then(|v| v.to_str()),
-                Some(".artifacts" | "examples")
+                Some(".artifacts" | "examples" | "qualification")
             ) {
                 collect(root, &path, entries);
             }
@@ -29,6 +32,11 @@ fn main() {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../../docs/simulation");
     let mut entries = Vec::new();
     collect(&root, &root, &mut entries);
+    // The pending-feature registry tells the agent which documented features are not in this
+    // binary; docs flag them with `[not yet in the current release](pending:<id>)`.
+    let registry = root.join("pending-features.json");
+    println!("cargo:rerun-if-changed={}", registry.display());
+    entries.push(("fea/pending-features.json".to_string(), registry));
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     let mut source =
         String::from("pub static FEA_REFERENCE_DOCUMENTS: &[ReferenceDocument] = &[\n");

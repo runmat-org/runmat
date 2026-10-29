@@ -38,7 +38,7 @@ backend and carries exactly one `FEA_ACCELERATOR_ADMISSION_FALLBACK` warning, in
 study as well as on the command line. `accelerators = required` is the strict option: the study
 fails closed with `RM.FEA.ACCELERATOR_REQUIRED` instead, before any assembly or solve whenever the
 fallback is known in advance. The result records the actual backend and device evidence rather
-than the preference alone. See [accelerator placement](../../fea/accelerator-placement.md).
+than the preference alone.
 
 ## Three distinct kinds of scale
 
