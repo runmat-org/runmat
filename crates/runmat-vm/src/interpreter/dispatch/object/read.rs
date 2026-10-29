@@ -1,6 +1,5 @@
-use super::{write_sequence_register, Request};
+use super::{write_sequence_values, Request};
 use runmat_runtime::object::resolve as obj_resolve;
-use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -184,10 +183,7 @@ pub(super) async fn load_member_sequence(request: Request<'_>) -> Result<bool, R
                 &access,
             )
             .await?;
-            values.with_owned_sequence(|values| {
-                stack.try_extend_output(values.resolve(*selection, Default::default())?)?;
-                Ok::<_, RuntimeError>(())
-            })?;
+            stack.try_extend(values.resolve_values(*selection, Default::default())?)?;
             Ok(true)
         }
         _ => Ok(false),
@@ -229,10 +225,7 @@ pub(super) async fn load_member_dynamic_sequence(
                 &access,
             )
             .await?;
-            values.with_owned_sequence(|values| {
-                stack.try_extend_output(values.resolve(*selection, Default::default())?)?;
-                Ok::<_, RuntimeError>(())
-            })?;
+            stack.try_extend(values.resolve_values(*selection, Default::default())?)?;
             Ok(true)
         }
         _ => Ok(false),
@@ -299,13 +292,11 @@ pub(super) async fn load_member_sequence_using_output_slot(
                 &access,
             )
             .await?;
-            sequence.with_owned_sequence(|sequence| {
-                let values = sequence.resolve(
-                    runmat_types::SequenceUse::SelectPrefix { count },
-                    Default::default(),
-                )?;
-                write_sequence_register(stack, sequence_register, values)
-            })?;
+            let values = sequence.resolve_values(
+                runmat_types::SequenceUse::SelectPrefix { count },
+                Default::default(),
+            )?;
+            write_sequence_values(stack, sequence_register, values)?;
             Ok(true)
         }
         _ => Ok(false),
@@ -350,13 +341,11 @@ pub(super) async fn load_member_dynamic_sequence_using_output_slot(
                 &access,
             )
             .await?;
-            sequence.with_owned_sequence(|sequence| {
-                let values = sequence.resolve(
-                    runmat_types::SequenceUse::SelectPrefix { count },
-                    Default::default(),
-                )?;
-                write_sequence_register(stack, sequence_register, values)
-            })?;
+            let values = sequence.resolve_values(
+                runmat_types::SequenceUse::SelectPrefix { count },
+                Default::default(),
+            )?;
+            write_sequence_values(stack, sequence_register, values)?;
             Ok(true)
         }
         _ => Ok(false),

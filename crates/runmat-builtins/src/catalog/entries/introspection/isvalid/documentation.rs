@@ -27,7 +27,7 @@ BuiltinDocumentationSection {
  heading: "Behavior and ownership",
  paragraphs: &[
 
-        "Handle validity uses the original GC-backed target and deletion state. Listener validity requires both live and enabled state; the query does not invoke a callback.",
+        "Handle validity uses the original GC-backed target and deletion state. Deleted handles return false. For handle and listener receivers this sealed query does not dispatch an object method or consult ambient class declarations. Value classes retain ordinary method dispatch. Listener validity requires both live and enabled state; the query does not invoke a callback.",
 
         "Numeric, text, container, foreign and resident numeric inputs are invalid-domain inputs. The error retains the `isvalid` owner; resident buffers are not gathered or modified.",
 

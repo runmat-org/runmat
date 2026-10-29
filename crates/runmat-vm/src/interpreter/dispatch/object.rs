@@ -10,10 +10,10 @@ mod subscript;
 mod suspend;
 mod write;
 
-pub(super) fn write_sequence_register(
+pub(super) fn write_sequence_values(
     stack: &mut crate::interpreter::stack::InterpreterStack,
     register: &mut super::SequenceState,
-    values: impl Into<runmat_value::OutputListStorage>,
+    values: impl ExactSizeIterator<Item = Value>,
 ) -> Result<(), RuntimeError> {
     if register.assignment.is_some() {
         return Err(crate::interpreter::errors::mex(
@@ -21,10 +21,9 @@ pub(super) fn write_sequence_register(
             "sequence register was overwritten before consumption",
         ));
     }
-    let values = values.into();
     let start = stack.len();
     let len = values.len();
-    stack.try_extend_output(values)?;
+    stack.try_extend(values)?;
     register.assignment = Some(super::SequenceRegister { start, len });
     Ok(())
 }
@@ -34,19 +33,7 @@ pub(super) fn write_rooted_sequence_register(
     register: &mut super::SequenceState,
     values: RootedValues,
 ) -> Result<(), RuntimeError> {
-    values.with_owned_output_storage(|values| {
-        if register.assignment.is_some() {
-            return Err(crate::interpreter::errors::mex(
-                "RunMat:CommaSeparatedListState",
-                "sequence register was overwritten before consumption",
-            ));
-        }
-        let start = stack.len();
-        let len = values.as_slice().len();
-        stack.try_extend_output(values)?;
-        register.assignment = Some(super::SequenceRegister { start, len });
-        Ok(())
-    })
+    write_sequence_values(stack, register, values.try_into_values()?)
 }
 
 pub(super) fn take_sequence_register(

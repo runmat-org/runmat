@@ -8,7 +8,11 @@ pub(super) fn execute(
 ) -> impl Future<Output = Result<Option<RootedValueSequence>, RuntimeError>> + '_ {
     crate::execution::after_result(
         async move {
-            let instance = if request.policy == RetainedDispatchPolicy::Normal {
+            let instance = if request.policy == RetainedDispatchPolicy::Normal
+                && !selected
+                    .implementation
+                    .is_handle_validity_query(request.args.first())
+            {
                 try_call_retained_instance_method_sequence(
                     request.name,
                     &request.args,

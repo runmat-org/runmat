@@ -152,6 +152,8 @@ impl BuiltinEffects {
 pub enum BuiltinSemanticKind {
     ExecutorIntrinsic(executor::BuiltinExecutorIntrinsic),
     General,
+    /// Sealed handle/listener validity query: receiver state is data, not a method lookup.
+    HandleValidityQuery,
     Elementwise,
     ArrayConstructor,
     ParameterizedArrayConstructor,

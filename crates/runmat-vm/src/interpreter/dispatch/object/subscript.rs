@@ -197,7 +197,7 @@ pub(super) async fn read_subscript_path(request: Request<'_>) -> Result<bool, Ru
             if *to_sequence_register {
                 write_rooted_sequence_register(stack, sequence_register, values)?;
             } else {
-                values.with_owned_output_storage(|values| stack.try_extend_output(values))?;
+                stack.try_extend(values.try_into_values()?)?;
             }
             Ok(true)
         }

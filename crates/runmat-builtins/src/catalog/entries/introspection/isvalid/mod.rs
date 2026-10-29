@@ -21,7 +21,7 @@ pub const ISVALID_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::DeterministicReadOnly,
-        semantic_kind: BuiltinSemanticKind::General,
+        semantic_kind: BuiltinSemanticKind::HandleValidityQuery,
         workspace_effect: None,
         environment_effect: None,
         effects: &[

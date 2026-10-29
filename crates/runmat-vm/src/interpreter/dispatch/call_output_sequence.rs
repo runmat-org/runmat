@@ -41,7 +41,21 @@ impl SequenceState {
         stack: &mut crate::interpreter::stack::InterpreterStack,
         sequence: runmat_runtime::execution::RootedValueSequence,
     ) -> Result<(), RuntimeError> {
-        sequence.with_owned_sequence(|sequence| self.stage_call_output_sequence(stack, sequence))
+        if self.call_outputs.is_some() {
+            return Err(state_error(
+                "call output sequence was overwritten before capture",
+            ));
+        }
+        let window = SequenceRegister {
+            start: stack.len(),
+            len: sequence.len(),
+        };
+        // Existing rooted iteration moves unique slots or projects canonical
+        // shared slots while retaining the original roots and physical claim.
+        // try_extend preflights exact stack capacity before consuming a slot.
+        stack.try_extend(sequence.try_into_values()?)?;
+        self.call_outputs = Some(window);
+        Ok(())
     }
 
     pub(super) fn capture_call_outputs(&mut self) -> Result<(), RuntimeError> {
@@ -97,6 +111,44 @@ mod tests {
             assert_eq!(sequence.as_slice(), expected.as_slice());
             assert_eq!(stack.as_slice(), &[Value::Num(99.0)]);
         }
+    }
+
+    #[test]
+    fn rooted_shared_prefix_stages_without_unwrapping_its_original_backing() {
+        let sequence = runmat_runtime::execution::RootedValueSequence::new(
+            runmat_value::ValueSequence::comma_separated(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(3.0),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+        let alias = sequence.clone();
+        let prefix = sequence
+            .resolve_sequence(
+                runmat_types::SequenceUse::SelectPrefix { count: 2 },
+                Default::default(),
+            )
+            .unwrap();
+        let mut stack = crate::interpreter::stack::InterpreterStack::unbounded();
+        stack.try_push(Value::Num(99.0)).unwrap();
+        let mut state = SequenceState::default();
+        state
+            .stage_rooted_call_output_sequence(&mut stack, prefix)
+            .unwrap();
+        assert_eq!(
+            stack.as_slice(),
+            &[Value::Num(99.0), Value::Num(1.0), Value::Num(2.0)]
+        );
+        assert_eq!(
+            alias.as_slice(),
+            &[Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)]
+        );
+        state.capture_call_outputs().unwrap();
+        let output = take_sequence_register(&mut stack, &mut state).unwrap();
+        assert_eq!(output.as_slice(), &[Value::Num(1.0), Value::Num(2.0)]);
+        assert_eq!(stack.as_slice(), &[Value::Num(99.0)]);
     }
 
     #[test]

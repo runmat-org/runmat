@@ -11,6 +11,31 @@ pub(super) enum SelectedImplementation {
 }
 
 impl SelectedImplementation {
+    /// Only the selected canonical binding's declared role can bypass object
+    /// method selection. Neither requested spelling nor receiver class grants
+    /// query authority; legacy and undeclared binding variants remain ordinary.
+    pub(super) fn is_handle_validity_query(self, receiver: Option<&Value>) -> bool {
+        // Sealing belongs to the canonical handle/listener domain, not to
+        // arbitrary value classes that may declare an ordinary isvalid method.
+        if !matches!(receiver, Some(Value::HandleObject(_) | Value::Listener(_))) {
+            return false;
+        }
+        let Self::Canonical(binding) = self else {
+            return false;
+        };
+        runmat_builtins::builtin_catalog_entry_by_name(binding.identity.builtin.name).is_some_and(
+            |entry| {
+                entry.identity == binding.identity.builtin
+                    && entry
+                        .bindings
+                        .iter()
+                        .any(|declared| entry.binding_identity(declared) == binding.identity)
+                    && entry.contract.semantic_kind
+                        == runmat_builtins::BuiltinSemanticKind::HandleValidityQuery
+            },
+        )
+    }
+
     fn invoke_retained(
         self,
         args: BuiltinArguments,

@@ -1675,15 +1675,17 @@ pub(crate) async fn call_selected_builtin_with_arguments(
         {
             return Ok(result);
         }
-        if let Some(result) = try_call_retained_instance_method_sequence(
-            name,
-            &args,
-            Some(output_count),
-            context.as_ref(),
-        )
-        .await?
-        {
-            return compatibility_checked_builtin_sequence(name, args.view(), result);
+        if !SelectedImplementation::Canonical(binding).is_handle_validity_query(args.first()) {
+            if let Some(result) = try_call_retained_instance_method_sequence(
+                name,
+                &args,
+                Some(output_count),
+                context.as_ref(),
+            )
+            .await?
+            {
+                return compatibility_checked_builtin_sequence(name, args.view(), result);
+            }
         }
         let prepared = preparation::prepare_retained_selected(
             SelectedBindingOrigin::CanonicalOrScoped,

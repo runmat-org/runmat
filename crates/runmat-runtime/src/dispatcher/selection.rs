@@ -4,6 +4,9 @@
 use super::*;
 use std::rc::Rc;
 
+#[cfg(test)]
+mod validity_tests;
+
 pub(super) struct SelectedRegisteredBuiltin {
     pub(super) origin: SelectedBindingOrigin,
     pub(super) implementation: SelectedImplementation,
@@ -126,14 +129,20 @@ pub fn observe_builtin_dispatch_target(
     let resolved = ResolvedBuiltinName::resolve(requested);
     let name = resolved.canonical;
     let registered = select_registered_builtin(name, Some(context))?;
-    if let Some(selected) =
-        select_instance_method(name, crate::call::FunctionArgumentView::from_slice(args))?
-            .filter(|selected| selected.has_executable_route())
-    {
-        return Ok(Some(ObservedBuiltinDispatchTarget::InstanceMethod {
-            owner: selected.owner,
-            method: selected.method,
-        }));
+    if !registered.as_ref().is_some_and(|selected| {
+        selected
+            .implementation
+            .is_handle_validity_query(args.first())
+    }) {
+        if let Some(selected) =
+            select_instance_method(name, crate::call::FunctionArgumentView::from_slice(args))?
+                .filter(|selected| selected.has_executable_route())
+        {
+            return Ok(Some(ObservedBuiltinDispatchTarget::InstanceMethod {
+                owner: selected.owner,
+                method: selected.method,
+            }));
+        }
     }
     if let Some(registered) = registered {
         let identity = match registered.implementation {

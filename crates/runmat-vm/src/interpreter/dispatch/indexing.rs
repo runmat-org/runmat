@@ -715,7 +715,7 @@ async fn execute_brace_operation_from_stack(
             value.with_owned(|value| stack.try_push(value))?;
         }
         (BraceIndexOutcome::Expanded(values), BraceOutcomeExpectation::ExpandedValues { .. }) => {
-            values.with_owned_output_storage(|values| stack.try_extend_output(values))?;
+            stack.try_extend(values.try_into_values()?)?;
         }
         (
             BraceIndexOutcome::Value(_),
