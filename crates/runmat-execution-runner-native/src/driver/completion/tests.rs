@@ -175,18 +175,30 @@ fn late_worker_success_cannot_override_scheduler_cancellation() {
             },
         )))
         .unwrap();
-    let completed = from_snapshot(&driver.snapshot(), &request, Ok(success)).unwrap();
-    assert_eq!(completed.result, Err(TransferFailure::Cancelled));
-    assert_eq!(completed.evidence.as_ref().unwrap().attempts.len(), 1);
-    assert!(completed.evidence.as_ref().unwrap().attempts[0]
-        .terminal
-        .as_ref()
-        .unwrap()
-        .resources
-        .is_some());
+    let completed = from_snapshot(&driver.snapshot(), &request, Ok(success.clone())).unwrap();
+    assert!(matches!(
+        completed.result,
+        Err(TransferFailure::RetirementUnverified(_))
+    ));
+    let evidence = completed.evidence.as_ref().unwrap();
+    assert_eq!(evidence.attempts.len(), 1);
+    assert!(evidence.attempts[0].terminal.is_none());
+    let unresolved = evidence.attempts[0].unverified_retirement.as_ref().unwrap();
+    assert_eq!(unresolved.resources.as_deref(), success.resources());
+    assert!(unresolved.retired_at_driver_millis.is_none());
+    assert!(evidence.resource_aggregate(1).is_err());
     assert!(driver.snapshot().tasks[&request.task_id]
         .committed
         .is_none());
+    let original_cancellation = evidence.task.cancellation.unwrap();
+    let completion = TaskCompletion::new();
+    completion.complete(completed, NativeCheckpointEvidence::Durable);
+    let completion = completion.try_native_completion().unwrap();
+    assert!(
+        matches!(completion.delivery_result(), Err(crate::NativeExecutionError::TaskCancelled {
+        task_id, cancellation, quiescence: crate::NativeTaskQuiescence::Unconfirmed,
+    }) if task_id == request.task_id && cancellation == original_cancellation)
+    );
 }
 
 #[test]

@@ -551,15 +551,16 @@ async fn execute_with_allocated_workers(
         // A task waiter can resolve as soon as cancellation is requested, while
         // the worker is still executing. Do not publish a terminal checkpoint
         // until every cancellation has been acknowledged or its route fenced.
-        let quiescent = tokio::time::timeout(
+        // This orders control cleanup; it cannot certify physical retirement.
+        let control_cleanup_complete = tokio::time::timeout(
             WORKER_READY_TIMEOUT,
-            terminal_pool.wait_for_cancellation_quiescence(),
+            terminal_pool.wait_for_cancellation_control(),
         )
         .await
         .unwrap_or(false);
-        if !quiescent {
+        if !control_cleanup_complete {
             return Ok(RemotePoolExecutionOutcome::Indeterminate(
-                "remote cancellation did not prove worker quiescence before its deadline".into(),
+                "remote cancellation control cleanup did not complete before its deadline".into(),
             ));
         }
         // Persist the final scheduler state before exposing any terminal outcome,
@@ -759,7 +760,7 @@ async fn execute_with_allocated_workers(
                         }
                         if cancellation_requested {
                             return Ok(RemotePoolExecutionOutcome::Indeterminate(
-                                "remote cancellation was not quiescent before worker reconciliation timed out".into(),
+                                "remote cancellation control cleanup remained incomplete when worker reconciliation timed out".into(),
                             ));
                         }
                         return Err(protocol("remote worker reconciliation exceeded its deadline"));

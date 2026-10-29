@@ -30,25 +30,26 @@ impl NativeTaskFailure {
         let Err(diagnostic) = result else {
             return None;
         };
-        if evidence.task.state == runmat_execution::state::TaskState::Indeterminate {
-            return Some(Self::Scheduler(diagnostic.clone()));
-        }
         match evidence.task.cancellation {
             Some(cancellation) => Some(Self::Cancelled {
                 task_id: evidence.task.id(),
                 cancellation,
                 quiescence: if evidence.attempts.iter().all(|attempt| {
-                    attempt
-                        .terminal
+                    !attempt
+                        .unverified_retirement
                         .as_ref()
-                        .and_then(|terminal| terminal.execution.as_ref())
-                        .is_some_and(|execution| {
-                            matches!(
-                                execution.termination,
-                                AttemptExecutionTermination::NotStarted
-                                    | AttemptExecutionTermination::ProcessExited { .. }
-                            )
-                        })
+                        .is_some_and(|retirement| retirement.retired_at_driver_millis.is_none())
+                        && attempt
+                            .terminal
+                            .as_ref()
+                            .and_then(|terminal| terminal.execution.as_ref())
+                            .is_some_and(|execution| {
+                                matches!(
+                                    execution.termination,
+                                    AttemptExecutionTermination::NotStarted
+                                        | AttemptExecutionTermination::ProcessExited { .. }
+                                )
+                            })
                 }) {
                     NativeTaskQuiescence::Confirmed
                 } else {
@@ -90,13 +91,13 @@ impl NativeTaskFailure {
         }
     }
 
-    pub(crate) fn confirm_remote_quiescence(&mut self, confirmed: bool) {
-        if let Self::Cancelled { quiescence, .. } = self {
-            *quiescence = if confirmed {
-                NativeTaskQuiescence::Confirmed
-            } else {
-                NativeTaskQuiescence::Unconfirmed
-            };
+    /// Control delivery can invalidate quiescence, but an acknowledgement is
+    /// not new physical-owner retirement evidence and can never establish it.
+    pub(crate) fn observe_remote_control_acknowledgement(&mut self, acknowledged: bool) {
+        if !acknowledged {
+            if let Self::Cancelled { quiescence, .. } = self {
+                *quiescence = NativeTaskQuiescence::Unconfirmed;
+            }
         }
     }
 }

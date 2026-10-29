@@ -141,15 +141,15 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
             .flatten()
             .any(|response| response.evidence.task.cancellation.is_some())
         {
-            let confirmed = tokio::time::timeout(
+            let control_acknowledged = tokio::time::timeout(
                 Duration::from_secs(5),
-                self.pool.wait_for_cancellation_quiescence(),
+                self.pool.wait_for_cancellation_control(),
             )
             .await
             .unwrap_or(false);
             for response in responses.iter_mut().flatten() {
                 if let Some(failure) = &mut response.failure {
-                    failure.confirm_remote_quiescence(confirmed);
+                    failure.observe_remote_control_acknowledgement(control_acknowledged);
                 }
             }
         }

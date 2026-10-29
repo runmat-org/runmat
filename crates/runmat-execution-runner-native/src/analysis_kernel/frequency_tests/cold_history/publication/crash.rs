@@ -13,7 +13,9 @@ pub(super) fn selected(order: ElementOrder) -> bool {
 
 pub(super) fn wait_for_termination() {
     if std::env::var_os(STOP_ENV).is_some() {
-        println!("{READY}");
+        // Serial libtest writes its test-name prefix without a trailing newline.
+        // Keep the readiness protocol on its own line, independent of that prefix.
+        println!("\n{READY}");
         std::io::stdout().flush().unwrap();
         // The parent retains the pipe and kills this process. EOF is a fixture failure,
         // never a way to finish or publish the prepared study.
@@ -75,6 +77,7 @@ fn producer(root: &std::path::Path, order: ElementOrder) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
         .args([PRODUCER, "--exact", "--ignored", "--nocapture"])
+        .env("RUST_TEST_THREADS", "1")
         .env(ROOT_ENV, root)
         .env(ORDER_ENV, format!("{order:?}"));
     command

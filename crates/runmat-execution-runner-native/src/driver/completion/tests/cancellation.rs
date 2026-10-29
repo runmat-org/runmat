@@ -8,6 +8,7 @@ use runmat_execution_runner::{
 
 fn cancelled(
     termination: Option<AttemptExecutionTermination>,
+    local_owner_retired: bool,
     checkpoint: NativeCheckpointEvidence,
 ) -> crate::NativeProgramCompletion {
     let (mut driver, request) = assigned();
@@ -25,7 +26,16 @@ fn cancelled(
             local_ipc_received_bytes: Some(0),
         })
     });
+    let mut retirement = report.clone();
+    retirement.report = AttemptReport::Retired;
     driver.handle(DriverCommand::BackendReport(report)).unwrap();
+    if local_owner_retired {
+        // This is the trusted local process-owner port, not a remote report.
+        // Operation outcome and a ProcessExited observation are not this proof.
+        driver
+            .handle(DriverCommand::BackendReport(retirement))
+            .unwrap();
+    }
     let original = from_snapshot(
         &driver.snapshot(),
         &request,
@@ -41,20 +51,48 @@ fn cancelled(
 
 #[test]
 fn native_cancellation_uses_original_cause_and_requires_physical_evidence_for_quiescence() {
-    for (termination, expected_quiescence) in [
-        (Some(AttemptExecutionTermination::NotStarted), true),
+    for (termination, local_owner_retired, expected_quiescence) in [
+        (Some(AttemptExecutionTermination::NotStarted), true, true),
         (
             Some(AttemptExecutionTermination::ProcessExited {
                 code: Some(137),
                 success: false,
             }),
             true,
+            true,
         ),
-        (Some(AttemptExecutionTermination::Unconfirmed), false),
-        (None, false),
+        (Some(AttemptExecutionTermination::NotStarted), false, false),
+        (
+            Some(AttemptExecutionTermination::ProcessExited {
+                code: Some(137),
+                success: false,
+            }),
+            false,
+            false,
+        ),
+        (Some(AttemptExecutionTermination::Unconfirmed), false, false),
+        (None, false, false),
     ] {
-        let completion = cancelled(termination, NativeCheckpointEvidence::Durable);
+        let completion = cancelled(
+            termination,
+            local_owner_retired,
+            NativeCheckpointEvidence::Durable,
+        );
         let original = completion.execution_evidence().unwrap().clone();
+        assert_eq!(
+            original.task.state,
+            runmat_execution::state::TaskState::Indeterminate
+        );
+        assert_eq!(original.attempts[0].terminal.is_some(), local_owner_retired);
+        if !local_owner_retired {
+            assert!(original.attempts[0]
+                .unverified_retirement
+                .as_ref()
+                .unwrap()
+                .retired_at_driver_millis
+                .is_none());
+            assert!(original.resource_aggregate(1).is_err());
+        }
         assert!(
             matches!(completion.delivery_result(), Err(NativeExecutionError::TaskCancelled {
             task_id, cancellation, quiescence
@@ -63,13 +101,71 @@ fn native_cancellation_uses_original_cause_and_requires_physical_evidence_for_qu
             && matches!(cancellation.cause, TaskCancellationCause::WallTime { .. })
             && quiescence == if expected_quiescence { NativeTaskQuiescence::Confirmed } else { NativeTaskQuiescence::Unconfirmed })
         );
-        let phase = AnalysisTaskCompletion::from_native(completion).unwrap();
+        let mut phase = AnalysisTaskCompletion::from_native(completion).unwrap();
         assert_eq!(phase.evidence, original);
         assert!(
             matches!(delivered_attempt(&phase.response, phase.attempt.as_ref(), phase.failure.as_ref()),
             Err(NativeExecutionError::TaskCancelled { quiescence, .. }) if quiescence == if expected_quiescence { NativeTaskQuiescence::Confirmed } else { NativeTaskQuiescence::Unconfirmed })
         );
+        let failure = phase.failure.as_mut().unwrap();
+        failure.observe_remote_control_acknowledgement(true);
+        assert!(
+            matches!(failure.error(), NativeExecutionError::TaskCancelled { quiescence, .. }
+            if quiescence == if expected_quiescence { NativeTaskQuiescence::Confirmed } else { NativeTaskQuiescence::Unconfirmed })
+        );
+        failure.observe_remote_control_acknowledgement(false);
+        failure.observe_remote_control_acknowledgement(true);
+        assert!(matches!(
+            failure.error(),
+            NativeExecutionError::TaskCancelled {
+                quiescence: NativeTaskQuiescence::Unconfirmed,
+                ..
+            }
+        ));
     }
+}
+
+#[test]
+fn indeterminate_worker_loss_without_original_cancellation_remains_protocol_failure() {
+    let (mut driver, request) = assigned();
+    driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &request,
+            AttemptReport::Lost {
+                message: "original worker transport lost".into(),
+            },
+        )))
+        .unwrap();
+    let original = from_snapshot(
+        &driver.snapshot(),
+        &request,
+        Err(TransferFailure::WorkerLost(
+            "original worker transport lost".into(),
+        )),
+    )
+    .unwrap();
+    let completion = TaskCompletion::new();
+    completion.complete(original, NativeCheckpointEvidence::Durable);
+    let completion = completion.try_native_completion().unwrap();
+    let evidence = completion.execution_evidence().unwrap();
+    assert_eq!(
+        evidence.task.state,
+        runmat_execution::state::TaskState::Indeterminate
+    );
+    assert!(evidence.task.cancellation.is_none());
+    assert!(matches!(
+        completion.delivery_result(),
+        Err(NativeExecutionError::Protocol(_))
+    ));
+    let phase = AnalysisTaskCompletion::from_native(completion).unwrap();
+    assert!(matches!(
+        delivered_attempt(
+            &phase.response,
+            phase.attempt.as_ref(),
+            phase.failure.as_ref()
+        ),
+        Err(NativeExecutionError::Protocol(_))
+    ));
 }
 
 #[test]
@@ -84,6 +180,7 @@ fn atomic_checkpoint_failure_keeps_priority_over_an_original_confirmed_cancellat
     ] {
         let completion = cancelled(
             Some(AttemptExecutionTermination::NotStarted),
+            true,
             checkpoint.clone(),
         );
         let original = completion.execution_evidence().unwrap().clone();

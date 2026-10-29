@@ -109,6 +109,46 @@ fn restores_original_product_and_executes_captures_helpers_and_output_ordinals()
 }
 
 #[test]
+fn cold_interop_round_trip_reconstitutes_only_required_capabilities() {
+    use runmat_types::{CapabilityRequirement as Capability, CapabilitySet};
+
+    let unit = original();
+    let mut expected = unit.portable_envelope().unwrap().manifest.capabilities;
+    assert!(!expected.0.contains(&Capability::Network));
+    expected
+        .0
+        .extend([Capability::NativeCode, Capability::ForeignRuntime]);
+    let interop = runmat_types::InteropManifest {
+        adapters: vec![runmat_types::ForeignAdapterRequirement {
+            adapter: runmat_types::ForeignAdapterId::new("cold-native-fixture").unwrap(),
+            minimum_version: 1,
+            capabilities: CapabilitySet(std::collections::BTreeSet::from([Capability::NativeCode])),
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
+            artifact_identities: vec![runmat_types::ForeignArtifactIdentity::new(
+                "cold-native-fixture:v1",
+            )
+            .unwrap()],
+        }],
+        ..runmat_types::InteropManifest::empty()
+    };
+    let envelope = unit
+        .portable_envelope_for_with_interop(None, interop)
+        .unwrap();
+    assert_eq!(envelope.manifest.capabilities, expected);
+    let cold: ExecutableUnitEnvelope =
+        serde_json::from_slice(&envelope.canonical_bytes().unwrap()).unwrap();
+    let restored = ExecutableUnit::from_portable_envelope(&cold).unwrap();
+    assert_eq!(restored.portable_envelope().unwrap(), cold);
+
+    // Even a structurally valid extra capability must not acquire authority
+    // merely because an incoming product claims it.
+    let mut extra = cold;
+    extra.manifest.capabilities.0.insert(Capability::Network);
+    extra.validate().unwrap();
+    assert!(ExecutableUnit::from_portable_envelope(&extra).is_err());
+}
+
+#[test]
 fn rejects_missing_foreign_and_duplicated_source_authority_after_hash_refresh() {
     let envelope = original().portable_envelope().unwrap();
     for mutation in 0..6 {

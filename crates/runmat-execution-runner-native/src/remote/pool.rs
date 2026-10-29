@@ -69,7 +69,8 @@ enum FailedRoute {
 
 // A terminal run checkpoint must not outrun a worker's cancellation acknowledgement.
 // Keep this guard even if the dispatch future is dropped or panics: in that case
-// ownership has not been proven quiescent and recovery must be indeterminate.
+// cancellation control cleanup is incomplete and recovery must be indeterminate.
+// Successful control cleanup does not certify physical worker retirement.
 struct CancellationDispatchGuard(Arc<RemotePoolDriver>, bool);
 
 impl Drop for CancellationDispatchGuard {
@@ -444,7 +445,9 @@ impl RemotePoolDriver {
         });
     }
 
-    pub(crate) async fn wait_for_cancellation_quiescence(&self) -> bool {
+    /// Wait for cancellation dispatch acknowledgements or route fencing, not
+    /// physical retirement. The original scheduler evidence retains that proof.
+    pub(crate) async fn wait_for_cancellation_control(&self) -> bool {
         loop {
             let notified = self.cancellation_settled.notified();
             tokio::pin!(notified);

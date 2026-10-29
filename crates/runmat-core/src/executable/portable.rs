@@ -376,6 +376,14 @@ impl ExecutableUnit {
         {
             return Err("preferred entrypoint belongs to a retained definition product".into());
         }
+        // Cold products retain their original interoperability contract. Select
+        // it before deriving capabilities so adapter requirements participate
+        // in the same canonical reconstruction as fresh products. Do not copy
+        // capability claims from the incoming manifest.
+        let interop = self
+            .imported_contract
+            .as_deref()
+            .map_or(interop, |imported| imported.interop.clone());
         let mut capabilities = runmat_types::CapabilitySet(
             self.analysis()
                 .functions
@@ -422,15 +430,14 @@ impl ExecutableUnit {
                 );
             }
         }
-        // A restored product keeps its original interoperability, parallel
-        // and optional-section contracts rather than re-deriving them.
-        let (interop, parallel, optional_sections) = match self.imported_contract.as_deref() {
+        // A restored product also keeps its original parallel and
+        // optional-section contracts rather than re-deriving them.
+        let (parallel, optional_sections) = match self.imported_contract.as_deref() {
             Some(imported) => (
-                imported.interop.clone(),
                 imported.parallel.clone(),
                 imported.optional_sections.clone(),
             ),
-            None => (interop, parallel, optional_sections),
+            None => (parallel, optional_sections),
         };
         let manifest = runmat_execution::ExecutableUnitManifest {
             dependencies: Vec::new(),
