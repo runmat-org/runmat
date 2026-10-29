@@ -1,6 +1,8 @@
 //! Actual-device ordering witness, not a throughput measurement. Native scope
 //! receipts can be immediately ready; browser promises are explicitly pending.
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
 use runmat_accelerate_api::{HostNumericDataOwned, HostNumericDataView, HostNumericTensorView};
 
 async fn submit_while_receipt_is_outstanding() {
