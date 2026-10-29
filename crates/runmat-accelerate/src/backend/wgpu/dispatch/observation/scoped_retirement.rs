@@ -71,7 +71,10 @@ impl ScopedRetirement {
 
     /// The callback records a fact only; it never unmaps or drops GPU owners.
     pub(crate) fn queue_retired(&self) {
-        self.state.queue_retired.store(true, Ordering::Release);
+        self.state
+            .get()
+            .queue_retired
+            .store(true, Ordering::Release);
     }
 
     pub(crate) fn is_retired(&self) -> bool {
@@ -79,11 +82,11 @@ impl ScopedRetirement {
     }
 
     pub(crate) fn proof(&self) -> Option<ScopedRetirementProof> {
-        if self.state.queue_retired.load(Ordering::Acquire) {
+        if self.state.get().queue_retired.load(Ordering::Acquire) {
             Some(ScopedRetirementProof {
                 kind: RetirementKind::QueueCallback,
             })
-        } else if self.state.device_lost.load(Ordering::Acquire) {
+        } else if self.state.get().device_lost.load(Ordering::Acquire) {
             Some(ScopedRetirementProof {
                 kind: RetirementKind::DeviceLost,
             })
@@ -93,25 +96,31 @@ impl ScopedRetirement {
     }
 
     pub(crate) fn actual_device_lost(&self) {
-        self.state.device_lost.store(true, Ordering::Release);
+        self.state.get().device_lost.store(true, Ordering::Release);
     }
 
     pub(crate) fn claim_callback_registration(&self) -> bool {
-        !self.state.callback_registered.swap(true, Ordering::AcqRel)
+        !self
+            .state
+            .get()
+            .callback_registered
+            .swap(true, Ordering::AcqRel)
     }
 
     pub(crate) fn confirm(&self) {
         self.state
+            .get()
             .outcome
             .store(ScopeOutcome::Confirmed as u8, Ordering::Release);
     }
 
     pub(crate) fn is_confirmed(&self) -> bool {
-        ScopeOutcome::load(&self.state.outcome) == ScopeOutcome::Confirmed
+        ScopeOutcome::load(&self.state.get().outcome) == ScopeOutcome::Confirmed
     }
 
     pub(crate) fn reject(&self) {
         self.state
+            .get()
             .outcome
             .store(ScopeOutcome::Rejected as u8, Ordering::Release);
     }
@@ -122,7 +131,7 @@ impl ScopedRetirement {
 pub(crate) struct ScopeConfirmation(pub(crate) ScopedRetirement);
 impl Drop for ScopeConfirmation {
     fn drop(&mut self) {
-        let _ = self.0.state.outcome.compare_exchange(
+        let _ = self.0.state.get().outcome.compare_exchange(
             ScopeOutcome::Pending as u8,
             ScopeOutcome::Abandoned as u8,
             Ordering::AcqRel,

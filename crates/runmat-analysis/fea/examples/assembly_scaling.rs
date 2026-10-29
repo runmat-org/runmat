@@ -49,7 +49,9 @@ fn refine(
         for parent in parents {
             let mut center = [0.0; 3];
             for &node_id in &parent.node_ids {
-                let point = mesh.topology.nodes[node_id as usize - 1].coordinates_m;
+                let point = mesh.topology.nodes[node_id as usize - 1]
+                    .coordinates_m
+                    .canonical_value();
                 for axis in 0..3 {
                     center[axis] += point[axis] / 4.0;
                 }
@@ -60,7 +62,10 @@ fn refine(
             mesh.topology.nodes.push(SolverMeshNode {
                 node_id: center_id,
                 stable_identity: StableDigest::from_bytes(identity_bytes),
-                coordinates_m: center,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(center),
                 provenance: parent.provenance.clone(),
                 exact_parameters: Vec::new(),
             });

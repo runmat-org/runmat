@@ -77,61 +77,64 @@ impl WgpuProvider {
         let retirement = ScopedRetirement::prepare()?;
         #[cfg(not(target_arch = "wasm32"))]
         let confirmation = ScopeConfirmation(retirement.clone());
-        #[cfg(not(target_arch = "wasm32"))]
-        let progress = self.observation_progress.as_ref().ok_or_else(|| {
-            ProviderExecutionError::from(anyhow::anyhow!(
-                "scoped FFT retirement progress unavailable"
-            ))
-        })?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let mut gate = progress
-            .scoped_emission_guard(self.access.clone(), retirement.clone())
-            .map_err(ProviderExecutionError::from_source)?;
-        #[cfg(target_arch = "wasm32")]
-        let mut pending = PendingSubmissions::new(self.access.clone());
-        let receipt = self
-            .access
-            .with_profiled_scoped(&self.emission_authority, |emission| {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    gate.with_pending(|pending| {
+        let receipt = {
+            #[cfg(not(target_arch = "wasm32"))]
+            let progress = self.observation_progress.as_ref().ok_or_else(|| {
+                ProviderExecutionError::from(anyhow::anyhow!(
+                    "scoped FFT retirement progress unavailable"
+                ))
+            })?;
+            #[cfg(not(target_arch = "wasm32"))]
+            let mut gate = progress
+                .scoped_emission_guard(self.access.clone(), retirement.clone())
+                .map_err(ProviderExecutionError::from_source)?;
+            #[cfg(target_arch = "wasm32")]
+            let mut pending = PendingSubmissions::new(self.access.clone());
+            let receipt = self
+                .access
+                .with_profiled_scoped(&self.emission_authority, |emission| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        gate.with_pending(|pending| {
+                            crate::backend::wgpu::dispatch::fft::run(
+                                emission,
+                                pending,
+                                pipeline,
+                                &bind_group,
+                                workgroups,
+                                label,
+                            )
+                        })
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
                         crate::backend::wgpu::dispatch::fft::run(
                             emission,
-                            pending,
+                            &mut pending,
                             pipeline,
                             &bind_group,
                             workgroups,
                             label,
                         )
-                    })
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    crate::backend::wgpu::dispatch::fft::run(
-                        emission,
-                        &mut pending,
-                        pipeline,
-                        &bind_group,
-                        workgroups,
-                        label,
-                    )
-                }
-            })
-            .map_err(ProviderExecutionError::from_source)?;
-        // Commit physical ownership BEFORE the first await. Neither scope
-        // rejection nor cancellation may wait on an unauthenticated index.
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // Drop publishes the already-owned fixed slot and merely wakes
-            // the existing worker; channel errors cannot drop physical work.
-            drop(gate);
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Browser has no indexed wait. Preserve its existing private
-            // map/fence callback ownership, including scope cancellation.
-            pending.commit();
-        }
+                    }
+                })
+                .map_err(ProviderExecutionError::from_source)?;
+            // Commit physical ownership BEFORE the first await. Neither scope
+            // rejection nor cancellation may wait on an unauthenticated index.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                // Drop publishes the already-owned fixed slot and merely wakes
+                // the existing worker; channel errors cannot drop physical work.
+                drop(gate);
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                // Browser has no indexed wait. Preserve its existing private
+                // map/fence callback ownership, including scope cancellation.
+                pending.commit();
+            }
+            receipt
+        };
         match receipt.resolve().await {
             Ok(Ok(())) => {
                 #[cfg(not(target_arch = "wasm32"))]

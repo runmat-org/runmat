@@ -12,6 +12,7 @@ use std::sync::{
     Arc, Mutex,
 };
 
+#[path = "observation_progress/scoped_retirement.rs"]
 mod scoped_retirement;
 #[path = "observation_progress/shutdown.rs"]
 mod shutdown;
