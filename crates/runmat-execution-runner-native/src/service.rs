@@ -1297,7 +1297,14 @@ impl RuntimeExecutionServices for NativeExecutionService {
             reservation.cancelled = true;
             return Ok(());
         }
-        if matches!(record, FutureState::CancellingGraph(_)) {
+        // A future already resolved (or already being cancelled) keeps its outcome: cancellation
+        // after completion is a no-op, exactly as scope draining treats it.
+        if matches!(
+            record,
+            FutureState::CancellingGraph(_)
+                | FutureState::Completed(_)
+                | FutureState::GraphResolved { .. }
+        ) {
             return Ok(());
         }
         let previous = std::mem::replace(record, FutureState::Cancelled);
