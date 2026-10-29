@@ -173,6 +173,6 @@ fn business_day_helpers_execute_in_scripts() {
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 4.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0, 1.0])
+        matches!(value, Value::LogicalArray(mask) if mask.shape == vec![1, 2] && mask.data == vec![1, 1])
     }));
 }

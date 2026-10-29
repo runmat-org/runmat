@@ -714,15 +714,25 @@ fn array_construct_like_and_size_vector_inference() {
             other => panic!("unexpected shape: {:?}", other),
         }
     } else {
-        assert_eq!(
-            bytecode_like.fusion_metadata.mir_fusion_signal_count, 0,
-            "accel graph should only be omitted for non-fusion-signal programs"
+        assert!(
+            bytecode_like
+                .fusion_metadata
+                .mir_fusion_candidate_group_count
+                == 0
+                || bytecode_like.fusion_metadata.instruction_window_count == 0,
+            "accel graph omission requires no candidate groups or no instruction windows"
         );
-        let vars_like = execute_source(src_like);
-        let Value::Tensor(tensor_like) = &vars_like[1] else {
+        let result_slot = bytecode_like
+            .var_names
+            .iter()
+            .find_map(|(&slot, name)| (name == "B").then_some(slot))
+            .expect("authored zeros-like output");
+        let vars_like = interpret(&bytecode_like).expect("execute zeros-like fallback");
+        let Value::Tensor(tensor_like) = &vars_like[result_slot] else {
             panic!("expected tensor result for zeros('like', A)");
         };
         assert_eq!(tensor_like.shape(), vec![3, 4]);
+        assert_eq!(tensor_like.materialize_f64(), vec![0.0; 12]);
     }
 
     // zeros([5,6]) via size vector
@@ -739,15 +749,22 @@ fn array_construct_like_and_size_vector_inference() {
             other => panic!("unexpected shape: {:?}", other),
         }
     } else {
-        assert_eq!(
-            bytecode_sz.fusion_metadata.mir_fusion_signal_count, 0,
-            "accel graph should only be omitted for non-fusion-signal programs"
+        assert!(
+            bytecode_sz.fusion_metadata.mir_fusion_candidate_group_count == 0
+                || bytecode_sz.fusion_metadata.instruction_window_count == 0,
+            "accel graph omission requires no candidate groups or no instruction windows"
         );
-        let vars_sz = execute_source(src_sz);
-        let Value::Tensor(tensor_sz) = &vars_sz[1] else {
+        let result_slot = bytecode_sz
+            .var_names
+            .iter()
+            .find_map(|(&slot, name)| (name == "B").then_some(slot))
+            .expect("authored zeros-size output");
+        let vars_sz = interpret(&bytecode_sz).expect("execute zeros-size fallback");
+        let Value::Tensor(tensor_sz) = &vars_sz[result_slot] else {
             panic!("expected tensor result for zeros(sz)");
         };
         assert_eq!(tensor_sz.shape(), vec![5, 6]);
+        assert_eq!(tensor_sz.materialize_f64(), vec![0.0; 30]);
     }
 }
 

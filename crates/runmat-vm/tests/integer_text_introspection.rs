@@ -31,17 +31,44 @@ fn compiled_text_introspection_preserves_wide_integer_passthrough() {
 
 #[test]
 fn compiled_integer_controls_and_rendering_sinks_dispatch_without_coercion() {
-    let vars = execute_source(
-        "lo = bitshift(uint64(1), 53); lo = lo + uint64(1); \
+    let source = "lo = bitshift(uint64(1), 53); lo = lo + uint64(1); \
          hi = intmax(\"uint64\"); a = [lo hi]; \
          tf = contains(\"RunMat\", \"run\", \"IgnoreCase\", true); \
          st = dbstack(uint8(0)); \
          disp(a); \
-         display(a);",
-    )
-    .expect("execute compiled integer control/sink cohort");
+         display(a);";
+    let bytecode =
+        test_helpers::compile_source(source).expect("compile integer control/sink cohort");
+    let vars =
+        test_helpers::interpret(&bytecode).expect("execute compiled integer control/sink cohort");
     assert!(vars.iter().any(|value| value == &Value::Bool(true)));
-    assert!(vars.iter().any(|value| matches!(value, Value::Cell(_))));
+    let stack_slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, name)| (name == "st").then_some(slot))
+        .expect("authored dbstack output slot");
+    let validate_frame = |frame: &runmat_value::StructValue| {
+        let mut fields = frame.field_names().collect::<Vec<_>>();
+        fields.sort_unstable();
+        assert_eq!(fields, ["file", "line", "name"]);
+        assert!(matches!(frame.fields.get("file"), Some(Value::String(_))));
+        assert!(matches!(frame.fields.get("name"), Some(Value::String(_))));
+        assert!(matches!(frame.fields.get("line"), Some(Value::Num(line)) if *line >= 0.0));
+    };
+    match &vars[stack_slot] {
+        Value::Struct(frame) => validate_frame(frame),
+        Value::StructArray(stack) => {
+            assert_eq!(stack.shape().len(), 2);
+            assert_eq!(stack.shape()[1], 1);
+            let mut fields = stack.field_names().collect::<Vec<_>>();
+            fields.sort_unstable();
+            assert_eq!(fields, ["file", "line", "name"]);
+            for frame in stack.elements() {
+                validate_frame(&frame.to_owned());
+            }
+        }
+        other => panic!("dbstack must return its structured schema, got {other:?}"),
+    }
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor) if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])))
     }));

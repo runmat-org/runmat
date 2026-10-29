@@ -1762,25 +1762,53 @@ fn every_real_integer_class_survives_the_full_shape_matrix_through_vm_dispatch()
         let source = format!(
             "a = {class}(reshape([1 2 3 4], 2, 2)); reshaped = reshape(a, 1, 4); permuted = permute(a, [2 1]); ipermuted = ipermute(permuted, [2 1]); transposed = a.'; conjugated = a'; squeezed = squeeze(reshape(a, 1, 2, 2, 1)); shifted = shiftdim(a, 1); circulated = circshift(a, [1 1]); flipped = flip(a); tiled = repmat(a, 2, 1); repeated = repelem(a, [1 2], 1); rotated = rot90(a); diagonalized = diag(a); lower = tril(a); upper = triu(a);"
         );
-        let vars = execute_source(&source)
+        let bytecode =
+            test_helpers::compile_source(&source).expect("compile authored shape matrix");
+        let vars = test_helpers::interpret(&bytecode)
             .unwrap_or_else(|error| panic!("{class} shape matrix should execute: {error}"));
-        let mut integer_results = 0;
-        for value in vars.values() {
-            if let Value::Tensor(tensor) = value {
-                if tensor.integer_storage().is_some() {
-                    integer_results += 1;
-                    assert_eq!(
-                        tensor.numeric_dtype(),
-                        expected_dtype,
-                        "{class} shape operation changed class"
-                    );
-                }
-            }
+        let outputs: [(&str, &[usize], &[f64]); 16] = [
+            ("a", &[2, 2], &[1., 2., 3., 4.]),
+            ("reshaped", &[1, 4], &[1., 2., 3., 4.]),
+            ("permuted", &[2, 2], &[1., 3., 2., 4.]),
+            ("ipermuted", &[2, 2], &[1., 2., 3., 4.]),
+            ("transposed", &[2, 2], &[1., 3., 2., 4.]),
+            ("conjugated", &[2, 2], &[1., 3., 2., 4.]),
+            ("squeezed", &[2, 2], &[1., 2., 3., 4.]),
+            ("shifted", &[2, 2], &[1., 3., 2., 4.]),
+            ("circulated", &[2, 2], &[4., 3., 2., 1.]),
+            ("flipped", &[2, 2], &[2., 1., 4., 3.]),
+            ("tiled", &[4, 2], &[1., 2., 1., 2., 3., 4., 3., 4.]),
+            ("repeated", &[3, 2], &[1., 2., 2., 3., 4., 4.]),
+            ("rotated", &[2, 2], &[3., 1., 4., 2.]),
+            ("diagonalized", &[2, 1], &[1., 4.]),
+            ("lower", &[2, 2], &[1., 2., 0., 4.]),
+            ("upper", &[2, 2], &[1., 0., 3., 4.]),
+        ];
+        for (name, shape, values) in outputs {
+            let slot = bytecode
+                .var_names
+                .iter()
+                .find_map(|(&slot, candidate)| (candidate == name).then_some(slot))
+                .unwrap_or_else(|| panic!("missing authored output {name}"));
+            let Value::Tensor(tensor) = &vars[slot] else {
+                panic!("{class} {name} must remain an integer tensor");
+            };
+            assert!(
+                tensor.integer_storage().is_some(),
+                "{class} {name} lost exact storage"
+            );
+            assert_eq!(
+                tensor.numeric_dtype(),
+                expected_dtype,
+                "{class} {name} changed class"
+            );
+            assert_eq!(tensor.shape(), shape, "{class} {name} changed shape");
+            assert_eq!(
+                tensor.materialize_f64(),
+                values,
+                "{class} {name} changed values"
+            );
         }
-        assert_eq!(
-            integer_results, 17,
-            "{class} shape matrix did not return every typed result"
-        );
     }
 }
 
