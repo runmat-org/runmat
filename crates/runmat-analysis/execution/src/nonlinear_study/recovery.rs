@@ -53,6 +53,7 @@ impl NonlinearSolidStudyCoordinator {
             source_block: self.block.as_ref().expect("terminal block").objects.clone(),
             program_revision: self.preparation.program_revision.clone(),
             output_policy: self.preparation.output_policy,
+            local_execution: self.preparation.local_execution,
         })?;
         self.admit_retention(None, Some(&task.resource_plan))?;
         self.recovery_task = Some(task);

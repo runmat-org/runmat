@@ -146,6 +146,7 @@ fn both_orders_native_solve_recovery_complex_observation_state_and_accuracy_cold
             source_result: imported.objects.clone(),
             program_revision: task.program.request.recipe.program_revision.clone(),
             output_policy: policy,
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .unwrap();
         let response = run(&mut store, &recovery.program, &recovery.host, policy);

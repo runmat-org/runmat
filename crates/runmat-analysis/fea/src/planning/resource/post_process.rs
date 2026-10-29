@@ -594,6 +594,19 @@ pub(super) fn post_process_worker() -> WorkerResourcePolicy {
     }
 }
 
+/// Post-process worker sized by the study's admitted local execution plan. Field recovery
+/// kernels run their element loops on this pool (`ordered_map_range`, scoped chunks).
+pub(super) fn post_process_worker_on(
+    local_execution: super::LocalExecutionPlan,
+) -> Result<WorkerResourcePolicy, ResourcePlanningError> {
+    Ok(WorkerResourcePolicy {
+        cpu_millicores: local_execution
+            .checked_cpu_millicores()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        ..post_process_worker()
+    })
+}
+
 pub(super) fn post_process_ceiling() -> AccuracyResourceCeiling {
     AccuracyResourceCeiling {
         maximum_refinement_cycles: 0,

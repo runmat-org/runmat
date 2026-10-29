@@ -38,6 +38,7 @@ pub fn build_acoustic_field_recovery_resource_plan(
     sample: RecoveredFieldSample,
     source_validation_workspace_bytes: ByteCount,
     facts: PreparedPhaseResourceFacts,
+    local_execution: super::LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let (partitions, construction_workspace_bytes) =
         acoustic_field_recovery_shape(request, sample)?;
@@ -67,7 +68,7 @@ pub fn build_acoustic_field_recovery_resource_plan(
             output: facts.output,
         }),
         output_set: Some(facts.output_set),
-        worker: super::post_process::post_process_worker(),
+        worker: super::post_process::post_process_worker_on(local_execution)?,
         accuracy_ceiling: super::post_process::post_process_ceiling(),
     })
 }

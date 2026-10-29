@@ -10,6 +10,7 @@ pub(super) fn execute(solved: &SolvedPipeline) -> RecoveredPipeline {
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
     )
     .unwrap();
@@ -29,6 +30,7 @@ pub(super) fn execute(solved: &SolvedPipeline) -> RecoveredPipeline {
             &prepared.request,
             &inputs,
             host.output_policy,
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         )
         .unwrap(),
         prepared.resource_plan

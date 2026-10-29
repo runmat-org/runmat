@@ -28,6 +28,7 @@ impl MagneticStudyCoordinator {
                 .clone(),
             program_revision: self.preparation.program_revision.clone(),
             output_policy: self.preparation.output_policy,
+            local_execution: self.preparation.local_execution,
         })?;
         self.recovery_task = Some(task);
         self.phase = MagneticStudyPhase::AwaitingFieldRecovery;

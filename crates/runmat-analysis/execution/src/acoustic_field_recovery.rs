@@ -28,6 +28,8 @@ pub struct AcousticFieldRecoveryPreparation {
     pub source_result: PreparedAnalysisObjects,
     pub program_revision: ProgramRevision,
     pub output_policy: AnalysisOutputPolicy,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 pub struct PreparedAcousticFieldRecovery {
@@ -37,6 +39,8 @@ pub struct PreparedAcousticFieldRecovery {
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,
     pub output_policy: AnalysisOutputPolicy,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 const SOURCE_KINDS: [AnalysisNumericalObjectKind; 4] = [
@@ -126,6 +130,7 @@ pub fn prepare_acoustic_field_recovery(
         &request,
         &inputs,
         p.output_policy,
+        p.local_execution,
     )?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
@@ -155,6 +160,7 @@ pub fn prepare_acoustic_field_recovery(
         inputs,
         resource_plan,
         output_policy: p.output_policy,
+        local_execution: p.local_execution,
     })
 }
 
@@ -182,6 +188,7 @@ pub fn build_prepared_acoustic_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let numerical = inputs
         .iter()
@@ -266,6 +273,7 @@ pub fn build_prepared_acoustic_field_recovery_resource_plan(
             output: projected_transport_output_resource_facts(&profile)?,
             output_set: projected_output_set_resource_facts(),
         },
+        local_execution,
     )?)
 }
 
@@ -323,6 +331,7 @@ pub fn import_acoustic_recovered_fields(
         &prepared.request,
         &prepared.inputs,
         prepared.output_policy,
+        prepared.local_execution,
     )?;
     if expected != prepared.resource_plan {
         return Err(invalid("acoustic recovery import resource authority differs"));

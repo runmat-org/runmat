@@ -327,6 +327,7 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
                 program_revision: revision(),
                 chunk_bytes: 1024,
                 inventory_limits: limits,
+                local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             },
         )
         .unwrap();

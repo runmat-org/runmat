@@ -196,6 +196,7 @@ pub use maxwell_study::{
 mod electrical_field_recovery;
 pub use electrical_field_recovery::{
     build_prepared_electrical_field_recovery_resource_plan, decode_electrical_recovery_source,
+    ElectricalRecoverySource,
     import_electrical_recovered_fields, prepare_electrical_field_recovery,
     ElectricalFieldRecoveryPreparation, PreparedElectricalFieldRecovery,
 };

@@ -39,12 +39,14 @@ pub(super) fn execute(
                 invocation.inputs,
                 invocation.output_policy,
                 demand.recovery_workspace_bytes,
+                crate::analysis_kernel::admitted_local_execution(&plan)?,
             )?
         || plan
             != build_prepared_nonlinear_recovery_resource_plan(
                 &request,
                 invocation.inputs,
                 invocation.output_policy,
+                crate::analysis_kernel::admitted_local_execution(&plan)?,
             )?
     {
         return Err(invalid(
