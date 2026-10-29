@@ -146,8 +146,8 @@ impl ObservationPublicationCatalog {
         // Every result of one catalog selects over the same mesh: derive its projection once,
         // and the observation topology once per face flag, not once per published result.
         let projection = std::cell::OnceCell::new();
-        let topologies: [std::cell::OnceCell<crate::results::observation::ObservationTopology<'_>>; 2] =
-            Default::default();
+        let topologies: [std::cell::OnceCell<crate::results::observation::ObservationTopology<'_>>;
+            2] = Default::default();
         self.visit_results(|source, observation_id, result, evidence| {
             let plan = self.execution_plan(source, observation_id, evidence)?;
             let field = source_field(source, &plan, evidence)?;
@@ -251,12 +251,9 @@ impl ObservationPublicationCatalog {
     ) -> AnalysisExecutionResult<ObservationPartitionPlan> {
         evidence.validate().map_err(invalid)?;
         // `visit_results` validated `source` (and so its plan identity) before visiting it.
-        let plan = ObservationPartitionPlan::derive(
-            &source.plan,
-            observation,
-            self.execution_policy,
-        )
-        .map_err(invalid)?;
+        let plan =
+            ObservationPartitionPlan::derive(&source.plan, observation, self.execution_policy)
+                .map_err(invalid)?;
         if plan.identity != evidence.partition_plan
             || plan.partitions.len() != evidence.contributions.len()
         {

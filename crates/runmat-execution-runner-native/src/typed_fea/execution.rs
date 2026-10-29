@@ -54,9 +54,7 @@ pub fn prepare_study_publication(
     result: &CompletedFeaStudyResult,
     placement: &str,
 ) -> Result<runmat_runtime::analysis::PreparedStudyPublication, String> {
-    use runmat_runtime::analysis::{
-        AnalysisStudyCompletionIdentity, PrecisionMode, QualityPolicy,
-    };
+    use runmat_runtime::analysis::{AnalysisStudyCompletionIdentity, PrecisionMode, QualityPolicy};
     let context = || runmat_runtime::operations::OperationContext::new(None, None);
     // Every execution is its own attempt of the definition: a rerun publishes a fresh attempt
     // rather than colliding with, or silently reusing, an earlier publication.
@@ -65,7 +63,10 @@ pub fn prepare_study_publication(
     // each execution's publication (its authenticated completion root is part of that attempt).
     let identity = |digest: runmat_execution::Digest, _root: &runmat_execution::Digest| {
         AnalysisStudyCompletionIdentity::with_attempt(
-            format!("{placement}:{}", digest.to_string().trim_start_matches("sha256:")),
+            format!(
+                "{placement}:{}",
+                digest.to_string().trim_start_matches("sha256:")
+            ),
             attempt.clone(),
         )
     };
@@ -151,11 +152,12 @@ pub fn prepare_study_publication(
             )
         }
         CompletedFeaStudyResult::Fluid(result) => {
-            let digest = result
+            let study = result
                 .completion
                 .compiled
-                .definition_digest()
+                .definition()
                 .map_err(|e| e.to_string())?;
+            let digest = study.digest();
             runmat_runtime::analysis::prepare_fluid_study_publication(
                 &result.completion,
                 &result.source,
@@ -166,7 +168,7 @@ pub fn prepare_study_publication(
                     numerical: result.completion.workload.policy,
                     geometry: result.completion.workload.geometry_policy,
                 },
-                digest,
+                study,
                 context(),
                 identity(digest, &result.completion.root.logical_digest)?,
             )
@@ -226,7 +228,10 @@ pub fn prepare_study_publication(
                 result,
                 context(),
                 AnalysisStudyCompletionIdentity::with_attempt(
-                    format!("{placement}:{}", digest.to_string().trim_start_matches("sha256:")),
+                    format!(
+                        "{placement}:{}",
+                        digest.to_string().trim_start_matches("sha256:")
+                    ),
                     attempt.clone(),
                 )?,
             )

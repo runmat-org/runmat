@@ -113,16 +113,19 @@ pub fn prepare_acoustic_study_publication(
         materialization::admit(completed, source, options, &run_id).map_err(invalid)?
     };
     let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence)
-            .map_err(invalid)?;
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
         step_id: authored_step.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
         solver_options: super::AnalysisSolverOptions::AcousticHelmholtz(options.clone()),
     };
+    let study = completed
+        .compiled
+        .definition()
+        .map_err(|error| invalid(error.to_string()))?;
     let prepared = super::structural_study::standalone_completion(
         context.clone(),
-        &completed.compiled,
+        study,
         execution,
         persisted,
     )
@@ -145,7 +148,7 @@ pub fn prepare_acoustic_study_publication(
             preparation,
         )?;
     let manifest = super::study_result_manifest::StudyResultManifest::new(
-        &completed.compiled,
+        study,
         completed
             .workload
             .identity()

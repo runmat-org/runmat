@@ -156,7 +156,11 @@ pub fn build_prepared_fluid_state_publication_resource_plan(
     build_plan_with_source(request, inputs, policy, None)
 }
 
-type DecodedSource = (FluidSteadyWorkload, SolverMeshArtifact, FluidSteadySolverResult);
+type DecodedSource = (
+    FluidSteadyWorkload,
+    SolverMeshArtifact,
+    FluidSteadySolverResult,
+);
 
 /// `decoded` is the source `decode_source` already authenticated from these same original
 /// inputs (workload, mesh, result and solve plan); it is not decoded a second time.
@@ -168,9 +172,13 @@ fn build_plan_with_source(
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     static MEMO: crate::fluid_phase_plan_memo::PlanMemo =
         crate::fluid_phase_plan_memo::PlanMemo::new();
-    MEMO.get_or_derive("fluid-state-publication", &request.canonical_bytes()?, inputs, policy, || {
-        derive_prepared_fluid_state_publication_resource_plan(request, inputs, policy, decoded)
-    })
+    MEMO.get_or_derive(
+        "fluid-state-publication",
+        &request.canonical_bytes()?,
+        inputs,
+        policy,
+        || derive_prepared_fluid_state_publication_resource_plan(request, inputs, policy, decoded),
+    )
 }
 
 fn derive_prepared_fluid_state_publication_resource_plan(

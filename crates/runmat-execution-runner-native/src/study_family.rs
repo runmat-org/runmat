@@ -8,23 +8,23 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{AnalysisModel, AuthoredMaterialRef, MaterialModel, RealizedStudy};
 use runmat_analysis_execution::{
-    AcousticResponseStudyPreparation, AcousticStudyPreparation, AnalysisCapabilityRequirement, AnalysisOutputPolicy,
-    CompletedAcousticResponseStudy, CompletedAcousticStudy, CompletedElectricalStudy, CompletedMagneticStudy,
-    CompletedMaxwellStudy, CompletedNonlinearSolidStudy, CompletedThermalStudy,
-    ElectricalStudyPreparation, FluidStudyPreparationParts, MagneticStudyPreparation,
-    PlannedFluidStudyPreparation,
-    MaxwellStudyPreparation, NonlinearSolidStudyPreparation, ThermalStudyPreparation,
+    AcousticResponseStudyPreparation, AcousticStudyPreparation, AnalysisCapabilityRequirement,
+    AnalysisOutputPolicy, CompletedAcousticResponseStudy, CompletedAcousticStudy,
+    CompletedElectricalStudy, CompletedMagneticStudy, CompletedMaxwellStudy,
+    CompletedNonlinearSolidStudy, CompletedThermalStudy, ElectricalStudyPreparation,
+    FluidStudyPreparationParts, MagneticStudyPreparation, MaxwellStudyPreparation,
+    NonlinearSolidStudyPreparation, PlannedFluidStudyPreparation, ThermalStudyPreparation,
     ThermalStudyScope,
 };
 use runmat_analysis_fea::execution::InitialFieldBinding;
 use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_analysis_fea::study::{
-    build_electrical_study_product, plan_electrical_study_product, build_magnetic_study_product,
-    build_maxwell_study_product, build_nonlinear_solid_study_product, compile_analysis_study,
+    build_electrical_study_product, build_magnetic_study_product, build_maxwell_study_product,
+    build_nonlinear_solid_study_product, compile_analysis_study,
     plan_acoustic_response_study_product, plan_acoustic_study_product,
-    plan_thermal_study_product_with_fields,
-    AnalysisStudyCompilationInput, ElectricalStudyProductInput,
-    MagneticStudyProductInput, MaxwellStudyProductInput, NonlinearSolidStudyProductInput,
+    plan_electrical_study_product, plan_thermal_study_product_with_fields,
+    AnalysisStudyCompilationInput, ElectricalStudyProductInput, MagneticStudyProductInput,
+    MaxwellStudyProductInput, NonlinearSolidStudyProductInput,
 };
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
@@ -227,8 +227,9 @@ pub(crate) fn plan_family_study(
             )
         }
         StudyRootPlanning::Acoustic(policy) => {
-            let product = plan_acoustic_study_product(compile(apply_inputs)?, context.mesh, *policy)
-                .map_err(|error| error.to_string())?;
+            let product =
+                plan_acoustic_study_product(compile(apply_inputs)?, context.mesh, *policy)
+                    .map_err(|error| error.to_string())?;
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Acoustic(Box::new(AcousticStudyPreparation {
@@ -421,9 +422,12 @@ fn electrothermal_heat_study(
     mesh: &SolverMeshArtifact,
     policy: &runmat_analysis_fea::study::ThermalStudyPlanningPolicy,
 ) -> Result<runmat_analysis_fea::study::CompiledAnalysisStudy, String> {
-    let (thermal, point) =
-        runmat_analysis_fea::execution::solve_electrothermal_heat_study(compiled, mesh, policy.clone())
-            .map_err(|error| error.to_string())?;
+    let (thermal, point) = runmat_analysis_fea::execution::solve_electrothermal_heat_study(
+        compiled,
+        mesh,
+        policy.clone(),
+    )
+    .map_err(|error| error.to_string())?;
     tracing::info!(
         sweeps = point.sweeps.len(),
         converged = point.converged,
@@ -649,7 +653,9 @@ impl CompletedFamilyStudy {
         }
         Ok(match self {
             Self::Thermal(completed) => {
-                root!(runmat_analysis_execution::prepare_thermal_study_root(completed))
+                root!(runmat_analysis_execution::prepare_thermal_study_root(
+                    completed
+                ))
             }
             Self::Electrical(completed) => {
                 root!(runmat_analysis_execution::prepare_electrical_study_root(
@@ -671,18 +677,18 @@ impl CompletedFamilyStudy {
                     completed
                 ))
             }
-            Self::AcousticResponse(completed) => root!(
-                runmat_analysis_execution::prepare_acoustic_response_study_root(completed)
-            ),
+            Self::AcousticResponse(completed) => {
+                root!(runmat_analysis_execution::prepare_acoustic_response_study_root(completed))
+            }
             Self::Fluid(completed) => {
                 root!(runmat_analysis_execution::prepare_fluid_study_root_for(
                     completed,
                     completed.preparation()
                 ))
             }
-            Self::NonlinearSolid(completed) => root!(
-                runmat_analysis_execution::prepare_nonlinear_solid_study_root(completed)
-            ),
+            Self::NonlinearSolid(completed) => {
+                root!(runmat_analysis_execution::prepare_nonlinear_solid_study_root(completed))
+            }
         })
     }
 }

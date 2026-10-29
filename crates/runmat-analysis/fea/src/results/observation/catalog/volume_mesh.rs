@@ -20,7 +20,9 @@ impl ObservationFieldCatalog {
     }
 
     /// The producing authored step of a volume-mesh catalog.
-    pub fn volume_mesh_step(&self) -> AnalysisExecutionResult<&runmat_analysis_core::ProcedureStep> {
+    pub fn volume_mesh_step(
+        &self,
+    ) -> AnalysisExecutionResult<&runmat_analysis_core::ProcedureStep> {
         match &self.source {
             ObservationFieldCatalogSource::VolumeMeshRecovery { step, .. } => Ok(step),
             _ => Err(invalid("expected native volume-mesh catalog")),
@@ -65,13 +67,13 @@ impl ObservationFieldCatalog {
 
     /// Resolve this catalog's producing step on the exact mesh projection from the catalog's
     /// own field manifest. The plan is canonical for this catalog by construction (it is the
-    /// resolution `validate_volume_mesh_plan` repeats for a plan from elsewhere), so the caller
-    /// does not verify it again. Returns the projection it was resolved on.
+    /// resolution `validate_volume_mesh_plan` repeats for a plan from elsewhere), so the pair
+    /// is sealed and no holder verifies it again. Returns the projection it was resolved on.
     pub fn resolve_volume_mesh_plan(
-        &self,
+        self,
         mesh: &SolverMeshArtifact,
         limits: super::super::ObservationLimits,
-    ) -> AnalysisExecutionResult<(AnalysisProjection, ResolvedObservationPlan)> {
+    ) -> AnalysisExecutionResult<(AnalysisProjection, VolumeMeshObservationAuthority)> {
         let ObservationFieldCatalogSource::VolumeMeshRecovery {
             recovery_request,
             manifest,
@@ -86,7 +88,9 @@ impl ObservationFieldCatalog {
             crate::execution::FieldTopologyIdentity::VolumeMesh { mesh_digest }
                 if mesh_digest == mesh.canonical_digest
         ) {
-            return Err(invalid("volume-mesh catalog differs from the canonical mesh"));
+            return Err(invalid(
+                "volume-mesh catalog differs from the canonical mesh",
+            ));
         }
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
         let mut seen = std::collections::BTreeSet::new();
@@ -98,7 +102,15 @@ impl ObservationFieldCatalog {
             .collect::<Vec<_>>();
         let plan = super::super::resolve_observation_plan(step, &projection, &definitions, limits)
             .map_err(invalid)?;
-        Ok((projection, plan))
+        let mesh_digest = mesh.canonical_digest;
+        Ok((
+            projection,
+            VolumeMeshObservationAuthority {
+                catalog: self,
+                plan,
+                mesh_digest,
+            },
+        ))
     }
 
     /// Independently re-resolve the authored plan on the exact mesh projection.
@@ -122,7 +134,9 @@ impl ObservationFieldCatalog {
             crate::execution::FieldTopologyIdentity::VolumeMesh { mesh_digest }
                 if mesh_digest == mesh.canonical_digest
         ) {
-            return Err(invalid("volume-mesh catalog differs from the canonical mesh"));
+            return Err(invalid(
+                "volume-mesh catalog differs from the canonical mesh",
+            ));
         }
         verify_authored_observations(step, plan).map_err(invalid)?;
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
@@ -139,7 +153,38 @@ impl ObservationFieldCatalog {
             definitions.into_iter(),
             plan,
         )
-            .map_err(invalid)
+        .map_err(invalid)
+    }
+}
+
+/// A volume-mesh field catalog and the plan resolved from its own step and manifest on one
+/// canonical mesh. Only [`ObservationFieldCatalog::resolve_volume_mesh_plan`] pairs them, so
+/// holders carry the pair instead of re-resolving the plan to check it against the catalog.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VolumeMeshObservationAuthority {
+    catalog: ObservationFieldCatalog,
+    plan: ResolvedObservationPlan,
+    mesh_digest: runmat_meshing_core::StableDigest,
+}
+
+impl VolumeMeshObservationAuthority {
+    pub fn catalog(&self) -> &ObservationFieldCatalog {
+        &self.catalog
+    }
+
+    pub fn plan(&self) -> &ResolvedObservationPlan {
+        &self.plan
+    }
+
+    /// Whether the plan was resolved on exactly this mesh.
+    pub(in crate::results::observation) fn resolved_on(&self, mesh: &SolverMeshArtifact) -> bool {
+        self.mesh_digest == mesh.canonical_digest
+    }
+
+    pub(in crate::results::observation) fn into_parts(
+        self,
+    ) -> (ObservationFieldCatalog, ResolvedObservationPlan) {
+        (self.catalog, self.plan)
     }
 }
 

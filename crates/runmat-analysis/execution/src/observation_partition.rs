@@ -118,6 +118,9 @@ enum ObservationExecutionTarget {
 pub struct PreparedObservationFanout {
     pub source_request: ObservationEvaluationRequest,
     pub partitions: Vec<PreparedObservationPartition>,
+    /// A volume-mesh source's catalog with the plan of `source_request`, sealed at admission.
+    pub volume_mesh:
+        Option<runmat_analysis_fea::results::observation::VolumeMeshObservationAuthority>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -330,6 +333,7 @@ pub fn prepare_observation_fanout(
     Ok(PreparedObservationFanout {
         source_request: admitted.request,
         partitions: prepared,
+        volume_mesh: admitted.volume_mesh,
     })
 }
 

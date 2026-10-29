@@ -42,6 +42,7 @@ pub use source::{
 pub(crate) use acceleration::governed_extrema_device_resident_bytes;
 pub use catalog::{
     ObservationFieldCatalog, ObservationFieldCatalogSource, ObservationSelectionCoordinate,
+    VolumeMeshObservationAuthority,
 };
 pub(crate) use contract::OBSERVATION_LIMITS;
 
@@ -50,24 +51,23 @@ pub use contract::{
     ObservationArtifactInput, ObservationArtifactManifest, ObservationEntity, ObservationError,
     ObservationLimits, ObservationResult, ObservationResultIdentity, ObservationSampleBounds,
     ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationPlanContents,
-    ResolvedObservationPlanIdentity, ResolvedObservationPoint, ResolvedObservationTarget,
+    ResolvedObservationPlanContents, ResolvedObservationPlanIdentity, ResolvedObservationPoint,
+    ResolvedObservationTarget,
 };
 pub use distributed::{
     evaluate_solid_observation_partition, evaluate_structural_observation_partition,
     prepare_solid_observation_field_partition, prepare_structural_observation_field_partition,
     reduce_observation_partitions, solid_observation_partition_source_indices,
-    SolidObservationSourceSelection,
     structural_observation_partition_source_indices, ObservationPartitionCombination,
     ObservationPartitionContribution, ObservationPartitionContributionIdentity,
     ObservationPartitionEvidence, ObservationPartitionEvidenceIdentity,
-    ObservationPartitionPayload,
+    ObservationPartitionPayload, SolidObservationSourceSelection,
 };
 pub use evaluate::{
-    evaluate_observation_event_sample, evaluate_observation_sample, evaluate_observations,
+    authored_histories_sample, authored_observations_sample, evaluate_observation_event_sample,
+    evaluate_observation_sample, evaluate_observations,
     evaluate_structural_observation_event_sample, evaluate_structural_observation_sample,
     evaluate_structural_observations, resolved_observation_accepts_sample,
-    authored_histories_sample, authored_observations_sample,
 };
 pub(crate) use history::{
     exact_scheduled_coordinate_at, exact_scheduled_sample_count, sample_matches_policy,
@@ -86,8 +86,7 @@ pub use history::{
 pub use partition::{
     ObservationExecutionPolicy, ObservationPartition, ObservationPartitionIdentity,
     ObservationPartitionPlan, ObservationPartitionPlanContents, ObservationPartitionPlanIdentity,
-    ObservationPartitionTarget,
-    DEFAULT_MAXIMUM_OBSERVATION_PARTITIONS,
+    ObservationPartitionTarget, DEFAULT_MAXIMUM_OBSERVATION_PARTITIONS,
 };
 pub use publish::publish_observation;
 pub use resolve::{

@@ -164,6 +164,7 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
         program: prepared.program.clone(),
         inputs: prepared.inputs.clone(),
         resource_plan: prepared.resource_plan.clone(),
+        source_observations: prepared.source_observations.clone(),
     };
     let context = bad
         .inputs
@@ -199,7 +200,9 @@ fn thermal_cold_import_rejects_rehashed_missing_spatial_certificate() {
             .boundaries
             .push(runmat_analysis_core::AnalysisBoundary {
                 boundary_id: "insulated".into(),
-                target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("face:0")),
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("face:0"),
+                ),
                 operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                     value: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::HeatFlux::new(0.0),

@@ -9,9 +9,10 @@ pub use contract::FluidTransientBlockResourceDemand;
 pub use contract::{FluidFieldRecoveryResourceDemand, FluidSteadySolveResourceDemand};
 pub use fluid::{
     build_fluid_field_recovery_resource_plan, build_fluid_steady_resource_plan,
-    derive_fluid_steady_resource_projection, fluid_field_recovery_shape,
-    fluid_steady_result_payload_bytes_upper_bound, validate_fluid_steady_prepared_facts,
-    FluidSteadyResourceProjection, PreparedFluidSteadyResourceFacts,
+    build_fluid_steady_resource_plan_with, derive_fluid_steady_resource_projection,
+    fluid_field_recovery_shape, fluid_steady_result_payload_bytes_upper_bound,
+    validate_fluid_steady_prepared_facts, FluidSteadyResourceProjection,
+    PreparedFluidSteadyResourceFacts,
 };
 pub use fluid_transient::{
     build_fluid_transient_block_resource_plan, derive_fluid_transient_block_resource_projection,
@@ -38,19 +39,19 @@ pub use acoustic_response::{
 };
 pub use contract::AcousticResponseResourceDemand;
 mod acoustic_recovery;
+pub use acoustic::{
+    acoustic_harmonic_result_payload_bytes_upper_bound, build_acoustic_resource_plan,
+    PreparedAcousticResourceFacts,
+};
 pub use acoustic_recovery::{
     acoustic_field_recovery_partition_count, acoustic_field_recovery_shape,
     acoustic_recovery_source_validation_workspace, build_acoustic_field_recovery_resource_plan,
 };
 pub use contract::AcousticFieldRecoveryResourceDemand;
-pub use acoustic::{
-    acoustic_harmonic_result_payload_bytes_upper_bound, build_acoustic_resource_plan,
-    PreparedAcousticResourceFacts,
-};
 pub use contract::AcousticHarmonicResourceDemand;
 pub use contract::ElectricalStaticResourceDemand;
-pub use contract::{ElectricalFieldRecoveryResourceDemand, MagneticFieldRecoveryResourceDemand};
 pub use contract::MaxwellFieldRecoveryResourceDemand;
+pub use contract::{ElectricalFieldRecoveryResourceDemand, MagneticFieldRecoveryResourceDemand};
 pub use contract::{MagneticGmresResourceEnvelope, MagnetostaticResourceDemand};
 pub use contract::{MaxwellDirectFactorEnvelope, MaxwellHarmonicResourceDemand};
 pub use electrical_static::{
@@ -195,16 +196,16 @@ pub use contract::{
     PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, PreparedPhaseResourceFacts,
     PreparedStructuralModalResourceFacts, ResourceAdmission, ResourceBreakdown,
     ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy, SparseResourceFacts,
-    StaticSolvePath, StaticSolveSelection, RESIDENT_MEMORY_RESOURCE,
-    StructuralBucklingResourceDemand, StructuralFrequencyOperatorResourceDemand,
-    StructuralFrequencyResultAssemblyResourceDemand, StructuralModalResourceDemand,
-    StructuralModalResponseSpectrumAssemblyResourceDemand,
+    StaticSolvePath, StaticSolveSelection, StructuralBucklingResourceDemand,
+    StructuralFrequencyOperatorResourceDemand, StructuralFrequencyResultAssemblyResourceDemand,
+    StructuralModalResourceDemand, StructuralModalResponseSpectrumAssemblyResourceDemand,
     StructuralModalResponseSpectrumDirectionResourceDemand, StructuralOperatorResourceDemand,
     StructuralRandomResponseAssemblyResourceDemand, StructuralRandomResponseIntervalResourceDemand,
     StructuralTransientBlockResourceDemand, StructuralTransientFieldRecoveryResourceDemand,
     StructuralTransientResultAssemblyResourceDemand, StructuralTransientScopeResourceDemand,
     ThermalFieldSourceResourceFacts, ThermalSolveResourceDemand, TopologyResourceFacts,
-    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
+    WorkerResourcePolicy, RESIDENT_MEMORY_RESOURCE, RESOURCE_ESTIMATION_MODEL_REVISION,
+    RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 pub use estimate::build_resource_plan;
 pub use frequency::{
@@ -241,8 +242,8 @@ pub use post_process::{
 };
 #[cfg(test)]
 pub(crate) use preflight::build_static_resource_plan;
-pub(crate) use preflight::{build_static_resource_plan_selecting, StaticResourcePreflight};
 pub use preflight::recorded_static_solve_path;
+pub(crate) use preflight::{build_static_resource_plan_selecting, StaticResourcePreflight};
 pub use preflight::{
     build_structural_resource_plan, build_structural_resource_plan_from_compilation,
     require_executable_static_backend,

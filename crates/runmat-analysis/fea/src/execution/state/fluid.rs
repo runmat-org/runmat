@@ -12,11 +12,65 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CanonicalFluidStatePayload {
+pub struct CanonicalFluidStatePayloadContents {
     pub workload: Box<FluidSteadyWorkload>,
     pub mesh: Box<SolverMeshArtifact>,
     pub result_bytes: Vec<u8>,
     pub topology: FiniteVolumeFieldTopology,
+}
+
+/// A fluid state payload whose result bytes decoded under its workload and mesh and whose
+/// topology is that result's native layout, checked once when it was built or decoded. The
+/// contents are read-only (through `Deref`), so `validate_for` compares the bound identities
+/// instead of decoding the result and deriving its topology again.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(try_from = "CanonicalFluidStatePayloadContents")]
+pub struct CanonicalFluidStatePayload {
+    contents: CanonicalFluidStatePayloadContents,
+    binding: FluidStateBinding,
+}
+
+/// What the result bytes and topology establish, derived once.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FluidStateBinding {
+    source_result: SolverResultIdentity,
+    producer: StepIdentity,
+    topology_digest: Digest,
+}
+
+/// Encodes exactly as its contents (the wire form is unchanged).
+impl Serialize for CanonicalFluidStatePayload {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.contents.serialize(serializer)
+    }
+}
+
+impl std::ops::Deref for CanonicalFluidStatePayload {
+    type Target = CanonicalFluidStatePayloadContents;
+
+    fn deref(&self) -> &Self::Target {
+        &self.contents
+    }
+}
+
+impl TryFrom<CanonicalFluidStatePayloadContents> for CanonicalFluidStatePayload {
+    type Error = AnalysisExecutionError;
+
+    fn try_from(contents: CanonicalFluidStatePayloadContents) -> Result<Self, Self::Error> {
+        let result = contents.original_result()?;
+        let original_topology = result.native_field_topology(&contents.workload, &contents.mesh)?;
+        if contents.topology != original_topology {
+            return Err(invalid(
+                "fluid state differs from original producer/result/owner-oriented layout",
+            ));
+        }
+        let binding = FluidStateBinding {
+            source_result: result.identity()?,
+            producer: result.producer_identity(),
+            topology_digest: original_topology.identity().discretization_digest(),
+        };
+        Ok(Self { contents, binding })
+    }
 }
 
 /// Borrowed exact payload shape, shared by cold/source residency and state wire profiling.
@@ -63,7 +117,7 @@ pub fn fluid_state_publication_workspace_bytes(
     Ok(required)
 }
 
-impl CanonicalFluidStatePayload {
+impl CanonicalFluidStatePayloadContents {
     /// Source-bound cold decode and original-equation validation; never invokes solve.
     pub fn original_result(&self) -> AnalysisExecutionResult<FluidSteadySolverResult> {
         fluid_state_publication_workspace_bytes(&self.workload, &self.mesh, &self.result_bytes)?;
@@ -74,18 +128,26 @@ impl CanonicalFluidStatePayload {
             &self.mesh,
         )
     }
+}
+
+impl CanonicalFluidStatePayload {
+    /// Give up the seal to edit the contents; re-sealing validates them again.
+    pub fn into_contents(self) -> CanonicalFluidStatePayloadContents {
+        self.contents
+    }
+
     pub fn validate_for(
         &self,
         topology_digest: Digest,
         source_result: SolverResultIdentity,
         producer: StepIdentity,
     ) -> AnalysisExecutionResult<()> {
-        let result = self.original_result()?;
-        let original_topology = result.native_field_topology(&self.workload, &self.mesh)?;
-        if result.identity()? != source_result
-            || result.producer_identity() != producer
-            || self.topology != original_topology
-            || self.topology.identity().discretization_digest() != topology_digest
+        if self.binding
+            != (FluidStateBinding {
+                source_result,
+                producer,
+                topology_digest,
+            })
         {
             return Err(invalid(
                 "fluid state differs from original producer/result/owner-oriented layout",
@@ -191,11 +253,20 @@ impl CanonicalSemanticState {
             topology_digest: request.topology_digest,
             source_result: request.source_result,
             payload: CanonicalSemanticStatePayload::Fluid {
+                // `validate_request` validated the caller's typed result against the workload
+                // and mesh and derived its topology, so the binding needs no decode.
                 state: Box::new(CanonicalFluidStatePayload {
-                    workload: Box::new(workload.clone()),
-                    mesh: Box::new(mesh.clone()),
-                    result_bytes,
-                    topology,
+                    binding: FluidStateBinding {
+                        source_result: result.identity()?,
+                        producer: result.producer_identity(),
+                        topology_digest: topology.identity().discretization_digest(),
+                    },
+                    contents: CanonicalFluidStatePayloadContents {
+                        workload: Box::new(workload.clone()),
+                        mesh: Box::new(mesh.clone()),
+                        result_bytes,
+                        topology,
+                    },
                 }),
             },
         })

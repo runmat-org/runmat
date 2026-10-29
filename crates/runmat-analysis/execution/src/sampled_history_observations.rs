@@ -28,6 +28,7 @@ use runmat_analysis_fea::{
         observation::{
             ObservationFieldCatalog, ObservationPartitionPlan, ObservationPublicationCatalog,
             ObservationPublicationEntry, ObservationSamplePublication,
+            VolumeMeshObservationAuthority,
         },
     },
 };
@@ -80,6 +81,8 @@ pub(crate) struct SampledHistoryWorkflow {
     prepared_sample: Option<usize>,
     source_request: Option<ObservationEvaluationRequest>,
     catalog: Option<ObservationFieldCatalog>,
+    /// A volume-mesh source's catalog sealed with the current request's plan.
+    volume_mesh: Option<VolumeMeshObservationAuthority>,
     catalog_objects: Option<PreparedAnalysisObjects>,
     partitions: VecDeque<PreparedObservationPartition>,
     plans: BTreeMap<ObservationId, ObservationPartitionPlan>,
@@ -154,11 +157,9 @@ impl SampledHistoryWorkflow {
                     self.pending = Some(PendingObservationTask::Reduction(Box::new(task)));
                     break;
                 }
-                if let Some((id, (sample, host))) = self
-                    .reduced
-                    .iter()
-                    .find(|(id, _)| is_history(context.step(), id) && !self.checkpointed.contains(*id))
-                {
+                if let Some((id, (sample, host))) = self.reduced.iter().find(|(id, _)| {
+                    is_history(context.step(), id) && !self.checkpointed.contains(*id)
+                }) {
                     let task = prepare_observation_history_checkpoint_task(
                         ObservationHistoryCheckpointPreparation {
                             source_host: host.clone(),
@@ -182,7 +183,11 @@ impl SampledHistoryWorkflow {
                     self.pending = Some(PendingObservationTask::Checkpoint(Box::new(task)));
                     break;
                 }
-                if self.reduced.keys().any(|id| !is_history(context.step(), id)) {
+                if self
+                    .reduced
+                    .keys()
+                    .any(|id| !is_history(context.step(), id))
+                {
                     let task = prepare_observation_assembly(ObservationAssemblyPreparation {
                         source_host: context.solve_host().clone(),
                         source_request: self
@@ -235,14 +240,23 @@ impl SampledHistoryWorkflow {
                 self.pending = Some(PendingObservationTask::Finalization(Box::new(task)));
                 break;
             }
-            let catalog = ObservationPublicationCatalog::new(
-                context.solve_host().workload.step,
-                self.last_plan()?.clone(),
-                self.catalog.as_ref().expect("source catalog").clone(),
-                context.step(),
-                self.entries.clone(),
-                context.history_context(),
-            )?;
+            let catalog = match self.volume_mesh.clone() {
+                Some(authority) => ObservationPublicationCatalog::on_volume_mesh(
+                    context.solve_host().workload.step,
+                    authority,
+                    context.step(),
+                    self.entries.clone(),
+                    context.history_context(),
+                )?,
+                None => ObservationPublicationCatalog::new(
+                    context.solve_host().workload.step,
+                    self.last_plan()?.clone(),
+                    self.catalog.as_ref().expect("source catalog").clone(),
+                    context.step(),
+                    self.entries.clone(),
+                    context.history_context(),
+                )?,
+            };
             self.completed.catalog = Some(catalog);
             return Ok(None);
         }
@@ -256,9 +270,7 @@ impl SampledHistoryWorkflow {
         self.source_request
             .as_ref()
             .map(|request| &request.plan)
-            .ok_or(AnalysisBridgeError::Identity(
-                "observation plan absent",
-            ))
+            .ok_or(AnalysisBridgeError::Identity("observation plan absent"))
     }
 
     fn advance_sample(&mut self) {
@@ -275,9 +287,14 @@ impl SampledHistoryWorkflow {
         context: &C,
     ) -> AnalysisBridgeResult<()> {
         let policy = context.output_policy();
-        let (preparation, coordinate) = context.observation_preparation(source, self.sample_ordinal)?;
+        let (preparation, coordinate) =
+            context.observation_preparation(source, self.sample_ordinal)?;
         let fanout = prepare_observation_fanout(source, preparation, coordinate, None)?;
-        let catalog = context.field_catalog()?;
+        // A volume-mesh admission resolved its plan from this same catalog; reuse it.
+        let catalog = match &fanout.volume_mesh {
+            Some(authority) => authority.catalog().clone(),
+            None => context.field_catalog()?,
+        };
         let catalog_objects = prepare_analysis_objects(
             Kind::ObservationFieldCatalog,
             catalog.identity(),
@@ -298,6 +315,7 @@ impl SampledHistoryWorkflow {
             .collect();
         self.partitions = fanout.partitions.into();
         self.source_request = Some(fanout.source_request);
+        self.volume_mesh = fanout.volume_mesh;
         self.prepared_sample = Some(self.sample_ordinal);
         self.catalog = Some(catalog);
         self.catalog_objects = Some(catalog_objects);

@@ -109,16 +109,19 @@ pub fn prepare_nonlinear_solid_study_publication(
         })?
     };
     let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence)
-            .map_err(invalid)?;
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
         step_id: step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
         solver_options: AnalysisSolverOptions::StructuralNonlinear(options.clone()),
     };
+    let study = completed
+        .compiled
+        .definition()
+        .map_err(|error| invalid(error.to_string()))?;
     let prepared = super::structural_study::standalone_completion(
         context.clone(),
-        &completed.compiled,
+        study,
         execution,
         persisted,
     )
@@ -141,7 +144,7 @@ pub fn prepare_nonlinear_solid_study_publication(
             preparation,
         )?;
     let manifest = super::study_result_manifest::StudyResultManifest::new(
-        &completed.compiled,
+        study,
         completed
             .workload
             .identity()

@@ -128,7 +128,7 @@ pub fn prepare_result_publication(
             ValueRefKind::ResultObject,
         ),
     ];
-    if let Some(observations) = preparation.source_observations {
+    if let Some(observations) = &preparation.source_observations {
         let bytes = observations
             .canonical_bytes()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -159,12 +159,14 @@ pub fn prepare_result_publication(
         .into_iter()
         .map(|(input, _)| input)
         .collect::<Vec<_>>();
-    let resource_plan = crate::build_prepared_result_publication_resource_plan(
-        &request,
-        &accuracy,
-        &resource_usage,
-        &inputs,
-    )?;
+    let resource_plan =
+        crate::result_publication_resource::build_result_publication_resource_plan_on(
+            &request,
+            &accuracy,
+            &resource_usage,
+            &inputs,
+            preparation.source_observations.as_ref(),
+        )?;
     let plan_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),

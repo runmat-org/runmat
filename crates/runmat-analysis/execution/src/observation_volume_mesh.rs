@@ -49,9 +49,11 @@ pub(super) fn admit_volume_mesh(
         preparation.step.clone(),
     )?;
     // Resolved from the catalog's own step and manifest on this mesh: canonical by construction.
-    let (projection, plan) = catalog.resolve_volume_mesh_plan(&mesh, preparation.limits)?;
-    let selected =
-        catalog.canonical_selected_fields(&plan, ObservationSelectionCoordinate::VolumeMeshRecovery)?;
+    let (projection, authority) = catalog.resolve_volume_mesh_plan(&mesh, preparation.limits)?;
+    let catalog = authority.catalog();
+    let plan = authority.plan().clone();
+    let selected = catalog
+        .canonical_selected_fields(&plan, ObservationSelectionCoordinate::VolumeMeshRecovery)?;
     let selection = ObservationFieldSelection::volume_mesh_recovery(
         source_request,
         fields,
@@ -75,5 +77,6 @@ pub(super) fn admit_volume_mesh(
         workload,
         mesh: Some(mesh),
         accelerator_requests: Vec::new(),
+        volume_mesh: Some(authority),
     })
 }

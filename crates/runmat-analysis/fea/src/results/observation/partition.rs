@@ -281,15 +281,19 @@ impl ObservationPartitionPlan {
         let entity_count = observation.target.selected_entity_count();
         let partition_count = self.partitions.len();
         let canonical = partition_count <= entity_count
-            && self.partitions.iter().enumerate().all(|(ordinal, partition)| {
-                partition.ordinal as usize == ordinal
-                    && partition_target_matches(
-                        &observation.target,
-                        ordinal * entity_count / partition_count,
-                        (ordinal + 1) * entity_count / partition_count,
-                        &partition.target,
-                    )
-            })
+            && self
+                .partitions
+                .iter()
+                .enumerate()
+                .all(|(ordinal, partition)| {
+                    partition.ordinal as usize == ordinal
+                        && partition_target_matches(
+                            &observation.target,
+                            ordinal * entity_count / partition_count,
+                            (ordinal + 1) * entity_count / partition_count,
+                            &partition.target,
+                        )
+                })
             && self.resource_cost
                 == partitioned_resource_cost(
                     observation,
@@ -321,7 +325,6 @@ impl ObservationPartitionPlan {
             OBSERVATION_LIMITS,
         )?)
     }
-
 }
 
 impl ObservationPartitionPlanContents {
@@ -361,13 +364,13 @@ impl ObservationPartitionPlanContents {
         }
         for partition in &self.partitions {
             if partition.identity
-                    != derive_partition_identity(
-                        self.observation_plan,
-                        self.topology_digest,
-                        &self.observation_id,
-                        partition.ordinal,
-                        &partition.target,
-                    )?
+                != derive_partition_identity(
+                    self.observation_plan,
+                    self.topology_digest,
+                    &self.observation_id,
+                    partition.ordinal,
+                    &partition.target,
+                )?
             {
                 return Err(ObservationError::Invalid(
                     "observation partition metadata or identity is invalid".into(),

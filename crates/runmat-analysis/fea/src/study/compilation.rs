@@ -120,6 +120,37 @@ impl CompiledAnalysisStudy {
         .map_err(|error| AnalysisStudyCompilationError::Identity(error.to_string()))?;
         Ok(Digest::sha256(assessed))
     }
+
+    /// This study with its definition digest, derived once for every holder of the pair.
+    pub fn definition(&self) -> Result<AnalysisStudyDefinition<'_>, AnalysisStudyCompilationError> {
+        Ok(AnalysisStudyDefinition {
+            digest: self.definition_digest()?,
+            compiled: self,
+        })
+    }
+}
+
+/// A compiled study and its definition digest. Only [`CompiledAnalysisStudy::definition`]
+/// pairs them, so the digest is the study's own and holders never re-derive it.
+#[derive(Clone, Copy, Debug)]
+pub struct AnalysisStudyDefinition<'a> {
+    compiled: &'a CompiledAnalysisStudy,
+    digest: Digest,
+}
+
+impl<'a> AnalysisStudyDefinition<'a> {
+    pub fn compiled(&self) -> &'a CompiledAnalysisStudy {
+        self.compiled
+    }
+
+    pub fn digest(&self) -> Digest {
+        self.digest
+    }
+
+    /// Whether this definition is the one of `compiled` itself (the same study object).
+    pub fn is_of(&self, compiled: &CompiledAnalysisStudy) -> bool {
+        std::ptr::eq(self.compiled, compiled)
+    }
 }
 
 pub struct AnalysisStudyCompilationInput<'a> {

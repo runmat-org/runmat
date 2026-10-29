@@ -24,9 +24,7 @@ pub enum ObservationHistorySourceContext<'a> {
     },
     /// Native node/element fields on the canonical solver mesh of any family. The producing
     /// step and identity are carried by the volume-mesh catalog itself.
-    VolumeMesh {
-        mesh: &'a SolverMeshArtifact,
-    },
+    VolumeMesh { mesh: &'a SolverMeshArtifact },
     Magnetostatic {
         workload: &'a super::MagnetostaticWorkload,
         mesh: &'a SolverMeshArtifact,
@@ -44,9 +42,9 @@ pub enum ObservationHistorySourceContext<'a> {
 impl ObservationHistorySourceContext<'_> {
     pub const fn observation_execution(self) -> ObservationExecutionPolicy {
         match self {
-            Self::Magnetostatic { .. }
-            | Self::MaxwellHarmonic { .. }
-            | Self::VolumeMesh { .. } => ObservationExecutionPolicy::serial(),
+            Self::Magnetostatic { .. } | Self::MaxwellHarmonic { .. } | Self::VolumeMesh { .. } => {
+                ObservationExecutionPolicy::serial()
+            }
             Self::Structural { source, .. } => source.observation_execution(),
             Self::Thermal { .. } => ObservationExecutionPolicy::serial(),
         }
