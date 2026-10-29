@@ -1242,6 +1242,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("native service poisoned");
         let record = state.futures.validate(&future.id, future.outputs)?;
+        // A caller completing a future that was cancelled meanwhile learns of the cancellation.
+        if matches!(record, FutureState::Cancelled) {
+            return Err(ExecutionServiceError::Cancelled);
+        }
         if !matches!(record, FutureState::ExecutingInCaller) {
             return Err(ExecutionServiceError::Failed(
                 "future is not executing in its caller".into(),
