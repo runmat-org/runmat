@@ -188,9 +188,9 @@ study bracket_static {
     execution = execution.workstation
     input service_load : force = 1.0 kN
     analysis static { structural static {} }
-    output peak_stress = max(analysis.static.field.node.von_mises_stress)
+    output fillet_stress = max(analysis.static.field.node.von_mises_stress, over = geometry.bracket.region.fillets)
     assessment stress_allowable {
-        value = output.peak_stress
+        value = output.fillet_stress
         maximum = 250 MPa
         evidence = authored_samples
     }
