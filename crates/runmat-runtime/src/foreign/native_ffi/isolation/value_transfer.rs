@@ -62,6 +62,7 @@ pub(super) fn wire_error(identifier: &str, message: impl Into<String>) -> Native
     NativeWireError {
         identifier: identifier.into(),
         message: message.into(),
+        cause: None,
     }
 }
 

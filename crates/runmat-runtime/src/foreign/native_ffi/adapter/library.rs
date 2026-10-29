@@ -2,10 +2,10 @@ use super::*;
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not read native library {path}: {source}")]
-struct PreparedLibraryReadError {
-    path: PathBuf,
+pub(in crate::foreign::native_ffi) struct PreparedLibraryReadError {
+    pub(in crate::foreign::native_ffi) path: PathBuf,
     #[source]
-    source: std::io::Error,
+    pub(in crate::foreign::native_ffi) source: std::io::Error,
 }
 
 impl NativeFfiAdapter {

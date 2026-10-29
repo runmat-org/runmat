@@ -4,6 +4,9 @@ use runmat_process_host::shared_memory::SharedMemoryDescriptor;
 use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 use serde::{Deserialize, Serialize};
 
+mod cause;
+use cause::NativeWireCause;
+
 pub const NATIVE_FFI_HOST_KIND: &str = "native-ffi";
 pub const NATIVE_FFI_HOST_KIND_ENV: &str = "RUNMAT_EXTENSION_HOST_KIND";
 pub const NATIVE_FFI_HOST_FRONTEND_ENV: &str = "RUNMAT_NATIVE_FFI_HOST_FRONTEND";
@@ -174,6 +177,8 @@ pub struct NativeShutdownResult {
 pub struct NativeWireError {
     pub identifier: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) cause: Option<NativeWireCause>,
 }
 
 impl NativeDriverMessage {
@@ -281,19 +286,27 @@ impl NativeWireError {
                 .unwrap_or("RunMat:NativeFFI:InvocationFailed")
                 .into(),
             message: error.to_string(),
+            cause: NativeWireCause::from_runtime(error),
         }
     }
 
     pub(super) fn into_runtime(self) -> crate::RuntimeError {
-        crate::build_runtime_error(self.message)
+        let error = crate::build_runtime_error(self.message)
             .with_builtin("native_ffi")
-            .with_identifier(self.identifier)
-            .build()
+            .with_identifier(self.identifier);
+        match self.cause {
+            Some(cause) => error.with_source(cause.into_source()).build(),
+            None => error.build(),
+        }
     }
 
     pub fn validate(&self) -> Result<(), String> {
         validate_text(&self.identifier, "error identifier")?;
-        validate_text(&self.message, "error message")
+        validate_text(&self.message, "error message")?;
+        if let Some(cause) = &self.cause {
+            cause.validate()?;
+        }
+        Ok(())
     }
 }
 
@@ -467,6 +480,7 @@ mod tests {
             outcome: Err(NativeWireError {
                 identifier: "RunMat:onCleanup:CallbackFailed".into(),
                 message: "cleanup failed".into(),
+                cause: None,
             }),
         });
         result.validate().expect("valid failed shutdown envelope");

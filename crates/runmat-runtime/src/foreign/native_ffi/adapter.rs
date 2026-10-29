@@ -65,6 +65,7 @@ mod call;
 mod child_inventory;
 mod direct_snapshot;
 mod library;
+pub(super) use library::PreparedLibraryReadError;
 mod pointer_roles;
 mod pointer_storage;
 mod pointer_view;
