@@ -66,7 +66,9 @@ pub(super) fn map_fea_run_error(
         ),
         FeaRunError::Resource(error) => {
             let error_type = match &error {
-                ResourcePlanningError::AccuracyCeiling { .. }
+                ResourcePlanningError::CanonicalCollectionCapacity { .. }
+                | ResourcePlanningError::CanonicalWireCapacity { .. }
+                | ResourcePlanningError::AccuracyCeiling { .. }
                 | ResourcePlanningError::StaticSolveCeiling { .. }
                 | ResourcePlanningError::Inventory(_)
                 | ResourcePlanningError::Capability(_)
@@ -196,18 +198,30 @@ mod tests {
             runmat_analysis_fea::fixtures::FixtureId::StructuralTransientTet4Reference,
         );
         let context = OperationContext::new(None, None);
-        let ceiling = map_fea_run_error(
-            AnalysisOperation::Transient,
-            &model,
-            &context,
-            FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling {
+        for resource in [
+            ResourcePlanningError::CanonicalCollectionCapacity {
+                required: 2,
+                maximum: 1,
+            },
+            ResourcePlanningError::CanonicalWireCapacity {
+                required: 2,
+                maximum: 1,
+            },
+            ResourcePlanningError::AccuracyCeiling {
                 resource: "resident memory bytes",
                 required: 2,
                 maximum: 1,
-            }),
-        );
-        assert_eq!(ceiling.error_type, OperationErrorType::Capacity);
-        assert_eq!(ceiling.error_code, "RM.FEA.RESOURCE_PLANNING_FAILED");
+            },
+        ] {
+            let ceiling = map_fea_run_error(
+                AnalysisOperation::Transient,
+                &model,
+                &context,
+                FeaRunError::Resource(resource),
+            );
+            assert_eq!(ceiling.error_type, OperationErrorType::Capacity);
+            assert_eq!(ceiling.error_code, "RM.FEA.RESOURCE_PLANNING_FAILED");
+        }
         let invalid = map_fea_run_error(
             AnalysisOperation::Transient,
             &model,

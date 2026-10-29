@@ -1,5 +1,4 @@
 use super::*;
-use runmat_types::physical::LengthUnit;
 
 pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
     vec![

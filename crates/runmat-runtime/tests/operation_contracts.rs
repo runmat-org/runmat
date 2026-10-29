@@ -8,7 +8,6 @@ use runmat_analysis_core::{
     SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape,
     SignalValue, TabulatedSignal, TabulatedSignalDomain, Velocity,
 };
-use runmat_types::physical::LengthUnit;
 
 fn exact_signal_evidence(sample_count: usize) -> SignalApproximationEvidence {
     SignalApproximationEvidence {
