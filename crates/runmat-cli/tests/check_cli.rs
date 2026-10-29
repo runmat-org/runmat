@@ -406,10 +406,11 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
         manifest["solver_mesh_digest"]
     );
     assert_eq!(evidence.artifact_digest, mesh.canonical_digest);
-    // Golden counts of the current mesher for this example (deterministic across runs).
-    assert_eq!(mesh.topology.nodes.len(), 778);
-    assert_eq!(mesh.topology.volume_elements.len(), 2156);
-    assert_eq!(mesh.topology.boundary_faces.len(), 1328);
+    // Golden counts for the authored independent-definition STEP fixture,
+    // qualified by two byte-identical standalone meshes with seed zero.
+    assert_eq!(mesh.topology.nodes.len(), 402);
+    assert_eq!(mesh.topology.volume_elements.len(), 1204);
+    assert_eq!(mesh.topology.boundary_faces.len(), 768);
 
     let model: AnalysisModel =
         serde_json::from_value(manifest["compiled"]["model"].clone()).unwrap();
