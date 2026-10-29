@@ -1,6 +1,8 @@
 //! Prepared handoff metadata are fenced before any geometry/solver execution.
 use super::prepared_validation::validate_prepared_execution;
 use super::*;
+#[path = "../../../tests/support/fea_admission.rs"]
+mod fea_admission;
 
 const SOURCE: &str = r#"
 geometry part {
@@ -100,8 +102,18 @@ async fn prepared_execution_rejects_metadata_and_envelope_substitution_before_ex
         .contains("revision"));
     prepared.revision = revision;
     prepared.realized.study_id.push_str("_foreign");
-    let error = execute_prepared_fea_study_locally(prepared, &options)
+    let host = fea_admission::TestFeaHost::new(None);
+    let error = host
+        .context()
+        .run_future(execute_prepared_fea_study_locally(prepared, &options))
         .await
         .unwrap_err();
     assert!(error.contains("original root study"), "{error}");
+    let events = host.events();
+    assert_eq!(events.requests.len(), 1, "one prepared execution root");
+    assert_eq!(events.settlements.len(), 1);
+    assert_eq!(
+        events.settlements[0].0,
+        runmat_runtime::analysis::fea_run_admission::FeaRunOutcome::Failed
+    );
 }

@@ -63,6 +63,14 @@ study response {
 "#;
 
 pub(super) async fn run() {
+    use runmat_runtime::analysis::fea_run_admission::{
+        FeaRunDenied, FeaRunKind, FeaRunOutcome, FeaRunSite,
+    };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
     let limits = ObjectInventoryLimits::default();
     for (order, name) in [
         (ElementOrder::Tet4, "linear"),
@@ -79,18 +87,68 @@ pub(super) async fn run() {
             "{:?}",
             checked.checked().check_result().diagnostics
         );
-        let completed = execute_checked_fea_locally(
-            &checked,
-            LocalFeaExecutionOptions {
-                root: Some(FeaRootSelector::Study {
-                    id: "response".into(),
-                }),
-                workers: Some(1),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        let effects = Arc::new(AtomicUsize::new(0));
+        let progress_effects = Arc::clone(&effects);
+        let mesh_effects = Arc::clone(&effects);
+        let options = LocalFeaExecutionOptions {
+            root: Some(FeaRootSelector::Study {
+                id: "response".into(),
+            }),
+            workers: Some(1),
+            cpu_threads_per_worker: Some(
+                runmat_analysis_fea::planning::resource::LocalThreadCount::new(1).unwrap(),
+            ),
+            progress_observer: Some(Arc::new(move |_| {
+                progress_effects.fetch_add(1, Ordering::SeqCst);
+            })),
+            mesh_observer: Some(Arc::new(move |_| {
+                mesh_effects.fetch_add(1, Ordering::SeqCst);
+            })),
+            ..Default::default()
+        };
+        // The same public root and checked source must stop before any mesh/solve
+        // progress or mesh publication when its explicit host denies admission.
+        let denied = crate::fea_admission::TestFeaHost::new(Some(FeaRunDenied::SignInRequired));
+        let error = denied
+            .context()
+            .run_future(execute_checked_fea_locally(&checked, options.clone()))
+            .await
+            .err()
+            .expect("denied root must not execute");
+        assert!(error.starts_with("RM.FEA.SignInRequired:"), "{error}");
+        assert_eq!(
+            effects.load(Ordering::SeqCst),
+            0,
+            "denial must precede numerical effects"
+        );
+        assert_eq!(denied.events().requests.len(), 1);
+        assert!(denied.events().settlements.is_empty());
+
+        let admitted = crate::fea_admission::TestFeaHost::new(None);
+        let completed = admitted
+            .context()
+            .run_future(execute_checked_fea_locally(&checked, options))
+            .await
+            .unwrap();
+        let events = admitted.events();
+        assert_eq!(
+            events.requests.len(),
+            1,
+            "mesh and solve share one root permit"
+        );
+        assert_eq!(events.requests[0].kind, FeaRunKind::MeshAndSolve);
+        assert_eq!(events.requests[0].site, FeaRunSite::Local);
+        assert_eq!(events.requests[0].allocated_cpu_millicores, 1000);
+        assert_eq!(events.settlements.len(), 1);
+        assert_eq!(events.settlements[0].0, FeaRunOutcome::Completed);
+        assert_eq!(
+            events.settlements[0].1.cpu_core_millis,
+            events.settlements[0].1.wall_millis
+        );
+        assert!(
+            effects.load(Ordering::SeqCst) > 0,
+            "successful root must exercise the observers"
+        );
         let LocalFeaExecution::Study(case) = completed else {
             panic!("expected standalone study");
         };
