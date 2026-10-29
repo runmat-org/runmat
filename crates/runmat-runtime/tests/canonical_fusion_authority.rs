@@ -14,7 +14,7 @@ fn nested_specification_module_joins_the_implementation_binding() {
 
 #[test]
 fn selected_binding_cannot_borrow_another_variants_expression() {
-    for (name, revision) in [("single", 1), ("double", 1), ("power", 3)] {
+    for (name, revision) in [("single", 2), ("double", 2), ("power", 3)] {
         let entry = builtin_catalog_entry_by_name(name).expect("canonical entry");
         let identity = entry.binding_identity(&entry.bindings[0]);
         let declaration = canonical_fusion_declaration(identity).expect("selected declaration");

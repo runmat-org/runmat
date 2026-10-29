@@ -1,4 +1,4 @@
-//! Single-library production declaration joins, independent of legacy lib-test fixtures.
+//! Single-library canonical production declaration joins, independent of legacy lib-test fixtures.
 use futures::executor::block_on;
 use runmat_runtime::{
     builtins::common::spec::{
@@ -18,12 +18,27 @@ use std::rc::Rc;
 fn declaration(name: &str) -> &'static FusionReductionDeclaration {
     let selected = selected_fusion_binding(name, None, None)
         .unwrap_or_else(|| panic!("{name}: production binding/provenance join missing"));
-    assert!(
-        matches!(selected.identity, SelectedFusionIdentity::Legacy { .. }),
-        "{name}: update explicit lineage witness when canonical migration lands"
+    let entry = runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical reduction");
+    let [binding] = entry.bindings else {
+        panic!("one canonical reduction binding")
+    };
+    let expected = entry.binding_identity(binding);
+    let SelectedFusionIdentity::Canonical(identity) = selected.identity else {
+        panic!("{name}: production reduction must select canonical authority");
+    };
+    assert_eq!(identity, expected);
+    assert_eq!(
+        selected.canonical.expect("canonical declaration").binding,
+        expected
     );
     let declaration = selected.reduction.expect("joined typed declaration");
-    assert_eq!(declaration.revision, 2);
+    let revision = match name {
+        "sum" => 3,
+        "mean" => 5,
+        "min" | "max" => 2,
+        _ => panic!("unregistered reduction witness"),
+    };
+    assert_eq!(declaration.revision, revision);
     declaration
 }
 fn receipt(
@@ -131,7 +146,7 @@ impl RuntimeBuiltinService for EmptyService {
 }
 
 #[test]
-fn all_four_join_exact_compiled_legacy_provenance_and_reject_other_authority() {
+fn all_four_join_exact_compiled_canonical_provenance_and_reject_other_authority() {
     runmat_gc::gc_test_context(|| {
         let wrong = runmat_builtins::builtin_catalog_entry_by_name("sin").unwrap();
         let [binding] = wrong.bindings else {
@@ -146,25 +161,52 @@ fn all_four_join_exact_compiled_legacy_provenance_and_reject_other_authority() {
             assert_eq!(
                 runmat_builtins::with_builtin_functions_by_exact_name(name, |entries| entries
                     .len()),
-                1
+                0,
+                "{name}: canonical reduction must not retain a legacy dispatcher"
             );
+            let entry = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
+            let [binding] = entry.bindings else {
+                panic!("one canonical reduction binding")
+            };
+            let expected = entry.binding_identity(binding);
+            let compiled =
+                runmat_runtime::builtin::with_runtime_builtin_bindings_by_name(name, |entries| {
+                    let [binding] = entries else {
+                        panic!("one compiled reduction binding")
+                    };
+                    *binding
+                });
+            assert_eq!(compiled.identity, expected);
             let owner =
                 runmat_builtins::with_builtin_implementation_provenance_by_name(name, |entries| {
-                    let entries: Vec<_> = entries
+                    let canonical = entries
                         .iter()
                         .filter(|entry| {
                             entry.authority
-                                == runmat_builtins::BuiltinImplementationAuthority::LegacyFunction
+                                == runmat_builtins::BuiltinImplementationAuthority::CanonicalBinding
+                                && entry.binding_variant == Some(expected.variant)
                         })
-                        .collect();
-                    assert_eq!(entries.len(), 1, "{name} provenance");
-                    entries[0].builtin_path
+                        .collect::<Vec<_>>();
+                    let [owner] = canonical.as_slice() else {
+                        panic!("one exact canonical provenance owner")
+                    };
+                    assert!(!entries.iter().any(|entry| entry.authority
+                        == runmat_builtins::BuiltinImplementationAuthority::LegacyFunction));
+                    owner.builtin_path
                 });
-            let selected = selected_fusion_binding(name, None, None).unwrap();
-            let SelectedFusionIdentity::Legacy { physical_owner } = selected.identity else {
-                panic!("expected legacy join");
+            assert_eq!(
+                compiled
+                    .provenance
+                    .expect("compiled provenance")
+                    .builtin_path,
+                owner
+            );
+            let selected = selected_fusion_binding(name, Some(expected), None).unwrap();
+            let SelectedFusionIdentity::Canonical(identity) = selected.identity else {
+                panic!("expected canonical join");
             };
-            assert_eq!(physical_owner, owner);
+            assert_eq!(identity, expected);
+            assert_eq!(selected.canonical.unwrap().binding, expected);
             assert!(selected.reduction.is_some());
             assert!(selected_fusion_binding(name, Some(wrong), None).is_none());
             assert!(selected_fusion_binding(name, None, Some(&context)).is_none());

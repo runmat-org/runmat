@@ -1,6 +1,6 @@
 #[path = "support/fixtures.rs"]
 mod test_fixtures;
-#[path = "support/fea_admission.rs"]
+#[path = "../../runmat-runtime/tests/support/fea_admission.rs"]
 mod fea_admission;
 #[path = "analysis_process_conformance/fluid_fourier.rs"]
 mod fluid_fourier;

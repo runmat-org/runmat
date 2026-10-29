@@ -1,7 +1,7 @@
 //! Prepared handoff metadata are fenced before any geometry/solver execution.
 use super::prepared_validation::validate_prepared_execution;
 use super::*;
-#[path = "../../../tests/support/fea_admission.rs"]
+#[path = "../../../../runmat-runtime/tests/support/fea_admission.rs"]
 mod fea_admission;
 
 const SOURCE: &str = r#"
