@@ -1,5 +1,8 @@
 use super::*;
+#[cfg(target_arch = "wasm32")]
 use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::backend::wgpu::dispatch::observation::{ScopeConfirmation, ScopedRetirement};
 use runmat_accelerate_api::observation::{
     current_provider_observation, ProviderObservationFailure,
 };
@@ -68,26 +71,81 @@ impl WgpuProvider {
 
         let (pipeline, bind_group, workgroups) =
             self.with_emission(|emission, _| prepare(emission))??;
+        // Pre-reserve before the synchronous emission-risk interval; retirement
+        // must no longer depend on polling/dropping the logical scope future.
+        #[cfg(not(target_arch = "wasm32"))]
+        let retirement = ScopedRetirement::prepare()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let confirmation = ScopeConfirmation(retirement.clone());
+        #[cfg(not(target_arch = "wasm32"))]
+        let progress = self.observation_progress.as_ref().ok_or_else(|| {
+            ProviderExecutionError::from(anyhow::anyhow!(
+                "scoped FFT retirement progress unavailable"
+            ))
+        })?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut gate = progress
+            .scoped_emission_guard(self.access.clone(), retirement.clone())
+            .map_err(ProviderExecutionError::from_source)?;
+        #[cfg(target_arch = "wasm32")]
         let mut pending = PendingSubmissions::new(self.access.clone());
         let receipt = self
             .access
             .with_profiled_scoped(&self.emission_authority, |emission| {
-                crate::backend::wgpu::dispatch::fft::run(
-                    emission,
-                    &mut pending,
-                    pipeline,
-                    &bind_group,
-                    workgroups,
-                    label,
-                )
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    gate.with_pending(|pending| {
+                        crate::backend::wgpu::dispatch::fft::run(
+                            emission,
+                            pending,
+                            pipeline,
+                            &bind_group,
+                            workgroups,
+                            label,
+                        )
+                    })
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    crate::backend::wgpu::dispatch::fft::run(
+                        emission,
+                        &mut pending,
+                        pipeline,
+                        &bind_group,
+                        workgroups,
+                        label,
+                    )
+                }
             })
             .map_err(ProviderExecutionError::from_source)?;
-        // Submission progress, including legacy exact-index waits on native,
-        // must not run under the exclusive scope gate.
-        pending.commit();
+        // Commit physical ownership BEFORE the first await. Neither scope
+        // rejection nor cancellation may wait on an unauthenticated index.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Drop publishes the already-owned fixed slot and merely wakes
+            // the existing worker; channel errors cannot drop physical work.
+            drop(gate);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Browser has no indexed wait. Preserve its existing private
+            // map/fence callback ownership, including scope cancellation.
+            pending.commit();
+        }
         match receipt.resolve().await {
-            Ok(result) => result.map_err(Into::into),
+            Ok(Ok(())) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                confirmation.0.confirm();
+                Ok(())
+            }
+            Ok(Err(error)) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                confirmation.0.reject();
+                Err(error.into())
+            }
             Err(error) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                confirmation.0.reject();
                 if let Some(recorder) = current_provider_observation() {
                     recorder.fail(ProviderObservationFailure::ProviderFailed);
                 }

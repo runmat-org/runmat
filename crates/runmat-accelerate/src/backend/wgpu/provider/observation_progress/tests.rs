@@ -11,6 +11,13 @@ fn isolated(
         used: AtomicU32::new(0),
         limit,
         stopped: Arc::new(AtomicBool::new(false)),
+        scoped_emission: Mutex::new(()),
+        scoped_work: Mutex::new(Vec::new()),
+        worker_closed: AtomicBool::new(false),
+        retained_uncertain: AtomicBool::new(false),
+        shutdown_requested: AtomicBool::new(false),
+        access: None,
+        health: None,
     });
     (
         NativeObservationProgress {
@@ -35,6 +42,148 @@ fn reservation_capacity_is_nonblocking_and_uncommitted_drop_releases() {
     drop(reservation);
     assert_eq!(progress.state.used.load(Ordering::Acquire), 0);
     drop(progress.reserve().unwrap());
+}
+
+#[test]
+fn scoped_errors_and_lost_wakes_retain_owner_until_actual_proof() {
+    let (progress, receiver) = isolated(2);
+    let unused = progress.reserve_slot().unwrap();
+    let reserved = progress.reserve_slot().unwrap();
+    let signal = crate::backend::wgpu::dispatch::observation::ScopedRetirement::prepare().unwrap();
+    let retained = Arc::new(());
+    let weak = Arc::downgrade(&retained);
+    progress
+        .state
+        .scoped_work
+        .lock()
+        .unwrap()
+        .push(Some(ScopedWork {
+            pending: None,
+            probe: Some(retained),
+            signal: signal.clone(),
+            ready: true,
+            _slot: reserved.slot,
+        }));
+    drop(receiver);
+    assert!(progress.control.sender.try_send(Command::Wake).is_err());
+    let mut job = progress.state.next_scoped().unwrap();
+    job.completion
+        .finish(Err(WgpuObservationProgressError::Stopped));
+    drop(job);
+    assert!(
+        weak.upgrade().is_some(),
+        "progress error is not retirement proof"
+    );
+    assert_eq!(progress.state.used.load(Ordering::Acquire), 2);
+    assert!(signal.proof().is_none());
+    let job = progress.state.next_scoped().unwrap();
+    drop(job); // Worker/queued completion destruction is not physical proof.
+    assert!(weak.upgrade().is_some());
+    assert!(signal.proof().is_none());
+    progress.state.retain_uncertain();
+    assert!(progress.state.retained_uncertain.load(Ordering::Acquire));
+    signal.queue_retired();
+    let mut job = progress.state.next_scoped().unwrap();
+    job.completion.finish(Ok(()));
+    drop(job);
+    assert!(weak.upgrade().is_none());
+    assert_eq!(progress.state.used.load(Ordering::Acquire), 1);
+    drop(unused);
+    assert_eq!(progress.state.used.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn fatal_progress_retains_charged_owner_and_shutdown_does_not_wait_for_proof() {
+    let (progress, receiver) = isolated(2);
+    let unused = progress.reserve_slot().unwrap();
+    let reserved = progress.reserve_slot().unwrap();
+    let signal = crate::backend::wgpu::dispatch::observation::ScopedRetirement::prepare().unwrap();
+    let retained = Arc::new(());
+    let weak = Arc::downgrade(&retained);
+    progress
+        .state
+        .scoped_work
+        .lock()
+        .unwrap()
+        .push(Some(ScopedWork {
+            pending: None,
+            probe: Some(retained),
+            signal: signal.clone(),
+            ready: true,
+            _slot: reserved.slot,
+        }));
+    // Exercise the actual worker unwind boundary once, not a fabricated loss.
+    drive(
+        [progress.state.next_scoped().unwrap()],
+        &progress.state,
+        |_| panic!("fatal driver poll witness"),
+    );
+    assert!(progress.state.retained_uncertain.load(Ordering::Acquire));
+    assert!(!progress.is_available());
+    assert!(signal.proof().is_none());
+    assert!(weak.upgrade().is_some());
+    assert_eq!(progress.state.used.load(Ordering::Acquire), 2);
+    progress.control.stop();
+    let owner = progress.state.clone();
+    drive(
+        commands(receiver, &progress.state, move || owner.next_scoped()),
+        &progress.state,
+        |_| panic!("closing must not repoll unproved work"),
+    );
+    assert!(progress.state.worker_closed.load(Ordering::Acquire));
+    assert!(
+        weak.upgrade().is_some(),
+        "unproved physical owner stays charged"
+    );
+    drop(unused);
+    assert_eq!(progress.state.used.load(Ordering::Acquire), 1);
+    // Explicit test cleanup uses actual callback proof, never shutdown itself.
+    signal.queue_retired();
+    let mut job = progress.state.next_scoped().unwrap();
+    job.completion.finish(Ok(()));
+    drop(job);
+    assert!(weak.upgrade().is_none());
+    assert_eq!(progress.state.used.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn shutdown_drains_only_prearmed_work_not_unused_reservations() {
+    let (progress, receiver) = isolated(2);
+    let unused = progress.reserve_slot().unwrap();
+    let reserved = progress.reserve_slot().unwrap();
+    let signal = crate::backend::wgpu::dispatch::observation::ScopedRetirement::prepare().unwrap();
+    let retained = Arc::new(());
+    let weak = Arc::downgrade(&retained);
+    progress
+        .state
+        .scoped_work
+        .lock()
+        .unwrap()
+        .push(Some(ScopedWork {
+            pending: None,
+            probe: Some(retained),
+            signal,
+            ready: true,
+            _slot: reserved.slot,
+        }));
+    progress.control.stop();
+    let owner = progress.state.clone();
+    drive(
+        commands(receiver, &progress.state, move || owner.next_scoped()),
+        &progress.state,
+        |target| {
+            let WaitTarget::Scoped(signal) = target else {
+                panic!("only prearmed scoped work")
+            };
+            assert!(weak.upgrade().is_some());
+            signal.queue_retired();
+            Ok(())
+        },
+    );
+    assert!(weak.upgrade().is_none());
+    assert_eq!(progress.state.used.load(Ordering::Acquire), 1);
+    drop(unused);
+    assert_eq!(progress.state.used.load(Ordering::Acquire), 0);
 }
 
 #[test]
@@ -71,8 +220,9 @@ fn readback_reserves_before_registration_and_commit_races_retire_once() {
             assert!(statuses.lock().unwrap().is_empty());
             let state = progress.state.clone();
             drop(progress);
-            drive(commands(receiver, &state), &state, |submission| {
-                assert!(submission.is_none())
+            drive(commands(receiver, &state, || None), &state, |submission| {
+                assert!(matches!(submission, WaitTarget::Existing(None)));
+                Ok(())
             });
             assert!(weak.upgrade().is_none());
             assert_eq!(*statuses.lock().unwrap(), vec![Ok(())]);
@@ -164,6 +314,13 @@ fn rejected_commit_invokes_completion_once_and_releases_capacity() {
             used: AtomicU32::new(1),
             limit: 1,
             stopped: Arc::new(AtomicBool::new(stopped)),
+            scoped_emission: Mutex::new(()),
+            scoped_work: Mutex::new(Vec::new()),
+            worker_closed: AtomicBool::new(false),
+            retained_uncertain: AtomicBool::new(false),
+            shutdown_requested: AtomicBool::new(false),
+            access: None,
+            health: None,
         });
         let completed = Arc::new(AtomicU32::new(0));
         let observed = completed.clone();
@@ -177,7 +334,8 @@ fn rejected_commit_invokes_completion_once_and_releases_capacity() {
                     assert_eq!(status, Err(WgpuObservationProgressError::Stopped));
                     observed.fetch_add(1, Ordering::AcqRel);
                 })),
-                _slot: Slot(state.clone()),
+                _slot: Some(Slot(state.clone())),
+                retire_after_stop: false,
             },
         );
         assert_eq!(result, Err(WgpuObservationProgressError::Stopped));
@@ -193,6 +351,13 @@ fn worker_poll_failure_or_device_loss_fails_and_drains_bounded_queue() {
             used: AtomicU32::new(2),
             limit: 2,
             stopped: Arc::new(AtomicBool::new(false)),
+            scoped_emission: Mutex::new(()),
+            scoped_work: Mutex::new(Vec::new()),
+            worker_closed: AtomicBool::new(false),
+            retained_uncertain: AtomicBool::new(false),
+            shutdown_requested: AtomicBool::new(false),
+            access: None,
+            health: None,
         });
         let failures = Arc::new(AtomicU32::new(0));
         let (sender, receiver) = sync_channel(2);
@@ -205,7 +370,8 @@ fn worker_poll_failure_or_device_loss_fails_and_drains_bounded_queue() {
                         assert!(status.is_err());
                         failed.fetch_add(1, Ordering::AcqRel);
                     })),
-                    _slot: Slot(state.clone()),
+                    _slot: Some(Slot(state.clone())),
+                    retire_after_stop: false,
                 })
                 .unwrap_or_else(|_| panic!("test queue available"));
         }
@@ -217,6 +383,7 @@ fn worker_poll_failure_or_device_loss_fails_and_drains_bounded_queue() {
                 panic!("injected device poll failure");
             }
             state.stopped.store(true, Ordering::Release); // device-lost callback
+            Ok(())
         });
         assert_eq!(polled, vec![11]);
         assert_eq!(failures.load(Ordering::Acquire), 2);
@@ -230,6 +397,13 @@ fn sender_shutdown_drains_without_failing_successful_jobs() {
         used: AtomicU32::new(2),
         limit: 2,
         stopped: Arc::new(AtomicBool::new(false)),
+        scoped_emission: Mutex::new(()),
+        scoped_work: Mutex::new(Vec::new()),
+        worker_closed: AtomicBool::new(false),
+        retained_uncertain: AtomicBool::new(false),
+        shutdown_requested: AtomicBool::new(false),
+        access: None,
+        health: None,
     });
     let failures = Arc::new(AtomicU32::new(0));
     let (sender, receiver) = sync_channel(2);
@@ -243,13 +417,17 @@ fn sender_shutdown_drains_without_failing_successful_jobs() {
                         failed.fetch_add(1, Ordering::AcqRel);
                     }
                 })),
-                _slot: Slot(state.clone()),
+                _slot: Some(Slot(state.clone())),
+                retire_after_stop: false,
             })
             .unwrap_or_else(|_| panic!("test queue available"));
     }
     drop(sender);
     let mut completed = Vec::new();
-    drive(receiver, &state, |submission| completed.push(*submission));
+    drive(receiver, &state, |submission| {
+        completed.push(*submission);
+        Ok(())
+    });
     assert_eq!(completed, vec![1, 2]);
     assert_eq!(failures.load(Ordering::Acquire), 0);
     assert_eq!(state.used.load(Ordering::Acquire), 0);
@@ -275,8 +453,13 @@ fn readiness_does_not_retire_the_physically_running_callback_tail() {
     let state = progress.state.clone();
     drop(progress);
     let worker_state = state.clone();
-    let worker =
-        std::thread::spawn(move || drive(commands(receiver, &worker_state), &worker_state, |_| {}));
+    let worker = std::thread::spawn(move || {
+        drive(
+            commands(receiver, &worker_state, || None),
+            &worker_state,
+            |_| Ok(()),
+        )
+    });
     ready_rx.recv().unwrap();
     assert!(
         weak.upgrade().is_some(),
@@ -306,9 +489,13 @@ fn explicit_shutdown_retires_queued_owners_with_a_live_sender() {
         progress.control.stop();
         // Keep progress (and its sender) live. A full queue cannot accept the
         // wake command, and an empty queue can: both must terminate normally.
-        drive(commands(receiver, &progress.state), &progress.state, |_| {
-            panic!("shutdown must not start another device poll");
-        });
+        drive(
+            commands(receiver, &progress.state, || None),
+            &progress.state,
+            |_| {
+                panic!("shutdown must not start another device poll");
+            },
+        );
         assert_eq!(completed.load(Ordering::Acquire), u32::from(full));
         assert_eq!(progress.state.used.load(Ordering::Acquire), 0);
         assert!(progress.reserve_slot().is_err());

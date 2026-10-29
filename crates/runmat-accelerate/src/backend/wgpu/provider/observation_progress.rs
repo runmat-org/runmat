@@ -9,17 +9,29 @@ use std::num::NonZeroU32;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
     mpsc::{sync_channel, SyncSender},
-    Arc,
+    Arc, Mutex,
 };
 
+mod scoped_retirement;
 #[path = "observation_progress/shutdown.rs"]
 mod shutdown;
+use scoped_retirement::ScopedWork;
 
 struct State {
     used: AtomicU32,
     limit: u32,
     stopped: Arc<AtomicBool>,
+    scoped_emission: Mutex<()>,
+    // Fixed per-device backing, sized at construction to the same slot limit.
+    // Physical ownership lives here; channel commands only wake the worker.
+    scoped_work: Mutex<Vec<Option<ScopedWork>>>,
+    worker_closed: AtomicBool,
+    retained_uncertain: AtomicBool,
+    shutdown_requested: AtomicBool,
+    access: Option<runmat_accelerate_api::WgpuDeviceAccess>,
+    health: Option<Arc<super::WgpuDeviceHealth>>,
 }
+
 struct Slot(Arc<State>);
 impl Drop for Slot {
     fn drop(&mut self) {
@@ -30,9 +42,14 @@ impl Drop for Slot {
 type CompletionCallback = Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>;
 pub(super) struct Completion {
     callback: Option<CompletionCallback>,
+    scoped: Option<ScopedCompletion>,
     // The consuming callback deallocates its Box before this external claim
     // retires. This field is inline in the existing preallocated queue Job.
     claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
+}
+struct ScopedCompletion {
+    owner: Arc<State>,
+    index: usize,
 }
 impl Completion {
     fn ordinary(callback: CompletionCallback) -> Self {
@@ -45,14 +62,27 @@ impl Completion {
     ) -> Self {
         Self {
             callback: Some(callback),
+            scoped: None,
             claim,
+        }
+    }
+
+    fn scoped(owner: Arc<State>, index: usize) -> Self {
+        Self {
+            callback: None,
+            scoped: Some(ScopedCompletion { owner, index }),
+            claim: None,
         }
     }
 
     pub(super) fn finish(&mut self, status: Result<(), WgpuObservationProgressError>) {
         let completion = self.callback.take();
+        let scoped = self.scoped.take();
         let claim = self.claim.take();
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            if let Some(scoped) = scoped {
+                scoped.owner.finish_scoped(scoped.index);
+            }
             if let Some(completion) = completion {
                 completion(status);
             }
@@ -67,15 +97,22 @@ impl Drop for Completion {
         self.finish(Err(WgpuObservationProgressError::Stopped));
     }
 }
-struct Job<I = Option<wgpu::SubmissionIndex>> {
-    submission: I,
-    completion: Completion,
-    _slot: Slot,
+enum WaitTarget {
+    Existing(Option<wgpu::SubmissionIndex>),
+    Scoped(crate::backend::wgpu::dispatch::observation::ScopedRetirement),
 }
 
-enum Command<I = Option<wgpu::SubmissionIndex>> {
+struct Job<I = WaitTarget> {
+    submission: I,
+    completion: Completion,
+    _slot: Option<Slot>,
+    retire_after_stop: bool,
+}
+
+enum Command<I = WaitTarget> {
     Observe(Job<I>),
     Shutdown,
+    Wake,
 }
 
 struct Control {
@@ -85,41 +122,109 @@ struct Control {
 
 impl Control {
     fn stop(&self) {
+        let _closing = self
+            .state
+            .scoped_emission
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         self.state.stopped.store(true, Ordering::Release);
+        self.state.shutdown_requested.store(true, Ordering::Release);
         // A full queue already wakes the receiver. The iterator checks stopped
         // before every receive, so a failed wake cannot strand an idle worker.
         let _ = self.sender.try_send(Command::Shutdown);
     }
 }
 
+impl Drop for Control {
+    fn drop(&mut self) {
+        // Normal sender exhaustion still drains accepted work. A catastrophically
+        // failed worker must also be able to close without another driver call.
+        self.state.shutdown_requested.store(true, Ordering::Release);
+        let _ = self.sender.try_send(Command::Wake);
+    }
+}
+
 fn commands<'a, I: 'a>(
     receiver: std::sync::mpsc::Receiver<Command<I>>,
     state: &'a State,
+    mut scoped: impl FnMut() -> Option<Job<I>> + 'a,
 ) -> impl Iterator<Item = Job<I>> + 'a {
     std::iter::from_fn(move || {
-        if state.stopped.load(Ordering::Acquire) {
-            return None;
-        }
-        match receiver.recv().ok()? {
-            Command::Observe(job) => Some(job),
-            Command::Shutdown => None,
+        loop {
+            if let Some(job) = scoped() {
+                return Some(job);
+            }
+            let command = if state.stopped.load(Ordering::Acquire) {
+                // The closing gate already prevented new scoped emission. Only
+                // drain accepted jobs; never wait for unused reservations.
+                let _closing = state
+                    .scoped_emission
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if let Some(job) = scoped() {
+                    return Some(job);
+                }
+                match receiver.try_recv() {
+                    Ok(command) => command,
+                    Err(_) => {
+                        state.worker_closed.store(true, Ordering::Release);
+                        return None;
+                    }
+                }
+            } else {
+                match receiver.recv() {
+                    Ok(command) => command,
+                    Err(_) => {
+                        let _closing = state
+                            .scoped_emission
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if let Some(job) = scoped() {
+                            return Some(job);
+                        }
+                        state.worker_closed.store(true, Ordering::Release);
+                        return None;
+                    }
+                }
+            };
+            match command {
+                Command::Observe(job) => return Some(job),
+                Command::Shutdown | Command::Wake => {}
+            }
         }
     })
 }
 
-fn drive<I>(receiver: impl IntoIterator<Item = Job<I>>, state: &State, mut poll: impl FnMut(&I)) {
+fn drive<I>(
+    receiver: impl IntoIterator<Item = Job<I>>,
+    state: &State,
+    mut poll: impl FnMut(&I) -> Result<(), WgpuObservationProgressError>,
+) {
     for mut job in receiver {
-        if state.stopped.load(Ordering::Acquire) {
+        if state.stopped.load(Ordering::Acquire) && !job.retire_after_stop {
             continue;
         }
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| poll(&job.submission)));
-        if result.is_ok() && !state.stopped.load(Ordering::Acquire) {
+        if matches!(result, Ok(Ok(())))
+            && (!state.stopped.load(Ordering::Acquire) || job.retire_after_stop)
+        {
             job.completion.finish(Ok(()));
         } else {
+            let _closing = state
+                .scoped_emission
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             state.stopped.store(true, Ordering::Release);
+            if !matches!(result, Ok(Ok(()))) {
+                state.retain_uncertain();
+            }
         }
     }
+    let _closing = state
+        .scoped_emission
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     state.stopped.store(true, Ordering::Release);
 }
 
@@ -131,19 +236,35 @@ pub(super) struct NativeObservationProgress {
 impl NativeObservationProgress {
     pub(super) fn is_available(&self) -> bool {
         !self.state.stopped.load(Ordering::Acquire)
+            && !self.state.worker_closed.load(Ordering::Acquire)
     }
 
     pub(super) fn start(
         access: runmat_accelerate_api::WgpuDeviceAccess,
         limit: NonZeroU32,
         stopped: Arc<AtomicBool>,
+        health: Arc<super::WgpuDeviceHealth>,
     ) -> std::io::Result<Arc<Self>> {
         shutdown::prepare()?;
         let (sender, receiver) = sync_channel::<Command>(limit.get() as usize);
+        let mut scoped_work = Vec::new();
+        scoped_work
+            .try_reserve_exact(limit.get() as usize)
+            .map_err(|error| {
+                std::io::Error::other(format!("scoped retirement backing: {error}"))
+            })?;
+        scoped_work.resize_with(limit.get() as usize, || None);
         let state = Arc::new(State {
             used: AtomicU32::new(0),
             limit: limit.get(),
             stopped,
+            scoped_emission: Mutex::new(()),
+            scoped_work: Mutex::new(scoped_work),
+            worker_closed: AtomicBool::new(false),
+            retained_uncertain: AtomicBool::new(false),
+            shutdown_requested: AtomicBool::new(false),
+            access: Some(access.clone()),
+            health: Some(health),
         });
         let control = Arc::new(Control {
             sender,
@@ -153,19 +274,28 @@ impl NativeObservationProgress {
         // The worker owns device access, not Provider or a sender. Closing all
         // senders drains queued work; only the process exit boundary joins it.
         shutdown::spawn(&control, move || {
-            let jobs = commands(receiver, &worker_state);
+            let owner = worker_state.clone();
+            let jobs = commands(receiver, &worker_state, move || owner.next_scoped());
             drive(jobs, &worker_state, |submission| {
                 // Poll drives callbacks and may wait: never hold an emission
                 // permit here. A native poll fatal is caught by `drive`,
                 // separately from the device-lost callback's state.
-                access.poll(match submission {
-                    Some(index) => wgpu::Maintain::WaitForSubmissionIndex(index.clone()),
+                match submission {
+                    WaitTarget::Existing(Some(index)) => {
+                        access.poll(wgpu::Maintain::WaitForSubmissionIndex(index.clone()));
+                    }
                     // Device control synchronizes existing queue work; it
                     // does not manufacture an ordinary submission while
                     // the session's emission admission is fenced. This
                     // wait runs only on this existing device worker.
-                    None => wgpu::Maintain::Wait,
-                });
+                    WaitTarget::Existing(None) => {
+                        access.poll(wgpu::Maintain::Wait);
+                    }
+                    WaitTarget::Scoped(signal) => {
+                        scoped_retirement::poll_scoped(&access, &worker_state, signal)?;
+                    }
+                }
+                Ok(())
             });
         })?;
         Ok(Arc::new(Self { control, state }))
@@ -230,9 +360,10 @@ impl Reservation {
         commit_job(
             &control.sender,
             Job {
-                submission: None,
+                submission: WaitTarget::Existing(None),
                 completion,
-                _slot: slot,
+                _slot: Some(slot),
+                retire_after_stop: false,
             },
         )
     }
@@ -249,7 +380,14 @@ fn commit_job<I>(
     sender: &SyncSender<Command<I>>,
     job: Job<I>,
 ) -> Result<(), WgpuObservationProgressError> {
-    if job._slot.0.stopped.load(Ordering::Acquire) {
+    if job
+        ._slot
+        .as_ref()
+        .expect("ordinary reservation")
+        .0
+        .stopped
+        .load(Ordering::Acquire)
+    {
         return Err(WgpuObservationProgressError::Stopped);
     }
     // On rejection the owned job runs completion outside the emission gate.
@@ -266,9 +404,10 @@ impl WgpuObservationProgressReservation for Reservation {
     ) -> Result<(), WgpuObservationProgressError> {
         let Self { control, slot } = *self;
         let job = Job {
-            submission: Some(submission),
+            submission: WaitTarget::Existing(Some(submission)),
             completion: Completion::ordinary(completion),
-            _slot: slot,
+            _slot: Some(slot),
+            retire_after_stop: false,
         };
         // Reservation accounts for queued AND active jobs. Disconnect drops Job,
         // running cleanup and releasing the slot, without a blocking send.

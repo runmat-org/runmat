@@ -15,8 +15,8 @@ use std::sync::Arc as Shared;
 use std::{error::Error, fmt, future::Future, pin::Pin};
 use wgpu::util::DeviceExt;
 
-mod gate;
 mod errors;
+mod gate;
 mod provenance;
 mod scopes;
 pub use errors::{WgpuScopeErrorKind, WgpuScopeErrors};
@@ -142,6 +142,19 @@ impl WgpuDeviceAccess {
 
     pub fn has_raw_export(&self) -> bool {
         self.inner.effects.has_raw_export()
+    }
+
+    /// One-way catastrophic progress fence. Already-admitted synchronous
+    /// permits finish before this returns; later emission is denied. This is
+    /// not physical device-loss proof and never blocks cleanup or callbacks.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn fence_emission(&self) {
+        self.inner.gate.fence_emission();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn is_emission_fenced(&self) -> bool {
+        self.inner.gate.is_fenced()
     }
 
     /// A mapped initializer or queue write may have enqueued device work

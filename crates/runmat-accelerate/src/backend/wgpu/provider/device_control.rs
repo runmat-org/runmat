@@ -123,9 +123,12 @@ impl ProviderDeviceControl for WgpuProvider {
         self.allocations.has_scope(scope).ok()
     }
     fn gpu_device_facts(&self) -> ProviderGpuDeviceFacts<'_> {
+        let available = self.device_health.loss_reason().is_none() && !self.allocations.is_lost();
+        #[cfg(not(target_arch = "wasm32"))]
+        let available = available && !self.access.is_emission_fenced();
         ProviderGpuDeviceFacts {
             name: &self.adapter_info.name,
-            available: self.device_health.loss_reason().is_none() && !self.allocations.is_lost(),
+            available,
             total_memory_bytes: None,
             available_memory_bytes: None,
             supports_double: Some(self.enabled_features.contains(wgpu::Features::SHADER_F64)),

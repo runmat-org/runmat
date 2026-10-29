@@ -83,6 +83,17 @@ pub(super) struct DirectCompletion {
 }
 
 impl DirectCompletion {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn retire_scoped(mut self, confirmed: bool) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.unretired_submission = None;
+        }
+        if !confirmed {
+            drop(self.physical.take());
+        }
+        self.retire(confirmed, false);
+    }
     fn retire(mut self, progressed: bool, mapped: bool) {
         let access = self.access.clone();
         let elapsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -204,6 +215,20 @@ pub(super) struct FenceCompletion {
 }
 
 impl FenceCompletion {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn retire_scoped(mut self, confirmed: bool) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.unretired_submission = None;
+        }
+        if !confirmed {
+            drop(self.physical.take());
+        }
+        let completed = self.result.take_after_progress(confirmed).flatten();
+        // Queue retirement is proven, but timestamps are optional. Do not
+        // wait on mapping/Promise delivery to retire GPU ownership.
+        self.cleanup(completed, confirmed, false);
+    }
     fn release_fence(&mut self, timing_mapped: bool) -> (bool, DecodedTimestamps) {
         let access = self.access.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

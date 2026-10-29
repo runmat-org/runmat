@@ -493,6 +493,7 @@ impl WgpuProvider {
             access.clone(),
             observation_limit,
             observation_stopped,
+            device_health.clone(),
         )
         .map_err(|error| log::warn!("provider observation progress unavailable: {error}"))
         .ok();

@@ -127,6 +127,8 @@ mod completion;
 mod host_control;
 #[path = "observation/inline_slots.rs"]
 mod inline_slots;
+#[cfg(not(target_arch = "wasm32"))]
+mod scoped_retirement;
 mod submitted_retention;
 #[cfg(target_arch = "wasm32")]
 use completion::map_direct_fence;
@@ -138,6 +140,8 @@ use completion::{
 use host_control::observed_completion_callback_fits_bound;
 pub(crate) use host_control::observed_submission_dispatch_host_control_upper_bytes;
 use inline_slots::InlineSlots;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use scoped_retirement::{ScopeConfirmation, ScopedRetirement, ScopedRetirementProof};
 
 pub(crate) use submitted_retention::{
     PreparedSubmittedAllocationRetention, SubmittedAllocationRetention,
@@ -165,6 +169,31 @@ pub(crate) struct PendingSubmissions {
 }
 
 impl PendingSubmissions {
+    /// Retire only after a non-indexed queue callback or actual device-loss
+    /// proof authenticated physical retirement. A rejected or unconfirmed command never earns
+    /// positive timing evidence. Existing map/query owners remain here until
+    /// that callback, independently of logical future cancellation.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn retire_scoped(mut self, proof: ScopedRetirementProof, confirmed: bool) {
+        let confirmed = confirmed && proof.queue_completed();
+        self.legacy_poll = None;
+        for observation in self.direct_observations.drain(..) {
+            observation.completion.retire_scoped(confirmed);
+        }
+        for observation in self.observations.drain() {
+            observation.completion.retire_scoped(confirmed);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn scoped_retirement_host_upper_bytes() -> Option<u64> {
+        // The queued physical completion is inline in the preallocated slot.
+        // Only the driver's signal callback capture allocates per request.
+        let callback = std::mem::size_of::<ScopedRetirement>()
+            .checked_add(std::mem::align_of::<ScopedRetirement>())?;
+        ScopedRetirement::host_upper_bytes()?.checked_add(callback.try_into().ok()?)
+    }
+
     pub(crate) fn new(access: WgpuDeviceAccess) -> Self {
         Self {
             access,

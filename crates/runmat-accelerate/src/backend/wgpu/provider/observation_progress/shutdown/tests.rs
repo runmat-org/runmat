@@ -1,5 +1,5 @@
-use super::*;
 use super::super::{Command, State};
+use super::*;
 use std::sync::{atomic::AtomicBool, atomic::AtomicU32, mpsc::sync_channel};
 
 #[test]
@@ -17,6 +17,13 @@ fn process_exit_drains_worker_after_main_thread_local_destruction() {
                 used: AtomicU32::new(0),
                 limit: 1,
                 stopped: Arc::new(AtomicBool::new(false)),
+                scoped_emission: Mutex::new(()),
+                scoped_work: Mutex::new(Vec::new()),
+                worker_closed: AtomicBool::new(false),
+                retained_uncertain: AtomicBool::new(false),
+                shutdown_requested: AtomicBool::new(false),
+                access: None,
+                health: None,
             }),
         });
         spawn(&control, move || {

@@ -60,6 +60,18 @@ fn authority_identity_requires_the_same_owner_not_equal_payloads() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn poisoned_admission_allows_only_cleanup_after_scope_unwind() {
+    let fenced = gate::Gate::default();
+    fenced.fence_emission();
+    fenced.cleanup(|| ()).unwrap();
+    assert!(fenced.is_fenced());
+    assert!(matches!(
+        fenced.shared(|| ()),
+        Err(WgpuAccessError::Poisoned)
+    ));
+    assert!(matches!(
+        fenced.exclusive(|| ()),
+        Err(WgpuAccessError::Poisoned)
+    ));
     let gate = gate::Gate::default();
     let driver = Driver::default();
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
