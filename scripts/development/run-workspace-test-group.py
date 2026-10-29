@@ -102,6 +102,12 @@ GROUPS = {
     ),
 }
 
+# Long continuum refinement belongs to an explicit scientific lane, not every
+# ordinary platform CI shard. Keep the tests runnable without changing assertions.
+EXTENDED_TEST_FILTERS = {
+    "geometry-analysis": ("pipeline::transient::rod_qualification::",),
+}
+
 
 def workspace_packages(repo_root: Path) -> set[str]:
     result = subprocess.run(
@@ -135,6 +141,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group", nargs="?", choices=GROUPS)
     parser.add_argument(
+        "--include-extended",
+        action="store_true",
+        help="include the scientific refinement lane in the selected group",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="validate that every workspace package belongs to exactly one group",
@@ -156,6 +167,12 @@ def main() -> int:
         "--all-features",
         *(argument for package in GROUPS[args.group] for argument in ("--package", package)),
     ]
+    if not args.include_extended:
+        filters = EXTENDED_TEST_FILTERS.get(args.group, ())
+        if filters:
+            command.append("--")
+            for test_filter in filters:
+                command.extend(("--skip", test_filter))
     return subprocess.run(command, cwd=repo_root).returncode
 
 

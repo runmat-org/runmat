@@ -126,6 +126,15 @@ through both host and JavaScript filesystem providers.
 
 ## FEA Script Tests
 
+The geometry/analysis CI group excludes the `pipeline::transient::rod_qualification` scientific family, which contains long continuum-refinement and multi-block cold-history fixtures. These tests retain their numerical assertions and are available as a separate qualification lane:
+
+```bash
+RUST_MIN_STACK=67108864 cargo test --locked -p runmat-analysis-fea --lib -- \
+  --test-threads=1 pipeline::transient::rod_qualification::
+```
+
+Allow a dedicated machine and an extended time budget for that lane. An ordinary CI pass does not establish these refinement envelopes. To include the lane in the complete geometry/analysis group, use `python3 scripts/development/run-workspace-test-group.py geometry-analysis --include-extended`. Direct `cargo test` retains its usual selection; ignored diagnostics and benchmarks remain opt-in.
+
 FEA governance, calibration, reporting, and artifact scripts use stdlib `unittest` tests:
 
 ```bash
