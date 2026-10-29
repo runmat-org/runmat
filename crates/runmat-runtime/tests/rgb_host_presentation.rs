@@ -130,18 +130,44 @@ impl RuntimePlacementService for Witness {
     fn invalidate(&self, _: PlacementInvalidation) {}
 }
 
-struct HostBudget(u64);
+struct HostBudget(runmat_runtime::context::host_effect::ManagedHostEffectLedger);
 impl RuntimeParallelService for HostBudget {
     fn supports(&self, _: ParallelCapability) -> bool {
         false
     }
     fn placement_resources(&self) -> RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
         RuntimeParallelResources {
             cpu_millicores_available: 1_000,
-            memory_available_bytes: Some(self.0),
-            epoch: 0,
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
         }
     }
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<runmat_runtime::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
+
+fn assert_argument_capacity_refusal(error: &RuntimeError) {
+    use runmat_runtime::context::{
+        host_allocation::HostAllocationError, host_effect::HostEffectAllocationError,
+    };
+    // A one-byte whole-call budget cannot admit even its exact Value slots.
+    // This original ingress refusal precedes placement and provider effects.
+    assert_eq!(error.identifier(), Some("RunMat:Call:Arguments"));
+    assert!(matches!(
+        std::error::Error::source(error)
+            .and_then(|cause| cause.downcast_ref::<HostAllocationError>()),
+        Some(HostAllocationError::Resource(
+            HostEffectAllocationError::ExceedsCapacity
+        ))
+    ));
+    assert_eq!(
+        error.gpu_gather_retry(),
+        runmat_runtime::GpuGatherRetry::Never
+    );
 }
 
 struct RejectPreparation;
@@ -292,7 +318,9 @@ fn finite_host_quota_rejects_rgb_route_before_readback_or_upload() {
     let runtime = base_context().with_service_ports(
         RuntimeServicePorts::default()
             .with_placement(Rc::new(PlacementSession::new(Default::default())))
-            .with_parallel(Rc::new(HostBudget(1))),
+            .with_parallel(Rc::new(HostBudget(
+                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(1),
+            ))),
     );
     let runtime = runmat_accelerate::native_auto::install_preparation_service(runtime);
     provider.reset_telemetry();
@@ -302,9 +330,7 @@ fn finite_host_quota_rejects_rgb_route_before_readback_or_upload() {
         &[Value::GpuTensor(source.clone())],
     ))
     .expect_err("finite quota must reject before Sink(Gather)");
-    assert!(error
-        .identifier()
-        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    assert_argument_capacity_refusal(&error);
     assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
     assert!(source.allocation_lease().validate_live().is_ok());
@@ -462,15 +488,15 @@ fn indexed_color_two_resident_readbacks_select_one_owner_and_finite_quota_reject
     let quota = base_context().with_service_ports(
         RuntimeServicePorts::default()
             .with_placement(Rc::new(PlacementSession::new(Default::default())))
-            .with_parallel(Rc::new(HostBudget(1))),
+            .with_parallel(Rc::new(HostBudget(
+                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(1),
+            ))),
     );
     let quota = runmat_accelerate::native_auto::install_preparation_service(quota);
     provider.reset_telemetry();
     let error = block_on(call_builtin_async_in_context(&quota, "ind2rgb", &operands))
         .expect_err("finite quota must reject both readbacks before effects");
-    assert!(error
-        .identifier()
-        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    assert_argument_capacity_refusal(&error);
     assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
     assert!(indexed.allocation_lease().validate_live().is_ok());
@@ -642,7 +668,9 @@ fn gray_host_sink_observes_completed_readback_and_replicated_host_result() {
     let quota = base_context().with_service_ports(
         RuntimeServicePorts::default()
             .with_placement(Rc::new(PlacementSession::new(Default::default())))
-            .with_parallel(Rc::new(HostBudget(1))),
+            .with_parallel(Rc::new(HostBudget(
+                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(1),
+            ))),
     );
     let quota = runmat_accelerate::native_auto::install_preparation_service(quota);
     provider.reset_telemetry();
@@ -652,9 +680,7 @@ fn gray_host_sink_observes_completed_readback_and_replicated_host_result() {
         &[Value::GpuTensor(source.clone())],
     ))
     .expect_err("finite host quota rejects before readback");
-    assert!(error
-        .identifier()
-        .is_some_and(|id| id.starts_with("RunMat:Placement:")));
+    assert_argument_capacity_refusal(&error);
     assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
 

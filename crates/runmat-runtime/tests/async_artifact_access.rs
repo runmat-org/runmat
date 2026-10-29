@@ -85,10 +85,16 @@ fn canonical_publication_reopens_and_failed_operations_do_not_publish() {
     futures::executor::block_on(async {
         let provider = Arc::new(MemoryFsProvider::new());
         let _guard = runmat_filesystem::replace_provider(provider.clone());
-        configure_artifact_store(AnalysisArtifactStoreConfig::Filesystem {
-            root: ".artifacts".into(),
+        // The async transaction owns one tree, including study evidence.
+        // Do not inherit a separately configured operator evidence root.
+        let root = std::path::PathBuf::from(".artifacts");
+        configure_fea_runtime(FeaRuntimeConfig {
+            artifact_root: Some(root.clone()),
+            study_artifact_root: Some(root.join("studies")),
+            ..FeaRuntimeConfig::default()
         })
         .unwrap();
+        configure_artifact_store(AnalysisArtifactStoreConfig::Filesystem { root }).unwrap();
         let run = fixture();
         let definition = runmat_execution::Digest::sha256(b"async-artifact-fixture");
         let receipt = with_artifact_access(true, |store| {

@@ -16,6 +16,14 @@ use std::time::Duration;
 use tempfile::tempdir;
 use zip::write::SimpleFileOptions;
 
+fn assert_logical_success(value: RootedValue, label: &str) {
+    assert_eq!(
+        value,
+        Value::Bool(true),
+        "{label} should return logical success"
+    );
+}
+
 fn assert_status_one(value: RootedValue, label: &str) {
     assert_eq!(value, Value::Num(1.0), "{label} should return success");
 }
@@ -44,11 +52,11 @@ fn exercise_repl_filesystem_builtins_through_provider() {
         "initial pwd",
     );
 
-    assert_status_one(
+    assert_logical_success(
         call_builtin("mkdir", &[Value::from("workspace")]).expect("mkdir workspace succeeds"),
         "mkdir workspace",
     );
-    assert_status_one(
+    assert_logical_success(
         call_builtin("mkdir", &[Value::from("workspace/nested")]).expect("mkdir nested succeeds"),
         "mkdir nested",
     );
@@ -79,7 +87,7 @@ fn exercise_repl_filesystem_builtins_through_provider() {
         "pwd after cd parent",
     );
 
-    assert_status_one(
+    assert_logical_success(
         call_builtin("mkdir", &[Value::from("/rooted")]).expect("mkdir rooted succeeds"),
         "mkdir rooted",
     );
@@ -156,7 +164,7 @@ fn exercise_repl_filesystem_builtins_through_provider() {
         block_on(vfs::metadata_async("workspace/moved.txt")).is_err(),
         "delete should remove the file"
     );
-    assert_status_one(
+    assert_logical_success(
         call_builtin("rmdir", &[Value::from("workspace"), Value::from("s")])
             .expect("rmdir recursive succeeds"),
         "rmdir",

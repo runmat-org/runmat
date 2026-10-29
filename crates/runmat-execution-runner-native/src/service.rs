@@ -735,11 +735,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         if record.generation != task.generation {
             return Err(ExecutionServiceError::UnknownHandle);
         }
-        let state = native_future_state(
-            state
-                .futures
-                .validate(&record.future_id, &task.outputs)?,
-        );
+        let state = native_future_state(state.futures.validate(&record.future_id, &task.outputs)?);
         Ok(ExecutionHandleSnapshot {
             state,
             outputs: task.outputs.clone(),

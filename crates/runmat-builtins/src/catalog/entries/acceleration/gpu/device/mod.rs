@@ -12,6 +12,7 @@ pub use properties::{GpuDeviceProperty, GPU_DEVICE_CLASS};
 mod tests;
 
 pub use contract::*;
+pub use methods::LIFECYCLE_ERROR as GPU_DEVICE_ERROR_LIFECYCLE;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &GPU_DEVICE_CATALOG_ENTRY,
     &methods::NAME,

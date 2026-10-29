@@ -21,7 +21,7 @@ const BUILTIN_NAME: &str = "gpuDevice";
 use runmat_builtins::{
     gpu_device_index_from_float, gpu_device_index_from_integer, GPU_DEVICE_ACTIVE_INDEX,
     GPU_DEVICE_ERROR_DEVICE_NOT_AVAILABLE, GPU_DEVICE_ERROR_INVALID_INDEX,
-    GPU_DEVICE_ERROR_NO_PROVIDER, GPU_DEVICE_ERROR_TOO_MANY_INPUTS,
+    GPU_DEVICE_ERROR_LIFECYCLE, GPU_DEVICE_ERROR_NO_PROVIDER, GPU_DEVICE_ERROR_TOO_MANY_INPUTS,
     GPU_DEVICE_ERROR_UNSUPPORTED_ARGUMENT, GPU_DEVICE_LOGICAL_SELECTOR_EXTENSION,
 };
 
@@ -133,10 +133,7 @@ async fn gpu_device_builtin(
 }
 
 fn lifecycle(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier("RunMat:gpuDevice:Lifecycle")
-        .build()
+    gpu_device_error_with_message(message, &GPU_DEVICE_ERROR_LIFECYCLE)
 }
 fn device_at_index(index: u32) -> BuiltinResult<&'static dyn AccelProvider> {
     let mut after = None;
