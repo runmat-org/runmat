@@ -159,7 +159,10 @@ impl CacheExport for FilesystemObjectStore {
                 verify_existing(self, object)?;
                 continue;
             }
-            if staged.iter().any(|(staged_target, _, _)| *staged_target == target) {
+            if staged
+                .iter()
+                .any(|(staged_target, _, _)| *staged_target == target)
+            {
                 // Same digest, already validated: identical canonical bytes.
                 continue;
             }
@@ -316,7 +319,9 @@ mod batch_tests {
         assert_eq!(fs::read_dir(&root).unwrap().count(), 3);
 
         fs::write(store.path(existing.descriptor.digest), b"poisoned").unwrap();
-        assert!(store.write_verified_batch([&object("c"), &existing]).is_err());
+        assert!(store
+            .write_verified_batch([&object("c"), &existing])
+            .is_err());
     }
 }
 

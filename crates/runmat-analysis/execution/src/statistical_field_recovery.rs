@@ -152,7 +152,12 @@ pub fn prepare_statistical_field_recovery(
         )?,
     );
     let resource_plan =
-        build_prepared_statistical_field_recovery_resource_plan(&request, &inputs, p.output_policy, p.local_execution)?;
+        build_prepared_statistical_field_recovery_resource_plan(
+            &request,
+            &inputs,
+            p.output_policy,
+            p.local_execution,
+        )?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),

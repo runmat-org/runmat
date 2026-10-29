@@ -74,8 +74,14 @@ mod tests {
     #[test]
     fn sha256_matches_published_vectors_the_previous_implementation_and_the_pinned_golden() {
         let vectors: [(&[u8], &str); 3] = [
-            (b"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
-            (b"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+            (
+                b"",
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ),
+            (
+                b"abc",
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            ),
             (
                 b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
                 "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
@@ -91,19 +97,29 @@ mod tests {
         );
 
         // Every padding boundary, one-shot and split across incremental updates, against 0.10.
-        let bytes = (0..1025u32).map(|i| (i.wrapping_mul(131) >> 3) as u8).collect::<Vec<_>>();
+        let bytes = (0..1025u32)
+            .map(|i| (i.wrapping_mul(131) >> 3) as u8)
+            .collect::<Vec<_>>();
         for len in 0..bytes.len() {
             let message = &bytes[..len];
             let previous = {
                 use sha2_mac::Digest as _;
                 sha2_mac::Sha256::digest(message).to_vec()
             };
-            assert_eq!(Sha256::digest(message).as_slice(), previous.as_slice(), "len {len}");
+            assert_eq!(
+                Sha256::digest(message).as_slice(),
+                previous.as_slice(),
+                "len {len}"
+            );
             let mut split = Sha256::new();
             let (head, tail) = message.split_at(len / 3);
             split.update(head);
             split.update(tail);
-            assert_eq!(split.finalize().as_slice(), previous.as_slice(), "split len {len}");
+            assert_eq!(
+                split.finalize().as_slice(),
+                previous.as_slice(),
+                "split len {len}"
+            );
         }
 
         // Golden configuration digest, computed independently with Python hashlib.

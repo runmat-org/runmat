@@ -138,8 +138,12 @@ pub fn prepare_nonlinear_field_recovery(
         ObjectNamespace::InputValue,
         p.output_policy.inventory_limits(),
     )?);
-    let resource_plan =
-        build_prepared_nonlinear_recovery_resource_plan(&request, &inputs, p.output_policy, p.local_execution)?;
+    let resource_plan = build_prepared_nonlinear_recovery_resource_plan(
+        &request,
+        &inputs,
+        p.output_policy,
+        p.local_execution,
+    )?;
     inputs.push(prepare_analysis_objects(
         Kind::ResourcePlan,
         resource_plan.identity.digest(),

@@ -122,8 +122,12 @@ pub fn prepare_maxwell_field_recovery(
         p.output_policy.inventory_limits(),
     )?;
     let mut inputs = vec![request_objects, p.workload, p.mesh, p.source_result];
-    let resource_plan =
-        build_prepared_maxwell_field_recovery_resource_plan(&request, &inputs, p.output_policy, p.local_execution)?;
+    let resource_plan = build_prepared_maxwell_field_recovery_resource_plan(
+        &request,
+        &inputs,
+        p.output_policy,
+        p.local_execution,
+    )?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),
@@ -228,7 +232,13 @@ pub fn build_prepared_maxwell_field_recovery_resource_plan(
         ));
     }
     let workspace = maxwell_recovery_source_validation_workspace(&workload, &mesh)?;
-    build_maxwell_recovery_metadata_resource_plan(request, inputs, policy, workspace, local_execution)
+    build_maxwell_recovery_metadata_resource_plan(
+        request,
+        inputs,
+        policy,
+        workspace,
+        local_execution,
+    )
 }
 
 /// Authenticate immutable closure profiles and output policy before domain decoding.

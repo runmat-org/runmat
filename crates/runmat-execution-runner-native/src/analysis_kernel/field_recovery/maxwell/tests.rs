@@ -66,7 +66,8 @@ fn both_orders_publish_all_original_native_fields_and_reopen_cold() {
                 source_result: solved.objects.clone(),
                 program_revision: task.program.request.recipe.program_revision.clone(),
                 output_policy: task.output_policy,
-                local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             })
             .unwrap();
             let original = solved

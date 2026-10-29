@@ -105,7 +105,9 @@ pub(super) async fn prepare(args: &TestArgs, cli: &Cli) -> Result<PreparedDiscov
         });
     let test_config_digest = format!(
         "sha256:{}",
-        hex::encode(Sha256::digest(serde_json::to_vec(&test_config).context("failed to encode test config")?)),
+        hex::encode(Sha256::digest(
+            serde_json::to_vec(&test_config).context("failed to encode test config")?
+        )),
     );
     let snapshot = freeze_native_snapshot(NativeSnapshotInput {
         project_root: project_root.clone(),

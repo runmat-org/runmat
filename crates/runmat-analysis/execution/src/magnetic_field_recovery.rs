@@ -100,8 +100,12 @@ pub fn prepare_magnetic_field_recovery(
         p.output_policy.inventory_limits(),
     )?;
     let mut inputs = vec![request_objects, p.workload, p.mesh, p.source_result];
-    let resource_plan =
-        build_prepared_magnetic_field_recovery_resource_plan(&request, &inputs, p.output_policy, p.local_execution)?;
+    let resource_plan = build_prepared_magnetic_field_recovery_resource_plan(
+        &request,
+        &inputs,
+        p.output_policy,
+        p.local_execution,
+    )?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),
@@ -169,7 +173,13 @@ pub fn build_prepared_magnetic_field_recovery_resource_plan(
         SolverMeshArtifact::canonical_decode(&unique(AnalysisNumericalObjectKind::Mesh)?.payload())
             .map_err(invalid)?;
     let workspace = magnetic_recovery_source_validation_workspace(&workload, &mesh)?;
-    build_magnetic_recovery_metadata_resource_plan(request, inputs, policy, workspace, local_execution)
+    build_magnetic_recovery_metadata_resource_plan(
+        request,
+        inputs,
+        policy,
+        workspace,
+        local_execution,
+    )
 }
 
 /// Authenticate immutable closure profiles and output policy before domain decoding.

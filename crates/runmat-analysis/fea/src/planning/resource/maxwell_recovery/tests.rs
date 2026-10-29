@@ -109,8 +109,13 @@ fn complex_recovery_profiles_bound_actual_catalog_and_partitions_both_orders() {
             },
         };
         let validation = maxwell_recovery_source_validation_workspace(&workload, &mesh).unwrap();
-        let plan = build_maxwell_field_recovery_resource_plan(&request, validation, facts.clone(), crate::planning::resource::LocalExecutionPlan::serial())
-            .unwrap();
+        let plan = build_maxwell_field_recovery_resource_plan(
+            &request,
+            validation,
+            facts.clone(),
+            crate::planning::resource::LocalExecutionPlan::serial(),
+        )
+        .unwrap();
         assert_eq!(
             plan.input
                 .demand
@@ -125,7 +130,13 @@ fn complex_recovery_profiles_bound_actual_catalog_and_partitions_both_orders() {
         let mut understated = facts;
         understated.output.encoded_payload_bytes_upper_bound.0 -= 1;
         assert!(
-            build_maxwell_field_recovery_resource_plan(&request, validation, understated, crate::planning::resource::LocalExecutionPlan::serial()).is_err()
+            build_maxwell_field_recovery_resource_plan(
+                &request,
+                validation,
+                understated,
+                crate::planning::resource::LocalExecutionPlan::serial(),
+            )
+            .is_err()
         );
         assert_eq!(
             FeaResourcePlan::from_canonical_bytes(&plan.canonical_bytes().unwrap()).unwrap(),

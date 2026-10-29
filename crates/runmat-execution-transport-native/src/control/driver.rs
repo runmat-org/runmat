@@ -617,7 +617,11 @@ mod streamed_download_tests {
             .await
             .expect("loopback listener");
         let url = format!("http://{}/signed", listener.local_addr().expect("address"));
-        let artifact = descriptor(url, 7, &format!("sha256:{}", hex::encode(Sha256::digest(b"sealed"))));
+        let artifact = descriptor(
+            url,
+            7,
+            &format!("sha256:{}", hex::encode(Sha256::digest(b"sealed"))),
+        );
         let (mut writer, _reader) = tokio::io::duplex(128);
         assert_eq!(
             SignedArtifactDownloader::new()

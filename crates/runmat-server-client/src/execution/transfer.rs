@@ -195,7 +195,8 @@ impl ExecutionClient {
             )
             .await?;
         if bytes.len() as i64 != artifact.ciphertext_size_bytes
-            || format!("sha256:{}", hex::encode(Sha256::digest(&bytes))) != artifact.ciphertext_digest
+            || format!("sha256:{}", hex::encode(Sha256::digest(&bytes)))
+                != artifact.ciphertext_digest
         {
             bail!("downloaded execution artifact failed exact ciphertext verification");
         }
