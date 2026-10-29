@@ -74,6 +74,7 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
         workspace_projection,
         fusion_snapshot,
         variable_array: _unstarted_frame,
+        #[cfg(not(target_arch = "wasm32"))]
         frame_extent,
         workspace_admission: _workspace_admission,
         ..
