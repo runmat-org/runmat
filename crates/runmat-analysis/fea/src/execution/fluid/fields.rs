@@ -432,7 +432,8 @@ impl FluidSteadySolverResult {
         let source = workload.prepare(mesh)?;
         self.validate_prepared(workload, &source, mesh)?;
         profile::admit(self, workload, &source)?;
-        FiniteVolumeFieldTopology::derive(&source.source, &source.topology).map_err(invalid)
+        // `prepare` derived the topology from this projection in process.
+        FiniteVolumeFieldTopology::from_derived(&source.source, &source.topology).map_err(invalid)
     }
 
     /// The fluid's native field layout on the canonical solver mesh, admitted first.
