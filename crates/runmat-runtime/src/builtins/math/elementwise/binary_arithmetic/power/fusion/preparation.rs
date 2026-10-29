@@ -71,3 +71,75 @@ pub(super) fn resources(
         retained_bytes: stage,
     })
 }
+
+#[cfg(test)]
+pub(super) fn assert_selected_finite_quote() {
+    use super::tests::{computed_base, power_receipt};
+    use super::{FusionScalarControl, SEMANTICS};
+    use runmat_value::Tensor;
+
+    let admission = SEMANTICS.admit.expect("selected POWER admission owner");
+    assert_eq!(admission.preparation_arity(), Some(2));
+    assert!(
+        SEMANTICS.finite_preparation_class().is_none(),
+        "domain admission is not pure"
+    );
+    for exponent in [0.0_f64, -0.0, 1.0, 2.0] {
+        let value = Value::Num(exponent);
+        let operands = [None, Some(&value)];
+        let resources = admission
+            .preparation_resources(FusionAdmissionPreparationQuery {
+                operands: &operands,
+                max_rank: 4,
+            })
+            .expect("existing certified typed producer's Double control");
+        let mut empty_work = FusionAdmissionWork::None;
+        let empty = FusionAdmissionContext::new(&[], &[], &[], &[], &mut empty_work).unwrap();
+        let actual_frame = admit_inner(empty);
+        let stage = std::mem::size_of::<FusionProofStage>() as u64;
+        assert_eq!(
+            resources.scratch_bytes,
+            std::mem::size_of_val(&actual_frame) as u64
+                + (4 * std::mem::size_of::<runmat_types::DimensionFact>()) as u64
+                + 17
+                + stage
+        );
+        assert_eq!(resources.retained_bytes, stage);
+        let receipt = power_receipt(computed_base(Value::Num(exponent)).unwrap());
+        assert_eq!(
+            receipt.exponent_scalar,
+            Some(FusionScalarControl::DoubleBits(exponent.to_bits()))
+        );
+        let tensor = Value::Tensor(Tensor::new(vec![exponent], vec![1, 1]).unwrap());
+        assert!(admission
+            .preparation_resources(FusionAdmissionPreparationQuery {
+                operands: &[None, Some(&tensor)],
+                max_rank: 2,
+            })
+            .is_some());
+    }
+    let single = Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap());
+    assert!(
+        admission
+            .preparation_resources(FusionAdmissionPreparationQuery {
+                operands: &[None, Some(&single)],
+                max_rank: 2,
+            })
+            .is_none(),
+        "Single bits are never widened into certified Double authority"
+    );
+    let other = Value::Num(3.0);
+    assert!(
+        admission
+            .preparation_resources(FusionAdmissionPreparationQuery {
+                operands: &[None, Some(&other)],
+                max_rank: 2,
+            })
+            .is_none(),
+        "broader POWER is not part of the existing typed product"
+    );
+    assert!(
+        computed_base(other).is_some(),
+        "original general admission remains unchanged"
+    );
+}

@@ -3,39 +3,6 @@ use runmat_runtime::RuntimeError;
 use super::{SequenceRegister, SequenceState};
 
 impl SequenceState {
-    fn stage_window(
-        slot: &mut Option<SequenceRegister>,
-        stack: &mut crate::interpreter::stack::InterpreterStack,
-        sequence: runmat_value::ValueSequence,
-        overwrite_message: &'static str,
-    ) -> Result<(), RuntimeError> {
-        if slot.is_some() {
-            return Err(state_error(overwrite_message));
-        }
-        let values = sequence.into_output_storage();
-        let output_count = values.as_slice().len();
-        let window = SequenceRegister {
-            start: stack.len(),
-            len: output_count,
-        };
-        stack.try_extend_output(values)?;
-        *slot = Some(window);
-        Ok(())
-    }
-
-    pub(super) fn stage_call_output_sequence(
-        &mut self,
-        stack: &mut crate::interpreter::stack::InterpreterStack,
-        sequence: runmat_value::ValueSequence,
-    ) -> Result<(), RuntimeError> {
-        Self::stage_window(
-            &mut self.call_outputs,
-            stack,
-            sequence,
-            "call output sequence was overwritten before capture",
-        )
-    }
-
     pub(super) fn stage_rooted_call_output_sequence(
         &mut self,
         stack: &mut crate::interpreter::stack::InterpreterStack,
@@ -100,8 +67,10 @@ mod tests {
             let mut state = SequenceState::default();
             let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(legacy)
                 .expect("adapt builtin result");
+            let sequence = runmat_runtime::execution::RootedValueSequence::new(sequence)
+                .expect("retain adapted output roots");
             state
-                .stage_call_output_sequence(&mut stack, sequence)
+                .stage_rooted_call_output_sequence(&mut stack, sequence)
                 .expect("stage call outputs");
             assert!(stack
                 .iter()
