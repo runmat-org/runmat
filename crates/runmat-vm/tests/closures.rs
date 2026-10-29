@@ -46,8 +46,10 @@ fn feval_with_string_handle() {
 
 #[test]
 fn feval_with_string_handle_resolves_local_semantic_function() {
-    let vars =
-        execute_source("function y = inc(x); y = x + 1; end; r = feval('@inc', 2);").unwrap();
+    let vars = execute_source_with_extensions(
+        "function y = inc(x); y = x + 1; end; r = feval('@inc', 2);",
+    )
+    .unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));

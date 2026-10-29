@@ -97,6 +97,8 @@ fn datetime_subtraction_between_scalars_uses_object_overload_path() {
 
 #[test]
 fn datetime_legacy_conversion_helpers_execute_in_scripts() {
+    // Numeric serial-date operands to isbetween are a RunMat extension.
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "n = datenum(2024, 3, 14); \
          v = datevec(n); \

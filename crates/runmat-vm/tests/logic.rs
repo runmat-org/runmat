@@ -1047,14 +1047,18 @@ fn typed_complex_integer_relational_equality_preserves_exact_storage() {
 #[test]
 fn typed_complex_integer_arithmetic_reductions_are_rejected_before_f64_coercion() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    for operation in ["sum(z)", "cumsum(z)", "cumprod(z)", "diff([z z])"] {
+    for (operation, identifier) in [
+        ("sum(z)", "RunMat:sum:InvalidInput"),
+        ("cumsum(z)", "RunMat:cumsum:InvalidInput"),
+        ("cumprod(z)", "RunMat:cumprod:InvalidInput"),
+        ("diff([z z])", "RunMat:diff:InvalidInput"),
+    ] {
         let source =
             format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {operation};");
         let err = execute_source(&source).expect_err(operation);
-        assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ),
+        assert_eq!(
+            err.identifier(),
+            Some(identifier),
             "{operation} returned an unexpected error: {err}"
         );
     }
@@ -1076,14 +1080,19 @@ fn typed_complex_integer_arithmetic_reductions_are_rejected_before_f64_coercion(
 
 #[test]
 fn typed_complex_integer_extrema_and_mean_are_rejected_before_f64_coercion() {
-    for operation in ["mean(z)", "min(z)", "max(z)", "cummin(z)", "cummax(z)"] {
+    for (operation, identifier) in [
+        ("mean(z)", "RunMat:mean:InvalidInput"),
+        ("min(z)", "RunMat:min:InvalidInput"),
+        ("max(z)", "RunMat:max:InvalidInput"),
+        ("cummin(z)", "RunMat:cummin:InvalidInput"),
+        ("cummax(z)", "RunMat:cummax:InvalidInput"),
+    ] {
         let source =
             format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {operation};");
         let err = execute_source(&source).expect_err(operation);
-        assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ),
+        assert_eq!(
+            err.identifier(),
+            Some(identifier),
             "{operation} returned an unexpected error: {err}"
         );
     }
@@ -1455,25 +1464,24 @@ fn typed_complex_integer_mat2cell_preserves_exact_components() {
 #[test]
 fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    for operation in [
-        "gradient(z)",
-        "trapz(z)",
-        "trapz(0, z)",
-        "trapz(z, 1)",
-        "trapz(0, z, 1)",
-        "cumtrapz(z)",
-        "cumtrapz(0, z)",
-        "cumtrapz(z, 1)",
-        "cumtrapz(0, z, 1)",
+    for (operation, identifier) in [
+        ("gradient(z)", "RunMat:gradient:InvalidInput"),
+        ("trapz(z)", "RunMat:trapz:InvalidInput"),
+        ("trapz(0, z)", "RunMat:trapz:InvalidInput"),
+        ("trapz(z, 1)", "RunMat:trapz:InvalidInput"),
+        ("trapz(0, z, 1)", "RunMat:trapz:InvalidInput"),
+        ("cumtrapz(z)", "RunMat:cumtrapz:InvalidInput"),
+        ("cumtrapz(0, z)", "RunMat:cumtrapz:InvalidInput"),
+        ("cumtrapz(z, 1)", "RunMat:cumtrapz:InvalidInput"),
+        ("cumtrapz(0, z, 1)", "RunMat:cumtrapz:InvalidInput"),
     ] {
         let source = format!(
             "z = complex(uint64([9223372036854775808 9223372036854775809]), uint64([1 1])); out = {operation};"
         );
         let err = execute_source(&source).expect_err(operation);
-        assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ),
+        assert_eq!(
+            err.identifier(),
+            Some(identifier),
             "{operation} returned an unexpected error: {err}"
         );
     }

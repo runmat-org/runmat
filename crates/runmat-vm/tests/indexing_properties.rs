@@ -3,17 +3,18 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
-fn find_last_tensor(vars: &[runmat_value::Value]) -> runmat_value::Tensor {
-    vars.iter()
-        .rev()
-        .find_map(|v| {
-            if let runmat_value::Value::Tensor(t) = v {
-                Some(t.clone())
-            } else {
-                None
-            }
-        })
-        .expect("no tensor found")
+fn execute_named_tensor(source: &str, name: &str) -> runmat_value::Tensor {
+    let bytecode = test_helpers::compile_source(source).expect("indexing fixture should compile");
+    let slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, variable)| (variable == name).then_some(slot))
+        .expect("authored output should have a named slot");
+    let vars = test_helpers::interpret(&bytecode).expect("indexing fixture should execute");
+    match &vars[slot] {
+        runmat_value::Value::Tensor(tensor) => tensor.clone(),
+        other => panic!("expected {name} tensor, got {other:?}"),
+    }
 }
 
 #[test]
@@ -120,8 +121,7 @@ fn fastpath_roundtrip_and_broadcast() {
 #[test]
 fn negative_step_linear_index() {
     let src = "A = 1:10; B = A(10:-2:2);";
-    let vars = execute_source(src).unwrap();
-    let b = find_last_tensor(&vars);
+    let b = execute_named_tensor(src, "B");
     // MATLAB preserves numeric index array shape for linear indexing.
     assert_eq!(b.shape(), vec![1, 5]);
     assert_eq!(b.materialize_f64(), vec![10.0, 8.0, 6.0, 4.0, 2.0]);
@@ -167,8 +167,7 @@ fn empty_col_selection() {
 #[test]
 fn empty_both_selection() {
     let src = "A = [1 2; 3 4]; B = A([], []);";
-    let vars = execute_source(src).unwrap();
-    let b = find_last_tensor(&vars);
+    let b = execute_named_tensor(src, "B");
     assert_eq!(b.shape(), vec![0, 0]);
     assert_eq!(b.materialize_f64().len(), 0);
 }
