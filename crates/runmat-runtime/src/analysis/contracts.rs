@@ -825,9 +825,9 @@ impl AnalysisRuntimeCapabilities {
 pub fn analysis_authoring_workflow() -> Vec<String> {
     vec![
         "edit <study>.fea with workspace file tools".to_string(),
-        "runmat fea check <study>.fea [--study <id> | --sweep <id>]".to_string(),
-        "runmat fea plan <study>.fea [--study <id> | --sweep <id>] --json".to_string(),
-        "runmat fea run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]"
+        "runmat check <study>.fea [--study <id> | --sweep <id>]".to_string(),
+        "runmat plan <study>.fea [--study <id> | --sweep <id>] --json".to_string(),
+        "runmat run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]"
             .to_string(),
     ]
 }
@@ -2695,9 +2695,9 @@ mod tests {
     fn agent_authoring_facts_come_from_closed_runtime_catalogs() {
         let workflow = analysis_authoring_workflow();
         assert_eq!(workflow.len(), 4);
-        assert!(workflow[1].starts_with("runmat fea check "));
-        assert!(workflow[2].starts_with("runmat fea plan "));
-        assert!(workflow[3].starts_with("runmat fea run "));
+        assert!(workflow[1].starts_with("runmat check "));
+        assert!(workflow[2].starts_with("runmat plan "));
+        assert!(workflow[3].starts_with("runmat run "));
 
         let procedures = analysis_procedure_ids();
         assert_eq!(procedures.len(), 11);

@@ -8,7 +8,7 @@ Meshing and solving consume the simulation allowance described on the [pricing p
 
 Save the following as `bracket.fea` beside `geometry/two-box-assembly.step`:
 
-The complete example package includes its CAD file and machine-managed named-selection metadata. The study stays in one readable source file; exporting the project preserves its selections.
+The included STEP file carries the authored body and end-face names the study selects; `select name` resolves only names authored in the CAD file. The study stays in one readable source file; exporting the project preserves its CAD names.
 
 ```fea
 geometry bracket {
@@ -74,10 +74,10 @@ This separation is deliberate:
 ## Check, Plan, Run
 
 ```sh
-runmat fea check bracket.fea
-runmat fea plan bracket.fea
+runmat check bracket.fea
+runmat plan bracket.fea
 runmat login
-runmat fea run bracket.fea
+runmat run bracket.fea
 ```
 
 Use `--json` for automation. `check` parses and type-checks the entire source graph but does not mesh or solve. `plan` prints the canonical logical phases and selected root. `run` realizes exact geometry, meshes, compiles assignments and procedure state, executes the solver, and publishes a typed result manifest.
@@ -92,8 +92,8 @@ runmat run bracket.fea
 If the root module declares several studies or sweeps, selection is explicit:
 
 ```sh
-runmat fea run qualification.fea --study bracket_static
-runmat fea run qualification.fea --sweep load_envelope
+runmat run qualification.fea --study bracket_static
+runmat run qualification.fea --sweep load_envelope
 ```
 
 ## Inspect Geometry Before Authoring Regions
@@ -190,13 +190,13 @@ Sweep expansion is deterministic. RunMat checks every value against the declared
 Local execution is the default:
 
 ```sh
-runmat fea run bracket.fea --json
+runmat run bracket.fea --json
 ```
 
 Use the same checked source on a configured cluster:
 
 ```sh
-runmat fea run bracket.fea \
+runmat run bracket.fea \
   --cluster engineering \
   --project 7a7d4d37-f0ae-4a6b-a0f8-013a04e0a9d5 \
   --queue batch \

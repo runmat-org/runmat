@@ -77,7 +77,7 @@ The source checker understands every declaration in the catalog above, but a che
 not by itself an executable end-to-end study. The native whole-study executor currently admits
 structural procedure graphs. Thermal, electromagnetic, acoustic, and fluid load contracts can be
 authored and checked, but their complete geometry-to-publication `.fea` execution paths are not yet
-admitted. `runmat fea check` therefore answers “is this a valid typed study definition?”; it does
+admitted. `runmat check` therefore answers “is this a valid typed study definition?”; it does
 not admit a physics family for execution.
 
 The family pages mark that boundary where it matters. See [FEA capability status](../status) for the
@@ -370,7 +370,7 @@ copying its samples or losing its source identity.
 Use the family pages as the closed source-language reference. A section with `.fea` syntax names a
 supported declaration. A section that says a first-class contract is unavailable describes the
 required physics and the safe alternative; it is not permission to place the same number into a
-different kind. `runmat fea check study.fea` rejects unknown kinds, wrong quantities, invalid target
+different kind. `runmat check study.fea` rejects unknown kinds, wrong quantities, invalid target
 roles, missing signal domains, and incompatible combinations before execution.
 
 ## Which result proves that a load was applied correctly?

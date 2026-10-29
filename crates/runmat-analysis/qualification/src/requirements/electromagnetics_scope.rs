@@ -65,7 +65,7 @@ const FEA_EM_TRANSIENT_001: Requirement = Requirement {
     id: "FEA-EM-TRANSIENT-001",
     title: "Transient electromagnetics",
     stages: &[Stage::Electromagnetics],
-    acceptance: "Time-domain eddy currents (A-V formulation) run from time-history drives, including switching and pulse loads, with the loss passed to heat, from an `electromagnetic transient` study through `fea run`.",
+    acceptance: "Time-domain eddy currents (A-V formulation) run from time-history drives, including switching and pulse loads, with the loss passed to heat, from an `electromagnetic transient` study through `runmat run`.",
     owners: &["crates/runmat-analysis/fea/src/physics/maxwell/system.rs"],
     dependencies: &[],
     obligations: &[
@@ -223,7 +223,7 @@ const FEA_COUPLING_ELECTROTHERMAL_002: Requirement = Requirement {
         ),
         obligation(
             "public_route",
-            "Electrothermal studies are admitted at `fea run` and run remotely.",
+            "Electrothermal studies are admitted at `runmat run` and run remotely.",
             EvidenceKind::PublicRun,
             ETH,
         ),

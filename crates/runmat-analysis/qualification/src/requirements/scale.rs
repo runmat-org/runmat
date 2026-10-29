@@ -255,7 +255,7 @@ const FEA_SCALE_DISTRIBUTED_001: Requirement = Requirement {
     obligations: &[
         obligation(
             "remote_whole_study_every_family",
-            "`runmat fea run --cluster` runs the family's published study remotely with encrypted inputs, no unsupported-physics rejection, and results equal to the local run under the equivalence policy.",
+            "`runmat run --cluster` runs the family's published study remotely with encrypted inputs, no unsupported-physics rejection, and results equal to the local run under the equivalence policy.",
             EvidenceKind::ExecutionEquivalence,
             REMOTE,
         ),

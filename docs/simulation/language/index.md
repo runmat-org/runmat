@@ -32,7 +32,7 @@ objects owned by a declaration, such as regions inside geometry and loads inside
 
 The smallest useful structural example still states its physical ownership explicitly:
 
-The complete example package includes its CAD file and machine-managed named-selection metadata. The study stays in one readable source file; exporting the project preserves its selections.
+The included STEP file carries the authored body and end-face names the study selects; `select name` resolves only names authored in the CAD file. The study stays in one readable source file; exporting the project preserves its CAD names.
 
 ```fea
 geometry bracket {
@@ -95,9 +95,9 @@ The checked-in copy is
 repository root:
 
 ```sh
-runmat fea check docs/simulation/examples/structural-static.fea
-runmat fea plan docs/simulation/examples/structural-static.fea
-runmat fea run docs/simulation/examples/structural-static.fea
+runmat check docs/simulation/examples/structural-static.fea
+runmat plan docs/simulation/examples/structural-static.fea
+runmat run docs/simulation/examples/structural-static.fea
 ```
 
 `check` resolves imports and performs source and semantic checking. `plan` selects a study or sweep

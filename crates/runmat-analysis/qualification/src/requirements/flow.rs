@@ -183,7 +183,7 @@ const FEA_FLUID_SOLVERS_001: Requirement = Requirement {
     id: "FEA-FLUID-SOLVERS-001",
     title: "Robust, scalable and accurate laminar flow solvers",
     stages: &[Stage::Fluid],
-    acceptance: "Non-turbulent flow solves robustly at every Reynolds number the laminar scope covers: a coupled Newton solver with pseudo-transient and Reynolds continuation, scalable block-preconditioned linear solvers, second-order time integration, and second-order accurate discretization on CAD tetrahedra, from `runmat fea run`.",
+    acceptance: "Non-turbulent flow solves robustly at every Reynolds number the laminar scope covers: a coupled Newton solver with pseudo-transient and Reynolds continuation, scalable block-preconditioned linear solvers, second-order time integration, and second-order accurate discretization on CAD tetrahedra, from `runmat run`.",
     owners: &["crates/runmat-analysis/fea/src/physics/cfd/canonical.rs"],
     dependencies: &[],
     obligations: &[

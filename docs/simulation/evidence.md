@@ -34,16 +34,16 @@ flowchart TD
 
 ## Study Evidence
 
-`runmat fea check model.fea --json` is side-effect-free. It reports `valid`, `invalid`, or
+`runmat check model.fea --json` is side-effect-free. It reports `valid`, `invalid`, or
 `incomplete`, the root module identity, declared runnable roots, and structured compiler
 diagnostics. It does not materialize geometry, produce a solver mesh, plan numerical workloads, or
 write an evidence artifact.
 
-`runmat fea plan model.fea --json` selects a study or sweep and reports its authored definition,
+`runmat plan model.fea --json` selects a study or sweep and reports its authored definition,
 geometry, mesh, optional execution policy, case count, and canonical logical phases. It does not
 execute those phases or claim realized model validation.
 
-`runmat fea run model.fea --json` adds factual execution evidence and a content-addressed typed
+`runmat run model.fea --json` adds factual execution evidence and a content-addressed typed
 result manifest. The manifest retains the checked/realized study, exact geometry and mesh identity,
 meshing evidence, compiled model, resolved workloads, numerical receipts, semantic state, authored
 output bindings, and published field references. Scheduler allocation, provider operations,

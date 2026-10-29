@@ -3,7 +3,7 @@
 These checks compare RunMat's electromagnetic and electrothermal solutions with closed-form
 references. Each reference is independent of RunMat's element matrices. The kernel checks run in
 the `runmat-analysis-fea` test suite; the study checks run complete `.fea` studies with
-`runmat fea run`.
+`runmat run`.
 
 ## Skin effect in a driven conductor (harmonic fields)
 
@@ -77,7 +77,7 @@ The coupling iterates until no element temperature changes by more than $10^{-6}
 Each element takes its conductivity at its mean temperature, so the temperature error falls
 fourfold per refinement.
 
-## Study checks with `runmat fea run`
+## Study checks with `runmat run`
 
 These are complete `.fea` studies on a 1000 x 100 x 100 mm bar (quadratic tetrahedra, 50 mm), read
 from their published authored outputs.

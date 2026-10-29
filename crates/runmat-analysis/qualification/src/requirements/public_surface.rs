@@ -112,13 +112,13 @@ const FEA_PUBLIC_STUDIES_001: Requirement = Requirement {
     id: "FEA-PUBLIC-STUDIES-001",
     title: "Published studies run from the public command",
     stages: &[Stage::PublicSurface],
-    acceptance: "Every published example and website study runs end to end from `runmat fea check|plan|run <file>.fea` on the release build, locally and, for every physics family, remotely, publishing the fields and outputs the page shows, with no maturity switch, no hidden preparation step and no family rejected as unsupported.",
+    acceptance: "Every published example and website study runs end to end from `runmat check|plan|run <file>.fea` on the release build, locally and, for every physics family, remotely, publishing the fields and outputs the page shows, with no maturity switch, no hidden preparation step and no family rejected as unsupported.",
     owners: &["crates/runmat-cli/src/commands/fea/run.rs"],
     dependencies: &[],
     obligations: &[
         obligation(
             "docs_examples_run",
-            "Every file in docs/simulation/examples and docs/fea/examples completes with `runmat fea run` on the release build; the generated catalog records pass and wall time for each.",
+            "Every file in docs/simulation/examples and docs/fea/examples completes with `runmat run` on the release build; the generated catalog records pass and wall time for each.",
             EvidenceKind::PublicRun,
             STUDY,
         ),
@@ -188,7 +188,7 @@ const FEA_PUBLIC_LANGUAGE_001: Requirement = Requirement {
         ),
         obligation(
             "default_load_case",
-            "A model with loads and no `load_case` applies them in one default case and `fea check` accepts it; a model with several loads and an explicit case set is unchanged.",
+            "A model with loads and no `load_case` applies them in one default case and `runmat check` accepts it; a model with several loads and an explicit case set is unchanged.",
             EvidenceKind::SemanticRealization,
             CHECK,
         ),
@@ -200,7 +200,7 @@ const FEA_PUBLIC_LANGUAGE_001: Requirement = Requirement {
         ),
         obligation(
             "check_matches_run",
-            "`fea check` validates procedure members, state references and name selectors so that a study it accepts cannot fail at run for those reasons.",
+            "`runmat check` validates procedure members, state references and name selectors so that a study it accepts cannot fail at run for those reasons.",
             EvidenceKind::RejectionInvariant,
             CHECK,
         ),
@@ -252,7 +252,7 @@ const FEA_PUBLIC_RESULTS_001: Requirement = Requirement {
         ),
         obligation(
             "verdicts_and_reassess",
-            "Each published example shows a verdict of passed, failed or indeterminate against its stated criteria with evidence in the results pane and CLI; an unconverged case returns indeterminate; `fea reassess` re-evaluates criteria without re-solving.",
+            "Each published example shows a verdict of passed, failed or indeterminate against its stated criteria with evidence in the results pane and CLI; an unconverged case returns indeterminate; `runmat reassess` re-evaluates criteria without re-solving.",
             EvidenceKind::AccuracyAcceptance,
             STUDY,
         ),
@@ -264,7 +264,7 @@ const FEA_PUBLIC_RESULTS_001: Requirement = Requirement {
         ),
         obligation(
             "saved_scene_capture",
-            "`fea snapshot` captures each hero study into a saved scene with the views the page shows: fields with cut planes and caps, field lines, arrows, isosurfaces, per-body transparency, AC-cycle playback, one view per frequency or mode, transient playback and streamlines, and the scene replays faithfully after save (NaN, colormaps, legends, units).",
+            "`runmat snapshot` captures each hero study into a saved scene with the views the page shows: fields with cut planes and caps, field lines, arrows, isosurfaces, per-body transparency, AC-cycle playback, one view per frequency or mode, transient playback and streamlines, and the scene replays faithfully after save (NaN, colormaps, legends, units).",
             EvidenceKind::PublicationIntegrity,
             DESKTOP,
         ),

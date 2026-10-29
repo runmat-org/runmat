@@ -94,7 +94,6 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
     let output = runmat(
         &project,
         &[
-            "fea",
             "run",
             "src/main.fea",
             "--study",

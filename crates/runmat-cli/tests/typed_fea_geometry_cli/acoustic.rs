@@ -40,7 +40,6 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
         let output = runmat(
             &project,
             &[
-                "fea",
                 "run",
                 "src/main.fea",
                 "--study",

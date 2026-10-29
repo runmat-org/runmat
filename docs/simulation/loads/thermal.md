@@ -14,7 +14,7 @@ $$
 $$
 
 The typed source checker validates the declarations on this page. Supported standalone steady
-thermal studies can run through `runmat fea run` on a native host; the study's formulation,
+thermal studies can run through `runmat run` on a native host; the study's formulation,
 boundaries and resource plan must pass admission. Authoring a boundary does not by itself make
 its execution available. In particular, surface radiation remains explicitly rejected by the
 canonical thermal procedure, as described below.

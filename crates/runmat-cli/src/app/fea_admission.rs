@@ -3,12 +3,9 @@ pub(super) use runmat_fea_admission_native::NativeFeaAdmission as CliFeaAdmissio
 use uuid::Uuid;
 
 pub(super) fn organization(cli: &crate::cli::Cli) -> Option<Uuid> {
-    use crate::cli::{Commands, FeaCommand};
+    use crate::cli::Commands;
     match &cli.command {
         Some(Commands::Run { execution, .. } | Commands::Mesh { execution, .. }) => execution.org,
-        Some(Commands::Fea {
-            fea_command: FeaCommand::Run { execution, .. },
-        }) => execution.org,
         _ => cli.execution.org,
     }
 }
@@ -25,7 +22,7 @@ mod tests {
             vec!["runmat", "main.m", "--org", id],
             vec!["runmat", "run", "main.m", "--org", id],
             vec!["runmat", "mesh", "part.step", "--org", id],
-            vec!["runmat", "fea", "run", "main.fea", "--org", id],
+            vec!["runmat", "run", "main.fea", "--org", id],
         ] {
             let cli = Cli::try_parse_from(args).unwrap();
             assert_eq!(organization(&cli), Some(Uuid::from_u128(1)));

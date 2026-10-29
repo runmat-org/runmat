@@ -43,7 +43,7 @@ fn run(policy: Option<(u32, u32)>) -> ResultIdentity {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
     command
         .current_dir(project.path())
-        .args(["--offline", "fea", "run", "study.fea", "--json"])
+        .args(["--offline", "run", "study.fea", "--json"])
         .env_remove("RUNMAT_CONFIG")
         .env(
             "RUNMAT_PACKAGE_CACHE_DIR",

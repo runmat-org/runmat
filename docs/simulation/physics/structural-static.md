@@ -60,9 +60,9 @@ Each change produces a new solve. The embedded figures continue to show the orig
 From the downloaded project directory:
 
 ```sh
-runmat fea check cantilever-static.fea
-runmat fea plan cantilever-static.fea
-runmat fea run cantilever-static.fea
+runmat check cantilever-static.fea
+runmat plan cantilever-static.fea
+runmat run cantilever-static.fea
 ```
 
 **Check** validates the source. **Plan** describes the geometry, meshing, analysis, and output work. **Run** executes the study and publishes its results. Geometry construction, meshing, and solving run in a native Desktop or CLI installation.

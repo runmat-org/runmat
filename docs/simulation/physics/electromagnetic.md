@@ -5,7 +5,7 @@ flux density, field intensity, and frequency-dependent loss. RunMat uses typed q
 amperes, coulombs, current density, and vector potential; it never passes them to a solver as
 unitless numbers.
 
-Four electromagnetic analyses run from a `.fea` study with `runmat fea run`:
+Four electromagnetic analyses run from a `.fea` study with `runmat run`:
 
 | Analysis | Selected by | Unknown | Elements |
 | --- | --- | --- | --- |

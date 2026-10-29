@@ -126,7 +126,7 @@ fn assert_fea_checks(temp: &TempDir, path: &str) {
 }
 
 fn fea_plan(temp: &TempDir, path: &str) -> Value {
-    let output = runmat_from_repository(temp, &["fea", "plan", path, "--json"]);
+    let output = runmat_from_repository(temp, &["plan", path, "--json"]);
     assert!(
         output.status.success(),
         "{path} failed plan:\nstdout={}\nstderr={}",

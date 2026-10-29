@@ -41,7 +41,15 @@ pub enum FeaRootSelectionError {
     SourceNotValid { status: FeaCheckStatus },
     #[error("root module `{module}` declares no study or sweep")]
     NoRoot { module: String },
-    #[error("root module `{module}` declares multiple runnable roots; select one explicitly")]
+    #[error(
+        "root module `{module}` declares {} runnable roots; select one with {}",
+        roots.len(),
+        roots
+            .iter()
+            .map(|root| format!("--{} {}", root.kind(), root.id()))
+            .collect::<Vec<_>>()
+            .join(" or ")
+    )]
     MultipleRoots {
         module: String,
         roots: Vec<FeaRootSelector>,

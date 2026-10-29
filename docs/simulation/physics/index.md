@@ -23,7 +23,7 @@ common failure modes.
 
 “Typed contract available” means the parser and checker understand the family, its quantities,
 conditions, independent domain, and state types. It does not mean that the public executor can run
-that family today. `runmat fea check` validates source; `runmat fea run` is the execution boundary.
+that family today. `runmat check` validates source; `runmat run` is the execution boundary.
 See [Current status](../status) for the qualification matrix.
 
 All guides use the same workflow: inspect or construct geometry, name stable regions, assign

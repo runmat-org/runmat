@@ -20,8 +20,8 @@ Every boundary has a canonical identity. Local and remote execution must return 
 ## Check
 
 ```sh
-runmat fea check model.fea
-runmat fea check model.fea --study static --json
+runmat check model.fea
+runmat check model.fea --study static --json
 ```
 
 Checking resolves the complete `.fea` module graph, exact `.m` imports, referenced geometry facts, and named execution-profile capabilities. It validates syntax, references, physical types/units, topology roles, model composition, procedure state flow, output expressions, sweep cases, and execution constraints. It neither meshes nor solves and does not write result evidence.
@@ -31,7 +31,7 @@ The result is `valid`, `invalid`, or `incomplete`. Incomplete means required pro
 ## Plan
 
 ```sh
-runmat fea plan model.fea --study static
+runmat plan model.fea --study static
 ```
 
 Planning reports the canonical logical phases and selected analysis definition. It is useful in code review and CI because it exposes what will be materialized and solved without performing the work.
@@ -39,7 +39,7 @@ Planning reports the canonical logical phases and selected analysis definition. 
 ## Run Locally
 
 ```sh
-runmat fea run model.fea --study static --json
+runmat run model.fea --study static --json
 ```
 
 The native runner executes portable geometry, meshing, generated-input, and analysis tasks through the shared process-isolated task substrate. Independent generated-input chunks, sweep cases, and frequency samples may run concurrently. Procedures with state dependencies preserve their declared order and recovery closure.
@@ -47,7 +47,7 @@ The native runner executes portable geometry, meshing, generated-input, and anal
 ## Run On A Cluster
 
 ```sh
-runmat fea run model.fea \
+runmat run model.fea \
   --cluster engineering \
   --project 7a7d4d37-f0ae-4a6b-a0f8-013a04e0a9d5 \
   --queue batch \

@@ -5,7 +5,7 @@ conduction in the part it cools. Fluid and solid keep their own materials and eq
 declared interface carries temperature and heat flux across the wetted surface, so the film
 coefficient comes from the flow instead of a guess.
 
-`fea run` executes steady conjugate heat transfer from a `.fea` study. The flow is the canonical
+`runmat run` executes steady conjugate heat transfer from a `.fea` study. The flow is the canonical
 cell-centred finite-volume solution of the [fluid flow](./fluid) analysis on the fluid regions.
 One nodal energy equation then spans every fluid and solid element: Galerkin conduction in both,
 conservative advection by the solved flow in the fluid, and streamline-upwind stabilization where
@@ -56,8 +56,8 @@ $q_n=h_c(T_s-T_f)$.
 
 | Procedure | Contract | Execution |
 | --- | --- | --- |
-| `conjugate_heat_transfer steady` | Steady flow and steady temperature in fluid and solid | Runs from `fea run` |
-| `conjugate_heat_transfer transient` | Steady flow advecting a backward-Euler temperature march from the authored initial temperature | Runs from `fea run` |
+| `conjugate_heat_transfer steady` | Steady flow and steady temperature in fluid and solid | Runs from `runmat run` |
+| `conjugate_heat_transfer transient` | Steady flow advecting a backward-Euler temperature march from the authored initial temperature | Runs from `runmat run` |
 | `conjugate_heat_transfer nonlinear` | Temperature-dependent properties | Typed contract; not yet executed |
 
 ## How do I declare a fluid–solid thermal interface?

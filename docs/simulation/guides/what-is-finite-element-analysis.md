@@ -166,13 +166,13 @@ predictions match a test? Both are needed before a result supports a design deci
 ## Finite element analysis in RunMat
 
 In RunMat a complete analysis is a `.fea` text file: geometry from a STEP file, a mesh, materials,
-loads and supports, and the analyses to run. `runmat fea check` checks units, regions and every
-reference before anything is meshed, and `runmat fea run` meshes, solves and saves the result,
+loads and supports, and the analyses to run. `runmat check` checks units, regions and every
+reference before anything is meshed, and `runmat run` meshes, solves and saves the result,
 which you can read and plot from MATLAB code.
 
 ```sh
-runmat fea check cantilever-static.fea
-runmat fea run cantilever-static.fea
+runmat check cantilever-static.fea
+runmat run cantilever-static.fea
 ```
 
 Continue with the [linear static guide](../physics/structural), the

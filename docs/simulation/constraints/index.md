@@ -42,7 +42,7 @@ directly prescribing the primary unknown.
 
 The `.fea` language accepts the following closed set. Family pages provide complete field syntax,
 equations, examples, conflicts, and verification evidence. If a kind is absent from this table,
-`runmat fea check` rejects it; RunMat does not reinterpret an unknown constraint as a generic
+`runmat check` rejects it; RunMat does not reinterpret an unknown constraint as a generic
 penalty.
 
 | Family | Constraint kinds | Physical role |
@@ -333,7 +333,7 @@ reaction force and moment by named constraint. For ties and periodic pairs, insp
 unmatched entities, projection distance, and pair residual. For contact, rank alone is insufficient:
 inspect active/open/stick/slip state, penetration, and contact work.
 
-## What should fail during `runmat fea check`?
+## What should fail during `runmat check`?
 
 Checking should reject an incompatible topology role, missing or ambiguous region, duplicate
 identity, invalid quantity or frame, incomplete pair transform, self-pair, nonphysical coefficient,

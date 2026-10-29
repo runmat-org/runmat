@@ -47,7 +47,7 @@ const FEA_ACOUSTIC_MODAL_001: Requirement = Requirement {
     id: "FEA-ACOUSTIC-MODAL-001",
     title: "Acoustic cavity modal analysis",
     stages: &[Stage::Acoustics],
-    acceptance: "Natural frequencies and pressure mode shapes of an enclosed air volume with rigid and impedance walls publish from an `acoustic modal` study through `fea run` with eigen-residuals, mass normalization and resource admission that accepts real models.",
+    acceptance: "Natural frequencies and pressure mode shapes of an enclosed air volume with rigid and impedance walls publish from an `acoustic modal` study through `runmat run` with eigen-residuals, mass normalization and resource admission that accepts real models.",
     owners: &["crates/runmat-analysis/fea/src/physics/acoustic/canonical.rs"],
     dependencies: &[],
     obligations: &[

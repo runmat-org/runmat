@@ -80,7 +80,6 @@ fn execute_with_charge(
         let output = runmat(
             &project,
             &[
-                "fea",
                 "run",
                 "src/main.fea",
                 "--study",

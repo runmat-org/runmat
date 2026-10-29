@@ -15,10 +15,10 @@ assigns steel, fixes one end, loads the other, and reports displacement and stre
 project downloaded, check, plan, and run it:
 
 ```sh
-runmat fea check cantilever-static.fea
-runmat fea plan cantilever-static.fea
+runmat check cantilever-static.fea
+runmat plan cantilever-static.fea
 runmat login
-runmat fea run cantilever-static.fea
+runmat run cantilever-static.fea
 ```
 
 Meshing and solving consume the simulation allowance described on the [pricing page](https://runmat.com/pricing). Usage is measured in GFLOP under [RunMat Simulation Usage Accounting](./usage-accounting). Sign-in and a connection to RunMat Server are required for admission.
@@ -32,10 +32,10 @@ Checking and planning a study do not mesh or solve. Ordinary local `.m` scripts 
 | Work | Interface |
 | --- | --- |
 | Author a repeatable analysis | Typed `.fea` source plus imported `.fea` modules and pure `.m` functions |
-| Check without executing | `runmat fea check model.fea` |
-| Inspect the canonical logical plan | `runmat fea plan model.fea` |
-| Run locally | `runmat fea run model.fea` |
-| Run on a configured cluster | `runmat fea run model.fea --cluster <name> --trust-identity <sha256-fingerprint>` |
+| Check without executing | `runmat check model.fea` |
+| Inspect the canonical logical plan | `runmat plan model.fea` |
+| Run locally | `runmat run model.fea` |
+| Run on a configured cluster | `runmat run model.fea --cluster <name> --trust-identity <sha256-fingerprint>` |
 | Load and inspect geometry in `.m` code | `geometry.load`, `geometry.inspect`, and geometry query operations |
 | Generate and display a mesh in `.m` code | `meshing.generate`, `mesh(meshValue)`, and mesh-quality operations |
 | Read a published result in `.m` code | typed FEA result, step, field, and mesh objects; use `plot(fieldValue)` for field rendering |

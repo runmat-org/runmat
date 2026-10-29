@@ -406,7 +406,7 @@ L1 sums of storage, applied heat and prescribed reactions, and the integral of a
 transfer, before global signed cancellation. Each balance also retains the gross heat entering
 and leaving through prescribed-temperature nodes, so a body held between two fixed temperatures
 reports its through-flow (for a bar, `k A (T_hot - T_cold) / L`) even though the net prescribed
-reaction is zero; `runmat fea run` prints it as `heat through prescribed temperatures`. Exactly zero transfers have zero relative residual;
+reaction is zero; `runmat run` prints it as `heat through prescribed temperatures`. Exactly zero transfers have zero relative residual;
 uniformly scaling all powers does not improve acceptance. All terms must be finite, each scale
 must bound its signed power, the recorded
 arithmetic must agree, and both linear and normalized energy residuals must meet the target.

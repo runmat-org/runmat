@@ -1528,7 +1528,7 @@
       "tagged": 0
     },
     {
-      "capability": "Every published example runs end to end via `runmat fea run`",
+      "capability": "Every published example runs end to end via `runmat run`",
       "cells": 1,
       "fail": 1,
       "id": "REG-CLI-002",
@@ -1570,7 +1570,7 @@
       "tagged": 0
     },
     {
-      "capability": "Chained and coupled studies admitted at `fea run`",
+      "capability": "Chained and coupled studies admitted at `runmat run`",
       "cells": 8,
       "fail": 0,
       "id": "REG-CLI-005",
@@ -3424,7 +3424,7 @@
       "tagged": 0
     },
     {
-      "capability": "Every family admitted at fea run, remote for all, sweeps, contact public, adaptation authored",
+      "capability": "Every family admitted at runmat run, remote for all, sweeps, contact public, adaptation authored",
       "cells": 73,
       "fail": 0,
       "id": "LAUNCH-ADMISSION",
@@ -3716,7 +3716,7 @@
       "tagged": 0
     },
     {
-      "capability": "Finite-element Helmholtz on Tet4/Tet10 from fea run",
+      "capability": "Finite-element Helmholtz on Tet4/Tet10 from runmat run",
       "cells": 53,
       "fail": 0,
       "id": "AC-T1-HELMHOLTZ",
@@ -3982,7 +3982,7 @@
       "tagged": 0
     },
     {
-      "capability": "Transient backward Euler admitted at fea run",
+      "capability": "Transient backward Euler admitted at runmat run",
       "cells": 29,
       "fail": 0,
       "id": "FL-C-TRANSIENT",
@@ -4907,7 +4907,7 @@
       "tagged": 0
     },
     {
-      "capability": "fea snapshot captures for each hero scene",
+      "capability": "runmat snapshot captures for each hero scene",
       "cells": 2,
       "fail": 0,
       "id": "RUNS-SNAPSHOT",

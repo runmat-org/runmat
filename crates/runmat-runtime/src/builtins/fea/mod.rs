@@ -227,7 +227,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
         input,
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
     ) {
-        // A `.fea` path runs through the host's public study runner, as `runmat fea run`.
+        // A `.fea` path runs through the host's public study runner, as `runmat run`.
         let path = scalar_string(&input, RUN_NAME, &ERROR_INPUT)?;
         let service = crate::context::legacy::active()
             .and_then(|runtime| runtime.service_ports().analysis().cloned())

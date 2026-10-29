@@ -1,19 +1,33 @@
 # Diagnostics and tooling
 
 The parser, semantic compiler, CLI, and language server use the same `.fea` frontend. An editor
-diagnostic and `runmat fea check` therefore refer to the same source rule.
+diagnostic and `runmat check` therefore refer to the same source rule.
 
 ## Check before execution
 
 ```sh
-runmat fea check bracket.fea
-runmat fea check bracket.fea --study static
-runmat fea check bracket.fea --sweep load_envelope --json
+runmat check bracket.fea
+runmat check bracket.fea --study static
+runmat check bracket.fea --sweep load_envelope --json
 ```
 
 `check` parses the module graph, resolves imports, binds references, checks types and units, and
-validates the authored geometry, model, procedure, output, sweep, and execution contracts. It does
-not translate CAD, generate a mesh, validate element-level property coverage, or run a solver.
+validates the authored geometry, model, procedure, output, sweep, and execution contracts. It also
+applies every rule `runmat run` applies before meshing, through the same code, so a study that
+checks clean is not refused later for a static reason, and a refused study carries the same
+diagnostic code from both commands:
+
+- the family and procedure must be one the release runs
+  ([family and procedure matrix](../generated/family-procedure-matrix.md)); a planned combination
+  names its `pending:<id>` key;
+- the procedure graph, constraint kinds, initial conditions and output observations must be ones the
+  selected family solves;
+- `select name` must resolve against names authored in the CAD file, with the cardinality the
+  region expects;
+- `accelerators = required` must name families with a device solve path;
+- `--study` or `--sweep` must name a root of the document; with several roots, `check` lists them.
+
+It does not generate a mesh, validate element-level property coverage, or run a solver.
 
 The command reports one of three states:
 
@@ -41,15 +55,15 @@ checked cantilever.fea: 1 error(s), 0 warning(s)
 
 A failure is reported once, where it occurs. A study that depends on a model which failed to check
 is not reported again, and a value whose unit or reference already failed is not re-reported by
-the declaration that uses it. `runmat fea check`, `plan`, and `run` print the same located
+the declaration that uses it. `runmat check`, `plan`, and `run` print the same located
 diagnostics to standard error before any geometry, meshing, or solve work starts; `--json` keeps the
 structured form, including each diagnostic's span and label.
 
 ## Inspect the logical plan
 
 ```sh
-runmat fea plan bracket.fea --study static
-runmat fea plan bracket.fea --study static --json
+runmat plan bracket.fea --study static
+runmat plan bracket.fea --study static --json
 ```
 
 `plan` selects one root and reports its bound geometry, mesh, model, execution policy, case count,

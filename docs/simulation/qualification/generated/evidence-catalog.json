@@ -1207,7 +1207,7 @@
               ]
             }
           ],
-          "criterion": "A study binds one model instance to geometry and mesh, declares an ordered semantic procedure graph, and names requested outputs. It is the normal runnable root. Analyses own procedure-specific options, active model content, accuracy obligations, and named state retention. A dependency such as `after analysis.modes` is semantic state flow, not merely a scheduler edge. The procedure kind determines admissible input/output state kinds. Incompatible transitions fail during checking. Physical procedure domains are explicit. Modal extraction requires a positive `modes` count; transient procedures require `start_time` and `end_time`; harmonic procedures require a non-empty, strictly increasing `frequencies` list; and nonlinear load-factor procedures require `start_load_factor` and `end_load_factor`. Modal-reduced and prestressed procedures additionally name the exact upstream state they consume. These values have no hidden language defaults because changing one changes the analysis definition. Procedure-specific physics and numerical controls are a closed typed union on the canonical procedure step; they are not string-keyed solver options and are not placement policy. For example, random response requires both values in this acceptance specification rather than obtaining either from a runtime default: Modal response-spectrum procedures similarly use `spectra = [model.response_spectrum.<name>, ...]`. These paths are checked against the exact bound model and are retained as typed stable ids in the procedure graph; a similarly spelled load, signal, or random excitation cannot satisfy the reference. `modal_damping_ratio` is finite and in `(0, 1)`; `minimum_cumulative_mass_ratio` is finite and in `[0, 1]`. These values participate in study-definition identity. Frequency-interval grouping, iteration ceilings, retry, placement, and worker resource limits remain execution policy and may change without changing the study definition. The compiler derives internal activation records, task graphs, state manifests, checkpoint dependencies, and publication bookkeeping. Users do not write `lifecycle: activate` or internal state-transfer records. When a file contains one study, `runmat fea run file.fea` selects it. With several studies the caller specifies `--study name`. `check` resolves and type-checks without executing user code; `plan` additionally produces the canonical logical graph and resource requirements; `run` executes it.",
+          "criterion": "A study binds one model instance to geometry and mesh, declares an ordered semantic procedure graph, and names requested outputs. It is the normal runnable root. Analyses own procedure-specific options, active model content, accuracy obligations, and named state retention. A dependency such as `after analysis.modes` is semantic state flow, not merely a scheduler edge. The procedure kind determines admissible input/output state kinds. Incompatible transitions fail during checking. Physical procedure domains are explicit. Modal extraction requires a positive `modes` count; transient procedures require `start_time` and `end_time`; harmonic procedures require a non-empty, strictly increasing `frequencies` list; and nonlinear load-factor procedures require `start_load_factor` and `end_load_factor`. Modal-reduced and prestressed procedures additionally name the exact upstream state they consume. These values have no hidden language defaults because changing one changes the analysis definition. Procedure-specific physics and numerical controls are a closed typed union on the canonical procedure step; they are not string-keyed solver options and are not placement policy. For example, random response requires both values in this acceptance specification rather than obtaining either from a runtime default: Modal response-spectrum procedures similarly use `spectra = [model.response_spectrum.<name>, ...]`. These paths are checked against the exact bound model and are retained as typed stable ids in the procedure graph; a similarly spelled load, signal, or random excitation cannot satisfy the reference. `modal_damping_ratio` is finite and in `(0, 1)`; `minimum_cumulative_mass_ratio` is finite and in `[0, 1]`. These values participate in study-definition identity. Frequency-interval grouping, iteration ceilings, retry, placement, and worker resource limits remain execution policy and may change without changing the study definition. The compiler derives internal activation records, task graphs, state manifests, checkpoint dependencies, and publication bookkeeping. Users do not write `lifecycle: activate` or internal state-transfer records. When a file contains one study, `runmat run file.fea` selects it. With several studies the caller specifies `--study name`. `check` resolves and type-checks without executing user code; `plan` additionally produces the canonical logical graph and resource requirements; `run` executes it.",
           "evidence_kind": "SemanticRealization",
           "id": "semantic_state_flow"
         },
@@ -6479,7 +6479,7 @@
               "tests": []
             }
           ],
-          "criterion": "A data-only `.fea` remains fully standalone. It may contain bounded inline samples or reference a declared data object that is content-hashed and frozen into the study bundle. The declarative form resolves once into the same typed objects. It imports the generating function from its actual `.m` file rather than relying on a magic namespace: Base acceleration is prescribed support kinematics rather than an ordinary excitation. It must identify the support region, driven degree of freedom, initial displacement and velocity, and the governed reconstruction. The referenced acceleration history is a real global vector over time; ordinary forces and source terms continue to use the excitation contract. A code-generated input references an explicitly imported project function plus typed arguments and sampling/materialization policy. It does not embed source text, a live closure, an absolute host path, or base-workspace state. `runmat fea run study.fea` resolves the enclosing RunMat project, freezes the same source graph and callable inventory used by ordinary program execution, and includes it in the encrypted execution bundle. Without a resolvable project and callable, planning fails before expensive work begins. An explicit relative `.m` import resolves immediately to a project-owned qualified function identity. Package-qualified functions remain supported for projects that use them, but package folders are not required by the language or its examples. Scripts are not excitation generators because they lack an argument/output contract and depend on mutable base-workspace and path state.",
+          "criterion": "A data-only `.fea` remains fully standalone. It may contain bounded inline samples or reference a declared data object that is content-hashed and frozen into the study bundle. The declarative form resolves once into the same typed objects. It imports the generating function from its actual `.m` file rather than relying on a magic namespace: Base acceleration is prescribed support kinematics rather than an ordinary excitation. It must identify the support region, driven degree of freedom, initial displacement and velocity, and the governed reconstruction. The referenced acceleration history is a real global vector over time; ordinary forces and source terms continue to use the excitation contract. A code-generated input references an explicitly imported project function plus typed arguments and sampling/materialization policy. It does not embed source text, a live closure, an absolute host path, or base-workspace state. `runmat run study.fea` resolves the enclosing RunMat project, freezes the same source graph and callable inventory used by ordinary program execution, and includes it in the encrypted execution bundle. Without a resolvable project and callable, planning fails before expensive work begins. An explicit relative `.m` import resolves immediately to a project-owned qualified function identity. Package-qualified functions remain supported for projects that use them, but package folders are not required by the language or its examples. Scripts are not excitation generators because they lack an argument/output contract and depend on mutable base-workspace and path state.",
           "evidence_kind": "SemanticRealization",
           "id": "named_function_ports"
         },
@@ -7917,7 +7917,7 @@
               "tests": []
             }
           ],
-          "criterion": "The shared CLI placement surface should preserve local defaults and reuse current cluster vocabulary: The reusable placement options are: project selection; cluster selection; queue, defaulting consistently with `job submit`; worker count, with zero retaining its existing driver-only/automatic meaning; trust identity, preferably supplied by project or named target configuration; idempotency key; attach/detach behavior; and machine-readable output. Do not require users to wrap `.fea` or meshing requests in a synthetic MATLAB script. `job submit` remains the generic MATLAB-program entrypoint. `runmat fea run file.fea` and `runmat mesh` prepare domain-specific encrypted execution bundles and reuse the lower-level submission lifecycle. An authored execution-policy reference is optional. Its absence means the CLI/project defaults choose placement, backend, and resources; it does not make the study incomplete. If present, the policy may express placement preference, elastic resource bounds, independent fanout, cooperative-distribution requirements, accelerator preference, and resilience. It cannot change physics or accuracy. CLI placement overrides use the same typed policy merge and may choose an equivalent location or tighten bounds without changing study-definition identity.",
+          "criterion": "The shared CLI placement surface should preserve local defaults and reuse current cluster vocabulary: The reusable placement options are: project selection; cluster selection; queue, defaulting consistently with `job submit`; worker count, with zero retaining its existing driver-only/automatic meaning; trust identity, preferably supplied by project or named target configuration; idempotency key; attach/detach behavior; and machine-readable output. Do not require users to wrap `.fea` or meshing requests in a synthetic MATLAB script. `job submit` remains the generic MATLAB-program entrypoint. `runmat run file.fea` and `runmat mesh` prepare domain-specific encrypted execution bundles and reuse the lower-level submission lifecycle. An authored execution-policy reference is optional. Its absence means the CLI/project defaults choose placement, backend, and resources; it does not make the study incomplete. If present, the policy may express placement preference, elastic resource bounds, independent fanout, cooperative-distribution requirements, accelerator preference, and resilience. It cannot change physics or accuracy. CLI placement overrides use the same typed policy merge and may choose an equivalent location or tighten bounds without changing study-definition identity.",
           "evidence_kind": "ExecutionEquivalence",
           "id": "optional_typed_placement"
         },
@@ -30463,7 +30463,7 @@
               "tests": []
             }
           ],
-          "criterion": "Electrothermal studies are admitted at `fea run` and run remotely.",
+          "criterion": "Electrothermal studies are admitted at `runmat run` and run remotely.",
           "evidence_kind": "PublicRun",
           "id": "public_route"
         }
@@ -33494,7 +33494,7 @@
               ]
             }
           ],
-          "criterion": "Every file in docs/simulation/examples and docs/fea/examples completes with `runmat fea run` on the release build; the generated catalog records pass and wall time for each.",
+          "criterion": "Every file in docs/simulation/examples and docs/fea/examples completes with `runmat run` on the release build; the generated catalog records pass and wall time for each.",
           "evidence_kind": "PublicRun",
           "id": "docs_examples_run"
         },
@@ -34099,7 +34099,7 @@
               "tests": []
             }
           ],
-          "criterion": "A model with loads and no `load_case` applies them in one default case and `fea check` accepts it; a model with several loads and an explicit case set is unchanged.",
+          "criterion": "A model with loads and no `load_case` applies them in one default case and `runmat check` accepts it; a model with several loads and an explicit case set is unchanged.",
           "evidence_kind": "SemanticRealization",
           "id": "default_load_case"
         },
@@ -34151,7 +34151,7 @@
               "tests": []
             }
           ],
-          "criterion": "`fea check` validates procedure members, state references and name selectors so that a study it accepts cannot fail at run for those reasons.",
+          "criterion": "`runmat check` validates procedure members, state references and name selectors so that a study it accepts cannot fail at run for those reasons.",
           "evidence_kind": "RejectionInvariant",
           "id": "check_matches_run"
         },
@@ -34326,7 +34326,7 @@
               "tests": []
             }
           ],
-          "criterion": "Each published example shows a verdict of passed, failed or indeterminate against its stated criteria with evidence in the results pane and CLI; an unconverged case returns indeterminate; `fea reassess` re-evaluates criteria without re-solving.",
+          "criterion": "Each published example shows a verdict of passed, failed or indeterminate against its stated criteria with evidence in the results pane and CLI; an unconverged case returns indeterminate; `runmat reassess` re-evaluates criteria without re-solving.",
           "evidence_kind": "AccuracyAcceptance",
           "id": "verdicts_and_reassess"
         },
@@ -34361,7 +34361,7 @@
               "tests": []
             }
           ],
-          "criterion": "`fea snapshot` captures each hero study into a saved scene with the views the page shows: fields with cut planes and caps, field lines, arrows, isosurfaces, per-body transparency, AC-cycle playback, one view per frequency or mode, transient playback and streamlines, and the scene replays faithfully after save (NaN, colormaps, legends, units).",
+          "criterion": "`runmat snapshot` captures each hero study into a saved scene with the views the page shows: fields with cut planes and caps, field lines, arrows, isosurfaces, per-body transparency, AC-cycle playback, one view per frequency or mode, transient playback and streamlines, and the scene replays faithfully after save (NaN, colormaps, legends, units).",
           "evidence_kind": "PublicationIntegrity",
           "id": "saved_scene_capture"
         },
@@ -35764,7 +35764,7 @@
               "tests": []
             }
           ],
-          "criterion": "`runmat fea run --cluster` runs the family's published study remotely with encrypted inputs, no unsupported-physics rejection, and results equal to the local run under the equivalence policy.",
+          "criterion": "`runmat run --cluster` runs the family's published study remotely with encrypted inputs, no unsupported-physics rejection, and results equal to the local run under the equivalence policy.",
           "evidence_kind": "ExecutionEquivalence",
           "id": "remote_whole_study_every_family"
         },

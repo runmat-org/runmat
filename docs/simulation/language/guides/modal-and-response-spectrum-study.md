@@ -29,8 +29,8 @@ ordered predecessor might not publish a compatible basis.
 Check and run the complete example:
 
 ```sh
-runmat fea check docs/simulation/examples/modal-response-spectrum.fea
-runmat fea run docs/simulation/examples/modal-response-spectrum.fea
+runmat check docs/simulation/examples/modal-response-spectrum.fea
+runmat run docs/simulation/examples/modal-response-spectrum.fea
 ```
 
 Before using the envelope, inspect modal residuals, mass orthogonality, cumulative effective mass,

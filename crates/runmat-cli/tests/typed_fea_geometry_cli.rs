@@ -74,7 +74,6 @@ end
     let checked = runmat(
         &project,
         &[
-            "fea",
             "check",
             "src/main.fea",
             "--study",
@@ -97,7 +96,6 @@ end
     let first = runmat(
         &project,
         &[
-            "fea",
             "run",
             "src/main.fea",
             "--study",
@@ -135,7 +133,6 @@ end
     let repeated = runmat(
         &project,
         &[
-            "fea",
             "run",
             "src/main.fea",
             "--study",
@@ -209,7 +206,6 @@ fn authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium() {
             let output = runmat(
                 &project,
                 &[
-                    "fea",
                     "run",
                     "src/main.fea",
                     "--study",
@@ -341,7 +337,6 @@ fn authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium() {
             let repeated = runmat(
                 &project,
                 &[
-                    "fea",
                     "run",
                     "src/main.fea",
                     "--study",

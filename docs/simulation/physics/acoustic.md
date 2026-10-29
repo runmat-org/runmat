@@ -82,7 +82,7 @@ study cavity_modes {
 ```
 
 The discrete eigenproblem is
-$\mathsf K_p\boldsymbol\phi_i=\omega_i^2\mathsf M_p\boldsymbol\phi_i$. `fea run` solves it on the
+$\mathsf K_p\boldsymbol\phi_i=\omega_i^2\mathsf M_p\boldsymbol\phi_i$. `runmat run` solves it on the
 canonical mesh and publishes each natural frequency with its pressure mode shape and residual.
 
 ## How do I apply an acoustic pressure or speaker velocity?

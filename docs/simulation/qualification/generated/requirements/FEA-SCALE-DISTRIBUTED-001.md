@@ -4,7 +4,7 @@
 
 ## remote_whole_study_every_family
 
-Evidence kind: ExecutionEquivalence. Criterion: `runmat fea run --cluster` runs the family's published study remotely with encrypted inputs, no unsupported-physics rejection, and results equal to the local run under the equivalence policy.
+Evidence kind: ExecutionEquivalence. Criterion: `runmat run --cluster` runs the family's published study remotely with encrypted inputs, no unsupported-physics rejection, and results equal to the local run under the equivalence policy.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|

@@ -141,7 +141,7 @@ fn seeded_setup_faults_are_rejected_before_meshing() {
         .unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_runmat"))
             .current_dir(project.path())
-            .args(["--offline", "fea", "run", "cantilever.fea"])
+            .args(["--offline", "run", "cantilever.fea"])
             .env_remove("RUNMAT_CONFIG")
             .env("NO_COLOR", "1")
             .env(

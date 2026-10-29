@@ -4,7 +4,7 @@
 
 ## docs_examples_run
 
-Evidence kind: PublicRun. Criterion: Every file in docs/simulation/examples and docs/fea/examples completes with `runmat fea run` on the release build; the generated catalog records pass and wall time for each.
+Evidence kind: PublicRun. Criterion: Every file in docs/simulation/examples and docs/fea/examples completes with `runmat run` on the release build; the generated catalog records pass and wall time for each.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|

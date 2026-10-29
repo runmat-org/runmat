@@ -287,7 +287,7 @@ pub(super) const REQUIREMENT: Requirement = Requirement {
                 "compiler derives internal activation records, task graphs, state manifests, ",
                 "checkpoint dependencies, and publication bookkeeping. Users do not write ",
                 "`lifecycle: activate` or internal state-transfer records. When a file ",
-                "contains one study, `runmat fea run file.fea` selects it. With several ",
+                "contains one study, `runmat run file.fea` selects it. With several ",
                 "studies the caller specifies `--study name`. `check` resolves and ",
                 "type-checks without executing user code; `plan` additionally produces the ",
                 "canonical logical graph and resource requirements; `run` executes it.",

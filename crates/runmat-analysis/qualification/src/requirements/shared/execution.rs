@@ -48,7 +48,7 @@ pub(super) const FEA_SHARED_EXECUTION_001: Requirement = Requirement {
                 "project or named target configuration; idempotency key; attach/detach ",
                 "behavior; and machine-readable output. Do not require users to wrap `.fea` ",
                 "or meshing requests in a synthetic MATLAB script. `job submit` remains the ",
-                "generic MATLAB-program entrypoint. `runmat fea run file.fea` and `runmat ",
+                "generic MATLAB-program entrypoint. `runmat run file.fea` and `runmat ",
                 "mesh` prepare domain-specific encrypted execution bundles and reuse the ",
                 "lower-level submission lifecycle. An authored execution-policy reference is ",
                 "optional. Its absence means the CLI/project defaults choose placement, ",

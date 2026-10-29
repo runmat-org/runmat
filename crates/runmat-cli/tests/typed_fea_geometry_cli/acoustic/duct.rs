@@ -96,7 +96,6 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
         let output = runmat(
             &project,
             &[
-                "fea",
                 "run",
                 "src/main.fea",
                 "--study",

@@ -13,7 +13,7 @@ use crate::cli::{Cli, ExecutionTargetArgs};
 use crate::presentation;
 use crate::AlreadyReportedCliError;
 
-mod command;
+pub(crate) mod command;
 mod input_materialization;
 mod plan;
 mod preparation;
@@ -23,13 +23,7 @@ mod run;
 mod snapshot;
 pub(crate) mod source;
 
-pub async fn execute_command(
-    command: crate::cli::FeaCommand,
-    cli: &Cli,
-    config: &RunMatRuntimeConfig,
-) -> Result<()> {
-    command::execute(command, cli, config).await
-}
+pub use command::{plan, reassess, render_snapshot, snapshot, verify_snapshot};
 
 #[derive(Debug)]
 pub(crate) struct NativeAnalysisService {
@@ -101,7 +95,7 @@ impl runmat_runtime::context::RuntimeAnalysisService for NativeAnalysisService {
     }
 }
 
-/// Runs a `.fea` document with this executable's public `fea run` command, then reads the
+/// Runs a `.fea` document with this executable's public `run` command, then reads the
 /// authenticated publication it wrote. The study runs exactly as it does from a shell.
 #[expect(
     clippy::result_large_err,
@@ -118,13 +112,12 @@ fn run_document_through_cli(
     let executable = std::env::current_exe()
         .map_err(|error| failure(format!("cannot locate the RunMat executable: {error}")))?;
     let output = std::process::Command::new(executable)
-        .arg("fea")
         .arg("run")
         .arg(path)
         .arg("--json")
         .stdin(std::process::Stdio::null())
         .output()
-        .map_err(|error| failure(format!("cannot start `runmat fea run`: {error}")))?;
+        .map_err(|error| failure(format!("cannot start `runmat run`: {error}")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let reason = stderr
@@ -134,7 +127,7 @@ fn run_document_through_cli(
             .or_else(|| stderr.lines().rev().find(|line| !line.trim().is_empty()))
             .unwrap_or("no diagnostic was printed");
         return Err(failure(format!(
-            "`runmat fea run {}` failed: {reason}",
+            "`runmat run {}` failed: {reason}",
             path.display()
         )));
     }
@@ -145,7 +138,7 @@ fn run_document_through_cli(
     }
     let printed: PrintedStudy = serde_json::from_slice(&output.stdout).map_err(|error| {
         failure(format!(
-            "`runmat fea run {}` did not print one study result: {error}",
+            "`runmat run {}` did not print one study result: {error}",
             path.display()
         ))
     })?;
@@ -183,22 +176,13 @@ fn host_placement_error(
 
 pub async fn execute_fea_path(
     path: PathBuf,
+    root: crate::cli::FeaRootArgs,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
     json: bool,
     execution: ExecutionTargetArgs,
 ) -> Result<()> {
-    command::execute(
-        crate::cli::FeaCommand::Run {
-            file: path,
-            root: crate::cli::FeaRootArgs::default(),
-            execution,
-            json,
-        },
-        cli,
-        config,
-    )
-    .await
+    command::run(path, root, execution, json, cli, config).await
 }
 
 pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {

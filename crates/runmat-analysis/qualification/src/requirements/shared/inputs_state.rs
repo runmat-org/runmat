@@ -168,7 +168,7 @@ pub(super) const FEA_SHARED_EXCITATION_001: Requirement = Requirement {
                 "continue to use the excitation contract. A code-generated input references ",
                 "an explicitly imported project function plus typed arguments and ",
                 "sampling/materialization policy. It does not embed source text, a live ",
-                "closure, an absolute host path, or base-workspace state. `runmat fea run ",
+                "closure, an absolute host path, or base-workspace state. `runmat run ",
                 "study.fea` resolves the enclosing RunMat project, freezes the same source ",
                 "graph and callable inventory used by ordinary program execution, and ",
                 "includes it in the encrypted execution bundle. Without a resolvable project ",

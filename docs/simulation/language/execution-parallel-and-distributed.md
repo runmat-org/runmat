@@ -62,7 +62,7 @@ ceiling. When the sparse Cholesky factor fits, the factor proves coercivity and 
 doesn't fit, element rigidity proves the operator positive definite and AMG-preconditioned
 conjugate gradients solve it, accepted by the true residual. Each published run records the
 effective ceiling (`effective_memory_ceiling_bytes`) and the selected path (`static_solve_path`)
-in its provenance, and `runmat fea run --json` prints both. Neither value enters the
+in its provenance, and `runmat run --json` prints both. Neither value enters the
 study-definition identity.
 
 ## Fan-out policy
@@ -113,7 +113,7 @@ retry restarts from the latest valid generic boundary or fails admission.
 An explicit cluster request uses the same source study:
 
 ```sh
-runmat fea run bracket.fea \
+runmat run bracket.fea \
   --study bracket_response \
   --cluster engineering \
   --project 00000000-0000-0000-0000-000000000000 \

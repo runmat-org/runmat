@@ -65,9 +65,9 @@ Each change produces a new extraction. The embedded figures continue to show the
 From the downloaded project directory:
 
 ```sh
-runmat fea check tuning-fork-modal.fea
-runmat fea plan tuning-fork-modal.fea
-runmat fea run tuning-fork-modal.fea
+runmat check tuning-fork-modal.fea
+runmat plan tuning-fork-modal.fea
+runmat run tuning-fork-modal.fea
 ```
 
 **Check** validates the source. **Plan** describes geometry, meshing, extraction and output work. **Run** executes the study and publishes its basis and recovered fields. Geometry import, meshing and extraction run in a native Desktop or CLI installation.
