@@ -9,9 +9,7 @@ use crate::BuiltinDocumentation;
 
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.ModalTruncation.new",
-    summary: concat!(
-        "Require a minimum captured modal mass and choose how omitted modes are corrected.",
-    ),
+    summary: "Require a minimum captured modal mass and choose how omitted modes are corrected.",
     description: concat!(
         "`fea.ModalTruncation.new(minimumMassRatio, correction)` returns an ",
         "`fea.ModalTruncation` with `value.minimum_cumulative_mass_ratio` and ",

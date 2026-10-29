@@ -27,9 +27,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
                     "100-40-40 rule write `percentage(1.0, 0.4)`. Invalid fractions fail with ",
                     "`RunMat:fea:InvalidInput`.",
                 ),
-                concat!(
-                    "The stored value is `value.percentage_rule` with fields `primary` and `secondary`.",
-                ),
+                "The stored value is `value.percentage_rule` with fields `primary` and `secondary`.",
             ],
         ),
         section(

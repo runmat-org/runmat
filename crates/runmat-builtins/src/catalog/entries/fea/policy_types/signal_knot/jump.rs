@@ -140,9 +140,7 @@ policy_entry!(
         (
             "continuity",
             Any,
-            concat!(
-                "Typed fea.SignalPointContinuity selecting which limit is the value at the abscissa.",
-            ),
+            "Typed fea.SignalPointContinuity selecting which limit is the value at the abscissa.",
             PolicyArg::Typed(&[classes::SIGNAL_POINT_CONTINUITY]),
         ),
     ],

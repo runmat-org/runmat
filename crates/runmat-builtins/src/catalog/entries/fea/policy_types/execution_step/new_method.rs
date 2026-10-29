@@ -9,9 +9,7 @@ use crate::BuiltinDocumentation;
 
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.ExecutionStep.new",
-    summary: concat!(
-        "Bind one procedure step to a compute backend and solver options.",
-    ),
+    summary: "Bind one procedure step to a compute backend and solver options.",
     description: concat!(
         "`fea.ExecutionStep.new(step, backend, solverOptions)` returns an ",
         "`fea.ExecutionStep` with properties `step_id`, `backend`, and ",

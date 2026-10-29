@@ -17,9 +17,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         section(
             "Behavior",
             &[
-                concat!(
-                    "Mode is the location of per-mode results such as modal frequency and participation.",
-                ),
+                "Mode is the location of per-mode results such as modal frequency and participation.",
                 super::ROLE,
             ],
         ),

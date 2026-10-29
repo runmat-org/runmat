@@ -165,20 +165,24 @@ pub fn tetrahedron10_stiffness_moments(
     let margin = tetrahedron10_jacobian_margin(coordinates)
         .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
     if !margin.is_valid() {
-        return Err(if margin.minimum_jacobian_lower_bound <= 0.0
-            && SAMPLE_POINTS
-                .iter()
-                .any(|point| determinant(jacobian(coordinates, *point)) <= 0.0)
-        {
-            Tet10ElementInvalidity::InvertedOrDegenerate
-        } else {
-            Tet10ElementInvalidity::InsufficientJacobianMargin
-        });
+        return Err(
+            if margin.minimum_jacobian_lower_bound <= 0.0
+                && SAMPLE_POINTS
+                    .iter()
+                    .any(|point| determinant(jacobian(coordinates, *point)) <= 0.0)
+            {
+                Tet10ElementInvalidity::InvertedOrDegenerate
+            } else {
+                Tet10ElementInvalidity::InsufficientJacobianMargin
+            },
+        );
     }
     if tetrahedron10_is_affine(coordinates) {
         let moments = integrate(
             coordinates,
-            TETRAHEDRON_FOUR_POINT_RULE.iter().map(|point| (*point, 1.0 / 24.0)),
+            TETRAHEDRON_FOUR_POINT_RULE
+                .iter()
+                .map(|point| (*point, 1.0 / 24.0)),
         )
         .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
         return Ok(Tet10StiffnessMoments {
@@ -186,18 +190,27 @@ pub fn tetrahedron10_stiffness_moments(
             moments,
         });
     }
-    let eight = integrate(coordinates, tensor_tetrahedron_rule(&GAUSS_LEGENDRE_EIGHT_UNIT))
-        .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
-    let twelve = integrate(coordinates, tensor_tetrahedron_rule(&GAUSS_LEGENDRE_TWELVE_UNIT))
-        .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
+    let eight = integrate(
+        coordinates,
+        tensor_tetrahedron_rule(&GAUSS_LEGENDRE_EIGHT_UNIT),
+    )
+    .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
+    let twelve = integrate(
+        coordinates,
+        tensor_tetrahedron_rule(&GAUSS_LEGENDRE_TWELVE_UNIT),
+    )
+    .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
     if converged(&eight, &twelve) {
         return Ok(Tet10StiffnessMoments {
             rule: Tet10StiffnessRule::GaussTwelve,
             moments: twelve,
         });
     }
-    let sixteen = integrate(coordinates, tensor_tetrahedron_rule(&GAUSS_LEGENDRE_SIXTEEN_UNIT))
-        .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
+    let sixteen = integrate(
+        coordinates,
+        tensor_tetrahedron_rule(&GAUSS_LEGENDRE_SIXTEEN_UNIT),
+    )
+    .ok_or(Tet10ElementInvalidity::InvertedOrDegenerate)?;
     if converged(&twelve, &sixteen) {
         Ok(Tet10StiffnessMoments {
             rule: Tet10StiffnessRule::GaussSixteen,
@@ -223,9 +236,7 @@ pub fn tetrahedron10_is_affine(coordinates: &[[f64; 3]; 10]) -> bool {
 
 /// Collapsed (Duffy) tensor Gauss rule on the reference tetrahedron: barycentric points and
 /// weights that sum to the reference volume 1/6.
-pub fn tensor_tetrahedron_rule(
-    rule: &[(f64, f64)],
-) -> impl Iterator<Item = ([f64; 4], f64)> + '_ {
+pub fn tensor_tetrahedron_rule(rule: &[(f64, f64)]) -> impl Iterator<Item = ([f64; 4], f64)> + '_ {
     rule.iter().flat_map(move |&(r, rw)| {
         rule.iter().flat_map(move |&(s, sw)| {
             rule.iter().map(move |&(t, tw)| {
@@ -390,18 +401,21 @@ fn integrate(
         });
         let scale = weight * det;
         for (i, gi) in gradients.iter().enumerate() {
-            for a in 0..3 {
-                let left = scale * gi[a];
+            for (a, gradient_i) in gi.iter().enumerate() {
+                let left = scale * gradient_i;
                 let row = (3 * i + a) * 30;
                 for (j_node, gj) in gradients.iter().enumerate() {
-                    for b in 0..3 {
-                        moments[row + 3 * j_node + b] += left * gj[b];
+                    for (b, gradient_j) in gj.iter().enumerate() {
+                        moments[row + 3 * j_node + b] += left * gradient_j;
                     }
                 }
             }
         }
     }
-    moments.iter().all(|value| value.is_finite()).then_some(moments)
+    moments
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(moments)
 }
 
 fn converged(
@@ -411,10 +425,9 @@ fn converged(
     let scale = next.iter().map(|value| value.abs()).fold(0.0_f64, f64::max);
     scale.is_finite()
         && scale > 0.0
-        && previous
-            .iter()
-            .zip(next)
-            .all(|(left, right)| (left - right).abs() <= STIFFNESS_MOMENT_RELATIVE_TOLERANCE * scale)
+        && previous.iter().zip(next).all(|(left, right)| {
+            (left - right).abs() <= STIFFNESS_MOMENT_RELATIVE_TOLERANCE * scale
+        })
 }
 
 /// Corners, edge midpoints, face centroids and the centroid.
@@ -498,16 +511,56 @@ mod tests {
     /// Element 377 of the published Tet10 bracket mesh (meters): the mesher certified its
     /// Jacobian positive, but analysis could not converge its curved stiffness quadrature.
     const BRACKET_ELEMENT_377: [[f64; 3]; 10] = [
-        [0.0026731306328256336, 0.015117805597817715, 0.028106087506546976],
-        [0.0027655490644655236, 0.015611856897379784, 0.027771248693692633],
-        [0.0026741522806826784, 0.014865997719849451, 0.02758560583257708],
-        [0.0026731306328256336, 0.015117805597817715, 0.027306758031048765],
-        [0.002703577318323532, 0.015366778468109766, 0.02793932208217616],
-        [0.0026845293059057436, 0.015243441484602419, 0.027678472586099],
-        [0.0026696787751872095, 0.014990901289704423, 0.027843813538023086],
-        [0.002671569442443801, 0.015117805597817715, 0.027707203363988787],
-        [0.002703577318323532, 0.015366778468109766, 0.027538096154045226],
-        [0.0026696675214352866, 0.014993854118408593, 0.027444003433363486],
+        [
+            0.0026731306328256336,
+            0.015117805597817715,
+            0.028106087506546976,
+        ],
+        [
+            0.0027655490644655236,
+            0.015611856897379784,
+            0.027771248693692633,
+        ],
+        [
+            0.0026741522806826784,
+            0.014865997719849451,
+            0.02758560583257708,
+        ],
+        [
+            0.0026731306328256336,
+            0.015117805597817715,
+            0.027306758031048765,
+        ],
+        [
+            0.002703577318323532,
+            0.015366778468109766,
+            0.02793932208217616,
+        ],
+        [
+            0.0026845293059057436,
+            0.015243441484602419,
+            0.027678472586099,
+        ],
+        [
+            0.0026696787751872095,
+            0.014990901289704423,
+            0.027843813538023086,
+        ],
+        [
+            0.002671569442443801,
+            0.015117805597817715,
+            0.027707203363988787,
+        ],
+        [
+            0.002703577318323532,
+            0.015366778468109766,
+            0.027538096154045226,
+        ],
+        [
+            0.0026696675214352866,
+            0.014993854118408593,
+            0.027444003433363486,
+        ],
     ];
 
     // witness: FEA-MESH-DISCRETIZATION-001/tet10_elevation @

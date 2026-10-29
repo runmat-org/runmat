@@ -18,9 +18,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         section(
             "Behavior",
             &[
-                concat!(
-                    "Average is the integral divided by the target's measure (length, area, or volume).",
-                ),
+                "Average is the integral divided by the target's measure (length, area, or volume).",
                 super::ROLE,
             ],
         ),

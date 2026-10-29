@@ -9,9 +9,7 @@ use crate::BuiltinDocumentation;
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.ComputeBackend.cpu",
     summary: "Request CPU execution for a procedure step.",
-    description: concat!(
-        "`fea.ComputeBackend.cpu()` returns the `fea.ComputeBackend` whose `value` is `cpu`.",
-    ),
+    description: "`fea.ComputeBackend.cpu()` returns the `fea.ComputeBackend` whose `value` is `cpu`.",
     keywords: &["fea", "execution", "backend", "cpu"],
     related: &["fea.ComputeBackend.gpu", "fea.ExecutionStep.new", "fea.ExecutionPlan.defaults", "fea.study"],
     sections: &[

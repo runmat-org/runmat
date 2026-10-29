@@ -84,9 +84,7 @@ policy_entry!(
     FEA_MASS_FLOW_SIGNAL_FROM_TIME_KNOTS_CATALOG_ENTRY,
     name: "fea.MassFlowSignal.fromTimeKnots",
     result: classes::MASS_FLOW_SIGNAL,
-    signature: concat!(
-        "signal = fea.MassFlowSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
-    ),
+    signature: "signal = fea.MassFlowSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
     inputs: [
         (
             "id",

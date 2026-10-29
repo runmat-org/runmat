@@ -19,9 +19,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         section(
             "Behavior",
             &[
-                concat!(
-                    "The heat flux ordinate of every knot is a scalar in watts per square meter (W/m^2).",
-                ),
+                "The heat flux ordinate of every knot is a scalar in watts per square meter (W/m^2).",
                 super::HISTORY_BEHAVIOR,
                 super::HISTORY_SAMPLING,
                 super::HISTORY_RESULT,
@@ -83,9 +81,7 @@ policy_entry!(
     FEA_HEAT_FLUX_SIGNAL_FROM_TIME_KNOTS_CATALOG_ENTRY,
     name: "fea.HeatFluxSignal.fromTimeKnots",
     result: classes::HEAT_FLUX_SIGNAL,
-    signature: concat!(
-        "signal = fea.HeatFluxSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
-    ),
+    signature: "signal = fea.HeatFluxSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
     inputs: [
         (
             "id",

@@ -31,9 +31,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         section(
             "Use in a study",
             &[
-                concat!(
-                    "Use the signal wherever a model object consumes a electric charge density signal.",
-                ),
+                "Use the signal wherever a model object consumes a electric charge density signal.",
                 super::HISTORY_STUDY,
             ],
         ),

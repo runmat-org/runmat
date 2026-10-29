@@ -88,7 +88,9 @@ fn possible_text_list(value: &ValueFact) -> bool {
     match &value.kind {
         ValueKindFact::Unknown | ValueKindFact::String => true,
         ValueKindFact::Character => host_text(value),
-        ValueKindFact::Cell(cell) => host_text(&cell.element) && cell.elements.iter().all(host_text),
+        ValueKindFact::Cell(cell) => {
+            host_text(&cell.element) && cell.elements.iter().all(host_text)
+        }
         _ => false,
     }
 }
@@ -276,13 +278,10 @@ pub fn infer_result(
                     1,
                 ));
             }
-            if arguments
-                .get(2)
-                .is_some_and(|value| {
-                    !possible_object(value, &[FEA_FREQUENCY_CLASS, FEA_TIME_CLASS])
-                        && !possible_exact_scalar(value)
-                })
-            {
+            if arguments.get(2).is_some_and(|value| {
+                !possible_object(value, &[FEA_FREQUENCY_CLASS, FEA_TIME_CLASS])
+                    && !possible_exact_scalar(value)
+            }) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-SAMPLE",
                     "fea.field sample must be a fea.Frequency, a fea.Time, or a one-based transient sample index",
@@ -308,8 +307,8 @@ pub fn infer_result(
                     0,
                 ));
             }
-            for index in 1..arguments.len().min(3) {
-                if !possible_exact_scalar(&arguments[index]) {
+            for (index, argument) in arguments.iter().enumerate().take(3).skip(1) {
+                if !possible_exact_scalar(argument) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-PAGE-BOUND",
                         "field page start and count must be host numeric scalars",

@@ -51,9 +51,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     faqs: &[
         faq(
             "Must the points be uniformly spaced?",
-            concat!(
-                "No. Any strictly increasing sequence of at least two finite coordinates is accepted.",
-            ),
+            "No. Any strictly increasing sequence of at least two finite coordinates is accepted.",
         ),
     ],
     links: &[
@@ -86,9 +84,7 @@ policy_entry!(
         (
             "points",
             NumericArray,
-            concat!(
-                "Strictly increasing finite sample coordinates in the domain's unit; at least two.",
-            ),
+            "Strictly increasing finite sample coordinates in the domain's unit; at least two.",
             PolicyArg::RealVector,
         ),
     ],

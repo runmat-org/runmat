@@ -9,9 +9,7 @@ use crate::BuiltinDocumentation;
 
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.SpectrumEvidence.bounded",
-    summary: concat!(
-        "Record sampling adequacy and an interpolation-error bound for a response spectrum.",
-    ),
+    summary: "Record sampling adequacy and an interpolation-error bound for a response spectrum.",
     description: concat!(
         "`fea.SpectrumEvidence.bounded(samplingAdequacyRatio, maximumInterpolationError)` ",
         "returns an `fea.SpectrumEvidence` with `value.sampling_adequacy_ratio` and ",

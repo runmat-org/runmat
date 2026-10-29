@@ -12,7 +12,7 @@ pub(super) const ROLE: &str = concat!(
     "such as a mean, RMS, or variance.",
 );
 pub(super) const STUDY: &str =
-    concat!("Pass the weighting to `fea.SeriesReduction.mean`, `rootMeanSquare`, or `variance`.",);
+    "Pass the weighting to `fea.SeriesReduction.mean`, `rootMeanSquare`, or `variance`.";
 pub(super) const FAQ: BuiltinDocumentationFaq = BuiltinDocumentationFaq {
     question: "Which weighting should a transient history use?",
     answer: concat!(

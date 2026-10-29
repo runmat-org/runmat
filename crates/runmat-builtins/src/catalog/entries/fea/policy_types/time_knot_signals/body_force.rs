@@ -86,9 +86,7 @@ policy_entry!(
     FEA_BODY_FORCE_SIGNAL_FROM_TIME_KNOTS_CATALOG_ENTRY,
     name: "fea.BodyForceSignal.fromTimeKnots",
     result: classes::BODY_FORCE_SIGNAL,
-    signature: concat!(
-        "signal = fea.BodyForceSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
-    ),
+    signature: "signal = fea.BodyForceSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
     inputs: [
         (
             "id",

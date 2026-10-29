@@ -9,9 +9,7 @@ use crate::BuiltinDocumentation;
 
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.ResponseSpectrum.new",
-    summary: concat!(
-        "Create an immutable, typed response spectrum for modal response-spectrum analysis.",
-    ),
+    summary: "Create an immutable, typed response spectrum for modal response-spectrum analysis.",
     description: concat!(
         "`fea.ResponseSpectrum.new(id, axis, ordinates, damping, response, envelope, ",
         "interpolation, extrapolation, direction, modalCombination, directionalCombination, ",
@@ -151,9 +149,7 @@ policy_entry!(
         (
             "ordinates",
             NumericArray,
-            concat!(
-                "Finite, nonnegative ordinates, one per abscissa, in the unit of the response type.",
-            ),
+            "Finite, nonnegative ordinates, one per abscissa, in the unit of the response type.",
             PolicyArg::RealVector,
         ),
         (

@@ -18,9 +18,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         section(
             "Behavior",
             &[
-                concat!(
-                    "Sound pressure level is a dimensionless scalar in dB derived from acoustic pressure.",
-                ),
+                "Sound pressure level is a dimensionless scalar in dB derived from acoustic pressure.",
                 super::ROLE,
             ],
         ),

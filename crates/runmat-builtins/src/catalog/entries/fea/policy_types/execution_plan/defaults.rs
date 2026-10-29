@@ -9,9 +9,7 @@ use crate::BuiltinDocumentation;
 
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.ExecutionPlan.defaults",
-    summary: concat!(
-        "Create an execution plan with default solver options for every step of a sequence.",
-    ),
+    summary: "Create an execution plan with default solver options for every step of a sequence.",
     description: concat!(
         "`fea.ExecutionPlan.defaults(sequence, backend)` returns an ",
         "`fea.ExecutionPlan` with one execution step per procedure step, each using ",
@@ -58,9 +56,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     faqs: &[
         faq(
             "Is this what fea.study does without an Execution option?",
-            concat!(
-                "Yes. `fea.study` builds the same default plan with the CPU backend.",
-            ),
+            "Yes. `fea.study` builds the same default plan with the CPU backend.",
         ),
     ],
     links: &[

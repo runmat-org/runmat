@@ -40,9 +40,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         example(
             "vertical",
             "Excite along global z",
-            concat!(
-                "direction = fea.SpectrumDirection.new(fea.CoordinateFrame.globalFrame(), [0 0 2]);",
-            ),
+            "direction = fea.SpectrumDirection.new(fea.CoordinateFrame.globalFrame(), [0 0 2]);",
             concat!(
                 "assert(strcmp(class(direction), 'fea.SpectrumDirection'));\n",
                 "assert(direction.value.vector(3) == 1);\n",

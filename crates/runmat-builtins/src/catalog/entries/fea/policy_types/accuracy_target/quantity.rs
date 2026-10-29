@@ -95,9 +95,7 @@ policy_entry!(
         (
             "quantity",
             Any,
-            concat!(
-                "Typed fea.ObservationQuantity, for example fea.ObservationQuantity.vonMisesStress().",
-            ),
+            "Typed fea.ObservationQuantity, for example fea.ObservationQuantity.vonMisesStress().",
             PolicyArg::Typed(&[classes::OBSERVATION_QUANTITY]),
         ),
     ],

@@ -84,9 +84,7 @@ policy_entry!(
     FEA_VOLUME_FLOW_SIGNAL_FROM_TIME_KNOTS_CATALOG_ENTRY,
     name: "fea.VolumeFlowSignal.fromTimeKnots",
     result: classes::VOLUME_FLOW_SIGNAL,
-    signature: concat!(
-        "signal = fea.VolumeFlowSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
-    ),
+    signature: "signal = fea.VolumeFlowSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
     inputs: [
         (
             "id",

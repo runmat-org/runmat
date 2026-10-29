@@ -88,9 +88,7 @@ policy_entry!(
     FEA_VELOCITY_SIGNAL_FROM_TIME_KNOTS_CATALOG_ENTRY,
     name: "fea.VelocitySignal.fromTimeKnots",
     result: classes::VELOCITY_SIGNAL,
-    signature: concat!(
-        "signal = fea.VelocitySignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
-    ),
+    signature: "signal = fea.VelocitySignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
     inputs: [
         (
             "id",

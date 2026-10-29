@@ -201,7 +201,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
         Some(_) => {}
     }
     let options = request.arguments.len().saturating_sub(1);
-    if options % 2 != 0 {
+    if !options.is_multiple_of(2) {
         diagnostics.push(crate::catalog::argument_error(
             "RM-CATALOG-GEOMETRY-MESH-OPTIONS",
             "geometry mesh display options must be Name, Value pairs",

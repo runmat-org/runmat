@@ -44,8 +44,7 @@ pub fn boundary_face_validity(
         BoundaryTriangleOrder::Tri3 => 3,
         BoundaryTriangleOrder::Tri6 => 6,
     };
-    if coordinates.len() != count || coordinates.iter().flatten().any(|value| !value.is_finite())
-    {
+    if coordinates.len() != count || coordinates.iter().flatten().any(|value| !value.is_finite()) {
         return None;
     }
     let corner_normal = cross(
@@ -162,19 +161,21 @@ pub const GAUSS_LEGENDRE_SIXTEEN_UNIT: [(f64, f64); 16] = [
     (0.994_700_467_495_825, 0.013_576_229_705_877_027),
 ];
 
-
 const MOMENT_RELATIVE_TOLERANCE: f64 = 1.0e-10;
 
 fn is_curved(coordinates: &[[f64; 3]]) -> bool {
     let scale = (0..3)
         .map(|index| norm(subtract(coordinates[(index + 1) % 3], coordinates[index])))
         .fold(0.0_f64, f64::max);
-    [(0, 1), (1, 2), (2, 0)].iter().enumerate().any(|(index, edge)| {
-        let midpoint: [f64; 3] = std::array::from_fn(|axis| {
-            0.5 * (coordinates[edge.0][axis] + coordinates[edge.1][axis])
-        });
-        norm(subtract(coordinates[index + 3], midpoint)) > 1.0e-12 * scale
-    })
+    [(0, 1), (1, 2), (2, 0)]
+        .iter()
+        .enumerate()
+        .any(|(index, edge)| {
+            let midpoint: [f64; 3] = std::array::from_fn(|axis| {
+                0.5 * (coordinates[edge.0][axis] + coordinates[edge.1][axis])
+            });
+            norm(subtract(coordinates[index + 3], midpoint)) > 1.0e-12 * scale
+        })
 }
 
 #[derive(Default)]
@@ -210,12 +211,12 @@ fn moments(coordinates: &[[f64; 3]], rule: &[(f64, f64)]) -> Option<Moments> {
             for (sum, shape) in result.nodal_area.iter_mut().zip(shapes) {
                 *sum += shape * jacobian * weight;
             }
-            for axis in 0..3 {
+            for (axis, component) in area_vector.iter().enumerate() {
                 let position = (0..6)
                     .map(|node| shapes[node] * coordinates[node][axis])
                     .sum::<f64>();
                 result.first_moment[axis] += position * jacobian * weight;
-                result.area_vector[axis] += area_vector[axis] * weight;
+                result.area_vector[axis] += component * weight;
             }
         }
     }
@@ -299,7 +300,10 @@ fn quadratic_triangle_minimum(q: impl Fn(f64, f64) -> f64) -> Option<f64> {
         q(0.0, 0.5),
         q(0.5, 0.5),
     ];
-    if [q00, q10, q01, qh0, q0h, qhh].iter().any(|value| !value.is_finite()) {
+    if [q00, q10, q01, qh0, q0h, qhh]
+        .iter()
+        .any(|value| !value.is_finite())
+    {
         return None;
     }
     // q(u,v) = a*u² + b*v² + c*u*v + d*u + e*v + q00.
@@ -391,12 +395,21 @@ mod tests {
         edge_on[2] = [0.5, 1.0e-6, 0.0];
         edge_on[4] = [0.75, 0.0, 0.3];
         edge_on[5] = [0.25, 0.0, 0.3];
-        assert!(!is_valid_boundary_face(BoundaryTriangleOrder::Tri6, &edge_on));
+        assert!(!is_valid_boundary_face(
+            BoundaryTriangleOrder::Tri6,
+            &edge_on
+        ));
         assert!(boundary_face_validity(BoundaryTriangleOrder::Tri6, &flat()[..3]).is_none());
         let mut collapsed = flat();
         collapsed[2] = [0.5, 0.0, 0.0];
-        assert!(!is_valid_boundary_face(BoundaryTriangleOrder::Tri6, &collapsed));
-        assert!(is_valid_boundary_face(BoundaryTriangleOrder::Tri3, &flat()[..3]));
+        assert!(!is_valid_boundary_face(
+            BoundaryTriangleOrder::Tri6,
+            &collapsed
+        ));
+        assert!(is_valid_boundary_face(
+            BoundaryTriangleOrder::Tri3,
+            &flat()[..3]
+        ));
         assert_eq!(
             boundary_face_rule(BoundaryTriangleOrder::Tri6, &flat()),
             Some(BoundaryFaceRule::Planar)
@@ -412,12 +425,19 @@ mod tests {
             [0.02, 0.017359901803675984, 0.029022258384304236],
             [0.01994235584120969, 0.017585270966048387, 0.029],
             [0.02, 0.017225653696809735, 0.029008841735619875],
-            [0.019972589040368874, 0.017476895463202486, 0.0290106004194752],
+            [
+                0.019972589040368874,
+                0.017476895463202486,
+                0.0290106004194752,
+            ],
             [0.01997743860379613, 0.01736723202559765, 0.029],
         ];
         assert!(boundary_face_validity(BoundaryTriangleOrder::Tri6, &fillet)
             .unwrap()
             .is_valid());
-        assert_eq!(boundary_face_rule(BoundaryTriangleOrder::Tri6, &fillet), None);
+        assert_eq!(
+            boundary_face_rule(BoundaryTriangleOrder::Tri6, &fillet),
+            None
+        );
     }
 }

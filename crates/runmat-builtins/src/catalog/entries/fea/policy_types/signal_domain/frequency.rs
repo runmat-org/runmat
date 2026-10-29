@@ -48,9 +48,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     faqs: &[
         faq(
             "Are angular frequencies accepted?",
-            concat!(
-                "No. Coordinates are cyclic frequency in hertz. Convert rad/s by dividing by 2*pi.",
-            ),
+            "No. Coordinates are cyclic frequency in hertz. Convert rad/s by dividing by 2*pi.",
         ),
     ],
     links: &[

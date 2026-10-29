@@ -84,9 +84,7 @@ policy_entry!(
     FEA_PRESSURE_SIGNAL_FROM_TIME_KNOTS_CATALOG_ENTRY,
     name: "fea.PressureSignal.fromTimeKnots",
     result: classes::PRESSURE_SIGNAL,
-    signature: concat!(
-        "signal = fea.PressureSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
-    ),
+    signature: "signal = fea.PressureSignal.fromTimeKnots(id, knots, interpolation, extrapolation)",
     inputs: [
         (
             "id",
