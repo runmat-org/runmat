@@ -187,7 +187,8 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
     let run_id = "run-remote-conformance";
     let (program, _, bytes) = super::pool_tests::executable_bundle().await;
     let bundle =
-        runmat_execution_artifact::archive::read_bundle(&bytes, ArchiveLimits::default()).unwrap();
+        runmat_execution_artifact::archive::read_bundle(bytes.as_slice(), ArchiveLimits::default())
+            .unwrap();
     let response = run_encrypted_remote_request_with_prior_sequence(
         run_id,
         bundle,
@@ -206,7 +207,8 @@ async fn replacement_driver_consumes_an_exact_resume_safe_checkpoint() {
     let run_id = "run-remote-replacement";
     let (program, _, bytes) = super::pool_tests::executable_bundle().await;
     let bundle =
-        runmat_execution_artifact::archive::read_bundle(&bytes, ArchiveLimits::default()).unwrap();
+        runmat_execution_artifact::archive::read_bundle(bytes.as_slice(), ArchiveLimits::default())
+            .unwrap();
     let response = run_encrypted_remote_request_with_prior_sequence(
         run_id,
         bundle,
