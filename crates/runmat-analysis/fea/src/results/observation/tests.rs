@@ -1304,8 +1304,12 @@ fn history_checkpoint_restart_preserves_exact_lineage_without_gaps_or_duplicates
     let restarted = final_attempt.finish().unwrap();
     assert_eq!(restarted, uninterrupted);
 
-    let mut stale_plan = plan.clone();
+    let mut stale_plan = plan.clone().into_contents();
     stale_plan.identity = ResolvedObservationPlanIdentity(Digest::sha256("stale-plan"));
+    assert!(ResolvedObservationPlan::try_from(stale_plan.clone()).is_err());
+    stale_plan.step_id = runmat_analysis_core::ProcedureStepId("another-step".into());
+    stale_plan.identity = stale_plan.derive_identity().unwrap();
+    let stale_plan = ResolvedObservationPlan::try_from(stale_plan).unwrap();
     assert!(
         BoundedObservationHistory::resume(&stale_plan, &observation_id, final_checkpoint).is_err()
     );
@@ -2598,7 +2602,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         .unwrap_err()
         .to_string()
         .contains("execution policy differs"));
-    let mut forged = plan;
+    let mut forged = plan.into_contents();
     let ResolvedObservationTarget::Nodes { indices, .. } = &mut forged.observations[0].target
     else {
         unreachable!()
@@ -2607,7 +2611,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         *index += 1;
     }
     forged.identity = forged.derive_identity().unwrap();
-    forged.validate_identity().unwrap();
+    let forged = ResolvedObservationPlan::try_from(forged).unwrap();
     assert!(source
         .validate_structural_plan(&forged, &model, None)
         .is_err());
@@ -2813,7 +2817,8 @@ fn direct_deserialization_rejects_semantically_invalid_resolved_plans() {
         &[definition],
         ObservationLimits::default(),
     )
-    .unwrap();
+    .unwrap()
+    .into_contents();
     let ResolvedObservationTarget::Nodes {
         indices,
         identities,
@@ -2851,7 +2856,8 @@ fn resolved_path_identity_rejects_interpolation_weight_substitution() {
         &[definition],
         ObservationLimits::default(),
     )
-    .unwrap();
+    .unwrap()
+    .into_contents();
     let ResolvedObservationTarget::Points { samples } = &mut plan.observations[0].target else {
         panic!("path must resolve to finite-element point samples")
     };
@@ -2904,13 +2910,15 @@ fn evaluation_rejects_plan_targets_rebound_to_another_topology_entity() {
         std::slice::from_ref(&definition),
         ObservationLimits::default(),
     )
-    .unwrap();
+    .unwrap()
+    .into_contents();
     let ResolvedObservationTarget::Nodes { identities, .. } = &mut plan.observations[0].target
     else {
         panic!("whole-model nodal field must resolve to nodes");
     };
     identities.swap(0, 1);
     plan.identity = plan.derive_identity().unwrap();
+    let plan = ResolvedObservationPlan::try_from(plan).unwrap();
     let fields = catalog(&projection, &definition, vec![4], vec![1.0, 2.0, 3.0, 4.0]);
 
     let error = evaluate_observations(&plan, &projection, &fields).unwrap_err();

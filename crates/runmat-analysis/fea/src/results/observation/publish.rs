@@ -14,7 +14,6 @@ pub fn publish_observation(
     result: &ObservationResult,
     requested_chunk_bytes: usize,
 ) -> Result<ChunkedAnalysisPayload, ObservationError> {
-    plan.validate_identity()?;
     let planned = plan
         .observations
         .iter()

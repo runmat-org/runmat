@@ -10,8 +10,7 @@ use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_analysis_fea::{
     execution::{AnalysisNumericalObjectKind, AnalysisTransportProfiler, FluidSteadyWorkload},
     planning::resource::{
-        build_fluid_steady_resource_plan, derive_fluid_steady_resource_projection,
-        fluid_steady_result_payload_bytes_upper_bound, FeaResourcePlan,
+        build_fluid_steady_resource_plan_with, FeaResourcePlan, FluidSteadyResourceProjection,
         PreparedFluidSteadyResourceFacts,
     },
 };
@@ -30,7 +29,6 @@ pub fn prepare_fluid_steady_inputs(
     policy: AnalysisOutputPolicy,
     local_execution: LocalExecutionPlan,
 ) -> AnalysisBridgeResult<PreparedFluidSteadyInputs> {
-    let result_output = projected_result(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::FluidSteadyWorkload,
         workload.identity()?.digest(),
@@ -49,21 +47,19 @@ pub fn prepare_fluid_steady_inputs(
         policy.inventory_limits(),
     )?;
     let inputs = vec![workload_objects, mesh_objects];
-    let resource_plan = build_fluid_steady_resource_plan(
-        workload,
-        mesh,
-        PreparedFluidSteadyResourceFacts {
+    let resource_plan = build_fluid_steady_resource_plan_with(workload, mesh, |projection| {
+        Ok::<_, AnalysisBridgeError>(PreparedFluidSteadyResourceFacts {
             local_execution,
             inputs: prepared_input_resource_facts(&inputs)?,
-            result_output,
+            result_output: projected_result(projection, policy)?,
             receipt_output: projected_output(
                 AnalysisNumericalObjectKind::NumericalReceipt,
                 runmat_analysis_fea::execution::FLUID_RECEIPT_MAX_ENCODED_BYTES,
                 policy,
             )?,
             output_set: projected_output_set_resource_facts(),
-        },
-    )?;
+        })
+    })?;
     Ok(PreparedFluidSteadyInputs {
         inputs,
         resource_plan,
@@ -78,75 +74,76 @@ pub fn rederive_fluid_steady_resource_plan(
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
-    // Original raw count/profile ceiling precedes source encoding/projection.
-    fluid_steady_result_payload_bytes_upper_bound(workload, mesh)?;
+    // The projection (the original raw count/profile ceiling) precedes source encoding.
     use AnalysisNumericalObjectKind::{FluidSteadyWorkload, Mesh, ResourcePlan};
-    if inputs.len() != 3
-        || [FluidSteadyWorkload, Mesh, ResourcePlan]
-            .iter()
-            .any(|kind| {
-                inputs
-                    .iter()
-                    .filter(|input| input.manifest.kind == *kind)
-                    .count()
-                    != 1
-            })
-    {
-        return Err(invalid(
-            "Fluid inputs require exactly workload, mesh and resource plan",
-        ));
-    }
-    for input in inputs {
-        input.manifest.validate()?;
-        let (expected, bytes) = match input.manifest.kind {
-            FluidSteadyWorkload => (workload.identity()?.digest(), workload.canonical_bytes()?),
-            Mesh => (
-                Digest::from_bytes(*mesh.canonical_digest.bytes()),
-                mesh.canonical_encode().map_err(invalid)?,
-            ),
-            ResourcePlan => continue,
-            _ => return Err(invalid("unexpected Fluid input")),
-        };
-        if input.manifest.logical_identity != expected {
-            return Err(invalid("Fluid imported source identity differs"));
-        }
-        let canonical = prepare_analysis_objects(
-            input.manifest.kind,
-            expected,
-            &bytes,
-            policy.chunk_bytes(),
-            ObjectNamespace::InputValue,
-            policy.inventory_limits(),
-        )?;
-        if input != &canonical {
+    let mut imported_plan = None;
+    let plan = build_fluid_steady_resource_plan_with(workload, mesh, |projection| {
+        if inputs.len() != 3
+            || [FluidSteadyWorkload, Mesh, ResourcePlan]
+                .iter()
+                .any(|kind| {
+                    inputs
+                        .iter()
+                        .filter(|input| input.manifest.kind == *kind)
+                        .count()
+                        != 1
+                })
+        {
             return Err(invalid(
-                "Fluid input closure differs from canonical source or chunk policy",
+                "Fluid inputs require exactly workload, mesh and resource plan",
             ));
         }
-    }
-    let input = inputs
-        .iter()
-        .find(|input| input.manifest.kind == ResourcePlan)
-        .ok_or_else(|| invalid("Fluid resource plan missing"))?;
-    let imported = FeaResourcePlan::from_canonical_bytes(&input.payload())?;
-    let plan = build_fluid_steady_resource_plan(
-        workload,
-        mesh,
-        PreparedFluidSteadyResourceFacts {
+        for input in inputs {
+            input.manifest.validate()?;
+            let (expected, bytes) = match input.manifest.kind {
+                FluidSteadyWorkload => (workload.identity()?.digest(), workload.canonical_bytes()?),
+                Mesh => (
+                    Digest::from_bytes(*mesh.canonical_digest.bytes()),
+                    mesh.canonical_encode().map_err(invalid)?,
+                ),
+                ResourcePlan => continue,
+                _ => return Err(invalid("unexpected Fluid input")),
+            };
+            if input.manifest.logical_identity != expected {
+                return Err(invalid("Fluid imported source identity differs"));
+            }
+            let canonical = prepare_analysis_objects(
+                input.manifest.kind,
+                expected,
+                &bytes,
+                policy.chunk_bytes(),
+                ObjectNamespace::InputValue,
+                policy.inventory_limits(),
+            )?;
+            if input != &canonical {
+                return Err(invalid(
+                    "Fluid input closure differs from canonical source or chunk policy",
+                ));
+            }
+        }
+        let input = inputs
+            .iter()
+            .find(|input| input.manifest.kind == ResourcePlan)
+            .ok_or_else(|| invalid("Fluid resource plan missing"))?;
+        let imported = FeaResourcePlan::from_canonical_bytes(&input.payload())?;
+        let facts = PreparedFluidSteadyResourceFacts {
             local_execution: LocalExecutionPlan::from_cpu_millicores(
                 imported.request.cpu_millicores,
             )
             .map_err(invalid)?,
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
-            result_output: projected_result(workload, mesh, policy)?,
+            result_output: projected_result(projection, policy)?,
             receipt_output: projected_output(
                 AnalysisNumericalObjectKind::NumericalReceipt,
                 runmat_analysis_fea::execution::FLUID_RECEIPT_MAX_ENCODED_BYTES,
                 policy,
             )?,
             output_set: projected_output_set_resource_facts(),
-        },
-    )?;
+        };
+        imported_plan = Some((input, imported));
+        Ok::<_, AnalysisBridgeError>(facts)
+    })?;
+    let (input, imported) = imported_plan.expect("the plan builder prepared its facts");
     if imported != plan || input.manifest.logical_identity != plan.identity.digest() {
         return Err(invalid(
             "Fluid resource plan disagrees with imported inputs or output policy",
@@ -169,11 +166,9 @@ pub fn rederive_fluid_steady_resource_plan(
 }
 
 fn projected_result(
-    workload: &FluidSteadyWorkload,
-    mesh: &SolverMeshArtifact,
+    projection: &FluidSteadyResourceProjection,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts> {
-    let projection = derive_fluid_steady_resource_projection(workload, mesh)?;
     let mut facts = projected_output(
         AnalysisNumericalObjectKind::SolverResult,
         projection.result_payload_bytes_upper_bound.0,

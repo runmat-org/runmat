@@ -1,13 +1,11 @@
 use runmat_analysis_core::SolverObservationEvent;
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::encode_contract;
 use runmat_execution::Digest;
 use serde::Serialize;
 
 use super::NonlinearSolveResult;
 
 const SOURCE_PREFIX: &[u8] = b"runmat-fea-nonlinear-event-source/v4\0";
-const SOURCE_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -141,10 +139,16 @@ pub fn detect_completed_nonlinear_events(
 /// Digest of deterministic numerical solver content used to bind in-process event attribution.
 /// Diagnostics and wall-clock measurements are intentionally excluded; they are execution
 /// evidence rather than the numerical state from which the event was detected.
+///
+/// `limits` is the history inventory the resource plan admitted for this result.
 pub fn nonlinear_solver_content_digest(
     result: &NonlinearSolveResult,
+    limits: crate::planning::resource::NonlinearHistoryLimits,
 ) -> Result<Digest, NonlinearEventDetectionError> {
     validate_event_source(result)?;
+    let limits = limits
+        .canonical()
+        .map_err(NonlinearEventDetectionError::Canonical)?;
     let bytes = encode_contract(
         SOURCE_PREFIX,
         "completed-nonlinear-solver-content",
@@ -186,7 +190,7 @@ pub fn nonlinear_solver_content_digest(
             device_apply_k_attempt_count: result.device_apply_k_attempt_count,
             preconditioner: result.preconditioner,
         },
-        SOURCE_LIMITS,
+        limits,
     )
     .map_err(|error| NonlinearEventDetectionError::Canonical(error.to_string()))?;
     Ok(Digest::sha256(bytes))
@@ -403,15 +407,41 @@ mod tests {
         );
     }
 
+    const LIMITS: crate::planning::resource::NonlinearHistoryLimits =
+        crate::planning::resource::NonlinearHistoryLimits {
+            encoded_bytes: crate::planning::resource::ByteCount(1 << 24),
+            collection_items: crate::planning::resource::Count(1 << 24),
+        };
+
+    #[test]
+    fn content_digest_is_bounded_by_the_planned_history_inventory() {
+        let baseline = result();
+        let digest = nonlinear_solver_content_digest(&baseline, LIMITS).unwrap();
+        // The bound comes from the plan, not a fixed ceiling: a plan that admits less
+        // history than the solver produced fails closed with a typed codec error.
+        let short = crate::planning::resource::NonlinearHistoryLimits {
+            encoded_bytes: crate::planning::resource::ByteCount(64),
+            ..LIMITS
+        };
+        assert!(matches!(
+            nonlinear_solver_content_digest(&baseline, short),
+            Err(NonlinearEventDetectionError::Canonical(_))
+        ));
+        assert_eq!(
+            nonlinear_solver_content_digest(&baseline, LIMITS).unwrap(),
+            digest
+        );
+    }
+
     #[test]
     fn source_identity_binds_numerical_state_but_not_execution_diagnostics() {
         let baseline = result();
-        let baseline_digest = nonlinear_solver_content_digest(&baseline).unwrap();
+        let baseline_digest = nonlinear_solver_content_digest(&baseline, LIMITS).unwrap();
         let mut substituted_strain = baseline.clone();
         substituted_strain.total_strain_snapshots[1][0] += 0.001;
         assert_ne!(
             baseline_digest,
-            nonlinear_solver_content_digest(&substituted_strain).unwrap()
+            nonlinear_solver_content_digest(&substituted_strain, LIMITS).unwrap()
         );
 
         let mut diagnostic_only = baseline.clone();
@@ -421,14 +451,14 @@ mod tests {
             message: "provider timing changed".into(),
         });
         assert_eq!(
-            nonlinear_solver_content_digest(&diagnostic_only).unwrap(),
+            nonlinear_solver_content_digest(&diagnostic_only, LIMITS).unwrap(),
             baseline_digest
         );
 
         let mut substituted_state = baseline;
         substituted_state.equivalent_plastic_strain_snapshots[1][0] = 0.2;
         assert_ne!(
-            nonlinear_solver_content_digest(&substituted_state).unwrap(),
+            nonlinear_solver_content_digest(&substituted_state, LIMITS).unwrap(),
             baseline_digest
         );
     }
@@ -438,6 +468,6 @@ mod tests {
         let mut malformed = result();
         malformed.contact_gap_snapshots.pop();
         assert!(detect_completed_nonlinear_events(&malformed).is_err());
-        assert!(nonlinear_solver_content_digest(&malformed).is_err());
+        assert!(nonlinear_solver_content_digest(&malformed, LIMITS).is_err());
     }
 }

@@ -134,6 +134,14 @@ enum ExecutionCheck {
     Derived,
 }
 
+/// Whether `validate_for_context` re-resolves a volume-mesh plan against its catalog, or the
+/// plan arrived sealed with that catalog on the context's mesh.
+#[derive(Clone, Copy, PartialEq)]
+enum PlanCheck {
+    Reresolve,
+    Resolved,
+}
+
 /// Successful (catalog, step, volume-mesh context) validations retained per process. One study
 /// validates its catalog when it is built, and again in accuracy preparation, accuracy import
 /// and publication; each is the same pure function of the keyed content, so the process runs
@@ -163,8 +171,47 @@ impl ObservationPublicationCatalog {
         plan: ResolvedObservationPlan,
         source: ObservationFieldCatalog,
         step: &ProcedureStep,
+        entries: Vec<ObservationPublicationEntry>,
+        context: ObservationHistorySourceContext<'_>,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::build(
+            producer,
+            plan,
+            source,
+            step,
+            entries,
+            context,
+            PlanCheck::Reresolve,
+        )
+    }
+
+    /// A volume-mesh catalog whose plan was resolved from its own field catalog: when the
+    /// context is the mesh it was resolved on, the plan is not re-resolved to check it.
+    pub fn on_volume_mesh(
+        producer: StepIdentity,
+        authority: super::VolumeMeshObservationAuthority,
+        step: &ProcedureStep,
+        entries: Vec<ObservationPublicationEntry>,
+        context: ObservationHistorySourceContext<'_>,
+    ) -> AnalysisExecutionResult<Self> {
+        let check = match context {
+            ObservationHistorySourceContext::VolumeMesh { mesh } if authority.resolved_on(mesh) => {
+                PlanCheck::Resolved
+            }
+            _ => PlanCheck::Reresolve,
+        };
+        let (source, plan) = authority.into_parts();
+        Self::build(producer, plan, source, step, entries, context, check)
+    }
+
+    fn build(
+        producer: StepIdentity,
+        plan: ResolvedObservationPlan,
+        source: ObservationFieldCatalog,
+        step: &ProcedureStep,
         mut entries: Vec<ObservationPublicationEntry>,
         context: ObservationHistorySourceContext<'_>,
+        plan_check: PlanCheck,
     ) -> AnalysisExecutionResult<Self> {
         // Validate entries before reading their canonical ordering keys.
         for entry in &entries {
@@ -189,7 +236,7 @@ impl ObservationPublicationCatalog {
         value.identity = value.derive_identity()?;
         // The execution grouping was just derived from this context; validate the rest.
         context.validate()?;
-        value.validate_for_context(step, context, ExecutionCheck::Derived)?;
+        value.validate_for_context(step, context, ExecutionCheck::Derived, plan_check)?;
         if let Some(key) = value.validated_context_key(step, context)? {
             remember(&VALIDATED_CONTEXTS, key);
         }
@@ -236,7 +283,12 @@ impl ObservationPublicationCatalog {
         if key.is_some_and(|key| seen(&VALIDATED_CONTEXTS, key)) {
             return Ok(());
         }
-        self.validate_for_context(step, context, ExecutionCheck::Rederive)?;
+        self.validate_for_context(
+            step,
+            context,
+            ExecutionCheck::Rederive,
+            PlanCheck::Reresolve,
+        )?;
         if let Some(key) = key {
             remember(&VALIDATED_CONTEXTS, key);
         }
@@ -268,6 +320,7 @@ impl ObservationPublicationCatalog {
         step: &ProcedureStep,
         context: ObservationHistorySourceContext<'_>,
         execution: ExecutionCheck,
+        plan_check: PlanCheck,
     ) -> AnalysisExecutionResult<()> {
         self.validate_authored_step(step)?;
         match (self.source.source(), context) {
@@ -340,7 +393,9 @@ impl ObservationPublicationCatalog {
                         "volume-mesh publication producer or authored step differs",
                     ));
                 }
-                self.source.validate_volume_mesh_plan(&self.plan, mesh)?;
+                if plan_check == PlanCheck::Reresolve {
+                    self.source.validate_volume_mesh_plan(&self.plan, mesh)?;
+                }
                 for entry in &self.entries {
                     if let ObservationPublicationEntry::Sample(value) = entry {
                         self.source

@@ -63,6 +63,16 @@ impl FiniteVolumeFieldTopology {
         topology: &FiniteVolumeTopology,
     ) -> Result<Self, RecoveredFieldError> {
         topology.validate_for(projection).map_err(invalid)?;
+        Self::from_derived(projection, topology)
+    }
+
+    /// The layout of `topology`, which the caller derived from `projection` in this process
+    /// (`FiniteVolumeTopology::derive*`), so it is not re-derived to check it. Face identities
+    /// are computed here once; validation checks the inventory without hashing them again.
+    pub(crate) fn from_derived(
+        projection: &AnalysisProjection,
+        topology: &FiniteVolumeTopology,
+    ) -> Result<Self, RecoveredFieldError> {
         let mut faces = Vec::with_capacity(topology.faces.len());
         for face in &topology.faces {
             let owner = topology.cells[face.owner].element_identity;
@@ -82,7 +92,8 @@ impl FiniteVolumeFieldTopology {
             cell_identities: topology.cells.iter().map(|c| c.element_identity).collect(),
             oriented_faces: faces,
         };
-        value.validate()?;
+        validation::validate(&value, validation::FaceIdentities::Computed)?;
+        value.entity_counts().validate()?;
         Ok(value)
     }
 
@@ -114,7 +125,7 @@ impl FiniteVolumeFieldTopology {
 
     /// Internal wire integrity is not original-source admission.
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
-        validation::validate(self)?;
+        validation::validate(self, validation::FaceIdentities::Recompute)?;
         self.entity_counts().validate()
     }
     pub fn validate_for(
@@ -122,7 +133,7 @@ impl FiniteVolumeFieldTopology {
         projection: &AnalysisProjection,
         topology: &FiniteVolumeTopology,
     ) -> Result<(), RecoveredFieldError> {
-        self.validate()?;
+        // Equal to the freshly derived (valid) layout implies valid; no separate validate.
         if self != &Self::derive(projection, topology)? {
             return Err(RecoveredFieldError::ArtifactTopologyMismatch);
         }

@@ -180,7 +180,10 @@ pub fn prepare_thermal_study_publication(
         object_artifact_paths,
     };
     let manifest = super::study_result_manifest::StudyResultManifest::new(
-        &completed.compiled,
+        completed
+            .compiled
+            .definition()
+            .map_err(|error| invalid(error.to_string()))?,
         completed
             .workload
             .identity()

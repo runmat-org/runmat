@@ -82,8 +82,16 @@ pub(super) fn validate_original_evidence(
     let catalog = match (catalogs.next(), catalogs.next()) {
         (None, None) => None,
         (Some(objects), None) => {
-            let catalog = ObservationPublicationCatalog::from_canonical_bytes(&objects.payload())
-                .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
+            let catalog = match &prepared.source_observations {
+                // The catalog prepared this input in process: same identity, no decode.
+                Some(catalog)
+                    if catalog.identity().digest() == objects.manifest.logical_identity =>
+                {
+                    catalog.clone()
+                }
+                _ => ObservationPublicationCatalog::from_canonical_bytes(&objects.payload())
+                    .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?,
+            };
             if catalog.identity().digest() != objects.manifest.logical_identity {
                 return Err(AnalysisBridgeError::Identity(
                     "accuracy original catalog logical identity",

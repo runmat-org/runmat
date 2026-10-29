@@ -319,8 +319,6 @@ impl ObservationResourceFacts {
         plan: &ResolvedObservationPlan,
         execution: ObservationExecutionPolicy,
     ) -> Result<Self, ResourcePlanningError> {
-        plan.validate_identity()
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         let total = plan.observations.iter().try_fold(
             ObservationResourceAccumulator::default(),
             |mut total, observation| {

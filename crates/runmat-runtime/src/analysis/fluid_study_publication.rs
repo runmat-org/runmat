@@ -4,7 +4,7 @@ use super::{
     FluidStudyCompletion, FluidStudyObjectSource,
 };
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
-use runmat_execution::Digest;
+use runmat_analysis_fea::study::AnalysisStudyDefinition;
 use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 
 #[path = "fluid_study_publication/admission.rs"]
@@ -18,7 +18,7 @@ pub fn publish_fluid_study_result(
     mesh: &SolverMeshArtifact,
     meshing_evidence: &MeshingEvidence,
     options: &AnalysisCfdRunOptions,
-    definition: Digest,
+    definition: AnalysisStudyDefinition<'_>,
     context: OperationContext,
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
@@ -50,11 +50,12 @@ pub fn prepare_fluid_study_publication(
     mesh: &SolverMeshArtifact,
     meshing_evidence: &MeshingEvidence,
     options: &AnalysisCfdRunOptions,
-    definition: Digest,
+    study: AnalysisStudyDefinition<'_>,
     context: OperationContext,
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<crate::analysis::PreparedStudyPublication, OperationErrorEnvelope> {
     let invalid = |message| publication_error(&context, &completed.compiled.study_id, message);
+    let definition = study.digest();
     let preparation =
         crate::analysis::study_publication::preparation::PublicationPreparation::capture_catalog(
             definition,
@@ -73,15 +74,8 @@ pub fn prepare_fluid_study_publication(
                 error, &context, invalid,
             )
         })?;
-        admission::validate(
-            completed,
-            source,
-            mesh,
-            meshing_evidence,
-            options,
-            definition,
-        )
-        .map_err(invalid)?
+        admission::validate(completed, source, mesh, meshing_evidence, options, study)
+            .map_err(invalid)?
     };
     // The admitted step family names the run: standalone flow or a coupled flow study.
     let family = completed
@@ -113,7 +107,7 @@ pub fn prepare_fluid_study_publication(
     };
     let prepared = super::structural_study::standalone_completion(
         context.clone(),
-        &completed.compiled,
+        study,
         execution,
         persisted,
     )
@@ -136,7 +130,7 @@ pub fn prepare_fluid_study_publication(
             preparation,
         )?;
     let manifest = super::study_result_manifest::StudyResultManifest::new(
-        &completed.compiled,
+        study,
         completed
             .workload
             .identity()

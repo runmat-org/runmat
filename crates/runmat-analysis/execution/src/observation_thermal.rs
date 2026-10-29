@@ -139,5 +139,6 @@ pub(super) fn admit_thermal(
         workload,
         mesh: Some(mesh),
         accelerator_requests: preparation.accelerator_requests.clone(),
+        volume_mesh: None,
     })
 }

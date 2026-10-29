@@ -14,7 +14,7 @@ fn manifest(
     );
     let evidence = runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&mesh);
     StudyResultManifest::new(
-        compiled,
+        compiled.definition().unwrap(),
         Digest::sha256(b"original-workload"),
         &(),
         &mesh,

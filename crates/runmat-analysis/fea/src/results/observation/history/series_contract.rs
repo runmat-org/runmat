@@ -312,7 +312,6 @@ impl SeriesReductionResult {
         history: &ObservationHistory,
     ) -> Result<(), ObservationError> {
         self.validate()?;
-        plan.validate_identity()?;
         history.validate()?;
         let observation = plan
             .observations

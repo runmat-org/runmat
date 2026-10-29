@@ -116,9 +116,13 @@ pub fn prepare_nonlinear_solid_study_publication(
         accelerator_admission: Default::default(),
         solver_options: AnalysisSolverOptions::StructuralNonlinear(options.clone()),
     };
+    let study = completed
+        .compiled
+        .definition()
+        .map_err(|error| invalid(error.to_string()))?;
     let prepared = super::structural_study::standalone_completion(
         context.clone(),
-        &completed.compiled,
+        study,
         execution,
         persisted,
     )
@@ -141,7 +145,7 @@ pub fn prepare_nonlinear_solid_study_publication(
             preparation,
         )?;
     let manifest = super::study_result_manifest::StudyResultManifest::new(
-        &completed.compiled,
+        study,
         completed
             .workload
             .identity()

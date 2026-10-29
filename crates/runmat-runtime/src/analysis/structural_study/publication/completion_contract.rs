@@ -61,10 +61,11 @@ pub(in crate::analysis) enum CompletedStudyStepRun {
 /// Family-neutral singleton carrier. Numerical evidence remains with its physics owner.
 pub(in crate::analysis) fn standalone_completion(
     context: OperationContext,
-    compiled: &runmat_analysis_fea::study::CompiledAnalysisStudy,
+    study: runmat_analysis_fea::study::AnalysisStudyDefinition<'_>,
     execution: AnalysisExecutionStep,
     mesh: crate::analysis::meshing::ResolvedStudyMesh,
 ) -> Result<PreparedStudyCompletion, String> {
+    let compiled = study.compiled();
     let [step] = compiled.model.sequence.steps.as_slice() else {
         return Err("standalone completion requires one authored procedure step".into());
     };
@@ -73,7 +74,7 @@ pub(in crate::analysis) fn standalone_completion(
     }
     let operation = crate::analysis::execution_dispatch::execution_operation(&execution, step)
         .ok_or("standalone completion execution options differ from authored procedure")?;
-    let definition = compiled.definition_digest().map_err(|e| e.to_string())?;
+    let definition = study.digest();
     Ok(PreparedStudyCompletion {
         thermal_prefix: None,
         context,

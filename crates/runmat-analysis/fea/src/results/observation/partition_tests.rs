@@ -1465,14 +1465,18 @@ fn reduction_rejects_missing_duplicate_and_substituted_contributions() {
     duplicate[2] = duplicate[1].clone();
     assert!(combine_observation_partitions(&plan, &partition_plan, duplicate).is_err());
 
-    let mut substituted_plan = partition_plan.clone();
+    // Tampered partition plans cannot be sealed, so `validate_for` never sees one.
+    let mut substituted_plan = partition_plan.clone().into_contents();
     substituted_plan.observation_id = ObservationId("other".into());
-    assert!(substituted_plan.validate_for(&plan).is_err());
+    assert!(ObservationPartitionPlan::try_from(substituted_plan).is_err());
 
-    let mut substituted_cost = partition_plan.clone();
+    let mut substituted_cost = partition_plan.clone().into_contents();
     substituted_cost.resource_cost.transfer_bytes += 1;
-    assert!(substituted_cost.validate_for(&plan).is_err());
-    assert!(substituted_cost.canonical_bytes().is_err());
+    assert!(ObservationPartitionPlan::try_from(substituted_cost.clone()).is_err());
+    assert!(serde_json::from_value::<ObservationPartitionPlan>(
+        serde_json::to_value(&substituted_cost).unwrap()
+    )
+    .is_err());
 }
 
 #[test]

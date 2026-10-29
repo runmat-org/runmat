@@ -1,6 +1,6 @@
 //! Authenticate the original cold source before recovering any public field storage.
 use super::*;
-use runmat_analysis_fea::results::field::RecoveredFieldArtifact;
+use runmat_analysis_fea::{results::field::RecoveredFieldArtifact, study::AnalysisStudyDefinition};
 
 pub(super) fn validate(
     completed: &FluidStudyCompletion,
@@ -8,7 +8,7 @@ pub(super) fn validate(
     mesh: &SolverMeshArtifact,
     evidence: &MeshingEvidence,
     options: &AnalysisCfdRunOptions,
-    definition: Digest,
+    definition: AnalysisStudyDefinition<'_>,
 ) -> Result<RecoveredFieldArtifact, String> {
     source.authenticate(completed)?;
     completed.catalog.validate().map_err(|e| e.to_string())?;
@@ -18,11 +18,7 @@ pub(super) fn validate(
         .map_err(|e| e.to_string())?;
     evidence.validate(mesh).map_err(|e| e.to_string())?;
     if !completed.catalog.roots.contains(&completed.root)
-        || completed
-            .compiled
-            .definition_digest()
-            .map_err(|e| e.to_string())?
-            != definition
+        || !definition.is_of(&completed.compiled)
         || completed.workload.model != completed.compiled.model
     {
         return Err("Fluid publication differs from its authenticated definition/root".into());

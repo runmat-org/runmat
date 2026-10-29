@@ -66,12 +66,14 @@ fn fluid_state_rejects_original_source_and_declaration_substitution() {
         .remove(0);
     let state = CanonicalSemanticState::from_fluid_publication(&request, &workload, &mesh, &result)
         .unwrap();
-    let mut payload = state.payload.fluid().unwrap().clone();
+    let mut payload = state.payload.fluid().unwrap().clone().into_contents();
     payload.result_bytes[0] ^= 1;
     assert!(payload.original_result().is_err());
-    let mut substituted = state.payload.fluid().unwrap().clone();
+    assert!(CanonicalFluidStatePayload::try_from(payload).is_err());
+    let mut substituted = state.payload.fluid().unwrap().clone().into_contents();
     substituted.workload.policy.momentum_relaxation = 0.75;
     assert!(substituted.original_result().is_err());
+    assert!(CanonicalFluidStatePayload::try_from(substituted).is_err());
     assert!(state
         .payload
         .fluid()

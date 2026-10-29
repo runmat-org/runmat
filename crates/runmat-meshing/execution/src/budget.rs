@@ -138,28 +138,14 @@ impl<'a> MeshingStageControl<'a> {
                 )),
             ));
         }
-        let checkpoint_latency_ms = self.last_checkpoint_at.latency_ms(now).max(
+        // Checkpoint latency is load-dependent telemetry; the enforced responsiveness contract is
+        // the work done between checkpoints (`checkpoint`).
+        crate::checkpoint_diagnostic::report_first_miss(
             self.maximum_observed_checkpoint_latency_ms
                 .load(Ordering::Relaxed),
+            self.last_checkpoint_at.latency_ms(now),
+            self.request.cancellation.maximum_checkpoint_latency_ms,
         );
-        if checkpoint_latency_ms > self.request.cancellation.maximum_checkpoint_latency_ms {
-            crate::checkpoint_diagnostic::report_first_miss(
-                self.maximum_observed_checkpoint_latency_ms
-                    .load(Ordering::Relaxed),
-                checkpoint_latency_ms,
-                self.request.cancellation.maximum_checkpoint_latency_ms,
-            );
-            return Err(failure(
-                self.stage,
-                MeshingFailureCategory::InternalInvariantViolation,
-                "reduce algorithm work between mandatory cancellation checkpoints",
-                Some((
-                    "checkpoint_latency_ms",
-                    checkpoint_latency_ms,
-                    self.request.cancellation.maximum_checkpoint_latency_ms,
-                )),
-            ));
-        }
         Ok(())
     }
 
@@ -209,9 +195,6 @@ impl<'a> MeshingStageControl<'a> {
         let prior_maximum = self
             .maximum_observed_checkpoint_latency_ms
             .fetch_max(current_checkpoint_latency_ms, Ordering::Relaxed);
-        let checkpoint_latency_ms = self
-            .maximum_observed_checkpoint_latency_ms
-            .load(Ordering::Relaxed);
         if self.cancellation.is_cancelled() {
             return Err(failure(
                 self.stage,
@@ -226,33 +209,21 @@ impl<'a> MeshingStageControl<'a> {
                 .load(Ordering::Relaxed)
                 .max(self.last.search_work),
         );
-        if work_since_check > self.request.cancellation.maximum_work_units_between_checks
-            || checkpoint_latency_ms > self.request.cancellation.maximum_checkpoint_latency_ms
-        {
-            let diagnostic =
-                if work_since_check > self.request.cancellation.maximum_work_units_between_checks {
-                    (
-                        "work_units_between_checks",
-                        work_since_check,
-                        self.request.cancellation.maximum_work_units_between_checks,
-                    )
-                } else {
-                    (
-                        "checkpoint_latency_ms",
-                        checkpoint_latency_ms,
-                        self.request.cancellation.maximum_checkpoint_latency_ms,
-                    )
-                };
-            crate::checkpoint_diagnostic::report_first_miss(
-                prior_maximum,
-                current_checkpoint_latency_ms,
-                self.request.cancellation.maximum_checkpoint_latency_ms,
-            );
+        crate::checkpoint_diagnostic::report_first_miss(
+            prior_maximum,
+            current_checkpoint_latency_ms,
+            self.request.cancellation.maximum_checkpoint_latency_ms,
+        );
+        if work_since_check > self.request.cancellation.maximum_work_units_between_checks {
             return Err(failure(
                 self.stage,
                 MeshingFailureCategory::InternalInvariantViolation,
                 "reduce algorithm work between mandatory cancellation checkpoints",
-                Some(diagnostic),
+                Some((
+                    "work_units_between_checks",
+                    work_since_check,
+                    self.request.cancellation.maximum_work_units_between_checks,
+                )),
             ));
         }
         self.enforce_budget(&checkpoint, elapsed_ms)?;

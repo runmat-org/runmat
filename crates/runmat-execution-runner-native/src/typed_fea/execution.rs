@@ -179,11 +179,12 @@ pub fn prepare_study_publication(
             )
         }
         CompletedFeaStudyResult::Fluid(result) => {
-            let digest = result
+            let study = result
                 .completion
                 .compiled
-                .definition_digest()
+                .definition()
                 .map_err(|e| e.to_string())?;
+            let digest = study.digest();
             runmat_runtime::analysis::prepare_fluid_study_publication(
                 &result.completion,
                 &result.source,
@@ -194,7 +195,7 @@ pub fn prepare_study_publication(
                     numerical: result.completion.workload.policy,
                     geometry: result.completion.workload.geometry_policy,
                 },
-                digest,
+                study,
                 context(),
                 identity(digest, &result.completion.root.logical_digest)?,
             )

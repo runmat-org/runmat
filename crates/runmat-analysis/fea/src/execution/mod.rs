@@ -285,12 +285,12 @@ pub use state::{
     fluid_state_publication_workspace_bytes, nonlinear_solid_state_publication_requests,
     semantic_state_retained_storage_bytes, AcousticPhasorConvention, BoundThermalStateTransfer,
     CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,
-    CanonicalFluidStatePayload, CanonicalMaxwellStatePayload, CanonicalNonlinearSolidStatePayload,
-    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
-    CanonicalStateTransition, CanonicalStateTransitionInput, CanonicalThermalStatePayload,
-    SemanticStatePublicationProfileSource, SemanticStatePublicationRequest,
-    SemanticStatePublicationSource, SolvedTemperatureField, StatePublicationProfileEntry,
-    StatePublicationProfiles, STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
+    CanonicalFluidStatePayload, CanonicalFluidStatePayloadContents, CanonicalMaxwellStatePayload,
+    CanonicalNonlinearSolidStatePayload, CanonicalSemanticState, CanonicalSemanticStateInput,
+    CanonicalSemanticStatePayload, CanonicalStateTransition, CanonicalStateTransitionInput,
+    CanonicalThermalStatePayload, SemanticStatePublicationProfileSource,
+    SemanticStatePublicationRequest, SemanticStatePublicationSource, SolvedTemperatureField,
+    StatePublicationProfileEntry, StatePublicationProfiles, STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
 };
 pub use statistical_fields::{
     random_response_statistical_fields, response_spectrum_statistical_fields,

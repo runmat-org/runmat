@@ -68,7 +68,7 @@ impl<Workloads, NumericalEvidence> StudyResultManifest<Workloads, NumericalEvide
         self.public_run = public_run;
     }
     pub(super) fn new(
-        compiled: &CompiledAnalysisStudy,
+        study: runmat_analysis_fea::study::AnalysisStudyDefinition<'_>,
         workload_digest: Digest,
         workloads: &Workloads,
         mesh: &SolverMeshArtifact,
@@ -83,14 +83,13 @@ impl<Workloads, NumericalEvidence> StudyResultManifest<Workloads, NumericalEvide
         Workloads: serde::Serialize + Clone,
         NumericalEvidence: serde::Serialize,
     {
+        let compiled = study.compiled();
         let public_run = &publication.published.data;
         let reservation = publication.staging.admit_compiled_manifest_copy(
             compiled,
             &(workloads, meshing_evidence, &numerical_evidence, public_run),
         )?;
-        let definition = compiled
-            .definition_digest()
-            .map_err(|error| error.to_string())?;
+        let definition = study.digest();
         if public_run.study_fingerprint != definition.to_string() {
             return Err("study result manifest differs from published definition identity".into());
         }

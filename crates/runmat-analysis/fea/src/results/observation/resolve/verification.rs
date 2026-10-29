@@ -38,7 +38,7 @@ pub(crate) fn verify_authored_observations(
             }
         }
     }
-    plan.validate_identity()
+    Ok(())
 }
 
 pub(crate) fn verify_observation_plan<'a, I>(
