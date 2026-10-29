@@ -207,28 +207,115 @@ fn ambiguous_driver_failure_is_terminal_and_cannot_requeue_the_call() {
 #[cfg(unix)]
 #[test]
 fn caller_completion_cannot_overwrite_a_deferred_or_accepted_future() {
-    use runmat_runtime::execution::{AwaitAction, RootedValueSequence, RuntimeExecutionServices};
+    use runmat_execution::{CancellationReason, ExecutionHandleState, TaskHandle, TaskId};
+    use runmat_runtime::execution::{
+        AwaitAction, RootedValueSequence, RuntimeExecutionServices, TaskRetention,
+    };
 
     let (_temporary, service) = service_fixture();
-    let future = service.create_future(admitted_program_call()).unwrap();
     let result =
         RootedValueSequence::new(runmat_value::ValueSequence::single(Value::Num(7.0)).unwrap())
             .unwrap();
-    assert!(service
-        .complete_future((&future).into(), Ok(result.clone()))
-        .is_err());
+    // A caller-executed future has no worker submission. Bind its ordinary
+    // public task alias in the same private table used by materialization.
+    let alias = |future: &FutureHandle| {
+        let task = TaskHandle {
+            id: TaskId::derive(&[future.id.bytes(), b"terminal-alias"]),
+            scope_id: future.scope_id,
+            generation: 1,
+            outputs: future.outputs.clone(),
+        };
+        service.state.lock().unwrap().tasks.insert(
+            task.id,
+            super::TaskRecord {
+                future_id: future.id,
+                generation: task.generation,
+                read: false,
+                claimed: false,
+                completion_order: None,
+                retention: TaskRetention::Refetchable,
+                callback_completion: None,
+            },
+        );
+        task
+    };
+    for terminal in [
+        Ok(result),
+        Err(ExecutionServiceError::Failed(
+            "original caller failure".into(),
+        )),
+    ] {
+        let future = service.create_future(admitted_program_call()).unwrap();
+        let task = alias(&future);
+        assert!(service
+            .complete_future((&future).into(), terminal.clone())
+            .is_err());
+        assert!(matches!(
+            service
+                .begin_await(Value::Future(future.clone().into()))
+                .unwrap(),
+            AwaitAction::ExecuteFuture { .. }
+        ));
+        service
+            .complete_future((&future).into(), terminal.clone())
+            .unwrap();
+        assert!(service
+            .complete_future((&future).into(), Err(ExecutionServiceError::Cancelled))
+            .is_err());
+        for handle in [
+            Value::Future(future.clone().into()),
+            Value::Task(task.clone().into()),
+        ] {
+            service.cancel(&handle, CancellationReason::User).unwrap();
+            service.drain_scope(CancellationReason::Shutdown);
+            assert_eq!(
+                service.begin_await(handle),
+                terminal.clone().map(AwaitAction::Completed)
+            );
+        }
+        let expected = if terminal.is_ok() {
+            ExecutionHandleState::Finished
+        } else {
+            ExecutionHandleState::Failed
+        };
+        assert_eq!(service.inspect_future(&future).unwrap().state, expected);
+        assert_eq!(service.inspect_task(&task).unwrap().state, expected);
+    }
+
+    let active = service.create_future(admitted_program_call()).unwrap();
+    let task = alias(&active);
     assert!(matches!(
         service
-            .begin_await(Value::Future(future.clone().into()))
+            .begin_await(Value::Task(task.clone().into()))
             .unwrap(),
         AwaitAction::ExecuteFuture { .. }
     ));
     service
-        .complete_future((&future).into(), Ok(result))
+        .cancel(&Value::Task(task.clone().into()), CancellationReason::User)
         .unwrap();
-    assert!(service
-        .complete_future((&future).into(), Err(ExecutionServiceError::Cancelled))
-        .is_err());
+    assert_eq!(
+        service.complete_future(
+            (&active).into(),
+            Err(ExecutionServiceError::Failed("late caller".into()))
+        ),
+        Err(ExecutionServiceError::Cancelled)
+    );
+    for handle in [
+        Value::Future(active.into()),
+        Value::Task(task.clone().into()),
+    ] {
+        service
+            .cancel(&handle, CancellationReason::Shutdown)
+            .unwrap();
+        assert_eq!(
+            service.begin_await(handle),
+            Err(ExecutionServiceError::Cancelled)
+        );
+    }
+    assert_eq!(
+        service.inspect_task(&task).unwrap().state,
+        ExecutionHandleState::Cancelled
+    );
 }
 
 #[cfg(unix)]

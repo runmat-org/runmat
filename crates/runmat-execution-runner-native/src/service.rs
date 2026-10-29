@@ -50,6 +50,23 @@ enum RunningCompletion {
     },
 }
 
+impl FutureState {
+    /// Once an outcome exists, cancellation cannot rewrite it through another
+    /// handle. A retained Running completion may already be terminal before
+    /// its first await decodes the result. This check does not certify physical
+    /// retirement: even an unverified terminal keeps its existing exact owner.
+    fn has_terminal_outcome(&self) -> bool {
+        match self {
+            Self::Completed(_) | Self::GraphResolved { .. } | Self::Cancelled => true,
+            Self::Running(running) => running.completion().verified_terminal().is_some(),
+            Self::Deferred(_)
+            | Self::ExecutingInCaller
+            | Self::Materializing(_)
+            | Self::CancellingGraph(_) => false,
+        }
+    }
+}
+
 impl RunningCompletion {
     fn completion(&self) -> &Arc<TaskCompletion> {
         match self {
@@ -1242,6 +1259,9 @@ impl RuntimeExecutionServices for NativeExecutionService {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("native service poisoned");
         let record = state.futures.validate(&future.id, future.outputs)?;
+        if matches!(record, FutureState::Cancelled) {
+            return Err(ExecutionServiceError::Cancelled);
+        }
         if !matches!(record, FutureState::ExecutingInCaller) {
             return Err(ExecutionServiceError::Failed(
                 "future is not executing in its caller".into(),
@@ -1298,6 +1318,9 @@ impl RuntimeExecutionServices for NativeExecutionService {
             return Ok(());
         }
         if matches!(record, FutureState::CancellingGraph(_)) {
+            return Ok(());
+        }
+        if record.has_terminal_outcome() {
             return Ok(());
         }
         let previous = std::mem::replace(record, FutureState::Cancelled);
@@ -1361,10 +1384,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
             if matches!(future, FutureState::CancellingGraph(_)) {
                 continue;
             }
-            if !matches!(
-                future,
-                FutureState::Completed(_) | FutureState::GraphResolved { .. }
-            ) {
+            if !future.has_terminal_outcome() {
                 let previous = std::mem::replace(future, FutureState::Cancelled);
                 if let FutureState::Running(RunningCompletion::Graph { .. }) = &previous {
                     *future = FutureState::CancellingGraph(match previous {

@@ -361,7 +361,6 @@ enum FutureState {
 struct TaskRecord {
     future_id: FutureId,
     generation: u64,
-    cancelled: bool,
     read: bool,
     claimed: bool,
     completion_order: Option<u64>,
@@ -575,7 +574,6 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             TaskRecord {
                 future_id: future.id,
                 generation,
-                cancelled: false,
                 read: false,
                 claimed: false,
                 completion_order: Some(sequence),
@@ -623,15 +621,11 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         if record.generation != task.generation {
             return Err(ExecutionServiceError::UnknownHandle);
         }
-        let handle_state = if record.cancelled {
-            ExecutionHandleState::Cancelled
-        } else {
-            state
-                .futures
-                .get(&record.future_id)
-                .map(future_state)
-                .ok_or(ExecutionServiceError::UnknownHandle)?
-        };
+        let handle_state = state
+            .futures
+            .get(&record.future_id)
+            .map(future_state)
+            .ok_or(ExecutionServiceError::UnknownHandle)?;
         Ok(ExecutionHandleSnapshot {
             state: handle_state,
             outputs: task.outputs.clone(),
@@ -720,9 +714,6 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
                 if record.generation != task.generation {
                     return Err(ExecutionServiceError::UnknownHandle);
                 }
-                if record.cancelled {
-                    return Err(ExecutionServiceError::Cancelled);
-                }
                 super::FutureExecutionHandle::from_task(task, record.future_id)
             }
             value => return Ok(AwaitAction::Passthrough(value)),
@@ -780,39 +771,34 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         _reason: CancellationReason,
     ) -> Result<(), ExecutionServiceError> {
         let mut state = self.state.lock().expect("execution service state poisoned");
-        let retired = match value {
+        let future_id = match value {
             Value::Future(handle) => {
                 self.validate_scope(handle.scope_id)?;
-                let record = state
-                    .futures
-                    .get_mut(&handle.id)
-                    .ok_or(ExecutionServiceError::UnknownHandle)?;
-                let retired = std::mem::replace(record, FutureState::Cancelled);
-                record_completion(&mut state, handle.id);
-                Some(retired)
+                handle.id
             }
             Value::Task(handle) => {
                 self.validate_scope(handle.scope_id)?;
-                let future_id = {
-                    let record = state
-                        .tasks
-                        .get_mut(&handle.id)
-                        .ok_or(ExecutionServiceError::UnknownHandle)?;
-                    if record.generation != handle.generation {
-                        return Err(ExecutionServiceError::UnknownHandle);
-                    }
-                    record.cancelled = true;
-                    record.future_id
-                };
-                let retired = state
-                    .futures
-                    .get_mut(&future_id)
-                    .map(|future| std::mem::replace(future, FutureState::Cancelled));
-                record_completion(&mut state, future_id);
-                retired
+                let record = state
+                    .tasks
+                    .get(&handle.id)
+                    .ok_or(ExecutionServiceError::UnknownHandle)?;
+                if record.generation != handle.generation {
+                    return Err(ExecutionServiceError::UnknownHandle);
+                }
+                record.future_id
             }
             _ => return Err(ExecutionServiceError::UnknownHandle),
         };
+        let record = state
+            .futures
+            .get_mut(&future_id)
+            .ok_or(ExecutionServiceError::UnknownHandle)?;
+        // The future owns the single terminal result for every task alias.
+        if matches!(record, FutureState::Completed(_) | FutureState::Cancelled) {
+            return Ok(());
+        }
+        let retired = std::mem::replace(record, FutureState::Cancelled);
+        record_completion(&mut state, future_id);
         drop(state);
         drop(retired);
         Ok(())
@@ -830,8 +816,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
                 }
             }
         }
-        for task in state.tasks.values_mut() {
-            task.cancelled = true;
+        for task in state.tasks.values() {
             completed.push(task.future_id);
         }
         for future_id in completed {
@@ -1036,7 +1021,11 @@ mod tests {
         service
             .cancel(&Value::Future(future.into()), CancellationReason::User)
             .unwrap();
-        assert_eq!(service.retained_values(), Some(vec![]));
+        // A late cancellation cannot discard a published, refetchable result.
+        assert_eq!(
+            service.retained_values(),
+            Some(vec![Value::String("output".into())])
+        );
     }
 
     #[test]
@@ -1087,6 +1076,25 @@ mod tests {
                 .unwrap()),
             )
             .unwrap();
+        let completed = service
+            .begin_await(Value::Future(future.clone().into()))
+            .unwrap();
+        for alias in [
+            Value::Future(future.clone().into()),
+            Value::Task(task.clone().into()),
+        ] {
+            service.cancel(&alias, CancellationReason::User).unwrap();
+            assert_eq!(service.begin_await(alias), Ok(completed.clone()));
+        }
+        service.drain_scope(CancellationReason::Shutdown);
+        assert_eq!(
+            service.inspect_future(&future).unwrap().state,
+            ExecutionHandleState::Finished
+        );
+        assert_eq!(
+            service.inspect_task(&task).unwrap().state,
+            ExecutionHandleState::Finished
+        );
         assert_eq!(
             service.begin_await(Value::Task(task.into())),
             Ok(AwaitAction::Completed(
@@ -1095,6 +1103,66 @@ mod tests {
                 )
                 .unwrap()
             ))
+        );
+        let failed = service.create_future(deferred_call(7, vec![])).unwrap();
+        let failed_task = service.spawn(&failed).unwrap();
+        assert!(matches!(
+            service
+                .begin_await(Value::Task(failed_task.clone().into()))
+                .unwrap(),
+            AwaitAction::ExecuteFuture { .. }
+        ));
+        let failure = ExecutionServiceError::Failed("original task failure".into());
+        service
+            .complete_future((&failed).into(), Err(failure.clone()))
+            .unwrap();
+        for alias in [
+            Value::Future(failed.clone().into()),
+            Value::Task(failed_task.clone().into()),
+        ] {
+            service.cancel(&alias, CancellationReason::User).unwrap();
+            service.drain_scope(CancellationReason::Shutdown);
+            assert_eq!(service.begin_await(alias), Err(failure.clone()));
+        }
+        assert_eq!(
+            service.inspect_task(&failed_task).unwrap().state,
+            ExecutionHandleState::Failed
+        );
+
+        // A genuinely active cancellation remains terminal through both aliases,
+        // and late execution completion cannot resurrect it.
+        let active = service.create_future(deferred_call(7, vec![])).unwrap();
+        let active_task = service.spawn(&active).unwrap();
+        assert!(matches!(
+            service
+                .begin_await(Value::Task(active_task.clone().into()))
+                .unwrap(),
+            AwaitAction::ExecuteFuture { .. }
+        ));
+        service
+            .cancel(
+                &Value::Task(active_task.clone().into()),
+                CancellationReason::User,
+            )
+            .unwrap();
+        assert!(service
+            .complete_future((&active).into(), Err(failure))
+            .is_err());
+        for alias in [
+            Value::Future(active.into()),
+            Value::Task(active_task.clone().into()),
+        ] {
+            service
+                .cancel(&alias, CancellationReason::Shutdown)
+                .unwrap();
+            assert_eq!(
+                service.begin_await(alias),
+                Err(ExecutionServiceError::Cancelled)
+            );
+        }
+        assert_eq!(
+            service.inspect_task(&active_task).unwrap().state,
+            ExecutionHandleState::Cancelled
         );
     }
 
