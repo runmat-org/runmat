@@ -44,7 +44,6 @@ impl BoundedObservationHistory {
         plan: &ResolvedObservationPlan,
         observation_id: &ObservationId,
     ) -> Result<Self, ObservationError> {
-        plan.validate_identity()?;
         let observation = plan
             .observations
             .iter()

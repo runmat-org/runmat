@@ -33,6 +33,7 @@ pub use electrical::CanonicalElectricalStaticStatePayload;
 pub use fluid::{
     fluid_state_publication_profile, fluid_state_publication_requests,
     fluid_state_publication_workspace_bytes, CanonicalFluidStatePayload,
+    CanonicalFluidStatePayloadContents,
 };
 pub use magnetic::CanonicalMagnetostaticStatePayload;
 pub use maxwell::CanonicalMaxwellStatePayload;

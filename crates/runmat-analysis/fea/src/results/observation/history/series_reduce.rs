@@ -20,7 +20,6 @@ pub fn reduce_observation_history(
     history: &ObservationHistory,
     policy: ObservationExecutionPolicy,
 ) -> Result<SeriesReductionResult, ObservationError> {
-    plan.validate_identity()?;
     history.validate()?;
     let observation = plan
         .observations

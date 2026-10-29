@@ -139,6 +139,7 @@ fn nonlinear_event_attributions(
     model: &AnalysisModel,
     step: &runmat_analysis_core::ProcedureStep,
     result: &NonlinearSolveResult,
+    resource_plan: &crate::planning::resource::FeaResourcePlan,
 ) -> Result<Vec<crate::results::observation::ObservationEventAttribution>, FeaRunError> {
     if !step.observations.iter().any(|request| {
         matches!(
@@ -155,7 +156,20 @@ fn nonlinear_event_attributions(
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     let producer = StepIdentity::from_solver_contract(sequence, step)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-    let content = nonlinear_solver_content_digest(result)
+    let history_limits = match &resource_plan.input.demand {
+        crate::planning::resource::FeaResourceDemand::StructuralNonlinearPipeline(demand) => {
+            demand.history_limits
+        }
+        crate::planning::resource::FeaResourceDemand::StructuralNonlinearRecovery(demand) => {
+            demand.history_limits
+        }
+        _ => {
+            return Err(FeaRunError::Observation(
+                "nonlinear event attribution requires a nonlinear resource plan".into(),
+            ))
+        }
+    };
+    let content = nonlinear_solver_content_digest(result, history_limits)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     let source = SolverResultIdentity::from_step_result(producer, content)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;

@@ -60,8 +60,6 @@ impl ObservationEvaluationRequest {
         plan: ResolvedObservationPlan,
     ) -> AnalysisExecutionResult<Self> {
         selection.validate()?;
-        plan.validate_identity()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         let producer = selection.producer();
         let request = Self {
             schema_version: 2,
@@ -121,9 +119,6 @@ impl ObservationEvaluationRequest {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.selection.validate()?;
-        self.plan
-            .validate_identity()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         if self.schema_version != 2 || self.plan.observations.is_empty() {
             return Err(AnalysisExecutionError::Invalid(
                 "observation evaluation requires a supported schema and nonempty plan".into(),

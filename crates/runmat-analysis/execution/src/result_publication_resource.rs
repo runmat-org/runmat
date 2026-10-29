@@ -10,14 +10,46 @@ use runmat_analysis_fea::{
         build_result_publication_resource_plan, FeaResourcePlan, PreparedPhaseResourceFacts,
         ResourceUsageEvidence,
     },
-    results::{accuracy::AccuracyArtifact, publication::published_result_encoding_profile},
+    results::{
+        accuracy::AccuracyArtifact, observation::ObservationPublicationCatalog,
+        publication::published_result_encoding_profile,
+    },
 };
+use std::borrow::Cow;
 
 pub fn build_prepared_result_publication_resource_plan(
     request: &ResultPublicationRequest,
     accuracy: &AccuracyArtifact,
     usage: &ResourceUsageEvidence,
     inputs: &[PreparedAnalysisObjects],
+) -> AnalysisBridgeResult<FeaResourcePlan> {
+    build_plan(request, accuracy, usage, inputs, None)
+}
+
+/// As [`build_prepared_result_publication_resource_plan`], with the typed observation catalog
+/// whose canonical bytes the caller just prepared as the observation input: no decode.
+pub(crate) fn build_result_publication_resource_plan_on(
+    request: &ResultPublicationRequest,
+    accuracy: &AccuracyArtifact,
+    usage: &ResourceUsageEvidence,
+    inputs: &[PreparedAnalysisObjects],
+    observations: Option<&ObservationPublicationCatalog>,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
+    build_plan(
+        request,
+        accuracy,
+        usage,
+        inputs,
+        observations.map(Cow::Borrowed),
+    )
+}
+
+fn build_plan(
+    request: &ResultPublicationRequest,
+    accuracy: &AccuracyArtifact,
+    usage: &ResourceUsageEvidence,
+    inputs: &[PreparedAnalysisObjects],
+    typed_observations: Option<Cow<'_, ObservationPublicationCatalog>>,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let numerical: Vec<_> = inputs
         .iter()
@@ -75,17 +107,23 @@ pub fn build_prepared_result_publication_resource_plan(
     }
     // Reconstruct from the source catalog at both worker admission and import. A receipt's
     // hashes alone cannot prove that an otherwise-valid usage graph retains required tasks.
-    let observations = request.source_observations.map(|_| {
-        runmat_analysis_fea::results::observation::ObservationPublicationCatalog::from_canonical_bytes(
-            &unique(AnalysisNumericalObjectKind::ObservationCatalog)?.payload(),
-        ).map_err(AnalysisBridgeError::from)
-    }).transpose()?;
+    // A typed catalog stands for its input only when its identity is the input's (checked
+    // against the request above); otherwise the input bytes are decoded.
+    let observations = match (request.source_observations, typed_observations) {
+        (None, _) => None,
+        (Some(identity), Some(catalog)) if catalog.identity() == identity => Some(catalog),
+        (Some(_), _) => Some(Cow::Owned(
+            ObservationPublicationCatalog::from_canonical_bytes(
+                &unique(AnalysisNumericalObjectKind::ObservationCatalog)?.payload(),
+            )?,
+        )),
+    };
     let profile = published_result_encoding_profile(request, accuracy, usage)?;
     Ok(build_result_publication_resource_plan(
         request,
         accuracy,
         usage,
-        observations.as_ref(),
+        observations.as_deref(),
         PreparedPhaseResourceFacts {
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
             output: projected_output_resource_facts(profile.encoded_bytes_upper_bound)?,

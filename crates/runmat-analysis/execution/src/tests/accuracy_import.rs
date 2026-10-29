@@ -164,6 +164,7 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
         program: prepared.program.clone(),
         inputs: prepared.inputs.clone(),
         resource_plan: prepared.resource_plan.clone(),
+        source_observations: prepared.source_observations.clone(),
     };
     let context = bad
         .inputs

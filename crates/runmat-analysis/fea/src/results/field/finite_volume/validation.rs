@@ -32,7 +32,17 @@ impl FiniteVolumeFieldTopology {
     }
 }
 
-pub(super) fn validate(layout: &FiniteVolumeFieldTopology) -> Result<(), RecoveredFieldError> {
+/// Whether face identities are recomputed, or were computed from these faces by the caller.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum FaceIdentities {
+    Recompute,
+    Computed,
+}
+
+pub(super) fn validate(
+    layout: &FiniteVolumeFieldTopology,
+    identities_check: FaceIdentities,
+) -> Result<(), RecoveredFieldError> {
     FiniteVolumeFieldTopology::validation_workspace_bytes(
         layout.node_identities.len(),
         layout.cell_identities.len(),
@@ -67,7 +77,9 @@ pub(super) fn validate(layout: &FiniteVolumeFieldTopology) -> Result<(), Recover
             || face.neighbor.is_some_and(|neighbor| {
                 neighbor == face.owner || cells.binary_search(&neighbor).is_err()
             })
-            || face.identity != face_identity(face.corner_identities, face.owner, face.neighbor)?
+            || (identities_check == FaceIdentities::Recompute
+                && face.identity
+                    != face_identity(face.corner_identities, face.owner, face.neighbor)?)
         {
             return Err(invalid("invalid exact owner-oriented face inventory"));
         }

@@ -12,18 +12,19 @@ use runmat_analysis_execution::{
     AnalysisOutputPolicy, CompletedAcousticResponseStudy, CompletedAcousticStudy,
     CompletedElectricalStudy, CompletedMagneticStudy, CompletedMaxwellStudy,
     CompletedNonlinearSolidStudy, CompletedThermalStudy, ElectricalStudyPreparation,
-    FluidStudyPreparation, MagneticStudyPreparation, MaxwellStudyPreparation,
-    NonlinearSolidStudyPreparation, ThermalStudyPreparation, ThermalStudyScope,
+    FluidStudyPreparationParts, MagneticStudyPreparation, MaxwellStudyPreparation,
+    NonlinearSolidStudyPreparation, PlannedFluidStudyPreparation, ThermalStudyPreparation,
+    ThermalStudyScope,
 };
 use runmat_analysis_fea::execution::InitialFieldBinding;
 use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_analysis_fea::study::{
-    build_electrical_study_product, build_fluid_study_product, build_magnetic_study_product,
-    build_maxwell_study_product, build_nonlinear_solid_study_product, compile_analysis_study,
+    build_electrical_study_product, build_magnetic_study_product, build_maxwell_study_product,
+    build_nonlinear_solid_study_product, compile_analysis_study,
     plan_acoustic_response_study_product, plan_acoustic_study_product,
     plan_electrical_study_product, plan_thermal_study_product_with_fields,
-    AnalysisStudyCompilationInput, ElectricalStudyProductInput, FluidStudyProductInput,
-    MagneticStudyProductInput, MaxwellStudyProductInput, NonlinearSolidStudyProductInput,
+    AnalysisStudyCompilationInput, ElectricalStudyProductInput, MagneticStudyProductInput,
+    MaxwellStudyProductInput, NonlinearSolidStudyProductInput,
 };
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
@@ -109,7 +110,7 @@ pub(crate) enum FamilyStudyPreparation {
     Maxwell(Box<MaxwellStudyPreparation>),
     Acoustic(Box<AcousticStudyPreparation>),
     AcousticResponse(Box<AcousticResponseStudyPreparation>),
-    Fluid(Box<FluidStudyPreparation>),
+    Fluid(Box<PlannedFluidStudyPreparation>),
     NonlinearSolid(Box<NonlinearSolidStudyPreparation>),
 }
 
@@ -361,31 +362,24 @@ pub(crate) fn plan_family_study(
             )
         }
         StudyRootPlanning::Fluid(policy) => {
-            let product = build_fluid_study_product(FluidStudyProductInput {
-                study: context.study,
-                geometry: context.document,
-                regions: context.regions,
-                materials: context.materials,
-                mesh: context.mesh,
-                planning: *policy,
-            })
-            .map_err(|error| error.to_string())?;
-            let mut step = single_step(&product.compiled.model, kind)?;
-            step.0 = step.0.min(product.workload.policy.resident_byte_budget());
-            (
-                FamilyStudyPreparation::Fluid(Box::new(FluidStudyPreparation {
+            let planned = PlannedFluidStudyPreparation::plan(
+                compile(&mut |_| Ok(()))?,
+                FluidStudyPreparationParts {
                     local_execution: context.local_execution,
                     policy: *policy,
-                    product,
                     mesh,
                     frozen_project_digest: frozen,
                     artifact_access: access,
                     program_revision: revision,
                     output_policy,
                     required_capabilities: capabilities,
-                })),
-                step,
+                },
             )
+            .map_err(|error| error.to_string())?;
+            let product = &planned.preparation().product;
+            let mut step = single_step(&product.compiled.model, kind)?;
+            step.0 = step.0.min(product.workload.policy.resident_byte_budget());
+            (FamilyStudyPreparation::Fluid(Box::new(planned)), step)
         }
         StudyRootPlanning::NonlinearSolid(policy) => {
             let product = build_nonlinear_solid_study_product(NonlinearSolidStudyProductInput {

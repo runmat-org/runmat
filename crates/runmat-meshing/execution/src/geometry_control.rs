@@ -33,6 +33,7 @@ pub struct MeshingGeometryEvaluationControl<'a> {
     last_checkpoint_search_work: Arc<AtomicU64>,
     maximum_wall_time_ms: u64,
     maximum_checkpoint_latency_ms: u64,
+    maximum_work_units_between_checks: u64,
     maximum_allocation_bytes: u64,
     maximum_search_work: u64,
     maximum_iterations: u64,
@@ -58,6 +59,7 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
             last_checkpoint_search_work,
             maximum_wall_time_ms: resources.maximum_wall_time_ms,
             maximum_checkpoint_latency_ms: policy.maximum_checkpoint_latency_ms,
+            maximum_work_units_between_checks: policy.maximum_work_units_between_checks,
             maximum_allocation_bytes: resources.maximum_memory_bytes,
             maximum_search_work: resources.maximum_search_work,
             maximum_iterations: resources.maximum_iterations,
@@ -88,6 +90,16 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
             search_work: self.usage.search_work.load(Ordering::Relaxed),
             iterations: self.usage.iterations.load(Ordering::Relaxed),
         }
+    }
+
+    /// Search work done by every view of this stage since the previous exact-geometry probe.
+    fn observe_probe_search_work(&self) -> u64 {
+        let current = self.usage.search_work.load(Ordering::Relaxed);
+        let previous = self
+            .usage
+            .search_work_at_last_probe
+            .fetch_max(current, Ordering::Relaxed);
+        current.saturating_sub(previous)
     }
 
     fn consume(
@@ -130,14 +142,24 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
             self.maximum_checkpoint_latency_ms,
         );
         let wall_time_ms = elapsed_millis(self.started, now);
-        if wall_time_ms > self.maximum_wall_time_ms
-            || checkpoint_latency_ms > self.maximum_checkpoint_latency_ms
-        {
+        if wall_time_ms > self.maximum_wall_time_ms {
             return Err(GeometryEvaluationError::new(
                 GeometryEvaluationErrorKind::TimeBudgetExceeded,
                 format!(
-                    "exact geometry evaluation exceeded its execution time envelope: wall time {wall_time_ms}/{} ms, checkpoint latency {checkpoint_latency_ms}/{} ms",
-                    self.maximum_wall_time_ms, self.maximum_checkpoint_latency_ms,
+                    "exact geometry evaluation exceeded its execution wall-time budget: {wall_time_ms}/{} ms",
+                    self.maximum_wall_time_ms,
+                ),
+            ));
+        }
+        // Responsiveness is bounded by the work done between probes, which is a property of the
+        // algorithm. Checkpoint latency depends on machine load and stays a diagnostic above.
+        let work_since_probe = self.observe_probe_search_work();
+        if work_since_probe > self.maximum_work_units_between_checks {
+            return Err(GeometryEvaluationError::new(
+                GeometryEvaluationErrorKind::SearchWorkBudgetExceeded,
+                format!(
+                    "exact geometry evaluation did {work_since_probe} search work units between cancellation checkpoints; the request admits {}",
+                    self.maximum_work_units_between_checks,
                 ),
             ));
         }
@@ -215,6 +237,7 @@ impl MeshingCancellationSignal for MeshingGeometryEvaluationControl<'_> {
         let prior_maximum = self
             .maximum_observed_checkpoint_latency_ms
             .fetch_max(checkpoint_latency_ms, Ordering::Relaxed);
+        self.observe_probe_search_work();
         self.last_checkpoint_search_work.store(
             self.usage.search_work.load(Ordering::Relaxed),
             Ordering::Relaxed,

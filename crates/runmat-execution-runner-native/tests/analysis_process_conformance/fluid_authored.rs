@@ -544,7 +544,7 @@ pub(super) async fn run() {
                     &mesh,
                     &meshing_evidence,
                     options,
-                    actual.compiled.definition_digest().unwrap(),
+                    candidate.compiled.definition().unwrap(),
                     runmat_runtime::operations::OperationContext::new(None, None),
                     runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
                         "cold-fluid:{}",

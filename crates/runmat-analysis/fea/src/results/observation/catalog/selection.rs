@@ -31,7 +31,6 @@ impl ObservationFieldCatalog {
         coordinate: ObservationSelectionCoordinate,
     ) -> AnalysisExecutionResult<ObservationFieldSelection> {
         self.validate()?;
-        plan.validate_identity().map_err(invalid)?;
         let selected = self.canonical_selected_fields(plan, coordinate)?;
         match (&self.source, coordinate) {
             (

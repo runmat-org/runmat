@@ -175,7 +175,10 @@ pub fn prepare_structural_study_publication(
             )
         })?;
     let result_manifest = StudyResultManifest::new(
-        result.compiled(),
+        result
+            .compiled()
+            .definition()
+            .map_err(|error| invalid(error.to_string()))?,
         result
             .workloads()
             .canonical_digest()

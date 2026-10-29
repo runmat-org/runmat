@@ -10,13 +10,18 @@ pub(super) fn recover(
     first_output_index: usize,
 ) -> Result<FeaNonlinearRunResult, FeaRunError> {
     let load_factor_start = nonlinear.initial_load_factor;
+    let event_attributions = nonlinear_event_attributions(
+        model,
+        prepared.execution_step,
+        &nonlinear,
+        &prepared.resource_plan,
+    )?;
     let preparation::PreparedNonlinear {
         execution_step,
         summary,
         identity,
         ..
     } = prepared;
-    let event_attributions = nonlinear_event_attributions(model, execution_step, &nonlinear)?;
     emit_phase(
         "fea.run_nonlinear",
         FeaProgressPhase::Solve,

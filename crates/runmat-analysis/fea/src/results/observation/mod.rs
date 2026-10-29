@@ -42,6 +42,7 @@ pub use source::{
 pub(crate) use acceleration::governed_extrema_device_resident_bytes;
 pub use catalog::{
     ObservationFieldCatalog, ObservationFieldCatalogSource, ObservationSelectionCoordinate,
+    VolumeMeshObservationAuthority,
 };
 pub(crate) use contract::OBSERVATION_LIMITS;
 
@@ -50,7 +51,8 @@ pub use contract::{
     ObservationArtifactInput, ObservationArtifactManifest, ObservationEntity, ObservationError,
     ObservationLimits, ObservationResult, ObservationResultIdentity, ObservationSampleBounds,
     ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationPlanIdentity, ResolvedObservationPoint, ResolvedObservationTarget,
+    ResolvedObservationPlanContents, ResolvedObservationPlanIdentity, ResolvedObservationPoint,
+    ResolvedObservationTarget,
 };
 pub use distributed::{
     evaluate_solid_observation_partition, evaluate_structural_observation_partition,
@@ -83,8 +85,8 @@ pub use history::{
 };
 pub use partition::{
     ObservationExecutionPolicy, ObservationPartition, ObservationPartitionIdentity,
-    ObservationPartitionPlan, ObservationPartitionPlanIdentity, ObservationPartitionTarget,
-    DEFAULT_MAXIMUM_OBSERVATION_PARTITIONS,
+    ObservationPartitionPlan, ObservationPartitionPlanContents, ObservationPartitionPlanIdentity,
+    ObservationPartitionTarget, DEFAULT_MAXIMUM_OBSERVATION_PARTITIONS,
 };
 pub use publish::publish_observation;
 pub use resolve::{

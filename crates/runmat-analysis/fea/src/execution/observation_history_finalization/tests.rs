@@ -468,8 +468,9 @@ fn finalization_resource_plan_bounds_outputs_and_rejects_missing_series() {
 
 #[test]
 fn finalization_rejects_self_consistent_foreign_resolved_indices() {
-    let (workload, mesh, mut plan, catalog, checkpoint) =
+    let (workload, mesh, plan, catalog, checkpoint) =
         fixture(RetentionPolicy::Canonical, SeriesReduction::None);
+    let mut plan = plan.into_contents();
     let crate::results::observation::ResolvedObservationTarget::Nodes { indices, .. } =
         &mut plan.observations[0].target
     else {
@@ -495,7 +496,7 @@ fn finalization_rejects_self_consistent_foreign_resolved_indices() {
     .unwrap();
     plan.identity =
         serde_json::from_value(serde_json::to_value(Digest::sha256(bytes)).unwrap()).unwrap();
-    plan.validate_identity().unwrap();
+    let plan = crate::results::observation::ResolvedObservationPlan::try_from(plan).unwrap();
     let ObservationFieldCatalogSource::Thermal { manifest } = catalog.source() else {
         unreachable!()
     };

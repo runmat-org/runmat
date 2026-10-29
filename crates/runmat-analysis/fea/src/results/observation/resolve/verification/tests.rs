@@ -26,9 +26,10 @@ fn streamed_verification_matches_full_resolution_for_both_orders_and_cost_polici
         .unwrap();
         verify_observation_plan(&step, &projection, std::slice::from_ref(&definition), &plan)
             .unwrap();
-        let mut empty = plan.clone();
+        let mut empty = plan.clone().into_contents();
         empty.observations.clear();
         empty.identity = empty.derive_identity().unwrap();
+        let empty = ResolvedObservationPlan::try_from(empty).unwrap();
         assert!(verify_observation_plan(
             &step,
             &projection,
@@ -36,9 +37,10 @@ fn streamed_verification_matches_full_resolution_for_both_orders_and_cost_polici
             &empty
         )
         .is_err());
-        let mut reordered = plan.clone();
+        let mut reordered = plan.clone().into_contents();
         reordered.observations.reverse();
         reordered.identity = reordered.derive_identity().unwrap();
+        let reordered = ResolvedObservationPlan::try_from(reordered).unwrap();
         assert!(verify_observation_plan(&step, &projection, &[definition], &reordered).is_err());
     }
 }
@@ -57,7 +59,8 @@ fn rehashed_smaller_target_cannot_make_verification_expand_past_its_input() {
         std::slice::from_ref(&definition),
         ObservationLimits::default(),
     )
-    .unwrap();
+    .unwrap()
+    .into_contents();
     let ResolvedObservationTarget::Nodes {
         indices,
         identities,
@@ -68,7 +71,7 @@ fn rehashed_smaller_target_cannot_make_verification_expand_past_its_input() {
     indices.truncate(1);
     identities.truncate(1);
     plan.identity = plan.derive_identity().unwrap();
-    plan.validate_identity().unwrap();
+    let plan = ResolvedObservationPlan::try_from(plan).unwrap();
     assert!(matches!(
         verify_observation_plan(&step, &projection, &[definition], &plan),
         Err(ObservationError::Limit("selected topology entities"))
@@ -90,22 +93,22 @@ fn rehashed_same_size_target_substitution_and_cost_changes_are_rejected() {
         ObservationLimits::default(),
     )
     .unwrap();
-    let mut plan = original.clone();
+    let mut plan = original.clone().into_contents();
     let ResolvedObservationTarget::Nodes { identities, .. } = &mut plan.observations[0].target
     else {
         panic!("nodes")
     };
     identities[0] = StableDigest::from_bytes([77; 32]);
     plan.identity = plan.derive_identity().unwrap();
-    plan.validate_identity().unwrap();
+    let plan = ResolvedObservationPlan::try_from(plan).unwrap();
     assert!(
         verify_observation_plan(&step, &projection, std::slice::from_ref(&definition), &plan)
             .is_err()
     );
-    let mut plan = original;
+    let mut plan = original.into_contents();
     plan.observations[0].resolved_cost.operation_count += 1;
     plan.identity = plan.derive_identity().unwrap();
-    plan.validate_identity().unwrap();
+    let plan = ResolvedObservationPlan::try_from(plan).unwrap();
     assert!(verify_observation_plan(&step, &projection, &[definition], &plan).is_err());
 }
 

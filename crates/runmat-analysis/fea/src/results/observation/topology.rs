@@ -103,8 +103,9 @@ impl<'a> ObservationTopology<'a> {
             crate::topology::FiniteVolumeCellSelection::AllElements,
         )
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+        // `geometry` was derived from `projection` just above.
         let layout =
-            crate::results::field::FiniteVolumeFieldTopology::derive(projection, &geometry)
+            crate::results::field::FiniteVolumeFieldTopology::from_derived(projection, &geometry)
                 .map_err(|error| ObservationError::Invalid(error.to_string()))?;
         self.oriented_faces = layout
             .oriented_faces()

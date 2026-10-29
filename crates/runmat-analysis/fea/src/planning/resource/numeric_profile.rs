@@ -45,6 +45,13 @@ pub(super) fn numeric_inventory_profile(
             maximum: limits.maximum_encoded_bytes as u64,
         });
     }
+    if wire > runmat_types::wire_integer::MAX_WIRE_INTEGER
+        || resident > runmat_types::wire_integer::MAX_WIRE_INTEGER
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "numeric inventory exceeds canonical shape capacity".into(),
+        ));
+    }
     Ok(SerializedCanonicalProfile {
         encoded_bytes_upper_bound: wire,
         materialization_resident_bytes_estimate: resident,
@@ -57,7 +64,7 @@ mod tests {
     // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
     //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
     //   boundary: Count-only numerical profiling covers real codec arrays across header-width
-    //   transitions and plans100million values without constructing or visiting that array. Domain
+    //   transitions and rejects arrays beyond admitted canonical capacity without visiting them. Domain
     //   metadata and transport remain separately reserved. This is structural codec accounting, not
     //   measured RSS or whole study admission.
     #[test]
@@ -73,8 +80,12 @@ mod tests {
                     >= actual.materialization_resident_bytes_estimate
             );
         }
-        // This call has constant work/storage, even at a hundred million values.
+        // Constant profiling work does not waive canonical transport capacity.
         assert!(numeric_inventory_profile(100_000_000).is_ok());
+        assert!(matches!(
+            numeric_inventory_profile(10_000_000_000),
+            Err(ResourcePlanningError::CanonicalCollectionCapacity { .. })
+        ));
         assert!(numeric_inventory_profile(u64::MAX).is_err());
     }
 }

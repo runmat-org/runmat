@@ -23,7 +23,8 @@ use super::contract::{
     observation_result_storage_component_count, shape_component_count,
     validate_output_numeric_contract, ObservationError, ObservationLimits, ObservationSampleBounds,
     ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationPlanIdentity, ResolvedObservationPoint, ResolvedObservationTarget,
+    ResolvedObservationPlanContents, ResolvedObservationPlanIdentity, ResolvedObservationPoint,
+    ResolvedObservationTarget,
 };
 use super::history::resolve_history_sample_bounds;
 use super::topology::ObservationTopology;
@@ -172,17 +173,14 @@ pub(super) fn resolve_observation_plan_for_topology(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut plan = ResolvedObservationPlan {
+    ResolvedObservationPlan::seal_derived(ResolvedObservationPlanContents {
         schema_version: 1,
         identity: ResolvedObservationPlanIdentity(Digest::sha256([])),
         topology_digest: topology.digest(),
         step_id: step.step_id.clone(),
         independent_domain: step.independent_domain.clone(),
         observations,
-    };
-    plan.identity = plan.derive_identity()?;
-    plan.validate_identity()?;
-    Ok(plan)
+    })
 }
 
 fn resolve_request<'a>(

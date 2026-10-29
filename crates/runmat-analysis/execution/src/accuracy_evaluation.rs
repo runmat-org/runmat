@@ -50,6 +50,9 @@ pub struct PreparedAccuracy {
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: runmat_analysis_fea::planning::resource::FeaResourcePlan,
+    /// The typed catalog whose canonical bytes are the observation input, kept so the import
+    /// in this process uses it instead of decoding those bytes again.
+    pub source_observations: Option<ObservationPublicationCatalog>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -270,6 +273,7 @@ pub fn prepare_accuracy(
         program,
         inputs,
         resource_plan,
+        source_observations: preparation.source_observations,
     })
 }
 
