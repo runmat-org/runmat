@@ -471,8 +471,12 @@ pub(super) async fn run_process(
             }
         }
         if let Some(error) = retirement_error {
+            let original = outcome.as_ref().err().map_or_else(
+                || "worker returned a terminal response".to_owned(),
+                ToString::to_string,
+            );
             let message = format!(
-                "worker process tree could not be retired after bounded retries: {error}; original outcome: {outcome:?}"
+                "worker process tree could not be retired after bounded retries: {error}; original outcome: {original}"
             );
             if !matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
                 return Err(TransferFailure::RetirementUnverified(message));
