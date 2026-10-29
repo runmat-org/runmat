@@ -47,7 +47,8 @@ fn sampled_observation_topology_retains_each_original_rule_order_and_identity() 
                 .integration_indices(std::iter::once(1), usize::MAX)
                 .is_err());
             for (actual, source) in topology
-                .volume_integration_points
+                .volume_integration_points()
+                .unwrap()
                 .iter()
                 .zip(samples.integration_samples_for(&mesh).unwrap())
             {
@@ -103,7 +104,7 @@ fn parent_expansion_counts_actual_samples_and_preserves_structural_legacy_identi
             .enumerate()
         {
             assert_eq!(
-                structural.volume_integration_points[index].identity,
+                structural.volume_integration_points().unwrap()[index].identity,
                 integration_point_identity(element.stable_identity, ordinal)
             );
         }

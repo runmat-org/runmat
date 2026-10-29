@@ -17,34 +17,7 @@ impl ObservationTopology<'_> {
         )
         .map_err(storage_error)?;
         let points = sampling.rule().points_per_element();
-        let integration_points_by_parent = (0..projection.elements.len())
-            .map(|parent| (parent * points..(parent + 1) * points).collect())
-            .collect::<Vec<Vec<usize>>>();
-        // Samples are named by (element, rule point): identity from that pair, geometry from
-        // the projection and the rule.
-        let mut volume_integration_points = Vec::new();
-        volume_integration_points
-            .try_reserve_exact(sampling.integration_sample_count())
-            .map_err(|_| ObservationError::Limit("sampled integration-point allocation"))?;
-        let mut failure = None;
-        sampling
-            .visit_integration_geometry(&projection, |point| {
-                match sampling.integration_sample_identity(point.index) {
-                    Ok(identity) => volume_integration_points.push(ObservationElement {
-                        identity,
-                        region_id: projection.elements[point.element]
-                            .region_id
-                            .source_topology_id
-                            .clone(),
-                        centroid_m: point.position_m,
-                    }),
-                    Err(error) => failure = failure.take().or(Some(error)),
-                }
-            })
-            .map_err(invalid)?;
-        if let Some(error) = failure {
-            return Err(invalid(error));
-        }
+        let parents = projection.elements.len();
         let oriented_edges = sampling
             .oriented_edges()
             .iter()
@@ -91,7 +64,10 @@ impl ObservationTopology<'_> {
                     centroid_m: element.centroid_m,
                 })
                 .collect(),
-            volume_integration_points,
+            volume_integration_points: IntegrationPoints::Sampled {
+                count: sampling.integration_sample_count(),
+                points: std::sync::OnceLock::new(),
+            },
             oriented_edges,
             oriented_faces: Vec::new(),
             finite_volume: None,
@@ -110,8 +86,43 @@ impl ObservationTopology<'_> {
             .map_err(storage_error)?,
             solid_projection: Some(Cow::Owned(projection)),
             sampling: Some(sampling.clone()),
-            integration_points_by_parent,
+            integration_points_by_parent: ParentIntegrationPoints::Uniform {
+                parents,
+                per_parent: points,
+            },
         })
+    }
+}
+
+/// Sample records of a sampled layout: identity from (rule, element, ordinal), parent region and
+/// rule position from the projection.
+pub(super) fn integration_points(
+    sampling: &SampledVolumeFieldTopology,
+    projection: &AnalysisProjection,
+) -> Result<Vec<ObservationElement>, ObservationError> {
+    let mut volume_integration_points = Vec::new();
+    volume_integration_points
+        .try_reserve_exact(sampling.integration_sample_count())
+        .map_err(|_| ObservationError::Limit("sampled integration-point allocation"))?;
+    let mut failure = None;
+    sampling
+        .visit_integration_geometry(projection, |point| {
+            match sampling.integration_sample_identity(point.index) {
+                Ok(identity) => volume_integration_points.push(ObservationElement {
+                    identity,
+                    region_id: projection.elements[point.element]
+                        .region_id
+                        .source_topology_id
+                        .clone(),
+                    centroid_m: point.position_m,
+                }),
+                Err(error) => failure = failure.take().or(Some(error)),
+            }
+        })
+        .map_err(invalid)?;
+    match failure {
+        Some(error) => Err(invalid(error)),
+        None => Ok(volume_integration_points),
     }
 }
 

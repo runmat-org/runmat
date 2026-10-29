@@ -59,12 +59,23 @@ pub(super) fn validate_sources(
         || request.source_resource_plan != primary.identity
         || request.source_resource_usage != usage.identity()
         || usage.result_digest != request.source_result.digest()
-        || !usage.overruns.is_empty()
-        || accuracy.gate().decision != PublicationDecision::Allow
     {
         return Err(AnalysisExecutionError::Identity(
-            "published result sources differ from the admitted request or publication gate",
+            "published result sources differ from the admitted request",
         ));
+    }
+    // A governed refusal is not a source mismatch: name it.
+    if !usage.overruns.is_empty() {
+        return Err(AnalysisExecutionError::Invalid(format!(
+            "result publication refused: measured resource usage exceeded the admitted plan: {:?}",
+            usage.overruns
+        )));
+    }
+    if accuracy.gate().decision != PublicationDecision::Allow {
+        return Err(AnalysisExecutionError::Invalid(format!(
+            "result publication refused by the accuracy gate: {:?}",
+            accuracy.gate()
+        )));
     }
     Ok(())
 }

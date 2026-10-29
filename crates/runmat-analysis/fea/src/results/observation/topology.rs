@@ -38,7 +38,7 @@ pub(crate) struct ObservationTopology<'a> {
     topology_digest: Digest,
     pub nodes: Vec<ObservationNode>,
     pub volume_elements: Vec<ObservationElement>,
-    pub volume_integration_points: Vec<ObservationElement>,
+    volume_integration_points: IntegrationPoints,
     pub oriented_edges: Vec<ObservationElement>,
     pub oriented_faces: Vec<ObservationElement>,
     pub finite_volume: Option<crate::results::field::FiniteVolumeFieldTopology>,
@@ -49,8 +49,44 @@ pub(crate) struct ObservationTopology<'a> {
     pub shell_elements: Vec<ObservationElement>,
     pub solid_projection: Option<Cow<'a, AnalysisProjection>>,
     pub sampling: Option<SampledVolumeFieldTopology>,
-    integration_points_by_parent: Vec<Vec<usize>>,
+    integration_points_by_parent: ParentIntegrationPoints,
     node_selectors: SortedValues<u64, Vec<usize>>,
+}
+
+/// Integration-point entities. A sampled layout names its samples by (element, rule point), so
+/// their records (derived identity, parent region, rule position) are built only when an
+/// observation actually addresses integration points.
+#[derive(Clone, Debug)]
+enum IntegrationPoints {
+    Materialized(Vec<ObservationElement>),
+    Sampled {
+        count: usize,
+        points: std::sync::OnceLock<Vec<ObservationElement>>,
+    },
+}
+
+/// Parent element -> integration-point indices: explicit lists, or a fixed number of
+/// consecutive samples per parent for a sampled layout.
+#[derive(Clone, Debug)]
+enum ParentIntegrationPoints {
+    Explicit(Vec<Vec<usize>>),
+    Uniform { parents: usize, per_parent: usize },
+}
+impl ParentIntegrationPoints {
+    fn count(&self, parent: usize) -> Option<usize> {
+        match self {
+            Self::Explicit(lists) => lists.get(parent).map(Vec::len),
+            Self::Uniform { parents, per_parent } => (parent < *parents).then_some(*per_parent),
+        }
+    }
+    fn extend(&self, parent: usize, indices: &mut Vec<usize>) {
+        match self {
+            Self::Explicit(lists) => indices.extend_from_slice(&lists[parent]),
+            Self::Uniform { per_parent, .. } => {
+                indices.extend(parent * per_parent..(parent + 1) * per_parent)
+            }
+        }
+    }
 }
 
 pub(super) mod resources;
@@ -186,7 +222,7 @@ impl<'a> ObservationTopology<'a> {
                     centroid_m: element.centroid_m,
                 })
                 .collect(),
-            volume_integration_points,
+            volume_integration_points: IntegrationPoints::Materialized(volume_integration_points),
             oriented_edges: Vec::new(),
             oriented_faces: Vec::new(),
             finite_volume: None,
@@ -196,7 +232,9 @@ impl<'a> ObservationTopology<'a> {
             shell_elements: Vec::new(),
             solid_projection: Some(projection),
             sampling: None,
-            integration_points_by_parent,
+            integration_points_by_parent: ParentIntegrationPoints::Explicit(
+                integration_points_by_parent,
+            ),
             node_selectors,
         })
     }
@@ -206,7 +244,7 @@ impl<'a> ObservationTopology<'a> {
             oriented_faces: self.oriented_faces.len(),
             nodes: self.nodes.len(),
             volume_elements: self.volume_elements.len(),
-            volume_integration_points: self.volume_integration_points.len(),
+            volume_integration_points: self.volume_integration_point_count(),
             oriented_edges: self.oriented_edges.len(),
             beam_elements: self.beam_elements.len(),
             shell_elements: self.shell_elements.len(),
@@ -313,11 +351,13 @@ impl<'a> ObservationTopology<'a> {
                         .collect()
                 })
                 .unwrap_or_default(),
-            volume_integration_points: projection
-                .as_ref()
-                .map(integration_point_elements)
-                .transpose()?
-                .unwrap_or_default(),
+            volume_integration_points: IntegrationPoints::Materialized(
+                projection
+                    .as_ref()
+                    .map(integration_point_elements)
+                    .transpose()?
+                    .unwrap_or_default(),
+            ),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             oriented_edges: Vec::new(),
@@ -326,11 +366,13 @@ impl<'a> ObservationTopology<'a> {
             face_boundary_sources: Vec::new(),
             face_elements: Vec::new(),
             sampling: None,
-            integration_points_by_parent: projection
-                .as_ref()
-                .map(structural_integration_indices)
-                .transpose()?
-                .unwrap_or_default(),
+            integration_points_by_parent: ParentIntegrationPoints::Explicit(
+                projection
+                    .as_ref()
+                    .map(structural_integration_indices)
+                    .transpose()?
+                    .unwrap_or_default(),
+            ),
             solid_projection: projection.map(Cow::Owned),
             node_selectors,
         };
@@ -379,6 +421,36 @@ impl<'a> ObservationTopology<'a> {
         self.topology_digest
     }
 
+    pub fn volume_integration_point_count(&self) -> usize {
+        match &self.volume_integration_points {
+            IntegrationPoints::Materialized(points) => points.len(),
+            IntegrationPoints::Sampled { count, .. } => *count,
+        }
+    }
+
+    /// Integration-point entities; a sampled layout builds them on first use.
+    pub fn volume_integration_points(&self) -> Result<&[ObservationElement], ObservationError> {
+        match &self.volume_integration_points {
+            IntegrationPoints::Materialized(points) => Ok(points),
+            IntegrationPoints::Sampled { points, .. } => {
+                if points.get().is_none() {
+                    let sampling = self.sampling.as_ref().ok_or(ObservationError::Identity(
+                        "sampled integration points require their sampled layout",
+                    ))?;
+                    let projection =
+                        self.solid_projection
+                            .as_deref()
+                            .ok_or(ObservationError::Identity(
+                                "sampled integration points require their projection",
+                            ))?;
+                    let built = sampled::integration_points(sampling, projection)?;
+                    let _ = points.set(built);
+                }
+                Ok(points.get().map(Vec::as_slice).unwrap_or_default())
+            }
+        }
+    }
+
     /// Expand actual parent membership, not a solver-specific fixed sampling count.
     /// Reject the complete selection before allocating its output indices.
     pub fn integration_indices(
@@ -387,14 +459,11 @@ impl<'a> ObservationTopology<'a> {
         maximum: usize,
     ) -> Result<Vec<usize>, ObservationError> {
         let count = parents.clone().try_fold(0usize, |count, parent| {
-            let indices =
-                self.integration_points_by_parent
-                    .get(parent)
-                    .ok_or(ObservationError::Identity(
-                        "integration-point parent exceeds observation topology",
-                    ))?;
+            let points = self.integration_points_by_parent.count(parent).ok_or(
+                ObservationError::Identity("integration-point parent exceeds observation topology"),
+            )?;
             let count = count
-                .checked_add(indices.len())
+                .checked_add(points)
                 .ok_or(ObservationError::Limit("integration-point target count"))?;
             if count > maximum {
                 return Err(ObservationError::Limit("integration-point target count"));
@@ -406,7 +475,7 @@ impl<'a> ObservationTopology<'a> {
             .try_reserve_exact(count)
             .map_err(|_| ObservationError::Limit("integration-point target allocation"))?;
         for parent in parents {
-            indices.extend_from_slice(&self.integration_points_by_parent[parent]);
+            self.integration_points_by_parent.extend(parent, &mut indices);
         }
         Ok(indices)
     }
@@ -428,7 +497,7 @@ impl<'a> ObservationTopology<'a> {
         match domain {
             RecoveredFieldEntityDomain::VolumeElements => Ok(&self.volume_elements),
             RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
-                Ok(&self.volume_integration_points)
+                self.volume_integration_points()
             }
             RecoveredFieldEntityDomain::BeamElements => Ok(&self.beam_elements),
             RecoveredFieldEntityDomain::ShellElements => Ok(&self.shell_elements),
