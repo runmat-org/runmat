@@ -192,6 +192,22 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Ships when: `include model.<m>(<name> = <value>, …)` checks, binds typed region, material and quantity inputs, and a study using it runs.
 - Described in: [Declaration reference](./language/reference/declarations.md).
 
+### language.keyword-names
+
+**Keywords allowed as declared names (`input load : force`).**
+
+- Kind: language.
+- Ships when: Declared input, let and output names may be keywords; `input load : force = 1.5 kN` checks clean and resolves as `input.load`.
+- Described in: [Types, units and expressions](./language/types-units-and-expressions.md).
+
+### language.vector.trailing-unit
+
+**Vectors with one trailing unit in orientation and frame members (`origin = [0, 0, 0] m`).**
+
+- Kind: language.
+- Ships when: Every member that expects a vector quantity accepts both `[0 m, 0 m, 0 m]` and `[0, 0, 0] m` through one normalization point; orientation and frame members check clean.
+- Described in: [Types, units and expressions](./language/types-units-and-expressions.md).
+
 ## Geometry
 
 ### geometry.select.predicate

@@ -351,6 +351,38 @@
       ],
       "owner": "q-check-parity",
       "landed_in": null
+    },
+    {
+      "id": "language.vector.trailing-unit",
+      "title": "Vectors with one trailing unit in orientation and frame members (`origin = [0, 0, 0] m`)",
+      "area": "language",
+      "kind": "language",
+      "acceptance": "Every member that expects a vector quantity accepts both `[0 m, 0 m, 0 m]` and `[0, 0, 0] m` through one normalization point; orientation and frame members check clean.",
+      "witness": [
+        "runmat check <orientation with origin = [0, 0, 0] m>.fea"
+      ],
+      "gaps": [
+        "G-E3",
+        "LANG-14"
+      ],
+      "owner": "q-check-parity",
+      "landed_in": null
+    },
+    {
+      "id": "language.keyword-names",
+      "title": "Keywords allowed as declared names (`input load : force`)",
+      "area": "language",
+      "kind": "language",
+      "acceptance": "Declared input, let and output names may be keywords; `input load : force = 1.5 kN` checks clean and resolves as `input.load`.",
+      "witness": [
+        "runmat check <input named load>.fea"
+      ],
+      "gaps": [
+        "G-E4",
+        "LANG-16"
+      ],
+      "owner": "q-check-parity",
+      "landed_in": null
     }
   ]
 }
