@@ -6,6 +6,9 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
+#[path = "support/fea_admission.rs"]
+mod fea_admission;
+
 const STUDY: &str = include_str!("fixtures/typed_box_loaded_static.fea");
 
 /// The identity of one run's results: definition, mesh, step run ids, the content digest of every
@@ -35,7 +38,8 @@ fn run(policy: Option<(u32, u32)>) -> ResultIdentity {
         ),
     };
     fs::write(project.path().join("study.fea"), source).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_runmat"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
+    command
         .current_dir(project.path())
         .args(["--offline", "fea", "run", "study.fea", "--json"])
         .env_remove("RUNMAT_CONFIG")
@@ -46,6 +50,13 @@ fn run(policy: Option<(u32, u32)>) -> ResultIdentity {
         .env(
             "RUNMAT_EXECUTION_STATE_DIR",
             project.path().join("execution-state"),
+        );
+    fea_admission::configure(&mut command, project.path());
+    // Preserve the authored solver-state location after admission config sets its defaults.
+    let output = command
+        .env(
+            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+            project.path().join(".artifacts/studies"),
         )
         .output()
         .unwrap();
