@@ -44,6 +44,7 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_00
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     policy: AcousticResponseStudyPlanningPolicy,
     compiled: CompiledAnalysisStudy,
     workload: AcousticResponseWorkload,
@@ -62,6 +63,7 @@ impl PreparationWire {
         let limits = preparation.output_policy.inventory_limits();
         let workload = preparation.workload().clone();
         Self {
+            local_execution: preparation.local_execution,
             policy: preparation.policy,
             compiled: preparation.product.compiled,
             workload,
@@ -99,6 +101,7 @@ impl PreparationWire {
             ));
         }
         Ok(AcousticResponseStudyPreparation {
+            local_execution: self.local_execution,
             policy: self.policy,
             product: AcousticResponseStudyProduct {
                 compiled: self.compiled,

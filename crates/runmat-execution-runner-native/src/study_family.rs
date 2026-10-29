@@ -252,6 +252,7 @@ pub(crate) fn plan_family_study(
             (
                 FamilyStudyPreparation::AcousticResponse(Box::new(
                     AcousticResponseStudyPreparation {
+                        local_execution: context.local_execution,
                         policy: *policy,
                         product,
                         mesh,

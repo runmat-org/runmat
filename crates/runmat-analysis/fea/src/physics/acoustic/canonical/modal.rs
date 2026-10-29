@@ -33,7 +33,6 @@ pub struct AcousticModalPolicy {
     pub relative_tolerance: f64,
     /// Relative residual of each inner (K + s M) solve.
     pub linear_relative_tolerance: f64,
-    pub linear_maximum_iterations: usize,
     /// Ceiling on shift-invert operator applications across all restarts.
     pub maximum_operator_applications: usize,
 }
@@ -43,7 +42,6 @@ impl Default for AcousticModalPolicy {
         Self {
             relative_tolerance: 1.0e-8,
             linear_relative_tolerance: 1.0e-12,
-            linear_maximum_iterations: 20_000,
             maximum_operator_applications: 4_000,
         }
     }
@@ -54,7 +52,6 @@ impl AcousticModalPolicy {
         let unit = |value: f64| value.is_finite() && value > 0.0 && value < 1.0;
         if !unit(self.relative_tolerance)
             || !unit(self.linear_relative_tolerance)
-            || self.linear_maximum_iterations == 0
             || self.maximum_operator_applications == 0
         {
             return Err(AcousticHarmonicError::InvalidInput(
@@ -292,7 +289,6 @@ fn lowest_eigenpairs(
     let operator = SpdOperator::factor(
         &shifted,
         policy.linear_relative_tolerance,
-        policy.linear_maximum_iterations,
     )?;
     let apply_m = |v: &[f64]| {
         spmv(mass, v).map_err(|error| AcousticHarmonicError::Operator(error.into()))
@@ -333,7 +329,7 @@ fn lowest_eigenpairs(
                 break;
             }
             let rhs = apply_m(&vector)?;
-            let solved = operator.solve(&rhs, None)?;
+            let solved = operator.solve(&rhs)?;
             applications += 1;
             linear_iterations += solved.iterations;
             let mut candidate = solved.values;

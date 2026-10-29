@@ -54,6 +54,7 @@ impl AcousticResponseStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct AcousticResponseStudyReplayContext {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: AcousticResponseStudyPlanningPolicy,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
@@ -90,6 +91,7 @@ impl CompletedAcousticResponseStudy {
             ));
         }
         Ok(AcousticResponseStudyPreparation {
+            local_execution: self.replay.local_execution,
             policy: self.replay.policy,
             product: AcousticResponseStudyProduct {
                 compiled: self.compiled.clone(),

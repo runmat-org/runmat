@@ -16,6 +16,8 @@ const RESULT_SCHEMA_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedAcousticResponseResourceFacts {
+    /// The admitted local CPU plan: the kernel's thread authority (as for every family).
+    pub local_execution: super::LocalExecutionPlan,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
@@ -137,21 +139,34 @@ pub fn build_acoustic_response_resource_plan(
     let support = operator_support(mesh)?;
     let samples = acoustic_response_sample_count(workload)?;
     // Assembly maps plus CSR values/columns for each simultaneously live operator.
-    let (live_operators, vectors) = match workload.solver {
+    let (live_operators, factors, vectors) = match workload.solver {
         AcousticResponseSolver::Modal { .. } => {
-            // K, M, B, K + sM, free K, free M and the incomplete factor; V, KV, MV basis
-            // blocks of capacity 2m + 6b + 20 with b <= 4, plus Rayleigh-Ritz dense work.
+            // K, M, B, K + sM, free K and free M plus the sparse Cholesky factor of K + sM;
+            // V, KV, MV basis blocks of capacity 2m + 6b + 20 with b <= 4, plus Rayleigh-Ritz
+            // dense work.
             let capacity = add(mul(samples, 2)?, 44)?;
             let dense = mul(mul(capacity, capacity)?, 24)?;
-            (7, add(mul(mul(capacity, 3)?, nodes)?, add(dense, mul(nodes, 16)?)?)?)
+            (6, 1, add(mul(mul(capacity, 3)?, nodes)?, add(dense, mul(nodes, 16)?)?)?)
         }
         AcousticResponseSolver::Transient { .. } => {
-            // K, M, B, effective, free effective, free mass and two incomplete factors;
-            // the retained history plus about twenty state/work vectors.
-            (8, add(mul(samples, nodes)?, mul(nodes, 24)?)?)
+            // K, M, B, effective, free effective and free mass plus the sparse Cholesky
+            // factors of the free effective and free mass operators; the retained history plus
+            // about twenty state/work vectors.
+            (6, 2, add(mul(samples, nodes)?, mul(nodes, 24)?)?)
         }
     };
     let operators = mul(mul(support, live_operators)?, 160)?;
+    // Each factor is quoted by the shared direct-solver reservation model from the operator's
+    // order and its element-incidence support (an upper bound of its nonzeros).
+    let factor = runmat_sparse_solvers::estimate::direct_reservation_bytes(
+        usize::try_from(nodes).map_err(|_| invalid("acoustic node count"))?,
+        usize::try_from(support).map_err(|_| invalid("acoustic operator support"))?,
+        false,
+    );
+    if factor == u64::MAX {
+        return Err(ResourcePlanningError::Overflow("acoustic factor reservation"));
+    }
+    let operators = add(operators, mul(factor, factors)?)?;
     let projection = AnalysisProjection::derivation_resident_bytes_estimate(mesh).map_err(invalid)?;
     let reservation = add(
         add(operators, mul(vectors, 8)?)?,
@@ -183,7 +198,10 @@ pub fn build_acoustic_response_resource_plan(
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1000,
+            cpu_millicores: prepared
+                .local_execution
+                .checked_cpu_millicores()
+                .map_err(invalid)?,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(16 * 1024 * 1024),
             fixed_scratch_bytes: ByteCount(8 * 1024 * 1024),
