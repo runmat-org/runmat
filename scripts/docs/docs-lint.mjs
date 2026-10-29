@@ -9,6 +9,8 @@
 // - every open entry is flagged by at least one doc, or carries `doc_less` with a reason;
 // - a ```fea source=<file> block is a verbatim excerpt of docs/simulation/examples/<file>;
 // - front matter, where present, matches docs/schema/doc-front-matter.schema.json;
+// - every name in the compiler's closed registries (units, types, field locations and quantities, output
+//   operations, material members) appears on its owner reference page (E-DOC-6, registry-coverage.mjs);
 // - relative links resolve to a file in docs/simulation and, with `#anchor`, to a heading in it;
 //   links may not leave docs/simulation (the site and the agent corpus only contain that tree).
 import Ajv from "ajv";
@@ -16,6 +18,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fencedBlocks, headings, links, markdownFiles, parseFrontMatter, readText } from "./markdown-scan.mjs";
+import { REGISTRIES, registryCoverage } from "./registry-coverage.mjs";
 
 const readJson = path => JSON.parse(readText(path));
 
@@ -135,6 +138,13 @@ export function lintDocs(source) {
                 const page = parsed.get(resolved.file);
                 if (page && !page.headings.some(heading => heading.anchor === resolved.anchor)) error(file, link.line, "link-anchor", `\`${target}\`: docs/simulation/${resolved.file} has no heading with anchor #${resolved.anchor}`);
             }
+        }
+    }
+    // E-DOC-6: every closed-registry name is documented on its owner page (skipped for fixture trees without sources).
+    if (REGISTRIES.every(registry => existsSync(join(source, registry.source)))) {
+        for (const entry of registryCoverage(source)) {
+            if (entry.names === 0) errors.push({ file: entry.source, line: 0, rule: "registry-coverage", message: `no names extracted for ${entry.id}; re-anchor REGISTRIES in scripts/docs/registry-coverage.mjs` });
+            for (const name of entry.missing) error(entry.docs[0], 0, "registry-coverage", `${entry.id}: \`${name}\` (${entry.source}) is not documented`);
         }
     }
     return { files: files.length, references: references.length, errors };

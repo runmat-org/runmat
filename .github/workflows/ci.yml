@@ -70,7 +70,7 @@ jobs:
       - name: Generated docs pages are current
         run: node scripts/docs/generate-pages.mjs --check
       - name: Docs tooling tests
-        run: node --test scripts/docs/docs-lint.test.mjs scripts/docs/check-snippets.test.mjs
+        run: node --test scripts/docs/docs-lint.test.mjs scripts/docs/check-snippets.test.mjs scripts/docs/registry-coverage.test.mjs
 
   builtin-example-closure:
     # Public-product verification builds native and browser products and is too
