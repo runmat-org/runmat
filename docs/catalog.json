@@ -166,6 +166,10 @@
       "path": "docs/simulation/physics/index.md"
     },
     {
+      "id": "doc:fea/family-procedure-matrix",
+      "path": "docs/simulation/generated/family-procedure-matrix.md"
+    },
+    {
       "id": "doc:fea/physics/structural",
       "path": "docs/simulation/physics/structural.md"
     },
