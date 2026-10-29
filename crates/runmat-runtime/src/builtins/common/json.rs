@@ -1,5 +1,7 @@
 use runmat_value::IntValue;
 
+pub(crate) mod typed_object_projection;
+
 pub(crate) fn int_value_to_json(value: &IntValue) -> serde_json::Value {
     let number = match value {
         IntValue::I8(value) => serde_json::Number::from(*value),

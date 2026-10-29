@@ -327,13 +327,33 @@ type FeaClassSchema = (
 pub(crate) fn ensure_fea_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     PORTABLE_SCHEMAS.call_once(|| {
-        for (class_name, type_identity, fields, required, validate) in fea_class_schemas() {
+        // The registry has process lifetime. Keep the optional projection field
+        // lists under one static owner rather than leaking each registration.
+        static FIELDS: std::sync::OnceLock<Vec<Vec<&'static str>>> = std::sync::OnceLock::new();
+        let schemas = fea_class_schemas();
+        let fields = FIELDS.get_or_init(|| {
+            schemas
+                .iter()
+                .map(|(_, _, fields, _, _)| {
+                    fields
+                        .iter()
+                        .copied()
+                        .chain(std::iter::once(
+                            crate::builtins::common::json::typed_object_projection::PROPERTY,
+                        ))
+                        .collect()
+                })
+                .collect()
+        });
+        for ((class_name, type_identity, _, required, validate), fields) in
+            schemas.into_iter().zip(fields)
+        {
             crate::execution::value_codec::register_immutable_value_class(
                 crate::execution::value_codec::ImmutableValueClassSchema {
                     class_name,
                     type_identity,
                     schema_version: 1,
-                    allowed_fields: fields,
+                    allowed_fields: fields.as_slice(),
                     required_fields: required,
                     validate,
                 },
@@ -393,11 +413,16 @@ pub(crate) fn ensure_fea_classes_registered() {
             };
             let properties = fields
                 .iter()
+                .copied()
+                .chain(std::iter::once(
+                    crate::builtins::common::json::typed_object_projection::PROPERTY,
+                ))
                 .map(|field| {
                     let get_access = if matches!(
-                        *field,
+                        field,
                         super::signals::bindings::FROZEN_GENERATORS_PROPERTY
                             | super::signals::bindings::FROZEN_STUDY_GENERATORS_PROPERTY
+                            | crate::builtins::common::json::typed_object_projection::PROPERTY
                     ) {
                         MemberAccess::Private
                     } else {
@@ -412,16 +437,16 @@ pub(crate) fn ensure_fea_classes_registered() {
 }
 
 fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
-    if object
-        .properties()
-        .keys()
-        .any(|name| name.starts_with("__runmat_"))
-    {
+    if object.properties().keys().any(|name| {
+        name.starts_with("__runmat_")
+            && name != crate::builtins::common::json::typed_object_projection::PROPERTY
+    }) {
         return Err(format!(
             "immutable FEA class `{}` contains an opaque runtime property",
             object.class_name()
         ));
     }
+    super::object_projection::validate(object)?;
     for field in [
         super::signals::bindings::FROZEN_GENERATORS_PROPERTY,
         super::signals::bindings::FROZEN_STUDY_GENERATORS_PROPERTY,

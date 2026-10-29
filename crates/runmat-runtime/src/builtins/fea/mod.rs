@@ -64,6 +64,7 @@ pub(crate) mod interfaces;
 pub(crate) mod material_assignments;
 mod modeling;
 mod object_api;
+mod object_projection;
 pub(crate) mod observations;
 pub(crate) mod response_spectra;
 pub(crate) mod response_spectrum_policies;
@@ -668,14 +669,8 @@ fn object_payload_omitting<T: DeserializeOwned>(
             format!("expected {expected_class}, got {}", object.class_name()),
         ));
     }
-    let mut fields = serde_json::Map::new();
-    for (name, value) in object.properties().iter() {
-        if !omitted.contains(&name) {
-            fields.insert(name.to_owned(), value_to_json(builtin, value)?);
-        }
-    }
-    let json = serde_json::Value::Object(fields);
-    decode_object_json(json).map_err(|err| {
+    let json = object_projection::to_json_omitting(builtin, object, omitted)?;
+    serde_json::from_value(json).map_err(|err| {
         builtin_error_with_source(
             builtin,
             &ERROR_INPUT,
@@ -685,74 +680,6 @@ fn object_payload_omitting<T: DeserializeOwned>(
             ),
             err,
         )
-    })
-}
-
-/// Object layer: absent property = null; wire decode remains strict.
-///
-/// Runtime values have no null, so `serializable_to_object_value` omits null
-/// properties. This is the one boundary where object properties become the typed
-/// value again, and it restores that rule exactly: a field that serde itself reports
-/// as required and missing is filled with null at the reported path, at most once,
-/// and decoding is retried. Defaulted fields (including skip-if-empty vectors) are
-/// never reported missing, so they are untouched; a required non-nullable field
-/// filled with null fails, and the original missing-field error is returned.
-/// Wire/JSON decoding (`serde_json::from_value` elsewhere) keeps rejecting omission.
-fn decode_object_json<T: DeserializeOwned>(
-    mut json: serde_json::Value,
-) -> Result<T, serde_json::Error> {
-    let mut filled: Vec<(String, String)> = Vec::new();
-    let mut last_fill: Option<(String, serde_json::Error)> = None;
-    loop {
-        let err = match serde_path_to_error::deserialize::<_, T>(&json) {
-            Ok(value) => return Ok(value),
-            Err(err) => err,
-        };
-        let path = err.path().iter().cloned().collect::<Vec<_>>();
-        let path_text = err.path().to_string();
-        let message = err.inner().to_string();
-        let missing = message
-            .strip_prefix("missing field `")
-            .and_then(|rest| rest.strip_suffix('`'))
-            .map(str::to_owned);
-        if let Some((fill_path, original)) = last_fill.take() {
-            // The previous fill did not resolve its field: report the field as missing.
-            if missing.is_none() && path_text == fill_path {
-                return Err(original);
-            }
-        }
-        let Some(field) = missing else {
-            return Err(err.into_inner());
-        };
-        let key = (path_text.clone(), field.clone());
-        if filled.contains(&key) {
-            return Err(err.into_inner());
-        }
-        let Some(serde_json::Value::Object(target)) = json_at_path(&mut json, &path) else {
-            return Err(err.into_inner());
-        };
-        if target.contains_key(&field) {
-            return Err(err.into_inner());
-        }
-        target.insert(field.clone(), serde_json::Value::Null);
-        let fill_path = if path.is_empty() {
-            field.clone()
-        } else {
-            format!("{path_text}.{field}")
-        };
-        filled.push(key);
-        last_fill = Some((fill_path, err.into_inner()));
-    }
-}
-
-fn json_at_path<'a>(
-    json: &'a mut serde_json::Value,
-    path: &[serde_path_to_error::Segment],
-) -> Option<&'a mut serde_json::Value> {
-    path.iter().try_fold(json, |node, segment| match segment {
-        serde_path_to_error::Segment::Map { key } => node.as_object_mut()?.get_mut(key),
-        serde_path_to_error::Segment::Seq { index } => node.as_array_mut()?.get_mut(*index),
-        _ => None,
     })
 }
 
@@ -1438,13 +1365,7 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
             }
             Ok(serde_json::Value::Object(object))
         }
-        Value::Object(object) => {
-            let mut object_json = serde_json::Map::new();
-            for (key, value) in object.properties().iter() {
-                object_json.insert(key.to_owned(), value_to_json(builtin, value)?);
-            }
-            Ok(serde_json::Value::Object(object_json))
-        }
+        Value::Object(object) => object_projection::to_json(builtin, object),
         other => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -2150,6 +2071,9 @@ fn typed_value_from_json(json: &serde_json::Value) -> BuiltinResult<Value> {
     fn holds_object(json: &serde_json::Value) -> bool {
         match json {
             serde_json::Value::Object(_) => true,
+            // Nullable arrays must retain their slots rather than allowing
+            // jsondecode to coerce null into a numerical array value.
+            serde_json::Value::Null => true,
             serde_json::Value::Array(items) => items.iter().any(holds_object),
             _ => false,
         }
@@ -2403,7 +2327,23 @@ fn serializable_to_object_value<T: Serialize>(
     ensure_fea_classes_registered();
     let json = serde_json::to_value(value)
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
-    let public_json = omit_null_object_fields(json.clone());
+    if json.as_object().is_some_and(|fields| {
+        fields.contains_key(crate::builtins::common::json::typed_object_projection::PROPERTY)
+    }) {
+        return Err(builtin_error(
+            builtin,
+            error,
+            "typed object projection property is reserved",
+        ));
+    }
+    let mut public_json = if json.is_object() {
+        json
+    } else {
+        serde_json::json!({"value": json})
+    };
+    let projection = crate::builtins::common::json::typed_object_projection::Projection::capture(
+        &mut public_json,
+    );
     let converted = value_from_json_preserving_integer_kinds(builtin, error, &public_json)?;
     let mut object = crate::builtins::fea::object_api::ordinary_builder(builtin, class_name)?;
     if let Value::Struct(fields) = converted {
@@ -2413,24 +2353,16 @@ fn serializable_to_object_value<T: Serialize>(
     } else {
         object.insert("value".to_string(), converted);
     }
-    Ok(object.finish())
-}
-
-fn omit_null_object_fields(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(fields) => serde_json::Value::Object(
-            fields
-                .into_iter()
-                .filter_map(|(name, value)| {
-                    (!value.is_null()).then(|| (name, omit_null_object_fields(value)))
-                })
-                .collect(),
-        ),
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.into_iter().map(omit_null_object_fields).collect())
-        }
-        value => value,
+    if let Some(projection) = projection {
+        let metadata = projection.to_json().map_err(|source| {
+            builtin_error_with_source(builtin, error, source.to_string(), source)
+        })?;
+        object.insert(
+            crate::builtins::common::json::typed_object_projection::PROPERTY.to_owned(),
+            value_from_json_preserving_integer_kinds(builtin, error, &metadata)?,
+        );
     }
+    Ok(object.finish())
 }
 
 fn geometry_asset_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<GeometryAsset> {
@@ -2726,31 +2658,7 @@ mod tests {
 
     fn object_payload<T: DeserializeOwned>(value: &Value) -> T {
         let json = value_to_json("fea.test", value).expect("typed FEA value should encode");
-        decode_object_json(json).expect("typed FEA value should decode")
-    }
-
-    #[test]
-    fn object_layer_null_fill_leaves_defaulted_fields_alone() {
-        #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Probe {
-            #[serde(default, skip_serializing_if = "Vec::is_empty")]
-            items: Vec<u64>,
-            #[serde(with = "runmat_types::wire_integer::option")]
-            limit: Option<u64>,
-        }
-        let make = |items: Vec<u64>, limit: Option<u64>| Probe { items, limit };
-        for probe in [
-            make(Vec::new(), None),
-            make(vec![3], Some(7)),
-            make(Vec::new(), Some(1)),
-            make(vec![2], None),
-        ] {
-            let properties = omit_null_object_fields(serde_json::to_value(&probe).unwrap());
-            assert_eq!(decode_object_json::<Probe>(properties).unwrap(), probe);
-        }
-        assert!(serde_json::from_value::<Probe>(serde_json::json!({})).is_err());
-        assert!(decode_object_json::<Probe>(serde_json::json!({ "limit": [] })).is_err());
+        serde_json::from_value(json).expect("typed FEA value should decode")
     }
 
     #[test]

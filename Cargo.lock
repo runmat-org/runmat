@@ -8971,7 +8971,6 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
- "serde_path_to_error",
  "sha2 0.10.9",
  "sobol",
  "target-lexicon 0.12.16",

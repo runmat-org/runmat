@@ -529,7 +529,7 @@ mod tests {
             .contains("missing field `maximum_resident_bytes`"));
         // A required non-nullable property absent from an object is still rejected as missing.
         wire.as_object_mut().unwrap().remove("maximum_samples");
-        let err = decode_object_json::<AccuracyResourceCeiling>(wire).unwrap_err();
+        let err = serde_json::from_value::<AccuracyResourceCeiling>(wire).unwrap_err();
         assert!(
             err.to_string().contains("missing field `maximum_samples`"),
             "{err}"
