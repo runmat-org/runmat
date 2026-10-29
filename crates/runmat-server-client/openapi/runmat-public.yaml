@@ -9262,15 +9262,18 @@ components:
           type: integer
           format: int32
           minimum: 0
-        driverLeaseId:
-          type: string
-        driverResources:
-          $ref: '#/components/schemas/ResourceRequestBody'
         driverAcceleratorDevices:
           type: array
           items:
             $ref: '#/components/schemas/AcceleratorDeviceBody'
+          description: |-
+            Concrete devices from this driver's authenticated allocation lease.
+            This Server emits an empty array for CPU-only allocations.
           nullable: true
+        driverLeaseId:
+          type: string
+        driverResources:
+          $ref: '#/components/schemas/ResourceRequestBody'
         endpointFingerprint:
           type: string
         fencingToken:

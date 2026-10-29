@@ -156,7 +156,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VersionRequest'
+              $ref: '#/components/schemas/SubmitApplicationRequest'
         required: true
       responses:
         '200':
@@ -567,6 +567,94 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/auth/email/start:
+    post:
+      tags:
+      - auth::workos
+      operationId: email_start
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailStart'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailChallengeResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+  /v1/auth/email/verify:
+    post:
+      tags:
+      - auth::workos
+      operationId: email_verify
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerify'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirstPartySessionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
   /v1/auth/feedback/onboarding-goal:
     post:
       tags:
@@ -603,16 +691,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/auth/feedback/trial-extension:
+  /v1/auth/login/callback:
+    get:
+      tags:
+      - auth::workos
+      operationId: login_callback
+      parameters:
+      - name: state
+        in: query
+        description: Bound login challenge
+        required: true
+        schema:
+          type: string
+      - name: code
+        in: query
+        description: Provider authorization code
+        required: true
+        schema:
+          type: string
+      responses:
+        '303':
+          description: Redirect to first-party web or native callback
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+  /v1/auth/login/complete:
     post:
       tags:
-      - auth::feedback
-      operationId: request_trial_extension
+      - auth::workos
+      operationId: login_complete
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TrialExtensionRequest'
+              $ref: '#/components/schemas/LoginComplete'
         required: true
       responses:
         '200':
@@ -620,7 +737,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FeedbackSubmissionResponse'
+                $ref: '#/components/schemas/FirstPartySessionResponse'
         '400':
           description: ''
           content:
@@ -633,12 +750,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '409':
+        '403':
           description: ''
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+  /v1/auth/login/start:
+    post:
+      tags:
+      - auth::workos
+      operationId: login_start
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginStart'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HostedLoginStartResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+  /v1/auth/logout:
+    post:
+      tags:
+      - auth::workos
+      operationId: logout
+      responses:
+        '204':
+          description: Session revoked; browser cookie cleared
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
   /v1/auth/me:
     get:
       tags:
@@ -739,6 +930,50 @@ paths:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security:
       - {}
+  /v1/auth/session:
+    post:
+      tags:
+      - auth::workos
+      operationId: session
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirstPartySessionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
   /v1/billing/pricing:
     get:
       tags:
@@ -808,6 +1043,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PublicResourceQuoteResponse'
+      security:
+      - {}
+  /v1/execution/core-hour-lease-keys:
+    get:
+      tags:
+      - Execution
+      operationId: list_core_hour_lease_keys
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreHourLeaseKeysResponse'
       security:
       - {}
   /v1/execution/drivers/{driverLeaseId}/artifacts:
@@ -2307,6 +2556,166 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/execution/core-hour-leases:
+    post:
+      tags:
+      - Execution
+      operationId: create_core_hour_lease
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCoreHourLeaseRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreHourLeaseResponse'
+        '201':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreHourLeaseResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '402':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/execution/core-hour-leases/{leaseId}/heartbeat:
+    post:
+      tags:
+      - Execution
+      operationId: heartbeat_core_hour_lease
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: leaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CoreHourLeaseUsageRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreHourLeaseResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/execution/core-hour-leases/{leaseId}/settle:
+    post:
+      tags:
+      - Execution
+      operationId: settle_core_hour_lease
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: leaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettleCoreHourLeaseRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreHourLeaseResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
           description: ''
           content:
             application/json:
@@ -3883,53 +4292,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/trial:
-    get:
-      tags:
-      - orgs::trials
-      operationId: get_trial_state
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TrialStateResponse'
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-    post:
-      tags:
-      - orgs::trials
-      operationId: start_trial
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TrialStateResponse'
-        '409':
           description: ''
           content:
             application/json:
@@ -6947,47 +7309,20 @@ components:
       enum:
       - approve
       - deny
-      - adjust
-      - request_information
     AcademicDecisionRequest:
       type: object
       required:
       - action
       - expectedVersion
       - idempotencyKey
-      - reasonCode
       properties:
         action:
           $ref: '#/components/schemas/AcademicDecisionAction'
-        applicantMessage:
-          type: string
-          nullable: true
-        durationDays:
-          type: integer
-          format: int32
-          nullable: true
         expectedVersion:
           type: integer
           format: int32
         idempotencyKey:
           type: string
-        privateNote:
-          type: string
-          nullable: true
-        reasonCode:
-          type: string
-        seatLimit:
-          type: integer
-          format: int32
-          nullable: true
-        storageLimitGb:
-          type: number
-          format: double
-          nullable: true
-        teachingLimits:
-          allOf:
-          - $ref: '#/components/schemas/TeachingLimitsBody'
-          nullable: true
     AcademicDecisionResponse:
       type: object
       required:
@@ -8103,12 +8438,12 @@ components:
       properties:
         endpointFingerprint:
           type: string
+        readyV1:
+          type: boolean
+          nullable: true
         runKeyEnvelope:
           type: string
           description: Base64url-encoded canonical run-key envelope for the verified worker.
-        readyV1:
-          type: boolean
-          description: Opt in this exact allocation to encrypted worker ReadyV1 discovery.
       additionalProperties: false
     BeginTransferRequest:
       type: object
@@ -8248,6 +8583,124 @@ components:
         token:
           type: string
       additionalProperties: false
+    CoreHourClientSurfaceBody:
+      type: string
+      enum:
+      - cli
+      - desktop
+      - browser
+    CoreHourLeaseKeyResponse:
+      type: object
+      required:
+      - keyId
+      - algorithm
+      - publicKey
+      properties:
+        algorithm:
+          type: string
+          description: Always `Ed25519`.
+        keyId:
+          type: string
+        publicKey:
+          type: string
+          description: base64url without padding, 32 bytes.
+    CoreHourLeaseKeysResponse:
+      type: object
+      required:
+      - keys
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoreHourLeaseKeyResponse'
+    CoreHourLeaseResponse:
+      type: object
+      required:
+      - leaseId
+      - orgId
+      - userId
+      - idempotencyKey
+      - status
+      - allocatedCpuMillicores
+      - reservedCoreMicroHours
+      - usedCoreMicroHours
+      - overageCoreMicroHours
+      - issuedAt
+      - expiresAt
+      properties:
+        allocatedCpuMillicores:
+          type: integer
+          format: int64
+        chargedCoreMicroHours:
+          type: integer
+          format: int64
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+        idempotencyKey:
+          type: string
+        issuedAt:
+          type: string
+          format: date-time
+        leaseId:
+          type: string
+        orgId:
+          type: string
+        outcome:
+          type: string
+          description: '`completed`, `cancelled`, `failed`, or null.'
+          nullable: true
+        overageCoreMicroHours:
+          type: integer
+          format: int64
+        refillsAt:
+          type: string
+          format: date-time
+          nullable: true
+        reservedCoreMicroHours:
+          type: integer
+          format: int64
+        status:
+          type: string
+          description: '`active`, `settled`, `released` or `expired`.'
+        token:
+          type: string
+          description: Present on create responses only.
+          nullable: true
+        usedCoreMicroHours:
+          type: integer
+          format: int64
+        userId:
+          type: string
+    CoreHourLeaseUsageRequest:
+      type: object
+      description: Cumulative usage since the run started (`ResourceUsage` so far).
+      required:
+      - wallMillis
+      - cpuCoreMillis
+      properties:
+        cpuCoreMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        wallMillis:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    CoreHourRunKindBody:
+      type: string
+      enum:
+      - meshing
+      - solve
+      - meshAndSolve
+    CoreHourRunOutcomeBody:
+      type: string
+      enum:
+      - completed
+      - cancelled
+      - failed
     CourseAllocationResponse:
       type: object
       required:
@@ -8411,6 +8864,36 @@ components:
           items:
             type: string
       additionalProperties: false
+    CreateCoreHourLeaseRequest:
+      type: object
+      required:
+      - idempotencyKey
+      - allocatedCpuMillicores
+      - kind
+      - clientSurface
+      properties:
+        allocatedCpuMillicores:
+          type: integer
+          format: int64
+          description: What the run reserves, 1 to 4,096,000.
+          minimum: 0
+        clientSurface:
+          $ref: '#/components/schemas/CoreHourClientSurfaceBody'
+        estimatedWallSeconds:
+          type: integer
+          format: int64
+          description: 1 to 604,800; 900 when absent.
+          nullable: true
+          minimum: 0
+        idempotencyKey:
+          type: string
+          description: 'The run id. 1-128 characters from `A-Z a-z 0-9 . _ : -`.'
+        kind:
+          $ref: '#/components/schemas/CoreHourRunKindBody'
+        studyIdentity:
+          type: string
+          nullable: true
+      additionalProperties: false
     CreateCourseRequest:
       type: object
       required:
@@ -8423,15 +8906,7 @@ components:
       - endsAt
       - expectedEnrollment
       - idempotencyKey
-      - accessStartsAt
-      - accessEndsAt
       properties:
-        accessEndsAt:
-          type: string
-          format: date-time
-        accessStartsAt:
-          type: string
-          format: date-time
         allocationId:
           type: string
         authorizationId:
@@ -8721,11 +9196,12 @@ components:
           type: string
         projectId:
           type: string
-        runId:
-          type: string
         readyV1:
           type: boolean
-          description: This Server accepts allocation-bound ReadyV1 intent.
+          description: This Server accepts an allocation-bound ReadyV1 authorization intent.
+          nullable: true
+        runId:
+          type: string
     DriverHeartbeatRequest:
       type: object
       required:
@@ -8786,15 +9262,18 @@ components:
           type: integer
           format: int32
           minimum: 0
-        driverLeaseId:
-          type: string
-        driverResources:
-          $ref: '#/components/schemas/ResourceRequestBody'
         driverAcceleratorDevices:
           type: array
           items:
             $ref: '#/components/schemas/AcceleratorDeviceBody'
+          description: |-
+            Concrete devices from this driver's authenticated allocation lease.
+            This Server emits an empty array for CPU-only allocations.
           nullable: true
+        driverLeaseId:
+          type: string
+        driverResources:
+          $ref: '#/components/schemas/ResourceRequestBody'
         endpointFingerprint:
           type: string
         fencingToken:
@@ -8938,6 +9417,45 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DriverWorkerAllocationResponse'
+    EmailChallengeResponse:
+      type: object
+      required:
+      - challenge
+      - expires_in
+      properties:
+        challenge:
+          type: string
+        expires_in:
+          type: integer
+          format: int64
+          minimum: 0
+    EmailStart:
+      type: object
+      required:
+      - email
+      - proof
+      properties:
+        client_kind:
+          type: string
+        email:
+          type: string
+        proof:
+          type: string
+    EmailVerify:
+      type: object
+      required:
+      - challenge
+      - proof
+      - code
+      properties:
+        challenge:
+          type: string
+        client_kind:
+          type: string
+        code:
+          type: string
+        proof:
+          type: string
     EndpointIdentityEvidenceBody:
       type: object
       required:
@@ -9149,8 +9667,8 @@ components:
       - runningRuns
       - terminalRunsLast24Hours
       - failedRunsLast24Hours
-      - reservedMicrousd
-      - settledMicrousd
+      - reservedCoreMicroHours
+      - settledCoreMicroHours
       - runs
       properties:
         activeRuns:
@@ -9170,7 +9688,7 @@ components:
           type: integer
           format: int64
           minimum: 0
-        reservedMicrousd:
+        reservedCoreMicroHours:
           type: integer
           format: int64
           minimum: 0
@@ -9182,7 +9700,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RunResponse'
-        settledMicrousd:
+        settledCoreMicroHours:
           type: integer
           format: int64
           minimum: 0
@@ -9307,6 +9825,20 @@ components:
           format: int64
           minimum: 0
       additionalProperties: false
+    FeedbackFlow:
+      type: string
+      enum:
+      - general
+      - onboarding
+      - post_trial
+      - product
+    FeedbackReason:
+      type: string
+      enum:
+      - technical_issue
+      - not_enough_time
+      - not_enough_value
+      - other
     FeedbackSubmissionResponse:
       type: object
       required:
@@ -9314,6 +9846,17 @@ components:
       properties:
         accepted:
           type: boolean
+    FeedbackTopic:
+      type: string
+      enum:
+      - runtime
+      - agent
+      - plotting
+      - compatibility
+      - performance
+      - documentation
+      - pricing
+      - other
     FinalizePublicationResponse:
       type: object
       required:
@@ -9330,6 +9873,50 @@ components:
           type: string
         version:
           type: string
+    FirstPartySessionResponse:
+      type: object
+      required:
+      - session
+      properties:
+        credential:
+          type: string
+          description: Native-only opaque credential. Browser clients receive an HttpOnly cookie.
+          nullable: true
+        session:
+          $ref: '#/components/schemas/FirstPartySessionView'
+    FirstPartySessionUser:
+      type: object
+      required:
+      - id
+      - email
+      - email_verified
+      properties:
+        email:
+          type: string
+        email_verified:
+          type: boolean
+        first_name:
+          type: string
+          nullable: true
+        id:
+          type: string
+        last_name:
+          type: string
+          nullable: true
+    FirstPartySessionView:
+      type: object
+      required:
+      - access_token
+      - expires_at
+      - user
+      properties:
+        access_token:
+          type: string
+        expires_at:
+          type: integer
+          minimum: 0
+        user:
+          $ref: '#/components/schemas/FirstPartySessionUser'
     ForeignAdapterInventoryBody:
       type: object
       required:
@@ -10576,6 +11163,16 @@ components:
             - extended
       discriminator:
         propertyName: kind
+    HostedLoginStartResponse:
+      type: object
+      required:
+      - challenge
+      - url
+      properties:
+        challenge:
+          type: string
+        url:
+          type: string
     InviteCourseStudentsRequest:
       type: object
       required:
@@ -10666,6 +11263,32 @@ components:
       - runmat
       - matlab
       - strict
+    LoginComplete:
+      type: object
+      required:
+      - challenge
+      - proof
+      properties:
+        challenge:
+          type: string
+        proof:
+          type: string
+    LoginStart:
+      type: object
+      required:
+      - proof
+      properties:
+        client_kind:
+          type: string
+        email:
+          type: string
+          nullable: true
+        proof:
+          type: string
+        provider:
+          type: string
+        return_to:
+          type: string
     MarcomBackfillRequest:
       type: object
       properties:
@@ -11224,7 +11847,10 @@ components:
       - historyAccess
       - canOpenLocalFolders
       - canUseProjectAgents
-      - includedAgentCreditsPerMember
+      - agentCreditsPerWeek
+      - mcpClientCallsPerWeek
+      - coreHoursPerWeek
+      - canPurchaseCoreHours
       - canUseFullDesktopMcp
       - canConfigureOnDemandCreditLimit
       - canConfigureStorageAddons
@@ -11233,12 +11859,15 @@ components:
       - canManageIdentitySso
       - canManageIdentityScim
       - canViewAuditLogs
-      - canUseManagedFea
       - canUsePrivateDeployment
       - canPublishPublicPackages
       - canPublishPrivatePackages
       - canUseRemoteExecution
       properties:
+        agentCreditsPerWeek:
+          type: integer
+          format: int32
+          minimum: 0
         canConfigureOnDemandCreditLimit:
           type: boolean
         canConfigureStorageAddons:
@@ -11261,9 +11890,9 @@ components:
           type: boolean
         canPurchaseAgentCredits:
           type: boolean
-        canUseFullDesktopMcp:
+        canPurchaseCoreHours:
           type: boolean
-        canUseManagedFea:
+        canUseFullDesktopMcp:
           type: boolean
         canUsePrivateDeployment:
           type: boolean
@@ -11275,19 +11904,24 @@ components:
           type: boolean
         canWritePersistentProjects:
           type: boolean
+        coreHoursPerWeek:
+          type: integer
+          format: int32
+          minimum: 0
         embeddedAgentExecutionsPerMember:
           type: integer
           format: int32
           nullable: true
         historyAccess:
           $ref: '#/components/schemas/HistoryAccessResponse'
-        includedAgentCreditsPerMember:
-          type: number
-          format: double
         maxProjects:
           type: integer
           format: int32
           nullable: true
+        mcpClientCallsPerWeek:
+          type: integer
+          format: int32
+          minimum: 0
         projectFileLimit:
           type: integer
           format: int32
@@ -11303,36 +11937,6 @@ components:
             type: string
             enum:
             - free
-      - type: object
-        required:
-        - trialPlanKey
-        - endsAt
-        - kind
-        properties:
-          endsAt:
-            type: string
-            format: date-time
-          kind:
-            type: string
-            enum:
-            - trial
-          trialPlanKey:
-            type: string
-      - type: object
-        required:
-        - trialPlanKey
-        - endsAt
-        - kind
-        properties:
-          endsAt:
-            type: string
-            format: date-time
-          kind:
-            type: string
-            enum:
-            - lapsedTrial
-          trialPlanKey:
-            type: string
       - type: object
         required:
         - kind
@@ -11706,16 +12310,40 @@ components:
           type: integer
           format: int32
           minimum: 0
+    PublicOfferHighlightResponse:
+      type: object
+      required:
+      - title
+      - detail
+      properties:
+        detail:
+          type: string
+        title:
+          type: string
     PublicPricingPlanResponse:
       type: object
       required:
       - planKey
       - displayName
+      - highlights
       - features
       properties:
+        agentCreditsPerWeek:
+          type: integer
+          format: int32
+          description: |-
+            Per person, per 7-day window from first use. Null for Enterprise
+            (contract-defined).
+          nullable: true
+          minimum: 0
         billingUnit:
           type: string
           nullable: true
+        coreHoursPerWeek:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
         ctaHref:
           type: string
           nullable: true
@@ -11731,19 +12359,29 @@ components:
           type: array
           items:
             type: string
-        includedAgentCredits:
-          type: number
-          format: double
+        featuresLead:
+          type: string
+          description: The line above `features`, such as "Everything in Free, plus".
           nullable: true
-        includedHistoryDays:
+        highlights:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicOfferHighlightResponse'
+        historyDays:
           type: integer
           format: int32
+          description: Days of project-version and run history; null means unlimited.
           nullable: true
           minimum: 0
         includedStorageGb:
           type: number
           format: double
           nullable: true
+        mcpClientCallsPerWeek:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
         planKey:
           type: string
         planVersion:
@@ -11757,9 +12395,21 @@ components:
           allOf:
           - $ref: '#/components/schemas/PublicPricingQuoteResponse'
           nullable: true
-        trialDays:
+        seatLimit:
           type: integer
           format: int32
+          description: Null means no fixed seat limit.
+          nullable: true
+          minimum: 0
+        summary:
+          type: string
+          description: |-
+            Who the plan is for. May contain `{{functionCountLabel}}`, which the
+            client expands.
+          nullable: true
+        support:
+          type: string
+          description: Community, Email or Dedicated.
           nullable: true
     PublicPricingQuoteResponse:
       type: object
@@ -11801,11 +12451,14 @@ components:
       - selfServeOffers
       - enterprise
       - agentCreditPack
+      - coreHourPack
       - storageAddon
       properties:
         academicProgramEnabled:
           type: boolean
         agentCreditPack:
+          $ref: '#/components/schemas/PublicResourcePricingResponse'
+        coreHourPack:
           $ref: '#/components/schemas/PublicResourcePricingResponse'
         enterprise:
           $ref: '#/components/schemas/PublicPricingPlanResponse'
@@ -13259,7 +13912,7 @@ components:
       - workerCount
       - workerResources
       - billingState
-      - reservedMicrousd
+      - reservedCoreMicroHours
       - state
       - version
       - createdAt
@@ -13316,7 +13969,7 @@ components:
         recoveryRecipientFingerprint:
           type: string
           nullable: true
-        reservedMicrousd:
+        reservedCoreMicroHours:
           type: integer
           format: int64
           minimum: 0
@@ -13325,7 +13978,7 @@ components:
         resultArtifactId:
           type: string
           nullable: true
-        settledMicrousd:
+        settledCoreMicroHours:
           type: integer
           format: int64
           nullable: true
@@ -13358,19 +14011,19 @@ components:
       type: object
       required:
       - runId
-      - reservedMicrousd
+      - reservedCoreMicroHours
       - usage
       properties:
         pricingVersion:
           type: string
           nullable: true
-        reservedMicrousd:
+        reservedCoreMicroHours:
           type: integer
           format: int64
           minimum: 0
         runId:
           type: string
-        settledMicrousd:
+        settledCoreMicroHours:
           type: integer
           format: int64
           nullable: true
@@ -13438,6 +14091,11 @@ components:
           format: date-time
         updatedBy:
           type: string
+    SessionRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
     SetClusterStateRequest:
       type: object
       required:
@@ -13464,6 +14122,24 @@ components:
           nullable: true
         status:
           $ref: '#/components/schemas/ReleaseStatusRequest'
+      additionalProperties: false
+    SettleCoreHourLeaseRequest:
+      type: object
+      required:
+      - outcome
+      - wallMillis
+      - cpuCoreMillis
+      properties:
+        cpuCoreMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        outcome:
+          $ref: '#/components/schemas/CoreHourRunOutcomeBody'
+        wallMillis:
+          type: integer
+          format: int64
+          minimum: 0
       additionalProperties: false
     StagePublicationRequest:
       type: object
@@ -13874,6 +14550,17 @@ components:
           minimum: 0
         kind:
           type: string
+    SubmitApplicationRequest:
+      type: object
+      required:
+      - expectedVersion
+      properties:
+        applicantName:
+          type: string
+          nullable: true
+        expectedVersion:
+          type: integer
+          format: int32
     SubmitRunRequest:
       type: object
       required:
@@ -13944,22 +14631,6 @@ components:
         startsAt:
           type: string
           format: date-time
-    TeachingLimitsBody:
-      type: object
-      required:
-      - maxActiveCourses
-      - maxEnrollmentPerCourse
-      - maxAggregateEnrollment
-      properties:
-        maxActiveCourses:
-          type: integer
-          format: int32
-        maxAggregateEnrollment:
-          type: integer
-          format: int32
-        maxEnrollmentPerCourse:
-          type: integer
-          format: int32
     TelemetryIngestRequest:
       type: object
       required:
@@ -14128,35 +14799,6 @@ components:
         orgId:
           type: string
       additionalProperties: false
-    TrialExtensionRequest:
-      type: object
-      required:
-      - comment
-      properties:
-        comment:
-          type: string
-    TrialExtensionStateResponse:
-      type: object
-      required:
-      - status
-      properties:
-        status:
-          type: string
-    TrialStateResponse:
-      type: object
-      required:
-      - state
-      properties:
-        endsAt:
-          type: string
-          format: date-time
-          nullable: true
-        startedAt:
-          type: string
-          format: date-time
-          nullable: true
-        state:
-          type: string
     TrustTierBody:
       type: string
       enum:
@@ -14438,6 +15080,10 @@ components:
         costCurrency:
           type: string
           nullable: true
+        meters:
+          allOf:
+          - $ref: '#/components/schemas/WeeklyMetersResponse'
+          nullable: true
         orgId:
           type: string
         periodEnd:
@@ -14481,12 +15127,9 @@ components:
       type: object
       required:
       - onboardingGoalFollowup
-      - trialExtension
       properties:
         onboardingGoalFollowup:
           $ref: '#/components/schemas/OnboardingGoalFollowupStateResponse'
-        trialExtension:
-          $ref: '#/components/schemas/TrialExtensionStateResponse'
     UserPreferencesRequest:
       type: object
       required:
@@ -14602,6 +15245,9 @@ components:
         pageReferrer:
           type: string
           nullable: true
+        posthogDistinctId:
+          type: string
+          nullable: true
         ttclid:
           type: string
           nullable: true
@@ -14623,9 +15269,28 @@ components:
         wbraid:
           type: string
           nullable: true
+    WebFeedback:
+      type: object
+      required:
+      - flow
+      - reason
+      - detail
+      properties:
+        detail:
+          type: string
+        flow:
+          $ref: '#/components/schemas/FeedbackFlow'
+        reason:
+          $ref: '#/components/schemas/FeedbackReason'
+        topic:
+          allOf:
+          - $ref: '#/components/schemas/FeedbackTopic'
+          nullable: true
+      additionalProperties: false
     WebIntakeKind:
       type: string
       enum:
+      - feedback
       - newsletter
       - contact
       - desktop_access
@@ -14636,6 +15301,9 @@ components:
       - email
       - runmat_source
       properties:
+        analytics_distinct_id:
+          type: string
+          nullable: true
         attribution:
           allOf:
           - $ref: '#/components/schemas/WebAttribution'
@@ -14643,8 +15311,15 @@ components:
         campaign:
           type: string
           nullable: true
+        disclosure_version:
+          type: string
+          nullable: true
         email:
           type: string
+        feedback:
+          allOf:
+          - $ref: '#/components/schemas/WebFeedback'
+          nullable: true
         firstname:
           type: string
           nullable: true
@@ -14661,6 +15336,9 @@ components:
           nullable: true
         runmat_source:
           type: string
+        submission_id:
+          type: string
+          nullable: true
     WebIntakeResponse:
       type: object
       required:
@@ -14672,6 +15350,41 @@ components:
         queuedJobs:
           type: integer
           minimum: 0
+    WeeklyMeterResponse:
+      type: object
+      description: One weekly meter for the signed-in person.
+      required:
+      - used
+      - allowance
+      properties:
+        allowance:
+          type: number
+          format: double
+          description: The weekly allowance, in the same unit.
+        refillsAt:
+          type: string
+          format: date-time
+          description: When the allowance refills; null before first use opens a window.
+          nullable: true
+        used:
+          type: number
+          format: double
+          description: |-
+            Used in the current 7-day window (MCP client calls, Agent credits, or
+            core-hours).
+    WeeklyMetersResponse:
+      type: object
+      required:
+      - mcpClientCalls
+      - agentCredits
+      - coreHours
+      properties:
+        agentCredits:
+          $ref: '#/components/schemas/WeeklyMeterResponse'
+        coreHours:
+          $ref: '#/components/schemas/WeeklyMeterResponse'
+        mcpClientCalls:
+          $ref: '#/components/schemas/WeeklyMeterResponse'
     WorkerBootstrapResponse:
       type: object
       required:
@@ -14707,6 +15420,10 @@ components:
           type: string
         projectId:
           type: string
+        readyV1:
+          type: boolean
+          description: Omitted for old drivers and older NodeAgent clients.
+          nullable: true
         relayPath:
           type: string
         relayProtocol:
@@ -14714,9 +15431,6 @@ components:
         relayTicket:
           type: string
           description: Single-use, short-lived capability for the allocation-owned worker.
-        readyV1:
-          type: boolean
-          description: Present only when the authoritative driver opted in this allocation.
         runId:
           type: string
         runKeyEnvelope:
