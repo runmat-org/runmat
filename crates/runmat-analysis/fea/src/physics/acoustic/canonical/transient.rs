@@ -30,14 +30,12 @@ use runmat_meshing_core::SolverMeshArtifact;
 #[serde(deny_unknown_fields)]
 pub struct AcousticTransientPolicy {
     pub linear_relative_tolerance: f64,
-    pub linear_maximum_iterations: usize,
 }
 
 impl Default for AcousticTransientPolicy {
     fn default() -> Self {
         Self {
             linear_relative_tolerance: 1.0e-11,
-            linear_maximum_iterations: 20_000,
         }
     }
 }
@@ -47,7 +45,6 @@ impl AcousticTransientPolicy {
         if !(self.linear_relative_tolerance.is_finite()
             && self.linear_relative_tolerance > 0.0
             && self.linear_relative_tolerance < 1.0)
-            || self.linear_maximum_iterations == 0
         {
             return Err(AcousticHarmonicError::InvalidInput(
                 "transient pressure solve policy".into(),
@@ -246,7 +243,6 @@ pub fn solve_canonical_transient(
     let operator = SpdOperator::factor(
         &effective_free,
         policy.linear_relative_tolerance,
-        policy.linear_maximum_iterations,
     )?;
     let mut linear_iterations = 0usize;
     let mut maximum_linear_relative_residual = 0.0_f64;
@@ -280,9 +276,8 @@ pub fn solve_canonical_transient(
             let mass_operator = SpdOperator::factor(
                 &mass_free,
                 policy.linear_relative_tolerance,
-                policy.linear_maximum_iterations,
             )?;
-            let solved = mass_operator.solve(&rhs, None)?;
+            let solved = mass_operator.solve(&rhs)?;
             linear_iterations += solved.iterations;
             maximum_linear_relative_residual =
                 maximum_linear_relative_residual.max(solved.relative_residual);
@@ -351,8 +346,7 @@ pub fn solve_canonical_transient(
             .iter()
             .map(|&row| load[row] + m_h[row] + b_h[row] - coupling[row])
             .collect::<Vec<_>>();
-        let guess = free.iter().map(|&row| pressure[row]).collect::<Vec<_>>();
-        let solved = operator.solve(&rhs, Some(&guess))?;
+        let solved = operator.solve(&rhs)?;
         linear_iterations += solved.iterations;
         maximum_linear_relative_residual =
             maximum_linear_relative_residual.max(solved.relative_residual);

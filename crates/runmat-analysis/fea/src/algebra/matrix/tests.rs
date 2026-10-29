@@ -232,3 +232,102 @@ fn immutable_clones_share_numeric_storage_and_cold_decode_revalidates() {
     drop(original);
     assert_eq!(cloned.values(), &[2.0, 3.0, 4.0]);
 }
+
+/// Discovered-assembler reference: every term's nonzero scaled entries accumulated term by term.
+fn scaled_sum_reference(terms: &[(f64, &RealSparseMatrix)]) -> RealSparseMatrix {
+    let first = terms[0].1;
+    let mut assembler = RealSparseAssembler::new(
+        first.rows(),
+        first.columns(),
+        OperatorRole::Stiffness,
+        MatrixProperties::GENERAL,
+    );
+    for (_, matrix) in terms {
+        for contribution in matrix.contributions.iter() {
+            if !assembler.contributions.contains(contribution) {
+                assembler.add_contribution(contribution.clone());
+            }
+        }
+    }
+    for (scale, matrix) in terms {
+        for row in 0..matrix.rows() {
+            for entry in matrix.pattern.row_range(row) {
+                assembler.add(row, matrix.pattern.column(entry), *scale * matrix.values[entry]);
+            }
+        }
+    }
+    assembler.finish().unwrap()
+}
+
+fn pseudo_random_matrix(n: usize, seed: u64, id: &str) -> RealSparseMatrix {
+    let mut state = seed;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut assembler =
+        RealSparseAssembler::new(n, n, OperatorRole::Stiffness, MatrixProperties::GENERAL);
+    assembler.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Acoustic,
+        contribution_id: ContributionId(id.into()),
+    });
+    for row in 0..n {
+        for _ in 0..(next() % 7) {
+            let column = (next() % n as u64) as usize;
+            // Small integers make exact cancellation between terms reachable.
+            let value = (next() % 5) as f64 - 2.0;
+            assembler.add(row, column, value);
+        }
+    }
+    assembler.finish().unwrap()
+}
+
+/// Scaled operator sums are bitwise the discovered-assembler sum (values, support, exact-zero drop) for one and several admitted threads
+#[test]
+fn scaled_sum_matches_term_by_term_accumulation_for_every_thread_count() {
+    let n = 5000;
+    let a = pseudo_random_matrix(n, 0x9e37_79b9_7f4a_7c15, "a");
+    let b = pseudo_random_matrix(n, 0x2545_f491_4f6c_dd1d, "b");
+    let c = pseudo_random_matrix(n, 0x1234_5678_9abc_def1, "a");
+    let terms = [(1.0, &a), (-1.0, &b), (0.37, &c), (0.0, &b)];
+    let expected = scaled_sum_reference(&terms);
+    let serial =
+        RealSparseMatrix::scaled_sum(&terms, OperatorRole::Stiffness, MatrixProperties::GENERAL)
+            .unwrap();
+    assert_eq!(serial.pattern, expected.pattern);
+    assert_eq!(
+        serial.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+        expected.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+    );
+    assert_eq!(*serial.contributions, *expected.contributions);
+    assert!(serial.values.iter().all(|value| *value != 0.0));
+    let threaded = runmat_cpu_execution::with_cpu_pool(4, || {
+        RealSparseMatrix::scaled_sum(&terms, OperatorRole::Stiffness, MatrixProperties::GENERAL)
+            .unwrap()
+    })
+    .unwrap();
+    assert_eq!(threaded.pattern, serial.pattern);
+    assert_eq!(
+        threaded.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+        serial.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+    );
+    let mismatched = pseudo_random_matrix(7, 1, "d");
+    assert!(matches!(
+        RealSparseMatrix::scaled_sum(
+            &[(1.0, &a), (1.0, &mismatched)],
+            OperatorRole::Stiffness,
+            MatrixProperties::GENERAL
+        ),
+        Err(RealSparseMatrixError::ShapeMismatch)
+    ));
+    assert!(matches!(
+        RealSparseMatrix::scaled_sum(
+            &[(f64::INFINITY, &a)],
+            OperatorRole::Stiffness,
+            MatrixProperties::GENERAL
+        ),
+        Err(RealSparseMatrixError::NonFiniteValue { .. })
+    ));
+}

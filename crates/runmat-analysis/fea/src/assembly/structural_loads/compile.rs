@@ -8,7 +8,9 @@ use crate::{
     assembly::{
         dofs::{StructuralDofKind, StructuralDofLayout},
         explicit_loads::apply_projected_explicit_structural_loads,
-        solver_solid_boundary::apply_solver_mesh_structural_loads,
+        solver_solid_boundary::{
+            apply_solver_mesh_structural_loads, apply_solver_mesh_structural_loads_on_projection,
+        },
         MomentProjectionSummary,
     },
     constraints::{
@@ -36,6 +38,7 @@ pub(crate) struct StructuralLoadCompilation {
 pub(crate) fn compile_solid(
     excitations: &RealizedExcitations,
     mesh: &SolverMeshArtifact,
+    projection: &Result<crate::topology::AnalysisProjection, String>,
     constraint_plan: &CanonicalStructuralConstraintPlan,
     topology: &CanonicalStructuralNodeSpace,
     layout: &StructuralDofLayout,
@@ -47,9 +50,17 @@ pub(crate) fn compile_solid(
         layout,
         |load, scratch| {
             validate_policy(load)?;
-            let projection = apply_solver_mesh_structural_loads(
+            let analysis_projection = projection.as_ref().map_err(|error| {
+                unresolved(
+                    load,
+                    crate::assembly::SolverMeshRegionMappingError::InvalidAnalysisProjection(error.clone())
+                        .to_string(),
+                )
+            })?;
+            let projection = apply_solver_mesh_structural_loads_on_projection(
                 &RealizedExcitations::new(vec![load.clone()]),
                 mesh,
+                analysis_projection,
                 constraint_plan,
                 layout,
                 scratch,

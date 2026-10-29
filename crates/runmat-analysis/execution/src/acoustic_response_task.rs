@@ -24,6 +24,7 @@ pub struct AcousticResponseTaskPreparation {
     pub mesh: SolverMeshArtifact,
     pub output_policy: AnalysisOutputPolicy,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 pub struct PreparedAcousticResponseTask {
@@ -41,6 +42,7 @@ pub fn prepare_acoustic_response_task(
         &preparation.workload,
         &preparation.mesh,
         preparation.output_policy,
+        preparation.local_execution,
     )?;
     let resource_plan = prepared.resource_plan;
     let mut inputs = prepared.inputs;

@@ -10,7 +10,7 @@ use runmat_analysis_fea::{
     execution::{AnalysisNumericalObjectKind, AnalysisTransportProfiler, AcousticResponseWorkload},
     planning::resource::{
         build_acoustic_response_resource_plan, acoustic_response_result_payload_bytes_upper_bound,
-        FeaResourcePlan, PreparedAcousticResponseResourceFacts,
+        FeaResourcePlan, LocalExecutionPlan, PreparedAcousticResponseResourceFacts,
     },
 };
 use runmat_execution::Digest;
@@ -26,6 +26,7 @@ pub fn prepare_acoustic_response_inputs(
     workload: &AcousticResponseWorkload,
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
+    local_execution: LocalExecutionPlan,
 ) -> AnalysisBridgeResult<PreparedAcousticResponseInputs> {
     let result_output = projected_result(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
@@ -50,6 +51,7 @@ pub fn prepare_acoustic_response_inputs(
         workload,
         mesh,
         PreparedAcousticResponseResourceFacts {
+            local_execution,
             inputs: prepared_input_resource_facts(&inputs)?,
             result_output,
             receipt_output: projected_output(
@@ -121,10 +123,19 @@ pub fn rederive_acoustic_response_resource_plan(
             ));
         }
     }
+    let declared = inputs
+        .iter()
+        .find(|input| input.manifest.kind == ResourcePlan)
+        .ok_or_else(|| invalid("acoustic response resource plan missing"))?;
+    let declared = FeaResourcePlan::from_canonical_bytes(&declared.payload())?;
     let plan = build_acoustic_response_resource_plan(
         workload,
         mesh,
         PreparedAcousticResponseResourceFacts {
+            local_execution: LocalExecutionPlan::from_cpu_millicores(
+                declared.request.cpu_millicores,
+            )
+            .map_err(invalid)?,
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
             result_output: projected_result(workload, mesh, policy)?,
             receipt_output: projected_output(
