@@ -47,8 +47,8 @@ pub struct CompletedFluidStudy {
     closures: Vec<FluidStudyResultClosure>,
     /// The field-recovery admission the coordinator derived when it prepared that phase.
     field_recovery_plan: runmat_analysis_fea::planning::resource::FeaResourcePlan,
-    pub compiled: CompiledAnalysisStudy,
-    pub workload: runmat_analysis_fea::execution::FluidSteadyWorkload,
+    /// The compiled study and workload planned on the study's mesh (sealed).
+    pub product: FluidStudyProduct,
     pub result: ImportedFluidSteadyResult,
     pub fields: crate::ImportedRecoveredFields,
     /// Field outputs assembled per retained sample, histories finalized over them, and the
@@ -72,7 +72,7 @@ impl VerifiedFluidStudy {
     /// The coordinator's own preparation: `FluidStudyCoordinator::new` validated it and
     /// every phase was admitted against it, so it is not validated or re-planned again.
     pub fn preparation(&self) -> FluidStudyPreparation {
-        self.0.assemble_preparation(self.0.workload.clone())
+        self.0.assemble_preparation()
     }
 
     /// Give up the in-process proof (for example, to treat the study as a cold source).
@@ -115,8 +115,8 @@ pub struct FluidStudyPreparationParts {
 
 /// A preparation whose product is the canonical plan of its own compiled study on its own
 /// mesh under its own policy. Only planning constructs it ([`Self::plan`] in process, or
-/// [`Self::verify`], which re-plans a preparation assembled elsewhere), so
-/// [`FluidStudyCoordinator::planned`] takes it without planning the product a second time.
+/// [`Self::verify`], which binds a preparation assembled elsewhere to its sealed product),
+/// so [`FluidStudyCoordinator::planned`] takes it without planning the product a second time.
 #[derive(Clone)]
 pub struct PlannedFluidStudyPreparation(FluidStudyPreparation);
 
@@ -142,19 +142,20 @@ impl PlannedFluidStudyPreparation {
         }))
     }
 
-    /// Re-plan a preparation assembled elsewhere and require exactly its product.
+    /// Bind a preparation assembled elsewhere to its product. The product is sealed (only
+    /// planning constructs it), so this authenticates the preparation's mesh content and
+    /// requires the product to have been planned on that mesh under the preparation's policy.
     pub fn verify(preparation: FluidStudyPreparation) -> AnalysisBridgeResult<Self> {
-        let expected = plan_fluid_study_product(
-            preparation.product.compiled.clone(),
-            &preparation.mesh,
-            preparation.policy,
-        )
-        .map_err(|error| invalid(error.to_string()))?;
-        if expected != preparation.product {
-            return Err(AnalysisBridgeError::Identity(
-                "fluid workload differs from the compiled authored study",
-            ));
-        }
+        runmat_meshing_core::CanonicalMeshingContract::validate_canonical(&preparation.mesh)
+            .map_err(|error| invalid(error.to_string()))?;
+        preparation
+            .product
+            .validate_planned_on(&preparation.mesh, preparation.policy)
+            .map_err(|_| {
+                AnalysisBridgeError::Identity(
+                    "fluid workload differs from the compiled authored study",
+                )
+            })?;
         Ok(Self(preparation))
     }
 
@@ -201,7 +202,7 @@ pub struct FluidStudyCoordinator {
 }
 
 impl FluidStudyCoordinator {
-    /// For a preparation assembled elsewhere: re-plans it first ([`PlannedFluidStudyPreparation::verify`]).
+    /// For a preparation assembled elsewhere: binds it first ([`PlannedFluidStudyPreparation::verify`]).
     pub fn new(preparation: FluidStudyPreparation) -> AnalysisBridgeResult<Self> {
         Self::planned(PlannedFluidStudyPreparation::verify(preparation)?)
     }
@@ -211,7 +212,7 @@ impl FluidStudyCoordinator {
         let preparation = preparation.into_preparation();
         let definition_digest = preparation
             .product
-            .compiled
+            .compiled()
             .definition_digest()
             .map_err(|error| invalid(error.to_string()))?;
         Ok(Self {
@@ -402,7 +403,6 @@ impl FluidStudyCoordinator {
 
     pub fn into_completed(self) -> AnalysisBridgeResult<CompletedFluidStudy> {
         self.require(FluidStudyPhase::Complete)?;
-        let workload = self.preparation.workload().clone();
         let tail = self.tail.expect("completed shared terminal lifecycle");
         Ok(CompletedFluidStudy {
             replay: completion::FluidStudyReplayContext {
@@ -420,8 +420,7 @@ impl FluidStudyCoordinator {
                 .recovery_task
                 .expect("completed field recovery")
                 .resource_plan,
-            compiled: self.preparation.product.compiled,
-            workload,
+            product: self.preparation.product,
             result: self.result.expect("completed solve"),
             fields: self.fields.expect("completed retained field publication"),
             observations: self.observation_state.into_completed(),
@@ -442,7 +441,7 @@ impl FluidStudyCoordinator {
         self.preparation.selected_step()
     }
     pub fn compiled_study(&self) -> &CompiledAnalysisStudy {
-        &self.preparation.product.compiled
+        self.preparation.product.compiled()
     }
     pub fn result(&self) -> Option<&ImportedFluidSteadyResult> {
         self.result.as_ref()
@@ -491,9 +490,9 @@ pub(super) fn invalid(message: impl Into<String>) -> AnalysisBridgeError {
 
 impl FluidStudyPreparation {
     pub(super) fn workload(&self) -> &runmat_analysis_fea::execution::FluidSteadyWorkload {
-        &self.product.workload
+        self.product.workload()
     }
     pub(super) fn selected_step(&self) -> &runmat_analysis_core::ProcedureStep {
-        &self.product.compiled.model.sequence.steps[0]
+        &self.product.compiled().model.sequence.steps[0]
     }
 }

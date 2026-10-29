@@ -415,38 +415,12 @@ pub fn fluid_native_field_definitions(
 }
 
 impl FluidSteadySolverResult {
-    /// Source-derived requested heap for native construction; not measured execution usage.
-    pub(crate) fn native_field_resident_bytes_estimate(
-        &self,
-        workload: &FluidSteadyWorkload,
-        mesh: &SolverMeshArtifact,
-    ) -> AnalysisExecutionResult<u64> {
-        profile::requested_bytes(self, workload, &*workload.prepare(mesh)?)
-    }
     pub fn native_field_topology(
         &self,
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<FiniteVolumeFieldTopology> {
-        // Validate without cloning retained residual/traction arrays.
-        let source = workload.prepare(mesh)?;
-        self.validate_prepared(workload, &source, mesh)?;
-        profile::admit(self, workload, &source)?;
-        // `prepare` derived the topology from this projection in process.
-        FiniteVolumeFieldTopology::from_derived(&source.source, &source.topology).map_err(invalid)
-    }
-
-    /// The fluid's native field layout on the canonical solver mesh, admitted first.
-    fn volume_mesh_layout(
-        &self,
-        workload: &FluidSteadyWorkload,
-        mesh: &SolverMeshArtifact,
-    ) -> AnalysisExecutionResult<(VolumeMeshLayout, AnalysisProjection)> {
-        let source = workload.prepare(mesh)?;
-        self.validate_prepared(workload, &source, mesh)?;
-        profile::admit(self, workload, &source)?;
-        let layout = VolumeMeshLayout::derive(&source.source, &source.topology)?;
-        Ok((layout, source.source.clone()))
+        self.on_source(workload, mesh)?.native_field_topology()
     }
 
     pub fn native_field_request(
@@ -454,8 +428,7 @@ impl FluidSteadySolverResult {
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<FieldRecoveryRequest> {
-        let (layout, projection) = self.volume_mesh_layout(workload, mesh)?;
-        self.request_on(&layout, &projection, workload)
+        self.on_source(workload, mesh)?.native_field_request()
     }
 
     fn request_on(
@@ -577,19 +550,64 @@ impl FluidSteadySolverResult {
         mesh: &SolverMeshArtifact,
         request: &FieldRecoveryRequest,
     ) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
-        let (layout, projection) = self.volume_mesh_layout(workload, mesh)?;
-        if request != &self.request_on(&layout, &projection, workload)? {
+        self.on_source(workload, mesh)?.recover_native_fields(request)
+    }
+
+    /// Whether published fields carry exactly this result's native values, bit for bit.
+    pub fn validate_native_fields(
+        &self,
+        workload: &FluidSteadyWorkload,
+        mesh: &SolverMeshArtifact,
+        fields: &RecoveredFieldArtifact,
+    ) -> AnalysisExecutionResult<()> {
+        self.on_source(workload, mesh)?.validate_native_fields(fields)
+    }
+}
+
+/// Field checks of a result already validated against its prepared source.
+impl FluidResultOnSource<'_> {
+    /// Source-derived requested heap for native construction; not measured execution usage.
+    pub fn native_field_resident_bytes_estimate(&self) -> AnalysisExecutionResult<u64> {
+        profile::requested_bytes(&self.result, &self.workload, &self.source)
+    }
+
+    pub fn native_field_topology(&self) -> AnalysisExecutionResult<FiniteVolumeFieldTopology> {
+        profile::admit(&self.result, &self.workload, &self.source)?;
+        // `prepare` derived the topology from this projection in process.
+        FiniteVolumeFieldTopology::from_derived(&self.source.source, &self.source.topology)
+            .map_err(invalid)
+    }
+
+    /// The fluid's native field layout on the canonical solver mesh, admitted first.
+    fn volume_mesh_layout(&self) -> AnalysisExecutionResult<VolumeMeshLayout> {
+        profile::admit(&self.result, &self.workload, &self.source)?;
+        VolumeMeshLayout::derive(&self.source.source, &self.source.topology)
+    }
+
+    pub fn native_field_request(&self) -> AnalysisExecutionResult<FieldRecoveryRequest> {
+        let layout = self.volume_mesh_layout()?;
+        self.result
+            .request_on(&layout, &self.source.source, &self.workload)
+    }
+
+    pub fn recover_native_fields(
+        &self,
+        request: &FieldRecoveryRequest,
+    ) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
+        let (workload, result) = (&*self.workload, &*self.result);
+        let layout = self.volume_mesh_layout()?;
+        if request != &result.request_on(&layout, &self.source.source, workload)? {
             return Err(invalid(
                 "fluid field request differs from original source/native layout",
             ));
         }
         let definitions = layout.definitions(workload.coupling())?;
-        let samples = self.field_samples(workload)?;
+        let samples = result.field_samples(workload)?;
         let mut fields = Vec::with_capacity(definitions.len() * samples.len());
         for (sample, original) in samples {
             for (definition, values) in definitions
                 .iter()
-                .zip(self.native_value_sources(&layout, original))
+                .zip(result.native_value_sources(&layout, original))
             {
                 let values = values.collect::<Vec<_>>();
                 let shape = definition
@@ -612,23 +630,22 @@ impl FluidSteadySolverResult {
         .map_err(invalid)
     }
 
-    /// Whether published fields carry exactly this result's native values, bit for bit.
+
     pub fn validate_native_fields(
         &self,
-        workload: &FluidSteadyWorkload,
-        mesh: &SolverMeshArtifact,
         fields: &RecoveredFieldArtifact,
     ) -> AnalysisExecutionResult<()> {
-        let (layout, _) = self.volume_mesh_layout(workload, mesh)?;
+        let (workload, result) = (&*self.workload, &*self.result);
+        let layout = self.volume_mesh_layout()?;
         let definitions = layout.definitions(workload.coupling())?;
-        let samples = self.field_samples(workload)?;
+        let samples = result.field_samples(workload)?;
         // Compared in place against the original arrays: no second copy of the values.
         let expected = samples
             .iter()
             .flat_map(|(sample, original)| {
                 definitions
                     .iter()
-                    .zip(self.native_value_sources(&layout, original))
+                    .zip(result.native_value_sources(&layout, original))
                     .map(move |(definition, values)| (*sample, definition, values))
             })
             .collect::<Vec<_>>();

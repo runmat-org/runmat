@@ -9,7 +9,10 @@ pub(in crate::analysis) struct StudyEvidenceAccess {
 }
 impl StudyEvidenceAccess {
     pub(in crate::analysis) fn capture() -> Self {
-        Self::new(study_evidence_root(), storage::scoped_artifact_provider().unwrap_or_else(runmat_filesystem::current_provider))
+        Self::new(
+            study_evidence_root(),
+            storage::scoped_artifact_provider().unwrap_or_else(runmat_filesystem::current_provider),
+        )
     }
     pub(in crate::analysis) fn new(
         root: PathBuf,
@@ -23,36 +26,35 @@ impl StudyEvidenceAccess {
         bytes: &[u8],
         maximum: u64,
     ) -> Result<String, Error> {
+        self.immutable_objects(maximum, bytes.len() as u64)?
+            .persist(relative, bytes)
+    }
+
+    /// One workspace scope (one journal lock and recovery) for a run of immutable objects
+    /// written one at a time, none larger than `largest` bytes: each object's buffer and its
+    /// existing-content comparison stay within `maximum`, as for a single object. The
+    /// allowance is checked here; the workspace opens with the first object written, so a
+    /// run rejected before any write leaves no directory behind.
+    pub(in crate::analysis) fn immutable_objects(
+        &self,
+        maximum: u64,
+        largest: u64,
+    ) -> Result<ImmutableObjectScope<'_>, Error> {
         let available = maximum
-            .checked_sub(bytes.len() as u64)
-            .filter(|available| *available > 0 && *available >= bytes.len() as u64)
+            .checked_sub(largest)
+            .filter(|available| *available > 0 && *available >= largest)
             .ok_or_else(|| {
                 Error::ResourceLimit {
                     message: format!(
-                        "immutable object buffers exceed their phase allowance: object {} bytes, allowance {maximum} bytes",
-                        bytes.len()
+                        "immutable object buffers exceed their phase allowance: object {largest} bytes, allowance {maximum} bytes"
                     ),
                 }
             })?;
-        let scope = self
-            .provider
-            .workspace_access(&self.root, true, available)?;
-        let path = std::path::Path::new(relative);
-        scope.create_dir_all(path.parent().ok_or("immutable object path has no parent")?)?;
-        match scope.atomic_create_new(path, bytes, available)? {
-            runmat_filesystem::AtomicCreateResult::Published { .. } => {}
-            runmat_filesystem::AtomicCreateResult::Existing(existing) if existing == bytes => {}
-            runmat_filesystem::AtomicCreateResult::Existing(_) => {
-                return Err("immutable object identity already contains different content".into())
-            }
-        }
-        scope.synchronize_immutable(path).map_err(|error| {
-            Error::EvidenceDurabilityIndeterminate {
-                path: self.root.join(path),
-                cause: error.to_string(),
-            }
-        })?;
-        Ok(self.root.join(path).display().to_string())
+        Ok(ImmutableObjectScope {
+            access: self,
+            scope: None,
+            available,
+        })
     }
     pub(super) fn persist(
         &self,
@@ -125,5 +127,53 @@ impl StudyEvidenceAccess {
 fn limited(message: &str) -> Error {
     Error::ResourceLimit {
         message: message.into(),
+    }
+}
+
+pub(in crate::analysis) struct ImmutableObjectScope<'a> {
+    access: &'a StudyEvidenceAccess,
+    scope: Option<Box<dyn runmat_filesystem::workspace_access::WorkspaceAccess>>,
+    available: u64,
+}
+
+impl ImmutableObjectScope<'_> {
+    pub(in crate::analysis) fn persist(
+        &mut self,
+        relative: &str,
+        bytes: &[u8],
+    ) -> Result<String, Error> {
+        if bytes.len() as u64 > self.available {
+            return Err(Error::ResourceLimit {
+                message: format!(
+                    "immutable object of {} bytes exceeds its scope allowance of {} bytes",
+                    bytes.len(),
+                    self.available
+                ),
+            });
+        }
+        let path = std::path::Path::new(relative);
+        let scope = match &mut self.scope {
+            Some(scope) => scope,
+            empty => empty.insert(self.access.provider.workspace_access(
+                &self.access.root,
+                true,
+                self.available,
+            )?),
+        };
+        scope.create_dir_all(path.parent().ok_or("immutable object path has no parent")?)?;
+        match scope.atomic_create_new(path, bytes, self.available)? {
+            runmat_filesystem::AtomicCreateResult::Published { .. } => {}
+            runmat_filesystem::AtomicCreateResult::Existing(existing) if existing == bytes => {}
+            runmat_filesystem::AtomicCreateResult::Existing(_) => {
+                return Err("immutable object identity already contains different content".into())
+            }
+        }
+        scope.synchronize_immutable(path).map_err(|error| {
+            Error::EvidenceDurabilityIndeterminate {
+                path: self.access.root.join(path),
+                cause: error.to_string(),
+            }
+        })?;
+        Ok(self.access.root.join(path).display().to_string())
     }
 }

@@ -20,7 +20,10 @@ pub use governed::{
     build_fluid_steady_resource_plan, build_fluid_steady_resource_plan_with,
     fluid_steady_result_payload_bytes_upper_bound, PreparedFluidSteadyResourceFacts,
 };
-pub use recovery::{build_fluid_field_recovery_resource_plan, fluid_field_recovery_shape};
+pub use recovery::{
+    build_fluid_field_recovery_resource_plan, build_fluid_field_recovery_resource_plan_on,
+    fluid_field_recovery_shape,
+};
 #[cfg(test)]
 mod tests;
 

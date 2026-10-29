@@ -205,12 +205,12 @@ fn exact_authored_plan_and_owned_phases_fail_closed() {
     );
     assert!(study.prepare_solve().is_err());
     assert!(study.into_completed().is_err());
+    // The product is sealed: a preparation can only pair it with another policy or mesh.
     let mut changed = preparation();
-    changed.product.workload.policy.momentum_relaxation *= 0.5;
+    changed.policy.numerical.momentum_relaxation *= 0.5;
     assert!(FluidStudyCoordinator::new(changed).is_err());
     let mut changed = preparation();
-    changed.product.compiled.model.materials[0].mass_density_kg_per_m3 =
-        (Some(2.0)).map(runmat_types::physical::MassDensity::new);
+    changed.mesh.canonical_digest = runmat_meshing_core::StableDigest([7; 32]);
     assert!(FluidStudyCoordinator::new(changed).is_err());
 }
 #[test]

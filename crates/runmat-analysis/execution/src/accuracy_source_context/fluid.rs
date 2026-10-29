@@ -89,16 +89,17 @@ pub(super) fn validate(
 ) -> AnalysisBridgeResult<()> {
     let (w, m) = original_source(request, inputs)?;
     let original = unique(inputs, Kind::SolverResult)?;
-    let result = FluidSteadySolverResult::from_canonical_bytes_for(
-        &original.payload(),
+    let payload = original.payload();
+    let result = FluidSteadySolverResult::decode_on_source(
+        &payload,
         original.manifest.payload_digest,
         &w,
         &m,
     )?;
-    if result.identity()?.digest() != original.manifest.logical_identity {
+    if result.result().identity()?.digest() != original.manifest.logical_identity {
         return Err(invalid("fluid accuracy retained result identity"));
     }
-    receipt.validate_against(&w, &result, &m)?;
+    receipt.validate_against_on(&result, &m)?;
     let step = &w.model.sequence.steps[0];
     if observations.is_some() == step.observations.is_empty() {
         return Err(invalid("fluid accuracy original observations presence"));
@@ -123,13 +124,13 @@ pub(super) fn validate(
                 "fluid accuracy requires the original native volume-mesh catalog",
             ));
         };
-        let original_request = result.native_field_request(&w, &m)?;
+        let original_request = result.native_field_request()?;
         if recovery_request.as_ref() != &original_request {
             return Err(invalid(
                 "fluid accuracy catalog differs from original native source",
             ));
         }
-        let original_fields = result.recover_native_fields(&w, &m, &original_request)?;
+        let original_fields = result.recover_native_fields(&original_request)?;
         if manifest.as_ref() != &original_fields.manifest().map_err(invalid)? {
             return Err(invalid(
                 "fluid accuracy catalog field storage differs from original U/p/q",

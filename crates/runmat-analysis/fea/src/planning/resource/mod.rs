@@ -8,7 +8,8 @@ pub(crate) mod fluid_transient;
 pub use contract::FluidTransientBlockResourceDemand;
 pub use contract::{FluidFieldRecoveryResourceDemand, FluidSteadySolveResourceDemand};
 pub use fluid::{
-    build_fluid_field_recovery_resource_plan, build_fluid_steady_resource_plan,
+    build_fluid_field_recovery_resource_plan, build_fluid_field_recovery_resource_plan_on,
+    build_fluid_steady_resource_plan,
     build_fluid_steady_resource_plan_with, derive_fluid_steady_resource_projection,
     fluid_field_recovery_shape, fluid_steady_result_payload_bytes_upper_bound,
     validate_fluid_steady_prepared_facts, FluidSteadyResourceProjection,

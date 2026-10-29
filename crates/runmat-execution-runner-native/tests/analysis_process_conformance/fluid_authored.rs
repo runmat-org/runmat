@@ -144,7 +144,7 @@ pub(super) async fn run() {
         };
         eprintln!("authored fluid lifecycle: original governed completion retained");
         assert_eq!(
-            result.completion.workload.policy.maximum_outer_iterations,
+            result.completion.workload().policy.maximum_outer_iterations,
             400
         );
         assert!(result.completion.result.original().outer_iterations <= 400);
@@ -153,11 +153,11 @@ pub(super) async fn run() {
             result.completion.result.original().outer_iterations,
             result.completion.result.original().linear_iterations
         );
-        assert!(result.completion.workload.policy.linear_relative_tolerance <= 1e-11);
+        assert!(result.completion.workload().policy.linear_relative_tolerance <= 1e-11);
         assert_eq!(
             result
                 .completion
-                .workload
+                .workload()
                 .policy
                 .physical_relative_tolerance,
             1e-8
@@ -218,7 +218,7 @@ pub(super) async fn run() {
         // The current authoring surface declares algebraic accuracy only. A stronger,
         // explicit mandatory spatial requirement must remain missing/Indeterminate;
         // real algebraic/conservation evidence cannot be relabelled as mesh accuracy.
-        let mut spatial_plan = result.completion.workload.model.sequence.steps[0]
+        let mut spatial_plan = result.completion.workload().model.sequence.steps[0]
             .accuracy
             .clone();
         assert_eq!(
@@ -293,7 +293,7 @@ pub(super) async fn run() {
                 residual
                     <= result
                         .completion
-                        .workload
+                        .workload()
                         .policy
                         .physical_relative_tolerance
             );
@@ -310,7 +310,7 @@ pub(super) async fn run() {
                 runmat_analysis_fea::topology::AnalysisProjection::derive(&result.mesh).unwrap();
             let topology = runmat_analysis_fea::topology::FiniteVolumeTopology::derive(
                 &projection,
-                result.completion.workload.geometry_policy,
+                result.completion.workload().geometry_policy,
             )
             .unwrap();
             assert_eq!(
@@ -323,7 +323,7 @@ pub(super) async fn run() {
             );
             let tolerance = result
                 .completion
-                .workload
+                .workload()
                 .policy
                 .physical_relative_tolerance;
             // Independent rigid-translation patch: U constant, p=0 and q=U dot S
@@ -532,8 +532,8 @@ pub(super) async fn run() {
         }
         let options = runmat_runtime::analysis::AnalysisCfdRunOptions {
             precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
-            numerical: actual.workload.policy,
-            geometry: actual.workload.geometry_policy,
+            numerical: actual.workload().policy,
+            geometry: actual.workload().geometry_policy,
         };
         let publish =
             |candidate: &runmat_runtime::analysis::FluidStudyCompletion,
@@ -544,7 +544,7 @@ pub(super) async fn run() {
                     &mesh,
                     &meshing_evidence,
                     options,
-                    candidate.compiled.definition().unwrap(),
+                    candidate.compiled().definition().unwrap(),
                     runmat_runtime::operations::OperationContext::new(None, None),
                     runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
                         "cold-fluid:{}",
@@ -596,7 +596,7 @@ pub(super) async fn run() {
             .observation_catalog
             .as_ref()
             .expect("authored catalog");
-        let step = &actual.workload.model.sequence.steps[0];
+        let step = &actual.workload().model.sequence.steps[0];
         let context = runmat_analysis_fea::execution::ObservationHistorySourceContext::VolumeMesh {
             mesh: &mesh,
         };

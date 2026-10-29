@@ -22,7 +22,7 @@ pub(super) fn admit(
     crate::analysis::structural_study::lifecycle::accuracy_completion::validate_publication_chain(
         completed.host_workload_digest,
         &FeaResourcePhase::FluidSteadySolve(
-            completed.workload.identity().map_err(|e| e.to_string())?,
+            completed.workload().identity().map_err(|e| e.to_string())?,
         ),
         &completed.accuracy,
         &completed.baseline_usage,
@@ -32,7 +32,7 @@ pub(super) fn admit(
     let accuracy = owner(&completed.accuracy);
     let run = FeaRunResult {
         identity: completed
-            .workload
+            .workload()
             .formulation(mesh)
             .map_err(|e| e.to_string())?,
         requested_backend: ComputeBackend::Cpu,

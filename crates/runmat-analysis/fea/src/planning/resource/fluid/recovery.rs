@@ -77,18 +77,29 @@ pub fn build_fluid_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     facts: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    result.validate_for(workload, mesh).map_err(invalid)?;
-    let expected = result
-        .native_field_request(workload, mesh)
-        .map_err(invalid)?;
+    // Validates the result against its source, prepared once for the checks below.
+    let on_source = result.on_source(workload, mesh).map_err(invalid)?;
+    build_fluid_field_recovery_resource_plan_on(&on_source, mesh, request, facts)
+}
+
+/// [`build_fluid_field_recovery_resource_plan`] for a result already validated against its
+/// source on `mesh`.
+pub fn build_fluid_field_recovery_resource_plan_on(
+    on_source: &crate::execution::FluidResultOnSource<'_>,
+    mesh: &SolverMeshArtifact,
+    request: &FieldRecoveryRequest,
+    facts: PreparedPhaseResourceFacts,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let (workload, result) = (on_source.workload(), on_source.result());
+    let expected = on_source.native_field_request().map_err(invalid)?;
     if request != &expected {
         return Err(invalid(
             "fluid native recovery differs from original retained source/layout/request",
         ));
     }
     let projection = derive_fluid_steady_resource_projection(workload, mesh)?;
-    let native = result
-        .native_field_resident_bytes_estimate(workload, mesh)
+    let native = on_source
+        .native_field_resident_bytes_estimate()
         .map_err(invalid)?;
     let (partitions, partition_workspace) = fluid_field_recovery_shape(request)?;
     let output_bytes = partitions.into_iter().try_fold(0, admission::add)?;

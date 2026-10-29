@@ -57,17 +57,19 @@ impl TryFrom<CanonicalFluidStatePayloadContents> for CanonicalFluidStatePayload 
     type Error = AnalysisExecutionError;
 
     fn try_from(contents: CanonicalFluidStatePayloadContents) -> Result<Self, Self::Error> {
-        let result = contents.original_result()?;
-        let original_topology = result.native_field_topology(&contents.workload, &contents.mesh)?;
-        if contents.topology != original_topology {
-            return Err(invalid(
-                "fluid state differs from original producer/result/owner-oriented layout",
-            ));
-        }
-        let binding = FluidStateBinding {
-            source_result: result.identity()?,
-            producer: result.producer_identity(),
-            topology_digest: original_topology.identity().discretization_digest(),
+        let binding = {
+            let result = contents.original_result_on_source()?;
+            let original_topology = result.native_field_topology()?;
+            if contents.topology != original_topology {
+                return Err(invalid(
+                    "fluid state differs from original producer/result/owner-oriented layout",
+                ));
+            }
+            FluidStateBinding {
+                source_result: result.result().identity()?,
+                producer: result.result().producer_identity(),
+                topology_digest: original_topology.identity().discretization_digest(),
+            }
         };
         Ok(Self { contents, binding })
     }
@@ -120,8 +122,16 @@ pub fn fluid_state_publication_workspace_bytes(
 impl CanonicalFluidStatePayloadContents {
     /// Source-bound cold decode and original-equation validation; never invokes solve.
     pub fn original_result(&self) -> AnalysisExecutionResult<FluidSteadySolverResult> {
+        self.original_result_on_source()
+            .map(crate::execution::FluidResultOnSource::into_result)
+    }
+
+    /// [`Self::original_result`], keeping the source it was validated against.
+    pub fn original_result_on_source(
+        &self,
+    ) -> AnalysisExecutionResult<crate::execution::FluidResultOnSource<'_>> {
         fluid_state_publication_workspace_bytes(&self.workload, &self.mesh, &self.result_bytes)?;
-        FluidSteadySolverResult::from_canonical_bytes_for(
+        FluidSteadySolverResult::decode_on_source(
             &self.result_bytes,
             Digest::sha256(&self.result_bytes),
             &self.workload,
@@ -162,12 +172,12 @@ pub fn fluid_state_publication_requests(
     mesh: &SolverMeshArtifact,
     result: &FluidSteadySolverResult,
 ) -> AnalysisExecutionResult<Vec<SemanticStatePublicationRequest>> {
-    result.validate_for(workload, mesh)?;
+    // Validates the result against its prepared source before deriving the layout.
     let topology = result.native_field_topology(workload, mesh)?;
     requests_on(workload, result, &topology)
 }
 
-/// The declared publication requests of a result whose `validate_for` succeeded, on its native
+/// The declared publication requests of a result validated against its source, on its native
 /// field topology.
 fn requests_on(
     workload: &FluidSteadyWorkload,
@@ -198,7 +208,7 @@ pub(super) fn validate_request(
     result: &FluidSteadySolverResult,
 ) -> AnalysisExecutionResult<FiniteVolumeFieldTopology> {
     request.validate()?;
-    result.validate_for(workload, mesh)?;
+    // Validates the result against its prepared source before deriving the layout.
     let topology = result.native_field_topology(workload, mesh)?;
     if !requests_on(workload, result, &topology)?.contains(request) {
         return Err(invalid(

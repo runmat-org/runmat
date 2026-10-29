@@ -22,7 +22,45 @@ use serde::{Deserialize, Serialize};
 /// Immutable original fields. Wire decoding alone never grants source authority.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct FluidSteadySolverResult {
+    /// Derived from `data` the first time it is asked for; `data` never changes afterwards.
+    #[serde(skip)]
+    identity: DerivedIdentity,
     data: FluidResultData,
+}
+
+/// The result identity (a digest of its whole canonical encoding), derived at most once per
+/// value. It is a function of the immutable data, so it takes no part in equality.
+#[derive(Clone, Debug, Default)]
+struct DerivedIdentity(std::sync::OnceLock<SolverResultIdentity>);
+
+impl PartialEq for DerivedIdentity {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// A fluid result validated once against its workload's source prepared once on its mesh.
+/// Only [`FluidSteadySolverResult::on_source`] and
+/// [`FluidSteadySolverResult::decode_on_source`] construct it, so its field, topology and
+/// request methods neither prepare the source nor validate the result again.
+pub struct FluidResultOnSource<'a> {
+    pub(super) result: std::borrow::Cow<'a, FluidSteadySolverResult>,
+    pub(super) workload: std::borrow::Cow<'a, FluidSteadyWorkload>,
+    pub(super) source: std::sync::Arc<PreparedFluidSource>,
+}
+
+impl FluidResultOnSource<'_> {
+    pub fn result(&self) -> &FluidSteadySolverResult {
+        &self.result
+    }
+
+    pub fn workload(&self) -> &FluidSteadyWorkload {
+        &self.workload
+    }
+
+    pub fn into_result(self) -> FluidSteadySolverResult {
+        self.result.into_owned()
+    }
 }
 
 /// Original retained fields of the authored procedure: one steady state, or the realized
@@ -81,6 +119,7 @@ impl FluidSteadySolverResult {
         problem.recover(&original).map_err(invalid)?;
         let reservation = problem.reservation();
         Ok(Self {
+            identity: DerivedIdentity::default(),
             data: source_data(
                 workload,
                 source,
@@ -102,6 +141,7 @@ impl FluidSteadySolverResult {
             .numerical_input_identity;
         let reservation = source.problem(workload)?.reservation();
         Ok(Self {
+            identity: DerivedIdentity::default(),
             data: source_data(
                 workload,
                 source,
@@ -126,6 +166,7 @@ impl FluidSteadySolverResult {
             .map_err(invalid)?;
         let reservation = problem.reservation();
         Ok(Self {
+            identity: DerivedIdentity::default(),
             data: source_data(
                 workload,
                 source,
@@ -149,6 +190,7 @@ impl FluidSteadySolverResult {
         let reservation = source.problem(workload)?.reservation();
         let identity = coupled.flow.numerical_input_identity;
         Ok(Self {
+            identity: DerivedIdentity::default(),
             data: source_data(
                 workload,
                 source,
@@ -172,6 +214,7 @@ impl FluidSteadySolverResult {
         let reservation = source.problem(workload)?.reservation();
         let identity = coupled.flow.numerical_input_identity;
         Ok(Self {
+            identity: DerivedIdentity::default(),
             data: source_data(
                 workload,
                 source,
@@ -213,6 +256,7 @@ impl FluidSteadySolverResult {
         let reservation = problem.reservation();
         let identity = coupled.flow.numerical_input_identity;
         Ok(Self {
+            identity: DerivedIdentity::default(),
             data: source_data(
                 workload,
                 source,
@@ -311,10 +355,14 @@ impl FluidSteadySolverResult {
         )?)
     }
     pub fn identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
-        SolverResultIdentity::derive(
+        if let Some(identity) = self.identity.0.get() {
+            return Ok(*identity);
+        }
+        let identity = SolverResultIdentity::derive(
             "steady-fluid-retained-result",
             &Digest::sha256(self.canonical_bytes()?),
-        )
+        )?;
+        Ok(*self.identity.0.get_or_init(|| identity))
     }
 
     /// Verify expected transport digest before decode, then original source and equations.
@@ -325,6 +373,36 @@ impl FluidSteadySolverResult {
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<Self> {
+        Self::decode_on_source(bytes, expected, workload, mesh).map(FluidResultOnSource::into_result)
+    }
+
+    /// [`Self::from_canonical_bytes_for`], keeping the prepared source the decoded result was
+    /// validated against for the caller's field, topology and request checks.
+    pub fn decode_on_source<'a>(
+        bytes: &[u8],
+        expected: Digest,
+        workload: &'a FluidSteadyWorkload,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<FluidResultOnSource<'a>> {
+        Self::decode_with(bytes, expected, std::borrow::Cow::Borrowed(workload), mesh)
+    }
+
+    /// [`Self::decode_on_source`] that keeps the decoded workload with the result.
+    pub fn decode_owned_on_source(
+        bytes: &[u8],
+        expected: Digest,
+        workload: FluidSteadyWorkload,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<FluidResultOnSource<'static>> {
+        Self::decode_with(bytes, expected, std::borrow::Cow::Owned(workload), mesh)
+    }
+
+    fn decode_with<'a>(
+        bytes: &[u8],
+        expected: Digest,
+        workload: std::borrow::Cow<'a, FluidSteadyWorkload>,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<FluidResultOnSource<'a>> {
         if bytes.len() > MAX_PAYLOAD_BYTES {
             return Err(AnalysisExecutionError::Limit("steady fluid encoded result"));
         }
@@ -335,7 +413,7 @@ impl FluidSteadySolverResult {
         }
         // Admit the exact source before decoding retained vector payloads.
         let source = workload.prepare(mesh)?;
-        let problem = source.problem(workload)?;
+        let problem = source.problem(&workload)?;
         let decode_bytes =
             canonical_payload_materialization_resident_bytes_estimate(bytes).map_err(invalid)?;
         let coexisting = source
@@ -350,12 +428,19 @@ impl FluidSteadySolverResult {
         }
         let wire: FluidResultWire =
             decode_contract(RESULT_PREFIX, "steady-fluid-retained-result", bytes, LIMITS)?;
-        let value = Self { data: wire.data };
+        let value = Self {
+            identity: DerivedIdentity::default(),
+            data: wire.data,
+        };
         // Validation below prepares its own original problem. Do not retain a
         // second pressure-stencil/authority cache across that preparation.
         drop(problem);
-        value.validate_prepared(workload, &source, mesh)?;
-        Ok(value)
+        value.validate_prepared(&workload, &source, mesh)?;
+        Ok(FluidResultOnSource {
+            result: std::borrow::Cow::Owned(value),
+            workload,
+            source,
+        })
     }
 
     pub fn validate_for(
@@ -363,7 +448,23 @@ impl FluidSteadySolverResult {
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
-        self.validate_prepared(workload, &*workload.prepare(mesh)?, mesh)
+        self.on_source(workload, mesh).map(drop)
+    }
+
+    /// Validate this result once against its workload's source on `mesh`, prepared once, and
+    /// keep that source for the caller's further field, topology and request checks.
+    pub fn on_source<'a>(
+        &'a self,
+        workload: &'a FluidSteadyWorkload,
+        mesh: &'a SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<FluidResultOnSource<'a>> {
+        let source = workload.prepare(mesh)?;
+        self.validate_prepared(workload, &source, mesh)?;
+        Ok(FluidResultOnSource {
+            result: std::borrow::Cow::Borrowed(self),
+            workload: std::borrow::Cow::Borrowed(workload),
+            source,
+        })
     }
     pub fn recover_original(
         &self,
