@@ -2,6 +2,8 @@ use crate::bytecode::program::ExecutionContext;
 use runmat_runtime::{execution::RootedValue, RuntimeError};
 use runmat_value::Value;
 
+mod input;
+
 pub(super) struct Executor<'a> {
     service: &'a dyn runmat_runtime::context::RuntimeDistributedService,
     bytecode: &'a crate::Bytecode,
@@ -37,6 +39,7 @@ impl<'a> Executor<'a> {
                 scheme: scheme.clone(),
             },
         )?;
+        let (input, _input_root) = input::prepare(input).await?;
         let pool = self
             .execution
             .runtime
@@ -84,6 +87,7 @@ impl<'a> Executor<'a> {
         match overload {
             crate::BytecodeCodistributedOverload::ReplicatedInputDefault => {
                 let [input] = super::arguments::decode(arguments)?;
+                let (input, _input_root) = input::prepare(input).await?;
                 if let Some(coordination) = coordination {
                     let (input, context) = super::coordination::agree(
                         self.execution,
@@ -99,6 +103,7 @@ impl<'a> Executor<'a> {
             }
             crate::BytecodeCodistributedOverload::CodistributorOrDesignatedWorker => {
                 let [input, selector] = super::arguments::decode(arguments)?;
+                let (input, _input_root) = input::prepare(input).await?;
                 if runmat_runtime::parallel::codistributor::is_codistributor(&selector) {
                     if let Some(coordination) = coordination {
                         let (input, context) = super::coordination::agree(
@@ -142,6 +147,7 @@ impl<'a> Executor<'a> {
             }
             crate::BytecodeCodistributedOverload::DesignatedWorkerWithCodistributor => {
                 let [input, worker, codistributor] = super::arguments::decode(arguments)?;
+                let (input, _input_root) = input::prepare(input).await?;
                 let rank = runmat_runtime::parallel::codistributor::designated_worker(&worker)?;
                 if !runmat_runtime::parallel::codistributor::is_codistributor(&codistributor) {
                     return Err(crate::interpreter::errors::mex(
@@ -230,6 +236,7 @@ impl<'a> Executor<'a> {
             None
         };
         let [local_part] = super::arguments::decode(arguments)?;
+        let (local_part, _input_root) = input::prepare(local_part).await?;
         let (contributions, context) = super::coordination::build(
             self.execution,
             coordination,

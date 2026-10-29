@@ -194,9 +194,19 @@ impl Default for AccelerateInitOptions {
     }
 }
 
+impl AccelerateInitOptions {
+    /// Compatibility providers remain available while ordinary automatic
+    /// placement respects the master acceleration switch.
+    fn effective_auto_offload(&self) -> AutoOffloadOptions {
+        let mut options = self.auto_offload.clone();
+        options.enabled &= self.enabled;
+        options
+    }
+}
+
 /// Initialize the global acceleration provider using the supplied options.
 pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
-    configure_auto_offload(options.auto_offload.clone());
+    configure_auto_offload(options.effective_auto_offload());
 
     #[cfg(all(feature = "cuda", not(target_arch = "wasm32")))]
     if options.enabled {
@@ -330,7 +340,7 @@ fn announce_wgpu_provider(provider: &WgpuProvider) {
 
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 pub async fn initialize_wgpu_provider_async(options: &AccelerateInitOptions) -> anyhow::Result<()> {
-    configure_auto_offload(options.auto_offload.clone());
+    configure_auto_offload(options.effective_auto_offload());
 
     if runmat_accelerate_api::provider().is_some() {
         return Ok(());
@@ -399,6 +409,29 @@ pub fn initialize_acceleration_provider() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn master_acceleration_switch_masks_only_effective_auto_placement() {
+        for master in [false, true] {
+            for requested in [false, true] {
+                let options = super::AccelerateInitOptions {
+                    enabled: master,
+                    auto_offload: super::AutoOffloadOptions {
+                        enabled: requested,
+                        calibrate: true,
+                        log_level: super::AutoOffloadLogLevel::Info,
+                    },
+                    ..Default::default()
+                };
+                let effective = options.effective_auto_offload();
+                assert_eq!(effective.enabled, master && requested);
+                assert!(effective.calibrate);
+                assert_eq!(effective.log_level, super::AutoOffloadLogLevel::Info);
+                assert_eq!(options.auto_offload.enabled, requested);
+                assert!(options.allow_inprocess_fallback);
+            }
+        }
+    }
+
     #[cfg(feature = "wgpu")]
     use crate::backend::wgpu::cache::key::compute_pipeline_hash_bytes;
 
