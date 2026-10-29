@@ -9,7 +9,8 @@ const CAPABILITY_NAMES: [&str; 10] = [
 #[test]
 fn conversion_and_interpolation_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
     }
 }

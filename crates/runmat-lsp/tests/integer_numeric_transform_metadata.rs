@@ -15,7 +15,8 @@ const PACKET: [(&str, usize, &str); 8] = [
 #[test]
 fn numeric_transform_metadata_is_class_complete() {
     for (name, expected_forms, _) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {
@@ -42,7 +43,8 @@ fn numeric_transform_signatures_remain_visible_to_lsp() {
 #[test]
 fn runmat_only_numeric_transform_forms_publish_compatibility_identifiers() {
     for name in ["pchip", "pdf", "pdist", "pdist2", "peaks", "periodogram"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.extensions.is_empty(), "{name}");
         for extension in builtin.extensions {
             assert_eq!(

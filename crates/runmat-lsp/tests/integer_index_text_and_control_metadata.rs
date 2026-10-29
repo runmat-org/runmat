@@ -20,11 +20,13 @@ const INAPPLICABLE_NAMES: [&str; 2] = ["htmlTree", "input"];
 #[test]
 fn index_text_and_control_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
     }
     for name in INAPPLICABLE_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_audit.is_some(), "{name}");
     }
 }

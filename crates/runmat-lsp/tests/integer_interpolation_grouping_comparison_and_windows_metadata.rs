@@ -21,12 +21,10 @@ fn interpolation_grouping_comparison_and_window_dispositions_are_public() {
     let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
     for name in BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(
-            builtin
-                .descriptor
-                .expect("public descriptor")
-                .completion_policy,
+            builtin.descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public
         );
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
@@ -64,7 +62,8 @@ fn interpolation_grouping_and_window_extensions_are_independently_registered() {
         ),
         ("hamming", &["hamming-logical-length"][..]),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         for id in ids {
             assert!(builtin
                 .extensions

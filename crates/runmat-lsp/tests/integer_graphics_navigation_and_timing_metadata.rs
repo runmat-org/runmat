@@ -18,13 +18,14 @@ const PACKET: [&str; 8] = [
 #[test]
 fn graphics_navigation_and_timing_integer_dispositions_are_explicit() {
     for name in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some(),
             "{name}"
         );
     }
-    let openfig = runmat_builtins::builtin_function_by_name("openfig").expect("openfig");
+    let openfig = runmat_builtins::builtin_catalog_entry_by_name("openfig").expect("openfig");
     assert!(openfig.integer_capabilities.is_empty());
     assert_eq!(
         openfig.integer_audit.expect("openfig audit").kind,
@@ -35,7 +36,8 @@ fn graphics_navigation_and_timing_integer_dispositions_are_explicit() {
 #[test]
 fn documented_graphics_and_timing_roles_cover_all_integer_classes() {
     for name in ["mesh", "meshc", "parula", "pause"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.iter().all(|capability| {
             capability.inputs.iter().all(|input| {
                 input.classes.len() == 8
@@ -44,13 +46,14 @@ fn documented_graphics_and_timing_roles_cover_all_integer_classes() {
         }));
     }
     for name in ["mesh", "meshc", "patch"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin
             .integer_capabilities
             .iter()
             .any(|capability| capability.backend == BuiltinIntegerBackendRule::GatherFallback));
     }
-    let parula = runmat_builtins::builtin_function_by_name("parula").expect("parula");
+    let parula = runmat_builtins::builtin_catalog_entry_by_name("parula").expect("parula");
     assert_eq!(
         parula.integer_capabilities[0].output_class,
         BuiltinIntegerOutputClassRule::Double
@@ -72,7 +75,8 @@ fn runmat_only_structural_forms_have_independent_extension_records() {
         ("patch", &["patch-integer-axes-handle"][..]),
         ("pause", &["pause-gpu-input"][..]),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         for id in ids {
             assert!(
                 builtin

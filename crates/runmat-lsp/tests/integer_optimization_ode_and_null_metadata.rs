@@ -41,7 +41,8 @@ fn optimization_and_ode_integer_extensions_describe_checked_host_boundaries() {
         "optimset",
         "quad",
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin.integer_capabilities.iter().any(|capability| {
                 capability
@@ -71,7 +72,7 @@ fn null_and_quad_distinguish_documented_integer_controls_from_extensions() {
         }) && capability.output_class == BuiltinIntegerOutputClassRule::PreserveNondoubleInput
     }));
 
-    let quad = runmat_builtins::builtin_function_by_name("quad").expect("quad builtin");
+    let quad = runmat_builtins::builtin_catalog_entry_by_name("quad").expect("quad builtin");
     for input_name in ["trace", "p1, p2, ..."] {
         assert!(
             quad.integer_capabilities.iter().any(|capability| {

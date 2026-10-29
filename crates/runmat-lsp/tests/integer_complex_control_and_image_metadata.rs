@@ -9,11 +9,9 @@ const PACKET: [&str; 8] = [
 #[test]
 fn complex_control_and_image_packet_is_public_and_audited() {
     for name in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
             .unwrap_or_else(|| panic!("registered builtin {name}"));
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("{name} descriptor"));
+        let descriptor = builtin.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             BuiltinCompletionPolicy::Public
@@ -100,7 +98,7 @@ fn packet_extensions_are_declarative_and_independently_named() {
         ("lab2rgb", "lab2rgb-explicit-gpu-input"),
         ("rgb2lab", "rgb2lab-explicit-gpu"),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).unwrap();
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
         assert!(builtin.extensions.iter().any(|record| {
             record.id == extension && record.mode == BuiltinExtensionMode::RunMatOnly
         }));

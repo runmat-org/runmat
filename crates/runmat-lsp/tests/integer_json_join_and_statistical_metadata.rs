@@ -38,11 +38,9 @@ fn json_join_and_statistical_packet_has_exact_public_names() {
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in PUBLIC_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
             .unwrap_or_else(|| panic!("registered builtin {name}"));
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("{name} descriptor"));
+        let descriptor = builtin.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             BuiltinCompletionPolicy::Public,
@@ -61,7 +59,7 @@ fn json_join_and_statistical_packet_has_exact_public_names() {
 #[test]
 fn capability_builtins_publish_all_eight_integer_classes() {
     for name in CAPABILITY_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
             .unwrap_or_else(|| panic!("registered builtin {name}"));
         assert!(
             builtin.integer_audit.is_none(),
@@ -87,7 +85,7 @@ fn capability_builtins_publish_all_eight_integer_classes() {
 #[test]
 fn object_and_text_only_builtins_have_explicit_not_applicable_audits() {
     for name in NOT_APPLICABLE_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
             .unwrap_or_else(|| panic!("registered builtin {name}"));
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         let audit = builtin

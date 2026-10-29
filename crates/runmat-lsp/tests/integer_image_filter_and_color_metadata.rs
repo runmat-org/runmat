@@ -8,19 +8,18 @@ const COHORT: [&str; 8] = [
 #[test]
 fn image_filter_and_color_integer_metadata_is_public_and_honest() {
     for name in COHORT {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(
-            builtin
-                .descriptor
-                .expect("public descriptor")
-                .completion_policy,
+            builtin.descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
             "{name}"
         );
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
     }
     for name in ["imag", "imhist"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin
                 .integer_capabilities

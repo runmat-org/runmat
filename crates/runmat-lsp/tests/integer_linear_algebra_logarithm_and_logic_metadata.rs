@@ -10,20 +10,10 @@ const CAPABILITY_NAMES: [&str; 25] = [
 #[test]
 fn linear_algebra_logarithm_and_logic_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let catalog = runmat_builtins::builtin_catalog_entry_by_name(name);
-        let binding = runmat_builtins::builtin_function_by_name(name);
-        let integer_capabilities = catalog.map_or_else(
-            || {
-                binding
-                    .unwrap_or_else(|| panic!("{name}: catalog entry or runtime binding"))
-                    .integer_capabilities
-            },
-            |entry| entry.integer_capabilities,
-        );
-        let integer_audit = catalog.map_or_else(
-            || binding.and_then(|binding| binding.integer_audit),
-            |entry| entry.integer_audit,
-        );
+        let catalog = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("canonical builtin {name}"));
+        let integer_capabilities = catalog.integer_capabilities;
+        let integer_audit = catalog.integer_audit;
         assert!(!integer_capabilities.is_empty(), "{name}");
         assert!(integer_audit.is_none(), "{name}");
     }
@@ -78,7 +68,8 @@ fn core_operator_runmat_extensions_are_visible_in_lsp_metadata() {
         ("or", &["or-complex-input", "or-character-input"][..]),
         ("xor", &["xor-complex-input", "xor-character-input"][..]),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         let actual = builtin
             .extensions
             .iter()

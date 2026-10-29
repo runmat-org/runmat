@@ -18,7 +18,8 @@ const CAPABILITY_NAMES: [&str; 8] = [
 #[test]
 fn array_construction_and_conversion_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {
@@ -32,7 +33,8 @@ fn array_construction_and_conversion_integer_metadata_is_explicit() {
 #[test]
 fn grid_and_conversion_class_and_backend_rules_are_visible() {
     for name in ["meshgrid", "ndgrid"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(
             builtin.integer_capabilities[0].output_class,
             BuiltinIntegerOutputClassRule::PreserveInput
@@ -43,12 +45,13 @@ fn grid_and_conversion_class_and_backend_rules_are_visible() {
         );
     }
     let mat2cell =
-        runmat_builtins::builtin_function_by_name("mat2cell").expect("registered builtin");
+        runmat_builtins::builtin_catalog_entry_by_name("mat2cell").expect("canonical builtin");
     assert_eq!(
         mat2cell.integer_capabilities[1].inputs[0].availability,
         BuiltinIntegerInputAvailability::RunMatOnly
     );
-    let mat2str = runmat_builtins::builtin_function_by_name("mat2str").expect("registered builtin");
+    let mat2str =
+        runmat_builtins::builtin_catalog_entry_by_name("mat2str").expect("canonical builtin");
     assert_eq!(
         mat2str.integer_capabilities[1].inputs[0].availability,
         BuiltinIntegerInputAvailability::RunMatOnly

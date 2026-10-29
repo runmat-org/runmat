@@ -18,7 +18,8 @@ const CAPABILITY_NAMES: [&str; 8] = [
 #[test]
 fn normal_distribution_and_regression_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {
@@ -32,7 +33,8 @@ fn normal_distribution_and_regression_integer_metadata_is_explicit() {
 #[test]
 fn normal_family_metadata_exposes_floating_boundaries_and_host_fallbacks() {
     for name in ["normcdf", "norminv", "normpdf", "normrnd", "mvnrnd"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin.integer_capabilities.iter().any(|capability| {
                 capability
@@ -49,7 +51,7 @@ fn normal_family_metadata_exposes_floating_boundaries_and_host_fallbacks() {
             "{name}"
         );
     }
-    let mnrfit = runmat_builtins::builtin_function_by_name("mnrfit").unwrap();
+    let mnrfit = runmat_builtins::builtin_catalog_entry_by_name("mnrfit").unwrap();
     assert!(mnrfit
         .integer_capabilities
         .iter()
@@ -68,7 +70,7 @@ fn normal_distribution_and_regression_extensions_are_visible_in_matlab_mode() {
         ("mvnrnd", "mvnrnd-integer-mu"),
         ("mnrfit", "mnrfit-integer-x"),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).unwrap();
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
         assert!(
             builtin
                 .extensions

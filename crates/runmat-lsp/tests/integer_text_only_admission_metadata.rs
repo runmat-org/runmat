@@ -35,7 +35,8 @@ const INTEGER_PACKET: [(&str, &str); 4] = [
 #[test]
 fn text_only_packet_exposes_integer_inapplicable_metadata() {
     for (name, _) in INAPPLICABLE_PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         assert_eq!(
             builtin.integer_audit.expect("integer audit").kind,
@@ -48,7 +49,8 @@ fn text_only_packet_exposes_integer_inapplicable_metadata() {
 #[test]
 fn string_conversion_and_prefix_comparison_expose_all_integer_classes() {
     for (name, _) in INTEGER_PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_audit.is_none(), "{name}");
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
         for capability in builtin.integer_capabilities {

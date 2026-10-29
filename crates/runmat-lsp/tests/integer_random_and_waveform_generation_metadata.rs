@@ -16,7 +16,8 @@ const PACKET: [(&str, usize, &str); 9] = [
 #[test]
 fn random_and_waveform_integer_metadata_is_public_and_precise() {
     for (name, expected_forms, _) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         assert!(builtin
@@ -54,7 +55,8 @@ fn new_runmat_only_forms_publish_stable_compatibility_identifiers() {
     ];
     let mut ids = std::collections::HashSet::new();
     for (name, count) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.extensions.len(), count, "{name}");
         for extension in builtin.extensions {
             assert_eq!(

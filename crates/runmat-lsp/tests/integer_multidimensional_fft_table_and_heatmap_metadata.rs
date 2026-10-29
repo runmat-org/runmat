@@ -6,12 +6,10 @@ const CAPABILITY_BUILTINS: [&str; 6] = ["ifft2", "ifftn", "ifftshift", "head", "
 #[test]
 fn multidimensional_fft_table_and_heatmap_integer_dispositions_are_public() {
     for name in CAPABILITY_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(
-            builtin
-                .descriptor
-                .expect("public descriptor")
-                .completion_policy,
+            builtin.descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
             "{name}"
         );
@@ -19,7 +17,8 @@ fn multidimensional_fft_table_and_heatmap_integer_dispositions_are_public() {
         assert!(builtin.integer_audit.is_none(), "{name}");
     }
     for name in ["hgload", "hgsave"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(
             builtin.integer_audit.map(|audit| audit.kind),
             Some(runmat_builtins::BuiltinIntegerAuditKind::NotApplicable),
@@ -38,7 +37,8 @@ fn multidimensional_fft_and_heatmap_extension_metadata_is_visible() {
         ("heatmap", "heatmap-gpu-cdata"),
         ("head", "head-gpu-row-count"),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin.extensions.iter().any(|extension| {
                 extension.id == extension_id

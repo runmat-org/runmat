@@ -1,7 +1,7 @@
 use lsp_types::Position;
 use runmat_lsp::core::analysis::{analyze_document_with_compat, signature_help_at, CompatMode};
 
-const CAPABILITY_NAMES: [&str; 7] = [
+const CAPABILITY_NAMES: [&str; 8] = [
     "ipermute",
     "isUnderlyingType",
     "isa",
@@ -9,9 +9,11 @@ const CAPABILITY_NAMES: [&str; 7] = [
     "isequaln",
     "isfinite",
     "isinf",
+    // Typed numeric graphics aliases have an explicit canonical integer role.
+    "isgraphics",
 ];
 
-const INAPPLICABLE_NAMES: [&str; 18] = [
+const INAPPLICABLE_NAMES: [&str; 17] = [
     "isStringScalar",
     "isVocabularyWord",
     "iscategorical",
@@ -26,7 +28,6 @@ const INAPPLICABLE_NAMES: [&str; 18] = [
     "isfield",
     "isfile",
     "isfolder",
-    "isgraphics",
     "ishandle",
     "ishermitian",
     "isletter",

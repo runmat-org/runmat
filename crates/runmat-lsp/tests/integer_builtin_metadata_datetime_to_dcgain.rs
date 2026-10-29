@@ -1,3 +1,5 @@
+mod support;
+
 use lsp_types::Position;
 use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, signature_help_at, CompatMode,
@@ -5,39 +7,27 @@ use runmat_lsp::core::analysis::{
 
 #[test]
 fn datetime_to_dcgain_descriptors_are_visible_to_lsp() {
-    for (source, expected) in [
-        (
-            "t = datetime(uint16([2024 7 31]));",
-            "t = datetime(dateVectors)",
-        ),
+    for (source, name) in [
+        ("t = datetime(uint16([2024 7 31]));", "datetime"),
         (
             "t2 = dateshift(datetime(2024, 7, 31), 'start', 'month');",
-            "t2 = dateshift(t, boundary, unit)",
+            "dateshift",
         ),
-        ("d = day(datetime(2024, 7, 31));", "X = day(t)"),
-        ("g = dcgain(tf(1, [1 1]));", "gain = dcgain(sys)"),
-        ("[a, b] = deal(uint8(1));", "[varargout] = deal(varargin)"),
-        (
-            "dA = decomposition(int16([1 0; 0 1]));",
-            "dA = decomposition(A)",
-        ),
+        ("d = day(datetime(2024, 7, 31));", "day"),
+        ("g = dcgain(tf(1, [1 1]));", "dcgain"),
+        ("[a, b] = deal(uint8(1));", "deal"),
+        ("dA = decomposition(int16([1 0; 0 1]));", "decomposition"),
     ] {
         let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
         assert!(analysis.syntax_error.is_none(), "{source}");
         assert!(analysis.lowering_error.is_none(), "{source}");
         assert!(analysis.compile_error.is_none(), "{source}");
-        let column = source.find('(').expect("call expression") as u32 - 1;
-        let help = signature_help_at(source, &analysis, &Position::new(0, column))
-            .unwrap_or_else(|| panic!("descriptor-backed signature help for {source}"));
-        assert!(
-            help.signatures
-                .iter()
-                .any(|signature| signature.label == expected),
-            "expected {expected} for {source}"
-        );
+        let position = Position::new(0, source.find(name).expect("builtin call") as u32);
+        let help =
+            signature_help_at(source, &analysis, &position).expect("canonical signature help");
+        support::assert_catalog_signatures(name, &help);
     }
 }
-
 #[test]
 fn matlab_mode_keeps_datetime_to_dcgain_capabilities_and_extensions_visible() {
     for name in [
@@ -59,14 +49,15 @@ fn matlab_mode_keeps_datetime_to_dcgain_capabilities_and_extensions_visible() {
         "mldivide",
         "mrdivide",
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             !builtin.integer_capabilities.is_empty(),
             "{name} must expose its settled integer capability records"
         );
     }
 
-    let deal = runmat_builtins::builtin_function_by_name("deal").expect("registered deal");
+    let deal = runmat_builtins::builtin_catalog_entry_by_name("deal").expect("registered deal");
     assert_eq!(deal.integer_capabilities.len(), 2);
     assert_eq!(deal.integer_capabilities[0].inputs[0].classes.len(), 8);
     assert_eq!(
@@ -117,7 +108,8 @@ fn matlab_mode_keeps_datetime_to_dcgain_capabilities_and_extensions_visible() {
         let source = format!("x = {name}(uint8(1));");
         let analysis = analyze_document_with_compat(&source, CompatMode::Matlab);
         assert!(analysis.syntax_error.is_none(), "{source}");
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin.extensions.iter().any(|extension| {
                 extension.id == extension_id
@@ -127,7 +119,7 @@ fn matlab_mode_keeps_datetime_to_dcgain_capabilities_and_extensions_visible() {
         );
     }
 
-    assert!(runmat_builtins::builtin_function_by_name("decomposition.ldivide").is_none());
+    assert!(runmat_builtins::builtin_catalog_entry_by_name("decomposition.ldivide").is_none());
 
     let source = "x = 1;";
     let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
@@ -136,11 +128,9 @@ fn matlab_mode_keeps_datetime_to_dcgain_capabilities_and_extensions_visible() {
         .iter()
         .all(|item| item.label != "decomposition.ldivide"));
     assert!(completions.iter().all(|item| {
-        runmat_builtins::builtin_function_by_name(&item.label).is_none_or(|builtin| {
-            builtin.descriptor.is_none_or(|descriptor| {
-                descriptor.completion_policy
-                    != runmat_builtins::BuiltinCompletionPolicy::HiddenInternal
-            })
+        runmat_builtins::builtin_catalog_entry_by_name(&item.label).is_none_or(|builtin| {
+            builtin.descriptor.completion_policy
+                != runmat_builtins::BuiltinCompletionPolicy::HiddenInternal
         })
     }));
 }

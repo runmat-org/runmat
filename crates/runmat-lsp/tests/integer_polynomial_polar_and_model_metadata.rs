@@ -42,7 +42,8 @@ const PACKET: [(&str, usize, &str); 15] = [
 #[test]
 fn polynomial_polar_and_model_metadata_is_class_complete() {
     for (name, expected_forms, _) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {
@@ -85,7 +86,8 @@ fn runmat_only_forms_publish_stable_compatibility_identifiers() {
         "predict",
         "print",
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.extensions.is_empty(), "{name}");
         for extension in builtin.extensions {
             assert_eq!(

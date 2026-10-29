@@ -2323,25 +2323,17 @@ mod tests {
     #[test]
     fn signature_help_uses_gpu_acceleration_descriptors() {
         let cases = [
-            ("arrayfun(\"sin\", 1);", "B = arrayfun(func, A1, An...)"),
-            ("gather(1);", "X = gather(X)"),
-            ("gpuArray(1);", "G = gpuArray(X)"),
-            ("gpuDevice();", "info = gpuDevice()"),
-            ("gpuDevice(1);", "info = gpuDevice(arg)"),
-            ("gpuInfo();", "summary = gpuInfo()"),
-            ("pagefun(\"mtimes\", 1, 1);", "Y = pagefun(func, A, B)"),
+            ("arrayfun(\"sin\", 1);", "arrayfun"),
+            ("gather(1);", "gather"),
+            ("gpuArray(1);", "gpuArray"),
+            ("gpuDevice();", "gpuDevice"),
+            ("gpuDevice(1);", "gpuDevice"),
+            ("gpuInfo();", "gpuInfo"),
+            ("pagefun(\"mtimes\", 1, 1);", "pagefun"),
         ];
 
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2992,34 +2984,20 @@ mod tests {
     #[test]
     fn signature_help_uses_datetime_duration_descriptors() {
         let cases = [
-            ("datetime();", "t = datetime()"),
-            (
-                "datetime(2024, 4, 9, 13, 30, 0);",
-                "t = datetime(year, month, day, hour, minute, second)",
-            ),
+            ("datetime();", "datetime"),
+            ("datetime(2024, 4, 9, 13, 30, 0);", "datetime"),
             (
                 "datetime(738000, \"ConvertFrom\", \"datenum\");",
-                "t = datetime(serialDateNumbers, \"ConvertFrom\", \"datenum\")",
+                "datetime",
             ),
-            ("year(t);", "X = year(t)"),
-            ("datetime.plus(t, 1);", "out = datetime.op(lhs, rhs)"),
-            (
-                "duration(1, 30, 45);",
-                "t = duration(hours, minutes, seconds)",
-            ),
-            ("duration.plus(d1, d2);", "out = duration.op(lhs, rhs)"),
+            ("year(t);", "year"),
+            ("datetime.plus(t, 1);", "datetime.plus"),
+            ("duration(1, 30, 45);", "duration"),
+            ("duration.plus(d1, d2);", "duration.plus"),
         ];
 
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -3178,64 +3156,44 @@ mod tests {
     #[test]
     fn signature_help_uses_math_reduction_cumulative_descriptors() {
         let cases = [
-            ("sum([1,2,3]);", "S = sum(A)"),
-            ("sum([1,2,3], \"all\");", "S = sum(A, \"all\")"),
-            ("mean([1,2,3]);", "M = mean(A)"),
-            ("mean([1,2,3], \"all\");", "M = mean(A, \"all\")"),
-            ("max([1,2,3]);", "M = max(A)"),
-            ("max([1,2,3], [3,2,1]);", "M = max(A, B)"),
-            ("max([1,2,3], [], 1);", "M = max(A, [], dim)"),
-            ("min([1,2,3]);", "M = min(A)"),
-            ("min([1,2,3], [3,2,1]);", "M = min(A, B)"),
-            ("min([1,2,3], [], 1);", "M = min(A, [], dim)"),
-            ("median([1,2,3]);", "M = median(A)"),
-            ("median([1,2,3], 1);", "M = median(A, dim)"),
-            (
-                "median([1,2,3], \"omitnan\");",
-                "M = median(A, missingflag)",
-            ),
-            ("std([1,2,3]);", "S = std(A)"),
-            ("std([1,2,3], 0, 1);", "S = std(A, w, dim)"),
-            ("var([1,2,3]);", "V = var(A)"),
-            ("var([1,2,3], 0, 1);", "V = var(A, w, dim)"),
-            ("var([1,2,3], \"omitnan\");", "V = var(A, nanflag)"),
-            ("diff([1,2,3]);", "B = diff(X)"),
-            ("diff([1,2,3], 2, 1);", "B = diff(X, n, dim)"),
-            ("gradient([1,2,3]);", "G = gradient(F)"),
-            ("gradient([1,2,3], 0.5);", "G = gradient(F, h)"),
-            ("cumsum([1,2,3]);", "B = cumsum(A)"),
-            ("cumsum([1,2,3], \"reverse\");", "B = cumsum(A, direction)"),
-            ("cumprod([1,2,3]);", "B = cumprod(A)"),
-            (
-                "cumprod([1,2,3], \"omitnan\", \"reverse\");",
-                "B = cumprod(A, nanflag, direction)",
-            ),
-            ("cummax([1,2,3]);", "M = cummax(A)"),
-            ("cummin([1,2,3]);", "M = cummin(A)"),
-            (
-                "cummax([1,2,3], \"omitnan\", \"reverse\");",
-                "M = cummax(A, nanflag, direction)",
-            ),
-            (
-                "cummin([1,2,3], \"omitnan\", \"reverse\");",
-                "M = cummin(A, nanflag, direction)",
-            ),
-            ("trapz([1,2,3]);", "Q = trapz(Y)"),
-            ("trapz([0,1,2], [1,2,3]);", "Q = trapz(X, Y)"),
-            ("cumtrapz([1,2,3]);", "Q = cumtrapz(Y)"),
-            ("cumtrapz([0,1,2], [1,2,3], 2);", "Q = cumtrapz(X, Y, dim)"),
+            ("sum([1,2,3]);", "sum"),
+            ("sum([1,2,3], \"all\");", "sum"),
+            ("mean([1,2,3]);", "mean"),
+            ("mean([1,2,3], \"all\");", "mean"),
+            ("max([1,2,3]);", "max"),
+            ("max([1,2,3], [3,2,1]);", "max"),
+            ("max([1,2,3], [], 1);", "max"),
+            ("min([1,2,3]);", "min"),
+            ("min([1,2,3], [3,2,1]);", "min"),
+            ("min([1,2,3], [], 1);", "min"),
+            ("median([1,2,3]);", "median"),
+            ("median([1,2,3], 1);", "median"),
+            ("median([1,2,3], \"omitnan\");", "median"),
+            ("std([1,2,3]);", "std"),
+            ("std([1,2,3], 0, 1);", "std"),
+            ("var([1,2,3]);", "var"),
+            ("var([1,2,3], 0, 1);", "var"),
+            ("var([1,2,3], \"omitnan\");", "var"),
+            ("diff([1,2,3]);", "diff"),
+            ("diff([1,2,3], 2, 1);", "diff"),
+            ("gradient([1,2,3]);", "gradient"),
+            ("gradient([1,2,3], 0.5);", "gradient"),
+            ("cumsum([1,2,3]);", "cumsum"),
+            ("cumsum([1,2,3], \"reverse\");", "cumsum"),
+            ("cumprod([1,2,3]);", "cumprod"),
+            ("cumprod([1,2,3], \"omitnan\", \"reverse\");", "cumprod"),
+            ("cummax([1,2,3]);", "cummax"),
+            ("cummin([1,2,3]);", "cummin"),
+            ("cummax([1,2,3], \"omitnan\", \"reverse\");", "cummax"),
+            ("cummin([1,2,3], \"omitnan\", \"reverse\");", "cummin"),
+            ("trapz([1,2,3]);", "trapz"),
+            ("trapz([0,1,2], [1,2,3]);", "trapz"),
+            ("cumtrapz([1,2,3]);", "cumtrapz"),
+            ("cumtrapz([0,1,2], [1,2,3], 2);", "cumtrapz"),
         ];
 
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 

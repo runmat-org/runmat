@@ -23,7 +23,8 @@ const INAPPLICABLE_NAMES: [&str; 3] = [
 #[test]
 fn persistence_and_introspection_integer_metadata_is_exhaustive() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {
@@ -33,7 +34,8 @@ fn persistence_and_introspection_integer_metadata_is_exhaustive() {
         }
     }
     for name in INAPPLICABLE_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         assert_eq!(
             builtin.integer_audit.expect("integer audit").kind,
@@ -56,7 +58,8 @@ fn loadobj_numel_and_memmapfile_extensions_are_independently_registered() {
             ][..],
         ),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         for extension_id in extension_ids {
             assert!(
                 builtin
@@ -68,7 +71,7 @@ fn loadobj_numel_and_memmapfile_extensions_are_independently_registered() {
         }
     }
 
-    let loadobj = runmat_builtins::builtin_function_by_name("loadobj").expect("loadobj");
+    let loadobj = runmat_builtins::builtin_catalog_entry_by_name("loadobj").expect("loadobj");
     assert!(loadobj.integer_capabilities.iter().any(|capability| {
         capability.inputs.iter().any(|input| {
             input.name == "integer_a"

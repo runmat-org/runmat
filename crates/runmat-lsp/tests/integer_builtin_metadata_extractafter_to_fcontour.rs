@@ -89,10 +89,9 @@ fn integer_builtins_are_public_completions_with_settled_metadata() {
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in EXTRACTAFTER_TO_FCONTOUR_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("{name} must expose a descriptor"));
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
+        let descriptor = builtin.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
@@ -150,7 +149,8 @@ fn runmat_only_integer_extensions_are_visible_in_builtin_metadata() {
             ][..],
         ),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         for extension_id in extension_ids {
             assert!(
                 builtin.extensions.iter().any(|extension| {
