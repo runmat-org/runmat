@@ -335,24 +335,35 @@ fn write_record(
         file.sync_all()?;
     }
     fs::rename(&partial, &path)?;
-    crate::workspace_native::sync_ancestors(root.parent().unwrap_or(root), &directory)?;
+    sync_exposing_directories(root, [directory.as_path()])?;
     Ok(path)
 }
 
+/// Persists each directory and its ancestors up to and including the root's parent, the same
+/// boundary as `synchronize_immutable`. A relative root (whose parent is the empty path) is
+/// persisted up to the current directory. Each directory is synchronized once.
 fn sync_exposing_directories<'a>(
     root: &Path,
     directories: impl IntoIterator<Item = &'a Path>,
 ) -> io::Result<()> {
-    let boundary = root.parent().unwrap_or(root);
+    let boundary = root.parent().filter(|parent| !parent.as_os_str().is_empty());
     let mut synced = BTreeSet::new();
     for directory in directories {
         let mut current = Some(directory);
         while let Some(path) = current {
-            if !path.starts_with(boundary) || !synced.insert(path.to_path_buf()) {
+            if boundary.is_some_and(|boundary| !path.starts_with(boundary)) {
                 break;
             }
-            fs::File::open(path)?.sync_all()?;
-            if path == boundary {
+            let effective = if path.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                path
+            };
+            if !synced.insert(effective.to_path_buf()) {
+                break;
+            }
+            fs::File::open(effective)?.sync_all()?;
+            if Some(path) == boundary || path.as_os_str().is_empty() {
                 break;
             }
             current = path.parent();
@@ -571,5 +582,15 @@ mod tests {
             })
             .count();
         assert_eq!(hidden, 0, "committed staging names are retired");
+    }
+
+    #[test]
+    fn a_single_component_relative_root_persists_up_to_the_current_directory() {
+        // `Path::new("src").parent()` is the empty path; the walk ends at ".".
+        super::sync_exposing_directories(
+            Path::new("src"),
+            [Path::new("src/workspace_access"), Path::new("src")],
+        )
+        .unwrap();
     }
 }
