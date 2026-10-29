@@ -118,7 +118,13 @@ fn catalog_projection_rejects_invalid_shape_arithmetic_metadata_and_limits() {
     assert!(profile(&definitions, &[1, 1, 1], 0).is_err());
     assert!(profile(&definitions, &[1, usize::MAX, 1], 1).is_err());
     assert!(profile(&definitions, &[1, 1, 1], usize::MAX).is_err());
-    assert!(profile(&definitions, &[1, 1, 1], 1_000_001).is_err());
+    // No fixed ceiling: a catalog above 1 GiB is profiled; its plan decides admission.
+    assert!(
+        profile(&definitions, &[1, 1, 1], 1_000_001)
+            .unwrap()
+            .encoded_bytes_upper_bound
+            > 1 << 30
+    );
     assert!(RecoveredFieldArtifactEntry::profile_sampled_catalog_shape(
         &definitions,
         &[1, 1, 1],

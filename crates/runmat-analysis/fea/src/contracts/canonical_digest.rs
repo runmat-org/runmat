@@ -76,7 +76,7 @@ mod tests {
 
     #[test]
     fn streamed_digest_equals_the_digest_of_the_materialized_encoding() {
-        let value: Vec<(u64, [f64; 3], String)> = (0..20_000)
+        let value: Vec<(u64, [f64; 3], String)> = (0..100_000)
             .map(|i| (i, [i as f64; 3], format!("entity-{i}")))
             .collect();
         let limits = CanonicalLimits::new(64 << 20, 1 << 20, 64, 8);
@@ -96,7 +96,7 @@ mod tests {
     struct Block;
     impl Serialize for Block {
         fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-            s.serialize_bytes(&[0x5a; 64 * 1024])
+            s.serialize_bytes(&[0x05; 64 * 1024])
         }
     }
     impl Serialize for Blocks {
@@ -113,29 +113,38 @@ mod tests {
     #[test]
     fn contracts_above_one_gibibyte_follow_the_plan_bound() {
         const GIB: u64 = 1 << 30;
+        // Each block encodes as 64 KiB one-byte items plus a header: just above 1 GiB in all.
         let contract = Blocks {
             count: 16 * 1024 + 64,
         };
         let format = CanonicalLimits::new(0, 0, 64, 4);
-        let mut streamed = DigestStream::new();
-        let admitted = stream_contract(
+        let mut wire = DigestStream::new();
+        let size = stream_contract(
             b"runmat-test/v1\0",
             "large",
             &contract,
-            planned_content_limits(GIB + GIB / 4, format).unwrap(),
-            &mut |chunk| streamed.update(chunk),
+            wire_bounded(format),
+            &mut |chunk| wire.update(chunk),
         )
         .unwrap();
-        assert!(admitted > GIB, "the contract exceeds the former fixed 1 GiB ceiling");
-        assert_eq!(
-            canonical_contract_digest(b"runmat-test/v1\0", "large", &contract, format).unwrap(),
-            streamed.finish()
-        );
+        assert!(size > GIB, "the contract exceeds the former fixed 1 GiB ceiling");
+        // A plan that admits the contract's size accepts it, digest unchanged.
+        let mut planned = DigestStream::new();
+        stream_contract(
+            b"runmat-test/v1\0",
+            "large",
+            &contract,
+            planned_content_limits(size, format).unwrap(),
+            &mut |chunk| planned.update(chunk),
+        )
+        .unwrap();
+        assert_eq!(planned.finish(), wire.finish());
+        // A plan one byte short rejects it, without a buffer of its size.
         let rejected = stream_contract(
             b"runmat-test/v1\0",
             "large",
             &contract,
-            planned_content_limits(GIB, format).unwrap(),
+            planned_content_limits(size - 1, format).unwrap(),
             &mut |_| {},
         )
         .unwrap_err();
