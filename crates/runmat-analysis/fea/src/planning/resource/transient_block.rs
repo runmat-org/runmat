@@ -1,6 +1,5 @@
 //! Assembly-free resource admission for one physical transient block worker.
 
-use crate::ComputeBackend;
 use crate::{
     execution::{
         CanonicalSemanticState, StructuralTransientBlockRequest, StructuralTransientCheckpoint,
@@ -56,11 +55,8 @@ pub fn build_structural_transient_block_resource_plan(
     request
         .validate_against_predecessor(predecessor)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    if workload.backend != ComputeBackend::Cpu {
-        return Err(ResourcePlanningError::Invalid(
-            "transient block resource planning currently requires the CPU backend".into(),
-        ));
-    }
+    // Block segments always execute on cpu_reference: a GPU request is admitted (fallback with
+    // one warning, or a strict failure) by `run_transient_block`, so the plan is the CPU plan.
     let prepared = prepare_transient_preassembly(&workload.model, workload.into())
         .map_err(ResourcePlanningError::from_preparation_error)?;
     let scope_plan = build_structural_transient_scope_resource_plan(

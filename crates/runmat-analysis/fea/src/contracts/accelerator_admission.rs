@@ -31,6 +31,8 @@ pub enum AcceleratorFamily {
     StructuralBuckling,
     StructuralFrequency,
     StructuralTransient,
+    /// Checkpointed transient block segments: the block solve has no device path.
+    StructuralTransientBlock,
     StructuralNonlinear,
     Thermal,
     /// Thermal with radiation boundaries: the damped Newton solve has no device path.
@@ -49,7 +51,7 @@ impl AcceleratorFamily {
             Self::StructuralModal => "structural modal",
             Self::StructuralBuckling => "structural buckling",
             Self::StructuralFrequency => "structural frequency response",
-            Self::StructuralTransient => "structural transient",
+            Self::StructuralTransient | Self::StructuralTransientBlock => "structural transient",
             Self::StructuralNonlinear => "structural nonlinear",
             Self::Thermal => "thermal",
             Self::ThermalRadiation => "thermal radiation",
@@ -74,6 +76,9 @@ impl AcceleratorFamily {
             ),
             Self::StructuralNonlinear => {
                 Some("the Newton tangent solves run on the shared CPU sparse layer")
+            }
+            Self::StructuralTransientBlock => {
+                Some("checkpointed transient block segments run on the shared CPU sparse layer")
             }
             Self::ThermalRadiation => {
                 Some("the damped Newton radiation solve runs on the shared CPU sparse layer")
@@ -343,7 +348,9 @@ pub fn confirm_accelerator_execution(
     }
     fallback_decision(
         family,
-        "the accelerator declined the system at solve time",
+        family
+            .unavailable_reason()
+            .unwrap_or("the accelerator declined the system at solve time"),
         accelerator_admission_policy(),
     )
     .map(Some)

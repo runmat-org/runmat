@@ -262,13 +262,12 @@ fn prepare_transient_scope_basis(
 pub fn run_transient_block(
     input: StructuralTransientRunBlockInput<'_>,
 ) -> Result<StructuralTransientSegment, FeaRunError> {
-    // Blocks keep the workload's placement identity (the requested backend); strict placement
-    // fails before the block assembles when admission already knows the device will not run,
-    // and a known fallback solves the block on cpu_reference. The recovered run restores the
-    // requested backend and carries the one fallback warning
-    // (`recover_completed_transient_run`).
+    // Blocks keep the workload's placement identity (the requested backend) but have no device
+    // path: a GPU request solves each block on cpu_reference, and strict placement fails before
+    // the block assembles. The recovered run restores the requested backend and carries the one
+    // fallback warning (`recover_completed_transient_run`).
     let solve_backend = crate::contracts::accelerator_admission::admit_accelerator(
-        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransient,
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransientBlock,
         input.workload.backend,
     )?
     .effective;

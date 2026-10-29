@@ -5,7 +5,7 @@ use crate::{
     assembly::{
         assemble_structural_system_borrowed, AssemblySummary, StructuralFormulationRequirement,
     },
-    contracts::{ComputeBackend, ExecutionBackend, FeaRunError, FeaTransientRunResult},
+    contracts::{ExecutionBackend, FeaRunError, FeaTransientRunResult},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
     execution::{
         StructuralTransientCheckpointScope, StructuralTransientCheckpointScopeInput,
@@ -79,10 +79,9 @@ pub fn recover_completed_transient_run(
             "completed transient result differs from its exact workload, mesh, or schedule".into(),
         ));
     }
-    let expected_backend = match input.workload.backend {
-        ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
-        ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
-    };
+    // Transient block segments have no device path: every block solves on cpu_reference,
+    // whatever backend the workload requested (that request is restored on the run below).
+    let expected_backend = LinearAlgebraBackendKind::CpuReference;
     let execution_backend = input
         .numerical_receipt
         .blocks
@@ -184,7 +183,7 @@ pub fn recover_completed_transient_run(
     // after a GPU request carries exactly one fallback warning (strict placement fails closed).
     let mut recovered = recovered;
     crate::contracts::accelerator_admission::settle_accelerator_execution(
-        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransient,
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralTransientBlock,
         &mut recovered.run,
     )?;
     Ok(recovered)
