@@ -18,10 +18,11 @@ use super::partition_set::{
 
 pub(super) const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
 /// Recovered fields carry one value per entity and component of any admitted mesh (the same
-/// complete fields a semantic state carries), so collections are bounded by the encoded-byte
-/// ceiling rather than a fixed item count. Memory is admitted by the recovery resource plan.
+/// complete fields a semantic state carries). Their size is admitted by the recovery resource
+/// plan and checked against it by the object inventory, so the codec bounds them only by the
+/// wire range; identities are digested from the streamed encoding.
 pub(super) const FIELD_LIMITS: CanonicalLimits =
-    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 4096, 32);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 4096, 32));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -315,16 +316,20 @@ impl RecoveredFieldDefinition {
         );
         // Complete fields keep their established identity; a support is part of the identity.
         if self.support.is_complete() {
-            encode_contract(FIELD_PREFIX, "recovered-field-definition", &shape, FIELD_LIMITS)
+            crate::contracts::canonical_digest::canonical_contract_digest(
+                FIELD_PREFIX,
+                "recovered-field-definition",
+                &shape,
+                FIELD_LIMITS,
+            )
         } else {
-            encode_contract(
+            crate::contracts::canonical_digest::canonical_contract_digest(
                 FIELD_PREFIX,
                 "recovered-field-definition-supported",
                 &(shape, &self.support),
                 FIELD_LIMITS,
             )
         }
-        .map(Digest::sha256)
         .map(RecoveredFieldDefinitionIdentity)
         .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
     }
@@ -594,13 +599,12 @@ impl RecoveredFieldSelection {
     }
 
     fn derive_identity(&self) -> Result<RecoveredFieldSelectionIdentity, RecoveredFieldError> {
-        encode_contract(
+        crate::contracts::canonical_digest::canonical_contract_digest(
             FIELD_PREFIX,
             "recovered-field-selection-identity",
             &(self.schema_version, self.source.identity, &self.fields),
             FIELD_LIMITS,
         )
-        .map(Digest::sha256)
         .map(RecoveredFieldSelectionIdentity)
         .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
     }
@@ -809,13 +813,12 @@ fn sample_identity(
     definition: RecoveredFieldDefinitionIdentity,
     sample: RecoveredFieldSample,
 ) -> Result<Digest, RecoveredFieldError> {
-    encode_contract(
+    crate::contracts::canonical_digest::canonical_contract_digest(
         FIELD_PREFIX,
         "recovered-field-sample",
         &(definition, sample),
         FIELD_LIMITS,
     )
-    .map(Digest::sha256)
     .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
 }
 

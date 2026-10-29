@@ -188,7 +188,7 @@ pub(in super::super) fn completed_summary(
             procedure: "steady_incompressible_fluid",
             study_definition_digest: result
                 .completion
-                .compiled
+                .compiled()
                 .definition_digest()
                 .map_err(anyhow::Error::msg)?
                 .to_string(),

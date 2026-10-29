@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct FluidStudyCompletion {
-    pub compiled: runmat_analysis_fea::study::CompiledAnalysisStudy,
-    pub workload: FluidSteadyWorkload,
+    /// The compiled study and its workload, planned once by the coordinator on the study's
+    /// mesh (sealed: holding it is the proof of that planning).
+    pub product: runmat_analysis_fea::study::FluidStudyProduct,
     pub host_workload_digest: Digest,
     pub result: FluidSteadySolverResult,
     pub numerical_receipt: FluidNumericalReceiptArtifact,
@@ -31,6 +32,16 @@ pub struct FluidStudyCompletion {
     pub frozen_project_digest: Option<Digest>,
     pub root: ValueRef,
     pub catalog: PublishedObjectCatalog,
+}
+
+impl FluidStudyCompletion {
+    pub fn compiled(&self) -> &runmat_analysis_fea::study::CompiledAnalysisStudy {
+        self.product.compiled()
+    }
+
+    pub fn workload(&self) -> &FluidSteadyWorkload {
+        self.product.workload()
+    }
 }
 
 /// Authenticate every DTO member against a cold replay of the original immutable root.

@@ -8,7 +8,12 @@ use crate::{
 use std::collections::BTreeSet;
 
 const PREFIX: &[u8] = b"runmat-magnetostatic-result/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+/// The retained result grows with the mesh (edges and fifteen samples per element). Its size is
+/// admitted by the magnetostatic resource plan (`result_output`) and checked against it by the
+/// object inventory, so the codec bounds it only by the wire range; its identity is digested
+/// from the streamed encoding.
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -16,19 +21,21 @@ pub struct MagnetostaticSolverResult {
     data: ResultData,
 }
 
+/// Fields are declared in canonical (UTF-8 key) order so the streamed encoding holds neither
+/// the sampled topology nor the response back for sorting.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResultData {
-    source_workload: AnalysisWorkloadIdentity,
-    producer: StepIdentity,
+    element_order: runmat_meshing_core::ElementOrder,
     formulation: AnalysisRunIdentity,
     mesh_digest: Digest,
+    producer: StepIdentity,
     projection_digest: Digest,
-    sampling_topology: crate::results::field::SampledVolumeFieldTopology,
     publication_declarations: Vec<runmat_analysis_core::StateOutput>,
-    element_order: runmat_meshing_core::ElementOrder,
     relative_residual_target: f64,
     response: MagnetostaticResponse,
+    sampling_topology: crate::results::field::SampledVolumeFieldTopology,
+    source_workload: AnalysisWorkloadIdentity,
 }
 
 impl<'de> Deserialize<'de> for MagnetostaticSolverResult {
@@ -326,11 +333,19 @@ impl MagnetostaticSolverResult {
         value.validate_for(workload, mesh)?;
         Ok(value)
     }
+    /// SHA-256 of `canonical_bytes`, from the streamed encoding: identifying a result never
+    /// materializes its mesh-sized wire.
+    pub fn payload_digest(&self) -> AnalysisExecutionResult<Digest> {
+        self.validate()?;
+        Ok(crate::contracts::canonical_digest::canonical_contract_digest(
+            PREFIX,
+            "magnetostatic-result",
+            self,
+            LIMITS,
+        )?)
+    }
     pub fn source_result_identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
-        SolverResultIdentity::from_step_result(
-            self.data.producer,
-            Digest::sha256(self.canonical_bytes()?),
-        )
+        SolverResultIdentity::from_step_result(self.data.producer, self.payload_digest()?)
     }
     pub fn response(&self) -> &MagnetostaticResponse {
         &self.data.response

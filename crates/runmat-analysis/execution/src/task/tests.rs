@@ -16,9 +16,10 @@ fn publication() -> (
         completeness: StateCompleteness::Complete,
         persistence: StatePersistence::UntilDependentsComplete,
     };
-    p.product.compiled.model.sequence.steps[0].state_outputs = vec![declaration.clone()];
+    let mut compiled = p.product.compiled().clone();
+    compiled.model.sequence.steps[0].state_outputs = vec![declaration.clone()];
     p.product = runmat_analysis_fea::study::plan_fluid_study_product(
-        p.product.compiled.clone(),
+        compiled,
         &p.mesh,
         p.policy,
     )
@@ -156,7 +157,7 @@ fn immutable_original_source_and_current_plan_are_distinct_authorities() {
     let mut unrelated = crate::fluid_study::tests::preparation();
     unrelated.policy.numerical.momentum_relaxation *= 0.5;
     unrelated.product = runmat_analysis_fea::study::plan_fluid_study_product(
-        unrelated.product.compiled.clone(),
+        unrelated.product.compiled().clone(),
         &unrelated.mesh,
         unrelated.policy,
     )

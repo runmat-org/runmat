@@ -28,23 +28,25 @@ pub struct MagneticFieldSample {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+/// Fields are declared in canonical (UTF-8 key) order so a streamed encoding of a mesh-sized
+/// response holds none of its edge or sample collections back for sorting.
 pub struct MagnetostaticResponse {
-    pub edge_node_identities: Vec<[StableDigest; 2]>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
     pub edge_circulations_wb:
         runmat_types::physical::Quantity<runmat_types::physical::kind::MagneticFlux, Vec<f64>>,
-    pub samples: Vec<MagneticFieldSample>,
+    pub edge_node_identities: Vec<[StableDigest; 2]>,
+    pub iterations: u32,
     #[serde(with = "runmat_types::physical::canonical_storage")]
     pub magnetic_energy_j:
         runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
+    pub relative_energy_work_error: f64,
+    pub relative_gauge_residual: f64,
+    pub relative_physical_residual: f64,
+    pub samples: Vec<MagneticFieldSample>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
     /// ∫J·A dV plus the reaction work of prescribed boundary potentials; equals twice the
     /// magnetic energy.
     pub source_work_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
-    pub relative_physical_residual: f64,
-    pub relative_gauge_residual: f64,
-    pub relative_energy_work_error: f64,
-    pub iterations: u32,
 }
 
 pub(super) fn solve(

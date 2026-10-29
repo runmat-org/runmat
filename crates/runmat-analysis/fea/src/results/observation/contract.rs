@@ -26,8 +26,10 @@ pub(super) const OBSERVATION_PREFIX: &[u8] = b"runmat-fea-observation/v1\0";
 // Artifact provenance was replaced, not made backward compatible. Plan/sample codecs remain
 // unchanged because their numerical contracts did not change.
 const OBSERVATION_ARTIFACT_PREFIX: &[u8] = b"runmat-fea-observation-artifact/v2\0";
+/// Observation plans and samples grow with the observed model. Their size is admitted by the
+/// resource plan and checked by the object inventory; the codec bounds them by the wire range.
 pub(crate) const OBSERVATION_LIMITS: CanonicalLimits =
-    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -196,19 +198,20 @@ pub struct ResolvedObservationPlanContents {
 
 impl ResolvedObservationPlanContents {
     pub fn derive_identity(&self) -> Result<ResolvedObservationPlanIdentity, ObservationError> {
-        let bytes = encode_contract(
-            OBSERVATION_PREFIX,
-            "resolved-observation-plan",
-            &(
-                self.schema_version,
-                self.topology_digest,
-                &self.step_id,
-                &self.independent_domain,
-                &self.observations,
-            ),
-            OBSERVATION_LIMITS,
-        )?;
-        Ok(ResolvedObservationPlanIdentity(Digest::sha256(bytes)))
+        Ok(ResolvedObservationPlanIdentity(
+            crate::contracts::canonical_digest::canonical_contract_digest(
+                OBSERVATION_PREFIX,
+                "resolved-observation-plan",
+                &(
+                    self.schema_version,
+                    self.topology_digest,
+                    &self.step_id,
+                    &self.independent_domain,
+                    &self.observations,
+                ),
+                OBSERVATION_LIMITS,
+            )?,
+        ))
     }
 
     fn validate(&self) -> Result<(), ObservationError> {

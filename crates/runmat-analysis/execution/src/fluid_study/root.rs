@@ -13,7 +13,6 @@ use runmat_analysis_fea::{
     },
     study::{
         plan_fluid_study_product, CompiledAnalysisStudy, FluidStudyPlanningPolicy,
-        FluidStudyProduct,
     },
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
@@ -69,7 +68,7 @@ impl PreparationWire {
         Self {
             local_execution: preparation.local_execution,
             policy: preparation.policy,
-            compiled: preparation.product.compiled,
+            compiled: preparation.product.into_compiled(),
             workload,
             mesh: preparation.mesh,
             frozen_project_digest: preparation.frozen_project_digest,
@@ -97,19 +96,15 @@ impl PreparationWire {
         if output_policy.chunk_bytes() != self.chunk_bytes {
             return Err(invalid("noncanonical fluid output chunk size"));
         }
-        let workload = plan_fluid_study_product(self.compiled.clone(), &self.mesh, self.policy)
-            .map_err(|error| invalid(&error.to_string()))?
-            .workload;
-        if workload != self.workload {
+        let product = plan_fluid_study_product(self.compiled, &self.mesh, self.policy)
+            .map_err(|error| invalid(&error.to_string()))?;
+        if *product.workload() != self.workload {
             return Err(invalid("fluid root workload differs from authored plan"));
         }
         Ok(FluidStudyPreparation {
             local_execution: self.local_execution,
             policy: self.policy,
-            product: FluidStudyProduct {
-                compiled: self.compiled,
-                workload,
-            },
+            product,
             mesh: self.mesh,
             frozen_project_digest: self.frozen_project_digest,
             artifact_access: access,

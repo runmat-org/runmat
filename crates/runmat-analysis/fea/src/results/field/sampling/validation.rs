@@ -26,7 +26,7 @@ impl SampledVolumeFieldTopology {
                 .len()
                 .checked_mul(data.rule.points_per_element())
                 != Some(data.integration_samples.len())
-            || self.sampling_digest != Digest::sha256(encode("sampling-layout", data)?)
+            || self.sampling_digest != digest("sampling-layout", data)?
         {
             return Err(invalid(
                 "sampled volume topology identity or complete inventory is invalid",

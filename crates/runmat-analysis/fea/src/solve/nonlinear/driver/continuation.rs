@@ -6,7 +6,11 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
-const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64);
+/// A continuation carries one accepted history (mesh-sized state). Its stored size is admitted
+/// by the nonlinear resource plan (`history_limits`, block transport) and checked by the object
+/// inventory, so the codec bounds it only by the wire range. Controller, scope and content
+/// identities are digested from the streamed encoding and never materialize it.
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 const PREFIX: &[u8] = b"runmat-j2-load-continuation-wire/v3\0";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +120,12 @@ impl NonlinearLoadContinuation {
             .map_err(|e| FeaRunError::InvalidModel(e.to_string()))?;
         state.validate_content_digest(expected_digest)?;
         Ok(state)
+    }
+
+    /// Integrity of the content digest this continuation carries (no encoding is built).
+    /// Like `canonical_bytes`, this grants no restart authority by itself.
+    pub fn validate_integrity(&self) -> Result<(), FeaRunError> {
+        self.validate_content_digest(self.content_digest)
     }
 
     fn validate_content_digest(&self, expected: Digest) -> Result<(), FeaRunError> {
@@ -257,8 +267,7 @@ pub(super) fn digest(
     value_prefix: &'static [u8],
     value: &impl Serialize,
 ) -> Result<Digest, FeaRunError> {
-    encode_contract(value_prefix, "j2-load-controller", value, LIMITS)
-        .map(Digest::sha256)
+    crate::contracts::canonical_digest::canonical_contract_digest(value_prefix, "j2-load-controller", value, LIMITS)
         .map_err(|e| FeaRunError::InvalidModel(e.to_string()))
 }
 

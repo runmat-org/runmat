@@ -193,7 +193,20 @@ impl FluidNumericalReceiptArtifact {
         )?;
         // This authenticates every original field and independently recomputes its
         // physical/algebraic face/cell closure; self-consistent summaries alone fail.
-        result.validate_for(w, mesh)?;
+        Self::new_on(&result.on_source(w, mesh)?, mesh)
+    }
+
+    /// The receipt of a result already validated against its source on `mesh`.
+    pub fn new_on(
+        on: &super::FluidResultOnSource<'_>,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<Self> {
+        let (w, result) = (on.workload(), on.result());
+        admit_receipt_materialization(
+            w,
+            result,
+            fluid_receipt_encoding_profile()?.materialization_resident_bytes_estimate,
+        )?;
         let original = result.original();
         let r = &original.residual;
         let cells = original.velocity_m_per_s.canonical_values().len() as u64;
@@ -310,8 +323,17 @@ impl FluidNumericalReceiptArtifact {
         r: &FluidSteadySolverResult,
         m: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
+        self.validate_against_on(&r.on_source(w, m)?, m)
+    }
+
+    /// [`Self::validate_against`] for a result already validated against its source on `m`.
+    pub fn validate_against_on(
+        &self,
+        on: &super::FluidResultOnSource<'_>,
+        m: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<()> {
         self.validate()?;
-        if self != &Self::new(w, r, m)? {
+        if self != &Self::new_on(on, m)? {
             return Err(invalid(
                 "fluid receipt differs from original workload/result/mesh",
             ));

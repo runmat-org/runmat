@@ -157,7 +157,7 @@ pub fn prepare_study_publication(
         CompletedFeaStudyResult::Fluid(result) => {
             let study = result
                 .completion
-                .compiled
+                .compiled()
                 .definition()
                 .map_err(|e| e.to_string())?;
             let digest = study.digest();
@@ -168,8 +168,8 @@ pub fn prepare_study_publication(
                 &result.meshing_evidence,
                 &runmat_runtime::analysis::AnalysisCfdRunOptions {
                     precision_mode: PrecisionMode::Fp64,
-                    numerical: result.completion.workload.policy,
-                    geometry: result.completion.workload.geometry_policy,
+                    numerical: result.completion.workload().policy,
+                    geometry: result.completion.workload().geometry_policy,
                 },
                 study,
                 context(),

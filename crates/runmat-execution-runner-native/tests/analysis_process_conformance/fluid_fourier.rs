@@ -45,7 +45,7 @@ pub(super) async fn run() {
 
         cold.result
             .numerical_receipt
-            .validate_against(&cold.workload, &cold.result.result, &fixture.mesh)
+            .validate_against(cold.product.workload(), &cold.result.result, &fixture.mesh)
             .unwrap();
         eprintln!(
             "scheduled original Fourier n={n}: centroid velocity={}, flow={}, wall shear={}",
