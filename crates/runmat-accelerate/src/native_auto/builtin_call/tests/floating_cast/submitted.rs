@@ -76,7 +76,14 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
     }))
     .unwrap();
     let Value::GpuTensor(resident_output) = output.value() else {
-        panic!("selected cross-precision device route")
+        panic!(
+            "selected cross-precision device route: plans={}, deferrals={}, casts={}, uploads={}, downloads={}",
+            probe.decisions.requests.borrow().len(),
+            probe.deferrals.get(),
+            provider.casts.load(Ordering::Relaxed),
+            provider.uploads.load(Ordering::Relaxed),
+            provider.downloads.load(Ordering::Relaxed),
+        )
     };
     assert_eq!(resident_output.device_id(), provider.device_id());
     assert_eq!(resident_output.shape(), &[1, 2, 2]);

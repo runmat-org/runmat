@@ -252,12 +252,20 @@ fn resident_authority_distinguishes_valid_ineligible_inputs_from_invalid_owners(
         dense_authority.floating_eligibility(),
         FloatingFusionEligibility::Eligible(ProviderPrecision::F32)
     );
-    for handle in [
-        &transpose,
-        &logical.handle,
-        &complex.handle,
-        &integer.handle,
-    ] {
+    let transpose_value = Value::GpuTensor(transpose);
+    let transpose_authority = authenticate_resident_input(&transpose_value)
+        .unwrap()
+        .expect("authenticated matrix transpose");
+    assert!(transpose_authority.belongs_to(provider));
+    assert_eq!(
+        transpose_authority.floating_eligibility(),
+        FloatingFusionEligibility::Eligible(ProviderPrecision::F32)
+    );
+    let leaves = FusionInvocationLeaves::new(&source, &[&transpose_value, &epsilon]).unwrap();
+    let mut expected = value_fact(&transpose_value);
+    expected.storage = StorageFact::Dense;
+    assert_eq!(storage(&leaves, 0, &transpose_value), expected);
+    for handle in [&logical.handle, &complex.handle, &integer.handle] {
         let value = Value::GpuTensor(handle.clone());
         let authority = authenticate_resident_input(&value)
             .unwrap()
@@ -283,7 +291,6 @@ fn resident_authority_distinguishes_valid_ineligible_inputs_from_invalid_owners(
     assert!(!foreign_authority.belongs_to(provider));
 
     for handle in [
-        transpose,
         unregistered.handle,
         logical.handle,
         complex.handle,
