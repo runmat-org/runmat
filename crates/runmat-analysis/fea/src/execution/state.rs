@@ -4,6 +4,8 @@ use runmat_analysis_core::{
     TopologyTransitionPolicy,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+
+use crate::contracts::canonical_digest::{canonical_contract_digest, wire_bounded};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
@@ -13,10 +15,10 @@ use super::{
 };
 
 const STATE_PREFIX: &[u8] = b"runmat-analysis-semantic-state/v1\0";
-/// Semantic states carry complete fields of any admitted mesh, so their collections are
-/// bounded by the contract's encoded-byte ceiling rather than a fixed item count.
-const STATE_LIMITS: CanonicalLimits =
-    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
+/// Semantic states carry complete fields of any admitted mesh. Their size is admitted by the
+/// producing resource plan and checked against it by the object inventory, so the codec bounds
+/// them only by the wire range; identities are digested from the streamed encoding.
+const STATE_LIMITS: CanonicalLimits = wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 pub(super) mod field_validation;
 mod resource_profile;
@@ -346,12 +348,12 @@ impl CanonicalSemanticState {
     }
 
     fn derive_content_digest(&self) -> AnalysisExecutionResult<Digest> {
-        Ok(Digest::sha256(encode_contract(
+        Ok(canonical_contract_digest(
             STATE_PREFIX,
             "semantic-state-content",
             &(self.kind, self.topology_digest, &self.payload),
             STATE_LIMITS,
-        )?))
+        )?)
     }
 
     fn derive_identity(&self) -> AnalysisExecutionResult<StateIdentity> {
@@ -380,12 +382,12 @@ impl CanonicalSemanticState {
         source_result: SolverResultIdentity,
         content_digest: Digest,
     ) -> AnalysisExecutionResult<StateIdentity> {
-        let declaration_digest = Digest::sha256(encode_contract(
+        let declaration_digest = canonical_contract_digest(
             STATE_PREFIX,
             "semantic-state-declaration",
             &(state_id, kind, completeness, persistence),
             STATE_LIMITS,
-        )?);
+        )?;
         StateIdentity::new(
             producer,
             declaration_digest,

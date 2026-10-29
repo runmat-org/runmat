@@ -44,10 +44,36 @@ fn shared_sample_rules_have_distinct_canonical_inventory_and_signed_edges() {
                 );
                 assert_eq!(edge.orientation_sign([edge.node_identities[0]; 2]), None);
             }
-            let reopened = SampledVolumeFieldTopology::from_canonical_bytes(
-                &topology.canonical_bytes().unwrap(),
+            // The layout is carried inside result contracts, whose limits come from their plan.
+            let limits = crate::contracts::canonical_digest::wire_bounded(
+                runmat_canonical_codec::CanonicalLimits::new(0, 0, 65_536, 64),
+            );
+            let bytes = runmat_canonical_codec::encode_contract(
+                b"runmat-test-sampled-topology/v1\0",
+                "sampled-volume-field-topology",
+                &topology,
+                limits,
             )
             .unwrap();
+            let reopened: SampledVolumeFieldTopology = runmat_canonical_codec::decode_contract(
+                b"runmat-test-sampled-topology/v1\0",
+                "sampled-volume-field-topology",
+                &bytes,
+                limits,
+            )
+            .unwrap();
+            assert_eq!(
+                topology.sampling_digest(),
+                Digest::sha256(
+                    runmat_canonical_codec::encode_contract(
+                        PREFIX,
+                        "sampling-layout",
+                        &topology.data,
+                        limits
+                    )
+                    .unwrap()
+                )
+            );
             assert_eq!(reopened, topology);
             if let Some(previous) = previous {
                 assert_ne!(topology.identity().unwrap(), previous);
@@ -83,7 +109,7 @@ fn malformed_sample_and_edge_inventory_is_rejected_even_with_updated_digest() {
             }
             _ => unreachable!(),
         }
-        bad.sampling_digest = Digest::sha256(encode("sampling-layout", &bad.data).unwrap());
+        bad.sampling_digest = digest("sampling-layout", &bad.data).unwrap();
         assert!(bad.validate().is_err(), "accepted defect {defect}");
     }
     let mut corrupt = serde_json::to_value(&topology).unwrap();
@@ -103,7 +129,7 @@ fn altered_physical_layout_cannot_splice_into_source_mesh_or_recovery_request() 
             .unwrap();
     let mut altered = topology.clone();
     altered.data.integration_samples[0].position_m[0] += 0.1;
-    altered.sampling_digest = Digest::sha256(encode("sampling-layout", &altered.data).unwrap());
+    altered.sampling_digest = digest("sampling-layout", &altered.data).unwrap();
     altered.validate().unwrap();
     assert!(altered.validate_for_mesh(&mesh).is_err());
     assert_ne!(

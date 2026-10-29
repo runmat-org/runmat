@@ -38,11 +38,12 @@ impl<'a, 'control> Array<'a, 'control> {
         if self.expected.is_some_and(|len| self.count > len) {
             return Err(invalid("sequence is longer than its declared length"));
         }
-        let sink = match self.body.as_mut() {
-            Some(body) => body,
-            None => &mut *self.output,
+        let Some(body) = self.body.as_mut() else {
+            value.serialize(Serializer::child(self.output, self.state, value))?;
+            self.state.flush(self.output, false);
+            return Ok(());
         };
-        value.serialize(Serializer::child(sink, self.state, value))
+        value.serialize(Serializer::child(body, self.state, value))
     }
     fn finish(self) -> Result<(), CanonicalCodecError> {
         self.state.check()?;
@@ -127,9 +128,12 @@ enum Mode {
         held: BTreeMap<&'static str, Vec<u8>>,
     },
     Streaming {
+        /// Absolute position (see `State::position`) of the map header.
         header_start: usize,
+        /// The header is pinned in a streamed root buffer and must be unpinned on exit.
+        pinned: bool,
         expected: usize,
-        /// Key and offset of each streamed entry, in strictly increasing key order.
+        /// Key and absolute position of each streamed entry, in strictly increasing key order.
         entries: Vec<(String, usize)>,
     },
     Held(BTreeMap<String, Vec<u8>>),
@@ -143,10 +147,12 @@ impl<'a, 'control> Map<'a, 'control> {
         let Serializer { output, state, .. } = serializer;
         let mode = match len {
             Some(len) => {
-                let header_start = output.len();
+                let header_start = state.position(output);
                 header(output, state, Header::Map(len as u64))?;
+                let pinned = state.pin(output, header_start);
                 Mode::Streaming {
                     header_start,
+                    pinned,
                     expected: len,
                     entries: Vec::new(),
                 }
@@ -205,6 +211,7 @@ impl<'a, 'control> Map<'a, 'control> {
                 self.output.extend_from_slice(&entry);
                 *next += 1;
             }
+            self.state.flush(self.output, false);
             return Ok(());
         }
         let Ok(position) = order.binary_search(&key) else {
@@ -226,7 +233,7 @@ impl<'a, 'control> Map<'a, 'control> {
         self.state.check()?;
         if let Mode::Streaming { entries, .. } = &self.mode {
             if entries.last().is_none_or(|(last, _)| *last < key) {
-                let start = self.output.len();
+                let start = self.state.position(self.output);
                 let key_bytes = key_bytes(&key)?;
                 self.state.charge(key_bytes.len())?;
                 self.output.extend_from_slice(&key_bytes);
@@ -235,6 +242,8 @@ impl<'a, 'control> Map<'a, 'control> {
                     unreachable!("streaming mode is unchanged by its value");
                 };
                 entries.push((key, start));
+                // Bytes after this map's own pinned header stay until the map completes.
+                self.state.flush(self.output, false);
                 return Ok(());
             }
             self.hold_streamed()?;
@@ -262,13 +271,19 @@ impl<'a, 'control> Map<'a, 'control> {
     fn hold_streamed(&mut self) -> Result<(), CanonicalCodecError> {
         let Mode::Streaming {
             header_start,
+            pinned,
             entries,
             ..
         } = std::mem::replace(&mut self.mode, Mode::Held(BTreeMap::new()))
         else {
             return Ok(());
         };
-        let tail = self.output.split_off(header_start);
+        if pinned {
+            self.state.unpin(header_start);
+        }
+        let tail = self
+            .output
+            .split_off(self.state.index(self.output, header_start));
         let body_start = entries.first().map_or(tail.len(), |(_, start)| start - header_start);
         self.state.wire_bytes -= body_start;
         let mut held = BTreeMap::new();
@@ -299,13 +314,21 @@ impl<'a, 'control> Map<'a, 'control> {
                 Ok(())
             }
             Mode::Streaming {
-                expected, entries, ..
+                header_start,
+                pinned,
+                expected,
+                entries,
             } => {
                 if *expected != entries.len() {
                     // A declared length that differs from the entries keeps the established
                     // count semantics of the held path.
                     self.hold_streamed()?;
                     return self.finish();
+                }
+                if *pinned {
+                    let header_start = *header_start;
+                    self.state.unpin(header_start);
+                    self.state.flush(self.output, false);
                 }
                 Ok(())
             }

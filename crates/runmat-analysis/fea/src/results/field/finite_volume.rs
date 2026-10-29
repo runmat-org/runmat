@@ -15,7 +15,9 @@ mod validation;
 
 const PREFIX: &[u8] = b"runmat-finite-volume-field-layout/v1\0";
 /// Per-entity topology of any admitted mesh: collections are bounded by the byte ceiling.
-const LIMITS: CanonicalLimits = CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
+/// Layout size follows the admitted mesh (its plan and the object inventory admit it), so the
+/// codec bounds it only by the wire range.
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -47,14 +49,14 @@ fn face_identity(
     owner: StableDigest,
     neighbor: Option<StableDigest>,
 ) -> Result<StableDigest, RecoveredFieldError> {
-    let bytes = encode_contract(
+    let digest = crate::contracts::canonical_digest::canonical_contract_digest(
         PREFIX,
         "owner-oriented-face",
         &(corners, owner, neighbor),
         LIMITS,
     )
     .map_err(invalid)?;
-    Ok(StableDigest::from_bytes(*Digest::sha256(bytes).bytes()))
+    Ok(StableDigest::from_bytes(*digest.bytes()))
 }
 
 impl FiniteVolumeFieldTopology {
