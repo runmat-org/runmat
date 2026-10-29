@@ -1247,6 +1247,11 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 "future is not executing in its caller".into(),
             ));
         }
+        if result.as_ref().is_ok_and(|sequence| {
+            sequence.value().len() != usize::from(future.outputs.requested_outputs)
+        }) {
+            return Err(ExecutionServiceError::InvalidOutputContract);
+        }
         let retired = state
             .futures
             .insert(future.id, FutureState::Completed(result));

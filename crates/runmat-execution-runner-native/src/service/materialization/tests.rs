@@ -324,9 +324,11 @@ fn callback_waves_release_only_internal_records_after_rooted_result_handoff() {
             };
             {
                 let mut state = service.state.lock().unwrap();
-                state
-                    .futures
-                    .insert(future_id, FutureState::Completed(Ok(result.clone())));
+                state.futures.issue(
+                    future_id,
+                    public_future.outputs.clone(),
+                    FutureState::Completed(Ok(result.clone())),
+                );
                 state.tasks.insert(
                     task.id,
                     super::TaskRecord {
