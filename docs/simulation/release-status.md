@@ -181,3 +181,23 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid_structure_interaction nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
 - Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md).
+
+## The `.fea` language
+
+### language.include.parameterized
+
+**Including a parameterized model with its inputs bound by name.**
+
+- Kind: language.
+- Ships when: `include model.<m>(<name> = <value>, …)` checks, binds typed region, material and quantity inputs, and a study using it runs.
+- Described in: [Declaration reference](./language/reference/declarations.md).
+
+## Geometry
+
+### geometry.select.predicate
+
+**Geometric-predicate region selectors (planar faces by normal, faces within a box).**
+
+- Kind: geometry.
+- Ships when: A region selected by a bounded geometric predicate checks with cardinality evidence, resolves to canonical ids, and stays stable across re-import of the same CAD revision.
+- Described in: [Declaration reference](./language/reference/declarations.md).

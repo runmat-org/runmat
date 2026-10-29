@@ -319,6 +319,38 @@
       ],
       "owner": "q-fluid",
       "landed_in": null
+    },
+    {
+      "id": "geometry.select.predicate",
+      "title": "Geometric-predicate region selectors (planar faces by normal, faces within a box)",
+      "area": "geometry",
+      "kind": "geometry",
+      "acceptance": "A region selected by a bounded geometric predicate checks with cardinality evidence, resolves to canonical ids, and stays stable across re-import of the same CAD revision.",
+      "witness": [
+        "runmat check <study selecting faces by normal>.fea"
+      ],
+      "gaps": [
+        "G-D4",
+        "LANG-04"
+      ],
+      "owner": "q-meshqual",
+      "landed_in": null
+    },
+    {
+      "id": "language.include.parameterized",
+      "title": "Including a parameterized model with its inputs bound by name",
+      "area": "language",
+      "kind": "language",
+      "acceptance": "`include model.<m>(<name> = <value>, …)` checks, binds typed region, material and quantity inputs, and a study using it runs.",
+      "witness": [
+        "runmat check <study with parameterized include>.fea"
+      ],
+      "gaps": [
+        "G-E1",
+        "LANG-03"
+      ],
+      "owner": "q-check-parity",
+      "landed_in": null
     }
   ]
 }
