@@ -25,3 +25,6 @@ runmat-meshing-surface = { workspace = true }
 
 [build-dependencies]
 runmat-build-identity = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }

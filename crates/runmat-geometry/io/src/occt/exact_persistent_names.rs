@@ -260,7 +260,7 @@ impl PersistentNameIndex {
                 hasher.update(component.as_bytes());
             }
             hasher.update([u8::from(coedge.reversed), coedge.seam_image as u8]);
-            let name = format!("occt:{:x}", hasher.finalize());
+            let name = format!("occt:{}", hex::encode(hasher.finalize()));
             if !self
                 .coedge_occurrences
                 .insert((coedge.occurrence_index, name.clone()))

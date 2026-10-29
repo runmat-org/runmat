@@ -63,7 +63,7 @@ impl EndpointIdentity {
             return Err(TransportError::StaleAuthority);
         }
         Ok(Self {
-            key_fingerprint: format!("{:x}", Sha256::digest(public_identity)),
+            key_fingerprint: hex::encode(Sha256::digest(public_identity)),
             credential_epoch,
         })
     }

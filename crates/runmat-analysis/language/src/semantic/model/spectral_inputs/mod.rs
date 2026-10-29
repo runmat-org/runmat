@@ -74,5 +74,5 @@ fn authored_digest(
     digest.update(kind.as_bytes());
     digest.update([0]);
     digest.update(name.as_bytes());
-    Some(format!("sha256:{:x}", digest.finalize()))
+    Some(format!("sha256:{}", hex::encode(digest.finalize())))
 }

@@ -88,7 +88,7 @@ fn canonical_fixture() {
     );
     let bytes = serde_json::to_vec(&(outcome, events)).unwrap();
     assert_eq!(
-        format!("sha256:{:x}", Sha256::digest(bytes)),
+        format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
         "sha256:ab2e398c22647508a142dc07a87b4773ab0f8e747bd87a8ceda9f8d7f31e4897"
     );
 }

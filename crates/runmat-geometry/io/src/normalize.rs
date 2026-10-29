@@ -8,5 +8,5 @@ pub fn deterministic_import_fingerprint(
     let mut hasher = Sha256::new();
     hasher.update(json);
     let digest = hasher.finalize();
-    Ok(format!("{:x}", digest))
+    Ok(hex::encode(digest))
 }

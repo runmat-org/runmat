@@ -1553,7 +1553,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     let digest = hasher.finalize();
-    format!("sha256:{:x}", digest)
+    format!("sha256:{}", hex::encode(digest))
 }
 
 fn chunk_key(coords: &[usize]) -> String {

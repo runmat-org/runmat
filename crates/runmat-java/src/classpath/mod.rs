@@ -153,7 +153,7 @@ impl SessionClasspath {
             project: self.project.clone(),
             dynamic: self.dynamic.clone(),
             revision: self.revision,
-            identity: format!("java-classpath:v1:{:x}", hasher.finalize()),
+            identity: format!("java-classpath:v1:{}", hex::encode(hasher.finalize())),
         }
     }
 

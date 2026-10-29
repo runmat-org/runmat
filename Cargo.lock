@@ -7602,6 +7602,7 @@ dependencies = [
  "env_logger",
  "futures",
  "git2",
+ "hex",
  "keyring",
  "libc",
  "log",
@@ -7664,7 +7665,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "supports-color",
  "target-lexicon 0.12.16",
  "tempfile",
@@ -7801,7 +7802,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 1.0.69",
  "tracing",
 ]
@@ -7810,6 +7811,7 @@ dependencies = [
 name = "runmat-analysis-language"
 version = "0.6.2"
 dependencies = [
+ "hex",
  "runmat-analysis-core",
  "runmat-analysis-fea",
  "runmat-fea-syntax",
@@ -7820,7 +7822,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 1.0.69",
 ]
 
@@ -7907,13 +7909,16 @@ dependencies = [
 name = "runmat-build-identity"
 version = "0.6.2"
 dependencies = [
+ "hex",
  "sha2 0.10.9",
+ "sha2 0.11.0",
 ]
 
 [[package]]
 name = "runmat-builtins"
 version = "0.6.2"
 dependencies = [
+ "hex",
  "inventory",
  "runmat-async",
  "runmat-macros",
@@ -7921,7 +7926,7 @@ dependencies = [
  "runmat-value",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "syn 1.0.109",
  "thiserror 1.0.69",
  "url",
@@ -8004,6 +8009,7 @@ dependencies = [
  "async-trait",
  "futures",
  "hashbrown 0.16.1",
+ "hex",
  "log",
  "pollster 0.3.0",
  "runmat-accelerate",
@@ -8044,7 +8050,7 @@ dependencies = [
  "runmat-vm",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "stacker",
  "tempfile",
  "tokio",
@@ -8066,12 +8072,13 @@ name = "runmat-execution"
 version = "0.6.2"
 dependencies = [
  "ed25519-dalek",
+ "hex",
  "minicbor",
  "runmat-time",
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 1.0.69",
  "wasm-bindgen-test",
 ]
@@ -8085,6 +8092,7 @@ dependencies = [
  "hex",
  "hkdf 0.12.4",
  "hpke",
+ "libc",
  "minicbor",
  "runmat-execution",
  "runmat-package",
@@ -8094,6 +8102,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 1.0.69",
  "zeroize",
@@ -8119,6 +8128,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
  "futures",
+ "hex",
  "libc",
  "rand 0.8.6",
  "rcgen",
@@ -8166,7 +8176,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "sysinfo 0.30.13",
  "target-lexicon 0.12.16",
  "tempfile",
@@ -8186,6 +8196,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures-util",
+ "hex",
  "minicbor",
  "quinn",
  "rand 0.8.6",
@@ -8196,7 +8207,7 @@ dependencies = [
  "runmat-server-client",
  "rustls 0.23.40",
  "serde",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "socket2 0.6.4",
  "thiserror 1.0.69",
  "tokio",
@@ -8250,7 +8261,7 @@ dependencies = [
  "runmat-workspace-contracts",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "tokio",
  "url",
@@ -8298,13 +8309,14 @@ dependencies = [
 name = "runmat-geometry-core"
 version = "0.6.2"
 dependencies = [
+ "hex",
  "runmat-build-identity",
  "runmat-canonical-codec",
  "runmat-types",
  "schemars",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -8323,6 +8335,7 @@ dependencies = [
  "base64 0.22.1",
  "cxx",
  "cxx-build",
+ "hex",
  "js-sys",
  "occt-sys",
  "runmat-build-identity",
@@ -8331,7 +8344,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 1.0.69",
  "wasm-bindgen",
@@ -8368,6 +8381,7 @@ dependencies = [
 name = "runmat-hir"
 version = "0.6.2"
 dependencies = [
+ "hex",
  "runmat-builtins",
  "runmat-execution",
  "runmat-parser",
@@ -8375,7 +8389,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "wasm-bindgen-test",
 ]
 
@@ -8384,11 +8398,12 @@ name = "runmat-java"
 version = "0.6.2"
 dependencies = [
  "futures",
+ "hex",
  "jni 0.21.1",
  "runmat-process-host",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 1.0.69",
 ]
@@ -8519,7 +8534,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -8535,7 +8550,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -8559,7 +8574,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 1.0.69",
  "tracing",
 ]
@@ -8591,7 +8606,7 @@ dependencies = [
  "runmat-meshing-size",
  "runmat-types",
  "serde",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tracing",
 ]
 
@@ -8599,6 +8614,7 @@ dependencies = [
 name = "runmat-meshing-tetrahedron"
 version = "0.6.2"
 dependencies = [
+ "hex",
  "minicbor",
  "runmat-build-identity",
  "runmat-canonical-codec",
@@ -8611,7 +8627,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tracing",
 ]
 
@@ -8629,7 +8645,7 @@ dependencies = [
  "runmat-value",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "target-lexicon 0.12.16",
  "tempfile",
  "thiserror 1.0.69",
@@ -8696,6 +8712,7 @@ dependencies = [
 name = "runmat-native-ffi"
 version = "0.6.2"
 dependencies = [
+ "hex",
  "libffi",
  "libloading 0.8.9",
  "runmat-process-host",
@@ -8703,7 +8720,7 @@ dependencies = [
  "runmat-value",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "target-lexicon 0.12.16",
  "tempfile",
  "thiserror 1.0.69",
@@ -8728,7 +8745,7 @@ dependencies = [
  "runmat-server-client",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "sysinfo 0.30.13",
  "tempfile",
  "thiserror 1.0.69",
@@ -8745,6 +8762,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "futures",
+ "hex",
  "p256",
  "runmat-config",
  "runmat-filesystem",
@@ -8752,7 +8770,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.23",
@@ -8797,6 +8815,7 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 1.0.69",
  "zeroize",
@@ -8857,6 +8876,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -8873,7 +8893,7 @@ dependencies = [
  "runmat-process-host",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 1.0.69",
  "zip",
 ]
@@ -8907,6 +8927,7 @@ dependencies = [
  "glob",
  "hashbrown 0.16.1",
  "hdf5-metno",
+ "hex",
  "http 1.4.2",
  "image 0.24.9",
  "inventory",
@@ -8968,7 +8989,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "sobol",
  "target-lexicon 0.12.16",
  "tempfile",
@@ -9008,6 +9029,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "futures",
+ "hex",
  "keyring",
  "openapiv3",
  "progenitor",
@@ -9021,7 +9043,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 1.0.69",
  "tokio",
  "url",
@@ -9085,10 +9107,11 @@ name = "runmat-test"
 version = "0.6.2"
 dependencies = [
  "futures",
+ "hex",
  "runmat-execution",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 1.0.69",
  "wasm-bindgen-test",
 ]
@@ -9126,6 +9149,7 @@ name = "runmat-test-runner-native"
 version = "0.6.2"
 dependencies = [
  "anyhow",
+ "hex",
  "log",
  "runmat-aot",
  "runmat-config",
@@ -9141,7 +9165,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -9234,6 +9258,7 @@ dependencies = [
  "futures",
  "getrandom 0.2.17",
  "glam",
+ "hex",
  "js-sys",
  "log",
  "miette",
@@ -9271,7 +9296,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tracing",
  "uuid",
  "wasm-bindgen",
@@ -9291,7 +9316,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.18",
  "ts-rs",
  "utoipa",

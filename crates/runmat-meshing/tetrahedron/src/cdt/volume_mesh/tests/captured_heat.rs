@@ -41,7 +41,7 @@ fn authenticated_constraints() -> DelaunayConstraints {
     assert!(std::fs::metadata(&path).unwrap().len() <= 10_000_000);
     let bytes = std::fs::read(path).unwrap();
     assert_eq!(
-        format!("{:x}", Sha256::digest(&bytes)),
+        hex::encode(Sha256::digest(&bytes)),
         "3ab5566217d37ac41f3d493c4d681753417eacbee73969e58b129fca795c9e4b"
     );
     let captured: CapturedSegments = serde_json::from_slice(&bytes).unwrap();

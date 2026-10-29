@@ -43,7 +43,7 @@ pub(super) fn mass_id(assembly_path: &[String], is_sheet_body: bool) -> MassProp
         hasher.update((segment.len() as u64).to_be_bytes());
         hasher.update(segment.as_bytes());
     }
-    MassPropertiesEvaluatorId(format!("mass:scope:{:x}", hasher.finalize()))
+    MassPropertiesEvaluatorId(format!("mass:scope:{}", hex::encode(hasher.finalize())))
 }
 
 pub(super) const fn orientation(reversed: bool) -> TopologicalOrientation {

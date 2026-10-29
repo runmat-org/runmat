@@ -104,7 +104,7 @@ async fn download_signed_artifact_to(
             .map_err(|error| TransportError::Unavailable(error.to_string()))?;
     }
     if received != artifact.ciphertext_size_bytes
-        || format!("sha256:{:x}", hasher.finalize()) != artifact.ciphertext_digest
+        || format!("sha256:{}", hex::encode(hasher.finalize())) != artifact.ciphertext_digest
     {
         return Err(TransportError::Integrity);
     }
@@ -563,9 +563,9 @@ mod streamed_download_tests {
             let url = format!("http://{}/signed", listener.local_addr().expect("address"));
             let mut server = tokio::spawn(serve_once(listener, body));
             let digest = if name == "wrong_digest" {
-                format!("sha256:{:x}", Sha256::digest(b"different"))
+                format!("sha256:{}", hex::encode(Sha256::digest(b"different")))
             } else {
-                format!("sha256:{:x}", Sha256::digest(b"sealed"))
+                format!("sha256:{}", hex::encode(Sha256::digest(b"sealed")))
             };
             let artifact = descriptor(url, declared_size, &digest);
             let (mut writer, mut reader) = tokio::io::duplex(128);
@@ -617,7 +617,7 @@ mod streamed_download_tests {
             .await
             .expect("loopback listener");
         let url = format!("http://{}/signed", listener.local_addr().expect("address"));
-        let artifact = descriptor(url, 7, &format!("sha256:{:x}", Sha256::digest(b"sealed")));
+        let artifact = descriptor(url, 7, &format!("sha256:{}", hex::encode(Sha256::digest(b"sealed"))));
         let (mut writer, _reader) = tokio::io::duplex(128);
         assert_eq!(
             SignedArtifactDownloader::new()

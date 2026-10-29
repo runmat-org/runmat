@@ -35,12 +35,12 @@ pub fn project_test_layout(value: JsValue) -> Result<JsValue, JsValue> {
         )?
     };
     let test_config_digest = format!(
-        "sha256:{:x}",
-        Sha256::digest(serde_json::to_vec(&manifest.test).map_err(|error| {
+        "sha256:{}",
+        hex::encode(Sha256::digest(serde_json::to_vec(&manifest.test).map_err(|error| {
             JsValue::from_str(&format!(
                 "project test configuration encode failed: {error}"
             ))
-        })?)
+        })?)),
     );
     serde_wasm_bindgen::to_value(&ProjectTestLayout {
         source_roots: manifest

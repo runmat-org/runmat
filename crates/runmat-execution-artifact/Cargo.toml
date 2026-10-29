@@ -19,6 +19,7 @@ runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+sha2-mac = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
@@ -32,6 +33,6 @@ getrandom = { version = "0.2", features = ["js"] }
 hpke = { workspace = true }
 
 [dev-dependencies]
-hex = "0.4"
+hex = { workspace = true }
 runmat-types = { workspace = true }
 tempfile = "3.12"

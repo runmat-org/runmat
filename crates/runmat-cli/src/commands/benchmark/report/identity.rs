@@ -17,7 +17,7 @@ pub(super) fn source(source: &runmat_core::abi::SourceInput) -> Identity {
 
 pub(super) fn content(text: &str) -> Identity {
     Identity::Sha256 {
-        digest: format!("{:x}", Sha256::digest(text.as_bytes())),
+        digest: hex::encode(Sha256::digest(text.as_bytes())),
     }
 }
 
@@ -33,7 +33,7 @@ pub(super) fn executable() -> Identity {
             }
             hash.update(&bytes[..count]);
         }
-        Ok(format!("{:x}", hash.finalize()))
+        Ok(hex::encode(hash.finalize()))
     })();
     digest.map_or(Identity::Unavailable, |digest| Identity::Sha256 { digest })
 }
