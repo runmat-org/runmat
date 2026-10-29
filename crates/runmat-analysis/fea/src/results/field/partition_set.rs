@@ -17,8 +17,10 @@ pub use selection::{
 };
 
 const FIELD_PARTITION_SET_PREFIX: &[u8] = b"runmat-fea-recovered-field-partition-set/v1\0";
+/// Partition-set size is admitted by the recovery resource plan and checked against it by the
+/// object inventory; the codec bounds it only by the wire range.
 const FIELD_PARTITION_SET_LIMITS: CanonicalLimits =
-    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 4_000_000, 32);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 4_000_000, 32));
 
 /// Canonical field-storage block size. It is part of the artifact contract rather than a
 /// placement decision, so the same recovered field has the same storage partition identities on
@@ -206,13 +208,12 @@ fn derive_partition_set_identity(
     sample: RecoveredFieldSample,
     partitions: PartitionIdentities<'_>,
 ) -> Result<RecoveredFieldPartitionSetIdentity, RecoveredFieldError> {
-    encode_contract(
+    crate::contracts::canonical_digest::canonical_contract_digest(
         FIELD_PARTITION_SET_PREFIX,
         "recovered-field-partition-set-identity",
         &(schema_version, source_field, definition, sample, partitions),
         FIELD_PARTITION_SET_LIMITS,
     )
-    .map(Digest::sha256)
     .map(RecoveredFieldPartitionSetIdentity)
     .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
 }

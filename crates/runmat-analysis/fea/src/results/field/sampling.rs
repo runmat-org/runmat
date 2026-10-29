@@ -1,6 +1,6 @@
 //! Physics-independent authority for canonical volume field storage layout.
 //! Sample rules name geometry/quadrature only; they do not select a solver.
-use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,9 @@ mod tests;
 mod validation;
 
 const PREFIX: &[u8] = b"runmat-sampled-volume-field-topology/v1\0";
-/// Per-entity topology of any admitted mesh: collections are bounded by the byte ceiling.
-const LIMITS: CanonicalLimits = CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
+/// Format bounds of the layout identity. Its size grows with the admitted mesh, so it is only
+/// ever digested from the streamed encoding, bounded by the wire range (see `digest`).
+const FORMAT: CanonicalLimits = CanonicalLimits::new(0, 0, 65_536, 64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,18 +63,20 @@ pub struct VolumeFieldIntegrationSample {
     pub volume_weight_m3: f64,
 }
 
+/// Fields are declared in canonical (UTF-8 key) order so the streamed encoding holds none of
+/// the mesh-sized collections back for sorting.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SamplingData {
-    schema_version: u16,
+    element_corner_identities: Vec<[StableDigest; 4]>,
+    element_identities: Vec<StableDigest>,
+    integration_samples: Vec<VolumeFieldIntegrationSample>,
     mesh_digest: StableDigest,
+    node_identities: Vec<StableDigest>,
+    oriented_edges: Vec<SampledOrientedEdge>,
     projection_digest: Digest,
     rule: VolumeFieldSamplingRule,
-    node_identities: Vec<StableDigest>,
-    element_identities: Vec<StableDigest>,
-    element_corner_identities: Vec<[StableDigest; 4]>,
-    oriented_edges: Vec<SampledOrientedEdge>,
-    integration_samples: Vec<VolumeFieldIntegrationSample>,
+    schema_version: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,14 +149,6 @@ impl SampledVolumeFieldTopology {
             constraint_groups: 0,
         }
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecoveredFieldError> {
-        self.validate()?;
-        encode("sampled-volume-field-topology", self)
-    }
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, RecoveredFieldError> {
-        decode_contract(PREFIX, "sampled-volume-field-topology", bytes, LIMITS)
-            .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
-    }
     /// Decode validation proves internal layout integrity. Source admission must
     /// additionally compare against the original mesh; no numerical field is recovered.
     pub fn validate_for_mesh(&self, mesh: &SolverMeshArtifact) -> Result<(), RecoveredFieldError> {
@@ -167,17 +162,17 @@ impl SampledVolumeFieldTopology {
     }
 }
 
-fn encode<T: Serialize>(label: &str, value: &T) -> Result<Vec<u8>, RecoveredFieldError> {
-    encode_contract(PREFIX, label, value, LIMITS)
+/// SHA-256 of the canonical encoding, streamed: a layout identity never materializes the
+/// mesh-sized encoding it names.
+fn digest<T: Serialize>(label: &str, value: &T) -> Result<Digest, RecoveredFieldError> {
+    crate::contracts::canonical_digest::canonical_contract_digest(PREFIX, label, value, FORMAT)
         .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
 }
 fn stable_identity<T: Serialize>(
     label: &str,
     value: &T,
 ) -> Result<StableDigest, RecoveredFieldError> {
-    Ok(StableDigest::from_bytes(
-        *Digest::sha256(encode(label, value)?).bytes(),
-    ))
+    Ok(StableDigest::from_bytes(*digest(label, value)?.bytes()))
 }
 fn invalid(message: impl Into<String>) -> RecoveredFieldError {
     RecoveredFieldError::InvalidArtifact(message.into())

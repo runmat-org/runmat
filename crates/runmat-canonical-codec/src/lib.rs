@@ -161,6 +161,31 @@ pub fn encode_contract_with_control<T: Serialize>(
     direct_encoding::encode(prefix, domain, contract, limits, control)
 }
 
+/// Hand the exact bytes of `encode_contract` to `sink`, in order, without materializing the
+/// encoding. Use it to digest a contract whose encoding is never stored: the digest equals the
+/// digest of `encode_contract`'s output. Returns the encoded byte count.
+pub fn stream_contract<T: Serialize>(
+    prefix: &[u8],
+    domain: &str,
+    contract: &T,
+    limits: CanonicalLimits,
+    sink: &mut dyn FnMut(&[u8]),
+) -> Result<u64, CanonicalCodecError> {
+    stream_contract_with_control(prefix, domain, contract, limits, &NeverCancelled, sink)
+}
+
+pub fn stream_contract_with_control<T: Serialize>(
+    prefix: &[u8],
+    domain: &str,
+    contract: &T,
+    limits: CanonicalLimits,
+    control: &dyn CanonicalCodecControl,
+    sink: &mut dyn FnMut(&[u8]),
+) -> Result<u64, CanonicalCodecError> {
+    validate_envelope(prefix, domain)?;
+    direct_encoding::stream(prefix, domain, contract, limits, control, sink)
+}
+
 /// Reserve a previously profiled output bound once, avoiding geometric growth
 /// slack in retained records. The capacity is not resource or semantic authority;
 /// callers admit workspace separately and verify the returned profile bounds.

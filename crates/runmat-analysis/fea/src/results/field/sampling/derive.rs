@@ -93,7 +93,7 @@ impl SampledVolumeFieldTopology {
             integration_samples,
         };
         let value = Self {
-            sampling_digest: Digest::sha256(encode("sampling-layout", &data)?),
+            sampling_digest: digest("sampling-layout", &data)?,
             data,
         };
         value.validate()?;

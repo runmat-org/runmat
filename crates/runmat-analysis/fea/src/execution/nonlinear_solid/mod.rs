@@ -18,18 +18,22 @@ pub use receipt::{
 pub use request::{NonlinearSolidBlockReference, NonlinearSolidBlockRequest};
 pub use workload::NonlinearSolidWorkload;
 
+/// Block artifacts, requests and workloads carry accepted histories of any admitted mesh. Their
+/// stored size is admitted by the block transport plan and checked by the object inventory, so
+/// the codec bounds them only by the wire range; identities are digested from the streamed
+/// encoding.
 pub(super) const LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 fn invalid(e: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(e.to_string())
 }
 fn digest(domain: &'static str, value: &impl Serialize) -> AnalysisExecutionResult<Digest> {
-    Ok(Digest::sha256(encode_contract(
+    Ok(crate::contracts::canonical_digest::canonical_contract_digest(
         b"runmat-nonlinear-solid/v1\0",
         domain,
         value,
         LIMITS,
-    )?))
+    )?)
 }
 
 impl super::NumericalPlanIdentity {

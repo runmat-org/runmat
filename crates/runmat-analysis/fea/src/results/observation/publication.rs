@@ -39,8 +39,10 @@ fn encode_scaled<T: Serialize>(domain: &str, value: &T) -> AnalysisExecutionResu
         .map_err(|_| invalid("catalog exceeds the address space"))?;
     encode_contract(PREFIX, domain, value, content_limits(bytes)).map_err(invalid)
 }
+/// Identities are digested from the streamed encoding; no catalog-sized buffer is built.
 fn digest<T: Serialize>(domain: &str, value: &T) -> AnalysisExecutionResult<Digest> {
-    encode_scaled(domain, value).map(Digest::sha256)
+    crate::contracts::canonical_digest::canonical_contract_digest(PREFIX, domain, value, LIMITS)
+        .map_err(invalid)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

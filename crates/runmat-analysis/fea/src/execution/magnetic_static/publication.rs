@@ -84,7 +84,7 @@ impl MagnetostaticSolverResult {
         &self,
         source_payload_digest: Digest,
     ) -> AnalysisExecutionResult<StatePublicationProfiles> {
-        if Digest::sha256(self.canonical_bytes()?) != source_payload_digest {
+        if self.payload_digest()? != source_payload_digest {
             return Err(invalid(
                 "magnetic publication profiles name another source payload",
             ));
