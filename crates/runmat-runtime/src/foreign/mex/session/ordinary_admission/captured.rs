@@ -107,7 +107,7 @@ impl CapturedOrdinaryMex {
                 "MEX sidecar changed during compatible capture",
             ));
         }
-        let identity = Digest::of_canonical(&(
+        let identity = Digest::sha256_serialized(&(
             "runmat.compatible-isolated-mex.v1",
             runmat_mex::MEX_HOST_ABI_VERSION,
             runmat_mex::MEX_ADAPTER_VERSION,

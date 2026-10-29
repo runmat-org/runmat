@@ -12,12 +12,11 @@ pub(super) fn admit_missing_client(
     has_client: bool,
 ) -> Result<(), crate::RuntimeError> {
     if evidence.is_unverified() && !has_client {
-        return Err(super::super::isolation::runtime_error(
-            super::super::isolation::wire_error(
-                "RunMat:Python:RetirementUnverified",
-                "Python child spawn or containment remains unverified",
-            ),
-        ));
+        return Err(crate::build_runtime_error(
+            "Python child spawn or containment remains unverified",
+        )
+        .with_identifier("RunMat:Python:RetirementUnverified")
+        .build());
     }
     Ok(())
 }
