@@ -230,6 +230,7 @@ impl<T> PipelineCache<T> {
 
     /// Existing disk warmup is explicitly unmanaged. It still respects live
     /// selected reservations and retires any prior charged backing afterward.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn insert_unbounded(
         &mut self,
         key: u64,
