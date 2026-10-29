@@ -6,13 +6,14 @@
 use crate::builtins::common::integer_conversion::{integer_values, IntegerClass, IntegerClassExt};
 use runmat_value::{
     decode_utf16_code_units, CharArray, IntValue, NumericDType, NumericScalar, NumericStorage,
-    SymbolicArray, SymbolicExpr, Tensor, Utf16CodeUnit, Value,
+    Tensor, Utf16CodeUnit, Value,
 };
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[path = "concatenation/host_matrix.rs"]
 mod host_matrix;
+pub(crate) mod symbolic;
 pub use host_matrix::{create_host_matrix_from_values, host_matrix_can_run_inline};
 
 fn concat_error(message: impl Into<String>) -> RuntimeError {
@@ -88,274 +89,6 @@ fn has_symbolic_operand(values: &[Value]) -> bool {
     values
         .iter()
         .any(|value| matches!(value, Value::Symbolic(_) | Value::SymbolicArray(_)))
-}
-
-fn numeric_scalar_to_symbolic(value: &Value) -> Option<SymbolicExpr> {
-    match value {
-        Value::Symbolic(expr) => Some(expr.clone()),
-        Value::Num(n) => Some(SymbolicExpr::constant(*n)),
-        Value::Int(i) => Some(SymbolicExpr::constant(i.to_f64())),
-        Value::Bool(flag) => Some(SymbolicExpr::constant(if *flag { 1.0 } else { 0.0 })),
-        _ => None,
-    }
-}
-
-fn normalize_symbolic_concat_shape(shape: &[usize]) -> Vec<usize> {
-    if shape.len() == 1 && shape[0] != 1 {
-        vec![1, shape[0]]
-    } else if crate::builtins::common::shape::is_scalar_shape(shape) {
-        vec![1, 1]
-    } else {
-        shape.to_vec()
-    }
-}
-
-#[derive(Clone)]
-struct SymbolicConcatBlock {
-    data: runmat_value::ExactArrayStorage<SymbolicExpr>,
-    shape: Vec<usize>,
-}
-
-impl SymbolicConcatBlock {
-    fn new(data: Vec<SymbolicExpr>, shape: Vec<usize>) -> BuiltinResult<Self> {
-        Self::from_shared(
-            runmat_value::ExactArrayStorage::shared_unbounded(data),
-            shape,
-        )
-    }
-    fn from_shared(
-        data: runmat_value::ExactArrayStorage<SymbolicExpr>,
-        shape: Vec<usize>,
-    ) -> BuiltinResult<Self> {
-        let expected_len = checked_shape_len(&shape)?;
-        if data.len() != expected_len {
-            return Err(concat_error(format!(
-                "Symbolic array data length {} does not match shape {:?} (expected {} elements)",
-                data.len(),
-                shape,
-                expected_len
-            )));
-        }
-        Ok(Self { data, shape })
-    }
-
-    fn rows(&self) -> usize {
-        self.shape[0]
-    }
-
-    fn cols(&self) -> usize {
-        self.shape[1]
-    }
-}
-
-fn checked_shape_len(shape: &[usize]) -> BuiltinResult<usize> {
-    shape.iter().try_fold(1usize, |acc, dim| {
-        acc.checked_mul(*dim)
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
-    })
-}
-
-fn dim_or_one(shape: &[usize], dim: usize) -> usize {
-    shape.get(dim).copied().unwrap_or(1)
-}
-
-fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicConcatBlock>> {
-    match value {
-        Value::SymbolicArray(array) => {
-            let shape = normalize_symbolic_concat_shape(&array.shape);
-            if shape[0] == 0 && shape[1] == 0 {
-                return Ok(None);
-            }
-            SymbolicConcatBlock::from_shared(array.data_owner().clone(), shape).map(Some)
-        }
-        Value::Tensor(tensor) => {
-            let shape = normalize_symbolic_concat_shape(tensor.shape());
-            if shape[0] == 0 && shape[1] == 0 {
-                return Ok(None);
-            }
-            let data = tensor
-                .materialize_f64()
-                .iter()
-                .map(|value| SymbolicExpr::constant(*value))
-                .collect();
-            SymbolicConcatBlock::new(data, shape).map(Some)
-        }
-        Value::LogicalArray(array) => {
-            let shape = normalize_symbolic_concat_shape(&array.shape);
-            if shape[0] == 0 && shape[1] == 0 {
-                return Ok(None);
-            }
-            let data = array
-                .data
-                .iter()
-                .map(|value| SymbolicExpr::constant(if *value == 0 { 0.0 } else { 1.0 }))
-                .collect();
-            SymbolicConcatBlock::new(data, shape).map(Some)
-        }
-        _ => {
-            if let Some(expr) = numeric_scalar_to_symbolic(value) {
-                SymbolicConcatBlock::new(vec![expr], vec![1, 1]).map(Some)
-            } else {
-                Err(concat_error(format!(
-                    "Cannot concatenate value of type {value:?} with symbolic array"
-                )))
-            }
-        }
-    }
-}
-
-fn hcat_symbolic_values(values: &[Value]) -> BuiltinResult<Value> {
-    let mut blocks = Vec::new();
-
-    for value in values {
-        let Some(block) = symbolic_block_from_value(value)? else {
-            continue;
-        };
-        blocks.push(block);
-    }
-
-    if blocks.is_empty() {
-        return SymbolicArray::new(Vec::new(), vec![0, 0])
-            .map(Value::SymbolicArray)
-            .map_err(concat_error);
-    }
-
-    let rank = blocks
-        .iter()
-        .map(|block| block.shape.len())
-        .max()
-        .unwrap_or(2)
-        .max(2);
-    let rows = dim_or_one(&blocks[0].shape, 0);
-    let mut cols_total = 0usize;
-    let mut output_shape = vec![1; rank];
-    output_shape[0] = rows;
-    for dim in 2..rank {
-        output_shape[dim] = dim_or_one(&blocks[0].shape, dim);
-    }
-
-    for block in &blocks {
-        if dim_or_one(&block.shape, 0) != rows {
-            return Err(concat_error(format!(
-                "Cannot horizontally concatenate symbolic arrays with different row counts: {} vs {}",
-                rows,
-                block.rows()
-            )));
-        }
-        for (dim, expected) in output_shape.iter().enumerate().skip(2) {
-            let actual = dim_or_one(&block.shape, dim);
-            if actual != *expected {
-                return Err(concat_error(format!(
-                    "Cannot horizontally concatenate symbolic arrays with different dimension {} sizes: {} vs {}",
-                    dim + 1,
-                    expected,
-                    actual
-                )));
-            }
-        }
-        cols_total = cols_total
-            .checked_add(block.cols())
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))?;
-    }
-    output_shape[1] = cols_total;
-
-    let output_len = checked_shape_len(&output_shape)?;
-    let tail_len = output_shape.iter().skip(2).try_fold(1usize, |acc, dim| {
-        acc.checked_mul(*dim)
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
-    })?;
-    let mut data = Vec::with_capacity(output_len);
-    for tail in 0..tail_len {
-        for block in &blocks {
-            let block_plane_len = block.rows() * block.cols();
-            let block_tail_offset = tail * block_plane_len;
-            for c in 0..block.cols() {
-                for r in 0..rows {
-                    data.push(block.data[block_tail_offset + r + c * block.rows()].clone());
-                }
-            }
-        }
-    }
-    SymbolicArray::new(data, output_shape)
-        .map(Value::SymbolicArray)
-        .map_err(concat_error)
-}
-
-fn vcat_symbolic_values(values: &[Value]) -> BuiltinResult<Value> {
-    let mut blocks = Vec::new();
-
-    for value in values {
-        let Some(block) = symbolic_block_from_value(value)? else {
-            continue;
-        };
-        blocks.push(block);
-    }
-
-    if blocks.is_empty() {
-        return SymbolicArray::new(Vec::new(), vec![0, 0])
-            .map(Value::SymbolicArray)
-            .map_err(concat_error);
-    }
-
-    let rank = blocks
-        .iter()
-        .map(|block| block.shape.len())
-        .max()
-        .unwrap_or(2)
-        .max(2);
-    let cols = dim_or_one(&blocks[0].shape, 1);
-    let mut rows_total = 0usize;
-    let mut output_shape = vec![1; rank];
-    output_shape[1] = cols;
-    for dim in 2..rank {
-        output_shape[dim] = dim_or_one(&blocks[0].shape, dim);
-    }
-
-    for block in &blocks {
-        if dim_or_one(&block.shape, 1) != cols {
-            return Err(concat_error(format!(
-                "Cannot vertically concatenate symbolic arrays with different column counts: {} vs {}",
-                cols,
-                block.cols()
-            )));
-        }
-        for (dim, expected) in output_shape.iter().enumerate().skip(2) {
-            let actual = dim_or_one(&block.shape, dim);
-            if actual != *expected {
-                return Err(concat_error(format!(
-                    "Cannot vertically concatenate symbolic arrays with different dimension {} sizes: {} vs {}",
-                    dim + 1,
-                    expected,
-                    actual
-                )));
-            }
-        }
-        rows_total = rows_total
-            .checked_add(block.rows())
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))?;
-    }
-    output_shape[0] = rows_total;
-
-    let output_len = checked_shape_len(&output_shape)?;
-    let tail_len = output_shape.iter().skip(2).try_fold(1usize, |acc, dim| {
-        acc.checked_mul(*dim)
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
-    })?;
-    let mut data = Vec::with_capacity(output_len);
-    for tail in 0..tail_len {
-        for c in 0..cols {
-            for block in &blocks {
-                let block_plane_len = block.rows() * block.cols();
-                let block_tail_offset = tail * block_plane_len;
-                for r in 0..block.rows() {
-                    data.push(block.data[block_tail_offset + r + c * block.rows()].clone());
-                }
-            }
-        }
-    }
-    SymbolicArray::new(data, output_shape)
-        .map(Value::SymbolicArray)
-        .map_err(concat_error)
 }
 
 fn char_array_from_int(value: &IntValue) -> BuiltinResult<CharArray> {
@@ -785,7 +518,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
     }
 
     if has_symbolic_operand(values) {
-        return hcat_symbolic_values(values);
+        return crate::builtins::array::shape::cat::symbolic::concatenate(1, values.iter());
     }
     if let Some(target) = leftmost_value_integer_target(values) {
         return hcat_integer_values(target, values);
@@ -1064,7 +797,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
     }
 
     if has_symbolic_operand(values) {
-        return vcat_symbolic_values(values);
+        return crate::builtins::array::shape::cat::symbolic::concatenate(0, values.iter());
     }
     if let Some(target) = leftmost_value_integer_target(values) {
         return vcat_integer_values(target, values);
@@ -1360,6 +1093,7 @@ pub(super) fn validate_matrix_row_widths(rows: &[Value]) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_value::{SymbolicArray, SymbolicExpr};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]

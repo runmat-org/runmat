@@ -26,6 +26,7 @@ const MAX_CAT_DIMENSION: usize = 1024;
 const BUILTIN_NAME: &str = "cat";
 
 mod managed;
+pub(crate) mod symbolic;
 
 fn is_like_name(value: &Value) -> bool {
     match value {
@@ -57,6 +58,7 @@ enum CatCategory {
     Char,
     String,
     Cell,
+    Symbolic,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -285,6 +287,7 @@ fn cat_host_values(
         CatCategory::Logical => cat_logical_arrays(dim_zero, inputs, like),
         CatCategory::Complex => cat_complex_arrays(dim_zero, inputs, like),
         CatCategory::Numeric => cat_numeric_tensors(dim_zero, inputs, like),
+        CatCategory::Symbolic => symbolic::concatenate(dim_zero, inputs.iter()),
     }
 }
 
@@ -302,6 +305,7 @@ fn determine_category(
                         | CatCategory::Char
                         | CatCategory::Cell
                         | CatCategory::Complex
+                        | CatCategory::Symbolic
                 ) {
                     return Err(cat_err(
                         "cat: 'like' prototype class does not match the input classes",
@@ -320,7 +324,10 @@ fn determine_category(
             CatCategory::Complex => {
                 if matches!(
                     category,
-                    CatCategory::String | CatCategory::Char | CatCategory::Cell
+                    CatCategory::String
+                        | CatCategory::Char
+                        | CatCategory::Cell
+                        | CatCategory::Symbolic
                 ) {
                     return Err(cat_err(
                         "cat: 'like' complex prototypes require numeric or complex inputs",
@@ -328,7 +335,7 @@ fn determine_category(
                 }
                 CatCategory::Complex
             }
-            CatCategory::Char | CatCategory::String | CatCategory::Cell => {
+            CatCategory::Char | CatCategory::String | CatCategory::Cell | CatCategory::Symbolic => {
                 return Err(cat_err(
                     "cat: 'like' prototypes for char, string, or cell arrays are not supported",
                 ));
@@ -344,6 +351,12 @@ fn infer_category(inputs: FunctionArgumentView<'_>) -> BuiltinResult<CatCategory
     // cell. Resolve this dominance before validating the enclosed value class.
     if inputs.iter().any(|value| matches!(value, Value::Cell(_))) {
         return Ok(CatCategory::Cell);
+    }
+    if inputs
+        .iter()
+        .any(|value| matches!(value, Value::Symbolic(_) | Value::SymbolicArray(_)))
+    {
+        return Ok(CatCategory::Symbolic);
     }
 
     let mut has_string = false;
@@ -1173,6 +1186,16 @@ fn concat_column_major<T: Clone, S: AsRef<[usize]>>(
     data: &[&[T]],
     context: &str,
 ) -> BuiltinResult<(Vec<T>, Vec<usize>)> {
+    concat_column_major_with_neutral(dim_zero, shapes, data, context, is_empty_concat_shape)
+}
+
+fn concat_column_major_with_neutral<T: Clone, S: AsRef<[usize]>>(
+    dim_zero: usize,
+    shapes: &[S],
+    data: &[&[T]],
+    context: &str,
+    is_neutral: impl Fn(&[usize]) -> bool,
+) -> BuiltinResult<(Vec<T>, Vec<usize>)> {
     if shapes.is_empty() {
         return Err(cat_err(format!("{context}: no inputs to concatenate")));
     }
@@ -1207,12 +1230,12 @@ fn concat_column_major<T: Clone, S: AsRef<[usize]>>(
 
     // MATLAB omits empty operands when a nonempty partner remains. Preserve
     // ordinary geometry when every operand is empty.
-    let has_non_neutral = padded.iter().any(|shape| !is_empty_concat_shape(shape));
+    let has_non_neutral = padded.iter().any(|shape| !is_neutral(shape));
     let mut active_shapes: Vec<Vec<usize>> = Vec::with_capacity(padded.len());
     let mut active_data: Vec<&[T]> = Vec::with_capacity(data.len());
     if has_non_neutral {
         for (shape, slice) in padded.iter().zip(data.iter()) {
-            if !is_empty_concat_shape(shape) {
+            if !is_neutral(shape) {
                 active_shapes.push(shape.clone());
                 active_data.push(*slice);
             }
@@ -1441,6 +1464,102 @@ async fn finalize_gpu_value(
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+
+    #[test]
+    fn symbolic_cat_shares_nd_geometry_and_preserves_symbolic_empty_rules() {
+        use runmat_value::{SymbolicArray, SymbolicExpr};
+
+        let symbolic = Value::SymbolicArray(
+            SymbolicArray::new(
+                ["a", "b", "c", "d"].map(SymbolicExpr::variable).to_vec(),
+                vec![1, 2, 2],
+            )
+            .unwrap(),
+        );
+        let numeric = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap());
+        for (dimension, shape, expected) in [
+            (
+                1,
+                vec![2, 2, 2],
+                vec!["a", "1", "b", "2", "c", "3", "d", "4"],
+            ),
+            (
+                2,
+                vec![1, 4, 2],
+                vec!["a", "b", "1", "2", "c", "d", "3", "4"],
+            ),
+            (
+                3,
+                vec![1, 2, 4],
+                vec!["a", "b", "c", "d", "1", "2", "3", "4"],
+            ),
+            (
+                4,
+                vec![1, 2, 2, 2],
+                vec!["a", "b", "c", "d", "1", "2", "3", "4"],
+            ),
+        ] {
+            let Value::SymbolicArray(result) = cat_builtin(
+                Value::Num(f64::from(dimension)),
+                vec![symbolic.clone(), numeric.clone()],
+            )
+            .unwrap() else {
+                panic!("expected symbolic result")
+            };
+            assert_eq!(result.shape, shape);
+            assert_eq!(
+                result
+                    .data()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        let empty = Value::SymbolicArray(SymbolicArray::new(Vec::new(), vec![0, 0]).unwrap());
+        let Value::SymbolicArray(result) =
+            cat_builtin(Value::Num(2.0), vec![empty.clone(), symbolic.clone()]).unwrap()
+        else {
+            panic!("expected symbolic result")
+        };
+        assert_eq!(result.shape, vec![1, 2, 2]);
+        let Value::SymbolicArray(result) =
+            cat_builtin(Value::Num(2.0), vec![empty.clone(), empty]).unwrap()
+        else {
+            panic!("expected symbolic empty")
+        };
+        assert_eq!(result.shape, vec![0, 0]);
+        let shaped_empty =
+            Value::SymbolicArray(SymbolicArray::new(Vec::new(), vec![0, 3, 2]).unwrap());
+        assert!(cat_builtin(Value::Num(1.0), vec![symbolic.clone(), shaped_empty]).is_err());
+        let trailing = Value::SymbolicArray(
+            SymbolicArray::new(
+                vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+                vec![1, 2, 1],
+            )
+            .unwrap(),
+        );
+        let Value::SymbolicArray(result) =
+            cat_builtin(Value::Num(2.0), vec![trailing.clone(), trailing.clone()]).unwrap()
+        else {
+            panic!("expected symbolic result")
+        };
+        assert_eq!(result.shape, vec![1, 4, 1]);
+        let inputs = vec![trailing.clone(), trailing];
+        let inputs = BuiltinArguments::from_borrowed(&inputs, None).unwrap();
+        assert!(determine_category(
+            inputs.view(),
+            &LikeSpec::from_prototype(&Value::Num(0.0)).unwrap()
+        )
+        .is_err());
+        assert!(LikeSpec {
+            device: LikeDevice::Gpu,
+            ..LikeSpec::default()
+        }
+        .ensure_device(CatCategory::Symbolic)
+        .is_err());
+        assert!(cat_builtin(Value::Num(2.0), vec![symbolic, Value::String("x".into())]).is_err());
+    }
 
     fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::cat_builtin(
