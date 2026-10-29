@@ -90,7 +90,7 @@ impl TypedProducer {
             if leaves.binary_search(&id).is_err() {
                 return Err(anyhow!("scalar producer has an unbound leaf"));
             }
-            let class = program.floating_class(id)?;
+            let mut class = program.floating_class(id)?;
             if controls.binary_search(&id).is_ok() {
                 let bits = program
                     .embedded_scalar_control_bits(id)
@@ -100,6 +100,11 @@ impl TypedProducer {
                     value: ScalarLiteral::F64Bits(bits),
                 });
                 continue;
+            }
+            if class == NumericClass::Double && buffer_type == ScalarType::F32 {
+                if let Some(proof) = program.explicit_host_single_input(plan, id) {
+                    class = proof.represented_class_for(id)?;
+                }
             }
             require_provider_class(class, buffer_type)?;
             if program.is_invocation_input(id) {

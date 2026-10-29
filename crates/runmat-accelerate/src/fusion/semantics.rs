@@ -141,6 +141,9 @@ fn source_slot_constants(plan: &FusionGroupPlan) -> Result<Vec<(usize, Digest)>>
 mod source_plan_identity;
 pub use source_plan_identity::exact_source_plan_identity;
 
+#[path = "semantics/input_representation.rs"]
+mod input_representation;
+
 /// Ordered source topology after the canonical binding capture. Public names
 /// never become a second execution identity after this boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -72,6 +72,8 @@ fn resolve_policy(
 
 #[path = "semantics_tests/domain_arithmetic.rs"]
 mod domain_arithmetic;
+#[path = "semantics_tests/input_representation.rs"]
+mod input_representation;
 #[path = "semantics_tests/power.rs"]
 mod power;
 #[path = "semantics_tests/precision_policy.rs"]
