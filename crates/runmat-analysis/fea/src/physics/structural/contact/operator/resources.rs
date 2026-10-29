@@ -16,8 +16,7 @@ fn add(a: u64, b: u64) -> Result<u64, ContactOperatorError> {
 }
 impl CanonicalContactOperator<'_> {
     pub fn resources(&self) -> Result<ContactOperatorResources, ContactOperatorError> {
-        let pattern =
-            slots::<u64>(self.pattern.row_offsets().len() + self.pattern.column_indices().len())?;
+        let pattern = self.pattern.retained_storage_bytes()?;
         let mut prepared = add(
             pattern,
             slots::<PreparedInterface<'_>>(self.interfaces.len())?,
@@ -53,9 +52,17 @@ impl CanonicalContactOperator<'_> {
             slots::<[f64; 3]>(self.projection.nodes.len())?,
             slots::<ContactConfigurationPoint>(self.point_count)?,
         )?;
+        let values = crate::algebra::storage::shared_vector_storage_bytes::<f64>(
+            self.pattern.column_indices().len(),
+        )
+        .ok_or(ContactOperatorError::Budget)?;
+        let contributions = crate::algebra::storage::shared_vector_storage_bytes::<
+            crate::algebra::ContributionProvenance,
+        >(0)
+        .ok_or(ContactOperatorError::Budget)?;
         let numeric = add(
             slots::<f64>(self.pattern.rows())?,
-            slots::<f64>(self.pattern.column_indices().len())?,
+            add(values, contributions)?,
         )?;
         let trial = add(configuration, add(numeric, pattern)?)?;
         Ok(ContactOperatorResources {

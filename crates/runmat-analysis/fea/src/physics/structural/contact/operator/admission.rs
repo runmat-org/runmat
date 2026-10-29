@@ -234,7 +234,7 @@ impl ContactPreparationDemand {
         )?;
         // At most three CSR inventories coexist during union, beside one original
         // coordinate buffer. Duplicate support reduces actual retained columns.
-        let csr = mul(add(offsets, coordinates as u64)?, 8)?;
+        let csr = SparsePattern::retained_storage_bytes_for_counts(dof_count, coordinates)?;
         let construction = add(
             prepared,
             add(

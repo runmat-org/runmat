@@ -15,6 +15,7 @@ pub(crate) use physical_operator::PhysicalScalarSystem;
 mod pattern;
 mod reference;
 mod right_inverse;
+pub(crate) mod storage;
 
 pub(crate) use coercivity::CoercivityWorkEnvelope;
 pub use coercivity::{CoercivityCertificate, CoercivityError, PreparedSolverAdmissibility};

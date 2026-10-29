@@ -120,18 +120,10 @@ impl ContactTangentSupport {
     pub fn coordinate_count(&self) -> usize {
         self.coordinates
     }
-    /// Requested numeric payload only; no allocator, codec, source or solver allowance.
+    /// Requested CSR heap, including its shared owners; no allocator, codec,
+    /// borrowed source or solver allowance.
     pub fn resident_bytes(&self) -> Result<u64, ContactSupportError> {
-        let count = self
-            .pattern
-            .row_offsets()
-            .len()
-            .checked_add(self.pattern.column_indices().len())
-            .ok_or(ContactSupportError::Budget)?;
-        let bytes = count
-            .checked_mul(std::mem::size_of::<u64>())
-            .ok_or(ContactSupportError::Budget)?;
-        u64::try_from(bytes).map_err(|_| ContactSupportError::Budget)
+        self.pattern.retained_storage_bytes().map_err(Into::into)
     }
     pub fn construction_resident_bytes(&self) -> Result<u64, ContactSupportError> {
         let scratch = self

@@ -1,7 +1,7 @@
 //! Count-only construction inventory, composed with the mesh/codec owners' estimates.
 //! Requested slots exclude borrowed inputs, allocator bookkeeping and measured RSS.
 use super::*;
-use runmat_canonical_codec::serialized_materialization_resident_bytes_estimate;
+use runmat_canonical_codec::profile_serialized_shape;
 use serde::{ser::SerializeSeq, Serializer};
 
 #[derive(Debug)]
@@ -96,8 +96,9 @@ pub(crate) fn node_space_workspace_profile(
         );
         let limits = CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
         identity_materialization_bytes = identity_materialization_bytes.max(
-            serialized_materialization_resident_bytes_estimate(&shape, limits)
-                .map_err(|e| StructuralNodeSpaceError::Identity(e.to_string()))?,
+            profile_serialized_shape(&shape, limits)
+                .map_err(|e| StructuralNodeSpaceError::Identity(e.to_string()))?
+                .materialization_resident_bytes_estimate,
         );
     }
     let profile = NodeSpaceWorkspaceProfile {

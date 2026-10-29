@@ -20,6 +20,36 @@ impl SparsePatternStatistics {
 }
 
 impl SparsePattern {
+    /// Requested heap for one independently owned CSR, including its shared owners.
+    /// Logical clones share these allocations; callers charge a backing owner once.
+    pub(crate) fn retained_storage_bytes(&self) -> Result<u64, SparsePatternError> {
+        Self::storage_bytes_for_capacities(
+            self.row_offsets.capacity(),
+            self.column_indices.capacity(),
+        )
+    }
+
+    pub(crate) fn retained_storage_bytes_for_counts(
+        rows: usize,
+        nonzeros: usize,
+    ) -> Result<u64, SparsePatternError> {
+        Self::storage_bytes_for_capacities(
+            rows.checked_add(1)
+                .ok_or(SparsePatternError::DimensionOverflow)?,
+            nonzeros,
+        )
+    }
+
+    fn storage_bytes_for_capacities(
+        offsets: usize,
+        indices: usize,
+    ) -> Result<u64, SparsePatternError> {
+        let bytes = super::super::storage::shared_vector_storage_bytes::<u64>;
+        bytes(offsets)
+            .and_then(|offsets| offsets.checked_add(bytes(indices)?))
+            .ok_or(SparsePatternError::DimensionOverflow)
+    }
+
     /// Copies canonical index buffers with fallible allocation and no geometric growth.
     pub fn try_clone(&self) -> Result<Self, SparsePatternError> {
         let mut row_offsets = reserve(self.row_offsets.len())?;
