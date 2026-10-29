@@ -1465,7 +1465,11 @@ fn linear_static_structural_step_leaves_declared_thermomechanical_domain_inactiv
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let baseline = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect("uncoupled structural baseline");
-    configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
+    // A domain declaration alone is inactive. A prescribed temperature field
+    // is an authored excitation and must not be silently dropped by this step.
+    model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
     let result = crate::run_linear_static_with_options(
         &model,
@@ -1486,6 +1490,21 @@ fn linear_static_structural_step_leaves_declared_thermomechanical_domain_inactiv
         field(&baseline, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
         "inactive thermal declarations must not change structural displacement"
     );
+
+    configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let error = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            ..baseline_linear_static_options()
+        },
+    )
+    .expect_err("a structural-only step must not discard an active temperature field");
+    assert!(matches!(error, FeaRunError::Assembly(message)
+            if message.contains("active temperature-field coupling (coupled_temperature)")
+                && message.contains("realizes Coupled(Thermomechanical)")));
 }
 
 #[test]
