@@ -517,28 +517,29 @@ fn legacy_program_workload_kind_is_checked_against_original_stored_request() {
     assert_eq!(store.completion(record.handle.id).unwrap(), None);
 }
 
-#[test]
-fn persisted_graph_failure_keeps_its_typed_workload_identity() {
+#[tokio::test]
+async fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     let temp = tempfile::tempdir().unwrap();
     let store = JobStore::open(SupervisorPaths::new(temp.path().join("state")).unwrap()).unwrap();
-    // This is a positive stored-Graph control, not a historical revision
-    // rejection. Keep the frozen fixture immutable and lift only its envelope
-    // schema in memory to the current transport schema.
-    let mut frozen: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "../../../runmat-execution/tests/fixtures/executable-unit-current.json"
-    ))
-    .unwrap();
-    // This dependency-free positive control uses today's required field,
-    // without rewriting the historical compatibility fixture.
-    frozen["manifest"]["dependencies"] = serde_json::json!([]);
-    frozen["dependency_products"] = serde_json::json!([]);
-    let mut envelope: runmat_execution::ExecutableUnitEnvelope =
-        serde_json::from_value(frozen).unwrap();
-    envelope.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
-    envelope.manifest.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
+    // Positive stored-Graph control: compile a current dependency-free product
+    // instead of relabeling historical executable/source-map bytes as current.
+    let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    let unit = session
+        .compile_executable_unit(
+            runmat_core::ExecutableSource::frozen(
+                "supervisor-graph",
+                "stored_graph.m",
+                "stored_graph.m",
+                "function y = stored_graph(); y = 1; end",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let envelope = unit.portable_envelope().unwrap();
     let bytes = envelope.canonical_bytes().unwrap();
     let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&bytes)
-        .expect("frozen executable-unit fixture remains canonical");
+        .expect("current compiler-produced executable remains canonical");
     assert_eq!(
         envelope.manifest.interop,
         runmat_types::InteropManifest::empty(),

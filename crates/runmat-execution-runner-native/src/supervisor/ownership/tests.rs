@@ -132,6 +132,14 @@ async fn escalation_routes_original_control_and_cannot_signal_a_foreign_saved_pi
     record.state = LocalJobState::Running;
     record.driver_process_id = unrelated.id();
     store.write_record(&record).unwrap();
+    let now_millis = scheduler.driver.snapshot().now_millis;
+    scheduler
+        .command(DriverCommand::CancelScope {
+            scope_id: request.scope_id,
+            reason: runmat_execution::CancellationReason::User,
+            now_millis,
+        })
+        .unwrap();
     let mut foreign = request.clone();
     foreign.worker_id = runmat_execution::identity::WorkerId::derive(&[b"foreign-worker"]);
     assert!(supervisor

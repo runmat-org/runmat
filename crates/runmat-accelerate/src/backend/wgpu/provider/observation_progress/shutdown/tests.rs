@@ -1,5 +1,5 @@
 use super::*;
-use crate::backend::wgpu::provider::observation_progress::{Command, State};
+use super::super::{Command, State};
 use std::sync::{atomic::AtomicBool, atomic::AtomicU32, mpsc::sync_channel};
 
 #[test]
