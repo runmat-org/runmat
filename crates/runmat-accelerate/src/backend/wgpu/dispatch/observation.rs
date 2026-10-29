@@ -262,6 +262,8 @@ impl PendingSubmissions {
             .take()
             .unwrap_or_else(|| selected_provider.map_or(ProviderAdmission::Absent, prepare));
         let provider_prepared = matches!(&admission, ProviderAdmission::Prepared(_));
+        #[cfg(not(target_arch = "wasm32"))]
+        let completion_prepared = self.scoped_retirement || self.prepared_direct_progress.is_some();
         ProfiledEncoder::new(
             emission,
             descriptor,
@@ -276,8 +278,7 @@ impl PendingSubmissions {
                 .then(|| self.progress_port.clone())
                 .flatten(),
             #[cfg(not(target_arch = "wasm32"))]
-            self.scoped_retirement
-                || self.prepared_direct_progress.is_some(),
+            completion_prepared,
         )
     }
 
