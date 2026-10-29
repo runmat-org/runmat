@@ -126,6 +126,123 @@
               "width",
               "height"
             ]
+          },
+          "receipts": {
+            "type": "array",
+            "description": "Run-derived values that docs quote, linked from prose as [value unit](receipt:<example id>#<receipt id>) (METHOD §2.7). The lint checks the prose value against `value` at the precision written.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "quantity",
+                "value",
+                "unit",
+                "mesh",
+                "run"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+$"
+                },
+                "quantity": {
+                  "type": "string",
+                  "minLength": 3,
+                  "description": "What was measured and where, e.g. nodal von Mises stress on the top surface at x = 100 mm."
+                },
+                "output": {
+                  "type": "string",
+                  "description": "The study output that publishes the value, when it has one."
+                },
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "mesh": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "order",
+                    "target_size"
+                  ],
+                  "properties": {
+                    "order": {
+                      "enum": [
+                        "linear",
+                        "quadratic"
+                      ]
+                    },
+                    "target_size": {
+                      "type": "string"
+                    },
+                    "nodes": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "elements": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "reference": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "value",
+                    "unit",
+                    "source"
+                  ],
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "minLength": 3
+                    }
+                  }
+                },
+                "run": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "cli",
+                    "commit",
+                    "date"
+                  ],
+                  "properties": {
+                    "cli": {
+                      "type": "string",
+                      "description": "Release CLI binary name."
+                    },
+                    "commit": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{7,40}$"
+                    },
+                    "date": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "study": {
+                      "type": "string",
+                      "description": "Study file run, when it differs from the example entry (for example a mesh variant)."
+                    },
+                    "result": {
+                      "type": "string",
+                      "description": "Result digest or receipt path."
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "required": [

@@ -81,3 +81,14 @@ test("scanner reads fence attributes, front matter and anchors like the website"
     assert.equal(headingAnchor("Apply a `structural.force` load [not yet in the current release](pending:x.y)"), "apply-a-structural-force-load");
     assert.equal(readFileSync(join(repository, "docs/simulation/pending-features.json"), "utf8").endsWith("\n"), true);
 });
+
+test("receipt links quote the catalog value at the precision written", async () => {
+    const { receiptMismatch } = await import("./docs-lint.mjs");
+    const receipt = { id: "tip", value: 0.20003, unit: "mm" };
+    assert.equal(receiptMismatch(receipt, "0.2000 mm"), null);
+    assert.equal(receiptMismatch(receipt, "0.20 mm"), null);
+    assert.match(receiptMismatch(receipt, "0.2001 mm"), /differs from the receipt value/);
+    assert.match(receiptMismatch(receipt, "0.2000 m"), /unit/);
+    assert.equal(receiptMismatch({ value: 1000.2, unit: "N" }, "1,000 N"), null);
+    assert.match(receiptMismatch(undefined, "1 N"), /no such receipt/);
+});

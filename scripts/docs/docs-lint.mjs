@@ -76,6 +76,23 @@ function resolveTarget(root, routes, fromFile, target) {
     return { missing: base };
 }
 
+/**
+ * E-DOC-4: a receipt link's text is the catalog value at the precision written, in the catalog unit:
+ * `[0.2000 mm](receipt:cantilever-static#tip-deflection)` needs value 0.19995 ≤ v < 0.20005 and unit mm.
+ */
+export function receiptMismatch(receipt, text) {
+    if (!receipt) return "no such receipt in examples/catalog.json";
+    const match = /^\s*([-−]?[0-9][0-9,]*)(?:\.([0-9]+))?(?:\s+(.+?))?\s*$/.exec(text.replace(/\u00a0|\u202f/g, " "));
+    if (!match) return `link text \`${text}\` is not a value and unit`;
+    const decimals = match[2]?.length ?? 0;
+    const shown = Number(`${match[1].replace(/,/g, "").replace("−", "-")}.${match[2] ?? "0"}`);
+    const unit = match[3] ?? "";
+    if (unit !== receipt.unit) return `unit \`${unit}\` differs from the receipt's \`${receipt.unit}\``;
+    const rounded = Number(receipt.value.toFixed(decimals));
+    if (Math.abs(rounded - shown) > 1e-12 * Math.max(1, Math.abs(shown))) return `text ${text} differs from the receipt value ${receipt.value} ${receipt.unit} at ${decimals} decimals (${rounded})`;
+    return null;
+}
+
 export function lintDocs(source) {
     const root = join(source, "docs/simulation");
     const files = markdownFiles(root);
@@ -98,7 +115,9 @@ export function lintDocs(source) {
     // Front matter.
     const ajv = new Ajv({ allErrors: true });
     const checkFrontMatter = ajv.compile(readJson(join(source, "docs/schema/doc-front-matter.schema.json")));
-    const exampleIds = new Set(readJson(join(root, "examples/catalog.json")).examples.map(example => example.id));
+    const catalog = readJson(join(root, "examples/catalog.json")).examples;
+    const exampleIds = new Set(catalog.map(example => example.id));
+    const receipts = new Map(catalog.flatMap(example => (example.receipts ?? []).map(receipt => [`${example.id}#${receipt.id}`, receipt])));
     const parsed = new Map();
     for (const file of files) {
         const text = readText(join(root, file));
@@ -128,7 +147,9 @@ export function lintDocs(source) {
             const target = link.target;
             if (/^(https?:|mailto:|pending:)/.test(target)) continue;
             if (target.startsWith("receipt:")) {
-                if (!/^receipt:[a-z0-9-]+#[a-z0-9-]+$/.test(target)) error(file, link.line, "link", `malformed receipt link \`${target}\``);
+                if (!/^receipt:[a-z0-9-]+#[a-z0-9-]+$/.test(target)) { error(file, link.line, "link", `malformed receipt link \`${target}\``); continue; }
+                const problem = receiptMismatch(receipts.get(target.slice("receipt:".length)), link.text);
+                if (problem) error(file, link.line, "receipt", `\`${target}\`: ${problem}`);
                 continue;
             }
             const resolved = resolveTarget(root, routes, file, target);
