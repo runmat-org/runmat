@@ -161,7 +161,8 @@ fn linear_logical_false_overhang_is_ignored_but_true_overhang_rejects() {
 fn host_linear_indexing_accepts_gpu_backed_range_selector() {
     let vars = execute_source("a=length(1:10); k=floor(a/2)+1; x=(1:10)'; y=x(1:k);").unwrap();
     if let Value::Tensor(v) = &vars[3] {
-        assert_eq!(v.shape(), vec![1, 6]);
+        // Linear indexing of a vector preserves the source vector orientation.
+        assert_eq!(v.shape(), vec![6, 1]);
         assert_eq!(v.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     } else {
         panic!("y");

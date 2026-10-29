@@ -109,6 +109,12 @@ pub(crate) async fn build_component_selectors_with_context(
         let selector = match component {
             ObjectIndexComponent::Colon => SliceSelector::Colon,
             ObjectIndexComponent::End => SliceSelector::Scalar(extent),
+            ObjectIndexComponent::Value(value) if dims == 1 && assignment => {
+                let materialized = owner
+                    .await_stage(materialize_index_value_in_context(context, value))
+                    .await??;
+                linear_assignment_selector_from_host(context, materialized.as_ref(), extent)?
+            }
             ObjectIndexComponent::Value(value) if dims == 1 && !assignment => {
                 let materialized = owner
                     .await_stage(materialize_index_value_in_context(context, value))
@@ -414,6 +420,25 @@ fn indices_from_host_value_linear_in_context(
             "UnsupportedIndexType",
             "Unsupported index type for linear indexing",
         )),
+    }
+}
+
+/// Linear logical stores use true-position bounds, not dimensional mask
+/// length equality. Numeric assignment selectors keep their existing growth
+/// policy; a logical true beyond the original extent never grants growth.
+fn linear_assignment_selector_from_host(
+    context: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    extent: usize,
+) -> VmResult<SliceSelector> {
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        let indices = indices_from_host_value_linear_in_context(context, value, extent)?;
+        if indices.iter().any(|index| *index > extent) {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        Ok(SliceSelector::Indices(indices))
+    } else {
+        selector_from_host_value_dim(context, value, extent, false)
     }
 }
 
@@ -773,6 +798,9 @@ fn selectors_from_host<B: Borrow<Value>>(
                 )
             })?;
         numeric_position += 1;
+        if dims == 1 && assignment {
+            return linear_assignment_selector_from_host(context, value, extent);
+        }
         if dims == 1 && !assignment {
             return match value {
                 Value::Tensor(tensor) => Ok(SliceSelector::LinearIndices {
@@ -887,6 +915,51 @@ mod tests {
         let error = futures::executor::block_on(indices_from_value_linear(&value, 3))
             .expect_err("true logical overhang must reject");
         assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
+    }
+
+    #[test]
+    fn linear_logical_assignment_routes_share_original_extent_bounds() {
+        for (bits, accepted) in [
+            (vec![0, 1], true),
+            (vec![0, 1, 0, 0, 0], true),
+            (vec![0, 0, 0, 1], false),
+        ] {
+            let mask =
+                Value::LogicalArray(LogicalArray::new(bits.clone(), vec![1, bits.len()]).unwrap());
+            let numeric = [mask.clone()];
+            let host = super::build_assignment_selectors_host(1, 0, 0, &numeric, &[1, 3])
+                .map(|selectors| selectors.expect("host selector"));
+            let asynchronous = futures::executor::block_on(super::build_assignment_selectors(
+                1,
+                0,
+                0,
+                &numeric,
+                &[1, 3],
+            ));
+            let components = [crate::object::indexing::ObjectIndexComponent::Value(mask)];
+            let object =
+                futures::executor::block_on(build_component_selectors(&components, &[1, 3], true));
+            for result in [host, asynchronous, object] {
+                if accepted {
+                    let selectors = result.expect("prefix/false-overhang assignment");
+                    assert_eq!(selectors[0].iter_indices(3).collect::<Vec<_>>(), vec![2]);
+                } else {
+                    assert_eq!(
+                        result.unwrap_err().identifier(),
+                        Some("RunMat:IndexOutOfBounds")
+                    );
+                }
+            }
+        }
+        // Scalar logical true cannot grow an empty target either.
+        for value in [
+            Value::Bool(true),
+            Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+        ] {
+            let error =
+                super::build_assignment_selectors_host(1, 0, 0, &[value], &[1, 0]).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
+        }
     }
 
     #[test]

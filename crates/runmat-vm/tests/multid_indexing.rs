@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use test_helpers::execute_source;
+use test_helpers::{compile_source, execute_source, interpret};
 
 #[test]
 fn reshape_and_index_3d_element() {
@@ -80,17 +80,20 @@ fn mixed_selectors_basic_2d_range() {
 
 #[test]
 fn logical_mask_rows_select() {
-    let vars = execute_source("A=[1 2; 3 4; 5 6]; sel = A([true false true], :);").unwrap();
-    // Expect rows 1 and 3 selected. In column-major storage, resulting 2x2 has data [1 5 2 6].
-    let sel = vars
+    let bytecode = compile_source("A=[1 2; 3 4; 5 6]; sel = A([true false true], :);").unwrap();
+    let slot = bytecode
+        .var_names
         .iter()
-        .rev()
-        .find(|v| matches!(v, runmat_value::Value::Tensor(_)))
+        .find_map(|(&slot, name)| (name == "sel").then_some(slot))
         .unwrap();
-    if let runmat_value::Value::Tensor(t) = sel {
-        assert_eq!(t.shape(), vec![2, 2]);
-        assert_eq!(t.materialize_f64(), vec![1.0, 5.0, 2.0, 6.0]);
-    }
+    let vars = interpret(&bytecode).unwrap();
+    // Inspect the authored output, not a private temporary or the original A.
+    let sel = vars.get(slot).expect("named sel output");
+    let runmat_value::Value::Tensor(t) = sel else {
+        panic!("sel must remain a numeric tensor");
+    };
+    assert_eq!(t.shape(), vec![2, 2]);
+    assert_eq!(t.materialize_f64(), vec![1.0, 5.0, 2.0, 6.0]);
 }
 
 #[test]

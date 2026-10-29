@@ -129,7 +129,7 @@ fn absent_cell_root_is_created_only_at_successful_sequence_commit() {
     let error = execute_source("c = 0; c{2} = 9;")
         .expect_err("an assigned numeric binding is not an absent cell root");
     assert!(
-        error.to_string().contains("CellAssignmentOnNonCell"),
+        error.identifier() == Some("RunMat:CellAssignmentOnNonCell"),
         "{error}"
     );
     execute_source(
@@ -142,11 +142,9 @@ fn absent_cell_root_is_created_only_at_successful_sequence_commit() {
 fn member_destination_cardinality_is_exact() {
     let error = execute_source("s = struct('value', {1, 2}); [s.value] = 7;")
         .expect_err("one value cannot fill a two-element sequence destination");
-    assert!(
-        error
-            .to_string()
-            .contains("exactly one value per destination"),
-        "{error}"
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:CommaSeparatedListOutputShortage")
     );
 }
 
@@ -185,7 +183,7 @@ fn declared_persistent_is_not_an_undefined_cell_root() {
     )
     .expect_err("a declared persistent is an existing empty numeric binding");
     assert!(
-        error.to_string().contains("CellAssignmentOnNonCell"),
+        error.identifier() == Some("RunMat:CellAssignmentOnNonCell"),
         "{error}"
     );
     execute_source(
