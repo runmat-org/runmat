@@ -157,7 +157,9 @@ fn configure_electro_thermal_excitation(model: &mut runmat_analysis_core::Analys
         "coupled_terminal_voltage",
         36.0,
         runmat_analysis_core::ExcitationTarget::Region(
-            runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
+            runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("tip"),
+            ),
         ),
     );
 }
@@ -581,7 +583,9 @@ fn prescribed_rotations_require_rotational_dofs() {
             frame: runmat_analysis_core::CoordinateFrame::Global,
             kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
                 runmat_analysis_core::PrescribedStructuralDofs {
-                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("tip")),
+                    target: runmat_analysis_core::RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_face("tip"),
+                    ),
                     translations: Vec::new(),
                     rotations: vec![runmat_analysis_core::RotationDofValue {
                         dof: runmat_analysis_core::StructuralRotationDof::Rx,
@@ -956,12 +960,18 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         nodes: vec![
             runmat_analysis_core::StructuralNode {
                 node_id: 1,
-                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([0.0, 0.0, 0.0]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 0.0, 0.0]),
                 solid_attachment: None,
             },
             runmat_analysis_core::StructuralNode {
                 node_id: 2,
-                coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([length_m, 0.0, 0.0]),
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([length_m, 0.0, 0.0]),
                 solid_attachment: None,
             },
         ],
@@ -978,18 +988,40 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         }],
         beam_sections: vec![runmat_analysis_core::BeamSectionModel {
             section_id: "rect".to_string(),
-            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area,_>::new(2.0e-4),
-            iy_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(1.6e-9),
-            iz_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(iz_m4),
-            torsion_j_m4: runmat_types::physical::Quantity::<runmat_types::physical::kind::SecondMomentOfArea,_>::new(2.4e-9),
-            outer_fiber_y_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.01),
-            outer_fiber_z_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.005),
-            torsion_outer_radius_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(0.011_180_339_887_498_949),
+            area_m2: runmat_types::physical::Quantity::<runmat_types::physical::kind::Area, _>::new(
+                2.0e-4,
+            ),
+            iy_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(1.6e-9),
+            iz_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(iz_m4),
+            torsion_j_m4: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::SecondMomentOfArea,
+                _,
+            >::new(2.4e-9),
+            outer_fiber_y_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.005),
+            torsion_outer_radius_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Length,
+                _,
+            >::new(0.011_180_339_887_498_949),
         }],
         shell_sections: Vec::new(),
     });
     model.material_assignments = vec![runmat_analysis_core::MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::beam(runmat_meshing_core::fixtures::fixture_edge("beam_span")),
+        target: runmat_analysis_core::PropertyRegionTarget::beam(
+            runmat_meshing_core::fixtures::fixture_edge("beam_span"),
+        ),
         expected_material_id: "mat_steel".into(),
         assigned_material_id: "mat_steel".into(),
         confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -1429,11 +1461,13 @@ fn thermo_mechanical_static_region_temperature_overrides_global_field_on_exact_s
 }
 
 #[test]
-fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
+fn linear_static_structural_step_leaves_declared_thermomechanical_domain_inactive() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let baseline = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
+        .expect("uncoupled structural baseline");
     configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
-    let error = crate::run_linear_static_with_options(
+    let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
@@ -1441,11 +1475,17 @@ fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
             ..baseline_linear_static_options()
         },
     )
-    .expect_err("a structural step must not silently execute coupled assembly math");
-
-    let message = error.to_string();
-    assert!(message.contains("requests Structural"));
-    assert!(message.contains("realizes Coupled(Thermomechanical)"));
+    .expect("a declared coupling domain does not activate a structural-only step");
+    assert_eq!(
+        result.identity.family(),
+        runmat_analysis_core::PhysicsFamily::Structural
+    );
+    assert_eq!(result.identity, baseline.identity);
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+        field(&baseline, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+        "inactive thermal declarations must not change structural displacement"
+    );
 }
 
 #[test]
@@ -2669,7 +2709,9 @@ fn add_face_region(mesh: &mut SolverMeshArtifact, face_index: usize, region_id: 
     let entity = match runmat_meshing_core::fixtures::fixture_entity_for_selection(region_id) {
         Some(entity) if entity.kind == PersistentEntityKind::Face => entity,
         Some(_) => return,
-        None => runmat_meshing_core::fixtures::fixture_entity(PersistentEntityKind::Face, region_id),
+        None => {
+            runmat_meshing_core::fixtures::fixture_entity(PersistentEntityKind::Face, region_id)
+        }
     };
     if !provenance.contains(&entity) {
         provenance.push(entity);
@@ -3961,7 +4003,11 @@ fn steady_thermal_solver_is_a_distinct_static_procedure() {
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "steady_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(fixed_selector))),
+                    target: runmat_analysis_core::RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                            &(fixed_selector),
+                        ),
+                    ),
                     value: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::Temperature::new(315.0),
                     ),
@@ -4071,7 +4117,11 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "time_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(prescribed_selector.clone()))),
+                    target: runmat_analysis_core::RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                            &(prescribed_selector.clone()),
+                        ),
+                    ),
                     value: runmat_analysis_core::PrescribedValue::Signal(signal_id),
                 },
             },
@@ -4095,7 +4145,11 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "inactive_time_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(prescribed_selector))),
+                    target: runmat_analysis_core::RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                            &(prescribed_selector),
+                        ),
+                    ),
                     value: runmat_analysis_core::PrescribedValue::Signal(inactive_id),
                 },
             },
@@ -4153,7 +4207,11 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "fixed_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(fixed_selector))),
+                    target: runmat_analysis_core::RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                            &(fixed_selector),
+                        ),
+                    ),
                     value: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::Temperature::new(293.15),
                     ),
@@ -4164,7 +4222,9 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
         .boundaries
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "applied_heat_flux".into(),
-            target: runmat_analysis_core::RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_boundary_selection(&(heated_selector))),
+            target: runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&(heated_selector)),
+            ),
             operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
                 value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::HeatFlux::new(600.0),
@@ -5145,8 +5205,8 @@ fn component_peak(values: &[f64], component: usize) -> f64 {
 fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
     use runmat_analysis_core::{
         AnalysisConstraint, CoordinateFrame, Displacement, RegionTarget, StructuralConstraint,
-        StructuralConstraintEquation, StructuralConstraintEquationTerm,
-        StructuralConstraintKind, StructuralTranslationDof,
+        StructuralConstraintEquation, StructuralConstraintEquationTerm, StructuralConstraintKind,
+        StructuralTranslationDof,
     };
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.sequence.steps = vec![ProcedureStep::structural_modal("modal")];

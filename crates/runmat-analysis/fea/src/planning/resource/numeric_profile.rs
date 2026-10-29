@@ -9,9 +9,10 @@ pub(super) fn numeric_inventory_profile(
     let overflow = || ResourcePlanningError::Overflow("numeric serialization inventory");
     let limits = CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32);
     if count > limits.maximum_collection_items as u64 {
-        return Err(ResourcePlanningError::Invalid(
-            "numeric inventory exceeds canonical shape capacity".into(),
-        ));
+        return Err(ResourcePlanningError::CanonicalCollectionCapacity {
+            required: count,
+            maximum: limits.maximum_collection_items as u64,
+        });
     }
     let profile = |v: &[f64]| {
         profile_serialized(v, limits).map_err(|e| ResourcePlanningError::Invalid(e.to_string()))
@@ -39,9 +40,10 @@ pub(super) fn numeric_inventory_profile(
         .and_then(|n| n.checked_add(16))
         .ok_or_else(overflow)?;
     if wire > limits.maximum_encoded_bytes as u64 {
-        return Err(ResourcePlanningError::Invalid(
-            "numeric inventory exceeds canonical wire capacity".into(),
-        ));
+        return Err(ResourcePlanningError::CanonicalWireCapacity {
+            required: wire,
+            maximum: limits.maximum_encoded_bytes as u64,
+        });
     }
     Ok(SerializedCanonicalProfile {
         encoded_bytes_upper_bound: wire,

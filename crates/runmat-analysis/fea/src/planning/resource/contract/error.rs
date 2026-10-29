@@ -2,6 +2,10 @@ use runmat_execution::resource::Capability;
 
 #[derive(Clone, Debug, thiserror::Error, Eq, PartialEq)]
 pub enum ResourcePlanningError {
+    #[error("canonical numeric inventory requires {required} items, maximum {maximum}")]
+    CanonicalCollectionCapacity { required: u64, maximum: u64 },
+    #[error("canonical numeric inventory requires {required} encoded bytes, maximum {maximum}")]
+    CanonicalWireCapacity { required: u64, maximum: u64 },
     #[error("invalid FEA resource fact: {0}")]
     Invalid(String),
     #[error("FEA resource arithmetic overflow: {0}")]

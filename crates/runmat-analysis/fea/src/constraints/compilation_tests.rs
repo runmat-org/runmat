@@ -1,8 +1,8 @@
-//! Canonical byte goldens captured from the pre-shared-pipeline compiler. These exercise the
-//! compiler only, independently of numerical solves and elapsed-time/memory heuristics.
-//! Baseline source SHA-1: compile.rs bf5c6204bc3b46004808d5645dd2b43007117278;
-//! mixed.rs fd8c4e97b68f173fdb5abc16987eb2c5a8555d21. The goldens pin SHA-256 of
-//! canonical plan bytes, including topology, groups, row identities, and rank evidence.
+//! Canonical compiler fixtures for typed physical quantities and canonical entity selectors.
+//! The wire contract includes quantity field names and selector-derived identities, so the
+//! pre-quantity/pre-selector byte hashes are not compatible. These goldens pin the combined
+//! contract; independent checks below retain row counts, redundancy, authored-order invariance
+//! and cold round trips. They do not establish numerical solver accuracy.
 use super::*;
 use crate::fixtures::{
     fixture_model, mixed_solid_beam_model, mixed_solid_beam_shell_model, FixtureId,
@@ -130,8 +130,16 @@ pub(super) fn cases() -> Vec<(&'static str, AnalysisModel, Option<SolverMeshArti
         }));
     let mut redundant_solid = tet4.clone();
     redundant_solid.constraints = vec![
-        prescribed("first", RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")), 0.0),
-        prescribed("second", RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")), 0.0),
+        prescribed(
+            "first",
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
+            0.0,
+        ),
+        prescribed(
+            "second",
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
+            0.0,
+        ),
     ];
     let mut redundant_mixed = mixed.clone();
     redundant_mixed.constraints = vec![
@@ -166,7 +174,8 @@ pub(super) fn cases() -> Vec<(&'static str, AnalysisModel, Option<SolverMeshArti
 }
 
 #[test]
-fn compiler_canonical_bytes_match_pre_shared_pipeline_goldens() {
+fn compiler_canonical_bytes_match_typed_quantity_and_selector_goldens() {
+    let mut differences = Vec::new();
     for (name, mut model, mesh) in cases() {
         let baseline = CanonicalStructuralConstraintPlan::compile_for_model(&model, mesh.as_ref())
             .unwrap_or_else(|error| panic!("{name}: {error}"));
@@ -177,12 +186,9 @@ fn compiler_canonical_bytes_match_pre_shared_pipeline_goldens() {
             .map(|byte| format!("{byte:02x}"))
             .collect();
         let (expected_length, expected_digest) = golden(name);
-        assert_eq!(
-            bytes.len(),
-            expected_length,
-            "{name}: canonical byte length"
-        );
-        assert_eq!(digest, expected_digest, "{name}: canonical byte digest");
+        if bytes.len() != expected_length || digest != expected_digest {
+            differences.push(format!("{name}: length={} digest={digest}", bytes.len()));
+        }
         model.constraints.reverse();
         let reordered =
             CanonicalStructuralConstraintPlan::compile_for_model(&model, mesh.as_ref()).unwrap();
@@ -204,49 +210,54 @@ fn compiler_canonical_bytes_match_pre_shared_pipeline_goldens() {
             assert_eq!(baseline.rows.len(), 18);
         }
     }
+    assert!(
+        differences.is_empty(),
+        "canonical fixture differences:\n{}",
+        differences.join("\n")
+    );
 }
 
 fn golden(name: &str) -> (usize, &'static str) {
     match name {
         "solid_tet4" => (
-            4961,
-            "50411bd494749ef115b45614b13b1d3613e018dddbbaf4bda727bd3b751f311c",
+            5051,
+            "a3d23b5a4b7e222aa18f0cbd9d698c36c62e15ddd1f327d9df7b769a7db77c5c",
         ),
         "solid_tet10" => (
-            11638,
-            "802e2a86a34abe88c4511f908d5b970b1cd4e742c4d04761d47c72ae75d4a88b",
+            11728,
+            "36c02b66837b42ead37aef9b946b8bd0f178280b7c7a93a0257f45c28e58c414",
         ),
         "explicit_beam" => (
             3111,
-            "e3af736ee0eda2178c212c6b6c95fb8a5042aaa975b9c225716b413cf077ebd4",
+            "a075db220289c68cbe47ee7d693b84223a9468fc99cce1f13ccdf964edfb7ce5",
         ),
         "explicit_shell" => (
-            3132,
-            "1d9a60e1adda238b83631cfc04cfbaea52f65fc526c38e6cab7615292ecbe6d6",
+            3125,
+            "9e6131f35b15b7964c8de2da343ae437f167e0e0ab1deeab087cf26613349e70",
         ),
         "mixed_solid_beam" => (
-            6593,
-            "e6140918f682ed230c4ebda93d45326b217d13fa8d426e2fa04bd846361b25fa",
+            7582,
+            "9ff207c4f266517a63a95e4fe63e39f4730241763db32c15847a01e408d44729",
         ),
         "mixed_only_generic" => (
-            2049,
-            "96eaa3289d16ac769b7f0b6a4794319cfc607669047ff68d16f161f17e95a516",
+            2053,
+            "496c932e693058be71845840e5be89cb63a5fb0ee6fb17ecfe4be3a039f77cf3",
         ),
         "mixed_shell_symmetry" => (
-            8248,
-            "c7a5b9636d9bb72bcda228e6d9350d858e5e9d7799159cdaf3e414c98d989b6e",
+            9321,
+            "fae9fac2654191619cef23d23f9b1e9c73c1f3f74556cc3642e838236d042287",
         ),
         "mixed_shared_shell_boundary" => (
-            7171,
-            "113793dfcda25551c2bc275a1e04f460e8265dbe36ad5cf48d7260bbedb4f88a",
+            7254,
+            "9e0d4448ac7d6ca69eba0295aba5cda600f03076ead99dad1d39107ef296cc70",
         ),
         "solid_redundant" => (
-            4247,
-            "3fa136852a5eb41437142f7f69f3546a7761e01831e9662ebf8ba40d95c2d3ca",
+            4423,
+            "f614ab766f8a1d43b79c3c7935f2560d2f340fc647c836e2878487d48b060961",
         ),
         "mixed_generic_redundant" => (
-            2298,
-            "729ca1c67cd579c76ca3210b83f99d016747fe6ad32b481c396ee390aff1c7c0",
+            2302,
+            "cbb84289e408e4c9aa38b6f97a5243d71a8bf4a1ed6d12ab03151da595eccbd5",
         ),
         _ => panic!("missing canonical compilation golden for {name}"),
     }
@@ -344,7 +355,11 @@ fn counted_unique_ids_preserve_first_authored_duplicate_diagnostic() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut constraints = Vec::new();
     for id in ["z", "z", "a", "a"] {
-        constraints.push(prescribed(id, RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")), 0.0));
+        constraints.push(prescribed(
+            id,
+            RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
+            0.0,
+        ));
     }
     model.constraints = constraints;
     assert_eq!(

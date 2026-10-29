@@ -302,8 +302,8 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
         (
             PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
             AnalysisProcedure::Static,
-            SolverMethod::ChtConjugateProjection,
-            SolverPreconditioner::ThermalCfdProjection,
+            SolverMethod::GeneralGmres,
+            SolverPreconditioner::Jacobi,
         ),
     ];
     for (family, procedure, method, preconditioner) in cases {
