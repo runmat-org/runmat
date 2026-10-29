@@ -41,7 +41,9 @@ fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         let allocation = TestAllocationOwner::new()
             .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
             .unwrap();
-        let root = runmat_gc::gc_allocate_rooted(Value::GpuTensor(allocation.handle)).unwrap();
+        let mut object = runmat_value::ObjectInstance::new("ManagedInput");
+        object.replace_property_unbounded("data".into(), Value::GpuTensor(allocation.handle));
+        let root = runmat_gc::gc_allocate_rooted(Value::Object(object)).unwrap();
         let target = root.handle();
         let value = Value::HandleObject(HandleRef {
             class_name: "ManagedInput".into(),

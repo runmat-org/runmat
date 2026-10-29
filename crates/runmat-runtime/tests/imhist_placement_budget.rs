@@ -15,7 +15,7 @@ use runmat_runtime::{
 use runmat_value::{NumericDType, Tensor, Value};
 use std::rc::Rc;
 
-struct HostBudget(u64);
+struct HostBudget(runmat_runtime::context::host_effect::ManagedHostEffectLedger);
 
 impl RuntimeParallelService for HostBudget {
     fn supports(&self, _: ParallelCapability) -> bool {
@@ -23,11 +23,17 @@ impl RuntimeParallelService for HostBudget {
     }
 
     fn placement_resources(&self) -> RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
         RuntimeParallelResources {
             cpu_millicores_available: 1_000,
-            memory_available_bytes: Some(self.0),
-            epoch: 0,
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
         }
+    }
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<runmat_runtime::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.0.clone())
     }
 }
 
@@ -38,7 +44,9 @@ fn budgeted_context(host_bytes: u64) -> RuntimeContext {
     .with_service_ports(
         RuntimeServicePorts::default()
             .with_placement(Rc::new(PlacementSession::new(Default::default())))
-            .with_parallel(Rc::new(HostBudget(host_bytes))),
+            .with_parallel(Rc::new(HostBudget(
+                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(host_bytes),
+            ))),
     )
 }
 

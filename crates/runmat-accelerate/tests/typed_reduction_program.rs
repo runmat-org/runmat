@@ -133,7 +133,7 @@ fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_
         vec![0, 1, 2],
         12,
     );
-    let request = request(
+    let mut request = request(
         &plan,
         vec![
             Value::GpuTensor(left.handle.clone()),
@@ -141,6 +141,9 @@ fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_
             Value::Num(2.0),
         ],
     );
+    request.runtime = Some(RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    )));
     let mut future = Box::pin(resolve_reduction_program(&request, ProviderPrecision::F64));
     let mut task = Context::from_waker(futures::task::noop_waker_ref());
     assert!(future.as_mut().poll(&mut task).is_pending());
@@ -168,17 +171,21 @@ fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_
         0,
         "resuming does not select a new implementation"
     );
-    assert!(
-        block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
-            .unwrap()
-            .is_none()
-    );
+    let mut next_request = support::request(&plan, request.inputs.clone());
+    next_request.runtime = Some(context.clone());
+    assert!(block_on(resolve_reduction_program(
+        &next_request,
+        ProviderPrecision::F64
+    ))
+    .unwrap()
+    .is_none());
     assert_eq!(owner.calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         denied.calls.get(),
         1,
         "fresh request checks its current selected service"
     );
+    drop(next_request);
     drop(receipt);
     drop(future);
     drop(request);
@@ -219,7 +226,14 @@ fn probe_operational_errors_keep_the_original_source() {
         Err(error) => error,
         _ => panic!("probe failed"),
     };
-    assert!(error.source().unwrap().is::<ProbeFailure>());
+    let mut cause = error
+        .source()
+        .expect("producer probe error retains a source");
+    while !cause.is::<ProbeFailure>() {
+        cause = cause
+            .source()
+            .expect("original ProbeFailure remains in the source chain");
+    }
     assert_eq!(owner.calls.load(Ordering::SeqCst), 1);
 }
 
@@ -376,10 +390,17 @@ fn strict_accumulator_and_mixed_class_proofs_are_not_weakened() {
         &plan,
         vec![tensor(true, vec![2, 2]), tensor(false, vec![1, 1])],
     );
+    let receipt = block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
+        .unwrap()
+        .expect("Single array plus Double scalar retains canonical Single arithmetic");
+    assert_eq!(receipt.contract().input_class, NumericClass::Single);
+    assert_eq!(receipt.contract().accumulator_class, NumericClass::Double);
+    assert_eq!(receipt.contract().output_class, NumericClass::Single);
     assert!(
-        block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
+        block_on(resolve_reduction_program(&request, ProviderPrecision::F32))
             .unwrap()
-            .is_none()
+            .is_none(),
+        "F32 owner cannot weaken default Double sum accumulation"
     );
     let min = reduction(
         fixture::plan(vec![add(0, 1, 10), builtin("min", vec![10], 11)], 11),
@@ -404,12 +425,40 @@ fn conflicting_missing_computed_and_extra_dependencies_fail_closed() {
         vec![0, 1, 2],
         10,
     );
-    for case in 0..6 {
+    // Cached values are not a second binding authority for an actual request
+    // slot. Deliberately change both cached class and payload: neither may
+    // replace the live Double operand or change its selected recipe identity.
+    let values = vec![
+        tensor(false, vec![2, 2]),
+        tensor(false, vec![2, 2]),
+        Value::Num(1.0),
+    ];
+    let original = request(&base, values.clone());
+    let original_receipt = block_on(resolve_reduction_program(&original, ProviderPrecision::F64))
+        .unwrap()
+        .unwrap();
+    let mut cached = base.clone();
+    cached.const_values.insert(
+        0,
+        Value::Tensor(Tensor::from_f32(vec![99.0; 4], vec![2, 2]).unwrap()),
+    );
+    let cached_request = request(&cached, values);
+    let cached_receipt = block_on(resolve_reduction_program(
+        &cached_request,
+        ProviderPrecision::F64,
+    ))
+    .unwrap()
+    .expect("stale cached values cannot replace actual request inputs");
+    assert!(std::ptr::eq(
+        cached_receipt.data_inputs()[0].value,
+        &cached_request.inputs[0],
+    ));
+    assert_eq!(cached_receipt.contract().input_class, NumericClass::Double);
+    assert_eq!(cached_receipt.identity(), original_receipt.identity());
+
+    for case in 1..6 {
         let mut plan = base.clone();
         match case {
-            0 => {
-                plan.const_values.insert(0, tensor(false, vec![2, 2]));
-            }
             1 => {
                 plan.inputs[1] = 0;
             }
