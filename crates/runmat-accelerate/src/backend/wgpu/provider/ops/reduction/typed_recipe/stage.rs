@@ -1,7 +1,7 @@
 //! Exact checked WGSL stages; no legacy reduction uniforms or shader parsing.
 use super::*;
 use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
-use runmat_accelerate_api::{reduction::ProviderReductionRecipe, WgpuBufferOwner, WgpuEmission};
+use runmat_accelerate_api::{reduction::ProviderReductionRecipe, WgpuEmission};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Stage {
@@ -31,8 +31,7 @@ impl Stage {
 pub(super) struct StageInvocation<'a> {
     pub(super) recipe: &'a ProviderReductionRecipe,
     pub(super) stage: Stage,
-    pub(super) inputs: &'a [WgpuBufferOwner],
-    pub(super) output: &'a WgpuBufferOwner,
+    pub(super) resources: SubmittedReductionResources,
 }
 
 impl WgpuProvider {
@@ -65,22 +64,24 @@ impl WgpuProvider {
     /// Every stage has precisely N read-only input bindings and one read-write
     /// output binding. Final has N=1 (the private partial), not the producer's
     /// original inputs. The cache key includes stage and immutable recipe ID.
-    pub(super) fn emit_reduction_stage(
+    pub(super) fn emit_reduction_stage<O: ReductionObserver>(
         &self,
         emission: &WgpuEmission<'_>,
         pending: &mut PendingSubmissions,
         request: StageInvocation<'_>,
         submit_attempted: &mut bool,
+        observer: &mut O,
     ) -> Result<u32> {
         let StageInvocation {
             recipe,
             stage,
-            inputs,
-            output,
+            resources,
         } = request;
-        let mut layout = Vec::with_capacity(inputs.len() + 1);
-        let mut bindings = Vec::with_capacity(inputs.len() + 1);
-        for (slot, buffer) in inputs.iter().enumerate() {
+        let input_count = resources.input_count();
+        let mut layout = Vec::with_capacity(input_count + 1);
+        let mut bindings = Vec::with_capacity(input_count + 1);
+        for slot in 0..input_count {
+            let buffer = resources.input_buffer(slot)?;
             layout.push(wgpu::BindGroupLayoutEntry {
                 binding: slot as u32,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -96,7 +97,7 @@ impl WgpuProvider {
                 resource: buffer.as_ref().as_entire_binding(),
             });
         }
-        let output_slot = inputs.len() as u32;
+        let output_slot = input_count as u32;
         layout.push(wgpu::BindGroupLayoutEntry {
             binding: output_slot,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -109,7 +110,7 @@ impl WgpuProvider {
         });
         bindings.push(wgpu::BindGroupEntry {
             binding: output_slot,
-            resource: output.as_ref().as_entire_binding(),
+            resource: resources.output_buffer().as_ref().as_entire_binding(),
         });
         let bgl = emission
             .device()
@@ -147,6 +148,13 @@ impl WgpuProvider {
                 layout: &bgl,
                 entries: &bindings,
             });
+        // Bindings and physical owners are derived from the SAME frame. The
+        // bind group has captured its WGPU refs; transfer exact lease/raw
+        // ownership before encoding/submit, independently of any recorder.
+        drop(bindings);
+        #[cfg(test)]
+        observer.prepare_pending(pending);
+        pending.retain_submission_resources(observer.retaining(resources)?)?;
         let mut enc = pending.profiled_encoder(
             emission,
             &wgpu::CommandEncoderDescriptor {

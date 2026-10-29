@@ -4,6 +4,18 @@ use anyhow::Result;
 use runmat_accelerate_api::WgpuBufferOwner;
 
 pub(super) trait ReductionObserver {
+    #[cfg(test)]
+    fn prepare_pending(
+        &self,
+        _pending: &mut crate::backend::wgpu::dispatch::observation::PendingSubmissions,
+    ) {
+    }
+    fn retaining(
+        &mut self,
+        resources: SubmittedReductionResources,
+    ) -> Result<crate::backend::wgpu::dispatch::observation::SubmittedAllocationRetention> {
+        Ok(resources.into_retention())
+    }
     fn output_acquired(&mut self, output: &WgpuBufferOwner) -> Result<()>;
     fn partial_acquired(&mut self, partial: &WgpuBufferOwner) -> Result<()>;
     fn submitted(&mut self, stage: Stage, id: u32) -> Result<()>;

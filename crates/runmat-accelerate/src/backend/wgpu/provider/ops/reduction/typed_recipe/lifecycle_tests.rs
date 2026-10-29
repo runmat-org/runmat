@@ -1,5 +1,8 @@
 //! Real checked two-stage queue/lifetime witnesses; requires an actual adapter.
 use super::*;
+use crate::backend::wgpu::dispatch::observation::{
+    with_retirement_for_test, SubmittedAllocationRetirement,
+};
 use crate::fusion::{
     reduction_recipe::{build, ReductionRecipe, ReductionRecipeConfig},
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
@@ -8,6 +11,8 @@ use crate::fusion_exec::{resolve_reduction_program, FusionExecutionRequest};
 use crate::graph::{InstrSpan, PrimitiveOp, ShapeInfo};
 use anyhow::Result;
 use futures::executor::block_on;
+use futures::FutureExt;
+use runmat_accelerate_api::observation::WgpuObservationProgress;
 use runmat_accelerate_api::{
     allocation::AllocationReleaseOutcome,
     reduction::{ReductionSelection, ReductionStrategy, ReductionSubmission},
@@ -17,6 +22,8 @@ use runmat_accelerate_api::{
 };
 use runmat_value::{Tensor, Value};
 use std::{collections::HashMap, sync::Weak};
+#[path = "lifecycle_tests/retention.rs"]
+mod retention;
 
 fn owner() -> &'static WgpuProvider {
     let provider = Box::leak(Box::new(
@@ -40,8 +47,52 @@ struct Trace {
     partial: Option<Weak<wgpu::Buffer>>,
     stages: Vec<(Stage, u32)>,
     fail_after_first: bool,
+    retirements: [Option<SubmittedAllocationRetirement>; 2],
+    progress: Option<std::sync::Arc<dyn WgpuObservationProgress>>,
+}
+impl Trace {
+    fn wait_retirements(&mut self) {
+        for slot in &mut self.retirements {
+            let Some(mut retirement) = slot.take() else {
+                continue;
+            };
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                if let Some(result) = std::pin::Pin::new(&mut retirement).now_or_never() {
+                    result.expect("actual exact-submission retirement");
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "exact typed-reduction resource owner did not retire"
+                );
+                std::thread::yield_now();
+            }
+        }
+    }
 }
 impl ReductionObserver for Trace {
+    fn prepare_pending(
+        &self,
+        pending: &mut crate::backend::wgpu::dispatch::observation::PendingSubmissions,
+    ) {
+        if let Some(progress) = &self.progress {
+            pending.set_progress_port_for_test(progress.clone());
+        }
+    }
+    fn retaining(
+        &mut self,
+        resources: SubmittedReductionResources,
+    ) -> Result<crate::backend::wgpu::dispatch::observation::SubmittedAllocationRetention> {
+        let (retention, retirement) = with_retirement_for_test(resources.into_retention())?;
+        let slot = self
+            .retirements
+            .iter_mut()
+            .find(|slot| slot.is_none())
+            .ok_or_else(|| anyhow::anyhow!("typed recipe emitted more than its two stages"))?;
+        *slot = Some(retirement);
+        Ok(retention)
+    }
     fn output_acquired(&mut self, output: &runmat_accelerate_api::WgpuBufferOwner) -> Result<()> {
         self.output = Some(WgpuBufferOwner::downgrade(output));
         Ok(())
@@ -266,6 +317,7 @@ fn authentic_two_pass_tracks_final_id_and_drains_after_first_stage_fault() {
         );
         assert_eq!(provider.allocations.record_count().unwrap(), before + 1);
         assert_eq!(read(&output), vec![11.0, 33.0, 55.0]);
+        success.wait_retirements();
         assert!(success.partial.as_ref().unwrap().upgrade().is_none());
         assert_eq!(output.release().unwrap(), AllocationReleaseOutcome::Retired);
         assert_eq!(provider.allocations.record_count().unwrap(), before);
@@ -289,6 +341,7 @@ fn authentic_two_pass_tracks_final_id_and_drains_after_first_stage_fault() {
         // Queue-ordered readback drains the already-submitted first stage.
         assert_eq!(read(&a), left);
         assert_eq!(read(&b), right);
+        fault.wait_retirements();
         assert!(fault.output.as_ref().unwrap().upgrade().is_none());
         assert!(fault.partial.as_ref().unwrap().upgrade().is_none());
         assert_eq!(provider.allocations.record_count().unwrap(), before);
@@ -297,6 +350,7 @@ fn authentic_two_pass_tracks_final_id_and_drains_after_first_stage_fault() {
     assert_eq!(a.release().unwrap(), AllocationReleaseOutcome::Retired);
     assert_eq!(b.release().unwrap(), AllocationReleaseOutcome::Retired);
     assert_eq!(provider.allocations.record_count().unwrap(), before - 2);
+    retention::prove_exact_owners(provider);
 }
 
 #[test]
@@ -343,11 +397,12 @@ fn same_class_transpose_binds_the_source_buffer_and_uses_checked_strides() {
     let admitted = provider
         .admit_reduction_recipe(&submission)
         .expect("provider authenticates transpose owner");
-    assert!(WgpuBufferOwner::ptr_eq(&source, &admitted[0]));
+    assert!(WgpuBufferOwner::ptr_eq(&source, &admitted[0].buffer));
     drop(admitted);
     let before = provider.allocations.record_count().unwrap();
+    let mut trace = Trace::default();
     let output = provider
-        .submit_reduction_recipe_exec(&submission)
+        .submit_reduction_recipe_observed(&submission, &mut trace)
         .expect("same-class transpose reduction");
     assert_eq!(provider.allocations.record_count().unwrap(), before + 1);
     let values = match block_on(provider.download_numeric(&output)).unwrap().data {
@@ -355,6 +410,7 @@ fn same_class_transpose_binds_the_source_buffer_and_uses_checked_strides() {
         other => panic!("expected native F32: {other:?}"),
     };
     assert_eq!(values, vec![11.0, 33.0, 55.0]);
+    trace.wait_retirements();
     assert_eq!(output.release().unwrap(), AllocationReleaseOutcome::Retired);
     assert_eq!(provider.allocations.record_count().unwrap(), before);
     drop(source);

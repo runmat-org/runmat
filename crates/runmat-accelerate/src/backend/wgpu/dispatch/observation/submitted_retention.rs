@@ -6,13 +6,15 @@
 //! the canonical exact-submission completion path.
 
 use super::{current_provider_observation, prepare, ProviderAdmission};
-mod retirement;
+mod reduction;
+pub(super) mod retirement;
+pub(crate) use reduction::{SubmittedReductionInput, SubmittedReductionResources};
 use retirement::{SubmittedAllocationRetirement, SubmittedAllocationRetirementNotifier};
 
 /// Observe exact retirement in direct-route tests without minting a selected
 /// provider observation. Actual progress/budget admission remains mandatory.
 #[cfg(test)]
-pub(super) fn with_retirement_for_test(
+pub(crate) fn with_retirement_for_test(
     retention: SubmittedAllocationRetention,
 ) -> anyhow::Result<(SubmittedAllocationRetention, SubmittedAllocationRetirement)> {
     let (retirement, notifier) = retirement::retirement_pair();
@@ -52,7 +54,7 @@ impl SubmittedResourceOwners {
     pub(crate) fn into_retention(self) -> SubmittedAllocationRetention {
         SubmittedAllocationRetention {
             owner: None,
-            resources: Some(self),
+            resources: Some(SubmittedResources::Fixed(self)),
             retirement: None,
         }
     }
@@ -103,8 +105,22 @@ pub(crate) struct SubmittedAllocationRetention {
     owner: Option<Box<dyn RetainedSubmittedAllocations>>,
     // Fixed FFT frame uses the already-existing completion/slot backing; no
     // extra Box, retirement pair, payload or host-control allocation is made.
-    resources: Option<SubmittedResourceOwners>,
+    resources: Option<SubmittedResources>,
     retirement: Option<SubmittedAllocationRetirementNotifier>,
+}
+
+enum SubmittedResources {
+    Fixed(SubmittedResourceOwners),
+    Reduction(SubmittedReductionResources),
+}
+
+impl SubmittedResources {
+    fn release(self) {
+        match self {
+            Self::Fixed(owner) => drop(owner),
+            Self::Reduction(owner) => drop(owner),
+        }
+    }
 }
 
 impl SubmittedAllocationRetention {
@@ -147,7 +163,9 @@ impl SubmittedAllocationRetention {
     /// grants permission to continue a bounded sequence.
     pub(super) fn retire(mut self, succeeded: bool) {
         drop(self.owner.take());
-        drop(self.resources.take());
+        if let Some(resources) = self.resources.take() {
+            resources.release();
+        }
         if let Some(retirement) = self.retirement.take() {
             retirement.finish(succeeded);
         }

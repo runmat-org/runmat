@@ -39,7 +39,10 @@ fn published_output_retains_exact_submission_and_retires() {
         .unwrap();
     assert_ne!(first_id, exact_id);
     let output = provider
-        .publish_reduction_output(buffer, vec![1, 1], 1, NumericElementType::F32, exact_id)
+        .register_reduction_output(buffer, vec![1, 1], 1, NumericElementType::F32)
+        .expect("register output once");
+    let output = provider
+        .publish_reduction_output(output, exact_id)
         .expect("publish tracked output");
     assert_eq!(
         provider.get_entry_raw(&output).unwrap().last_submission_id,

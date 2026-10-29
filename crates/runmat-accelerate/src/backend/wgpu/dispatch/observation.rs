@@ -127,11 +127,11 @@ mod completion;
 mod host_control;
 #[path = "observation/inline_slots.rs"]
 mod inline_slots;
+#[path = "observation/retention_admission.rs"]
+mod retention_admission;
 #[cfg(not(target_arch = "wasm32"))]
 mod scoped_retirement;
 mod submitted_retention;
-#[path = "observation/retention_admission.rs"]
-mod retention_admission;
 #[cfg(target_arch = "wasm32")]
 use completion::map_direct_fence;
 use completion::{
@@ -145,8 +145,13 @@ use inline_slots::InlineSlots;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use scoped_retirement::{ScopeConfirmation, ScopedRetirement, ScopedRetirementProof};
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use submitted_retention::retirement::SubmittedAllocationRetirement;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use submitted_retention::with_retirement_for_test;
 pub(crate) use submitted_retention::{
-    PreparedSubmittedAllocationRetention, SubmittedAllocationRetention, SubmittedResourceOwners,
+    PreparedSubmittedAllocationRetention, SubmittedAllocationRetention, SubmittedReductionInput,
+    SubmittedReductionResources, SubmittedResourceOwners,
 };
 
 /// Construct outside the access closure, borrow through nested emitters, then
@@ -178,6 +183,13 @@ pub(crate) struct PendingSubmissions {
 }
 
 impl PendingSubmissions {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn set_progress_port_for_test(
+        &mut self,
+        progress: Arc<dyn runmat_accelerate_api::observation::WgpuObservationProgress>,
+    ) {
+        self.progress_port = Some(progress);
+    }
     /// Retire only after a non-indexed queue callback or actual device-loss
     /// proof authenticated physical retirement. A rejected or unconfirmed command never earns
     /// positive timing evidence. Existing map/query owners remain here until

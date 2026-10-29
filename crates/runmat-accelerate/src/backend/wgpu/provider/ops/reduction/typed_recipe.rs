@@ -1,5 +1,8 @@
 //! Executable typed reduction route for prepared resident inputs.
 use super::*;
+use crate::backend::wgpu::dispatch::observation::{
+    SubmittedReductionInput, SubmittedReductionResources,
+};
 use crate::backend::wgpu::residency::BufferUsageClass;
 use runmat_accelerate_api::{
     reduction::{ReductionStrategy, ReductionSubmission},
@@ -7,14 +10,14 @@ use runmat_accelerate_api::{
     ProviderShaderRequirements,
 };
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod lifecycle_tests;
 mod phase;
 pub(super) mod preflight;
 mod publication;
 mod stage;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod lifecycle_tests;
 
 use phase::{NoopObserver, ReductionObserver};
 use preflight::physical;
@@ -77,9 +80,15 @@ impl WgpuProvider {
             ensure!(
                 inputs
                     .iter()
-                    .all(|b| !std::ptr::eq(b.as_ref(), output.as_ref())),
+                    .all(|b| !std::ptr::eq(b.buffer.as_ref(), output.as_ref())),
                 "typed reduction output aliases input"
             );
+            let published = self.register_reduction_output(
+                output.clone(),
+                d.output_shape.clone(),
+                output_len,
+                output_type,
+            )?;
             let submission_id = match selection.strategy() {
                 ReductionStrategy::SinglePass => {
                     let id = self.emit_reduction_stage(
@@ -88,10 +97,14 @@ impl WgpuProvider {
                         StageInvocation {
                             recipe,
                             stage: Stage::Single,
-                            inputs: &inputs,
-                            output: &output,
+                            resources: SubmittedReductionResources::producer(
+                                inputs,
+                                &output,
+                                Some(&published),
+                            )?,
                         },
                         &mut submit_attempted,
+                        observer,
                     )?;
                     observer.submitted(Stage::Single, id)?;
                     id
@@ -113,23 +126,25 @@ impl WgpuProvider {
                         !std::ptr::eq(partial.as_ref(), output.as_ref())
                             && inputs
                                 .iter()
-                                .all(|b| !std::ptr::eq(b.as_ref(), partial.as_ref())),
+                                .all(|b| !std::ptr::eq(b.buffer.as_ref(), partial.as_ref())),
                         "typed reduction partial aliases live input or output"
                     );
-                    // The same admitted producer inputs feed pass 1. The final
-                    // stage sees only the private typed partial. Keep that owner
-                    // alive through both queue submissions; WGPU retains queued
-                    // resource references after this closure drops it.
+                    // Pass1 owns the original input vector and the exact raw
+                    // partial through its real completion. Pass2 separately
+                    // retains that partial and final output lease; no temporary
+                    // tensor lease or duplicate allocation charge is invented.
                     let first_id = self.emit_reduction_stage(
                         emission,
                         pending,
                         StageInvocation {
                             recipe,
                             stage: Stage::First,
-                            inputs: &inputs,
-                            output: &partial,
+                            resources: SubmittedReductionResources::producer(
+                                inputs, &partial, None,
+                            )?,
                         },
                         &mut submit_attempted,
+                        observer,
                     )?;
                     observer.submitted(Stage::First, first_id)?;
                     let final_id = self.emit_reduction_stage(
@@ -138,16 +153,18 @@ impl WgpuProvider {
                         StageInvocation {
                             recipe,
                             stage: Stage::Final,
-                            inputs: std::slice::from_ref(&partial),
-                            output: &output,
+                            resources: SubmittedReductionResources::final_stage(
+                                &partial, &output, &published,
+                            )?,
                         },
                         &mut submit_attempted,
+                        observer,
                     )?;
                     observer.submitted(Stage::Final, final_id)?;
                     final_id
                 }
             };
-            Ok((output, submission_id))
+            Ok((published, submission_id))
         });
         let (output, submission_id) = match result {
             Ok(Ok(output)) => output,
@@ -160,12 +177,6 @@ impl WgpuProvider {
                 });
             }
         };
-        self.publish_reduction_output(
-            output,
-            d.output_shape.clone(),
-            output_len,
-            output_type,
-            submission_id,
-        )
+        self.publish_reduction_output(output, submission_id)
     }
 }

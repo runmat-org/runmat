@@ -1,9 +1,6 @@
 //! Provider-side physical admission for an immutable selected reduction.
 use super::*;
-use runmat_accelerate_api::{
-    reduction::{ReductionSelection, ReductionStrategy},
-    WgpuBufferOwner,
-};
+use runmat_accelerate_api::reduction::{ReductionSelection, ReductionStrategy};
 
 pub(super) fn physical(precision: ProviderPrecision) -> NumericElementType {
     match precision {
@@ -105,7 +102,7 @@ impl WgpuProvider {
     pub(super) fn admit_reduction_recipe(
         &self,
         submission: &ReductionSubmission<'_>,
-    ) -> ProviderExecutionResult<Vec<WgpuBufferOwner>> {
+    ) -> ProviderExecutionResult<Vec<SubmittedReductionInput>> {
         if submission.device_id() != self.device_id() {
             return Err(unsupported("foreign typed reduction submission"));
         }
@@ -113,7 +110,18 @@ impl WgpuProvider {
         self.admit_reduction_selection(selection)?;
         let d = selection.recipe().descriptor();
         let limits = &self.adapter_limits;
-        let mut inputs = Vec::with_capacity(submission.inputs().len());
+        // The immutable enabled-device limits above bound N+1 bindings. This
+        // is the original one input vector, now retaining exact leases too.
+        // Checked size is not a finite Runtime host-allocation grant: this
+        // legacy route still lacks a complete managed control-workspace quote.
+        let count = submission.inputs().len();
+        count
+            .checked_mul(std::mem::size_of::<SubmittedReductionInput>())
+            .ok_or_else(|| unsupported("typed reduction input owner size overflow"))?;
+        let mut inputs = Vec::new();
+        inputs
+            .try_reserve_exact(count)
+            .map_err(|error| ProviderExecutionError::from(anyhow::anyhow!(error)))?;
         for (handle, binding) in submission.inputs().iter().zip(&d.inputs) {
             let e = self
                 .get_entry_raw(handle)
@@ -130,7 +138,10 @@ impl WgpuProvider {
                     "typed reduction actual input differs from binding",
                 ));
             }
-            inputs.push(e.buffer);
+            inputs.push(
+                SubmittedReductionInput::new(handle, e.buffer)
+                    .map_err(ProviderExecutionError::from)?,
+            );
         }
         Ok(inputs)
     }

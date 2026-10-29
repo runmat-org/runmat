@@ -2,29 +2,35 @@
 use super::*;
 
 impl WgpuProvider {
-    /// One publication boundary for actual reduction output and its exact queue ID.
-    pub(super) fn publish_reduction_output(
+    /// Register once before the output's first dispatch, so that dispatch can
+    /// retain the actual final allocation lease before caller publication.
+    pub(super) fn register_reduction_output(
         &self,
         output: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         output_type: NumericElementType,
+    ) -> Result<GpuTensorHandle> {
+        let allocated_bytes = output.size();
+        self.register_numeric_buffer(
+            output,
+            super::super::super::backend_types::NumericBufferRegistration {
+                shape,
+                len,
+                physical_element_type: output_type,
+                storage: GpuTensorStorage::Real,
+                allocated_bytes,
+                usage: BufferUsageClass::FusionOut,
+            },
+        )
+    }
+
+    /// Publish the already-registered output with its exact final queue ID.
+    pub(super) fn publish_reduction_output(
+        &self,
+        handle: GpuTensorHandle,
         submission_id: u32,
     ) -> ProviderExecutionResult<GpuTensorHandle> {
-        let allocated_bytes = output.size();
-        let handle = self
-            .register_numeric_buffer(
-                output,
-                super::super::super::backend_types::NumericBufferRegistration {
-                    shape,
-                    len,
-                    physical_element_type: output_type,
-                    storage: GpuTensorStorage::Real,
-                    allocated_bytes,
-                    usage: BufferUsageClass::FusionOut,
-                },
-            )
-            .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
         if let Err(error) = self
             .allocations
             .record_submission(handle.buffer_id(), submission_id)
