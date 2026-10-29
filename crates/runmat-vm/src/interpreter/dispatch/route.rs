@@ -165,9 +165,7 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
 
         Instr::EmitStackTop { .. } | Instr::EmitVar { .. } => Output,
         Instr::AndAnd(..) | Instr::OrOr(..) | Instr::JumpIfFalse(..) => Logical,
-        Instr::CreateMatrixFromSequences { .. }
-        | Instr::CreateMatrixDynamic(..)
-        | Instr::CreateRange(..) => Aggregate,
+        Instr::CreateMatrixFromSequences { .. } | Instr::CreateRange(..) => Aggregate,
 
         Instr::LoadConst(..)
         | Instr::LoadInt(..)

@@ -78,18 +78,6 @@ pub fn create_matrix(
     array_ops::create_matrix(stack, rows, cols)
 }
 
-pub async fn create_matrix_dynamic<F, Fut>(
-    stack: &mut crate::interpreter::stack::InterpreterStack,
-    num_rows: usize,
-    create_from_values: F,
-) -> Result<(), RuntimeError>
-where
-    F: FnMut(Vec<Vec<Value>>) -> Fut,
-    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
-{
-    array_ops::create_matrix_dynamic(stack, num_rows, create_from_values).await
-}
-
 pub async fn create_range<F, Fut>(
     stack: &mut crate::interpreter::stack::InterpreterStack,
     has_step: bool,

@@ -495,20 +495,6 @@ async fn dispatch_aggregate(
                 })?
                 .with_owned(|value| stack.try_push(value))?;
         }
-        Instr::CreateMatrixDynamic(num_rows) => {
-            create_matrix_dynamic(stack, *num_rows, |rows_data| async move {
-                runmat_runtime::create_matrix_from_values(&rows_data)
-                    .await
-                    .map_err(|error| {
-                        arrays::qualify_matrix_construction_shape(
-                            error,
-                            source_ref,
-                            invocation_arity,
-                        )
-                    })
-            })
-            .await?;
-        }
         Instr::CreateRange(has_step) => {
             let runtime = &context.runtime;
             create_range(stack, *has_step, |args| async move {

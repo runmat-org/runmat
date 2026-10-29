@@ -198,9 +198,8 @@ pub(super) fn resume_after_input_store(
                     | Instr::LoadInt(_)
                     | Instr::CreateRange(_)
                     | Instr::CreateMatrix(_, _)
-                    | Instr::CreateMatrixDynamic(_)
                     | Instr::EnterScope(_)
-            ),
+            ) || matches!(instruction, Instr::CreateMatrixFromSequences { elements, .. } if elements.iter().all(|element| element.stack_operand_count() == 1)),
             "unexpected input-prefix instruction: {instruction:?}"
         );
     }

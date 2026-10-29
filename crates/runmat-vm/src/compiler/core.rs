@@ -4131,12 +4131,15 @@ impl Compiler {
             .all(|candidate| *candidate == columns)
             .then_some(columns);
 
-        if elements.iter().any(|element| {
+        let captured_sequence = elements.iter().any(|element| {
             matches!(
                 element,
                 runmat_mir::MirAggregateElement::CapturedSequence(_)
             )
-        }) {
+        });
+        let dynamic_concat = matches!(kind, MirAggregateKind::Tensor)
+            && (self.mir_aggregate_needs_dynamic_concat(elements) || rectangular_columns.is_none());
+        if captured_sequence || dynamic_concat {
             let specs = elements
                 .iter()
                 .map(|element| match element {
@@ -4167,18 +4170,6 @@ impl Compiler {
         }
 
         match kind {
-            MirAggregateKind::Tensor
-                if self.mir_aggregate_needs_dynamic_concat(elements)
-                    || rectangular_columns.is_none() =>
-            {
-                for element in elements {
-                    self.compile_mir_aggregate_element(element)?;
-                }
-                for columns in row_lengths {
-                    self.emit(Instr::LoadConst(*columns as f64));
-                }
-                self.emit(Instr::CreateMatrixDynamic(rows));
-            }
             MirAggregateKind::Tensor => {
                 for element in elements {
                     self.compile_mir_aggregate_element(element)?;

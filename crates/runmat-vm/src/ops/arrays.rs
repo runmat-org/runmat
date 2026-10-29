@@ -204,44 +204,6 @@ fn scalar_to_symbolic(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
     }
 }
 
-pub async fn create_matrix_dynamic<F, Fut>(
-    stack: &mut crate::interpreter::stack::InterpreterStack,
-    num_rows: usize,
-    mut create_from_values: F,
-) -> Result<(), RuntimeError>
-where
-    F: FnMut(Vec<Vec<Value>>) -> Fut,
-    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
-{
-    let mut row_lengths = Vec::new();
-    for _ in 0..num_rows {
-        let row_len: f64 = (&stack
-            .pop()
-            .ok_or(mex("StackUnderflow", "stack underflow"))?)
-            .try_into()?;
-        row_lengths.push(row_len as usize);
-    }
-    row_lengths.reverse();
-    let mut rows_data = Vec::new();
-    for &row_len in row_lengths.iter().rev() {
-        let mut row_values = Vec::new();
-        for _ in 0..row_len {
-            row_values.push(
-                stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?,
-            );
-        }
-        row_values.reverse();
-        rows_data.push(row_values);
-    }
-    rows_data.reverse();
-    let _rows_roots = crate::call::root_values(rows_data.iter().flatten())?;
-    create_from_values(rows_data)
-        .await?
-        .with_owned(|result| stack.try_push(result))
-}
-
 pub async fn create_range<F, Fut>(
     stack: &mut crate::interpreter::stack::InterpreterStack,
     has_step: bool,

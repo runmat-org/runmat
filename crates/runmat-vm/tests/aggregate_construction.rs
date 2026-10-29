@@ -9,7 +9,7 @@ fn execute_with_dynamic_concat(source: &str) -> runmat_runtime::execution::Roote
     let has_dynamic = |instructions: &[Instr]| {
         instructions
             .iter()
-            .any(|instruction| matches!(instruction, Instr::CreateMatrixDynamic(_)))
+            .any(|instruction| matches!(instruction, Instr::CreateMatrixFromSequences { .. }))
     };
     assert!(
         has_dynamic(&bytecode.instructions)
@@ -91,4 +91,18 @@ fn primitive_scalar_operator_results_keep_fixed_constructor() {
         .iter()
         .any(|instruction| matches!(instruction, Instr::CreateMatrix(1, 5))));
     interpret(&bytecode).expect("execute primitive scalar operators");
+}
+
+#[test]
+fn loop_aggregate_has_exact_join_geometry_and_single_operand_arity() {
+    let source = "for i = 1:3\n matrix = [i,i+1;i+2,i+3];\nend\nassert(isequal(matrix,[3 4;5 6]));";
+    let bytecode = compile_source(source).expect("compile loop aggregate without join-depth drift");
+    let aggregate = bytecode.instructions.iter().find(|instruction| matches!(instruction,
+        Instr::CreateMatrixFromSequences { rows: 2, row_lengths, elements }
+        if row_lengths == &[2, 2] && elements.iter().all(|element| element.stack_operand_count() == 1)
+    )).expect("typed aggregate metadata");
+    let effect = aggregate.stack_effect().unwrap();
+    assert_eq!((effect.pops, effect.pushes), (4, 1));
+    assert!(bytecode.stack_geometry.exact_maximum().is_some());
+    interpret(&bytecode).expect("ordinary loop preserves matrix values");
 }

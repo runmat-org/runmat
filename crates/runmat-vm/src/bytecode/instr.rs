@@ -321,7 +321,6 @@ pub enum Instr {
         row_lengths: Vec<usize>,
         elements: Vec<AggregateElementSpec>,
     },
-    CreateMatrixDynamic(usize),
     CreateRange(bool),
     Index(usize),
 
@@ -996,7 +995,6 @@ impl Instr {
             ),
             Instr::CreateStructLiteral(fields) => effect(fields.len(), 1),
             Instr::CreateObjectLiteral { fields, .. } => effect(fields.len(), 1),
-            Instr::CreateMatrixDynamic(rows) => effect(*rows, 1),
             Instr::CreateRange(has_step) => effect(if *has_step { 3 } else { 2 }, 1),
             Instr::Unpack(_) => effect(0, 0),
             Instr::Index(n) => effect(n + 1, 1),

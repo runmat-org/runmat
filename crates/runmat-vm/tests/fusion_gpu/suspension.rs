@@ -205,9 +205,8 @@ fn stochastic_witness(resident: bool, cancel: bool) {
                     | Instr::LoadInt(_)
                     | Instr::StoreVar(_)
                     | Instr::CreateMatrix(_, _)
-                    | Instr::CreateMatrixDynamic(_)
                     | Instr::EnterScope(_)
-            )));
+            ) || matches!(instruction, Instr::CreateMatrixFromSequences { elements, .. } if elements.iter().all(|element| element.stack_operand_count() == 1))));
         let drift = provider.push(vec![0.1], vec![1, 1]);
         let borrowed = resident.then(|| provider.push(vec![1., 2.], vec![2, 1]));
         let baseline = provider.buffers.lock().unwrap().clone();

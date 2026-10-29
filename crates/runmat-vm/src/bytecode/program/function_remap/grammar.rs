@@ -88,7 +88,6 @@ macro_rules! with_instruction_function_references {
             | crate::bytecode::Instr::StochasticEvolution { .. }
             | crate::bytecode::Instr::CreateMatrix(..)
             | crate::bytecode::Instr::CreateMatrixFromSequences { .. }
-            | crate::bytecode::Instr::CreateMatrixDynamic(..)
             | crate::bytecode::Instr::CreateRange(..)
             | crate::bytecode::Instr::Index(..)
             | crate::bytecode::Instr::IndexSlice(..)

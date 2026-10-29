@@ -27,9 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 
 pub(crate) use arrays::MatrixConstructionAtSource;
-pub use arrays::{
-    create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
-};
+pub use arrays::{create_matrix, create_range, pack_to_col, pack_to_row, unpack};
 pub(crate) use calls::checked_class_registration;
 pub use calls::{
     build_builtin_expand_multi_args, build_feval_expand_multi_args,

@@ -259,7 +259,6 @@ impl Instr {
             | Instr::Pop
             | Instr::Unpack(..)
             | Instr::CreateMatrix(..)
-            | Instr::CreateMatrixDynamic(..)
             | Instr::CreateRange(..)
             | Instr::Index(..)
             | Instr::IndexSlice(..)

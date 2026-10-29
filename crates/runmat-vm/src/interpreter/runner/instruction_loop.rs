@@ -1111,7 +1111,6 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::Unpack(_)
             | Instr::CreateMatrix(_, _)
             | Instr::CreateMatrixFromSequences { .. }
-            | Instr::CreateMatrixDynamic(_)
             | Instr::CreateRange(_)
             | Instr::PackToRow(_)
             | Instr::PackToCol(_) => unreachable!("handled by dispatch_instruction"),

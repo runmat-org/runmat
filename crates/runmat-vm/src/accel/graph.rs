@@ -12,6 +12,9 @@ use runmat_value::Value;
 
 use crate::instr::Instr;
 
+#[path = "graph/aggregate.rs"]
+mod aggregate;
+
 pub fn build_accel_graph(instructions: &[Instr], var_types: &[Type]) -> AccelGraph {
     GraphBuilder::new(instructions, var_types).build()
 }
@@ -265,6 +268,7 @@ impl<'a> GraphBuilder<'a> {
                 // Pop total elements (column-major expectation). We'll reconstruct column-major data.
                 let mut elems: Vec<f64> = Vec::with_capacity(total);
                 let mut element_ids = Vec::with_capacity(total);
+                let mut foldable = true;
                 for _ in 0..total {
                     if let Some(id) = self.pop_value() {
                         element_ids.push(id);
@@ -275,12 +279,12 @@ impl<'a> GraphBuilder<'a> {
                             // integer literals out of this acceleration-only
                             // fold instead of silently rounding them.
                             Some(Value::Int(_)) => {
-                                elems.clear();
-                                break;
+                                foldable = false;
+                                continue;
                             }
                             _ => {
-                                elems.clear();
-                                break;
+                                foldable = false;
+                                continue;
                             }
                         };
                         elems.push(val);
@@ -289,13 +293,14 @@ impl<'a> GraphBuilder<'a> {
                         break;
                     }
                 }
+                element_ids.reverse();
                 let node_id = self.nodes.len() as NodeId;
                 let span = InstrSpan { start: pc, end: pc };
                 let mut node = AccelNode {
                     id: node_id,
                     label: AccelNodeLabel::Primitive(PrimitiveOp::UPlus),
                     category: AccelOpCategory::Other,
-                    inputs: Vec::new(),
+                    inputs: element_ids,
                     outputs: Vec::new(),
                     span,
                     tags: vec![],
@@ -304,9 +309,8 @@ impl<'a> GraphBuilder<'a> {
                     shape: Some(vec![Some(rows), Some(cols)]),
                 };
                 // Column-major data: elements were popped last-in-first-out; reverse to original push order for row vector cases
-                let tensor_const = if elems.len() == total {
+                let tensor_const = if foldable && elems.len() == total {
                     elems.reverse();
-                    element_ids.reverse();
                     // For generality, map from row-major order in elems to column-major storage expected
                     // Assuming elems are in left-to-right, top-to-bottom order, convert to column-major
                     let mut data_cm = vec![0.0f64; total];
@@ -322,7 +326,6 @@ impl<'a> GraphBuilder<'a> {
                     None
                 };
                 if tensor_const.is_some() {
-                    node.inputs = element_ids;
                     node.tags.push(AccelGraphTag::FoldedLiteralArray);
                 }
                 let out_value = if let Some(t) = tensor_const {
@@ -341,149 +344,12 @@ impl<'a> GraphBuilder<'a> {
                 self.nodes.push(node);
                 self.stack.push(out_value);
             }
-            Instr::CreateMatrixDynamic(num_rows) => {
-                let num_rows = *num_rows;
-                if self.stack.len() < num_rows {
-                    self.reset_stack();
-                    return;
-                }
-                let mut row_length_ids = Vec::with_capacity(num_rows);
-                for _ in 0..num_rows {
-                    if let Some(id) = self.pop_value() {
-                        row_length_ids.push(id);
-                    } else {
-                        self.reset_stack();
-                        return;
-                    }
-                }
-                row_length_ids.reverse();
-
-                let mut row_lengths: Vec<usize> = Vec::with_capacity(num_rows);
-                for &id in &row_length_ids {
-                    let info = &self.values[id as usize];
-                    let len = match &info.constant {
-                        Some(Value::Num(n)) if n.is_finite() => {
-                            let r = n.round();
-                            if (r - n).abs() <= f64::EPSILON && r >= 0.0 {
-                                r as usize
-                            } else {
-                                self.reset_stack();
-                                return;
-                            }
-                        }
-                        Some(Value::Int(i)) => match i.try_to_usize() {
-                            Some(v) => v,
-                            None => {
-                                self.reset_stack();
-                                return;
-                            }
-                        },
-                        _ => {
-                            self.reset_stack();
-                            return;
-                        }
-                    };
-                    row_lengths.push(len);
-                }
-
-                let total: usize = row_lengths.iter().sum();
-                if self.stack.len() < total {
-                    self.reset_stack();
-                    return;
-                }
-
-                let mut rows_data: Vec<Vec<f64>> = Vec::with_capacity(num_rows);
-                let mut rows_ids: Vec<Vec<ValueId>> = Vec::with_capacity(num_rows);
-                let mut all_numeric = true;
-                for &row_len in row_lengths.iter().rev() {
-                    let mut row_values = Vec::with_capacity(row_len);
-                    let mut row_ids = Vec::with_capacity(row_len);
-                    for _ in 0..row_len {
-                        if let Some(id) = self.pop_value() {
-                            row_ids.push(id);
-                            let info = &self.values[id as usize];
-                            match &info.constant {
-                                Some(Value::Num(n)) => row_values.push(*n),
-                                Some(Value::Int(_)) => {
-                                    all_numeric = false;
-                                    row_values.push(0.0);
-                                }
-                                _ => {
-                                    all_numeric = false;
-                                    row_values.push(0.0);
-                                }
-                            }
-                        } else {
-                            self.reset_stack();
-                            return;
-                        }
-                    }
-                    row_values.reverse();
-                    row_ids.reverse();
-                    rows_data.push(row_values);
-                    rows_ids.push(row_ids);
-                }
-                rows_data.reverse();
-                rows_ids.reverse();
-
-                let node_id = self.nodes.len() as NodeId;
-                let span = InstrSpan { start: pc, end: pc };
-                let mut node = AccelNode {
-                    id: node_id,
-                    label: AccelNodeLabel::Primitive(PrimitiveOp::UPlus),
-                    category: AccelOpCategory::Other,
-                    inputs: Vec::new(),
-                    outputs: Vec::new(),
-                    span,
-                    tags: vec![],
-                };
-
-                let cols = row_lengths.first().copied().unwrap_or(0);
-                let uniform_cols = row_lengths.iter().all(|len| *len == cols);
-                let ty = if uniform_cols {
-                    Type::Tensor {
-                        shape: Some(vec![Some(num_rows), Some(cols)]),
-                    }
-                } else {
-                    Type::Unknown
-                };
-
-                let tensor_const = if all_numeric && uniform_cols {
-                    let mut data_cm = vec![0.0f64; num_rows * cols];
-                    for r in 0..num_rows {
-                        for c in 0..cols {
-                            if let Some(row) = rows_data.get(r) {
-                                if let Some(val) = row.get(c) {
-                                    let idx = r + c * num_rows;
-                                    data_cm[idx] = *val;
-                                }
-                            }
-                        }
-                    }
-                    runmat_value::Tensor::new(data_cm, vec![num_rows, cols]).ok()
-                } else {
-                    None
-                };
-                if tensor_const.is_some() {
-                    node.inputs = rows_ids.into_iter().flatten().collect();
-                    node.tags.push(AccelGraphTag::FoldedLiteralArray);
-                }
-
-                let out_value = if let Some(t) = tensor_const {
-                    self.new_value(
-                        ValueOrigin::NodeOutput {
-                            node: node_id,
-                            output: 0,
-                        },
-                        ty.clone(),
-                        Some(Value::Tensor(t)),
-                    )
-                } else {
-                    self.new_node_output(node_id, 0, ty)
-                };
-                node.outputs.push(out_value);
-                self.nodes.push(node);
-                self.stack.push(out_value);
+            Instr::CreateMatrixFromSequences {
+                rows,
+                row_lengths,
+                elements,
+            } => {
+                self.handle_matrix_aggregate(pc, *rows, row_lengths, elements);
             }
             Instr::Swap => {
                 if self.stack.len() >= 2 {
