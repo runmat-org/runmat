@@ -7681,6 +7681,7 @@ name = "runmat-accelerate"
 version = "0.6.2"
 dependencies = [
  "anyhow",
+ "ash",
  "bytemuck",
  "dirs 5.0.1",
  "env_logger",
@@ -7712,6 +7713,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "spirv",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

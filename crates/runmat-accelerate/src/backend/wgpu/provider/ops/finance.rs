@@ -105,6 +105,34 @@ impl WgpuProvider {
                 strides: request.inputs[index].strides,
             }),
         };
+        // Complete every chunk's fallible compiler work before allocating or
+        // dispatching outputs. Later chunks must not discover a compiler error
+        // after an earlier chunk has already executed.
+        let mut prepared_chunks = Vec::new();
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        // `total_len` was admitted as u32 above, so this geometry imposes a
+        // fixed finite receipt count; reserve it before preparing any chunk.
+        prepared_chunks.try_reserve_exact(total_len.div_ceil(chunk_capacity))?;
+        let mut offset = 0usize;
+        while offset < total_len {
+            let chunk_len = (total_len - offset).min(chunk_capacity);
+            let shader = black_scholes_price_shader(
+                self.precision,
+                &geometry,
+                total_len as u32,
+                offset as u32,
+                chunk_len as u32,
+            );
+            prepared_chunks.push((
+                chunk_len,
+                crate::backend::wgpu::shader_compilation::prepare(
+                    &shader,
+                    self.access.enabled_features(),
+                )?,
+            ));
+            offset += chunk_len;
+        }
         let (call_buffer, put_buffer) =
             self.with_emission(|emission, pending| -> Result<_> {
                 let call_buffer = self.create_storage_buffer_checked(
@@ -119,26 +147,13 @@ impl WgpuProvider {
                 )?;
 
                 if total_len > 0 {
-                    let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS
-                        as usize)
-                        * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-                    let mut offset = 0usize;
-                    while offset < total_len {
-                        let chunk_len = (total_len - offset).min(chunk_capacity);
-                        let shader = black_scholes_price_shader(
-                            self.precision,
-                            &geometry,
-                            total_len as u32,
-                            offset as u32,
-                            chunk_len as u32,
-                        );
+                    for (chunk_len, prepared_shader) in &prepared_chunks {
                         let shader_module =
-                            emission
-                                .device()
-                                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                                    label: Some("runmat-black-scholes-price-shader"),
-                                    source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                                });
+                            crate::backend::wgpu::shader_compilation::create_prepared(
+                                emission,
+                                "runmat-black-scholes-price-shader",
+                                prepared_shader,
+                            )?;
                         let bind_layout = emission.device().create_bind_group_layout(
                             &wgpu::BindGroupLayoutDescriptor {
                                 label: Some("runmat-black-scholes-price-layout"),
@@ -202,7 +217,7 @@ impl WgpuProvider {
                                     ],
                                 });
                         let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                            chunk_len as u32,
+                            *chunk_len as u32,
                             crate::backend::wgpu::config::WORKGROUP_SIZE,
                         );
                         crate::backend::wgpu::dispatch::creation::run(
@@ -214,7 +229,6 @@ impl WgpuProvider {
                             "runmat-black-scholes-price-encoder",
                             "runmat-black-scholes-price-pass",
                         )?;
-                        offset += chunk_len;
                     }
                 }
 

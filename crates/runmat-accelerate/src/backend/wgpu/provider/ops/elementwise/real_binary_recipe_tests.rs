@@ -191,7 +191,10 @@ async fn actual_binary_same_and_broadcast_cover_workgroup_tail() {
 #[ignore = "requires an actual adapter, RUNMAT_WGPU_FORCE_PRECISION=f32 and RUNMAT_WG=256"]
 async fn actual_f32_binary_device_launch_preserves_outputs_and_receipts() {
     let provider = owner().await;
-    assert_eq!(provider.precision(), runmat_accelerate_api::ProviderPrecision::F32);
+    assert_eq!(
+        provider.precision(),
+        runmat_accelerate_api::ProviderPrecision::F32
+    );
     assert_eq!(provider.binary_linear_launch().unwrap().workgroup(), 256);
     qualify(provider).await;
 }

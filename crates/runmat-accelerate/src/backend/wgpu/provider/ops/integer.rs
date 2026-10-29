@@ -377,7 +377,7 @@ impl WgpuProvider {
                     emission,
                     "runmat-integer-cumulative-module",
                     &shader,
-                );
+                )?;
                 let key = self.compute_pipeline_hash_bytes(
                     shader.as_bytes(),
                     "runmat-integer-cumulative-bgl",
@@ -563,7 +563,7 @@ impl WgpuProvider {
                 emission,
                 "runmat-integer-reduce-dim-module",
                 &shader,
-            );
+            )?;
             let key = self.compute_pipeline_hash_bytes(
                 shader.as_bytes(),
                 "runmat-integer-reduce-dim-bgl",
@@ -837,7 +837,7 @@ impl WgpuProvider {
                 emission,
                 "runmat-integer-mean-dim-module",
                 &shader,
-            );
+            )?;
             let key = self.compute_pipeline_hash_bytes(
                 shader.as_bytes(),
                 "runmat-integer-mean-dim-bgl",
@@ -1079,7 +1079,7 @@ impl WgpuProvider {
                         emission,
                         "runmat-integer-reduce-dim-extrema-module",
                         &shader,
-                    );
+                    )?;
                     let key = self.compute_pipeline_hash_bytes(
                         shader.as_bytes(),
                         "runmat-integer-reduce-dim-extrema-bgl",

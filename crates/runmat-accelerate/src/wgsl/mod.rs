@@ -4,6 +4,9 @@
 use std::borrow::Cow;
 
 pub(crate) mod ieee_words;
+#[cfg(any(feature = "wgpu", test))]
+pub(crate) mod f64_math;
+pub(crate) mod integer;
 pub(crate) mod nan_predicate;
 #[cfg(test)]
 pub(crate) mod validation_tests;

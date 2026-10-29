@@ -452,7 +452,8 @@ fn extreme_normalization_adjoint_keeps_representable_gradients(precision: Provid
                 < match precision {
                     ProviderPrecision::F32 => 2e-2,
                     ProviderPrecision::F64 => 1e-10,
-                }
+                },
+            "constant {precision:?} dX[{index}]={actual} != {expected} at magnitude {magnitude}"
         );
     }
 }

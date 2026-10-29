@@ -62,12 +62,12 @@ fn mapped_span(raw: i32) -> i32 {
     case 1u: { return clamp(raw, 0, len - 1); }
     case 2u: {
       let period = 2 * len;
-      let index = ((raw % period) + period) % period;
+      let index = i32(runmat_i32_positive_period_residue(raw, u32(period)));
       return select(period - index - 1, index, index < len);
     }
     default: {
       let period = 2 * (len - 1);
-      let index = ((raw % period) + period) % period;
+      let index = i32(runmat_i32_positive_period_residue(raw, u32(period)));
       return select(period - index, index, index < len);
     }
   }
@@ -217,7 +217,7 @@ fn residue_contribution(residue: i32, period: i32,
   let step = params.reflection_step;
   let divisor = period_u / step;
   let congruence_target = residue + i32(params.padding_left) - i32(tap * params.dilation);
-  let positive_target = u32(((congruence_target % period) + period) % period);
+  let positive_target = runmat_i32_positive_period_residue(congruence_target, period_u);
   if (positive_target % divisor != 0u) { return $SCALAR$(0.0); }
   let first = multiply_mod(
       positive_target / divisor,
@@ -354,11 +354,13 @@ fn shader(
         .replace("$PARAM_BINDING$", &parameter_binding.to_string())
         .replace("$PADDING_FIELDS$", padding_fields)
         .replace("$PADDING_VALUE$", padding_value);
-    source
+    let mut rendered = source
         .replace("$COMMON$", &common)
         .replace("$SOURCE_VALUE$", &SOURCE_VALUE.replace("$SCALAR$", scalar))
         .replace("$SCALAR$", scalar)
-        .replace("$WG$", &CONV_WORKGROUP_SIZE.to_string())
+        .replace("$WG$", &CONV_WORKGROUP_SIZE.to_string());
+    rendered.push_str(crate::wgsl::integer::POSITIVE_PERIOD_RESIDUE);
+    rendered
 }
 
 pub fn forward(precision: super::super::types::NumericPrecision) -> String {

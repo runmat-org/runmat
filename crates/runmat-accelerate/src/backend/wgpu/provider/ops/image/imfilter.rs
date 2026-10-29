@@ -179,6 +179,14 @@ impl WgpuProvider {
         let allocated_bytes = u64::try_from(output_len)?
             .checked_mul(u64::try_from(element_size)?)
             .ok_or_else(|| anyhow!("imfilter output byte extent overflow"))?;
+        let pipeline = match (storage_precision, accumulation_precision) {
+            (NumericPrecision::F32, NumericPrecision::F32) => &self.pipelines.imfilter_single,
+            (NumericPrecision::F32, NumericPrecision::F64) => {
+                &self.pipelines.imfilter_single_double
+            }
+            (NumericPrecision::F64, _) => &self.pipelines.imfilter_double,
+        };
+        pipeline.preflight()?;
         // Only materialize a borrowed lazy view once the direct recipe has
         // passed geometry admission. Never mutate the caller's view identity.
         let materialized = if runmat_accelerate_api::handle_is_transposed(image) {
@@ -189,13 +197,6 @@ impl WgpuProvider {
         let image_entry = match materialized.as_ref() {
             Some(handle) => self.get_entry_raw(handle)?,
             None => image_entry,
-        };
-        let pipeline = match (storage_precision, accumulation_precision) {
-            (NumericPrecision::F32, NumericPrecision::F32) => &self.pipelines.imfilter_single,
-            (NumericPrecision::F32, NumericPrecision::F64) => {
-                &self.pipelines.imfilter_single_double
-            }
-            (NumericPrecision::F64, _) => &self.pipelines.imfilter_double,
         };
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let kernel_offsets_buffer =

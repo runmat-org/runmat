@@ -14,7 +14,15 @@ rocm = []
 metal = []
 vulkan = []
 opencl = []
-wgpu = ["dep:wgpu", "dep:pollster", "dep:libc", "runmat-accelerate-api/wgpu"]
+wgpu = [
+    "dep:wgpu",
+    "dep:pollster",
+    "dep:libc",
+    "dep:naga",
+    "dep:ash",
+    "dep:spirv",
+    "runmat-accelerate-api/wgpu",
+]
 
 [dependencies]
 runmat-value = { workspace = true }
@@ -45,6 +53,7 @@ libm = "0.2"
 
 # Optional backend deps
 pollster = { version = "0.3", optional = true }
+naga = { version = "24.0.0", features = ["wgsl-in"], optional = true }
 
 [dev-dependencies]
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }
@@ -78,9 +87,14 @@ wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = { version = "0.2", optional = true }
+naga = { version = "24.0.0", features = ["spv-out"], optional = true }
+spirv = { version = "0.3", optional = true }
 wgpu = { workspace = true, optional = true }
 libloading = { version = "0.8.9", optional = true }
 tokio = { workspace = true, default-features = false, features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+ash = { version = "0.38", optional = true }
 
 [[bench]]
 name = "direct_call_observation"

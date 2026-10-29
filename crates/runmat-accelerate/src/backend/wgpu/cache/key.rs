@@ -7,6 +7,7 @@ pub fn compute_pipeline_hash_bytes(
     workgroup_size: Option<u32>,
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
+    crate::wgsl::f64_math::COMPILER_REVISION.hash(&mut hasher);
     shader_bytes.hash(&mut hasher);
     layout_tag.hash(&mut hasher);
     if let Some(wg) = workgroup_size {

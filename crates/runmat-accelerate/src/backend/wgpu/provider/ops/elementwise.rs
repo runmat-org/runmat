@@ -1727,24 +1727,24 @@ impl WgpuProvider {
                 ))),
             };
         }
-        // `get_entry` is the existing precision/class admission owner. Its
-        // Unsupported result is certified before the synchronous emitter can
-        // allocate, so retain it for Runtime's legitimate host fallback.
+        // Admit the operation's physical precision before effects. The native
+        // entry gate remains strict for complex kernels, while real kernels
+        // can use their selected F32 pipelines on an F64 provider.
         let raw_a = self.get_entry_raw(a)?;
         let raw_b = self.get_entry_raw(b)?;
-        let complex_division = op == BinaryOpCode::Div
-            && (self.effective_storage_for_entry(a, &raw_a)
-                == GpuTensorStorage::ComplexInterleaved
-                || self.effective_storage_for_entry(b, &raw_b)
-                    == GpuTensorStorage::ComplexInterleaved);
-        if complex_division {
+        let complex = self.effective_storage_for_entry(a, &raw_a)
+            == GpuTensorStorage::ComplexInterleaved
+            || self.effective_storage_for_entry(b, &raw_b) == GpuTensorStorage::ComplexInterleaved;
+        if complex && op == BinaryOpCode::Div {
             let (entry_a, entry_b) = self.complex_division_inputs(a, b)?;
             if entry_a.len != 0 && entry_b.len != 0 {
                 self.require_ieee_words(entry_a.precision)
                     .map_err(ProviderExecutionError::from)?;
             }
-        } else {
+        } else if complex {
             let _ = (self.get_entry(a)?, self.get_entry(b)?);
+        } else {
+            let _ = self.real_floating_binary_inputs(a, b)?;
         }
         // This inherited synchronous floating route can allocate or submit;
         // its unphased errors are never certified pre-effect replay causes.
@@ -1855,13 +1855,7 @@ impl WgpuProvider {
             }
             return self.complex_binary_op_exec(op, a, b, &entry_a, &entry_b);
         }
-        let _ = (self.get_entry(a)?, self.get_entry(b)?);
-        let entry_a = self.real_floating_entry(a)?;
-        let entry_b = self.real_floating_entry(b)?;
-        ensure!(
-            entry_a.precision == entry_b.precision,
-            "real binary operands require the same physical precision"
-        );
+        let (entry_a, entry_b) = self.real_floating_binary_inputs(a, b)?;
         if validated.is_some() {
             ensure!(
                 entry_a.precision == self.precision && entry_a.shape == entry_b.shape,
@@ -2074,12 +2068,7 @@ impl WgpuProvider {
         admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
         use crate::backend::wgpu::params::{AlignedU32, BinaryBroadcastParams, BCAST_MAX_RANK};
-        let entry_a = self.real_floating_entry(a)?;
-        let entry_b = self.real_floating_entry(b)?;
-        ensure!(
-            entry_a.precision == entry_b.precision,
-            "real broadcast operands require the same physical precision"
-        );
+        let (entry_a, entry_b) = self.real_floating_binary_inputs(a, b)?;
         let selected_precision = entry_a.precision;
         let pipeline = self.real_binary_pipeline(selected_precision, true, op)?;
         // Compute broadcasted output shape

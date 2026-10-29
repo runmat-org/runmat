@@ -51,6 +51,19 @@ pub(super) fn validate(
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), capabilities)
         .validate(&module)
         .map_err(|error| CachedShaderAdmissionError::IncompatibleAdapter(error.to_string()))?;
+    let prepared = crate::wgsl::f64_math::prepare(source)
+        .map_err(|error| CachedShaderAdmissionError::InvalidSource(error.to_string()))?;
+    let controlled_features = super::super::shader_compilation::capabilities::REQUIRED_FEATURES;
+    if prepared.requires_f64_math() && !features.contains(controlled_features) {
+        return Err(CachedShaderAdmissionError::IncompatibleAdapter(
+            "binary64 shader requires the controlled arithmetic feature contract".into(),
+        ));
+    }
+    // A valid frontend module is not sufficient: warmup must pass the same
+    // legalization, bounds checking and controlled-emission audit as a cold
+    // runtime compilation. This performs no device allocation/publication.
+    super::super::shader_compilation::prepare(source, features)
+        .map_err(|error| CachedShaderAdmissionError::InvalidSource(error.to_string()))?;
     Ok(())
 }
 
@@ -67,7 +80,18 @@ mod tests {
             validate(double, wgpu::Features::empty()),
             Err(CachedShaderAdmissionError::IncompatibleAdapter(_))
         ));
-        assert!(validate(double, wgpu::Features::SHADER_F64).is_ok());
+        assert!(matches!(
+            validate(double, wgpu::Features::SHADER_F64),
+            Err(CachedShaderAdmissionError::IncompatibleAdapter(_))
+        ));
+        #[cfg(not(target_arch = "wasm32"))]
+        assert!(validate(
+            double,
+            wgpu::Features::SHADER_F64
+                | wgpu::Features::SHADER_INT64
+                | wgpu::Features::SPIRV_SHADER_PASSTHROUGH
+        )
+        .is_ok());
         for invalid in [
             "@compute @workgroup_size(@WG@) fn main() {}",
             "@compute @workgroup_size(1) fn main() { let x = 1.0 / 0.0; }",

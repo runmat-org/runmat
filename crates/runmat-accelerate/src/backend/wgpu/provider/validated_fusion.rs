@@ -841,6 +841,11 @@ impl WgpuProvider {
             observation.finish(runmat_execution::CandidatePreparationState::Warm);
             return Ok(selected);
         }
+        let prepared_shader = crate::backend::wgpu::shader_compilation::prepare(
+            &recipe.shader,
+            self.access.enabled_features(),
+        )
+        .map_err(ProviderExecutionError::from)?;
         let receipt = self
             .access
             .with_profiled_scoped(&self.emission_authority, |emission| -> Result<_> {
@@ -950,11 +955,11 @@ impl WgpuProvider {
                     label,
                     layout.as_ref(),
                 );
-                let module = crate::backend::wgpu::pipelines::create_shader_module(
+                let module = crate::backend::wgpu::shader_compilation::create_prepared(
                     emission,
                     label,
-                    &recipe.shader,
-                );
+                    &prepared_shader,
+                )?;
                 let pipeline = Arc::new(emission.device().create_compute_pipeline(
                     &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
                         label: Some(label), layout: Some(&pipeline_layout), module: &module, entry_point: "main",

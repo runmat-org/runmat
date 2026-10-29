@@ -13,7 +13,7 @@ impl WgpuProvider {
             Ok(())
         } else {
             Err(runmat_accelerate_api::unsupported_provider_operation(
-                "selected f64 IEEE shader requires enabled SHADER_INT64",
+                "selected f64 IEEE shader requires the controlled binary64 feature contract",
             ))
         }
     }
@@ -45,7 +45,7 @@ impl WgpuProvider {
 }
 
 fn selected_ieee_features_available(enabled: wgpu::Features) -> bool {
-    enabled.contains(wgpu::Features::SHADER_F64 | wgpu::Features::SHADER_INT64)
+    enabled.contains(crate::backend::wgpu::shader_compilation::capabilities::REQUIRED_FEATURES)
 }
 
 #[cfg(test)]
@@ -54,7 +54,7 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
-    fn selected_f64_ieee_words_require_both_enabled_features() {
+    fn selected_f64_ieee_words_require_the_complete_enabled_contract() {
         assert!(!selected_ieee_features_available(wgpu::Features::empty()));
         assert!(!selected_ieee_features_available(
             wgpu::Features::SHADER_F64
@@ -62,8 +62,11 @@ mod tests {
         assert!(!selected_ieee_features_available(
             wgpu::Features::SHADER_INT64
         ));
-        assert!(selected_ieee_features_available(
+        assert!(!selected_ieee_features_available(
             wgpu::Features::SHADER_F64 | wgpu::Features::SHADER_INT64
+        ));
+        assert!(selected_ieee_features_available(
+            crate::backend::wgpu::shader_compilation::capabilities::REQUIRED_FEATURES
         ));
     }
 }

@@ -260,6 +260,49 @@ impl WgpuProvider {
             "crossentropy_terms: tensor length exceeds GPU dispatch limits"
         );
         self.require_ieee_words(predictions_entry.precision)?;
+        let mode = match request.mode {
+            ProviderCrossentropyMode::SingleLabel => 0,
+            ProviderCrossentropyMode::MultiLabel => 1,
+        };
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut prepared_chunks = Vec::new();
+        // The u32 length admission and fixed dispatch geometry bound this
+        // count independently of host address-space size. Sources specialize
+        // chunk and offset, so their receipts cannot be shared across chunks.
+        prepared_chunks.try_reserve_exact(predictions_entry.len.div_ceil(chunk_capacity))?;
+        let mut offset = 0usize;
+        while offset < predictions_entry.len {
+            let chunk_len = (predictions_entry.len - offset).min(chunk_capacity);
+            let params = CrossentropyParams {
+                total: predictions_entry.len as u32,
+                offset: offset as u32,
+                chunk: chunk_len as u32,
+                mode,
+                weights_enabled: u32::from(weights_entry.is_some()),
+                mask_enabled: u32::from(mask_entry.is_some()),
+                _pad0: 0,
+                _pad1: 0,
+            };
+            let prepare = |source: String| {
+                crate::backend::wgpu::shader_compilation::prepare(
+                    &source,
+                    self.access.enabled_features(),
+                )
+            };
+            let positive = prepare(crossentropy_positive_shader(self.precision, &params))?;
+            let complementary = if mode == 1 {
+                Some(prepare(crossentropy_complementary_shader(
+                    self.precision,
+                    &params,
+                ))?)
+            } else {
+                None
+            };
+            let validation = prepare(crossentropy_validation_shader(self.precision, &params))?;
+            prepared_chunks.push((params, positive, complementary, validation));
+            offset += chunk_len;
+        }
 
         let (out_losses, staging, error_size) =
             self.with_emission(|emission, pending| -> Result<_> {
@@ -281,10 +324,6 @@ impl WgpuProvider {
                             label: Some("runmat-crossentropy-layout"),
                             entries: &crossentropy_terms_bind_layout_entries(),
                         });
-                let mode = match request.mode {
-                    ProviderCrossentropyMode::SingleLabel => 0,
-                    ProviderCrossentropyMode::MultiLabel => 1,
-                };
                 let weights_buffer = weights_entry
                     .as_ref()
                     .map(|entry| entry.buffer.as_ref())
@@ -293,24 +332,11 @@ impl WgpuProvider {
                     .as_ref()
                     .map(|entry| entry.buffer.as_ref())
                     .unwrap_or_else(|| predictions_entry.buffer.as_ref());
-                let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS
-                    as usize)
-                    * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-                let mut offset = 0usize;
-                while offset < predictions_entry.len {
-                    let chunk_len = (predictions_entry.len - offset).min(chunk_capacity);
-                    let params = CrossentropyParams {
-                        total: predictions_entry.len as u32,
-                        offset: offset as u32,
-                        chunk: chunk_len as u32,
-                        mode,
-                        weights_enabled: u32::from(weights_entry.is_some()),
-                        mask_enabled: u32::from(mask_entry.is_some()),
-                        _pad0: 0,
-                        _pad1: 0,
-                    };
+                for (params, positive_shader, complementary_shader, validation_shader) in
+                    &prepared_chunks
+                {
                     let params_buffer =
-                        self.uniform_buffer(emission, &params, "runmat-crossentropy-params")?;
+                        self.uniform_buffer(emission, params, "runmat-crossentropy-params")?;
                     let bind_group =
                         emission
                             .device()
@@ -349,15 +375,15 @@ impl WgpuProvider {
                                 ],
                             });
                     let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                        chunk_len as u32,
+                        params.chunk,
                         crate::backend::wgpu::config::WORKGROUP_SIZE,
                     );
                     let positive_pipeline = create_crossentropy_pipeline(
                         emission,
                         &bind_layout,
                         "runmat-crossentropy-positive",
-                        crossentropy_positive_shader(self.precision, &params),
-                    );
+                        positive_shader,
+                    )?;
                     crate::backend::wgpu::dispatch::creation::run(
                         emission,
                         pending,
@@ -367,13 +393,13 @@ impl WgpuProvider {
                         "runmat-crossentropy-positive-encoder",
                         "runmat-crossentropy-positive-pass",
                     )?;
-                    if mode == 1 {
+                    if let Some(complementary_shader) = complementary_shader {
                         let complementary_pipeline = create_crossentropy_pipeline(
                             emission,
                             &bind_layout,
                             "runmat-crossentropy-complementary",
-                            crossentropy_complementary_shader(self.precision, &params),
-                        );
+                            complementary_shader,
+                        )?;
                         crate::backend::wgpu::dispatch::creation::run(
                             emission,
                             pending,
@@ -388,8 +414,8 @@ impl WgpuProvider {
                         emission,
                         &bind_layout,
                         "runmat-crossentropy-validation",
-                        crossentropy_validation_shader(self.precision, &params),
-                    );
+                        validation_shader,
+                    )?;
                     crate::backend::wgpu::dispatch::creation::run(
                         emission,
                         pending,
@@ -399,7 +425,6 @@ impl WgpuProvider {
                         "runmat-crossentropy-validation-encoder",
                         "runmat-crossentropy-validation-pass",
                     )?;
-                    offset += chunk_len;
                 }
 
                 let error_size = std::mem::size_of::<u32>() as u64;
@@ -543,6 +568,10 @@ impl WgpuProvider {
             "adam_update: tensor length exceeds GPU dispatch limits"
         );
         self.require_ieee_words(parameters_entry.precision)?;
+        let prepared_shader = crate::backend::wgpu::shader_compilation::prepare(
+            &adam_update_shader(self.precision),
+            self.access.enabled_features(),
+        )?;
 
         let mut temporary_inputs = Vec::new();
         let average_grad = match request.average_grad {
@@ -595,14 +624,11 @@ impl WgpuProvider {
                             contents: bytes_of(&0u32),
                             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                         });
-                    let shader = adam_update_shader(self.precision);
-                    let shader_module =
-                        emission
-                            .device()
-                            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                                label: Some("runmat-adamupdate-shader"),
-                                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                            });
+                    let shader_module = crate::backend::wgpu::shader_compilation::create_prepared(
+                        emission,
+                        "runmat-adamupdate-shader",
+                        &prepared_shader,
+                    )?;
                     let bind_layout = emission.device().create_bind_group_layout(
                         &wgpu::BindGroupLayoutDescriptor {
                             label: Some("runmat-adamupdate-layout"),
@@ -825,14 +851,10 @@ fn create_crossentropy_pipeline(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     bind_layout: &wgpu::BindGroupLayout,
     label: &str,
-    shader: String,
-) -> wgpu::ComputePipeline {
-    let module = emission
-        .device()
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(label),
-            source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-        });
+    shader: &crate::backend::wgpu::shader_compilation::PreparedModule,
+) -> Result<wgpu::ComputePipeline> {
+    let module =
+        crate::backend::wgpu::shader_compilation::create_prepared(emission, label, shader)?;
     let layout = emission
         .device()
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -840,14 +862,14 @@ fn create_crossentropy_pipeline(
             bind_group_layouts: &[bind_layout],
             push_constant_ranges: &[],
         });
-    emission.device().create_compute_pipeline(
+    Ok(emission.device().create_compute_pipeline(
         &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
             label: Some(label),
             layout: Some(&layout),
             module: &module,
             entry_point: "main",
         },
-    )
+    ))
 }
 
 fn crossentropy_positive_shader(

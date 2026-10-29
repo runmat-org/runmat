@@ -236,7 +236,8 @@ async fn diagnostic_shader_and_pipeline_errors(
         })
         .expect("diagnostic shader scope acquisition");
     let module = match module_receipt.resolve().await {
-        Ok(module) => module,
+        Ok(Ok(module)) => module,
+        Ok(Err(error)) => return format!("module_preparation={error:#}"),
         Err(errors) => {
             return errors.with_errors(|inner| format!("module_scope={inner:?}"));
         }

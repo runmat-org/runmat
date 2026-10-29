@@ -55,13 +55,15 @@ fn exercise_lazy_mean_and_moments(precision: NumericPrecision) {
         NumericPrecision::F64 => NumericElementType::F64,
     };
     let native_bytes = 6 * class.element_size() as u64;
+    // Entry lookup and the returned tensor each own a logical shape vector.
+    let shape_bytes = 2 * original.shape().len() as u64 * std::mem::size_of::<usize>() as u64;
     assert_eq!(
         provider.download_numeric_host_workspace_bound(&original),
-        runmat_execution::ResourceByteBound::Known(native_bytes)
+        runmat_execution::ResourceByteBound::Known(native_bytes + shape_bytes)
     );
     assert_eq!(
         provider.download_numeric_host_workspace_bound(&lazy),
-        runmat_execution::ResourceByteBound::Known(native_bytes * 2)
+        runmat_execution::ResourceByteBound::Known(native_bytes * 2 + shape_bytes)
     );
 
     for (axis, shape, means, squares) in [
@@ -236,7 +238,7 @@ fn actual_pinned_warm_pair_survives_source_retirement_until_consumed() {
         ex2_weak.acquire().is_err(),
         "hidden pair is no longer pinned"
     );
-    assert_values(&provider, &selected_mean, &[2.0, 3.0]);
+    assert_values(&provider, &selected_mean, &[1.5, 3.5]);
     drop(selected_mean);
     assert!(mean_weak.acquire().is_err());
 }

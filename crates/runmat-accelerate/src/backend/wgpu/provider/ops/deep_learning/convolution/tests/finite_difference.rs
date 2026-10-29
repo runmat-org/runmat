@@ -66,8 +66,16 @@ fn boundary_adjoint_matches_actual_forward_finite_difference(precision: NumericP
             .unwrap();
         let actual_y = download_native(&provider, &y);
         assert_eq!(actual_y.len(), 2);
-        assert!((actual_y[0] - expected_first).abs() < tolerance);
-        assert!((actual_y[1] - 2.9).abs() < tolerance);
+        assert!(
+            (actual_y[0] - expected_first).abs() < tolerance,
+            "{precision:?} {padding_value:?}: first output {} != {expected_first}",
+            actual_y[0]
+        );
+        assert!(
+            (actual_y[1] - 2.9).abs() < tolerance,
+            "{precision:?} {padding_value:?}: second output {} != 2.9",
+            actual_y[1]
+        );
         provider.reset_telemetry();
         let gradients = provider
             .deep_learning_conv1d_adjoint_exec(&x, &w, &b, &dy, &request)

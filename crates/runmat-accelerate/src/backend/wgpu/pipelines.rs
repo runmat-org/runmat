@@ -216,6 +216,7 @@ pub struct PipelineBundle {
     linear_launch: Option<FrozenLinearLaunch>,
     frozen_reduction_shader_workgroup: Option<u32>,
     compiled: OnceLock<CompiledPipelineBundle>,
+    prepared: OnceLock<super::shader_compilation::PreparedModule>,
     access: runmat_accelerate_api::WgpuDeviceAccess,
     layout_label: &'static str,
     shader_label: &'static str,
@@ -402,7 +403,24 @@ impl PipelineBundle {
     /// Check the selected physical shader before output allocation or submission.
     pub(crate) fn preflight(&self) -> anyhow::Result<()> {
         self.validate_features(self.access.enabled_features())?;
+        self.prepared_shader()?;
         Ok(())
+    }
+
+    fn prepared_shader(&self) -> anyhow::Result<&super::shader_compilation::PreparedModule> {
+        if let Some(prepared) = self.prepared.get() {
+            return Ok(prepared);
+        }
+        let prepared = super::shader_compilation::prepare(
+            &self.shader_source,
+            self.access.enabled_features(),
+        )?;
+        // Concurrent successful preparation may win; never cache a failed
+        // compiler result or publish a partially prepared device object.
+        let _ = self.prepared.set(prepared);
+        self.prepared
+            .get()
+            .ok_or_else(|| anyhow::anyhow!("prepared shader publication failed"))
     }
 
     /// Inspect compilation state without compiling a shader or accessing the device.
@@ -416,6 +434,14 @@ impl PipelineBundle {
     ) -> anyhow::Result<&CompiledPipelineBundle> {
         emission.ensure_device(&self.access)?;
         self.validate_features(emission.device().features())?;
+        if let Some(compiled) = self.compiled.get() {
+            return Ok(compiled);
+        }
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
+        let prepared = self.prepared_shader()?;
+        // Fail before layout/pipeline creation, and never publish a failed
+        // receipt. OnceLock still coalesces concurrent pipeline construction.
+        let admitted = prepared.admit(emission)?;
         Ok(crate::backend::wgpu::cache::scope::get_or_init(
             &self.compiled,
             emission.mode(),
@@ -426,7 +452,7 @@ impl PipelineBundle {
                     self.shader_label,
                     self.pipeline_label,
                     &self.entries,
-                    &self.shader_source,
+                    &admitted,
                 )
             },
         )?)
@@ -2428,6 +2454,7 @@ pub(crate) fn create_pipeline(
         linear_launch: None,
         frozen_reduction_shader_workgroup: None,
         compiled: OnceLock::new(),
+        prepared: OnceLock::new(),
         access: access.clone(),
         layout_label,
         shader_label,
@@ -2444,28 +2471,14 @@ fn compile_pipeline(
     shader_label: &str,
     pipeline_label: &str,
     entries: &[wgpu::BindGroupLayoutEntry],
-    shader_source: &str,
+    admitted: &super::shader_compilation::AdmittedModule<'_, '_, '_>,
 ) -> CompiledPipelineBundle {
+    let module = admitted.create(shader_label);
     let layout = emission
         .device()
         .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some(layout_label),
             entries,
-        });
-    let patched = if shader_source.contains("@WG@") || shader_source.contains("@MT@") {
-        substitute_tokens(
-            shader_source,
-            crate::backend::wgpu::config::effective_workgroup_size(),
-            crate::backend::wgpu::config::effective_matmul_tile(),
-        )
-    } else {
-        Cow::Borrowed(shader_source)
-    };
-    let module = emission
-        .device()
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(shader_label),
-            source: wgpu::ShaderSource::Wgsl(patched),
         });
 
     let pipeline = emission.device().create_compute_pipeline(
@@ -2490,22 +2503,8 @@ pub fn create_shader_module(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     label: &str,
     wgsl: &str,
-) -> wgpu::ShaderModule {
-    let patched = if wgsl.contains("@WG@") || wgsl.contains("@MT@") {
-        substitute_tokens(
-            wgsl,
-            crate::backend::wgpu::config::effective_workgroup_size(),
-            crate::backend::wgpu::config::effective_matmul_tile(),
-        )
-    } else {
-        Cow::Borrowed(wgsl)
-    };
-    emission
-        .device()
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(label),
-            source: wgpu::ShaderSource::Wgsl(patched),
-        })
+) -> anyhow::Result<wgpu::ShaderModule> {
+    super::shader_compilation::create_shader_module(emission, label, wgsl)
 }
 
 pub fn create_pipeline_layout(

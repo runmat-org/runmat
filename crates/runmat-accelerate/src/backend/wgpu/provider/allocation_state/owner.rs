@@ -95,12 +95,31 @@ impl AllocationState {
         &self,
         handle: &GpuTensorHandle,
     ) -> Result<bool> {
-        self.entry_for_handle(handle)?;
-        let records = self.lock_records()?;
-        Ok(records
-            .get(&handle.buffer_id())
-            .ok_or(AllocationAcquisitionError::NotLive)?
-            .logical_producer)
+        self.check_identity(handle.allocation_identity())?;
+        let (logical, weak) = {
+            let records = self.lock_records()?;
+            let record = records
+                .get(&handle.buffer_id())
+                .ok_or(AllocationAcquisitionError::NotLive)?;
+            if record.phase != Phase::Live {
+                return Err(AllocationAcquisitionError::NotLive.into());
+            }
+            (
+                record.logical_producer,
+                record
+                    .lease
+                    .clone()
+                    .ok_or(AllocationAcquisitionError::NotLive)?,
+            )
+        };
+        // Acquiring a lease re-enters its owner; never do so under the table lock.
+        // This metadata query must not allocate an operation entry's shape vector.
+        let lease = weak.acquire().ok_or(AllocationAcquisitionError::NotLive)?;
+        if !lease.shares_allocation_with(handle.allocation_lease()) {
+            return Err(AllocationAcquisitionError::WrongOwner.into());
+        }
+        self.validate_view(handle.allocation_identity(), handle.view())?;
+        Ok(logical)
     }
 
     fn check_identity(

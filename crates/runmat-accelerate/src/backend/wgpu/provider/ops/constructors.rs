@@ -552,13 +552,11 @@ impl WgpuProvider {
 
         let buffers = self.with_emission(|emission, pending| -> Result<_> {
             let shader = ndgrid_shader(self.precision, self.linear_launch.workgroup());
-            let shader_module =
-                emission
-                    .device()
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: Some("runmat-ndgrid-shader"),
-                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                    });
+            let shader_module = crate::backend::wgpu::shader_compilation::create_shader_module(
+                emission,
+                "runmat-ndgrid-shader",
+                &shader,
+            )?;
             let bind_layout =
                 emission
                     .device()

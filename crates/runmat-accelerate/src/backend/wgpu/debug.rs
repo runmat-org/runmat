@@ -4,14 +4,13 @@ pub fn try_compile_kernel(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     label: &str,
     wgsl_src: &str,
-) {
+) -> anyhow::Result<()> {
     let t0 = Instant::now();
-    let module = emission
-        .device()
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(&format!("{}-module", label)),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl_src)),
-        });
+    let module = super::shader_compilation::create_shader_module(
+        emission,
+        &format!("{label}-module"),
+        wgsl_src,
+    )?;
     let pl = emission
         .device()
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -32,6 +31,7 @@ pub fn try_compile_kernel(
         label,
         t0.elapsed().as_secs_f64() * 1000.0
     );
+    Ok(())
 }
 
 pub(crate) fn probe_kernel_with_buffers(
@@ -42,12 +42,11 @@ pub(crate) fn probe_kernel_with_buffers(
     wg: u32,
 ) -> anyhow::Result<()> {
     let t0 = Instant::now();
-    let module = emission
-        .device()
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(&format!("{}-module", label)),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl_src)),
-        });
+    let module = super::shader_compilation::create_shader_module(
+        emission,
+        &format!("{label}-module"),
+        wgsl_src,
+    )?;
     let bgl = emission
         .device()
         .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

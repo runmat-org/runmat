@@ -127,7 +127,7 @@ impl WgpuProvider {
             emission,
             "typed-reduction-source",
             source,
-        );
+        )?;
         let tag = format!("typed-reduction-{stage:?}-{:?}", recipe.identity());
         let key = self.typed_reduction_pipeline_key(stage, recipe);
         let pipeline = self.get_or_create_pipeline(

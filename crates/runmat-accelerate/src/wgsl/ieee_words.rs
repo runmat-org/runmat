@@ -13,6 +13,12 @@ fn runmat_f64_from_words(low: u32, high: u32) -> f64 {
 }
 "#;
 
+/// Canonical declarations for the typed shader compiler. Callers identify
+/// declarations through Naga spans rather than textual include markers.
+pub(crate) const fn helpers() -> &'static str {
+    HELPERS
+}
+
 pub(crate) fn inject(source: &str) -> String {
     if source.contains("fn runmat_f64_from_words(") {
         return source.to_owned();

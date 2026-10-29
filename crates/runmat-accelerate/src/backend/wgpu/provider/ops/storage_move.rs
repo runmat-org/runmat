@@ -12,13 +12,16 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         operation: &str,
     ) -> Result<BufferEntry> {
-        let entry = self.get_entry_raw(handle)?;
+        let mut entry = self.get_entry_raw(handle)?;
         ensure!(
             handle.shape() == entry.shape
                 && handle.physical().element_type() == entry.element_type
                 && handle.physical().storage() == entry.storage,
             "{operation}: storage move descriptor does not match allocation"
         );
+        // Bit-preserving moves retain the allocation's encoding authority, not
+        // a facade's logical/numeric interpretation of those same bytes.
+        entry.logical = self.allocations.requires_logical_encoding(handle)?;
         Ok(entry)
     }
 

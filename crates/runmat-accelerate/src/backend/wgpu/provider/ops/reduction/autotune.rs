@@ -196,7 +196,7 @@ impl WgpuProvider {
                 emission,
                 "runmat-fused-reduction-module",
                 shader,
-            );
+            )?;
             let bgl = self
                 .cached_bind_group_layout_for_tag(emission, layout_tag)?
                 .expect("reduction bgl");
@@ -477,12 +477,12 @@ impl WgpuProvider {
                 emission,
                 "runmat-reduction-pass1",
                 &pass1,
-            );
+            )?;
             let m2 = crate::backend::wgpu::pipelines::create_shader_module(
                 emission,
                 "runmat-reduction-pass2",
                 &pass2,
-            );
+            )?;
             let bgl1 = self
                 .cached_bind_group_layout_for_tag(emission, "runmat-reduction-p1-bgl")?
                 .expect("p1 bgl");

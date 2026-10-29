@@ -1018,6 +1018,14 @@ impl WgpuProvider {
         if total != 0 {
             self.require_ieee_words(entry.precision)?;
         }
+        let prepared_shader = if total != 0 {
+            Some(crate::backend::wgpu::shader_compilation::prepare(
+                &covariance_to_correlation_shader(self.precision),
+                self.access.enabled_features(),
+            )?)
+        } else {
+            None
+        };
 
         let (correlation_buffer, sigma_buffer) =
             self.with_emission(|emission, _| -> Result<_> {
@@ -1049,14 +1057,14 @@ impl WgpuProvider {
                             contents: bytes_of(&0u32),
                             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                         });
-                    let shader = covariance_to_correlation_shader(self.precision);
-                    let shader_module =
-                        emission
-                            .device()
-                            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                                label: Some("runmat-cov2corr-shader"),
-                                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                            });
+                    let prepared_shader = prepared_shader
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("cov2corr shader receipt missing"))?;
+                    let shader_module = crate::backend::wgpu::shader_compilation::create_prepared(
+                        emission,
+                        "runmat-cov2corr-shader",
+                        prepared_shader,
+                    )?;
                     let bind_layout = emission.device().create_bind_group_layout(
                         &wgpu::BindGroupLayoutDescriptor {
                             label: Some("runmat-cov2corr-layout"),

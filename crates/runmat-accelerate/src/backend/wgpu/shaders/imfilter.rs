@@ -10,7 +10,7 @@ pub enum ImfilterShader {
 
 impl ImfilterShader {
     pub fn source(self) -> Cow<'static, str> {
-        match self {
+        let mut source = match self {
             Self::Single => Cow::Borrowed(IMFILTER_SHADER_F32),
             Self::Double => Cow::Borrowed(IMFILTER_SHADER_F64),
             Self::SingleDouble => Cow::Owned(
@@ -25,7 +25,11 @@ impl ImfilterShader {
                         "Output.data[global_idx] = f32(acc);",
                     ),
             ),
-        }
+        };
+        source
+            .to_mut()
+            .push_str(crate::wgsl::integer::POSITIVE_PERIOD_RESIDUE);
+        source
     }
 }
 
@@ -124,11 +128,7 @@ fn wrap_index(coord_in: i32, len: i32) -> u32 {
     if len <= 0 {
         return 0u;
     }
-    var coord = coord_in % len;
-    if coord < 0 {
-        coord = coord + len;
-    }
-    return u32(coord);
+    return runmat_i32_positive_period_residue(coord_in, u32(len));
 }
 
 fn reflect_index(coord_in: i32, len: i32) -> u32 {
@@ -138,15 +138,12 @@ fn reflect_index(coord_in: i32, len: i32) -> u32 {
     if len == 1 {
         return 0u;
     }
-    let period = 2 * len - 2;
-    var value = coord_in % period;
-    if value < 0 {
-        value = value + period;
-    }
-    if value >= len {
+    let period = 2u * u32(len) - 2u;
+    var value = runmat_i32_positive_period_residue(coord_in, period);
+    if value >= u32(len) {
         value = period - value;
     }
-    return u32(value);
+    return value;
 }
 
 @group(0) @binding(0) var<storage, read> Image: Tensor;
@@ -304,11 +301,7 @@ fn wrap_index(coord_in: i32, len: i32) -> u32 {
     if len <= 0 {
         return 0u;
     }
-    var coord = coord_in % len;
-    if coord < 0 {
-        coord = coord + len;
-    }
-    return u32(coord);
+    return runmat_i32_positive_period_residue(coord_in, u32(len));
 }
 
 fn reflect_index(coord_in: i32, len: i32) -> u32 {
@@ -318,15 +311,12 @@ fn reflect_index(coord_in: i32, len: i32) -> u32 {
     if len == 1 {
         return 0u;
     }
-    let period = 2 * len - 2;
-    var value = coord_in % period;
-    if value < 0 {
-        value = value + period;
-    }
-    if value >= len {
+    let period = 2u * u32(len) - 2u;
+    var value = runmat_i32_positive_period_residue(coord_in, period);
+    if value >= u32(len) {
         value = period - value;
     }
-    return u32(value);
+    return value;
 }
 
 @group(0) @binding(0) var<storage, read> Image: Tensor;

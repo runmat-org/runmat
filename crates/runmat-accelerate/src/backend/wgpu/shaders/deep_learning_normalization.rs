@@ -108,9 +108,12 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let count = $SCALAR$(params.group_size);
   var mean = $SCALAR$(0.0);
   for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
-    mean = mean + scaled_ratio(input.data[physical_index(group, sample)], maximum);
+    let value = scaled_ratio(input.data[physical_index(group, sample)], maximum);
+    // Online centering preserves the scaled value of a constant group exactly.
+    // Summing first can round the mean away from every sample, manufacturing
+    // variance which overwhelms epsilon for large finite constant inputs.
+    mean = mean + (value - mean) / $SCALAR$(sample + 1u);
   }
-  mean = mean / count;
   var variance = $SCALAR$(0.0);
   for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
     let delta = scaled_ratio(input.data[physical_index(group, sample)], maximum) - mean;
@@ -279,9 +282,13 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
         .replace("$RATIO_SCALE$", ratio_scale)
 }
 
-pub fn statistics(precision: super::super::types::NumericPrecision) -> String {
-    let source = STATISTICS
-        .replace("$COMMON$", &common(precision, 2))
+fn render(
+    template: &str,
+    precision: super::super::types::NumericPrecision,
+    binding: u32,
+) -> String {
+    let source = template
+        .replace("$COMMON$", &common(precision, binding))
         .replace("$SCALAR$", precision_scalar(precision))
         .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string());
     if precision == super::super::types::NumericPrecision::F64 {
@@ -289,39 +296,26 @@ pub fn statistics(precision: super::super::types::NumericPrecision) -> String {
     } else {
         source
     }
+}
+
+pub fn statistics(precision: super::super::types::NumericPrecision) -> String {
+    render(STATISTICS, precision, 2)
 }
 
 pub fn affine(precision: super::super::types::NumericPrecision) -> String {
-    let source = AFFINE
-        .replace("$COMMON$", &common(precision, 5))
-        .replace("$SCALAR$", precision_scalar(precision))
-        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string());
-    if precision == super::super::types::NumericPrecision::F64 {
-        super::ieee_words::inject(&source)
-    } else {
-        source
-    }
+    render(AFFINE, precision, 5)
 }
 
 pub fn adjoint_groups(precision: super::super::types::NumericPrecision) -> String {
-    ADJOINT_GROUPS
-        .replace("$COMMON$", &common(precision, 5))
-        .replace("$SCALAR$", precision_scalar(precision))
-        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string())
+    render(ADJOINT_GROUPS, precision, 5)
 }
 
 pub fn adjoint_channels(precision: super::super::types::NumericPrecision) -> String {
-    ADJOINT_CHANNELS
-        .replace("$COMMON$", &common(precision, 5))
-        .replace("$SCALAR$", precision_scalar(precision))
-        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string())
+    render(ADJOINT_CHANNELS, precision, 5)
 }
 
 pub fn adjoint_input(precision: super::super::types::NumericPrecision) -> String {
-    ADJOINT_INPUT
-        .replace("$COMMON$", &common(precision, 6))
-        .replace("$SCALAR$", precision_scalar(precision))
-        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string())
+    render(ADJOINT_INPUT, precision, 6)
 }
 
 fn precision_scalar(precision: super::super::types::NumericPrecision) -> &'static str {

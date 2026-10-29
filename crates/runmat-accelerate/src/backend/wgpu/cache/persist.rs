@@ -7,7 +7,9 @@ use crate::backend::wgpu::types::NumericPrecision;
 // Version 8 retires the four-binding softmax ABI. Its former serialized layout
 // tag is now reconstructed with three bindings, so version 7 cannot be warmed
 // using the current layout recipes even when its source hash is intact.
-pub const PIPELINE_CACHE_VERSION: u32 = 8;
+// Version 9 introduces typed binary64 legalization and controlled SPIR-V;
+// original-source identities now include the compiler revision domain.
+pub const PIPELINE_CACHE_VERSION: u32 = 9;
 
 #[derive(Serialize, Deserialize)]
 pub struct PipelineMeta {

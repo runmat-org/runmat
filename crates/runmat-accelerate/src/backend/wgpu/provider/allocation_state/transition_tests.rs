@@ -295,6 +295,19 @@ fn logical_allocation_invariant_survives_numeric_aliases_and_casts() {
         !cast.shares_allocation_with(&logical),
         "mutable numeric cast cannot invalidate logical aliases"
     );
+    let copied = provider
+        .scatter_linear_functional_exec(&numeric_view, &[0, 1], &values)
+        .unwrap();
+    assert!(provider
+        .allocations
+        .requires_logical_encoding(&copied)
+        .unwrap());
+    assert_eq!(
+        futures::executor::block_on(provider.download(&copied))
+            .unwrap()
+            .data,
+        vec![1.0, 0.0]
+    );
     provider
         .scatter_linear_exec(&cast, &[0, 1], &numeric)
         .unwrap();

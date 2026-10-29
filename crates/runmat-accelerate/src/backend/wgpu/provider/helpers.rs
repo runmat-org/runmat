@@ -3,7 +3,6 @@ use runmat_accelerate_api::AccelProvider;
 use anyhow::{ensure, Result};
 use log::{debug, info};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, WgpuEmission};
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use super::backend_shared::gpu_per_buffer_limit_error;
@@ -290,12 +289,11 @@ impl WgpuProvider {
                 spatial_tile: tuning.spatial_tile,
             },
         );
-        let module = emission
-            .device()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("runmat-image-normalize-shader-dyn"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader_src)),
-            });
+        let module = crate::backend::wgpu::shader_compilation::create_shader_module(
+            emission,
+            "runmat-image-normalize-shader-dyn",
+            &shader_src,
+        )?;
         let pipeline_layout = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
             emission,
             "runmat-image-normalize-pipeline-dyn",
@@ -345,35 +343,38 @@ impl WgpuProvider {
                 // Build under the device's exclusive validation scopes, but
                 // resolve their detached receipt only after releasing access.
                 // Never publish an invalid driver object into the shared cache.
-                let receipt =
-                    self.access
-                        .with_profiled_scoped(&self.emission_authority, |emission| {
-                            let bgl =
-                                Arc::new(crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
-                                    emission, tag,
-                                )?);
-                            let pl =
-                                crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
-                                    emission,
-                                    "warmup-pipeline-layout",
-                                    bgl.as_ref(),
-                                );
-                            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                let receipt = self.access.with_profiled_scoped(
+                    &self.emission_authority,
+                    |emission| -> Result<Option<_>> {
+                        let Some(bgl) =
+                            crate::backend::wgpu::bindings::build_bgl_for_layout_tag(emission, tag)
+                        else {
+                            return Ok(None);
+                        };
+                        let bgl = Arc::new(bgl);
+                        let pl =
+                            crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
                                 emission,
-                                "warmup-shader-module",
-                                src,
+                                "warmup-pipeline-layout",
+                                bgl.as_ref(),
                             );
-                            Some((
-                                bgl,
-                                crate::backend::wgpu::cache::factory::create_compute_pipeline(
-                                    emission,
-                                    "warmup-precompiled-pipeline",
-                                    &pl,
-                                    &module,
-                                ),
-                            ))
-                        })?;
-                let Some((layout, pipeline)) = pollster::block_on(receipt.resolve())? else {
+                        let module = crate::backend::wgpu::pipelines::create_shader_module(
+                            emission,
+                            "warmup-shader-module",
+                            src,
+                        )?;
+                        Ok(Some((
+                            bgl,
+                            crate::backend::wgpu::cache::factory::create_compute_pipeline(
+                                emission,
+                                "warmup-precompiled-pipeline",
+                                &pl,
+                                &module,
+                            ),
+                        )))
+                    },
+                )?;
+                let Some((layout, pipeline)) = pollster::block_on(receipt.resolve())?? else {
                     return Ok(false);
                 };
                 let pipeline = Arc::new(pipeline);
@@ -479,7 +480,7 @@ impl WgpuProvider {
     pub fn try_compile_kernel(&self, label: &str, wgsl_src: &str) -> Result<()> {
         self.with_emission(|emission, _| {
             crate::backend::wgpu::debug::try_compile_kernel(emission, label, wgsl_src)
-        })?;
+        })??;
         Ok(())
     }
 
@@ -668,11 +669,11 @@ impl WgpuProvider {
         self.get_or_create_pipeline_with(
             emission,
             hash_key, label, persist_wgsl_src, persist_layout_tag, persist_workgroup_size,
-            || emission.device().create_compute_pipeline(
+            || Ok(emission.device().create_compute_pipeline(
                 &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
                     label: Some(label), layout: Some(pipeline_layout), module: module, entry_point: "main",
                 },
-            ),
+            )),
         )
     }
 
@@ -684,17 +685,21 @@ impl WgpuProvider {
         label: &str,
     ) -> Result<Arc<wgpu::ComputePipeline>> {
         emission.ensure_device(&self.access)?;
+        let prepared = crate::backend::wgpu::shader_compilation::prepare(
+            &recipe.shader,
+            self.access.enabled_features(),
+        )?;
         self.get_or_create_pipeline_with(emission, recipe.key(), label, Some(recipe.shader.as_bytes()),
             Some(&recipe.layout), Some(recipe.workgroup), || {
                 let layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
                     emission, label, bindings);
-                let module = crate::backend::wgpu::pipelines::create_shader_module(
-                    emission, label, &recipe.shader);
-                emission.device().create_compute_pipeline(
+                let module = crate::backend::wgpu::shader_compilation::create_prepared(
+                    emission, label, &prepared)?;
+                Ok(emission.device().create_compute_pipeline(
                     &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
                         label: Some(label), layout: Some(&layout), module: &module, entry_point: "main",
                     },
-                )
+                ))
             })
     }
 
@@ -707,7 +712,7 @@ impl WgpuProvider {
         persist_wgsl_src: Option<&[u8]>,
         persist_layout_tag: Option<&str>,
         persist_workgroup_size: Option<u32>,
-        create: impl FnOnce() -> wgpu::ComputePipeline,
+        create: impl FnOnce() -> Result<wgpu::ComputePipeline>,
     ) -> Result<Arc<wgpu::ComputePipeline>> {
         if let (Some(source), Some(layout_tag)) = (persist_wgsl_src, persist_layout_tag) {
             ensure!(
@@ -737,7 +742,7 @@ impl WgpuProvider {
         crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
         self.metrics.inc_miss();
         // Cache lock is released before any driver/compiler callback.
-        let p = Arc::new(create());
+        let p = Arc::new(create()?);
         // A failed or panicking driver construction must not leave a new
         // warmup record. Source/key identity was checked before cache lookup.
         self.persist_pipeline_meta(

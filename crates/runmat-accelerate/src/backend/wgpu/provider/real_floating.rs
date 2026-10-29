@@ -31,6 +31,20 @@ fn requires_signed_zero_atan2_kernel(op: crate::backend::wgpu::types::BinaryOpCo
 }
 
 impl WgpuProvider {
+    pub(super) fn real_floating_binary_inputs(
+        &self,
+        left: &GpuTensorHandle,
+        right: &GpuTensorHandle,
+    ) -> Result<(BufferEntry, BufferEntry)> {
+        let left = self.real_floating_entry(left)?;
+        let right = self.real_floating_entry(right)?;
+        ensure!(
+            left.precision == right.precision,
+            "real binary operands require the same physical precision"
+        );
+        Ok((left, right))
+    }
+
     pub(super) fn real_floating_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         let entry = self.get_entry_raw(handle)?;
         if entry.precision == self.precision {

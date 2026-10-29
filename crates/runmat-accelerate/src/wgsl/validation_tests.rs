@@ -54,6 +54,19 @@ pub(crate) fn validate_generated(
             "{name}: unexpectedly valid with insufficient {insufficient:?} for {required:?}"
         );
     }
+
+    // Frontend acceptance alone permits binary64 calls whose corresponding
+    // GLSL extended instructions have no legal binary64 form. Exercise the
+    // same typed preparation and controlled emission as production.
+    let prepared =
+        crate::wgsl::f64_math::prepare(&source).unwrap_or_else(|error| panic!("{name}: {error}"));
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    if prepared.requires_f64_math() && !module.entry_points.is_empty() {
+        crate::backend::wgpu::shader_compilation::spirv::compile(prepared.source())
+            .unwrap_or_else(|error| panic!("{name}: controlled SPIR-V: {error:#}"));
+    }
+    #[cfg(not(all(feature = "wgpu", not(target_arch = "wasm32"))))]
+    let _ = prepared;
 }
 
 #[test]

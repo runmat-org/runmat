@@ -26,19 +26,13 @@ use crate::telemetry::AccelTelemetry;
 mod timestamp_features;
 
 #[cfg(not(target_arch = "wasm32"))]
-fn native_required_features(
-    precision: NumericPrecision,
-    adapter_features: wgpu::Features,
-) -> wgpu::Features {
-    let mut features = match precision {
+fn native_required_features(precision: NumericPrecision) -> wgpu::Features {
+    match precision {
         NumericPrecision::F32 => wgpu::Features::empty(),
-        NumericPrecision::F64 => wgpu::Features::SHADER_F64,
-    };
-    if precision == NumericPrecision::F64 && adapter_features.contains(wgpu::Features::SHADER_INT64)
-    {
-        features |= wgpu::Features::SHADER_INT64;
+        NumericPrecision::F64 => {
+            crate::backend::wgpu::shader_compilation::capabilities::REQUIRED_FEATURES
+        }
     }
-    features
 }
 
 impl WgpuProvider {
@@ -203,10 +197,18 @@ impl WgpuProvider {
         let precision = select_precision(requested_precision, false)?;
 
         #[cfg(not(target_arch = "wasm32"))]
-        let precision = select_precision(
-            requested_precision,
-            adapter_features.contains(wgpu::Features::SHADER_F64),
-        )?;
+        let precision = {
+            if requested_precision == Some(NumericPrecision::F64) {
+                crate::backend::wgpu::shader_compilation::capabilities::validate_adapter(&adapter)?;
+            }
+            // Preserve the established default precision policy. Supporting
+            // complete binary64 math does not select a different default or
+            // authorize narrowing an explicitly requested binary64 route.
+            select_precision(
+                requested_precision,
+                adapter_features.contains(wgpu::Features::SHADER_F64),
+            )?
+        };
 
         if requested_precision.is_none() {
             info!(
@@ -244,8 +246,7 @@ impl WgpuProvider {
         let optional_timestamp_features =
             timestamp_features::requested(adapter_info.backend, adapter_features);
         #[cfg(not(target_arch = "wasm32"))]
-        let required_features =
-            native_required_features(precision, adapter_features) | optional_timestamp_features;
+        let required_features = native_required_features(precision) | optional_timestamp_features;
         #[cfg(target_arch = "wasm32")]
         let required_features = optional_timestamp_features;
         let limits = adapter.limits();
@@ -620,6 +621,10 @@ mod precision_tests {
             select_precision(None, false).expect("default native precision"),
             NumericPrecision::F32
         );
+        assert_eq!(
+            select_precision(None, true).expect("default precision with binary64 available"),
+            NumericPrecision::F32
+        );
     }
 }
 
@@ -628,16 +633,14 @@ mod ieee_feature_tests {
     use super::*;
 
     #[test]
-    fn absent_integer_words_does_not_disable_plain_f64_provider() {
-        let basic = native_required_features(NumericPrecision::F64, wgpu::Features::SHADER_F64);
-        assert_eq!(basic, wgpu::Features::SHADER_F64);
-        let capable = native_required_features(
-            NumericPrecision::F64,
-            wgpu::Features::SHADER_F64 | wgpu::Features::SHADER_INT64,
-        );
-        assert!(capable.contains(wgpu::Features::SHADER_INT64));
+    fn native_binary64_requests_the_complete_controlled_arithmetic_contract() {
+        let capable = native_required_features(NumericPrecision::F64);
         assert_eq!(
-            native_required_features(NumericPrecision::F32, wgpu::Features::SHADER_INT64),
+            capable,
+            crate::backend::wgpu::shader_compilation::capabilities::REQUIRED_FEATURES
+        );
+        assert_eq!(
+            native_required_features(NumericPrecision::F32),
             wgpu::Features::empty()
         );
     }

@@ -1724,10 +1724,10 @@ impl WgpuProvider {
             self.require_ieee_words(entry.precision)?;
         }
         let out_shape = request.output_shape.to_vec();
-        let out_buffer = self.with_emission(|emission, _| {
-            self.create_storage_buffer_checked(emission, output_len, "runmat-moving-window-out")
-        })??;
         if output_len == 0 {
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer_checked(emission, output_len, "runmat-moving-window-out")
+            })??;
             return self.register_existing_buffer(out_buffer, out_shape, 0);
         }
 
@@ -1755,14 +1755,19 @@ impl WgpuProvider {
             normalization: request.normalization,
             fill_value,
         });
+        let prepared_shader = crate::backend::wgpu::shader_compilation::prepare(
+            &shader,
+            self.access.enabled_features(),
+        )?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, output_len, "runmat-moving-window-out")
+        })??;
         self.with_emission(|emission, pending| -> Result<()> {
-            let shader_module =
-                emission
-                    .device()
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: Some("runmat-moving-window-specialized-shader"),
-                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                    });
+            let shader_module = crate::backend::wgpu::shader_compilation::create_prepared(
+                emission,
+                "runmat-moving-window-specialized-shader",
+                &prepared_shader,
+            )?;
             let pipeline_layout =
                 emission
                     .device()

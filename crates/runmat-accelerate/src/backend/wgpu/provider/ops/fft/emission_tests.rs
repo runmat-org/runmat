@@ -32,7 +32,7 @@ async fn submitted_compute_pass_reports_two_physical_dispatches_and_optional_dev
     };
 
     let provider = provider().await;
-    let (_, pipeline) = scope_test_pipeline(&provider);
+    let (layout, pipeline) = scope_test_pipeline(&provider);
     let progress = provider
         .observation_progress
         .clone()
@@ -41,6 +41,13 @@ async fn submitted_compute_pass_reports_two_physical_dispatches_and_optional_dev
         ProviderOperationReceipt::with_wgpu_progress(provider.observation_budget.clone(), progress);
     with_provider_observation(Some(receipt.recorder()), || {
         provider.with_emission(|emission, pending| -> anyhow::Result<()> {
+            let bind = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("two-physical-dispatches-bind"),
+                    layout: &layout,
+                    entries: &[],
+                });
             let mut encoder = pending.profiled_encoder(
                 emission,
                 &wgpu::CommandEncoderDescriptor {
@@ -53,6 +60,7 @@ async fn submitted_compute_pass_reports_two_physical_dispatches_and_optional_dev
                     timestamp_writes: None,
                 });
                 pass.set_pipeline(&pipeline);
+                pass.set_bind_group(0, &bind, &[]);
                 pass.dispatch_workgroups(1, 1, 1);
                 pass.dispatch_workgroups(1, 1, 1);
             }
@@ -109,7 +117,8 @@ fn scope_test_pipeline(provider: &WgpuProvider) -> (wgpu::BindGroupLayout, wgpu:
                 emission,
                 "fft-scope-test-shader",
                 "@compute @workgroup_size(1) fn main() {}",
-            );
+            )
+            .expect("prepare FFT scope test shader");
             let pipeline = crate::backend::wgpu::cache::factory::create_compute_pipeline(
                 emission,
                 "fft-scope-test-pipeline",

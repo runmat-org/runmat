@@ -111,7 +111,9 @@ Floating-point precision depends on the active provider. Precision admission doe
 | Precision | Behavior |
 | --- | --- |
 | `F32` | Accepted on all GPU providers. |
-| `F64` | Requires provider support for double precision. |
+| `F64` | The WGPU route requires a qualified Vulkan 1.2 device on Linux or Windows with native F64, INT64, round-to-nearest and signed-zero/infinity/NaN preservation. Metal and browser WebGPU do not provide this route. |
+
+Native F64 elementary functions use binary64 algorithms with full-range argument reduction and explicit subnormal handling. Their shaders compile with arithmetic-order and rounding controls; advertising `SHADER_F64` alone is insufficient. An explicit F64 request fails admission if the required contract is unavailable. This does not change the default provider precision or authorize an implicit class conversion.
 
 Fixed-width integer transfers and operations use separate typed provider paths. Supported WGPU kernels retain all eight integer classes; 64-bit integer storage uses paired 32-bit words. Integer support is operation-specific, not inferred from the provider's floating-point precision. Consult the builtin's GPU contract for supported resident operations and host boundaries.
 

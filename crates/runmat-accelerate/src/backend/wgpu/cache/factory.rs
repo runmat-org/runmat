@@ -1,16 +1,9 @@
-use std::borrow::Cow;
-
 pub fn create_shader_module(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     label: &str,
     wgsl: &str,
-) -> wgpu::ShaderModule {
-    emission
-        .device()
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(label),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(wgsl)),
-        })
+) -> anyhow::Result<wgpu::ShaderModule> {
+    super::super::shader_compilation::create_shader_module(emission, label, wgsl)
 }
 
 pub fn create_pipeline_layout_single(

@@ -42,7 +42,8 @@ async fn submit_while_receipt_is_outstanding() {
                 "outstanding-receipt-shader",
                 "@group(0) @binding(0) var<storage, read_write> data: array<f32>;
                  @compute @workgroup_size(1) fn main() { data[0] = data[0] * 2.0 + 1.0; }",
-            );
+            )
+            .expect("prepare outstanding receipt test shader");
             let pipeline = crate::backend::wgpu::cache::factory::create_compute_pipeline(
                 emission,
                 "outstanding-receipt-pipeline",
