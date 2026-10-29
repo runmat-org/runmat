@@ -142,7 +142,7 @@ impl WgpuProvider {
                         Box::new(move |result| {
                             callback.complete(result);
                         }),
-                        callback_claim,
+                        [callback_claim, None],
                     ),
                 )
                 .map_err(ProviderExecutionError::from_source)?;

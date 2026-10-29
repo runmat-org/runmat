@@ -37,6 +37,7 @@ pub(super) fn choose(
     selections: &[ReductionSelection<'_>],
     input_plan: &TypedInputPlan<'_>,
     vm_selection: Option<super::super::VmFusionSelectionRight<'_>>,
+    host_metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 ) -> ExecutionResult<Choice> {
     let vm_right = vm_selection.and_then(super::super::VmFusionSelectionRight::completion);
     let vm_decline = vm_selection.and_then(super::super::VmFusionSelectionRight::decline);
@@ -153,7 +154,10 @@ pub(super) fn choose(
                     ..Default::default()
                 },
                 preparation: CandidatePreparationState::Cold,
-                preparation_program: Some(ProviderPreparationProgram::TypedReduction { selection }),
+                preparation_program: Some(ProviderPreparationProgram::TypedReduction {
+                    selection,
+                    host_metadata,
+                }),
                 shader_requirements: None,
                 fallback: runmat_execution::CandidateCostEvidence::Estimated(cost(execution_ns)),
                 required_upload_bytes: Some(resources.required_upload_bytes),

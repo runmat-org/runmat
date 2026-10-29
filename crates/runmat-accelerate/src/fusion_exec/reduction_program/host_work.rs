@@ -76,6 +76,7 @@ mod tests {
             },
             data: vec![],
             controls: vec![],
+            _mapping_claim: None,
             root: 2,
             terminal: 1,
             producer_indices: vec![0],

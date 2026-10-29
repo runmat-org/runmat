@@ -170,7 +170,7 @@ fn valid_disk_replay_preserves_canonical_provenance_and_device_usability() {
             .get(&fused_key)
             .cloned()
             .expect("typed runtime admission must promote the warmed receipt");
-        assert!(std::sync::Arc::ptr_eq(&selected.pipeline, &warmed.pipeline));
+        assert!(selected.pipeline.ptr_eq(&warmed.pipeline));
         assert_eq!(provider.telemetry_snapshot().fusion_cache_misses, misses);
     });
 }

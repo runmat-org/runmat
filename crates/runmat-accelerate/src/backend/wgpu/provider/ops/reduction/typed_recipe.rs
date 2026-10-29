@@ -1,7 +1,7 @@
 //! Executable typed reduction route for prepared resident inputs.
 use super::*;
 use crate::backend::wgpu::dispatch::observation::{
-    SubmittedReductionInput, SubmittedReductionResources,
+    SubmittedReductionInput, SubmittedReductionInputs, SubmittedReductionResources,
 };
 use crate::backend::wgpu::residency::BufferUsageClass;
 use runmat_accelerate_api::{
@@ -16,6 +16,7 @@ mod phase;
 pub(super) mod preflight;
 mod publication;
 mod stage;
+mod tag;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
@@ -64,6 +65,10 @@ impl WgpuProvider {
         let mut output_owned = false;
         let mut submit_attempted = false;
         let result = self.with_emission(|emission, pending| -> Result<_> {
+            // The original Runtime already reserved this registration's exact
+            // record/lease/view headroom before input or output effects. Move
+            // the exact-rank shape into that same admitted record below.
+            let output_shape = runmat_value::exact_capacity_vec_from_slice(&d.output_shape)?;
             let output = self.create_storage_buffer_checked_with_element_size(
                 emission,
                 output_len,
@@ -85,9 +90,10 @@ impl WgpuProvider {
             );
             let published = self.register_reduction_output(
                 output.clone(),
-                d.output_shape.clone(),
+                output_shape,
                 output_len,
                 output_type,
+                submission.output_registration_metadata(),
             )?;
             let submission_id = match selection.strategy() {
                 ReductionStrategy::SinglePass => {
@@ -97,6 +103,7 @@ impl WgpuProvider {
                         StageInvocation {
                             recipe,
                             stage: Stage::Single,
+                            host_metadata: submission.host_metadata(),
                             resources: SubmittedReductionResources::producer(
                                 inputs,
                                 &output,
@@ -139,6 +146,7 @@ impl WgpuProvider {
                         StageInvocation {
                             recipe,
                             stage: Stage::First,
+                            host_metadata: submission.host_metadata(),
                             resources: SubmittedReductionResources::producer(
                                 inputs, &partial, None,
                             )?,
@@ -153,6 +161,7 @@ impl WgpuProvider {
                         StageInvocation {
                             recipe,
                             stage: Stage::Final,
+                            host_metadata: submission.host_metadata(),
                             resources: SubmittedReductionResources::final_stage(
                                 &partial, &output, &published,
                             )?,

@@ -155,6 +155,7 @@ fn altered_checked_selection_workload_refuses_before_provider_query() {
                 preparation_program: Some(
                     runmat_accelerate_api::ProviderPreparationProgram::TypedReduction {
                         selection: &selection,
+                        host_metadata: None,
                     },
                 ),
                 shader_requirements: None,
@@ -216,6 +217,7 @@ fn unchanged_checked_typed_selection_reaches_same_physical_query() {
             preparation_program: Some(
                 runmat_accelerate_api::ProviderPreparationProgram::TypedReduction {
                     selection: &selection,
+                    host_metadata: None,
                 },
             ),
             shader_requirements: None,

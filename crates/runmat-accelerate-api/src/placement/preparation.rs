@@ -30,6 +30,7 @@ pub enum ProviderPreparationProgram<'a> {
     /// is observed from the pipeline keys used by submission.
     TypedReduction {
         selection: &'a crate::reduction::ReductionSelection<'a>,
+        host_metadata: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     },
     /// Provider-owned cast recipe; controls/adaptation are not part of this route.
     FloatingCast {

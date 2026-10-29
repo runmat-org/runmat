@@ -24,6 +24,8 @@ use runmat_value::{Tensor, Value};
 use std::{collections::HashMap, sync::Weak};
 #[path = "lifecycle_tests/retention.rs"]
 mod retention;
+#[path = "lifecycle_tests/managed_host.rs"]
+mod managed_host;
 
 fn owner() -> &'static WgpuProvider {
     let provider = Box::leak(Box::new(
@@ -180,7 +182,7 @@ fn checked_recipe_with_config(
     let program = block_on(resolve_reduction_program(&request, ProviderPrecision::F32))
         .unwrap()
         .expect("canonical checked folded reduction");
-    build(&program, config).expect("physical checked recipe")
+    build(&program, config, None).expect("physical checked recipe")
 }
 
 fn checked_recipe(a: &GpuTensorHandle, b: &GpuTensorHandle) -> ReductionRecipe {
@@ -237,7 +239,7 @@ fn authentic_checked_candidate_probe_matches_enabled_limits_without_effects() {
     wrong_config.chunk_elements = if config.chunk_elements == 1 { 2 } else { 1 };
     let wrong_recipe = checked_recipe_with_config(&a, &b, wrong_config);
     assert!(provider
-        .typed_reduction_candidates(wrong_recipe.physical())
+        .typed_reduction_candidates(wrong_recipe.physical(), None)
         .unwrap_err()
         .is_unsupported());
     let (preferred, feasible) = provider
@@ -302,7 +304,8 @@ fn authentic_two_pass_tracks_final_id_and_drains_after_first_stage_fault() {
     {
         let selected =
             ReductionSelection::new(recipe.physical(), ReductionStrategy::TwoPass).unwrap();
-        let submitted = ReductionSubmission::new(selected, &inputs, provider.device_id()).unwrap();
+        let submitted =
+            ReductionSubmission::new(selected, &inputs, provider.device_id(), None, None).unwrap();
         let mut success = Trace::default();
         let output = provider
             .submit_reduction_recipe_observed(&submitted, &mut success)
@@ -326,7 +329,8 @@ fn authentic_two_pass_tracks_final_id_and_drains_after_first_stage_fault() {
     {
         let selected =
             ReductionSelection::new(recipe.physical(), ReductionStrategy::TwoPass).unwrap();
-        let submitted = ReductionSubmission::new(selected, &inputs, provider.device_id()).unwrap();
+        let submitted =
+            ReductionSubmission::new(selected, &inputs, provider.device_id(), None, None).unwrap();
         let mut fault = Trace {
             fail_after_first: true,
             ..Default::default()
@@ -390,7 +394,7 @@ fn same_class_transpose_binds_the_source_buffer_and_uses_checked_strides() {
     let workload = ProviderTypedReductionWorkload::from_selection(&selection);
     assert_eq!(workload.inputs[0].layout, ProviderLayout::Strided);
     let inputs = [transposed.clone(), contiguous.clone()];
-    let submission = ReductionSubmission::new(selection, &inputs, provider.device_id())
+    let submission = ReductionSubmission::new(selection, &inputs, provider.device_id(), None, None)
         .expect("checked transpose submission");
 
     let source = provider.get_entry_raw(&transposed).unwrap().buffer;

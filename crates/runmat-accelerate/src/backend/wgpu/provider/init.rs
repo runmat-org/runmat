@@ -530,7 +530,7 @@ impl WgpuProvider {
             cache_device_id,
             precision,
             element_size,
-            fused_pipeline_cache: Mutex::new(HashMap::new()),
+            fused_pipeline_cache: Mutex::new(super::pipeline_cache::PipelineCache::default()),
             validated_fusion_cache: Mutex::new(HashMap::new()),
             warmed_pipeline_cache: Mutex::new(HashMap::new()),
             bind_group_layout_cache: Mutex::new(HashMap::new()),

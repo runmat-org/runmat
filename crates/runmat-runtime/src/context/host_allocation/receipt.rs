@@ -308,7 +308,7 @@ impl ProviderHostMetadataAdmission for HostRetainedViewPermit {
     }
 }
 
-fn provider_metadata_error(error: HostAllocationError) -> ProviderHostMetadataError {
+pub(super) fn provider_metadata_error(error: HostAllocationError) -> ProviderHostMetadataError {
     match error {
         HostAllocationError::Overflow => ProviderHostMetadataError::Overflow,
         HostAllocationError::Cancelled => ProviderHostMetadataError::Cancelled,

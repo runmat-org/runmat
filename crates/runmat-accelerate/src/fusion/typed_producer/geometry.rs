@@ -504,8 +504,8 @@ pub(in crate::fusion) fn structural_upper_bytes(
         bytes.add(17)?;
     }
     bytes.vector::<(FusionMathHelper, ScalarType)>(6)?;
-    for _ in 0..3 {
-        bytes.vector::<EmittedScalarImplementation>(operation_count)?;
+    for count in [operation_count, nodes, nodes] {
+        bytes.vector::<EmittedScalarImplementation>(count)?;
     }
     bytes.vector::<NumericClass>(outputs)?;
     for _ in 0..2 {

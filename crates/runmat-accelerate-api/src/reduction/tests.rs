@@ -35,7 +35,8 @@ fn default_typed_reduction_declines_before_effects_and_keeps_input() {
     {
         let inputs = [input.handle.clone()];
         let selected = ReductionSelection::new(&recipe, ReductionStrategy::SinglePass).unwrap();
-        let submitted = ReductionSubmission::new(selected, &inputs, owner.device_id()).unwrap();
+        let submitted =
+            ReductionSubmission::new(selected, &inputs, owner.device_id(), None, None).unwrap();
         let error = NoReductionProvider
             .submit_reduction_recipe(&submitted)
             .unwrap_err();
@@ -56,7 +57,9 @@ fn default_physical_selection_is_pre_effect_unsupported() {
     assert!(config.is_unsupported());
     assert!(!config.is_after_effect());
     let recipe = recipe(descriptor());
-    let candidates = provider.reduction_recipe_candidates(&recipe).unwrap_err();
+    let candidates = provider
+        .reduction_recipe_candidates(&recipe, None)
+        .unwrap_err();
     assert!(candidates.is_unsupported());
     assert!(!candidates.is_after_effect());
 }
@@ -524,7 +527,8 @@ fn authentic_inputs_are_borrowed_without_a_shadow_lifetime_manager() {
     let inputs = [input.handle];
     {
         let selection = ReductionSelection::new(&r, ReductionStrategy::TwoPass).unwrap();
-        let submission = ReductionSubmission::new(selection, &inputs, owner.device_id()).unwrap();
+        let submission =
+            ReductionSubmission::new(selection, &inputs, owner.device_id(), None, None).unwrap();
         assert!(std::ptr::eq(&submission.inputs()[0], &inputs[0]));
         assert_eq!(submission.device_id(), owner.device_id());
         assert_eq!(
@@ -567,7 +571,9 @@ fn submission_checks_owner_native_storage_layout_and_actual_allocation_extent() 
         assert!(ReductionSubmission::new(
             ReductionSelection::new(&r, ReductionStrategy::SinglePass).unwrap(),
             &inputs,
-            owner.device_id()
+            owner.device_id(),
+            None,
+            None
         )
         .is_err());
         assert_eq!(input.probe.retirements(), 0);
@@ -588,7 +594,9 @@ fn submission_checks_owner_native_storage_layout_and_actual_allocation_extent() 
     assert!(ReductionSubmission::new(
         ReductionSelection::new(&r, ReductionStrategy::SinglePass).unwrap(),
         &[view],
-        owner.device_id()
+        owner.device_id(),
+        None,
+        None
     )
     .is_err());
     assert_eq!(allocation.probe.retirements(), 0);
@@ -617,7 +625,9 @@ fn submission_checks_owner_native_storage_layout_and_actual_allocation_extent() 
     assert!(ReductionSubmission::new(
         ReductionSelection::new(&r, ReductionStrategy::SinglePass).unwrap(),
         &inputs,
-        owner.device_id()
+        owner.device_id(),
+        None,
+        None
     )
     .is_err());
     let mut d = descriptor();
@@ -629,6 +639,8 @@ fn submission_checks_owner_native_storage_layout_and_actual_allocation_extent() 
             ReductionSelection::new(&transpose_recipe, ReductionStrategy::SinglePass).unwrap(),
             &inputs,
             owner.device_id(),
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(submission.inputs()[0].view().layout(), layout);
@@ -659,6 +671,8 @@ fn logical_f32_leaf_is_rejected_without_releasing_the_callers_allocation() {
             ReductionSelection::new(&r, strategy).unwrap(),
             &inputs,
             owner.device_id(),
+            None,
+            None,
         ) {
             Ok(_) => panic!("logical storage must not be interpreted as a numerical leaf"),
             Err(error) => error,
@@ -693,6 +707,8 @@ fn unavailable_leaf_retains_typed_not_live_source_and_caller_ownership() {
         ReductionSelection::new(&r, ReductionStrategy::SinglePass).unwrap(),
         &inputs,
         owner.device_id(),
+        None,
+        None,
     )
     .is_ok());
     input.probe.mark_unavailable();
@@ -701,6 +717,8 @@ fn unavailable_leaf_retains_typed_not_live_source_and_caller_ownership() {
             ReductionSelection::new(&r, strategy).unwrap(),
             &inputs,
             owner.device_id(),
+            None,
+            None,
         ) {
             Ok(_) => panic!("unavailable allocation must not be submitted"),
             Err(error) => error,

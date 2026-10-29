@@ -51,7 +51,7 @@ pub(super) fn validate(
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), capabilities)
         .validate(&module)
         .map_err(|error| CachedShaderAdmissionError::IncompatibleAdapter(error.to_string()))?;
-    let prepared = crate::wgsl::f64_math::prepare(source)
+    let prepared = crate::wgsl::f64_math::prepare(source, None)
         .map_err(|error| CachedShaderAdmissionError::InvalidSource(error.to_string()))?;
     let controlled_features = super::super::shader_compilation::capabilities::REQUIRED_FEATURES;
     if prepared.requires_f64_math() && !features.contains(controlled_features) {
@@ -62,7 +62,7 @@ pub(super) fn validate(
     // A valid frontend module is not sufficient: warmup must pass the same
     // legalization, bounds checking and controlled-emission audit as a cold
     // runtime compilation. This performs no device allocation/publication.
-    super::super::shader_compilation::prepare(source, features)
+    super::super::shader_compilation::prepare(source, features, None)
         .map_err(|error| CachedShaderAdmissionError::InvalidSource(error.to_string()))?;
     Ok(())
 }

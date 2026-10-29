@@ -8,7 +8,9 @@
 use super::{current_provider_observation, prepare, ProviderAdmission};
 mod reduction;
 pub(super) mod retirement;
-pub(crate) use reduction::{SubmittedReductionInput, SubmittedReductionResources};
+pub(crate) use reduction::{
+    SubmittedReductionInput, SubmittedReductionInputs, SubmittedReductionResources,
+};
 use retirement::{SubmittedAllocationRetirement, SubmittedAllocationRetirementNotifier};
 
 /// Observe exact retirement in direct-route tests without minting a selected
@@ -124,6 +126,12 @@ impl SubmittedResources {
 }
 
 impl SubmittedAllocationRetention {
+    pub(super) fn take_completion_host_claim(&mut self) -> crate::wgsl::host_buffers::Claim {
+        match self.resources.as_mut() {
+            Some(SubmittedResources::Reduction(owner)) => owner.take_completion_claim(),
+            _ => None,
+        }
+    }
     pub(crate) fn new<T>(owner: T) -> Self
     where
         T: RetainedSubmittedAllocations,

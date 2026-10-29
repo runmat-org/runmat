@@ -21,7 +21,7 @@ impl FusionReductionDeclaration {
         output: &'a ValueFact,
     ) -> FusionReductionSignFuture<'a> {
         Box::pin(async move {
-            if context.real_floating_input().is_none() {
+            if context.real_floating_input()?.is_none() {
                 return Ok(None);
             }
             let Some(prepared) = (self.prepare)(FusionReductionControls {

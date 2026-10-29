@@ -288,6 +288,7 @@ impl WgpuProvider {
                 crate::backend::wgpu::shader_compilation::prepare(
                     &source,
                     self.access.enabled_features(),
+                    None,
                 )
             };
             let positive = prepare(crossentropy_positive_shader(self.precision, &params))?;
@@ -571,6 +572,7 @@ impl WgpuProvider {
         let prepared_shader = crate::backend::wgpu::shader_compilation::prepare(
             &adam_update_shader(self.precision),
             self.access.enabled_features(),
+            None,
         )?;
 
         let mut temporary_inputs = Vec::new();

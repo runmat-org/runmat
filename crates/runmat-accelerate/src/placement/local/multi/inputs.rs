@@ -43,7 +43,7 @@ pub(super) fn validate_set(
                         || candidate.outputs.as_slice() != std::slice::from_ref(&typed.output)
                 })
             || matches!(candidate.preparation_program, Some(
-                ProviderPreparationProgram::TypedReduction { selection }
+                ProviderPreparationProgram::TypedReduction { selection, .. }
             ) if candidate.physical_identity != Some(selection.identity())
                 || candidate.workload.typed_reduction.as_ref().is_none_or(|typed|
                     !typed.matches_selection(selection)))

@@ -31,14 +31,17 @@ fn ordered_strategies(
 pub(super) fn select_candidates(
     mode: ReductionTwoPassMode,
     preferred: ReductionStrategy,
-    feasible: &[ReductionStrategy],
-) -> ProviderExecutionResult<Vec<ReductionStrategy>> {
-    let candidates: Vec<_> = ordered_strategies(mode, preferred)
-        .into_iter()
-        .flatten()
-        .filter(|strategy| feasible.contains(strategy))
-        .collect();
-    if candidates.is_empty() {
+    feasible: &[Option<ReductionStrategy>; 2],
+) -> ProviderExecutionResult<[Option<ReductionStrategy>; 2]> {
+    let mut candidates = [None, None];
+    let mut count = 0;
+    for strategy in ordered_strategies(mode, preferred).into_iter().flatten() {
+        if feasible.contains(&Some(strategy)) {
+            candidates[count] = Some(strategy);
+            count += 1;
+        }
+    }
+    if count == 0 {
         return Err(typed_recipe::preflight::unsupported(
             "no executable typed reduction strategy on this device",
         ));
@@ -85,16 +88,19 @@ impl WgpuProvider {
     pub(crate) fn typed_reduction_candidates(
         &self,
         recipe: &ProviderReductionRecipe,
-    ) -> ProviderExecutionResult<Vec<ReductionStrategy>> {
+        host_metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<[Option<ReductionStrategy>; 2]> {
         let mode = self.reduction_two_pass_mode;
-        let (preferred, feasible) = self.typed_reduction_feasible_candidates(recipe)?;
+        let (preferred, feasible) =
+            self.typed_reduction_feasible_candidates(recipe, host_metadata)?;
         select_candidates(mode, preferred, &feasible)
     }
 
     pub(super) fn typed_reduction_feasible_candidates(
         &self,
         recipe: &ProviderReductionRecipe,
-    ) -> ProviderExecutionResult<(ReductionStrategy, Vec<ReductionStrategy>)> {
+        host_metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<(ReductionStrategy, [Option<ReductionStrategy>; 2])> {
         let d = recipe.descriptor();
         let config = self.typed_reduction_config(d.geometry.reduce_elements, d.geometry.slices)?;
         if d.config != config {
@@ -102,7 +108,7 @@ impl WgpuProvider {
                 "typed reduction recipe configuration differs from executing device",
             ));
         }
-        crate::fusion::reduction_recipe::validate_lowered_sources(recipe)
+        crate::fusion::reduction_recipe::validate_lowered_sources(recipe, host_metadata)
             .map_err(ProviderExecutionError::from)?;
         let preferred = self.heuristic_reduction_tuning(
             d.geometry.reduce_elements as usize,
@@ -113,13 +119,18 @@ impl WgpuProvider {
             ReductionMode::SinglePass => ReductionStrategy::SinglePass,
             ReductionMode::TwoPass { .. } => ReductionStrategy::TwoPass,
         };
-        let mut feasible = Vec::new();
-        for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
+        let mut feasible = [None, None];
+        for (index, strategy) in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass]
+            .into_iter()
+            .enumerate()
+        {
             let Ok(selected) = ReductionSelection::new(recipe, strategy) else {
                 continue;
             };
-            if self.admit_reduction_selection(&selected).is_ok() {
-                feasible.push(strategy);
+            match self.admit_reduction_selection(&selected, host_metadata) {
+                Ok(()) => feasible[index] = Some(strategy),
+                Err(error) if error.is_unsupported() => {}
+                Err(error) => return Err(error),
             }
         }
         Ok((preferred, feasible))
@@ -147,7 +158,7 @@ mod tests {
             ordered_strategies(ReductionTwoPassMode::ForceOn, ReductionStrategy::SinglePass),
             [Some(ReductionStrategy::TwoPass), None]
         );
-        let feasible = [ReductionStrategy::SinglePass];
+        let feasible = [Some(ReductionStrategy::SinglePass), None];
         assert_eq!(
             select_candidates(
                 ReductionTwoPassMode::Auto,

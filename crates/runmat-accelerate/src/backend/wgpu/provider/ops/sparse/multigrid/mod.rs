@@ -92,6 +92,7 @@ impl Builder<'_, '_> {
             self.emission,
             "runmat-multigrid-kernel",
             &source,
+            None,
         )?;
         let pipeline = Arc::new(self.emission.device().create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {

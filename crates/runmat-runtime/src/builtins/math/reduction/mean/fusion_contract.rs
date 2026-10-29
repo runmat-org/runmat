@@ -5,28 +5,166 @@ use crate::builtins::common::spec::{
     FusionReductionEmpty, FusionReductionOperation, FusionReductionPrepareFuture,
     FusionReductionTies, PreparedFusionReduction,
 };
+use crate::builtins::common::spec::{
+    reduction_layout, reduction_sum_bytes, FusionReductionPreparationQuery,
+    FusionReductionPreparationQuote, ReductionAxisPlan, ReductionDimensions,
+};
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
     revision: 6,
     operation: FusionReductionOperation::Mean,
     prepare,
+    resources,
 };
 fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
-    Box::pin(async move {
-        if !controls.supported() {
-            return Ok(None);
+    Box::pin(prepare_impl(controls))
+}
+async fn prepare_impl(
+    controls: FusionReductionControls<'_>,
+) -> BuiltinResult<Option<Box<dyn PreparedFusionReduction>>> {
+    if let Some(plan) = lexical_plan(&controls) {
+        return Ok(Some(Box::new(Prepared(plan.materialize()?))));
+    }
+    if !controls.supported() {
+        return Ok(None);
+    }
+    let parsed = parse_arguments(crate::call::FunctionArgumentView::from_slice(
+        controls.values,
+    ))
+    .await?;
+    if parsed.weights.is_some() {
+        return Ok(None);
+    }
+    Ok(Some(
+        Box::new(Prepared(parsed)) as Box<dyn PreparedFusionReduction>
+    ))
+}
+
+struct Plan<'a> {
+    axes: ReductionAxisPlan<'a>,
+    nan_mode: ReductionNaN,
+    output: OutputTemplate,
+}
+fn lexical_plan<'a>(controls: &FusionReductionControls<'a>) -> Option<Plan<'a>> {
+    if !controls.supported() {
+        return None;
+    }
+    let mut plan = Plan {
+        axes: ReductionAxisPlan::Auto,
+        nan_mode: ReductionNaN::Include,
+        output: OutputTemplate::Default,
+    };
+    let mut axes_set = false;
+    let mut output_set = false;
+    for value in controls.values {
+        let control = match value {
+            Value::String(text) => MeanControl::from_public_option(text),
+            Value::StringArray(array) if array.data().len() == 1 => {
+                MeanControl::from_public_option(&array.data()[0])
+            }
+            Value::CharArray(array) if array.rows == 1 => {
+                MeanControl::from_public_code_units(array.data().iter().map(|unit| unit.raw()))
+            }
+            _ => None,
+        };
+        if let Some(control) = control {
+            match control {
+                MeanControl::Weights => return None,
+                MeanControl::Missing(mode) => plan.nan_mode = mode,
+                MeanControl::All => {
+                    if axes_set && !plan.axes.is_auto() {
+                        return None;
+                    }
+                    plan.axes = ReductionAxisPlan::All;
+                    axes_set = true;
+                }
+                MeanControl::Output(output) => {
+                    if output_set {
+                        return None;
+                    }
+                    plan.output = output;
+                    output_set = true;
+                }
+            }
+        } else {
+            if axes_set && !plan.axes.is_auto() {
+                return None;
+            }
+            plan.axes = ReductionAxisPlan::Dimensions(ReductionDimensions::parse(value, true)?);
+            axes_set = true;
         }
-        let parsed = parse_arguments(crate::call::FunctionArgumentView::from_slice(
-            controls.values,
-        ))
-        .await?;
-        if parsed.weights.is_some() {
-            return Ok(None);
-        }
-        Ok(Some(
-            Box::new(Prepared(parsed)) as Box<dyn PreparedFusionReduction>
-        ))
+    }
+    Some(plan)
+}
+impl Plan<'_> {
+    fn materialize(self) -> BuiltinResult<ParsedArguments> {
+        let axes = match self.axes {
+            ReductionAxisPlan::Auto => MeanAxes::Default,
+            ReductionAxisPlan::Dim(dimension) => MeanAxes::Dim(dimension),
+            ReductionAxisPlan::All => MeanAxes::All,
+            ReductionAxisPlan::Dimensions(dimensions) => {
+                let mut values = dimensions.materialize()?;
+                match values.len() {
+                    0 => MeanAxes::Default,
+                    1 => MeanAxes::Dim(values.pop().expect("one axis")),
+                    _ => MeanAxes::Vec(values),
+                }
+            }
+        };
+        Ok(ParsedArguments {
+            axes,
+            nan_mode: self.nan_mode,
+            output: self.output,
+            weights: None,
+        })
+    }
+}
+fn resources(
+    query: FusionReductionPreparationQuery<'_>,
+) -> Option<FusionReductionPreparationQuote> {
+    let plan = lexical_plan(&query.controls)?;
+    let rank = query.input_rank_upper.max(2);
+    let dimensions = plan.axes.retained_len().max(1);
+    let retained_axes = if plan.axes.retained_len() > 1 {
+        plan.axes.retained_len()
+    } else {
+        0
+    };
+    let temporary_scalar_axis = usize::from(plan.axes.retained_len() == 1);
+    let stages = dimensions;
+    let mut retained = reduction_layout::<FusionReductionContract>(stages)?;
+    // Each actual stage owns input shape, output shape, and axes. All-axes
+    // uses rank axes; other stages use one. Rank is the captured shape bound.
+    let axis_count = if matches!(plan.axes, ReductionAxisPlan::All) {
+        rank
+    } else {
+        1
+    };
+    let stage_backing = reduction_sum_bytes(&[
+        reduction_layout::<usize>(rank)?,
+        reduction_layout::<usize>(rank)?,
+        reduction_layout::<usize>(axis_count)?,
+    ])?;
+    retained = retained.checked_add(stage_backing.checked_mul(u64::try_from(stages).ok()?)?)?;
+    Some(FusionReductionPreparationQuote {
+        prepare_scratch_bytes: reduction_sum_bytes(&[
+            u64::try_from(std::mem::size_of_val(&prepare_impl(query.controls))).ok()?,
+            reduction_layout::<usize>(temporary_scalar_axis)?,
+        ])?,
+        prepared_retained_bytes: reduction_sum_bytes(&[
+            reduction_layout::<Prepared>(1)?,
+            reduction_layout::<usize>(retained_axes)?,
+        ])?,
+        // Vecdim sort copy and mapped Option worklist; current-shape carry
+        // and pre-publication output overlap.
+        resolve_scratch_bytes: reduction_sum_bytes(&[
+            reduction_layout::<usize>(retained_axes)?,
+            reduction_layout::<Option<usize>>(dimensions)?,
+            reduction_layout::<usize>(rank)?,
+            reduction_layout::<usize>(rank)?,
+        ])?,
+        contract_retained_bytes: retained,
     })
 }
 
@@ -80,7 +218,8 @@ impl PreparedFusionReduction for Prepared {
             controls: &[],
             requested_outputs: 1,
         })
-        .real_floating_input() else {
+        .real_floating_input()?
+        else {
             return Ok(None);
         };
         let parsed = &self.0;
@@ -250,6 +389,92 @@ mod tests {
 
     #[test]
     fn mean_uses_double_sum_and_actual_valid_count_before_single_restoration() {
+        let fact = value_fact(&single(vec![1.0; 6], vec![2, 3]));
+        for controls in [
+            vec![],
+            vec![Value::String(" AlL ".into())],
+            vec![Value::CharArray(runmat_value::CharArray::new_row(
+                "\u{2003}ALL\u{2003}",
+            ))],
+            vec![
+                Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+                Value::Num(2.0),
+            ],
+            vec![
+                Value::Tensor(Tensor::new(vec![0.0, 2.0, 2.0], vec![1, 3]).unwrap()),
+                Value::String("NaTiVe".into()),
+            ],
+            vec![Value::Num(1.0), Value::String("OMITMISSING".into())],
+        ] {
+            let request = FusionReductionControls {
+                values: &controls,
+                requested_outputs: 1,
+            };
+            let plan = lexical_plan(&request).expect("existing valid host controls are quoted");
+            assert!(resources(FusionReductionPreparationQuery {
+                controls: request,
+                input_rank_upper: 2
+            })
+            .is_some());
+            let original = futures::executor::block_on(parse_arguments(
+                crate::call::FunctionArgumentView::from_slice(&controls),
+            ))
+            .unwrap();
+            assert_eq!(
+                Prepared(plan.materialize().unwrap())
+                    .resolve_stages(&fact)
+                    .unwrap(),
+                Prepared(original).resolve_stages(&fact).unwrap()
+            );
+        }
+        let weights = [Value::String("Weights".into()), Value::Num(1.0)];
+        assert!(resources(FusionReductionPreparationQuery {
+            controls: FusionReductionControls {
+                values: &weights,
+                requested_outputs: 1
+            },
+            input_rank_upper: 2
+        })
+        .is_none());
+        assert!(futures::executor::block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&weights)
+        ))
+        .unwrap()
+        .weights
+        .is_some());
+        assert!(
+            futures::executor::block_on(prepare(FusionReductionControls {
+                values: &weights,
+                requested_outputs: 1
+            }))
+            .unwrap()
+            .is_none()
+        );
+        let duplicate = [
+            Value::String("default".into()),
+            Value::String("DEFAULT".into()),
+        ];
+        let original = futures::executor::block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&duplicate),
+        ))
+        .err()
+        .unwrap();
+        assert!(resources(FusionReductionPreparationQuery {
+            controls: FusionReductionControls {
+                values: &duplicate,
+                requested_outputs: 1
+            },
+            input_rank_upper: 2
+        })
+        .is_none());
+        let fallback = futures::executor::block_on(prepare(FusionReductionControls {
+            values: &duplicate,
+            requested_outputs: 1,
+        }))
+        .err()
+        .unwrap();
+        assert_eq!(original.identifier, fallback.identifier);
+        assert_eq!(original.to_string(), fallback.to_string());
         let input = single(vec![16_777_216.0, 1.0, 1.0], vec![3, 1]);
         let contract = receipt(&input, &[]).unwrap();
         assert_eq!(contract.accumulator_class, NumericClass::Double);

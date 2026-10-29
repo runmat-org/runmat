@@ -26,6 +26,22 @@ fn word_test(precision: NumericPrecision) -> &'static str {
     }
 }
 
+/// Write the canonical predicate without allocating intermediate replacements.
+pub(crate) fn write_body(
+    writer: &mut dyn std::fmt::Write,
+    precision: NumericPrecision,
+) -> std::fmt::Result {
+    let prefix = match precision {
+        NumericPrecision::F32 => "let bits = bitcast<u32>(value); return ",
+        NumericPrecision::F64 => {
+            "let low = runmat_f64_low(value); let high = runmat_f64_high(value); return "
+        }
+    };
+    writer.write_str(prefix)?;
+    writer.write_str(word_test(precision))?;
+    writer.write_str(";")
+}
+
 pub(crate) fn inject(source: &str, precision: NumericPrecision) -> String {
     assert_eq!(
         source.matches(FLOAT_MARKER).count(),

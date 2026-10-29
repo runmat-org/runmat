@@ -4,6 +4,13 @@ use runmat_accelerate_api::observation::{
     with_provider_observation, ProviderOperationReceipt, WgpuObservationCompletion,
     WgpuObservationProgressError, WgpuObservationProgressReservation,
 };
+use runmat_runtime::context::host_allocation::{
+    provider_registration_host_quote, HostAllocationPlan, HostAllocationReceipt,
+    ProviderHostControlAdmission,
+};
+use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 struct Held {
@@ -71,6 +78,25 @@ pub(super) fn prove_exact_owners(provider: &'static WgpuProvider) {
             (ReductionStrategy::TwoPass, false),
             (ReductionStrategy::TwoPass, true),
         ] {
+            // Independently uploaded inputs remain the original physical-owner
+            // fixture. Control and output-registration funding both come from
+            // this genuine captured Runtime, never a synthetic metadata grant.
+            let old_cache = {
+                let mut cache = provider.fused_pipeline_cache.lock().unwrap();
+                std::mem::take(&mut *cache)
+            };
+            drop(old_cache);
+            let ledger = ManagedHostEffectLedger::new(16 * 1024 * 1024);
+            let runtime = RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ))
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_parallel(Rc::new(super::managed_host::Managed(ledger.clone()))),
+            );
+            let control = ProviderHostControlAdmission::capture(Some(&runtime))
+                .expect("capture genuine managed Runtime control admission")
+                .expect("finite ledger cannot silently become unbounded");
             let baseline = provider.allocations.retained_bytes();
             let upload = |data: &[f32]| {
                 provider
@@ -87,6 +113,30 @@ pub(super) fn prove_exact_owners(provider: &'static WgpuProvider) {
             let weak_b = b.allocation_lease().downgrade();
             let recipe = checked_recipe(&a, &b);
             let inputs = [a, b];
+            let output_quote = provider_registration_host_quote(
+                provider,
+                recipe.physical().descriptor().output_shape.len(),
+                1,
+                0,
+            )
+            .unwrap()
+            .expect("actual provider output registration quote");
+            let output_receipt = HostAllocationReceipt::admit(
+                Some(&runtime),
+                HostAllocationPlan::new(
+                    output_quote.preparation_bytes,
+                    output_quote.retained_bytes,
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .expect("same finite Runtime owns output headroom");
+            let output_registration = provider
+                .prepare_output_host_metadata(
+                    Box::new(output_receipt.retained_view_permit(&runtime).unwrap()),
+                    1,
+                )
+                .unwrap();
             let gate = Arc::new(Gate {
                 real: provider
                     .observation_progress
@@ -105,10 +155,20 @@ pub(super) fn prove_exact_owners(provider: &'static WgpuProvider) {
             };
             let result = with_provider_observation(observed.then(|| receipt.recorder()), || {
                 let selected = ReductionSelection::new(recipe.physical(), strategy).unwrap();
-                let submission =
-                    ReductionSubmission::new(selected, &inputs, provider.device_id()).unwrap();
+                let submission = ReductionSubmission::new(
+                    selected,
+                    &inputs,
+                    provider.device_id(),
+                    Some(&control),
+                    Some(output_registration.as_ref()),
+                )
+                .unwrap();
                 provider.submit_reduction_recipe_observed(&submission, &mut trace)
             });
+            // Unused preparation/headroom is not evidence that a submitted
+            // physical owner retained its control/output registration claims.
+            drop(output_registration);
+            drop(output_receipt);
             let weak_output = if fail_after_first {
                 let error = result.expect_err("original injected after-pass1 failure");
                 assert!(error.is_after_effect() && !error.is_unsupported());
@@ -132,6 +192,10 @@ pub(super) fn prove_exact_owners(provider: &'static WgpuProvider) {
                 );
             }
             assert!(provider.allocations.retained_bytes() > baseline);
+            assert!(
+                ledger.snapshot().live_reserved_bytes > 0,
+                "held real completion must retain original Runtime control funding"
+            );
             if strategy == ReductionStrategy::TwoPass {
                 assert!(trace.partial.as_ref().unwrap().upgrade().is_some());
             }
@@ -151,6 +215,23 @@ pub(super) fn prove_exact_owners(provider: &'static WgpuProvider) {
                 assert!(trace.partial.as_ref().unwrap().upgrade().is_none());
             }
             assert_eq!(provider.allocations.retained_bytes(), baseline);
+            let old_cache = {
+                let mut cache = provider.fused_pipeline_cache.lock().unwrap();
+                std::mem::take(&mut *cache)
+            };
+            drop(old_cache);
+            // The inner exact-retirement notification may precede destruction
+            // of its outer callback Box. Wait for physical owner disposal too,
+            // without inventing a timer-based retirement certificate.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while ledger.snapshot().live_reserved_bytes != 0 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "exact completion/cache backing must eventually refund control funding"
+                );
+                std::thread::yield_now();
+            }
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
         }
     }
 }

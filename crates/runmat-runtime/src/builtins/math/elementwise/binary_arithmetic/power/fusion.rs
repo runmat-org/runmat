@@ -8,10 +8,11 @@ use runmat_builtins::{BuiltinBindingIdentity, POWER_CATALOG_ENTRY};
 use runmat_types::{NumericClass, NumericDomain, NumericFact, ValueKindFact};
 use runmat_value::{NumericScalar, Value};
 
+mod preparation;
 #[path = "fusion/sign.rs"]
 mod sign;
 mod static_admission;
-use static_admission::{admit_static, static_admission_with_work};
+use static_admission::admit_static;
 
 pub(super) const SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
     binding: BuiltinBindingIdentity {
@@ -19,7 +20,11 @@ pub(super) const SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaratio
         variant: "default",
     },
     revision: 6,
-    admit: Some(admit),
+    admit: Some(FusionAdmission::with_preparation(
+        admit,
+        2,
+        preparation::resources,
+    )),
     admit_static: Some(admit_static),
     required_real_unary: None,
     required_arithmetic: Some(FusionArithmeticKind::RealPower),
@@ -86,92 +91,96 @@ fn selected_arithmetic(
 }
 
 fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
-    Box::pin(async move {
-        let Some((receipt, _)) = selected_arithmetic(&context) else {
-            return Ok(None);
-        };
-        let (evidence, work) = static_admission_with_work(&context)?;
-        *context.work = work;
-        if let Some(evidence) = evidence {
-            return Ok(Some(evidence));
-        }
-        let ([left, Some(right)], _) = (context.operands, context.facts) else {
-            return Ok(None);
-        };
-        let mode = receipt.mode;
-        let precision = if receipt.base_class == NumericClass::Single {
-            ProviderPrecision::F32
-        } else {
-            ProviderPrecision::F64
-        };
-        // The ordinary mixed Single/Double route evaluates in binary64 before
-        // rounding its result to Single. The current fused F32 helper cannot
-        // claim that arithmetic mode, even when the scalar exponent converts
-        // exactly to F32 (near-rounding-boundary results can still differ).
-        if left.is_none() {
-            return Ok(None);
-        }
-        let Some(left) = left else {
-            return Ok(None);
-        };
-        let domain = if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (left, right) {
-            if matches!(mode, RealPowerArithmeticMode::MixedDoubleThenSingle { .. }) {
-                // Paired resident classification currently admits one native
-                // precision. A mixed physical route needs its own probe.
-                return Ok(None);
-            }
-            // Classification is about the exact values that the kernel will
-            // receive, not a future lossy conversion of different operands.
-            if [left, right]
-                .iter()
-                .any(|handle| runmat_accelerate_api::handle_precision(handle) != Some(precision))
-            {
-                return Ok(None);
-            }
-            let provider = gpu_helpers::exact_provider_for_binary_inputs(left, right)
-                .map_err(anyhow::Error::msg)?;
-            *context.work = FusionAdmissionWork::ProviderProbe {
-                binding: SEMANTICS.binding,
-                precision,
-                provider_precision: provider.precision(),
-                inputs: [left, right]
-                    .into_iter()
-                    .map(super::provider::admission::representation)
-                    .collect::<Result<Vec<_>, _>>()?,
-            };
-            let left_metadata = gpu_helpers::ResidencyRestoreGuard::new(left);
-            let right_metadata = gpu_helpers::ResidencyRestoreGuard::new(right);
-            let result = provider.classify_real_power(left, right).await;
-            drop((left_metadata, right_metadata));
-            match result {
-                Ok(domain) => domain,
-                Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
-                    return Ok(None)
-                }
-                Err(error) => return Err(error),
-            }
-        } else {
-            return Ok(None);
-        };
-        if domain != PowerResultDomain::Real {
+    Box::pin(admit_inner(context))
+}
+
+async fn admit_inner(
+    context: FusionAdmissionContext<'_>,
+) -> anyhow::Result<Option<FusionAdmissionEvidence>> {
+    let Some((receipt, scalar)) = selected_arithmetic(&context) else {
+        return Ok(None);
+    };
+    let (evidence, work) = static_admission::admission_for_selected(&context, receipt, scalar)?;
+    *context.work = work;
+    if let Some(evidence) = evidence {
+        return Ok(Some(evidence));
+    }
+    let ([left, Some(right)], _) = (context.operands, context.facts) else {
+        return Ok(None);
+    };
+    let mode = receipt.mode;
+    let precision = if receipt.base_class == NumericClass::Single {
+        ProviderPrecision::F32
+    } else {
+        ProviderPrecision::F64
+    };
+    // The ordinary mixed Single/Double route evaluates in binary64 before
+    // rounding its result to Single. The current fused F32 helper cannot
+    // claim that arithmetic mode, even when the scalar exponent converts
+    // exactly to F32 (near-rounding-boundary results can still differ).
+    if left.is_none() {
+        return Ok(None);
+    }
+    let Some(left) = left else {
+        return Ok(None);
+    };
+    let domain = if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (left, right) {
+        if matches!(mode, RealPowerArithmeticMode::MixedDoubleThenSingle { .. }) {
+            // Paired resident classification currently admits one native
+            // precision. A mixed physical route needs its own probe.
             return Ok(None);
         }
-        Ok(Some(FusionAdmissionEvidence {
-            output_storage: None,
-            output_kind: ValueKindFact::Numeric(NumericFact {
+        // Classification is about the exact values that the kernel will
+        // receive, not a future lossy conversion of different operands.
+        if [left, right]
+            .iter()
+            .any(|handle| runmat_accelerate_api::handle_precision(handle) != Some(precision))
+        {
+            return Ok(None);
+        }
+        let provider = gpu_helpers::exact_provider_for_binary_inputs(left, right)
+            .map_err(anyhow::Error::msg)?;
+        *context.work = FusionAdmissionWork::ProviderProbe {
+            binding: SEMANTICS.binding,
+            precision,
+            provider_precision: provider.precision(),
+            inputs: [left, right]
+                .into_iter()
+                .map(super::provider::admission::representation)
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        let left_metadata = gpu_helpers::ResidencyRestoreGuard::new(left);
+        let right_metadata = gpu_helpers::ResidencyRestoreGuard::new(right);
+        let result = provider.classify_real_power(left, right).await;
+        drop((left_metadata, right_metadata));
+        match result {
+            Ok(domain) => domain,
+            Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+                return Ok(None)
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        return Ok(None);
+    };
+    if domain != PowerResultDomain::Real {
+        return Ok(None);
+    }
+    Ok(Some(FusionAdmissionEvidence {
+        output_storage: None,
+        output_kind: ValueKindFact::Numeric(NumericFact {
+            class: mode.output_class(),
+            domain: NumericDomain::Real,
+        }),
+        numerical_domain: NumericalDomainEvidence::RealPower(domain),
+        arithmetic: Some(FusionArithmeticEvidence::RealPower(receipt)),
+        sign: receipt
+            .exponent_scalar
+            .filter(|control| sign::even_integral_control(*control))
+            .map(|_| FusionSignEvidence::NonnegativeOrNaN {
                 class: mode.output_class(),
-                domain: NumericDomain::Real,
             }),
-            numerical_domain: NumericalDomainEvidence::RealPower(domain),
-            arithmetic: Some(FusionArithmeticEvidence::RealPower(receipt)),
-            sign: receipt
-                .exponent_scalar
-                .filter(|control| sign::even_integral_control(*control))
-                .map(|_| FusionSignEvidence::NonnegativeOrNaN {
-                    class: mode.output_class(),
-                }),
-        }))
-    })
+    }))
 }
 
 #[cfg(test)]

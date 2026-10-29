@@ -109,19 +109,27 @@ allocation owners. It is not a limit on total process memory. Device-buffer
 accounting and host-memory accounting are separate; a maximum buffer size does
 not establish either total device capacity or a host-memory allowance.
 
-Memory allocated internally by Naga, WGPU, graphics drivers and browser shader
-compilers is outside the enforced RunMat-managed host-byte budget. Shader
-compilation can therefore consume additional memory even when the managed
+Host-side workspace allocated internally for shader parsing, validation,
+translation and backend pipeline creation by Naga, WGPU, graphics drivers and
+browser shader compilers is outside the enforced RunMat-managed host-byte budget.
+Compilation can therefore consume additional memory even when the managed
 allocations fit. Source-size limits, cache hits and measured compiler peaks do
 not establish a hard bound on that additional memory. GPU execution remains
 available under this boundary; successful admission is not a guarantee that
 the complete process cannot run out of memory.
 
+This exclusion does not remove accounting for tensor payloads, their requested
+device-buffer extents, or RunMat-owned preparation, submission and cache backing.
+RunMat callback frames retain their own admission through completion. Private
+callback/task bookkeeping allocated inside backend and browser scheduling
+libraries is not an admitted RunMat block either; it is a separate dependency
+boundary, not shader-compilation memory.
+
 Errors returned by fallible shader preparation and resource admission retain
 their causes through the operation's error path. This does not promise recovery
 from backend panics, a host allocator abort or an operating-system process
-termination. Applications requiring a hard limit on
-the entire process need an independently enforced isolation mechanism; a
+termination. Applications requiring a hard limit on the entire process need an
+independently enforced isolation mechanism; a
 RunMat-managed budget alone does not supply that guarantee.
 
 ## Operation Categories

@@ -122,6 +122,8 @@ impl Drop for ProbeSubmitGuard {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+mod browser_completion;
 mod completion;
 #[path = "observation/host_control.rs"]
 mod host_control;
@@ -141,6 +143,7 @@ use completion::{
 #[cfg(not(target_arch = "wasm32"))]
 use host_control::observed_completion_callback_fits_bound;
 pub(crate) use host_control::observed_submission_dispatch_host_control_upper_bytes;
+pub(crate) use host_control::typed_submission_dispatch_host_control_upper_bytes;
 use inline_slots::InlineSlots;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use scoped_retirement::{ScopeConfirmation, ScopedRetirement, ScopedRetirementProof};
@@ -151,7 +154,7 @@ pub(crate) use submitted_retention::retirement::SubmittedAllocationRetirement;
 pub(crate) use submitted_retention::with_retirement_for_test;
 pub(crate) use submitted_retention::{
     PreparedSubmittedAllocationRetention, SubmittedAllocationRetention, SubmittedReductionInput,
-    SubmittedReductionResources, SubmittedResourceOwners,
+    SubmittedReductionInputs, SubmittedReductionResources, SubmittedResourceOwners,
 };
 
 /// Construct outside the access closure, borrow through nested emitters, then
@@ -660,6 +663,11 @@ impl PendingSubmissions {
 
     fn drain(&mut self, abandoned: bool) {
         for mut observation in self.direct_observations.drain() {
+            let control_claim = observation
+                .completion
+                .submitted_allocation_retention
+                .as_mut()
+                .and_then(|retention| retention.take_completion_host_claim());
             if abandoned {
                 // The command is abandoned, not the already-submitted device
                 // work. Retire its physical evidence as Missing now, but keep
@@ -684,7 +692,7 @@ impl PendingSubmissions {
                         submission,
                         runmat_accelerate_api::observation::WgpuObservationCompletion::new(
                             Box::new(move |status| completion.after_poll(status)),
-                            None,
+                            [None, control_claim],
                         ),
                     )
                 }));
@@ -702,9 +710,20 @@ impl PendingSubmissions {
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            wasm_bindgen_futures::spawn_local(observation.completion.after_callback());
+            browser_completion::direct(observation.completion, [None, control_claim]);
         }
-        for observation in self.observations.drain() {
+        for mut observation in self.observations.drain() {
+            let claims = [
+                observation
+                    .completion
+                    .recorder
+                    .completion_host_metadata_claim(),
+                observation
+                    .completion
+                    .submitted_allocation_retention
+                    .as_mut()
+                    .and_then(|retention| retention.take_completion_host_claim()),
+            ];
             if abandoned {
                 if let Some(probe) = &observation.completion.probe {
                     probe.fail();
@@ -729,7 +748,6 @@ impl PendingSubmissions {
                     continue;
                 };
                 let recorder = completion.recorder.clone();
-                let claim = recorder.completion_host_metadata_claim();
                 let callback = move |status| completion.after_poll(status);
                 if !observed_completion_callback_fits_bound(&callback) {
                     recorder.fail(ProviderObservationFailure::TrackingOverflow);
@@ -740,7 +758,7 @@ impl PendingSubmissions {
                         submission,
                         runmat_accelerate_api::observation::WgpuObservationCompletion::new(
                             Box::new(callback),
-                            claim,
+                            claims,
                         ),
                     )
                 }));
@@ -760,7 +778,7 @@ impl PendingSubmissions {
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            wasm_bindgen_futures::spawn_local(observation.completion.after_callback());
+            browser_completion::observed(observation.completion, claims);
         }
     }
 }

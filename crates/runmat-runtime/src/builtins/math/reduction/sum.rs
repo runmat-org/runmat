@@ -1,7 +1,5 @@
 //! MATLAB-compatible `sum` builtin with GPU-aware semantics for RunMat.
 
-use std::collections::HashSet;
-
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision, ReductionFlavor};
 use runmat_builtins::{
     BuiltinErrorDescriptor, SumControl, SumOutputClass as OutputTemplate, SUM_ERROR_INTERNAL,
@@ -862,16 +860,14 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<Reso
         }
     };
 
-    let mut seen = HashSet::new();
-    let mut dims_in_bounds = Vec::new();
+    // A bounded flat axis vector needs no opaque hash-table allocation.
+    // Sorting/dedup below preserves the original set and ascending order.
+    let mut dims_in_bounds = Vec::with_capacity(dims_1_based.len());
     let ndims = shape.len();
 
     for dim1 in dims_1_based {
         if dim1 == 0 {
             return Err(sum_invalid_argument("sum: dimension indices must be >= 1"));
-        }
-        if !seen.insert(dim1) {
-            continue;
         }
         let zero = dim1 - 1;
         if zero < ndims {
@@ -880,6 +876,7 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<Reso
     }
 
     dims_in_bounds.sort_unstable();
+    dims_in_bounds.dedup();
 
     Ok(ResolvedDims { dims_in_bounds })
 }

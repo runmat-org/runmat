@@ -20,14 +20,19 @@ use runmat_types::NumericClass;
 use serde::Serialize;
 
 mod indexing;
-mod state;
+mod resources;
 mod shader;
+mod state;
+mod writer;
 
 /// Check that all shader stages lower from the carried scalar program and
 /// reduction contract. This does not authenticate the scalar program against
 /// the admitted source plan; submission must do that before provider effects.
-pub fn validate_lowered_sources(recipe: &ProviderReductionRecipe) -> Result<()> {
-    shader::validate_lowered_sources(recipe)
+pub fn validate_lowered_sources(
+    recipe: &ProviderReductionRecipe,
+    metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+) -> Result<()> {
+    shader::validate_lowered_sources(recipe, metadata)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,6 +66,9 @@ pub struct ReductionRecipe {
     inputs: Vec<ReductionInputLayout>,
     contract: FusionReductionContract,
     physical: ProviderReductionRecipe,
+    // Physical sources and metadata deallocate before their backing claims.
+    _source_claims: [crate::wgsl::host_buffers::Claim; 3],
+    _metadata_claim: crate::wgsl::host_buffers::Claim,
 }
 impl ReductionRecipe {
     pub fn identity(&self) -> Digest {
@@ -101,6 +109,7 @@ impl ReductionRecipe {
 pub fn build(
     program: &ResolvedReductionProgram<'_>,
     config: ReductionRecipeConfig,
+    metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 ) -> Result<ReductionRecipe> {
     ensure!(
         config.workgroup_size.is_power_of_two()
@@ -120,6 +129,7 @@ pub fn build(
             || (precision == ProviderPrecision::F32 && output_precision == ProviderPrecision::F32),
         "provider cannot represent reduction arithmetic"
     );
+    let funding = resources::prepare(program, metadata)?;
     let inputs = indexing::inputs(program, config)?;
     let geometry = indexing::geometry(contract, config)?;
     let partial = state::layout(precision);
@@ -185,16 +195,15 @@ pub fn build(
     };
     // Include the original-to-prepared mapping as well as captured semantic
     // identity. Physical source ownership stays upstream of the provider ABI.
-    let semantic_identity = Digest::sha256(serde_json::to_vec(&(
-        program.identity(),
-        &inputs,
-        contract,
-    ))?);
-    let sources = shader::sources(program, &descriptor, semantic_identity)?;
+    let semantic_identity = Digest::sha256_serialized(&(program.identity(), &inputs, contract))?;
+    let sources = shader::sources(program, &descriptor, semantic_identity, metadata)?;
+    let (single, single_claim) = sources.0.into_parts();
+    let (pass1, pass1_claim) = sources.1.into_parts();
+    let (pass2, pass2_claim) = sources.2.into_parts();
     let sources = ReductionShaderSources {
-        single: sources.0,
-        pass1: sources.1,
-        pass2: sources.2,
+        single,
+        pass1,
+        pass2,
     };
     let physical = if let Some(scalar) = program.checked_scalar() {
         ProviderReductionRecipe::new_checked(
@@ -212,12 +221,14 @@ pub fn build(
         ProviderReductionRecipe::new(semantic_identity, descriptor, sources)?
     };
     if physical.checked_scalar().is_some() {
-        validate_lowered_sources(&physical)?;
+        validate_lowered_sources(&physical, metadata)?;
     }
     Ok(ReductionRecipe {
         inputs,
         contract: contract.clone(),
         physical,
+        _source_claims: [single_claim, pass1_claim, pass2_claim],
+        _metadata_claim: funding.retained,
     })
 }
 

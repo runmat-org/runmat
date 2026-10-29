@@ -3,7 +3,6 @@ use runmat_accelerate_api::{
     ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation,
     ProviderStorage,
 };
-use std::sync::Arc;
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -496,7 +495,7 @@ fn actual_cache_queries_are_read_only_and_lazy_hits_reuse_exact_pipeline() {
         })
         .unwrap()
         .unwrap();
-    assert!(Arc::ptr_eq(&first, &second));
+    assert!(first.ptr_eq(&second));
     // A legacy shared-cache hit is not validation authority for the ordinary
     // fused hook. Seed its exact scoped, validated pair before claiming warm.
     let validated = futures::executor::block_on(provider.prepare_validated_fusion_pipeline(
@@ -543,7 +542,7 @@ fn actual_cache_queries_are_read_only_and_lazy_hits_reuse_exact_pipeline() {
             .unwrap()
             .unwrap()
     });
-    assert!(!Arc::ptr_eq(&first, &uncached));
+    assert!(!first.ptr_eq(&uncached));
     assert!(matches!(
         receipt.take_completed().unwrap().status,
         ProviderObservationStatus::Failed(ProviderObservationFailure::ProviderFailed)

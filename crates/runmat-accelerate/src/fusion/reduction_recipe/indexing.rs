@@ -10,79 +10,90 @@ pub(super) fn inputs(
         program.data_inputs().len() == program.data_classes().len(),
         "reduction input class mapping mismatch"
     );
-    program
-        .data_inputs()
-        .iter()
-        .zip(program.data_classes())
-        .map(|(input, &class)| {
-            let fact = value_fact(input.value);
-            let source_precision = precision(
-                fact.numeric()
-                    .ok_or_else(|| anyhow!("missing source numeric class"))?
-                    .class,
-            )?;
-            let bound_precision = precision(class)?;
-            let shape = fact
-                .shape
-                .known_dims()
-                .and_then(|dims| dims.into_iter().collect::<Option<Vec<_>>>())
-                .ok_or_else(|| anyhow!("unknown source dimensions"))?;
-            let (source_layout, residency, source_physical) = match input.value {
-                Value::GpuTensor(handle) => (
-                    handle.view().layout(),
-                    ProviderResidency::Device,
-                    Some(*handle.physical()),
-                ),
-                Value::Num(_) | Value::Tensor(_) => {
-                    (GpuTensorLayout::Contiguous, ProviderResidency::Host, None)
+    let mut result = runmat_value::exact_capacity_vec(program.data_inputs().len())?;
+    for (input, &class) in program.data_inputs().iter().zip(program.data_classes()) {
+        let fact = value_fact(input.value);
+        let source_precision = precision(
+            fact.numeric()
+                .ok_or_else(|| anyhow!("missing source numeric class"))?
+                .class,
+        )?;
+        let bound_precision = precision(class)?;
+        let shape = match &fact.shape {
+            runmat_types::ShapeFact::Scalar => {
+                runmat_value::exact_capacity_vec_from_slice(&[1usize, 1])?
+            }
+            runmat_types::ShapeFact::Shaped { dims } => {
+                let mut shape = runmat_value::exact_capacity_vec(dims.len())?;
+                for dimension in dims {
+                    let runmat_types::DimensionFact::Known(extent) = dimension else {
+                        return Err(anyhow!("unknown source dimensions"));
+                    };
+                    shape.push(*extent);
                 }
-                _ => return Err(anyhow!("unsupported recipe data operand")),
-            };
-            // Existing casts consume contiguous data. A cast of a lazy view requires
-            // an explicit materialization; its shader strides are then contiguous.
-            let transpose = match source_layout {
-                GpuTensorLayout::Transpose(info) if source_precision == bound_precision => {
-                    Some(info)
-                }
-                _ => None,
-            };
-            let (broadcast_shape, strides) = crate::backend::fusion_operand_layout::resolve(
-                &shape,
-                transpose,
-                &program.contract().input_shape,
-                config.max_rank,
-            )?;
-            let elements = u64::try_from(
-                checked_reduction_elements(&shape)
-                    .ok_or_else(|| anyhow!("source cardinality overflow"))?,
-            )?;
-            let source_payload_bytes = elements
-                .checked_mul(bytes(source_precision))
-                .ok_or_else(|| anyhow!("source byte size overflow"))?;
-            let bound_payload_bytes = elements
-                .checked_mul(bytes(bound_precision))
-                .ok_or_else(|| anyhow!("bound byte size overflow"))?;
-            validate_binding_extents(
-                source_physical,
-                bound_payload_bytes,
-                config.max_storage_binding_bytes,
-            )?;
-            Ok(ReductionInputLayout {
-                value_id: input.value_id,
-                request_slot: input.request_slot,
-                source_precision,
-                bound_precision,
-                source_layout,
-                source_physical,
-                residency,
-                shape,
-                broadcast_shape,
-                strides,
-                source_payload_bytes,
-                bound_payload_bytes,
-            })
-        })
-        .collect()
+                shape
+            }
+            _ => return Err(anyhow!("unknown source dimensions")),
+        };
+        let (source_layout, residency, source_physical) = match input.value {
+            Value::GpuTensor(handle) => (
+                handle.view().layout(),
+                ProviderResidency::Device,
+                Some(*handle.physical()),
+            ),
+            Value::Num(_) | Value::Tensor(_) => {
+                (GpuTensorLayout::Contiguous, ProviderResidency::Host, None)
+            }
+            _ => return Err(anyhow!("unsupported recipe data operand")),
+        };
+        // Existing casts consume contiguous data. A cast of a lazy view requires
+        // an explicit materialization; its shader strides are then contiguous.
+        let transpose = match source_layout {
+            GpuTensorLayout::Transpose(info) if source_precision == bound_precision => Some(info),
+            _ => None,
+        };
+        let rank = program.contract().input_shape.len();
+        let mut broadcast_shape = runmat_value::exact_capacity_vec_with(rank, |_| 0u32)?;
+        let mut strides = runmat_value::exact_capacity_vec_with(rank, |_| 0u32)?;
+        crate::backend::fusion_operand_layout::resolve_into(
+            &shape,
+            transpose,
+            &program.contract().input_shape,
+            config.max_rank,
+            &mut broadcast_shape,
+            &mut strides,
+        )?;
+        let elements = u64::try_from(
+            checked_reduction_elements(&shape)
+                .ok_or_else(|| anyhow!("source cardinality overflow"))?,
+        )?;
+        let source_payload_bytes = elements
+            .checked_mul(bytes(source_precision))
+            .ok_or_else(|| anyhow!("source byte size overflow"))?;
+        let bound_payload_bytes = elements
+            .checked_mul(bytes(bound_precision))
+            .ok_or_else(|| anyhow!("bound byte size overflow"))?;
+        validate_binding_extents(
+            source_physical,
+            bound_payload_bytes,
+            config.max_storage_binding_bytes,
+        )?;
+        result.push(ReductionInputLayout {
+            value_id: input.value_id,
+            request_slot: input.request_slot,
+            source_precision,
+            bound_precision,
+            source_layout,
+            source_physical,
+            residency,
+            shape,
+            broadcast_shape,
+            strides,
+            source_payload_bytes,
+            bound_payload_bytes,
+        });
+    }
+    Ok(result)
 }
 
 fn validate_binding_extents(
@@ -114,36 +125,39 @@ pub(super) fn geometry(
         rank <= config.max_rank,
         "reduction rank exceeds recipe limit"
     );
-    let mut reduced = vec![false; rank];
     if !contract.identity {
-        for &axis in &contract.axes {
+        for (position, &axis) in contract.axes.iter().enumerate() {
             ensure!(
-                axis < rank && !reduced[axis],
+                axis < rank && !contract.axes[..position].contains(&axis),
                 "invalid reduction axis receipt"
             );
-            reduced[axis] = true;
         }
     }
-    let reduce_shape: Vec<_> = contract
-        .input_shape
-        .iter()
-        .enumerate()
-        .filter_map(|(axis, &extent)| reduced[axis].then_some(extent))
-        .collect();
-    let slice_shape: Vec<_> = contract
-        .input_shape
-        .iter()
-        .enumerate()
-        .filter_map(|(axis, &extent)| (!reduced[axis]).then_some(extent))
-        .collect();
     let count = |shape: &[usize]| -> Result<u32> {
         Ok(u32::try_from(
             checked_reduction_elements(shape)
                 .ok_or_else(|| anyhow!("reduction cardinality overflow"))?,
         )?)
     };
-    let reduce_elements = count(&reduce_shape)?;
-    let slices = count(&slice_shape)?;
+    let selected_count = |reduced: bool| -> Result<u32> {
+        let mut extents = contract
+            .input_shape
+            .iter()
+            .enumerate()
+            .filter(|(axis, _)| (!contract.identity && contract.axes.contains(axis)) == reduced)
+            .map(|(_, &extent)| extent);
+        // As with checked_reduction_elements, a zero extent wins before any
+        // nonzero prefix can overflow. An empty selection has product one.
+        if extents.clone().any(|extent| extent == 0) {
+            return Ok(0);
+        }
+        let product = extents
+            .try_fold(1usize, |n, extent| n.checked_mul(extent))
+            .ok_or_else(|| anyhow!("reduction cardinality overflow"))?;
+        Ok(u32::try_from(product)?)
+    };
+    let reduce_elements = selected_count(true)?;
+    let slices = selected_count(false)?;
     ensure!(
         count(&contract.output_shape)? == slices,
         "owner output shape disagrees with reduction axes"
@@ -194,13 +208,17 @@ fn dispatch(groups: u32, limit: u32) -> Result<ReductionDispatch> {
 }
 
 /// One coordinate-to-buffer mapping is used verbatim by single pass and pass 1.
-pub(super) fn source(
+pub(super) fn write_source(
+    code: &mut dyn std::fmt::Write,
     contract: &FusionReductionContract,
     inputs: &[ReductionInputBinding],
-) -> Result<String> {
-    let mut code = String::new();
+) -> Result<()> {
     for (slot, input) in inputs.iter().enumerate() {
-        let mut terms = Vec::new();
+        write!(
+            code,
+            "fn rr_index{slot}(slice: u32, r: u32) -> u32 {{ return "
+        )?;
+        let mut emitted = false;
         let (mut reduce_stride, mut slice_stride) = (1u64, 1u64);
         if !contract.input_shape.contains(&0) {
             for (axis, (&extent, &stride)) in
@@ -213,25 +231,26 @@ pub(super) fn source(
                     ("slice", &mut slice_stride)
                 };
                 if stride != 0 {
-                    terms.push(format!(
+                    if emitted {
+                        code.write_str(" + ")?;
+                    }
+                    write!(
+                        code,
                         "(({coordinate} / {divisor}u) % {extent}u) * {stride}u"
-                    ));
+                    )?;
+                    emitted = true;
                 }
                 *divisor = divisor
                     .checked_mul(extent as u64)
                     .ok_or_else(|| anyhow!("coordinate stride overflow"))?;
             }
         }
-        let expression = if terms.is_empty() {
-            "0u".into()
-        } else {
-            terms.join(" + ")
-        };
-        code.push_str(&format!(
-            "fn rr_index{slot}(slice: u32, r: u32) -> u32 {{ return {expression}; }}\n"
-        ));
+        if !emitted {
+            code.write_str("0u")?;
+        }
+        code.write_str("; }\n")?;
     }
-    Ok(code)
+    Ok(())
 }
 
 #[cfg(test)]

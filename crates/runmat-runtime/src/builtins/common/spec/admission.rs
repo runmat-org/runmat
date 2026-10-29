@@ -181,7 +181,11 @@ pub struct FusionAdmissionEvidence {
 
 pub type FusionAdmissionFuture<'a> =
     Pin<Box<dyn Future<Output = anyhow::Result<Option<FusionAdmissionEvidence>>> + 'a>>;
-pub type FusionAdmission = for<'a> fn(FusionAdmissionContext<'a>) -> FusionAdmissionFuture<'a>;
+pub type FusionAdmissionFunction =
+    for<'a> fn(FusionAdmissionContext<'a>) -> FusionAdmissionFuture<'a>;
+#[path = "admission/preparation.rs"]
+mod preparation;
+pub use preparation::{FusionAdmission, FusionAdmissionPreparationQuery, FusionAdmissionResources};
 pub type FusionStaticAdmission =
     for<'a> fn(
         &FusionAdmissionContext<'a>,

@@ -9,10 +9,10 @@ use runmat_accelerate_api::{
     ProviderPreparationSnapshot, ProviderResidency,
 };
 use runmat_execution::{CandidatePreparationState, Digest};
-#[path = "preparation/real_unary.rs"]
-mod real_unary;
 #[path = "preparation/power_pair.rs"]
 mod power_pair;
+#[path = "preparation/real_unary.rs"]
+mod real_unary;
 
 fn preparation_key_is_warm(
     key: u64,
@@ -43,15 +43,20 @@ impl WgpuProvider {
             ProviderPreparationProgram::RealUnary { recipe } => {
                 return self.real_unary_preparation_snapshot(recipe)
             }
-            ProviderPreparationProgram::TypedReduction { selection } => {
+            ProviderPreparationProgram::TypedReduction {
+                selection,
+                host_metadata,
+            } => {
                 let work = query.workload.typed_reduction.as_ref()?;
                 if !work.matches_selection(selection)
                     || crate::placement::typed_reduction_physical_work(query).is_none()
-                    || self.admit_reduction_selection(selection).is_err()
+                    || self
+                        .admit_reduction_selection(selection, host_metadata)
+                        .is_err()
                 {
                     return None;
                 }
-                let keys = self.typed_reduction_pipeline_keys(selection);
+                let keys = self.typed_reduction_pipeline_keys(selection)?;
                 return self.preparation_keys_snapshot(
                     "wgpu-typed-reduction-preparation-v1",
                     keys,
@@ -261,11 +266,12 @@ impl WgpuProvider {
     fn preparation_keys_snapshot(
         &self,
         kind: &str,
-        keys: Vec<u64>,
+        keys: impl AsRef<[u64]>,
         validated_fusion_key: Option<u64>,
     ) -> Option<ProviderPreparationSnapshot> {
+        let keys = keys.as_ref();
         let identity =
-            Digest::sha256(serde_json::to_vec(&(kind, self.workgroup_config.scalar, &keys)).ok()?);
+            Digest::sha256_serialized(&(kind, self.workgroup_config.scalar, keys)).ok()?;
         // No shader is used by a same-type alias or empty cast. Cache contention
         // cannot make that route's known zero preparation work unknown.
         if keys.is_empty() {

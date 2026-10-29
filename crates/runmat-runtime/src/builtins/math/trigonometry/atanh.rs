@@ -16,7 +16,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionAdmission,
     FusionAdmissionContext, FusionAdmissionFuture, FusionKernelTemplate, FusionSemanticDeclaration,
     GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
@@ -69,7 +69,7 @@ const FUSION_SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
         variant: "default",
     },
     revision: 2,
-    admit: Some(admit_fusion),
+    admit: Some(FusionAdmission::unbounded(admit_fusion)),
     admit_static: None,
     required_real_unary: Some((
         runmat_types::RealUnaryPredicate::ClosedUnitInterval,

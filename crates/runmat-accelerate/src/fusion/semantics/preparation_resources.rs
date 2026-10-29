@@ -102,6 +102,13 @@ fn source_rank(value: &Value) -> Option<usize> {
     }
 }
 
+/// Same shape/origin payload used by every source-fact preparation owner.
+pub(crate) fn source_fact_payload_bytes(rank: usize) -> Result<u64, PreparationBoundError> {
+    let mut bytes = RequestedBytes::default();
+    bytes.fact_payload(rank)?;
+    Ok(bytes.0)
+}
+
 fn selected_geometry(operation: &FusionOp) -> Result<(usize, bool), PreparationBoundError> {
     if let FusionOp::Primitive { op, inputs, .. } = operation {
         // VM primitives use the already-selected typed operator rule rather
@@ -179,16 +186,31 @@ pub(crate) struct PureSourceGeometry {
     pub liveness_value_ids_upper: usize,
     pub add_sign_operations: usize,
     pub max_rank: usize,
+    owned_admission_bytes: u64,
 }
 
 impl PureSourceGeometry {
     pub fn admit(plan: &FusionGroupPlan, inputs: &[Value]) -> Result<Self, PreparationBoundError> {
+        Self::admit_iter(plan, inputs.iter())
+    }
+
+    pub(crate) fn admit_borrowed(
+        plan: &FusionGroupPlan,
+        inputs: &[&Value],
+    ) -> Result<Self, PreparationBoundError> {
+        Self::admit_iter(plan, inputs.iter().copied())
+    }
+
+    fn admit_iter<'a>(
+        plan: &FusionGroupPlan,
+        inputs: impl ExactSizeIterator<Item = &'a Value> + Clone,
+    ) -> Result<Self, PreparationBoundError> {
         if inputs.len() != plan.inputs.len() {
             return Err(PreparationBoundError::UnsupportedDeclarationOrCarrier);
         }
         let mut max_rank = 2;
         let mut resident_inputs = 0usize;
-        for value in inputs {
+        for value in inputs.clone() {
             max_rank = max_rank.max(
                 source_rank(value).ok_or(PreparationBoundError::UnsupportedDeclarationOrCarrier)?,
             );
@@ -206,8 +228,58 @@ impl PureSourceGeometry {
         }
         let mut source_operand_ids = 0usize;
         let mut add_sign_operations = 0usize;
+        let mut owned_admission_bytes = 0u64;
         for operation in &plan.operations {
-            let (arity, add) = selected_geometry(operation)?;
+            let (arity, add) = match selected_geometry(operation) {
+                Ok(pure) => pure,
+                Err(PreparationBoundError::UnsupportedDeclarationOrCarrier) => {
+                    // An operation-owned finite quote is NOT a pure-class or
+                    // numerical permission. Actual semantic admission and the
+                    // checked scalar product still enforce their exact theorem.
+                    let binding = SemanticBinding::capture_typed(operation)
+                        .map_err(|_| PreparationBoundError::UnsupportedDeclarationOrCarrier)?
+                        .ok_or(PreparationBoundError::UnsupportedDeclarationOrCarrier)?;
+                    let owner = binding
+                        .declaration
+                        .semantics
+                        .and_then(|semantics| semantics.admit)
+                        .ok_or(PreparationBoundError::UnsupportedDeclarationOrCarrier)?;
+                    let arity = owner
+                        .preparation_arity()
+                        .filter(|arity| *arity <= 2)
+                        .ok_or(PreparationBoundError::UnsupportedDeclarationOrCarrier)?;
+                    let ids = match operation {
+                        FusionOp::Primitive { inputs, .. } | FusionOp::Builtin { inputs, .. } => {
+                            inputs
+                        }
+                    };
+                    if ids.len() != arity {
+                        return Err(PreparationBoundError::UnsupportedDeclarationOrCarrier);
+                    }
+                    let mut operands = [None; 2];
+                    for (slot, &id) in ids.iter().enumerate() {
+                        // Exact invocation leaf first. A computed SSA operand
+                        // never borrows an ancestor's value or cached fallback.
+                        operands[slot] = if let Some(position) =
+                            plan.inputs.iter().position(|&candidate| candidate == id)
+                        {
+                            inputs.clone().nth(position)
+                        } else {
+                            plan.const_values.get(&id)
+                        };
+                    }
+                    let quote = owner.preparation_resources(
+                        runmat_runtime::builtins::common::spec::FusionAdmissionPreparationQuery {
+                            operands: &operands[..arity], max_rank,
+                        }).ok_or(PreparationBoundError::UnsupportedDeclarationOrCarrier)?;
+                    owned_admission_bytes = owned_admission_bytes
+                        .checked_add(quote.scratch_bytes)
+                        .and_then(|bytes| bytes.checked_add(quote.retained_bytes))
+                        .ok_or(PreparationBoundError::Overflow)?;
+                    (arity, false)
+                }
+                Err(error) => return Err(error),
+            };
             source_operand_ids = source_operand_ids
                 .checked_add(arity)
                 .ok_or(PreparationBoundError::Overflow)?;
@@ -242,11 +314,13 @@ impl PureSourceGeometry {
             liveness_value_ids_upper,
             add_sign_operations,
             max_rank,
+            owned_admission_bytes,
         })
     }
 
     pub fn source_fixed_bytes(&self) -> Result<u64, PreparationBoundError> {
         let mut bytes = RequestedBytes::default();
+        bytes.add(self.owned_admission_bytes)?;
         // Captured selected declarations and borrowed request inputs.
         bytes.add(
             crate::fusion_exec::binding_storage_bytes(self.operations)

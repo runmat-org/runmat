@@ -1,8 +1,15 @@
 //! Validated native compute emission. Never ingest untrusted raw SPIR-V.
 
-pub(crate) fn compile(source: &str) -> anyhow::Result<Vec<u32>> {
-    let module = naga::front::wgsl::parse_str(source)
-        .map_err(|error| anyhow::anyhow!("prepared shader: {}", error.emit_to_string(source)))?;
+pub(crate) fn compile(
+    source: &str,
+    metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+) -> anyhow::Result<crate::wgsl::host_buffers::ClaimedVec<u32>> {
+    let module = naga::front::wgsl::parse_str(source).map_err(|error| {
+        // Naga owns this diagnostic rendering. Keep its useful spans and
+        // ORIGINAL typed cause; formatting it into anyhow! lost the latter.
+        let diagnostic = error.emit_to_string(source);
+        anyhow::Error::new(error).context(diagnostic)
+    })?;
     let info = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::FLOAT64 | naga::valid::Capabilities::SHADER_INT64,
@@ -30,6 +37,9 @@ pub(crate) fn compile(source: &str) -> anyhow::Result<Vec<u32>> {
             naga::back::spv::ZeroInitializeWorkgroupMemoryMode::Polyfill,
         ..Default::default()
     };
+    // Naga's parser/validator/write_vec allocations are the explicit library
+    // boundary. Our subsequent control-analysis buffers and transformed copy
+    // use the original captured admission and retain their own exact claims.
     let words = naga::back::spv::write_vec(&module, &info, &options, None)?;
-    super::controls::apply(&words)
+    super::controls::apply(&words, metadata)
 }

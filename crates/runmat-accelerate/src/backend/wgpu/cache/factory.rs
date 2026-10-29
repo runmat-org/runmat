@@ -3,7 +3,7 @@ pub fn create_shader_module(
     label: &str,
     wgsl: &str,
 ) -> anyhow::Result<wgpu::ShaderModule> {
-    super::super::shader_compilation::create_shader_module(emission, label, wgsl)
+    super::super::shader_compilation::create_shader_module(emission, label, wgsl, None)
 }
 
 pub fn create_pipeline_layout_single(

@@ -4,19 +4,26 @@
 /// Completion and its already-admitted callback backing claim. The claim is
 /// deliberately outside the callback Box: it outlives consuming invocation,
 /// deallocation, and unwind. No new allocation is made by this outer owner.
+#[cfg(not(target_arch = "wasm32"))]
+type CompletionCallback = Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>;
+#[cfg(target_arch = "wasm32")]
+type CompletionCallback = Box<dyn FnOnce(Result<(), WgpuObservationProgressError>)>;
+
 pub struct WgpuObservationCompletion {
-    callback: Option<Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>>,
-    _claim: Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
+    callback: Option<CompletionCallback>,
+    _claims:
+        [Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>; 2],
 }
 
 impl WgpuObservationCompletion {
     pub fn new(
-        callback: Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>,
-        claim: Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
+        callback: CompletionCallback,
+        claims: [Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>;
+            2],
     ) -> Self {
         Self {
             callback: Some(callback),
-            _claim: claim,
+            _claims: claims,
         }
     }
 

@@ -62,12 +62,12 @@ mod exact_product;
 pub(crate) use exact_product::ExactProductReceipt;
 #[path = "semantics/assembly.rs"]
 mod assembly;
+#[path = "semantics/computed_scalars.rs"]
+mod computed_scalars;
 #[path = "semantics/preparation_resources.rs"]
 pub(crate) mod preparation_resources;
 #[path = "semantics/request_literals.rs"]
 mod request_literals;
-#[path = "semantics/computed_scalars.rs"]
-mod computed_scalars;
 use computed_scalars::{ComputedScalars, ScalarEvidenceObservation};
 #[path = "semantics/sign.rs"]
 mod sign;
@@ -545,7 +545,7 @@ impl ResolvedProgram {
                     )
                     .ok_or_else(|| anyhow!("fusion operand evidence identity mismatch"))?
                     .with_output_fact(&inferred.fact);
-                    let result = admit(context).await;
+                    let result = admit.call(context).await;
                     observation.provider_probe_observed |= observed.work.provider_effect_observed();
                     let result = result.map_err(FusionResolveFailure::Admission)?;
                     let work = observed.completed();

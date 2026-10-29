@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use super::backend_shared::gpu_per_buffer_limit_error;
 use super::backend_types::{ImageNormalizeKey, ImageNormalizeTuning, WgpuProvider};
+use super::pipeline_cache::{CacheLookup, PipelineAllocation, PipelineCache, PipelineOwner};
 use crate::backend::wgpu::cache::{key as cache_key, persist as cache_persist};
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::shaders::image_normalize::{self, ImageNormalizeShaderGeometry};
 use crate::backend::wgpu::types::NumericPrecision;
+use runmat_execution::resource::ProviderHostMetadataAdmission;
 
 impl WgpuProvider {
     pub(super) fn precision_tag(&self) -> &'static str {
@@ -293,6 +295,7 @@ impl WgpuProvider {
             emission,
             "runmat-image-normalize-shader-dyn",
             &shader_src,
+            None,
         )?;
         let pipeline_layout = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
             emission,
@@ -377,7 +380,7 @@ impl WgpuProvider {
                 let Some((layout, pipeline)) = pollster::block_on(receipt.resolve())?? else {
                     return Ok(false);
                 };
-                let pipeline = Arc::new(pipeline);
+                let pipeline = PipelineOwner::unbounded(pipeline);
                 let warmed = if let Some(workgroup) = workgroup {
                     let recipe = super::pipeline_recipe::PipelineRecipe {
                         shader: src.to_owned(),
@@ -403,10 +406,13 @@ impl WgpuProvider {
                     .warmed_pipeline_cache
                     .lock()
                     .map_err(|_| anyhow::anyhow!("warmed pipeline cache is poisoned"))?;
+                let (_, retired) = raw_cache.insert_unbounded(key, &pipeline)?;
                 if let Some(warmed) = warmed {
                     warmed_cache.entry(key).or_insert(warmed);
                 }
-                raw_cache.entry(key).or_insert(pipeline);
+                drop(warmed_cache);
+                drop(raw_cache);
+                drop(retired);
                 Ok(true)
             },
         );
@@ -664,10 +670,11 @@ impl WgpuProvider {
         persist_wgsl_src: Option<&[u8]>,
         persist_layout_tag: Option<&str>,
         persist_workgroup_size: Option<u32>,
-    ) -> Result<Arc<wgpu::ComputePipeline>> {
+    ) -> Result<PipelineOwner> {
         emission.ensure_device(&self.access)?;
         self.get_or_create_pipeline_with(
             emission,
+            None,
             hash_key, label, persist_wgsl_src, persist_layout_tag, persist_workgroup_size,
             || Ok(emission.device().create_compute_pipeline(
                 &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
@@ -683,14 +690,12 @@ impl WgpuProvider {
         recipe: &super::pipeline_recipe::PipelineRecipe,
         bindings: &wgpu::BindGroupLayout,
         label: &str,
-    ) -> Result<Arc<wgpu::ComputePipeline>> {
+    ) -> Result<PipelineOwner> {
         emission.ensure_device(&self.access)?;
-        let prepared = crate::backend::wgpu::shader_compilation::prepare(
-            &recipe.shader,
-            self.access.enabled_features(),
-        )?;
-        self.get_or_create_pipeline_with(emission, recipe.key(), label, Some(recipe.shader.as_bytes()),
+        self.get_or_create_pipeline_with(emission, None, recipe.key(), label, Some(recipe.shader.as_bytes()),
             Some(&recipe.layout), Some(recipe.workgroup), || {
+                let prepared = crate::backend::wgpu::shader_compilation::prepare(
+                    &recipe.shader, self.access.enabled_features(), None)?;
                 let layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
                     emission, label, bindings);
                 let module = crate::backend::wgpu::shader_compilation::create_prepared(
@@ -704,16 +709,18 @@ impl WgpuProvider {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn get_or_create_pipeline_with(
+    pub(super) fn get_or_create_pipeline_with(
         &self,
         emission: &WgpuEmission<'_>,
+        metadata: Option<&dyn ProviderHostMetadataAdmission>,
         hash_key: u64,
         label: &str,
         persist_wgsl_src: Option<&[u8]>,
         persist_layout_tag: Option<&str>,
         persist_workgroup_size: Option<u32>,
         create: impl FnOnce() -> Result<wgpu::ComputePipeline>,
-    ) -> Result<Arc<wgpu::ComputePipeline>> {
+    ) -> Result<PipelineOwner> {
+        emission.ensure_device(&self.access)?;
         if let (Some(source), Some(layout_tag)) = (persist_wgsl_src, persist_layout_tag) {
             ensure!(
                 !cache_key::has_unresolved_launch_tokens(source),
@@ -726,39 +733,52 @@ impl WgpuProvider {
             );
         }
         let observation = super::pipeline_observation::PipelineObservation::begin();
-        let cached = match self.fused_pipeline_cache.lock() {
-            Ok(guard) => guard.get(&hash_key).cloned(),
-            Err(error) => {
-                drop(error);
-                super::pipeline_observation::poisoned_cache();
-                None
-            }
-        };
-        if let Some(p) = cached {
-            self.metrics.inc_hit();
-            observation.finish(runmat_execution::CandidatePreparationState::Warm);
-            return Ok(p);
-        }
+        let reservation =
+            match PipelineCache::reserve(&self.fused_pipeline_cache, hash_key, metadata) {
+                Ok(CacheLookup::Hit(p)) => {
+                    self.metrics.inc_hit();
+                    observation.finish(runmat_execution::CandidatePreparationState::Warm);
+                    return Ok(p);
+                }
+                Ok(CacheLookup::Miss(reservation)) => Some(reservation),
+                // Historical unmanaged poison behavior is an uncached pipeline.
+                // Managed calls never bypass their actual table admission.
+                Err(error) if metadata.is_none() && self.fused_pipeline_cache.is_poisoned() => {
+                    drop(error);
+                    super::pipeline_observation::poisoned_cache();
+                    None
+                }
+                Err(error) => return Err(error),
+            };
         crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
+        let allocation = PipelineAllocation::prepare(metadata)?;
+        // Admission failure must precede publication and all driver creation.
+        let persistence = self
+            .pipeline_cache_dir
+            .as_ref()
+            .map(|dir| cache_persist::PreparedPipelinePersistence::prepare(dir, hash_key, metadata))
+            .transpose()?;
         self.metrics.inc_miss();
         // Cache lock is released before any driver/compiler callback.
-        let p = Arc::new(create()?);
-        // A failed or panicking driver construction must not leave a new
-        // warmup record. Source/key identity was checked before cache lookup.
-        self.persist_pipeline_meta(
-            hash_key,
-            label,
-            persist_layout_tag,
-            persist_workgroup_size,
-            persist_wgsl_src,
-        );
-        match self.fused_pipeline_cache.lock() {
-            Ok(mut guard) => {
-                guard.insert(hash_key, p.clone());
-            }
-            Err(error) => {
-                drop(error);
-                super::pipeline_observation::poisoned_cache();
+        let p = allocation.allocate(create()?)?;
+        let (p, loser, inserted) = if let Some(reservation) = reservation {
+            reservation.publish(p)?
+        } else {
+            (p, None, true)
+        };
+        // A concurrent winner retains its identity. Neither loser destruction
+        // nor metadata callbacks/persistence run under the table mutex.
+        drop(loser);
+        if inserted {
+            if let (Some(prepared), Some(dir)) = (persistence, self.pipeline_cache_dir.as_ref()) {
+                prepared.write(
+                    dir,
+                    label,
+                    persist_layout_tag,
+                    persist_workgroup_size,
+                    self.precision,
+                    persist_wgsl_src,
+                );
             }
         }
         observation.finish(runmat_execution::CandidatePreparationState::Cold);

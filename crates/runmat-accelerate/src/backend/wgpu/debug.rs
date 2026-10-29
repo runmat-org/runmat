@@ -10,6 +10,7 @@ pub fn try_compile_kernel(
         emission,
         &format!("{label}-module"),
         wgsl_src,
+        None,
     )?;
     let pl = emission
         .device()
@@ -46,6 +47,7 @@ pub(crate) fn probe_kernel_with_buffers(
         emission,
         &format!("{label}-module"),
         wgsl_src,
+        None,
     )?;
     let bgl = emission
         .device()

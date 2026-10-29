@@ -10,7 +10,7 @@ pub(super) struct ValidatedFusionPipeline {
     kind: ValidatedPipelineKind,
     recipe: super::pipeline_recipe::PipelineRecipe,
     pub(super) layout: Arc<wgpu::BindGroupLayout>,
-    pub(super) pipeline: Arc<wgpu::ComputePipeline>,
+    pub(super) pipeline: super::pipeline_cache::PipelineOwner,
 }
 
 /// A successful scoped driver receipt is not yet a semantic runtime pipeline.
@@ -18,7 +18,7 @@ pub(super) struct ValidatedFusionPipeline {
 pub(super) struct WarmedPipelineReceipt {
     pub(super) recipe: super::pipeline_recipe::PipelineRecipe,
     pub(super) layout: Arc<wgpu::BindGroupLayout>,
-    pub(super) pipeline: Arc<wgpu::ComputePipeline>,
+    pub(super) pipeline: super::pipeline_cache::PipelineOwner,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -844,6 +844,7 @@ impl WgpuProvider {
         let prepared_shader = crate::backend::wgpu::shader_compilation::prepare(
             &recipe.shader,
             self.access.enabled_features(),
+            None,
         )
         .map_err(ProviderExecutionError::from)?;
         let receipt = self
@@ -960,7 +961,7 @@ impl WgpuProvider {
                     label,
                     &prepared_shader,
                 )?;
-                let pipeline = Arc::new(emission.device().create_compute_pipeline(
+                let pipeline = super::pipeline_cache::PipelineOwner::unbounded(emission.device().create_compute_pipeline(
                     &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
                         label: Some(label), layout: Some(&pipeline_layout), module: &module, entry_point: "main",
                     },

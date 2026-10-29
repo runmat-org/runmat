@@ -51,6 +51,12 @@ pub(crate) fn binary32_widening() -> String {
     )
 }
 
+pub(crate) fn write_binary32_widening(writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    writer.write_str(runmat_accelerate_api::wgpu_ieee_words::BINARY32_TO_BINARY64_WORDS_WGSL)?;
+    writer.write_str("\n")?;
+    writer.write_str(BINARY32_WIDENING)
+}
+
 pub(crate) fn binary32_widening_implementation(
     output: u32,
 ) -> runmat_accelerate_api::scalar_program::EmittedScalarImplementation {

@@ -156,13 +156,19 @@ impl Intrinsic {
         }
     }
 
-    pub(crate) fn helper(self, shape: Shape) -> String {
-        let mut name = format!("runmat_math64_{}", self.spelling());
-        if let Some(width) = shape.vector_width() {
-            use std::fmt::Write;
-            write!(name, "_vec{width}").expect("formatting a String");
+    pub(crate) fn helper(self, shape: Shape) -> HelperName {
+        HelperName(self, shape)
+    }
+}
+
+pub(crate) struct HelperName(Intrinsic, Shape);
+impl std::fmt::Display for HelperName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "runmat_math64_{}", self.0.spelling())?;
+        if let Some(width) = self.1.vector_width() {
+            write!(f, "_vec{width}")?;
         }
-        name
+        Ok(())
     }
 }
 

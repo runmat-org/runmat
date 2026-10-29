@@ -3,7 +3,7 @@
 use crate::backend::wgpu::shaders::{creation, fft};
 
 fn parsed(source: &str) -> naga::Module {
-    let source = crate::backend::wgpu::pipelines::substitute_tokens(source, 64, 8);
+    let source = crate::backend::wgpu::pipelines::substitute_tokens(source, 64, 8, None).unwrap();
     naga::front::wgsl::parse_str(&source)
         .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)))
 }

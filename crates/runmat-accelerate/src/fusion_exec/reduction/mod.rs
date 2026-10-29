@@ -166,6 +166,24 @@ async fn execute_reduction_with_shape_placed_async_inner(
     mut authority: Option<super::VmFusionExecutionRight<'_>>,
     synchronous: bool,
 ) -> ExecutionResult<FusionExecutionOutcome<TypedReductionVmOutput>> {
+    let host_runtime = request.runtime.clone();
+    let host_control =
+        runmat_runtime::context::host_allocation::ProviderHostControlAdmission::capture(
+            host_runtime.as_ref(),
+        )
+        .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+    let host_metadata = host_control.as_ref().map(|admission| {
+        admission as &dyn runmat_execution::resource::ProviderHostMetadataAdmission
+    });
+    let binding_bytes = super::binding_storage_bytes(request.plan.operations.len())
+        .and_then(|bytes| bytes.checked_mul(2))
+        .ok_or_else(|| anyhow!("reduction binding capture size overflow"))?;
+    let _entry_binding_claim = crate::wgsl::host_buffers::claim_bytes(
+        host_metadata,
+        usize::try_from(binding_bytes)
+            .map_err(|_| anyhow!("reduction binding size exceeds usize"))?,
+    )
+    .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -178,24 +196,16 @@ async fn execute_reduction_with_shape_placed_async_inner(
         }
     };
     let selected_identity = bindings.identity(None)?;
-    let arithmetic = if synchronous {
-        reduction_arithmetic::admitted_static(&request, &bindings, selected_provider.precision())?
-    } else {
-        reduction_arithmetic::admitted(&request, &bindings, selected_provider.precision()).await?
-    };
-    let Some(arithmetic) = arithmetic else {
-        return Ok(FusionExecutionOutcome::SharedRuntime(
-            FusionCpuObservation::new(None),
-        ));
-    };
-    let current = AdmittedBindings::new(&request)
-        .ok_or_else(|| anyhow!("selected reduction binding changed during admission"))?;
-    if current.identity(None)? != selected_identity
-        || !provider().is_some_and(|current_provider| {
-            runmat_accelerate_api::same_provider_instance(current_provider, selected_provider)
-        })
     {
-        return Err(anyhow!("selected reduction authority changed during admission").into());
+        let current = AdmittedBindings::new(&request)
+            .ok_or_else(|| anyhow!("selected reduction binding changed during admission"))?;
+        if current.identity(None)? != selected_identity
+            || !provider().is_some_and(|current_provider| {
+                runmat_accelerate_api::same_provider_instance(current_provider, selected_provider)
+            })
+        {
+            return Err(anyhow!("selected reduction authority changed during admission").into());
+        }
     }
     validation::request(&request, reduce_len, num_slices, output_shape)?;
     let program = if synchronous {
@@ -237,7 +247,7 @@ async fn execute_reduction_with_shape_placed_async_inner(
             Err(error) => return Err(error),
         };
         if let Some(config) = config {
-            let recipe = crate::fusion::reduction_recipe::build(&program, config)
+            let recipe = crate::fusion::reduction_recipe::build(&program, config, host_metadata)
                 .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
             if recipe.geometry().reduce_elements == reduce_elements
                 && recipe.geometry().slices == slices
@@ -264,22 +274,32 @@ async fn execute_reduction_with_shape_placed_async_inner(
                         FusionCpuObservation::new(None),
                     ));
                 }
-                let strategies =
-                    match selected_provider.reduction_recipe_candidates(recipe.physical()) {
-                        Ok(strategies) => strategies,
-                        Err(error) if error.is_unsupported() => Vec::new(),
-                        Err(error) => return Err(error),
-                    };
-                let mut selections = strategies
-                    .into_iter()
-                    .map(|strategy| {
+                let strategies = match selected_provider
+                    .reduction_recipe_candidates(recipe.physical(), host_metadata)
+                {
+                    Ok(strategies) => strategies,
+                    Err(error) if error.is_unsupported() => [None, None],
+                    Err(error) => return Err(error),
+                };
+                let selection_bytes = std::alloc::Layout::array::<
+                    runmat_accelerate_api::reduction::ReductionSelection<'_>,
+                >(2)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?
+                .size();
+                let _selections_claim =
+                    crate::wgsl::host_buffers::claim_bytes(host_metadata, selection_bytes)
+                        .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+                let mut selections = runmat_value::exact_capacity_vec(2)
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+                for strategy in strategies.into_iter().flatten() {
+                    selections.push(
                         runmat_accelerate_api::reduction::ReductionSelection::new(
                             recipe.physical(),
                             strategy,
                         )
-                        .map_err(runmat_accelerate_api::ProviderExecutionError::from)
-                    })
-                    .collect::<ExecutionResult<Vec<_>>>()?;
+                        .map_err(runmat_accelerate_api::ProviderExecutionError::from)?,
+                    );
+                }
                 if !selections.is_empty() {
                     match select::choose(
                         &request,
@@ -290,6 +310,7 @@ async fn execute_reduction_with_shape_placed_async_inner(
                         authority
                             .as_ref()
                             .and_then(super::VmFusionExecutionRight::as_selection),
+                        host_metadata,
                     )? {
                         select::Choice::Shared {
                             observation,
@@ -324,6 +345,7 @@ async fn execute_reduction_with_shape_placed_async_inner(
                                         .and_then(super::VmFusionExecutionRight::into_completion),
                                 },
                                 selected_identity,
+                                host_metadata,
                             )
                             .await?;
                             return Ok(FusionExecutionOutcome::Executed(value));
@@ -344,7 +366,33 @@ async fn execute_reduction_with_shape_placed_async_inner(
     // axis geometry. A typed recipe can index an exact N-D axis, but failure to
     // select that recipe must return to ordinary runtime execution rather than
     // reinterpret an N-D buffer as contiguous legacy rows or columns.
-    if output_shape.len() > 2 || arithmetic.requires_typed() {
+    if output_shape.len() > 2 {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    }
+    let arithmetic = if synchronous {
+        reduction_arithmetic::admitted_static(&request, &bindings, selected_provider.precision())?
+    } else {
+        reduction_arithmetic::admitted(&request, &bindings, selected_provider.precision()).await?
+    };
+    let Some(arithmetic) = arithmetic else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
+    // Deferred legacy admission may suspend or probe. Authenticate the same
+    // selected binding/provider again before this fallback reaches effects.
+    let current = AdmittedBindings::new(&request)
+        .ok_or_else(|| anyhow!("selected reduction binding changed during legacy admission"))?;
+    if current.identity(None)? != selected_identity
+        || !provider().is_some_and(|current_provider| {
+            runmat_accelerate_api::same_provider_instance(current_provider, selected_provider)
+        })
+    {
+        return Err(anyhow!("selected reduction authority changed during legacy admission").into());
+    }
+    if arithmetic.requires_typed() {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
         ));

@@ -15,7 +15,6 @@ pub(crate) use legalize::PreparationError;
 pub(crate) const COMPILER_REVISION: u32 = 1;
 
 use intrinsic::Intrinsic;
-use std::collections::BTreeSet;
 
 // Family definitions are kept separate from typed call rewriting.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -59,7 +58,43 @@ impl Family {
     }
 }
 
-fn include_family(intrinsic: Intrinsic, families: &mut BTreeSet<Family>) {
+const FAMILIES: [Family; 15] = [
+    Family::Words,
+    Family::Scaling,
+    Family::Exp,
+    Family::Log,
+    Family::Exp2,
+    Family::Log2,
+    Family::Expm1,
+    Family::Log1p,
+    Family::Pow,
+    Family::Hyperbolic,
+    Family::InverseTrig,
+    Family::RangeReduction,
+    Family::TrigKernels,
+    Family::Trigonometry,
+    Family::Conversions,
+];
+
+#[derive(Default)]
+struct FamilySet([bool; FAMILIES.len()]);
+impl FamilySet {
+    fn insert(&mut self, family: Family) {
+        self.0[family as usize] = true;
+    }
+    fn extend(&mut self, families: impl IntoIterator<Item = Family>) {
+        for family in families {
+            self.insert(family);
+        }
+    }
+    fn iter(&self) -> impl Iterator<Item = Family> + '_ {
+        FAMILIES
+            .into_iter()
+            .filter(|family| self.0[*family as usize])
+    }
+}
+
+fn include_family(intrinsic: Intrinsic, families: &mut FamilySet) {
     families.insert(Family::Words);
     if !matches!(intrinsic, Intrinsic::Radians | Intrinsic::Degrees) {
         families.insert(Family::Scaling);

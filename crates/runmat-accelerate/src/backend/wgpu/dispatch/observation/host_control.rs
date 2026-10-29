@@ -1,21 +1,41 @@
-//! Exact heap-control bounds for one observed WGPU submission.
+//! Known-layout controls of canonical WGPU completion owners.
+#[cfg(not(target_arch = "wasm32"))]
+use super::{
+    completion::{DirectCompletion, FenceCompletion},
+    completion_signal,
+};
 
-use super::{completion::FenceCompletion, completion_signal};
+pub(crate) fn typed_submission_dispatch_host_control_upper_bytes(observed: bool) -> Option<u64> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if observed {
+            super::browser_completion::observed_host_upper_bytes()
+        } else {
+            super::browser_completion::direct_host_upper_bytes()
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let payload = if observed {
+            std::mem::size_of::<FenceCompletion>()
+        } else {
+            std::mem::size_of::<DirectCompletion>()
+        };
+        let bytes = u64::try_from(payload)
+            .ok()?
+            .checked_add(completion_signal::channel_host_upper_bytes::<bool>()?)?;
+        if observed {
+            bytes.checked_add(completion_signal::channel_host_upper_bytes::<
+                Option<runmat_accelerate_api::observation::ProviderCompletedSubmission>,
+            >()?)
+        } else {
+            Some(bytes)
+        }
+    }
+}
 
 pub(crate) fn observed_submission_dispatch_host_control_upper_bytes() -> Option<u64> {
-    fn boxed_upper<T>() -> Option<u64> {
-        std::mem::size_of::<T>()
-            .checked_add(std::mem::align_of::<T>())?
-            .try_into()
-            .ok()
-    }
-
-    let bytes = completion_signal::channel_host_upper_bytes::<
-        Option<runmat_accelerate_api::observation::ProviderCompletedSubmission>,
-    >()?
-    .checked_add(completion_signal::channel_host_upper_bytes::<bool>()?)?
-    // Includes the inline exact-resource frame; FFT adds no owner Box.
-    .checked_add(boxed_upper::<FenceCompletion>()?)?;
+    let bytes = typed_submission_dispatch_host_control_upper_bytes(true)?;
     #[cfg(not(target_arch = "wasm32"))]
     let bytes =
         bytes.checked_add(super::PendingSubmissions::scoped_retirement_host_upper_bytes()?)?;

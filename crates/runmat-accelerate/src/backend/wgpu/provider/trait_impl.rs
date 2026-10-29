@@ -4266,10 +4266,11 @@ impl AccelProvider for WgpuProvider {
     fn reduction_recipe_candidates(
         &self,
         recipe: &runmat_accelerate_api::reduction::ProviderReductionRecipe,
+        host_metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<
-        Vec<runmat_accelerate_api::reduction::ReductionStrategy>,
+        [Option<runmat_accelerate_api::reduction::ReductionStrategy>; 2],
     > {
-        self.typed_reduction_candidates(recipe)
+        self.typed_reduction_candidates(recipe, host_metadata)
     }
 
     fn submit_reduction_recipe(

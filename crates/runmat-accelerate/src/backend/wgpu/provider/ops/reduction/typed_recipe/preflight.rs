@@ -39,6 +39,7 @@ impl WgpuProvider {
     pub(crate) fn admit_reduction_selection(
         &self,
         selection: &ReductionSelection<'_>,
+        host_metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> ProviderExecutionResult<()> {
         let recipe = selection.recipe();
         let d = recipe.descriptor();
@@ -46,7 +47,7 @@ impl WgpuProvider {
         if d.geometry.slices == 0 {
             return Err(unsupported("empty typed reduction submission"));
         }
-        crate::fusion::reduction_recipe::validate_lowered_sources(recipe)
+        crate::fusion::reduction_recipe::validate_lowered_sources(recipe, host_metadata)
             .map_err(ProviderExecutionError::from)?;
         let f64_required = d.execution_precision == ProviderPrecision::F64
             || d.output_precision == ProviderPrecision::F64
@@ -102,27 +103,28 @@ impl WgpuProvider {
     pub(super) fn admit_reduction_recipe(
         &self,
         submission: &ReductionSubmission<'_>,
-    ) -> ProviderExecutionResult<Vec<SubmittedReductionInput>> {
+    ) -> ProviderExecutionResult<SubmittedReductionInputs> {
         if submission.device_id() != self.device_id() {
             return Err(unsupported("foreign typed reduction submission"));
         }
         let selection = submission.selection();
-        self.admit_reduction_selection(selection)?;
+        self.admit_reduction_selection(selection, submission.host_metadata())?;
         let d = selection.recipe().descriptor();
         let limits = &self.adapter_limits;
-        // The immutable enabled-device limits above bound N+1 bindings. This
-        // is the original one input vector, now retaining exact leases too.
-        // Checked size is not a finite Runtime host-allocation grant: this
-        // legacy route still lacks a complete managed control-workspace quote.
+        // The original vector's exact backing is admitted BEFORE allocation,
+        // and consumed by the canonical physical retirement owner below.
         let count = submission.inputs().len();
-        count
-            .checked_mul(std::mem::size_of::<SubmittedReductionInput>())
-            .ok_or_else(|| unsupported("typed reduction input owner size overflow"))?;
-        let mut inputs = Vec::new();
-        inputs
-            .try_reserve_exact(count)
-            .map_err(|error| ProviderExecutionError::from(anyhow::anyhow!(error)))?;
+        let mut inputs = SubmittedReductionInputs::reserve(count, submission.host_metadata())
+            .map_err(ProviderExecutionError::from)?;
         for (handle, binding) in submission.inputs().iter().zip(&d.inputs) {
+            // The allocation owner constructs exactly this view's shape (it
+            // no longer clones an obsolete physical-record shape first).
+            let shape_bytes = std::alloc::Layout::array::<usize>(handle.shape().len())
+                .map_err(ProviderExecutionError::from_source)?
+                .size();
+            let _entry_shape_claim =
+                crate::wgsl::host_buffers::claim_bytes(submission.host_metadata(), shape_bytes)
+                    .map_err(ProviderExecutionError::from_source)?;
             let e = self
                 .get_entry_raw(handle)
                 .map_err(ProviderExecutionError::from)?;
@@ -138,10 +140,12 @@ impl WgpuProvider {
                     "typed reduction actual input differs from binding",
                 ));
             }
-            inputs.push(
-                SubmittedReductionInput::new(handle, e.buffer)
-                    .map_err(ProviderExecutionError::from)?,
-            );
+            inputs
+                .push(
+                    SubmittedReductionInput::new(handle, e.buffer)
+                        .map_err(ProviderExecutionError::from)?,
+                )
+                .map_err(ProviderExecutionError::from)?;
         }
         Ok(inputs)
     }

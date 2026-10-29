@@ -93,32 +93,28 @@ impl ProviderReductionRecipe {
                 root_class == descriptor.contract.input_class,
                 "checked scalar root class differs from reduction owner input"
             );
-            let declared = program
-                .wire()
-                .nodes
-                .iter()
-                .filter_map(|node| match node {
+            let declared = || {
+                program.wire().nodes.iter().filter_map(|node| match node {
                     ScalarNode::Input { id, class } => Some((*id, *class)),
                     _ => None,
                 })
-                .collect::<Vec<_>>();
+            };
             anyhow::ensure!(
                 scalar_inputs.len() == descriptor.inputs.len()
-                    && scalar_inputs.len() == declared.len(),
+                    && scalar_inputs.len() == declared().count(),
                 "checked reduction scalar inputs differ from physical bindings"
             );
-            let mut declared_ids = declared.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-            let mut mapped_ids = scalar_inputs.clone();
-            declared_ids.sort_unstable();
-            mapped_ids.sort_unstable();
             anyhow::ensure!(
-                mapped_ids == declared_ids,
+                scalar_inputs.iter().all(|id| scalar_inputs
+                    .iter()
+                    .filter(|candidate| *candidate == id)
+                    .count()
+                    == declared().filter(|(candidate, _)| candidate == id).count()),
                 "checked reduction scalar input set differs from physical bindings"
             );
             for (id, binding) in scalar_inputs.iter().zip(&descriptor.inputs) {
-                let class = declared
-                    .iter()
-                    .find_map(|(candidate, class)| (candidate == id).then_some(class))
+                let class = declared()
+                    .find_map(|(candidate, class)| (candidate == *id).then_some(class))
                     .ok_or_else(|| anyhow::anyhow!("missing checked scalar input binding"))?;
                 let precision = match class {
                     runmat_types::NumericClass::Single => ProviderPrecision::F32,
@@ -133,14 +129,14 @@ impl ProviderReductionRecipe {
         } else {
             anyhow::ensure!(scalar_inputs.is_empty(), "unbound reduction scalar inputs");
         }
-        let identity = Digest::sha256(serde_json::to_vec(&(
+        let identity = Digest::sha256_serialized(&(
             "typed-reduction-physical-v4",
             semantic_identity,
             &descriptor,
             &sources,
             checked_scalar.as_ref().map(ScalarProgram::identity),
             &scalar_inputs,
-        ))?);
+        ))?;
         Ok(Self {
             identity,
             semantic_identity,

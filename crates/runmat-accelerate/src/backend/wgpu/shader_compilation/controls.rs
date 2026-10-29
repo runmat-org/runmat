@@ -1,36 +1,62 @@
 //! Apply float controls to compiler-emitted SPIR-V without changing executable
 //! instructions, identifiers, bindings, control flow or bounds-check code.
-
+use crate::wgsl::host_buffers::{self, ClaimedVec};
+use runmat_execution::resource::ProviderHostMetadataAdmission;
 use spirv::{Capability, Decoration, ExecutionMode, GLOp, Op};
-use std::collections::BTreeSet;
 
 struct Instruction<'a> {
     op: Op,
     words: &'a [u32],
 }
 
-fn instructions(words: &[u32]) -> anyhow::Result<Vec<Instruction<'_>>> {
+fn instructions<'a>(
+    words: &'a [u32],
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+) -> anyhow::Result<ClaimedVec<Instruction<'a>>> {
     anyhow::ensure!(
         words.len() >= 5 && words[0] == spirv::MAGIC_NUMBER,
         "invalid compiler SPIR-V header"
     );
-    let mut result = Vec::new();
     let mut offset = 5;
+    let mut count = 0usize;
     while offset < words.len() {
-        let count = (words[offset] >> 16) as usize;
+        let length = (words[offset] >> 16) as usize;
         anyhow::ensure!(
-            count != 0 && count <= words.len() - offset,
+            length != 0 && length <= words.len() - offset,
             "invalid compiler SPIR-V instruction length"
         );
-        let op = Op::from_u32(words[offset] & 0xffff)
-            .ok_or_else(|| anyhow::anyhow!("unknown compiler SPIR-V instruction"))?;
-        result.push(Instruction {
-            op,
-            words: &words[offset..offset + count],
-        });
-        offset += count;
+        anyhow::ensure!(
+            Op::from_u32(words[offset] & 0xffff).is_some(),
+            "unknown compiler SPIR-V instruction"
+        );
+        count = count.checked_add(1).ok_or(host_buffers::Error::Overflow)?;
+        offset += length;
+    }
+    let mut result = ClaimedVec::with_capacity(count, metadata)?;
+    offset = 5;
+    while offset < words.len() {
+        let length = (words[offset] >> 16) as usize;
+        result.push(
+            Instruction {
+                op: Op::from_u32(words[offset] & 0xffff).expect("validated compiler opcode"),
+                words: &words[offset..offset + length],
+            },
+            metadata,
+        )?;
+        offset += length;
     }
     Ok(result)
+}
+
+fn insert<T: PartialEq>(
+    set: &mut ClaimedVec<T>,
+    value: T,
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+) -> Result<(), host_buffers::Error> {
+    if !set.as_slice().contains(&value) {
+        set.push(value, metadata)?;
+    }
+    Ok(())
 }
 
 fn forbidden_math(op: u32) -> bool {
@@ -91,61 +117,77 @@ fn is_type_or_constant(op: Op) -> bool {
     )
 }
 
-fn append_instruction(output: &mut Vec<u32>, op: Op, operands: &[u32]) {
-    output.push(((operands.len() as u32 + 1) << 16) | op as u32);
-    output.extend_from_slice(operands);
+fn append_instruction(
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+    output: &mut ClaimedVec<u32>,
+    op: Op,
+    operands: &[u32],
+) -> anyhow::Result<()> {
+    let count = operands
+        .len()
+        .checked_add(1)
+        .and_then(|n| u16::try_from(n).ok())
+        .ok_or(host_buffers::Error::Overflow)?;
+    output.push((u32::from(count) << 16) | op as u32, metadata)?;
+    output.extend_from_slice(operands, metadata)?;
+    Ok(())
 }
 
-pub(super) fn apply(words: &[u32]) -> anyhow::Result<Vec<u32>> {
-    let instructions = instructions(words)?;
-    let mut wide_types = BTreeSet::new();
-    let mut imports = BTreeSet::new();
-    let mut entries = BTreeSet::new();
-    let mut existing_caps = BTreeSet::new();
-    let mut existing_modes = BTreeSet::new();
-    let mut existing_no_contraction = BTreeSet::new();
-    for instruction in &instructions {
+pub(super) fn apply(
+    words: &[u32],
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+) -> anyhow::Result<ClaimedVec<u32>> {
+    let instructions = instructions(words, metadata)?;
+    let mut wide_types = ClaimedVec::with_capacity(0, metadata)?;
+    let mut imports = ClaimedVec::with_capacity(0, metadata)?;
+    let mut entries = ClaimedVec::with_capacity(0, metadata)?;
+    let mut existing_caps = ClaimedVec::with_capacity(0, metadata)?;
+    let mut existing_modes = ClaimedVec::with_capacity(0, metadata)?;
+    let mut existing_no_contraction = ClaimedVec::with_capacity(0, metadata)?;
+    for instruction in instructions.as_slice() {
         let w = instruction.words;
         match instruction.op {
             Op::TypeFloat if w.len() == 3 && w[2] == 64 => {
-                wide_types.insert(w[1]);
+                insert(&mut wide_types, w[1], metadata)?;
             }
-            Op::TypeVector | Op::TypeMatrix if w.len() == 4 && wide_types.contains(&w[2]) => {
-                wide_types.insert(w[1]);
+            Op::TypeVector | Op::TypeMatrix
+                if w.len() == 4 && wide_types.as_slice().contains(&w[2]) =>
+            {
+                insert(&mut wide_types, w[1], metadata)?;
             }
             Op::Capability if w.len() == 2 => {
-                existing_caps.insert(w[1]);
+                insert(&mut existing_caps, w[1], metadata)?;
             }
             Op::EntryPoint if w.len() >= 4 => {
-                entries.insert(w[2]);
+                insert(&mut entries, w[2], metadata)?;
             }
             Op::ExecutionMode if w.len() == 4 => {
-                existing_modes.insert((w[1], w[2], w[3]));
+                insert(&mut existing_modes, (w[1], w[2], w[3]), metadata)?;
             }
             Op::Decorate if w.len() == 3 && w[2] == Decoration::NoContraction as u32 => {
-                existing_no_contraction.insert(w[1]);
+                existing_no_contraction.push(w[1], metadata)?;
             }
             Op::ExtInstImport if w.len() >= 3 => {
-                let name: Vec<u8> = w[2..]
+                let glsl = w[2..]
                     .iter()
                     .flat_map(|word| word.to_le_bytes())
                     .take_while(|byte| *byte != 0)
-                    .collect();
-                if name == b"GLSL.std.450" {
-                    imports.insert(w[1]);
+                    .eq(b"GLSL.std.450".iter().copied());
+                if glsl {
+                    insert(&mut imports, w[1], metadata)?;
                 }
             }
             _ => {}
         }
     }
     anyhow::ensure!(!entries.is_empty(), "SPIR-V has no compute entrypoint");
-    let mut arithmetic = BTreeSet::new();
-    for instruction in &instructions {
+    let mut arithmetic = ClaimedVec::with_capacity(0, metadata)?;
+    for instruction in instructions.as_slice() {
         let w = instruction.words;
-        if w.len() < 3 || !wide_types.contains(&w[1]) {
+        if w.len() < 3 || !wide_types.as_slice().contains(&w[1]) {
             continue;
         }
-        if instruction.op == Op::ExtInst && w.len() >= 5 && imports.contains(&w[3]) {
+        if instruction.op == Op::ExtInst && w.len() >= 5 && imports.as_slice().contains(&w[3]) {
             anyhow::ensure!(
                 !forbidden_math(w[4]),
                 "illegal binary64 GLSL extended instruction remains"
@@ -166,14 +208,21 @@ pub(super) fn apply(words: &[u32]) -> anyhow::Result<Vec<u32>> {
                 | Op::MatrixTimesMatrix
                 | Op::Dot
         ) {
-            arithmetic.insert(w[2]);
+            arithmetic.push(w[2], metadata)?;
         }
     }
+    entries.as_mut_slice().sort_unstable();
+    arithmetic.as_mut_slice().sort_unstable();
+    arithmetic.dedup();
+    existing_no_contraction.as_mut_slice().sort_unstable();
+    existing_no_contraction.dedup();
     let capability_at = instructions
+        .as_slice()
         .iter()
         .position(|instruction| instruction.op != Op::Capability)
         .unwrap_or(instructions.len());
     let modes_at = instructions
+        .as_slice()
         .iter()
         .rposition(|instruction| {
             matches!(
@@ -184,6 +233,7 @@ pub(super) fn apply(words: &[u32]) -> anyhow::Result<Vec<u32>> {
         .map(|index| index + 1)
         .ok_or_else(|| anyhow::anyhow!("SPIR-V entrypoint section is missing"))?;
     let annotations_at = instructions
+        .as_slice()
         .iter()
         .position(|instruction| is_type_or_constant(instruction.op))
         .ok_or_else(|| anyhow::anyhow!("SPIR-V type section is missing"))?;
@@ -191,48 +241,109 @@ pub(super) fn apply(words: &[u32]) -> anyhow::Result<Vec<u32>> {
         capability_at <= modes_at && modes_at <= annotations_at,
         "unexpected compiler SPIR-V section order"
     );
-    let mut output = words[..5].to_vec();
+    let caps = [
+        Capability::SignedZeroInfNanPreserve,
+        Capability::RoundingModeRTE,
+    ]
+    .iter()
+    .filter(|cap| !existing_caps.as_slice().contains(&(**cap as u32)))
+    .count();
+    let modes = entries
+        .as_slice()
+        .iter()
+        .try_fold(0usize, |count, &entry| {
+            let missing = [
+                ExecutionMode::SignedZeroInfNanPreserve,
+                ExecutionMode::RoundingModeRTE,
+            ]
+            .iter()
+            .filter(|mode| {
+                !existing_modes
+                    .as_slice()
+                    .contains(&(entry, **mode as u32, 64))
+            })
+            .count();
+            count
+                .checked_add(missing)
+                .ok_or(host_buffers::Error::Overflow)
+        })?;
+    let annotations = arithmetic
+        .as_slice()
+        .iter()
+        .filter(|id| {
+            existing_no_contraction
+                .as_slice()
+                .binary_search(id)
+                .is_err()
+        })
+        .count();
+    let output_words = caps
+        .checked_mul(2)
+        .and_then(|n| modes.checked_mul(4).and_then(|m| n.checked_add(m)))
+        .and_then(|n| annotations.checked_mul(3).and_then(|a| n.checked_add(a)))
+        .and_then(|n| words.len().checked_add(n))
+        .ok_or(host_buffers::Error::Overflow)?;
+    let mut output = ClaimedVec::with_capacity(output_words, metadata)?;
+    output.extend_from_slice(&words[..5], metadata)?;
     for index in 0..=instructions.len() {
         if index == capability_at {
             for capability in [
                 Capability::SignedZeroInfNanPreserve,
                 Capability::RoundingModeRTE,
             ] {
-                if !existing_caps.contains(&(capability as u32)) {
-                    append_instruction(&mut output, Op::Capability, &[capability as u32]);
+                if !existing_caps.as_slice().contains(&(capability as u32)) {
+                    append_instruction(
+                        metadata,
+                        &mut output,
+                        Op::Capability,
+                        &[capability as u32],
+                    )?;
                 }
             }
         }
         if index == modes_at {
-            for &entry in &entries {
+            for &entry in entries.as_slice() {
                 for mode in [
                     ExecutionMode::SignedZeroInfNanPreserve,
                     ExecutionMode::RoundingModeRTE,
                 ] {
-                    if !existing_modes.contains(&(entry, mode as u32, 64)) {
+                    if !existing_modes
+                        .as_slice()
+                        .contains(&(entry, mode as u32, 64))
+                    {
                         append_instruction(
+                            metadata,
                             &mut output,
                             Op::ExecutionMode,
                             &[entry, mode as u32, 64],
-                        );
+                        )?;
                     }
                 }
             }
         }
         if index == annotations_at {
-            for &id in &arithmetic {
-                if !existing_no_contraction.contains(&id) {
+            for &id in arithmetic.as_slice() {
+                if existing_no_contraction
+                    .as_slice()
+                    .binary_search(&id)
+                    .is_err()
+                {
                     append_instruction(
+                        metadata,
                         &mut output,
                         Op::Decorate,
                         &[id, Decoration::NoContraction as u32],
-                    );
+                    )?;
                 }
             }
         }
-        if let Some(instruction) = instructions.get(index) {
-            output.extend_from_slice(instruction.words);
+        if let Some(instruction) = instructions.as_slice().get(index) {
+            output.extend_from_slice(instruction.words, metadata)?;
         }
     }
+    anyhow::ensure!(
+        output.len() == output_words,
+        "SPIR-V control word count changed"
+    );
     Ok(output)
 }

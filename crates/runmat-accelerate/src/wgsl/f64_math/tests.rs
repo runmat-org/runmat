@@ -3,17 +3,19 @@ use super::{prepare, PreparationError};
 #[test]
 fn typed_calls_preserve_comments_and_single_precision() {
     let source = "alias Double = f64; fn f(x: Double) -> Double { return exp /* call */ (log(x)); } fn single(x: f32) -> f32 { return exp(x); }";
-    let prepared = prepare(source).unwrap();
+    let prepared = prepare(source, None).unwrap();
     assert!(prepared
         .source()
         .contains("runmat_math64_exp /* call */ (runmat_math64_log(x))"));
     assert!(prepared.source().contains("return exp(x);"));
     assert!(prepared.requires_f64_math());
     assert_eq!(
-        prepare(prepared.source()).unwrap().source(),
+        prepare(prepared.source(), None).unwrap().source(),
         prepared.source()
     );
-    assert!(prepare(prepared.source()).unwrap().requires_f64_math());
+    assert!(prepare(prepared.source(), None)
+        .unwrap()
+        .requires_f64_math());
 }
 
 #[test]
@@ -21,7 +23,7 @@ fn typed_vector_wrappers_cover_every_width() {
     for width in 2..=4 {
         let source =
             format!("fn f(x: vec{width}<f64>) -> vec{width}<f64> {{ return exp(log(x)); }}");
-        let prepared = prepare(&source).unwrap();
+        let prepared = prepare(&source, None).unwrap();
         assert!(prepared.source().contains(&format!(
             "runmat_math64_exp_vec{width}(runmat_math64_log_vec{width}(x))"
         )));
@@ -34,7 +36,7 @@ fn typed_vector_wrappers_cover_every_width() {
 #[test]
 fn canonical_ieee_helpers_are_shared_by_parsed_declaration() {
     let source = crate::wgsl::ieee_words::inject("fn f(x: f64) -> f64 { return exp(x); }");
-    let prepared = prepare(&source).unwrap();
+    let prepared = prepare(&source, None).unwrap();
     assert_eq!(prepared.source().matches("fn runmat_f64_high(").count(), 1);
     assert_eq!(prepared.source().matches("fn runmat_f64_low(").count(), 1);
     assert_eq!(
@@ -51,7 +53,7 @@ fn incompatible_reserved_declaration_is_a_structured_error() {
     let source =
         "fn runmat_f64_low(x: f64) -> u32 { return 0u; } fn f(x: f64) -> f64 { return exp(x); }";
     assert!(matches!(
-        prepare(source),
+        prepare(source, None),
         Err(PreparationError::ReservedHelperCollision(_))
     ));
 }
@@ -62,16 +64,38 @@ fn permitted_intrinsics_and_single_precision_source_are_unchanged() {
         "fn f(x: f64) -> f64 { return sqrt(x) + floor(x); }",
         "fn f(x: f32) -> f32 { return exp(log(x)); }",
     ] {
-        assert_eq!(prepare(source).unwrap().source(), source);
+        assert_eq!(prepare(source, None).unwrap().source(), source);
     }
 }
 
 #[test]
 fn malformed_shader_is_not_deferred_to_device_creation() {
-    assert!(matches!(
-        prepare("not WGSL"),
-        Err(PreparationError::Parse(_))
-    ));
+    let error = match prepare("not WGSL", None) {
+        Err(error) => error,
+        Ok(_) => panic!("malformed shader must fail before device creation"),
+    };
+    assert!(matches!(&error, PreparationError::Parse(_)));
+    let mut cause = Some(&error as &dyn std::error::Error);
+    let mut original_parse_error = false;
+    while let Some(error) = cause {
+        original_parse_error |= error
+            .downcast_ref::<naga::front::wgsl::ParseError>()
+            .is_some();
+        cause = error.source();
+    }
+    assert!(
+        original_parse_error,
+        "original typed Naga cause survives legalization"
+    );
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    {
+        let error = crate::backend::wgpu::shader_compilation::spirv::compile("not WGSL", None)
+            .err()
+            .expect("malformed SPIR-V preparation source rejects");
+        assert!(error.chain().any(|cause| cause
+            .downcast_ref::<naga::front::wgsl::ParseError>()
+            .is_some()));
+    }
 }
 
 #[test]
@@ -114,7 +138,7 @@ fn every_restricted_intrinsic_and_shape_is_legalized() {
                 "fn f(x: {ty}) -> {ty} {{ return {}({arguments}); }}",
                 intrinsic.spelling()
             );
-            let prepared = match prepare(&source) {
+            let prepared = match prepare(&source, None) {
                 Ok(prepared) => prepared,
                 Err(error) => {
                     failures.push(format!("{intrinsic:?}/{shape:?}: {error}"));
@@ -125,7 +149,7 @@ fn every_restricted_intrinsic_and_shape_is_legalized() {
                 .source()
                 .contains(&format!("return {}({arguments});", intrinsic.helper(shape))));
             assert_eq!(
-                prepare(prepared.source()).unwrap().source(),
+                prepare(prepared.source(), None).unwrap().source(),
                 prepared.source()
             );
         }

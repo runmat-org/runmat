@@ -3,8 +3,8 @@
 //! authorized by this declaration.
 
 use crate::builtins::common::spec::{
-    FusionAdmissionContext, FusionAdmissionEvidence, FusionAdmissionFuture, FusionAdmissionWork,
-    FusionProofStage, FusionSemanticDeclaration,
+    FusionAdmission, FusionAdmissionContext, FusionAdmissionEvidence, FusionAdmissionFuture,
+    FusionAdmissionWork, FusionProofStage, FusionSemanticDeclaration,
 };
 use runmat_accelerate_api::{NumericalDomainEvidence, ProviderPrecision};
 use runmat_builtins::{BuiltinBindingIdentity, MAX_CATALOG_ENTRY};
@@ -17,7 +17,7 @@ pub(super) const SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaratio
         variant: "default",
     },
     revision: 2,
-    admit: Some(admit),
+    admit: Some(FusionAdmission::unbounded(admit)),
     admit_static: None,
     required_real_unary: None,
     required_arithmetic: None,

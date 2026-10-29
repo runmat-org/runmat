@@ -1,8 +1,8 @@
 //! Semantic-only SQRT refinement. Physical fusion remains disabled.
 
 use crate::builtins::common::spec::{
-    FusionAdmissionContext, FusionAdmissionEvidence, FusionAdmissionFuture, FusionAdmissionWork,
-    FusionProofStage, FusionSemanticDeclaration, FusionSignEvidence,
+    FusionAdmission, FusionAdmissionContext, FusionAdmissionEvidence, FusionAdmissionFuture,
+    FusionAdmissionWork, FusionProofStage, FusionSemanticDeclaration, FusionSignEvidence,
 };
 use runmat_accelerate_api::{NumericalDomainEvidence, ProviderPrecision};
 use runmat_builtins::{BuiltinBindingIdentity, SQRT_CATALOG_ENTRY};
@@ -14,7 +14,7 @@ pub(super) const SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaratio
         variant: "default",
     },
     revision: 2,
-    admit: Some(admit),
+    admit: Some(FusionAdmission::unbounded(admit)),
     admit_static: Some(admit_static),
     required_real_unary: None,
     required_arithmetic: None,

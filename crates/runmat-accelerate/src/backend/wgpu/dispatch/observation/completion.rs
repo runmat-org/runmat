@@ -96,7 +96,7 @@ impl DirectCompletion {
         }
         self.retire(confirmed, false);
     }
-    fn retire(mut self, progressed: bool, mapped: bool) {
+    pub(super) fn retire(mut self, progressed: bool, mapped: bool) {
         let access = self.access.clone();
         let elapsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             access.with_cleanup(|cleanup| {
@@ -149,15 +149,6 @@ impl DirectCompletion {
         // wait, so unwind still takes the Drop retirement path before unmap.
         self.unretired_submission = None;
         self.retire(status.is_ok(), mapped);
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(super) async fn after_callback(mut self) {
-        let mapped = match self.result.take() {
-            Some(mut result) => result.receive().await.unwrap_or(false),
-            None => false,
-        };
-        self.retire(mapped, mapped);
     }
 }
 
@@ -264,7 +255,7 @@ impl FenceCompletion {
         (released, elapsed)
     }
 
-    fn cleanup(
+    pub(super) fn cleanup(
         mut self,
         completed: Option<ProviderCompletedSubmission>,
         progress_ok: bool,
@@ -346,16 +337,6 @@ impl FenceCompletion {
             .unwrap_or(false);
         self.unretired_submission = None;
         self.cleanup(completed, status.is_ok(), timing_mapped);
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(super) async fn after_callback(mut self) {
-        let completed = self.result.receive().await.flatten();
-        let timing_mapped = match self.readback_result.take() {
-            Some(mut result) => result.receive().await.unwrap_or(false),
-            None => false,
-        };
-        self.cleanup(completed, true, timing_mapped);
     }
 }
 

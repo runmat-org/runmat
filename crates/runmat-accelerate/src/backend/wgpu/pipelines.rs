@@ -414,6 +414,7 @@ impl PipelineBundle {
         let prepared = super::shader_compilation::prepare(
             &self.shader_source,
             self.access.enabled_features(),
+            None,
         )?;
         // Concurrent successful preparation may win; never cache a failed
         // compiler result or publish a partially prepared device object.
@@ -2500,7 +2501,7 @@ pub fn create_shader_module(
     label: &str,
     wgsl: &str,
 ) -> anyhow::Result<wgpu::ShaderModule> {
-    super::shader_compilation::create_shader_module(emission, label, wgsl)
+    super::shader_compilation::create_shader_module(emission, label, wgsl, None)
 }
 
 pub fn create_pipeline_layout(

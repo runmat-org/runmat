@@ -25,6 +25,16 @@ pub(super) fn static_admission_with_work(
     let Some((receipt, scalar)) = selected_arithmetic(context) else {
         return Ok((None, FusionAdmissionWork::None));
     };
+    admission_for_selected(context, receipt, scalar)
+}
+
+/// Both static and async entrypoints use this exact theorem after their
+/// private selected-arithmetic validation, without allocating its facts twice.
+pub(super) fn admission_for_selected(
+    context: &FusionAdmissionContext<'_>,
+    receipt: FusionPowerArithmeticReceipt,
+    scalar: Option<f64>,
+) -> anyhow::Result<(Option<FusionAdmissionEvidence>, FusionAdmissionWork)> {
     let [left, Some(right)] = context.operands else {
         return Ok((None, FusionAdmissionWork::None));
     };
@@ -42,7 +52,13 @@ pub(super) fn static_admission_with_work(
             value.is_finite()
                 && (super::super::domain::real_for_any_real_base(value) || prior_nonnegative)
         });
-    let exponent_host = host_tensor(right)?;
+    // The represented scalar theorem has already completed the proof. Do
+    // not construct a scalar Tensor merely to inspect a disjoint fallback.
+    let exponent_host = if universally_real {
+        None
+    } else {
+        host_tensor(right)?
+    };
     let host_universally_real = exponent_host.as_ref().is_some_and(|tensor| {
         context.facts[1].shape.element_count() == Some(tensor.len())
             && (0..tensor.len()).all(|index| {

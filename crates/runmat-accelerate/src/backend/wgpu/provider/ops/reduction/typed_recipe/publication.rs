@@ -10,9 +10,10 @@ impl WgpuProvider {
         shape: Vec<usize>,
         len: usize,
         output_type: NumericElementType,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
         let allocated_bytes = output.size();
-        self.register_numeric_buffer(
+        self.register_numeric_buffer_produced_admitted(
             output,
             super::super::super::backend_types::NumericBufferRegistration {
                 shape,
@@ -22,6 +23,8 @@ impl WgpuProvider {
                 allocated_bytes,
                 usage: BufferUsageClass::FusionOut,
             },
+            false,
+            admission,
         )
     }
 

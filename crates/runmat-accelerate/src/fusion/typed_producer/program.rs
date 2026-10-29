@@ -247,9 +247,15 @@ impl TypedProducer {
                     id,
                     value: ScalarLiteral::F32Bits(bits),
                 } if buffer_type == ScalarType::F32 && capture_words => {
-                    let name = format!("control{id}_bits");
+                    let name =
+                        super::checked_resources::exact_format(format_args!("control{id}_bits"))?;
                     writeln!(&mut body, "    let {name}: u32 = 0x{bits:08x}u;")?;
-                    expressions.insert(*id, format!("bitcast<f32>({name})"))?;
+                    expressions.insert(
+                        *id,
+                        super::checked_resources::exact_format(format_args!(
+                            "bitcast<f32>({name})"
+                        ))?,
+                    )?;
                     word_expressions.insert(*id, name)?;
                 }
                 ScalarNode::Literal { id, .. } => {
@@ -272,9 +278,16 @@ impl TypedProducer {
                             let bits = word_expressions.get(&base).ok_or_else(|| {
                                 anyhow!("exact product requires word-preserving Single data")
                             })?;
-                            let temporary = format!("typed{source_index}_bits");
+                            let temporary = super::checked_resources::exact_format(format_args!(
+                                "typed{source_index}_bits"
+                            ))?;
                             writeln!(&mut body, "    let {temporary}: u32 = rm_exact_product_bits({bits}, 0x{:08x}u);", exact.binary32_bits())?;
-                            expressions.insert(*id, format!("bitcast<f32>({temporary})"))?;
+                            expressions.insert(
+                                *id,
+                                super::checked_resources::exact_format(format_args!(
+                                    "bitcast<f32>({temporary})"
+                                ))?,
+                            )?;
                             word_expressions.insert(*id, temporary)?;
                             exact_product = true;
                             implementations.push(super::product_implementation(*id));
@@ -303,19 +316,26 @@ impl TypedProducer {
                             })
                             .and_then(runmat_accelerate_api::ExactSingleBasePower::for_control)
                             .ok_or_else(|| anyhow!("certified POWER control is unavailable"))?;
-                        let base_bits = word_expressions
-                            .get(base)
-                            .cloned()
-                            .or_else(|| {
-                                expressions
-                                    .get(base)
-                                    .map(|value| format!("bitcast<u32>({value})"))
-                            })
-                            .ok_or_else(|| anyhow!("missing certified POWER base"))?;
+                        let base_bits = if let Some(bits) = word_expressions.get(base) {
+                            bits.clone()
+                        } else if let Some(value) = expressions.get(base) {
+                            super::checked_resources::exact_format(format_args!(
+                                "bitcast<u32>({value})"
+                            ))?
+                        } else {
+                            return Err(anyhow!("missing certified POWER base"));
+                        };
                         let name = crate::kernel_math::power_exact::entrypoint(control);
-                        let temporary = format!("typed{source_index}_bits");
+                        let temporary = super::checked_resources::exact_format(format_args!(
+                            "typed{source_index}_bits"
+                        ))?;
                         writeln!(&mut body, "    let {temporary}: u32 = {name}({base_bits});")?;
-                        expressions.insert(*id, format!("bitcast<f32>({temporary})"))?;
+                        expressions.insert(
+                            *id,
+                            super::checked_resources::exact_format(format_args!(
+                                "bitcast<f32>({temporary})"
+                            ))?,
+                        )?;
                         word_expressions.insert(*id, temporary)?;
                         exact_power = true;
                         implementations.push(crate::kernel_math::power_exact::implementation(
@@ -342,7 +362,9 @@ impl TypedProducer {
                     let mut arguments = Vec::new();
                     arguments.try_reserve_exact(raw_arguments.len())?;
                     for expression in &raw_arguments {
-                        arguments.push(format!("{name}({expression})"));
+                        arguments.push(super::checked_resources::exact_format(format_args!(
+                            "{name}({expression})"
+                        ))?);
                     }
                     let expression = match (operation, arguments.as_slice()) {
                         (ScalarOperation::RealArithmetic(recipe), _) => {
@@ -367,12 +389,16 @@ impl TypedProducer {
                         ) => a.clone(),
                         _ => return Err(anyhow!("scalar operation lacks WGSL lowering")),
                     };
-                    let temporary = format!("typed{source_index}");
+                    let temporary = super::checked_resources::exact_format(format_args!(
+                        "typed{source_index}"
+                    ))?;
                     writeln!(&mut body, "    let {temporary}: {name} = {expression};")?;
                     if capture_words && scalar == ScalarType::F32 {
                         // Bits of the existing native result, not an accuracy
                         // certificate for the operation which produced it.
-                        let bits = format!("{temporary}_bits");
+                        let bits = super::checked_resources::exact_format(format_args!(
+                            "{temporary}_bits"
+                        ))?;
                         writeln!(
                             &mut body,
                             "    let {bits}: u32 = bitcast<u32>({temporary});"

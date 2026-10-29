@@ -129,6 +129,7 @@ impl WgpuProvider {
                 crate::backend::wgpu::shader_compilation::prepare(
                     &shader,
                     self.access.enabled_features(),
+                    None,
                 )?,
             ));
             offset += chunk_len;

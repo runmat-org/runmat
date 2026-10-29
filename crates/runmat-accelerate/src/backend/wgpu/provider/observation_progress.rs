@@ -60,7 +60,7 @@ impl Completion {
         claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
     ) -> Self {
         Self {
-            callback: Some(WgpuObservationCompletion::new(callback, claim)),
+            callback: Some(WgpuObservationCompletion::new(callback, [claim, None])),
             scoped: None,
         }
     }

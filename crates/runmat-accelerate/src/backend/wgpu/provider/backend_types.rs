@@ -91,7 +91,7 @@ pub struct WgpuProvider {
     pub(super) cache_device_id: u32,
     pub(super) precision: NumericPrecision,
     pub(super) element_size: usize,
-    pub(super) fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
+    pub(super) fused_pipeline_cache: Mutex<super::pipeline_cache::PipelineCache>,
     /// Only pipelines whose complete driver error scope resolved successfully.
     /// Migrated ordinary fusion and tagged generic routes carry the exact pair
     /// to emission; legacy shared-cache writers cannot substitute it.

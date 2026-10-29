@@ -72,7 +72,8 @@ impl WgpuProvider {
             shader,
             workgroup_size,
             self.workgroup_config.matmul_tile,
-        );
+            None,
+        )?;
         let tuning_key =
             ReductionAutotuneKey::new(self.precision, requirements, num_slices, reduce_len);
         if self.reduction_autotune.is_enabled() {

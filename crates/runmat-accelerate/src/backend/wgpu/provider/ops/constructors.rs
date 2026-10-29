@@ -556,6 +556,7 @@ impl WgpuProvider {
                 emission,
                 "runmat-ndgrid-shader",
                 &shader,
+                None,
             )?;
             let bind_layout =
                 emission

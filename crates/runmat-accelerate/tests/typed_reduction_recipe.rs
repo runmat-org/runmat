@@ -142,7 +142,7 @@ fn try_recipe_with_precision(
     let program = block_on(resolve_reduction_program(&request, execution_precision))
         .unwrap()
         .expect("owner-proven reduction");
-    build(&program, cfg)
+    build(&program, cfg, None)
 }
 fn axes(name: &str, axis: Value, omit: bool) -> Vec<Value> {
     let mut controls = Vec::new();
@@ -678,7 +678,8 @@ fn real_recipe_projects_one_checked_physical_authority_for_both_strategies() {
     for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
         let selection = ReductionSelection::new(physical, strategy).unwrap();
         identities.push(selection.identity());
-        let submission = ReductionSubmission::new(selection, &inputs, owner.device_id()).unwrap();
+        let submission =
+            ReductionSubmission::new(selection, &inputs, owner.device_id(), None, None).unwrap();
         assert_eq!(
             submission.selection().recipe().identity(),
             recipe.identity()
@@ -760,7 +761,8 @@ fn actual_f32_forced_reduction_strategies_folded_min_axes_preserve_inputs() {
             let inputs = [a.clone(), b.clone()];
             let selected = ReductionSelection::new(physical.physical(), strategy).unwrap();
             let submission =
-                ReductionSubmission::new(selected, &inputs, provider.device_id()).unwrap();
+                ReductionSubmission::new(selected, &inputs, provider.device_id(), None, None)
+                    .unwrap();
             let output = provider
                 .submit_reduction_recipe(&submission)
                 .expect("actual selected typed reduction, not Unsupported fallback");

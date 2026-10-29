@@ -1,15 +1,14 @@
 //! Descriptive source-to-binding projection. Actual buffers are authenticated
 //! later by whole-set input preflight and the submitting provider, not here.
 use super::{inputs::Inputs, ProviderPrecision, ResolvedProgram};
+use crate::fusion::typed_producer::ExpressionSlots;
 use crate::{fusion::FusionOp, graph::ValueId};
 use runmat_types::NumericClass;
-use std::collections::{HashMap, HashSet};
 
 pub(super) struct Projection {
-    pub controls: HashSet<ValueId>,
+    pub controls: Vec<ValueId>,
     pub precision: ProviderPrecision,
-    pub expressions: HashMap<ValueId, String>,
-    pub words: HashMap<ValueId, String>,
+    pub word_storage: bool,
 }
 
 impl Projection {
@@ -20,11 +19,11 @@ impl Projection {
     ) -> anyhow::Result<Self> {
         // A word recipe may omit only authenticated metadata controls. All
         // actual Double data/interior nodes still require their native owner.
-        let mut controls = program.embedded_controls_for_precision(
+        let mut controls = program.embedded_controls_sorted_for_precision(
             &mapped.producer,
             &[mapped.root],
             ProviderPrecision::F32,
-        );
+        )?;
         // Preserve all genuine Double data/interior operations. The buffer
         // choice cannot grant arithmetic admission or narrow a source fact.
         let single_operations = mapped.producer.operations.iter().all(|operation| {
@@ -48,11 +47,11 @@ impl Projection {
             owner
         };
         if precision != ProviderPrecision::F32 {
-            controls = program.embedded_controls_for_precision(
+            controls = program.embedded_controls_sorted_for_precision(
                 &mapped.producer,
                 &[mapped.root],
                 precision,
-            );
+            )?;
         }
         let word_storage = precision == ProviderPrecision::F32
             && crate::fusion::typed_producer::TypedProducer::requires_binary32_word_transport(
@@ -60,39 +59,47 @@ impl Projection {
                 program,
                 Some(&[mapped.root]),
             )?;
-        let words = mapped
-            .data
-            .iter()
-            .filter(|input| !controls.contains(&input.value_id))
-            .enumerate()
-            .filter(|_| word_storage)
-            .map(|(slot, input)| (input.value_id, format!("input{slot}.data[i{slot}]")))
-            .collect();
-        let expressions = mapped
-            .data
-            .iter()
-            .filter(|input| !controls.contains(&input.value_id))
-            .enumerate()
-            .map(|(slot, input)| {
-                let load = format!("input{slot}.data[i{slot}]");
-                (
-                    input.value_id,
-                    if word_storage {
-                        format!("bitcast<f32>({load})")
-                    } else {
-                        load
-                    },
-                )
-            })
-            // Dependency markers only: checked POWER embeds original bits and
-            // never reads or casts these strings into a physical expression.
-            .chain(controls.iter().map(|&id| (id, String::new())))
-            .collect();
         Ok(Self {
             controls,
             precision,
-            expressions,
-            words,
+            word_storage,
         })
+    }
+
+    /// Called only after the selected producer's counted phase is admitted.
+    pub fn expressions(
+        &self,
+        mapped: &Inputs<'_>,
+    ) -> anyhow::Result<(ExpressionSlots, ExpressionSlots)> {
+        // This method runs inside the caller's pre-admitted counted producer
+        // phase. Fragment allocations use the same exact formatter but do not
+        // reserve those already-funded bytes a second time.
+        let mut expressions = ExpressionSlots::new(&mapped.producer)?;
+        let mut words = ExpressionSlots::new(&mapped.producer)?;
+        for (slot, input) in mapped
+            .data
+            .iter()
+            .filter(|input| !self.controls.contains(&input.value_id))
+            .enumerate()
+        {
+            let load = crate::fusion::typed_producer::checked_format(format_args!(
+                "input{slot}.data[i{slot}]"
+            ))?;
+            if self.word_storage {
+                words.insert(input.value_id, load.clone())?;
+                expressions.insert(
+                    input.value_id,
+                    crate::fusion::typed_producer::checked_format(format_args!(
+                        "bitcast<f32>({load})"
+                    ))?,
+                )?;
+            } else {
+                expressions.insert(input.value_id, load)?;
+            }
+        }
+        for &id in &self.controls {
+            expressions.insert_if_missing(id)?;
+        }
+        Ok((expressions, words))
     }
 }

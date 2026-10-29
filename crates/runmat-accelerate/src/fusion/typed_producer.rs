@@ -43,12 +43,15 @@ impl SelectedProducerIndices {
     }
 }
 
-#[path = "typed_producer/program.rs"]
-mod program;
+#[path = "typed_producer/checked_resources.rs"]
+mod checked_resources;
 #[path = "typed_producer/constants.rs"]
 mod constants;
 #[path = "typed_producer/expression_slots.rs"]
 mod expression_slots;
+pub(crate) use checked_resources::{exact_format as checked_format, CheckedProducerResources};
+#[path = "typed_producer/program.rs"]
+mod program;
 pub(crate) use expression_slots::ExpressionSlots;
 #[path = "typed_producer/geometry.rs"]
 mod geometry;
@@ -254,11 +257,11 @@ impl TypedProducer {
         let resolved = program::selected_resolution_receipt(plan, program, &indices)?;
         let mut body =
             super::wgsl_source::BoundedWgslBody::from_source(constant_body, body_capacity)?;
-        let mut helpers = Vec::new();
+        let mut helpers = runmat_value::exact_capacity_vec(6)?;
         helpers.try_reserve_exact(6)?;
         let mut exact_power = false;
         let mut exact_product = false;
-        let mut implementations = Vec::new();
+        let mut implementations = runmat_value::exact_capacity_vec(plan.operations.len())?;
         implementations.try_reserve_exact(plan.operations.len())?;
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
@@ -281,13 +284,16 @@ impl TypedProducer {
                     let bits = word_expressions.get(&receipt.base).ok_or_else(|| {
                         anyhow!("exact product requires word-preserving Single data")
                     })?;
-                    let temporary = format!("typed{index}_bits");
+                    let temporary = checked_format(format_args!("typed{index}_bits"))?;
                     writeln!(
                         &mut body,
                         "    let {temporary}: u32 = rm_exact_product_bits({bits}, 0x{:08x}u);",
                         receipt.exact.binary32_bits()
                     )?;
-                    expressions.insert(output, format!("bitcast<f32>({temporary})"))?;
+                    expressions.insert(
+                        output,
+                        checked_format(format_args!("bitcast<f32>({temporary})"))?,
+                    )?;
                     word_expressions.insert(output, temporary)?;
                     exact_product = true;
                     implementations.push(product_implementation(output));
@@ -306,19 +312,20 @@ impl TypedProducer {
                 let [base, _] = inputs.as_slice() else {
                     return Err(anyhow!("certified POWER arity changed"));
                 };
-                let base_bits = word_expressions
-                    .get(base)
-                    .cloned()
-                    .or_else(|| {
-                        expressions
-                            .get(base)
-                            .map(|value| format!("bitcast<u32>({value})"))
-                    })
-                    .ok_or_else(|| anyhow!("missing certified POWER base"))?;
+                let base_bits = if let Some(bits) = word_expressions.get(base) {
+                    bits.clone()
+                } else if let Some(value) = expressions.get(base) {
+                    checked_format(format_args!("bitcast<u32>({value})"))?
+                } else {
+                    return Err(anyhow!("missing certified POWER base"));
+                };
                 let name = crate::kernel_math::power_exact::entrypoint(operation);
-                let temporary = format!("typed{index}_bits");
+                let temporary = checked_format(format_args!("typed{index}_bits"))?;
                 writeln!(&mut body, "    let {temporary}: u32 = {name}({base_bits});")?;
-                expressions.insert(output, format!("bitcast<f32>({temporary})"))?;
+                expressions.insert(
+                    output,
+                    checked_format(format_args!("bitcast<f32>({temporary})"))?,
+                )?;
                 word_expressions.insert(output, temporary)?;
                 exact_power = true;
                 implementations.push(crate::kernel_math::power_exact::implementation(
@@ -345,7 +352,10 @@ impl TypedProducer {
                 let expression = expressions
                     .get(id)
                     .ok_or_else(|| anyhow!("missing typed fusion operand"))?;
-                operands.push((*id, format!("{operation_name}({expression})")));
+                operands.push((
+                    *id,
+                    checked_format(format_args!("{operation_name}({expression})"))?,
+                ));
             }
             operands.sort_unstable_by_key(|(id, _)| *id);
             let resolved = resolved[index];
@@ -402,7 +412,7 @@ impl TypedProducer {
                     }
                 }
                 .ok_or_else(|| anyhow!("no typed fusion expression for the selected operation"))?;
-            let temporary = format!("typed{index}");
+            let temporary = checked_format(format_args!("typed{index}"))?;
             writeln!(
                 &mut body,
                 "    let {temporary}: {operation_name} = {expression};"
@@ -410,7 +420,7 @@ impl TypedProducer {
             if capture_words && operation_type == ScalarType::F32 {
                 // Capture the already-admitted native Single result. This is
                 // not a stronger accuracy/FTZ promise for that native operation.
-                let bits = format!("{temporary}_bits");
+                let bits = checked_format(format_args!("{temporary}_bits"))?;
                 writeln!(
                     &mut body,
                     "    let {bits}: u32 = bitcast<u32>({temporary});"
@@ -523,7 +533,10 @@ impl TypedProducer {
         Ok(preamble)
     }
 
-    pub(crate) fn write_checked_preamble(&self, writer: &mut impl std::fmt::Write) -> Result<()> {
+    pub(crate) fn write_checked_preamble(
+        &self,
+        writer: &mut (impl std::fmt::Write + ?Sized),
+    ) -> Result<()> {
         let checked = self
             .checked_program
             .as_ref()
@@ -553,8 +566,7 @@ pub(crate) fn producer_indices(
     leaves: &[ValueId],
     roots: &[ValueId],
 ) -> Result<SelectedProducerIndices> {
-    let mut producers = Vec::new();
-    producers.try_reserve_exact(plan.operations.len())?;
+    let mut producers = runmat_value::exact_capacity_vec(plan.operations.len())?;
     for (index, operation) in plan.operations.iter().enumerate() {
         let (_, output) = operands(operation);
         let output = output.ok_or_else(|| anyhow!("fusion operation has no output"))?;
@@ -567,8 +579,7 @@ pub(crate) fn producer_indices(
     if producers.windows(2).any(|pair| pair[0].0 == pair[1].0) {
         return Err(anyhow!("ambiguous typed fusion producer"));
     }
-    let mut bits = Vec::new();
-    bits.try_reserve_exact(plan.operations.len())?;
+    let mut bits = runmat_value::exact_capacity_vec(plan.operations.len())?;
     bits.resize(plan.operations.len(), false);
     let mut selected = SelectedProducerIndices { bits, selected: 0 };
     let pending_capacity = plan
@@ -578,8 +589,7 @@ pub(crate) fn producer_indices(
             count.checked_add(operands(operation).0.len())
         })
         .ok_or_else(|| anyhow!("typed fusion producer traversal overflows"))?;
-    let mut pending = Vec::new();
-    pending.try_reserve_exact(pending_capacity)?;
+    let mut pending = runmat_value::exact_capacity_vec(pending_capacity)?;
     pending.extend(roots.iter().map(|&id| (id, plan.operations.len())));
     while let Some((id, consumer)) = pending.pop() {
         if leaves.binary_search(&id).is_ok() {

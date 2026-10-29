@@ -55,6 +55,51 @@ impl RuntimeParallelService for ManagedParallel {
 
 struct UnmanagedFinite;
 
+#[test]
+fn provider_control_admission_is_original_owner_bound_and_retained_until_last_alias() {
+    use runmat_execution::resource::{ProviderHostMetadataAdmission, ProviderHostMetadataError};
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let admission = ProviderHostControlAdmission::capture(Some(&context))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ledger.snapshot().live_reserved_bytes,
+        0,
+        "capture grants no bytes"
+    );
+    let record = admission.claim_record(128).unwrap();
+    let bytes = HostAllocationPlan::retained_metadata_bytes(128).unwrap();
+    assert_eq!(ledger.snapshot().live_reserved_bytes, bytes);
+    let alias = record.clone();
+    drop(record);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, bytes);
+    assert!(matches!(
+        admission.claim_record(65_536),
+        Err(ProviderHostMetadataError::ExceedsCapacity)
+    ));
+    assert_eq!(
+        ledger.snapshot().live_reserved_bytes,
+        bytes,
+        "denial leaves original owner charged"
+    );
+    ledger.revoke();
+    assert!(matches!(
+        admission.claim_record(1),
+        Err(ProviderHostMetadataError::StaleAuthority)
+    ));
+    assert_eq!(ledger.snapshot().live_reserved_bytes, bytes);
+    drop(alias);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    let missing = runtime(RuntimeServicePorts::default().with_parallel(Rc::new(UnmanagedFinite)));
+    assert!(matches!(
+        ProviderHostControlAdmission::capture(Some(&missing)),
+        Err(HostAllocationError::MissingManagedOwner)
+    ));
+}
+
 #[path = "tests/sparse_indexing.rs"]
 mod sparse_indexing;
 

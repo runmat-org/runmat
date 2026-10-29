@@ -45,6 +45,83 @@ pub(crate) struct TypedShaderPreparationBound {
     pub retained_bytes: u64,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct TypedProducerPreparationBound {
+    pub requested_bytes: u64,
+    pub body_bytes: usize,
+}
+
+impl FusionGroupPlan {
+    /// Only the selected producer, not an imaginary elementwise shader shell.
+    /// The same declaration/scalar writers count every emitted expression.
+    pub(crate) fn measured_typed_producer_preparation_bytes(
+        &self,
+        root: ValueId,
+        program: &ResolvedProgram,
+        scalar: ScalarType,
+        input_count: usize,
+    ) -> Result<TypedProducerPreparationBound> {
+        let outputs = [root];
+        let (body, expression) =
+            super::typed_producer::body_upper_bytes(self, &outputs, program, scalar, input_count)?;
+        let preamble = super::typed_producer::preamble_upper_bytes(self, program)?;
+        let operand = super::typed_producer::max_operand_bytes(self, input_count)?;
+        let mut rank = 2usize;
+        for id in self.const_values.keys() {
+            if let Ok(fact) = program.fact(*id) {
+                rank = rank.max(fact.shape.rank().unwrap_or(0));
+            }
+        }
+        for id in self
+            .inputs
+            .iter()
+            .copied()
+            .chain(self.operations.iter().filter_map(|op| match op {
+                super::FusionOp::Primitive { output, .. }
+                | super::FusionOp::Builtin { output, .. } => *output,
+            }))
+        {
+            rank = rank.max(program.fact(id)?.shape.rank().unwrap_or(0));
+        }
+        let mut bytes =
+            super::typed_producer::structural_upper_bytes(self, 1, rank, operand, expression)?;
+        // Retained body/preamble and the two copied root expressions coexist
+        // with lowering tables. The final shape projections are owned below.
+        for count in [body, preamble, operand, operand] {
+            bytes = bytes
+                .checked_add(u64::try_from(count)?)
+                .ok_or_else(|| anyhow::anyhow!("reduction producer storage overflow"))?;
+        }
+        let operations = self.operations.len();
+        let arrays = [
+            operations.checked_add(1).and_then(|n| {
+                n.checked_mul(std::mem::size_of::<
+                    runmat_accelerate_api::scalar_program::EmittedScalarImplementation,
+                >())
+            }),
+            input_count.checked_mul(std::mem::size_of::<runmat_types::NumericClass>()),
+            input_count.checked_mul(std::mem::size_of::<(ValueId, u64)>()),
+            operations.checked_mul(std::mem::size_of::<Vec<usize>>()),
+            operations.checked_mul(std::mem::size_of::<[Vec<usize>; 2]>()),
+            operations
+                .checked_mul(rank)
+                .and_then(|n| n.checked_mul(3))
+                .and_then(|n| n.checked_mul(std::mem::size_of::<usize>())),
+        ];
+        for count in arrays {
+            bytes = bytes
+                .checked_add(u64::try_from(count.ok_or_else(|| {
+                    anyhow::anyhow!("reduction retained metadata overflows")
+                })?)?)
+                .ok_or_else(|| anyhow::anyhow!("reduction retained producer storage overflows"))?;
+        }
+        Ok(TypedProducerPreparationBound {
+            requested_bytes: bytes,
+            body_bytes: body,
+        })
+    }
+}
+
 /// Selected source and its shader feature requirement share one producer.
 pub(crate) struct GeneratedElementwiseShader {
     source: String,

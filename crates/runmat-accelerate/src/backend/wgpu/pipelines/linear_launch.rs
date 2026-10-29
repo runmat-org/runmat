@@ -65,7 +65,13 @@ impl FrozenShaderTokens {
     }
 
     pub(crate) fn substitute(self, source: &str) -> String {
-        super::substitute_tokens(source, self.linear.workgroup(), self.matmul_tile).into_owned()
+        // This constructor is an explicitly unbounded, infallible pipeline
+        // API. Managed reduction source never enters through this boundary.
+        super::substitute_tokens(source, self.linear.workgroup(), self.matmul_tile, None)
+            .expect("unbounded frozen launch source substitution failed")
+            .into_parts()
+            .0
+            .into_owned()
     }
 }
 

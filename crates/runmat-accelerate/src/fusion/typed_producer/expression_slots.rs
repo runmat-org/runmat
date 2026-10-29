@@ -43,7 +43,7 @@ impl ExpressionSlots {
         })
     }
 
-    pub(super) fn from_sorted_ids(ids: &[ValueId]) -> Self {
+    pub(crate) fn from_sorted_ids(ids: &[ValueId]) -> Self {
         Self {
             slots: ids.iter().copied().map(|id| (id, None)).collect(),
             populated: 0,

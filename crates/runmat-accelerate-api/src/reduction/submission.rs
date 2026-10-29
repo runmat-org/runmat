@@ -93,12 +93,12 @@ impl<'a> ReductionSelection<'a> {
             work.checked_total_scalar_work_units().is_some(),
             "complete reduction work overflow"
         );
-        let identity = Digest::sha256(serde_json::to_vec(&(
+        let identity = Digest::sha256_serialized(&(
             "typed-reduction-selection-v2",
             recipe.identity(),
             strategy,
             work,
-        ))?);
+        ))?;
         Ok(Self {
             recipe,
             strategy,
@@ -132,13 +132,28 @@ pub struct ReductionSubmission<'a> {
     selection: ReductionSelection<'a>,
     inputs: &'a [GpuTensorHandle],
     device_id: u32,
+    host_metadata: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    output_registration_metadata:
+        Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 }
 impl<'a> ReductionSubmission<'a> {
+    /// Explicit first-party control admission from the selected original
+    /// Runtime. Unbounded direct callers explicitly pass None; managed
+    /// execution supplies its captured port, never ambient state.
     pub fn new(
         selection: ReductionSelection<'a>,
         inputs: &'a [GpuTensorHandle],
         device_id: u32,
+        host_metadata: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        output_registration_metadata: Option<
+            &'a dyn runmat_execution::resource::ProviderHostMetadataAdmission,
+        >,
     ) -> ProviderExecutionResult<Self> {
+        if host_metadata.is_some() && output_registration_metadata.is_none() {
+            return Err(ProviderExecutionError::from(anyhow::anyhow!(
+                "managed reduction output has no registration metadata authority"
+            )));
+        }
         let descriptor = selection.recipe().descriptor();
         validate_inputs(descriptor, inputs, device_id).map_err(ProviderExecutionError::from)?;
         for handle in inputs {
@@ -151,6 +166,8 @@ impl<'a> ReductionSubmission<'a> {
             selection,
             inputs,
             device_id,
+            host_metadata,
+            output_registration_metadata,
         })
     }
     pub fn selection(&self) -> &ReductionSelection<'a> {
@@ -161,6 +178,18 @@ impl<'a> ReductionSubmission<'a> {
     }
     pub fn device_id(&self) -> u32 {
         self.device_id
+    }
+    pub fn host_metadata(
+        &self,
+    ) -> Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission> {
+        self.host_metadata
+    }
+    /// Separate tensor record/lease/view rights. A control-only allocation
+    /// port cannot substitute for this exact provider's prepared registration.
+    pub fn output_registration_metadata(
+        &self,
+    ) -> Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission> {
+        self.output_registration_metadata
     }
 }
 

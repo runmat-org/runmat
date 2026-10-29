@@ -17,6 +17,7 @@ mod control_error;
 mod frame_collection;
 mod owner;
 mod plan;
+mod provider_control;
 mod provider_registration;
 mod receipt;
 mod session;
@@ -42,6 +43,7 @@ pub use frame_collection::{
 };
 pub(in crate::context) use owner::HostAllocationContext;
 pub use plan::HostAllocationPlan;
+pub use provider_control::ProviderHostControlAdmission;
 pub use provider_registration::{provider_registration_host_quote, ProviderRegistrationHostQuote};
 pub(crate) use receipt::HostOutputPermit;
 pub use receipt::{

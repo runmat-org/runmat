@@ -15,12 +15,13 @@ pub(super) fn layout(precision: ProviderPrecision) -> ReductionPartialLayout {
     }
 }
 
-pub(super) fn source(
+pub(super) fn write(
+    source: &mut dyn std::fmt::Write,
     contract: &FusionReductionContract,
     partial: ReductionPartialLayout,
     geometry: &ReductionGeometry,
     word_identity: bool,
-) -> Result<String> {
+) -> Result<()> {
     if word_identity {
         ensure!(
             contract.identity
@@ -30,7 +31,8 @@ pub(super) fn source(
         );
         // Same 4+4+4-byte partial layout, with no floating round trip in either
         // strategy. An identity is transport, not new arithmetic permission.
-        return Ok("struct RRPartial { value: u32, count: u32, flags: u32, };\nfn rr_sample(value: u32) -> RRPartial { return RRPartial(value, 1u, 1u); }\nfn rr_finish(a: RRPartial) -> u32 { return a.value; }\n".to_owned());
+        source.write_str("struct RRPartial { value: u32, count: u32, flags: u32, };\nfn rr_sample(value: u32) -> RRPartial { return RRPartial(value, 1u, 1u); }\nfn rr_finish(a: RRPartial) -> u32 { return a.value; }\n")?;
+        return Ok(());
     }
     let acc = scalar(partial.precision);
     let out = scalar(precision_of_output(contract)?);
@@ -49,10 +51,10 @@ pub(super) fn source(
             "(bitcast<u32>(f32(value)) & 0x80000000u) != 0u",
         ),
     };
-    let mut source = format!("struct RRPartial {{ value: {acc}, count: u32, flags: u32, }};\nfn rr_nan() -> {acc} {{ let nan_bits: u32 = 0x7fc00000u; return {nan}; }}\nfn rr_negative_zero(value: {acc}) -> bool {{ if value != {acc}(0.0) {{ return false; }} return {negative}; }}\nfn rr_empty() -> RRPartial {{ return RRPartial({acc}(0.0), 0u, 0u); }}\n");
+    write!(source, "struct RRPartial {{ value: {acc}, count: u32, flags: u32, }};\nfn rr_nan() -> {acc} {{ let nan_bits: u32 = 0x7fc00000u; return {nan}; }}\nfn rr_negative_zero(value: {acc}) -> bool {{ if value != {acc}(0.0) {{ return false; }} return {negative}; }}\nfn rr_empty() -> RRPartial {{ return RRPartial({acc}(0.0), 0u, 0u); }}\n")?;
     if contract.identity {
-        source.push_str(&format!("fn rr_sample(value: {acc}) -> RRPartial {{ return RRPartial(value, 1u, 1u); }}\nfn rr_combine(a: RRPartial, b: RRPartial) -> RRPartial {{ if (a.flags & 1u) != 0u {{ return a; }} return b; }}\nfn rr_finish(a: RRPartial) -> {out} {{ return {out}(a.value); }}\n"));
-        return Ok(source);
+        write!(source, "fn rr_sample(value: {acc}) -> RRPartial {{ return RRPartial(value, 1u, 1u); }}\nfn rr_combine(a: RRPartial, b: RRPartial) -> RRPartial {{ if (a.flags & 1u) != 0u {{ return a; }} return b; }}\nfn rr_finish(a: RRPartial) -> {out} {{ return {out}(a.value); }}\n")?;
+        return Ok(());
     }
     // Arithmetic self-comparison can be folded under device fast-math. Use
     // the same exact IEEE-word predicate as the other reduction kernels.
@@ -60,16 +62,20 @@ pub(super) fn source(
         ProviderPrecision::F32 => crate::wgsl::NumericPrecision::F32,
         ProviderPrecision::F64 => crate::wgsl::NumericPrecision::F64,
     };
-    source.push_str(&format!(
-        "fn rr_is_nan(value: {acc}) -> bool {{ @IEEE_NAN_PREDICATE@ }}\n"
-    ));
+    write!(source, "fn rr_is_nan(value: {acc}) -> bool {{ ")?;
+    crate::wgsl::nan_predicate::write_body(source, predicate_precision)?;
+    source.write_str(" }\n")?;
     let nan_flags = if contract.nan_mode == ReductionNaN::Include {
         2
     } else {
         0
     };
-    source.push_str(&format!("fn rr_sample(value: {acc}) -> RRPartial {{\n  if rr_is_nan(value) {{ return RRPartial({acc}(0.0), 0u, {nan_flags}u); }}\n  return RRPartial(value, 1u, 1u);\n}}\n"));
-    let combine = if is_extrema(contract.operation) {
+    write!(source, "fn rr_sample(value: {acc}) -> RRPartial {{\n  if rr_is_nan(value) {{ return RRPartial({acc}(0.0), 0u, {nan_flags}u); }}\n  return RRPartial(value, 1u, 1u);\n}}\n")?;
+    write!(
+        source,
+        "fn rr_combine(a: RRPartial, b: RRPartial) -> RRPartial {{\n  "
+    )?;
+    if is_extrema(contract.operation) {
         let (comparison, tie) = match (contract.operation, contract.ties) {
             (FusionReductionOperation::Minimum, FusionReductionTies::FirstWithNegativeZero) => (
                 "b.value < a.value",
@@ -81,29 +87,36 @@ pub(super) fn source(
             ),
             _ => return Err(anyhow!("unsupported extrema tie policy")),
         };
-        format!("var value = a.value;\n  if (a.flags & 1u) == 0u {{ value = b.value; }}\n  else if (b.flags & 1u) != 0u {{\n    if {comparison} || (a.value == {acc}(0.0) && b.value == {acc}(0.0) && ({tie})) {{ value = b.value; }}\n  }}")
+        write!(source, "var value = a.value;\n  if (a.flags & 1u) == 0u {{ value = b.value; }}\n  else if (b.flags & 1u) != 0u {{\n    if {comparison} || (a.value == {acc}(0.0) && b.value == {acc}(0.0) && ({tie})) {{ value = b.value; }}\n  }}")?;
     } else {
-        "let value = a.value + b.value;".into()
-    };
-    source.push_str(&format!("fn rr_combine(a: RRPartial, b: RRPartial) -> RRPartial {{\n  {combine}\n  return RRPartial(value, a.count + b.count, a.flags | b.flags);\n}}\n"));
+        source.write_str("let value = a.value + b.value;")?;
+    }
+    source.write_str("\n  return RRPartial(value, a.count + b.count, a.flags | b.flags);\n}\n")?;
     let empty = match contract.empty {
-        FusionReductionEmpty::PositiveZero => format!("{out}(0.0)"),
-        FusionReductionEmpty::NaN => format!("{out}(rr_nan())"),
+        FusionReductionEmpty::PositiveZero => "0.0",
+        FusionReductionEmpty::NaN => "rr_nan()",
     };
-    let result = match contract.operation {
+    write!(source, "fn rr_finish(a: RRPartial) -> {out} {{\n  if (a.flags & 2u) != 0u {{ return {out}(rr_nan()); }}\n  ")?;
+    match contract.operation {
         FusionReductionOperation::Mean => {
-            let denominator = match contract.count {
-                FusionReductionCount::NonNan => "a.count".to_owned(),
-                FusionReductionCount::SliceLength => format!("{}u", geometry.reduce_elements),
+            source.write_str("let denominator = ")?;
+            match contract.count {
+                FusionReductionCount::NonNan => source.write_str("a.count")?,
+                FusionReductionCount::SliceLength => {
+                    write!(source, "{}u", geometry.reduce_elements)?
+                }
                 FusionReductionCount::None => return Err(anyhow!("mean lacks denominator policy")),
-            };
-            format!("let denominator = {denominator};\n  if denominator == 0u {{ return {empty}; }}\n  return {out}(a.value / {acc}(denominator));")
+            }
+            write!(source, ";\n  if denominator == 0u {{ return {out}({empty}); }}\n  return {out}(a.value / {acc}(denominator));")?;
         }
-        _ => format!("if (a.flags & 1u) == 0u {{ return {empty}; }}\n  return {out}(a.value);"),
-    };
-    source.push_str(&format!("fn rr_finish(a: RRPartial) -> {out} {{\n  if (a.flags & 2u) != 0u {{ return {out}(rr_nan()); }}\n  {result}\n}}\n"));
-    Ok(crate::wgsl::nan_predicate::inject(
-        &source,
-        predicate_precision,
-    ))
+        _ => write!(
+            source,
+            "if (a.flags & 1u) == 0u {{ return {out}({empty}); }}\n  return {out}(a.value);"
+        )?,
+    }
+    source.write_str("\n}\n")?;
+    if partial.precision == ProviderPrecision::F64 {
+        write!(source, "\n{}", crate::wgsl::ieee_words::helpers())?;
+    }
+    Ok(())
 }

@@ -1022,6 +1022,7 @@ impl WgpuProvider {
             Some(crate::backend::wgpu::shader_compilation::prepare(
                 &covariance_to_correlation_shader(self.precision),
                 self.access.enabled_features(),
+                None,
             )?)
         } else {
             None

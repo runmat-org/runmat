@@ -34,7 +34,7 @@ pub(crate) fn validate_generated(
     tile: u32,
     required: RequiredCaps,
 ) {
-    let source = super::substitute_tokens(source, workgroup, tile);
+    let source = super::substitute_tokens(source, workgroup, tile, None).unwrap();
     assert!(!source.contains("@IEEE_"), "{name}: unbound IEEE marker");
     assert!(!source.contains("@WG@"), "{name}: unbound workgroup marker");
     assert!(!source.contains("@MT@"), "{name}: unbound tile marker");
@@ -58,11 +58,11 @@ pub(crate) fn validate_generated(
     // Frontend acceptance alone permits binary64 calls whose corresponding
     // GLSL extended instructions have no legal binary64 form. Exercise the
     // same typed preparation and controlled emission as production.
-    let prepared =
-        crate::wgsl::f64_math::prepare(&source).unwrap_or_else(|error| panic!("{name}: {error}"));
+    let prepared = crate::wgsl::f64_math::prepare(&source, None)
+        .unwrap_or_else(|error| panic!("{name}: {error}"));
     #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     if prepared.requires_f64_math() && !module.entry_points.is_empty() {
-        crate::backend::wgpu::shader_compilation::spirv::compile(prepared.source())
+        crate::backend::wgpu::shader_compilation::spirv::compile(prepared.source(), None)
             .unwrap_or_else(|error| panic!("{name}: controlled SPIR-V: {error:#}"));
     }
     #[cfg(not(all(feature = "wgpu", not(target_arch = "wasm32"))))]

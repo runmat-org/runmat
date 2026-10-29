@@ -285,23 +285,27 @@ impl AdmittedBindings {
         self.operations.get(index)?.reduction
     }
     pub fn identity(&self, semantic: Option<Digest>) -> anyhow::Result<Digest> {
-        let identities: Vec<_> = self
-            .operations
-            .iter()
-            .map(|operation| {
-                (
-                    &operation.identity,
-                    operation
-                        .reduction
-                        .map(|declaration| (declaration.revision, declaration.operation)),
-                )
-            })
-            .collect();
-        Ok(Digest::sha256(serde_json::to_vec(&(
+        struct Identities<'a>(&'a [Operation]);
+        impl Serialize for Identities<'_> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                use serde::ser::SerializeSeq;
+                let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+                for operation in self.0 {
+                    sequence.serialize_element(&(
+                        &operation.identity,
+                        operation
+                            .reduction
+                            .map(|declaration| (declaration.revision, declaration.operation)),
+                    ))?;
+                }
+                sequence.end()
+            }
+        }
+        Ok(Digest::sha256_serialized(&(
             "selected-fusion-bindings-v2",
-            identities,
+            Identities(&self.operations),
             semantic,
-        ))?))
+        ))?)
     }
 }
 

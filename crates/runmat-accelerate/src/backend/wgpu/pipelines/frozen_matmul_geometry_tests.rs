@@ -36,7 +36,10 @@ fn matrix_and_diagonal_sources_keep_the_provider_recipe_during_lazy_compilation(
                 // Lazy compilation may observe another provider's old globals.
                 // Fully resolved source (also hashed by the dynamic cache)
                 // must remain byte-identical under that generic patch step.
-                assert_eq!(substitute_tokens(source, 512, 32), source.as_str());
+                assert_eq!(
+                    substitute_tokens(source, 512, 32, None).unwrap().as_str(),
+                    source.as_str()
+                );
             }
             let changed = crate::backend::wgpu::shaders::matmul::epilogue_shader(
                 precision,

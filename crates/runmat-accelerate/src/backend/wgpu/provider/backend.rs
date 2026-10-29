@@ -5,6 +5,8 @@ mod allocation_state;
 mod moments_cache;
 #[path = "owner_shared.rs"]
 mod owner_shared;
+#[path = "pipeline_cache.rs"]
+mod pipeline_cache;
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use log::{debug, error};
 use once_cell::sync::OnceCell;
@@ -77,6 +79,8 @@ mod context;
 mod core;
 #[path = "ops/deep_learning.rs"]
 mod deep_learning;
+#[path = "ops/deep_learning/convolution/mod.rs"]
+mod deep_learning_convolution;
 #[path = "ops/deep_learning/normalization/mod.rs"]
 mod deep_learning_normalization;
 #[path = "ops/deep_learning/pooling.rs"]
@@ -87,8 +91,6 @@ mod deep_learning_preparation;
 mod deep_learning_resource_bound;
 #[path = "ops/deep_learning/route.rs"]
 mod deep_learning_route;
-#[path = "ops/deep_learning/convolution/mod.rs"]
-mod deep_learning_convolution;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
 #[path = "ops/fft/mod.rs"]
@@ -124,10 +126,6 @@ mod observation_progress;
 mod pipeline_observation;
 #[path = "pipeline_recipe.rs"]
 mod pipeline_recipe;
-#[path = "vm_region_tail.rs"]
-mod vm_region_tail;
-#[path = "validated_fusion.rs"]
-mod validated_fusion;
 #[path = "ops/polynomial.rs"]
 mod polynomial;
 #[path = "ops/power.rs"]
@@ -156,8 +154,12 @@ mod storage_move;
 mod telemetry;
 #[path = "ops/tensor.rs"]
 mod tensor;
+#[path = "validated_fusion.rs"]
+mod validated_fusion;
 #[path = "ops/view_plan.rs"]
 mod view_plan;
+#[path = "vm_region_tail.rs"]
+mod vm_region_tail;
 #[path = "ops/window.rs"]
 mod window;
 
@@ -187,12 +189,12 @@ use crate::telemetry::AccelTelemetry;
 pub(crate) mod backend_shared;
 #[path = "backend_types.rs"]
 pub(crate) mod backend_types;
+#[path = "device_control.rs"]
+mod device_control;
 #[path = "health.rs"]
 mod health;
 #[path = "trait_impl.rs"]
 mod trait_impl;
-#[path = "device_control.rs"]
-mod device_control;
 
 pub(super) use backend_shared::*;
 pub(super) use backend_types::*;

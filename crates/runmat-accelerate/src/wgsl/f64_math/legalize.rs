@@ -1,23 +1,59 @@
-use std::collections::BTreeSet;
-use std::fmt::{self, Write};
-use std::ops::Range;
-
-use super::include_family;
 use super::intrinsic::{Intrinsic, Shape};
+use super::{include_family, FamilySet};
+use crate::wgsl::host_buffers::{self, ClaimedString, ClaimedVec};
+use runmat_execution::resource::ProviderHostMetadataAdmission;
+use std::{fmt, ops::Range};
+
+#[derive(Debug)]
+pub(crate) struct ParseFailure {
+    error: naga::front::wgsl::ParseError,
+    // Naga-produced diagnostic rendering is library-owned, not a RunMat copy.
+    diagnostic: String,
+}
+impl fmt::Display for ParseFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.diagnostic)
+    }
+}
+impl std::error::Error for ParseFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ValidationFailure {
+    error: naga::WithSpan<naga::valid::ValidationError>,
+    diagnostic: String,
+}
+impl fmt::Display for ValidationFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.diagnostic)
+    }
+}
+impl std::error::Error for ValidationFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum PreparationError {
-    Parse(String),
-    Validate(String),
+    Parse(ParseFailure),
+    Validate(ValidationFailure),
     InvalidSpan { intrinsic: Intrinsic },
     ConflictingEdits,
     RemainingIntrinsic { intrinsic: Intrinsic },
-    ReservedHelperCollision(String),
-    Allocation(String),
+    ReservedHelperCollision(ClaimedString),
+    Buffer(host_buffers::Error),
     SourceSizeOverflow,
     ConstantIntrinsic { intrinsic: Intrinsic },
 }
-
+impl From<host_buffers::Error> for PreparationError {
+    fn from(error: host_buffers::Error) -> Self {
+        Self::Buffer(error)
+    }
+}
 impl fmt::Display for PreparationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -33,7 +69,7 @@ impl fmt::Display for PreparationError {
             Self::ReservedHelperCollision(name) => {
                 write!(f, "shader declares reserved math helper {name}")
             }
-            Self::Allocation(detail) => write!(f, "shader preparation allocation failed: {detail}"),
+            Self::Buffer(error) => fmt::Display::fmt(error, f),
             Self::SourceSizeOverflow => f.write_str("shader preparation source size overflows"),
             Self::ConstantIntrinsic { intrinsic } => write!(
                 f,
@@ -42,19 +78,27 @@ impl fmt::Display for PreparationError {
         }
     }
 }
-impl std::error::Error for PreparationError {}
-
-pub(crate) struct PreparedShader {
-    source: String,
-    requires_f64_math: bool,
+impl std::error::Error for PreparationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Parse(error) => Some(error),
+            Self::Validate(error) => Some(error),
+            Self::Buffer(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
+pub(crate) struct PreparedShader {
+    source: ClaimedString,
+    requires_f64_math: bool,
+}
 impl PreparedShader {
     #[cfg(any(test, all(feature = "wgpu", not(target_arch = "wasm32"))))]
     pub(crate) fn source(&self) -> &str {
-        &self.source
+        self.source.as_str()
     }
-    pub(crate) fn into_source(self) -> String {
+    pub(crate) fn into_source(self) -> ClaimedString {
         self.source
     }
     pub(crate) fn requires_f64_math(&self) -> bool {
@@ -62,6 +106,7 @@ impl PreparedShader {
     }
 }
 
+#[derive(PartialEq, Eq)]
 struct Edit {
     span: Range<usize>,
     intrinsic: Intrinsic,
@@ -69,14 +114,21 @@ struct Edit {
 }
 
 fn parse(source: &str) -> Result<(naga::Module, naga::valid::ModuleInfo), PreparationError> {
-    let module = naga::front::wgsl::parse_str(source)
-        .map_err(|error| PreparationError::Parse(error.emit_to_string(source)))?;
+    // Naga's parser/validator storage and its diagnostic output remain the
+    // explicitly excluded library boundary; preserve original typed causes.
+    let module = naga::front::wgsl::parse_str(source).map_err(|error| {
+        let diagnostic = error.emit_to_string(source);
+        PreparationError::Parse(ParseFailure { error, diagnostic })
+    })?;
     let info = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
     )
     .validate(&module)
-    .map_err(|error| PreparationError::Validate(error.emit_to_string(source)))?;
+    .map_err(|error| {
+        let diagnostic = error.emit_to_string(source);
+        PreparationError::Validate(ValidationFailure { error, diagnostic })
+    })?;
     Ok((module, info))
 }
 
@@ -85,7 +137,8 @@ fn collect_function(
     module: &naga::Module,
     function: &naga::Function,
     info: &naga::valid::FunctionInfo,
-    edits: &mut Vec<Edit>,
+    edits: &mut ClaimedVec<Edit>,
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
 ) -> Result<(), PreparationError> {
     for (handle, expression) in function.expressions.iter() {
         let naga::Expression::Math { fun, arg, .. } = *expression else {
@@ -105,11 +158,14 @@ fn collect_function(
         if source.get(span.clone()) != Some(intrinsic.spelling()) {
             return Err(PreparationError::InvalidSpan { intrinsic });
         }
-        edits.push(Edit {
-            span,
-            intrinsic,
-            shape,
-        });
+        edits.push(
+            Edit {
+                span,
+                intrinsic,
+                shape,
+            },
+            metadata,
+        )?;
     }
     Ok(())
 }
@@ -118,10 +174,8 @@ fn collect(
     source: &str,
     module: &naga::Module,
     info: &naga::valid::ModuleInfo,
-) -> Result<Vec<Edit>, PreparationError> {
-    // A runtime helper call cannot appear in a WGSL constant/override
-    // expression. Normal constant folding has removed these operations; fail
-    // closed if a future frontend leaves one for SPIR-V emission.
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+) -> Result<ClaimedVec<Edit>, PreparationError> {
     for (_, expression) in module.global_expressions.iter() {
         if let naga::Expression::Math { fun, arg, .. } = *expression {
             if let Some(intrinsic) = Intrinsic::from_math(fun) {
@@ -131,9 +185,16 @@ fn collect(
             }
         }
     }
-    let mut edits = Vec::new();
+    let mut edits = ClaimedVec::with_capacity(0, metadata)?;
     for (handle, function) in module.functions.iter() {
-        collect_function(source, module, function, &info[handle], &mut edits)?;
+        collect_function(
+            source,
+            module,
+            function,
+            &info[handle],
+            &mut edits,
+            metadata,
+        )?;
     }
     for (index, entry) in module.entry_points.iter().enumerate() {
         collect_function(
@@ -142,14 +203,18 @@ fn collect(
             &entry.function,
             info.get_entry_point(index),
             &mut edits,
+            metadata,
         )?;
     }
     Ok(edits)
 }
 
-pub(crate) fn prepare(source: &str) -> Result<PreparedShader, PreparationError> {
+pub(crate) fn prepare(
+    source: &str,
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+) -> Result<PreparedShader, PreparationError> {
     let (module, info) = parse(source)?;
-    let mut edits = collect(source, &module, &info)?;
+    let mut edits = collect(source, &module, &info, metadata)?;
     let requires_f64_math = module.types.iter().any(|(_, ty)| match ty.inner {
         naga::TypeInner::Scalar(scalar)
         | naga::TypeInner::Vector { scalar, .. }
@@ -160,20 +225,24 @@ pub(crate) fn prepare(source: &str) -> Result<PreparedShader, PreparationError> 
     });
     if edits.is_empty() {
         return Ok(PreparedShader {
-            source: source.to_owned(),
+            source: ClaimedString::copy_from(source, metadata)?,
             requires_f64_math,
         });
     }
-    let selected: BTreeSet<_> = edits
-        .iter()
-        .map(|edit| (edit.intrinsic, edit.shape))
-        .collect();
-    let mut helpers = String::new();
-    append_helpers(&mut helpers, &selected);
-    // Resolve helper identity through parsed declarations, not substring markers.
-    let helper_module = naga::front::wgsl::parse_str(&helpers)
-        .map_err(|error| PreparationError::Parse(error.emit_to_string(&helpers)))?;
-    let mut omit = Vec::new();
+    // Sorted/deduplicated flat records replace private BTree node allocation.
+    let mut selected = ClaimedVec::with_capacity(edits.len(), metadata)?;
+    for edit in edits.as_slice() {
+        selected.push((edit.intrinsic, edit.shape), metadata)?;
+    }
+    selected.as_mut_slice().sort_unstable();
+    selected.dedup();
+    let mut helpers = ClaimedString::with_capacity(0, metadata)?;
+    append_helpers(&mut helpers, selected.as_slice(), metadata)?;
+    let helper_module = naga::front::wgsl::parse_str(helpers.as_str()).map_err(|error| {
+        let diagnostic = error.emit_to_string(helpers.as_str());
+        PreparationError::Parse(ParseFailure { error, diagnostic })
+    })?;
+    let mut omit = ClaimedVec::with_capacity(0, metadata)?;
     for (helper_handle, helper) in helper_module.functions.iter() {
         let Some(name) = helper.name.as_deref() else {
             continue;
@@ -186,69 +255,84 @@ pub(crate) fn prepare(source: &str) -> Result<PreparedShader, PreparationError> 
             let helper_span = helper_module.functions.get_span(helper_handle).to_range();
             let identical = original_span
                 .and_then(|span| source.get(span))
-                .zip(helper_span.clone().and_then(|span| helpers.get(span)))
+                .zip(
+                    helper_span
+                        .clone()
+                        .and_then(|span| helpers.as_str().get(span)),
+                )
                 .is_some_and(|(a, b)| a == b);
             if !identical {
-                return Err(PreparationError::ReservedHelperCollision(name.to_owned()));
+                return Err(PreparationError::ReservedHelperCollision(
+                    ClaimedString::copy_from(name, metadata)?,
+                ));
             }
             if let Some(mut span) = helper_span {
-                // Naga24's declaration span ends at the final body statement,
-                // before whitespace and the function's closing brace. This
-                // extension reads only our canonical helper source, never
-                // searches a user source for a builtin name or call boundary.
+                // Extend only the canonical helper declaration span, exactly
+                // as before; never discover operations by scanning user text.
                 while helpers
+                    .as_str()
                     .as_bytes()
                     .get(span.end)
                     .is_some_and(u8::is_ascii_whitespace)
                 {
                     span.end += 1;
                 }
-                if helpers.as_bytes().get(span.end) != Some(&b'}') {
-                    return Err(PreparationError::ReservedHelperCollision(name.to_owned()));
+                if helpers.as_str().as_bytes().get(span.end) != Some(&b'}') {
+                    return Err(PreparationError::ReservedHelperCollision(
+                        ClaimedString::copy_from(name, metadata)?,
+                    ));
                 }
                 span.end += 1;
-                omit.push(span);
+                omit.push(span, metadata)?;
             }
         }
     }
-    omit.sort_by_key(|span| span.start);
-    for span in omit.into_iter().rev() {
-        helpers.replace_range(span, "");
+    omit.as_mut_slice().sort_unstable_by_key(|span| span.start);
+    for span in omit.as_slice().iter().rev() {
+        helpers.remove_range(span.clone())?;
     }
-    edits.sort_by_key(|edit| (edit.span.start, edit.span.end));
-    edits.dedup_by(|a, b| a.span == b.span && a.intrinsic == b.intrinsic && a.shape == b.shape);
-    let replacement_bytes = edits
-        .iter()
-        .try_fold(0usize, |bytes, edit| {
-            bytes.checked_add(edit.intrinsic.helper(edit.shape).len() - edit.span.len())
-        })
-        .ok_or(PreparationError::SourceSizeOverflow)?;
-    // The compiler owns exactly one final-source allocation with a checked
-    // bound; this does not alter the original producer's measured byte receipt.
+    edits
+        .as_mut_slice()
+        .sort_unstable_by_key(|edit| (edit.span.start, edit.span.end));
+    edits.dedup();
+    let replacement_bytes = edits.as_slice().iter().try_fold(0usize, |bytes, edit| {
+        let count =
+            host_buffers::formatted_len(format_args!("{}", edit.intrinsic.helper(edit.shape)))?;
+        count
+            .checked_sub(edit.span.len())
+            .and_then(|added| bytes.checked_add(added))
+            .ok_or(host_buffers::Error::Overflow)
+    })?;
     let source_bytes = source
         .len()
         .checked_add(helpers.len())
         .and_then(|bytes| bytes.checked_add(replacement_bytes))
         .and_then(|bytes| bytes.checked_add(1))
         .ok_or(PreparationError::SourceSizeOverflow)?;
-    let mut output = String::new();
-    output
-        .try_reserve_exact(source_bytes)
-        .map_err(|error| PreparationError::Allocation(error.to_string()))?;
+    let mut output = ClaimedString::with_capacity(source_bytes, metadata)?;
     let mut cursor = 0;
-    for edit in edits {
+    for edit in edits.as_slice() {
         if edit.span.start < cursor {
             return Err(PreparationError::ConflictingEdits);
         }
-        output.push_str(&source[cursor..edit.span.start]);
-        output.push_str(&edit.intrinsic.helper(edit.shape));
+        output.push_str(&source[cursor..edit.span.start], metadata)?;
+        output.append_fmt(
+            format_args!("{}", edit.intrinsic.helper(edit.shape)),
+            metadata,
+        )?;
         cursor = edit.span.end;
     }
-    output.push_str(&source[cursor..]);
-    output.push('\n');
-    output.push_str(&helpers);
-    let (module, info) = parse(&output)?;
-    if let Some(edit) = collect(&output, &module, &info)?.first() {
+    output.push_str(&source[cursor..], metadata)?;
+    output.push_str("\n", metadata)?;
+    output.push_str(helpers.as_str(), metadata)?;
+    if output.len() != source_bytes {
+        return Err(PreparationError::SourceSizeOverflow);
+    }
+    let (module, info) = parse(output.as_str())?;
+    if let Some(edit) = collect(output.as_str(), &module, &info, metadata)?
+        .as_slice()
+        .first()
+    {
         return Err(PreparationError::RemainingIntrinsic {
             intrinsic: edit.intrinsic,
         });
@@ -259,16 +343,18 @@ pub(crate) fn prepare(source: &str) -> Result<PreparedShader, PreparationError> 
     })
 }
 
-fn append_helpers(output: &mut String, selected: &BTreeSet<(Intrinsic, Shape)>) {
-    // Family closure is deliberately explicit: a selected numerical family
-    // owns the full dependency contract of all functions in its source bundle.
-    let mut families = BTreeSet::new();
+fn append_helpers(
+    output: &mut ClaimedString,
+    selected: &[(Intrinsic, Shape)],
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+) -> Result<(), PreparationError> {
+    let mut families = FamilySet::default();
     for (intrinsic, _) in selected {
         include_family(*intrinsic, &mut families);
     }
-    for family in families {
-        output.push_str(family.source());
-        output.push('\n');
+    for family in families.iter() {
+        output.push_str(family.source(), metadata)?;
+        output.push_str("\n", metadata)?;
     }
     for &(intrinsic, shape) in selected {
         let Some(width) = shape.vector_width() else {
@@ -276,22 +362,25 @@ fn append_helpers(output: &mut String, selected: &BTreeSet<(Intrinsic, Shape)>) 
         };
         let name = intrinsic.helper(shape);
         let scalar = intrinsic.helper(Shape::Scalar);
-        write!(output, "fn {name}(a: vec{width}<f64>").expect("String formatting");
+        output.append_fmt(format_args!("fn {name}(a: vec{width}<f64>"), metadata)?;
         if intrinsic.arguments() == 2 {
-            write!(output, ", b: vec{width}<f64>").expect("String formatting");
+            output.append_fmt(format_args!(", b: vec{width}<f64>"), metadata)?;
         }
-        write!(output, ") -> vec{width}<f64> {{ return vec{width}<f64>(")
-            .expect("String formatting");
+        output.append_fmt(
+            format_args!(") -> vec{width}<f64> {{ return vec{width}<f64>("),
+            metadata,
+        )?;
         for index in 0..width {
             if index != 0 {
-                output.push_str(", ");
+                output.push_str(", ", metadata)?;
             }
-            write!(output, "{scalar}(a[{index}]").expect("String formatting");
+            output.append_fmt(format_args!("{scalar}(a[{index}]"), metadata)?;
             if intrinsic.arguments() == 2 {
-                write!(output, ", b[{index}]").expect("String formatting");
+                output.append_fmt(format_args!(", b[{index}]"), metadata)?;
             }
-            output.push(')');
+            output.push_str(")", metadata)?;
         }
-        output.push_str("); }\n");
+        output.push_str("); }\n", metadata)?;
     }
+    Ok(())
 }

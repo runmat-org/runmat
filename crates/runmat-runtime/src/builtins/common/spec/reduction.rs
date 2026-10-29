@@ -19,7 +19,7 @@ impl FusionReductionContext<'_> {
     /// This first contract covers real floating data and host-only controls.
     /// Device controls must retain ordinary dispatch, not perform hidden probes
     /// while constructing a supposedly payload-free semantic receipt.
-    pub fn real_floating_input(&self) -> Option<(NumericClass, Vec<usize>)> {
+    pub fn real_floating_input(&self) -> crate::BuiltinResult<Option<(NumericClass, Vec<usize>)>> {
         if self.requested_outputs != 1
             || !self.controls.iter().all(|value| {
                 matches!(
@@ -33,22 +33,45 @@ impl FusionReductionContext<'_> {
                 )
             })
         {
-            return None;
+            return Ok(None);
         }
-        let numeric = self.input.numeric()?;
+        let Some(numeric) = self.input.numeric() else {
+            return Ok(None);
+        };
         if numeric.domain != NumericDomain::Real
             || !matches!(numeric.class, NumericClass::Single | NumericClass::Double)
         {
-            return None;
+            return Ok(None);
         }
-        let shape = self
-            .input
-            .shape
-            .known_dims()?
-            .into_iter()
-            .collect::<Option<Vec<_>>>()?;
-        checked_reduction_elements(&shape)?;
-        Some((numeric.class, shape))
+        // Materialize exactly one final shape, not known_dims' temporary
+        // Option vector followed by a second geometrically growing collect.
+        let shape = match &self.input.shape {
+            runmat_types::ShapeFact::Scalar => {
+                let mut shape = reduction_vec(2)?;
+                shape.extend([1, 1]);
+                shape
+            }
+            runmat_types::ShapeFact::Shaped { dims } => {
+                if !dims
+                    .iter()
+                    .all(|dim| matches!(dim, runmat_types::DimensionFact::Known(_)))
+                {
+                    return Ok(None);
+                }
+                let mut shape = reduction_vec(dims.len())?;
+                for dim in dims {
+                    if let runmat_types::DimensionFact::Known(value) = dim {
+                        shape.push(*value);
+                    }
+                }
+                shape
+            }
+            _ => return Ok(None),
+        };
+        if checked_reduction_elements(&shape).is_none() {
+            return Ok(None);
+        }
+        Ok(Some((numeric.class, shape)))
     }
 }
 
@@ -63,6 +86,162 @@ pub struct FusionReductionDeclaration {
     /// from a name or treat an unsupported extrema as Sum.
     pub operation: FusionReductionOperation,
     pub prepare: FusionReductionPreparer,
+    /// Allocation-free bound from the same operation-owned lexical plan used
+    /// by preparation. None retains ordinary dispatch and its diagnostics.
+    pub resources:
+        for<'a> fn(FusionReductionPreparationQuery<'a>) -> Option<FusionReductionPreparationQuote>,
+}
+
+pub struct FusionReductionPreparationQuery<'a> {
+    pub controls: FusionReductionControls<'a>,
+    pub input_rank_upper: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct FusionReductionPreparationQuote {
+    pub prepare_scratch_bytes: u64,
+    pub prepared_retained_bytes: u64,
+    pub resolve_scratch_bytes: u64,
+    pub contract_retained_bytes: u64,
+}
+
+/// One checked allocation layout, not an allocator-private size estimate.
+pub(crate) fn reduction_layout<T>(count: usize) -> Option<u64> {
+    u64::try_from(std::alloc::Layout::array::<T>(count).ok()?.size()).ok()
+}
+
+/// The existing non-mean public tokens are ASCII and at most sixteen bytes
+/// (`ComparisonMethod`). Decode a character row on the stack, then invoke the
+/// canonical typed decoder. Unknown/non-ASCII text retains ordinary parsing;
+/// no independent spelling table or new string dispatch is introduced here.
+pub(crate) fn reduction_control<T>(value: &Value, decode: fn(&str) -> Option<T>) -> Option<T> {
+    match value {
+        Value::String(text) => decode(text),
+        Value::StringArray(array) if array.data().len() == 1 => decode(&array.data()[0]),
+        Value::CharArray(array) if array.rows == 1 => {
+            let mut bytes = [0u8; 16];
+            let units = array.data();
+            let output = bytes.get_mut(..units.len())?;
+            for (out, unit) in output.iter_mut().zip(units) {
+                *out = u8::try_from(unit.raw()).ok().filter(u8::is_ascii)?;
+            }
+            decode(std::str::from_utf8(output).ok()?)
+        }
+        _ => None,
+    }
+}
+
+/// Borrowed dimension controls are validated without a decoded payload copy.
+/// Only the final retained axis vector is materialized, at its exact extent.
+#[derive(Clone, Copy)]
+pub(crate) struct ReductionDimensions<'a> {
+    value: &'a Value,
+    pub len: usize,
+    zero_is_one: bool,
+    scalar_dimension: Option<usize>,
+}
+impl<'a> ReductionDimensions<'a> {
+    pub fn axis_plan(self) -> ReductionAxisPlan<'a> {
+        match self.scalar_dimension {
+            Some(dimension) => ReductionAxisPlan::Dim(dimension),
+            None => ReductionAxisPlan::Dimensions(self),
+        }
+    }
+    pub fn parse(value: &'a Value, mean: bool) -> Option<Self> {
+        if !mean && matches!(value, Value::Num(_) | Value::Int(_)) {
+            let dimension =
+                crate::builtins::common::tensor::scalar_dimension_from_value_typed(value, false)
+                    .ok()??;
+            return Some(Self {
+                value,
+                len: 1,
+                zero_is_one: false,
+                scalar_dimension: Some(dimension),
+            });
+        }
+        let dimensions = crate::builtins::common::tensor::borrowed_host_shape_dimensions(value)?;
+        let len = dimensions.len();
+        for dimension in dimensions {
+            let dimension = dimension.ok()?;
+            if dimension == 0 && !(mean && len > 1) {
+                return None;
+            }
+        }
+        Some(Self {
+            value,
+            len,
+            zero_is_one: mean && len > 1,
+            scalar_dimension: None,
+        })
+    }
+    pub fn materialize(self) -> crate::BuiltinResult<Vec<usize>> {
+        let mut values = runmat_value::exact_capacity_vec(self.len).map_err(|source| {
+            crate::runtime_error::semantic_error_with_source(
+                "ResourceExhausted",
+                "reduction axis allocation failed",
+                source,
+            )
+        })?;
+        if let Some(dimension) = self.scalar_dimension {
+            values.push(dimension);
+            return Ok(values);
+        }
+        let dimensions =
+            crate::builtins::common::tensor::borrowed_host_shape_dimensions(self.value)
+                .expect("same borrowed host dimension owner");
+        for dimension in dimensions {
+            let dimension = dimension.expect("lexical plan validated unchanged control");
+            values.push(if self.zero_is_one {
+                dimension.max(1)
+            } else {
+                dimension
+            });
+        }
+        Ok(values)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ReductionAxisPlan<'a> {
+    Auto,
+    Dim(usize),
+    Dimensions(ReductionDimensions<'a>),
+    All,
+}
+impl ReductionAxisPlan<'_> {
+    pub fn resolved_capacity(self, rank_upper: usize) -> usize {
+        match self {
+            Self::All => rank_upper.max(1),
+            Self::Dimensions(dimensions) if dimensions.len != 0 => dimensions.len,
+            _ => 1,
+        }
+    }
+    pub fn retained_len(self) -> usize {
+        match self {
+            Self::Dimensions(dimensions) => dimensions.len,
+            _ => 0,
+        }
+    }
+    pub fn is_auto(self) -> bool {
+        matches!(self, Self::Auto)
+            || matches!(self, Self::Dimensions(dimensions) if dimensions.len == 0)
+    }
+}
+
+pub(crate) fn reduction_sum_bytes(parts: &[u64]) -> Option<u64> {
+    parts
+        .iter()
+        .try_fold(0u64, |total, &part| total.checked_add(part))
+}
+
+pub(crate) fn reduction_vec<T>(count: usize) -> crate::BuiltinResult<Vec<T>> {
+    runmat_value::exact_capacity_vec(count).map_err(|source| {
+        crate::runtime_error::semantic_error_with_source(
+            "ResourceExhausted",
+            "reduction metadata allocation failed",
+            source,
+        )
+    })
 }
 
 /// Parsed by the operation owner before producer admission can touch a device.
@@ -137,7 +316,7 @@ impl FusionReductionDeclaration {
         context: FusionReductionContext<'_>,
         output: &ValueFact,
     ) -> crate::BuiltinResult<Option<StorageFact>> {
-        if context.real_floating_input().is_none()
+        if context.real_floating_input()?.is_none()
             || !matches!(
                 context.input.storage,
                 StorageFact::Scalar | StorageFact::Dense
@@ -165,7 +344,7 @@ impl FusionReductionDeclaration {
     pub fn resolve<'a>(&'a self, context: FusionReductionContext<'a>) -> FusionReductionFuture<'a> {
         Box::pin(async move {
             // Preserve the standalone resolver's existing unsupported-input gate.
-            if context.real_floating_input().is_none() {
+            if context.real_floating_input()?.is_none() {
                 return Ok(None);
             }
             let Some(prepared) = (self.prepare)(FusionReductionControls {
@@ -185,7 +364,7 @@ impl FusionReductionDeclaration {
         context: FusionReductionContext<'a>,
     ) -> FusionReductionStagesFuture<'a> {
         Box::pin(async move {
-            if context.real_floating_input().is_none() {
+            if context.real_floating_input()?.is_none() {
                 return Ok(None);
             }
             let Some(prepared) = (self.prepare)(FusionReductionControls {
@@ -231,14 +410,14 @@ mod tests {
             requested_outputs: 1,
         };
         assert_eq!(
-            request.real_floating_input(),
+            request.real_floating_input().unwrap(),
             Some((NumericClass::Double, vec![1, 1]))
         );
         let extra = FusionReductionContext {
             requested_outputs: 2,
             ..request
         };
-        assert!(extra.real_floating_input().is_none());
+        assert!(extra.real_floating_input().unwrap().is_none());
         for value in [
             Value::Complex(1.0, 2.0),
             Value::Bool(true),
@@ -251,6 +430,7 @@ mod tests {
                 requested_outputs: 1
             }
             .real_floating_input()
+            .unwrap()
             .is_none());
         }
     }

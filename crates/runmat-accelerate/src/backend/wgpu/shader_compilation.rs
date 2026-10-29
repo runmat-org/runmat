@@ -1,9 +1,15 @@
 //! One fallible, device-independent preparation boundary for every GPU shader.
 //!
-//! Original WGSL and the compiler revision identify cache entries; prepared
-//! source and SPIR-V are bounded compiler-stage allocations, not producer-owned
-//! fusion source. Preparation completes before any shader object is created.
+//! Original WGSL and the compiler revision identify cache entries. RunMat's
+//! token/rewrite/control buffers retain their explicit admission claims;
+//! Naga's own compiler/output storage and WGPU/driver-private allocations are
+//! excluded, not inferred from source length. Preparation finishes before
+//! shader creation; uncaptured device errors are not converted into Results.
 
+use crate::wgsl::host_buffers::ClaimedString;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::wgsl::host_buffers::ClaimedVec;
+use runmat_execution::resource::ProviderHostMetadataAdmission;
 use std::borrow::Cow;
 
 pub(crate) mod capabilities;
@@ -18,18 +24,23 @@ pub(crate) struct PreparedModule {
 }
 
 enum PreparedSource {
-    Wgsl(String),
+    Wgsl(ClaimedString),
     #[cfg(not(target_arch = "wasm32"))]
-    ControlledSpirV(Vec<u32>),
+    ControlledSpirV(ClaimedVec<u32>),
 }
 
-pub(crate) fn prepare(source: &str, features: wgpu::Features) -> anyhow::Result<PreparedModule> {
+pub(crate) fn prepare(
+    source: &str,
+    features: wgpu::Features,
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+) -> anyhow::Result<PreparedModule> {
     let source = crate::wgsl::substitute_tokens(
         source,
         super::config::effective_workgroup_size(),
         super::config::effective_matmul_tile(),
-    );
-    let prepared = crate::wgsl::f64_math::prepare(&source)?;
+        metadata,
+    )?;
+    let prepared = crate::wgsl::f64_math::prepare(source.as_str(), metadata)?;
     if !prepared.requires_f64_math() {
         return Ok(PreparedModule {
             source: PreparedSource::Wgsl(prepared.into_source()),
@@ -44,7 +55,7 @@ pub(crate) fn prepare(source: &str, features: wgpu::Features) -> anyhow::Result<
     #[cfg(not(target_arch = "wasm32"))]
     {
         Ok(PreparedModule {
-            source: PreparedSource::ControlledSpirV(spirv::compile(prepared.source())?),
+            source: PreparedSource::ControlledSpirV(spirv::compile(prepared.source(), metadata)?),
             required_features: required,
         })
     }
@@ -89,7 +100,7 @@ impl AdmittedModule<'_, '_, '_> {
                     .device()
                     .create_shader_module(wgpu::ShaderModuleDescriptor {
                         label: Some(label),
-                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(source)),
+                        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(source.as_str())),
                     })
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -101,7 +112,7 @@ impl AdmittedModule<'_, '_, '_> {
                     self.emission.device().create_shader_module_spirv(
                         &wgpu::ShaderModuleDescriptorSpirV {
                             label: Some(label),
-                            source: Cow::Borrowed(words),
+                            source: Cow::Borrowed(words.as_slice()),
                         },
                     )
                 }
@@ -122,7 +133,8 @@ pub(crate) fn create_shader_module(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     label: &str,
     source: &str,
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
 ) -> anyhow::Result<wgpu::ShaderModule> {
-    let prepared = prepare(source, emission.device().features())?;
+    let prepared = prepare(source, emission.device().features(), metadata)?;
     create_prepared(emission, label, &prepared)
 }

@@ -1758,6 +1758,7 @@ impl WgpuProvider {
         let prepared_shader = crate::backend::wgpu::shader_compilation::prepare(
             &shader,
             self.access.enabled_features(),
+            None,
         )?;
         let out_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer_checked(emission, output_len, "runmat-moving-window-out")

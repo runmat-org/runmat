@@ -5,25 +5,134 @@ use crate::builtins::common::spec::{
     FusionReductionEmpty, FusionReductionOperation, FusionReductionPrepareFuture,
     FusionReductionTies, PreparedFusionReduction,
 };
+use crate::builtins::common::spec::{
+    reduction_control, reduction_layout, reduction_sum_bytes, FusionReductionPreparationQuery,
+    FusionReductionPreparationQuote, ReductionAxisPlan, ReductionDimensions,
+};
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
     revision: 3,
     operation: FusionReductionOperation::Sum,
     prepare,
+    resources,
 };
 fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
-    Box::pin(async move {
-        if !controls.supported() {
-            return Ok(None);
+    Box::pin(prepare_impl(controls))
+}
+async fn prepare_impl(
+    controls: FusionReductionControls<'_>,
+) -> BuiltinResult<Option<Box<dyn PreparedFusionReduction>>> {
+    if let Some(plan) = lexical_plan(&controls) {
+        return Ok(Some(Box::new(Prepared(plan.materialize()?))));
+    }
+    if !controls.supported() {
+        return Ok(None);
+    }
+    let parsed = parse_arguments(crate::call::FunctionArgumentView::from_slice(
+        controls.values,
+    ))
+    .await?;
+    Ok(Some(
+        Box::new(Prepared(parsed)) as Box<dyn PreparedFusionReduction>
+    ))
+}
+
+struct Plan<'a> {
+    axes: ReductionAxisPlan<'a>,
+    nan_mode: ReductionNaN,
+    output: OutputTemplate,
+}
+fn lexical_plan<'a>(controls: &FusionReductionControls<'a>) -> Option<Plan<'a>> {
+    if !controls.supported() {
+        return None;
+    }
+    let mut plan = Plan {
+        axes: ReductionAxisPlan::Auto,
+        nan_mode: ReductionNaN::Include,
+        output: OutputTemplate::Default,
+    };
+    let mut selection_set = false;
+    let mut output_set = false;
+    for value in controls.values {
+        if let Some(control) = reduction_control(value, SumControl::from_public_option) {
+            match control {
+                SumControl::Missing(mode) => plan.nan_mode = mode,
+                SumControl::All => {
+                    if selection_set && !plan.axes.is_auto() {
+                        return None;
+                    }
+                    plan.axes = ReductionAxisPlan::All;
+                    selection_set = true;
+                }
+                SumControl::Output(output) => {
+                    if output_set {
+                        return None;
+                    }
+                    plan.output = output;
+                    output_set = true;
+                }
+            }
+        } else {
+            if selection_set && !plan.axes.is_auto() {
+                return None;
+            }
+            let dimensions = ReductionDimensions::parse(value, false)?;
+            if let Value::Tensor(tensor) = value {
+                if !is_vector_shape(tensor.shape()) {
+                    return None;
+                }
+            }
+            plan.axes = dimensions.axis_plan();
+            selection_set = true;
         }
-        let parsed = parse_arguments(crate::call::FunctionArgumentView::from_slice(
-            controls.values,
-        ))
-        .await?;
-        Ok(Some(
-            Box::new(Prepared(parsed)) as Box<dyn PreparedFusionReduction>
-        ))
+    }
+    Some(plan)
+}
+impl Plan<'_> {
+    fn materialize(self) -> BuiltinResult<ParsedArguments> {
+        let selection = match self.axes {
+            ReductionAxisPlan::Auto => DimSelection::Auto,
+            ReductionAxisPlan::Dim(dimension) => DimSelection::Dim(dimension),
+            ReductionAxisPlan::All => DimSelection::All,
+            ReductionAxisPlan::Dimensions(dimensions) => match dimensions.len {
+                0 => DimSelection::Auto,
+                _ => DimSelection::Vec(dimensions.materialize()?),
+            },
+        };
+        Ok(ParsedArguments {
+            invocation: runmat_types::SumInvocation::Sum,
+            selection,
+            nan_mode: self.nan_mode,
+            output: self.output,
+        })
+    }
+}
+fn resources(
+    query: FusionReductionPreparationQuery<'_>,
+) -> Option<FusionReductionPreparationQuote> {
+    let plan = lexical_plan(&query.controls)?;
+    let rank = query.input_rank_upper.max(2);
+    let axes = plan.axes.resolved_capacity(rank);
+    Some(FusionReductionPreparationQuote {
+        prepare_scratch_bytes: u64::try_from(std::mem::size_of_val(&prepare_impl(query.controls)))
+            .ok()?,
+        prepared_retained_bytes: reduction_sum_bytes(&[
+            reduction_layout::<Prepared>(1)?,
+            reduction_layout::<usize>(plan.axes.retained_len())?,
+        ])?,
+        // One-based axis worklist and the old output shape overlapping scalar
+        // publication. Final input/output/axis backing is retained below.
+        resolve_scratch_bytes: reduction_sum_bytes(&[
+            reduction_layout::<usize>(axes)?,
+            reduction_layout::<usize>(rank)?,
+        ])?,
+        contract_retained_bytes: reduction_sum_bytes(&[
+            reduction_layout::<FusionReductionContract>(1)?,
+            reduction_layout::<usize>(rank)?,
+            reduction_layout::<usize>(rank)?,
+            reduction_layout::<usize>(axes)?,
+        ])?,
     })
 }
 
@@ -38,7 +147,8 @@ impl PreparedFusionReduction for Prepared {
             controls: &[],
             requested_outputs: 1,
         })
-        .real_floating_input() else {
+        .real_floating_input()?
+        else {
             return Ok(None);
         };
         let parsed = &self.0;
@@ -119,6 +229,72 @@ mod tests {
 
     #[test]
     fn host_classes_and_actual_owner_parser_define_sum_receipt() {
+        // Differential against the original operation parser, not a second
+        // expected-options table. No extra numerical execution is required.
+        let fact = value_fact(&single(vec![1.0; 6], vec![2, 3]));
+        for controls in [
+            vec![],
+            vec![Value::String("AlL".into())],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("ALL"))],
+            vec![
+                Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+                Value::Num(2.0),
+            ],
+            vec![
+                Value::Tensor(Tensor::new(vec![2.0, 1.0, 2.0], vec![1, 3]).unwrap()),
+                Value::String("NaTiVe".into()),
+            ],
+            vec![
+                Value::Num(1.0 + 5.0e-7),
+                Value::String("OMITMISSING".into()),
+            ],
+        ] {
+            let request = FusionReductionControls {
+                values: &controls,
+                requested_outputs: 1,
+            };
+            let plan = lexical_plan(&request).expect("existing valid host controls are quoted");
+            assert!(resources(FusionReductionPreparationQuery {
+                controls: request,
+                input_rank_upper: 2
+            })
+            .is_some());
+            let original = futures::executor::block_on(parse_arguments(
+                crate::call::FunctionArgumentView::from_slice(&controls),
+            ))
+            .unwrap();
+            assert_eq!(
+                Prepared(plan.materialize().unwrap())
+                    .resolve(&fact)
+                    .unwrap(),
+                Prepared(original).resolve(&fact).unwrap()
+            );
+        }
+        let duplicate = [
+            Value::String("default".into()),
+            Value::String("DEFAULT".into()),
+        ];
+        assert!(resources(FusionReductionPreparationQuery {
+            controls: FusionReductionControls {
+                values: &duplicate,
+                requested_outputs: 1
+            },
+            input_rank_upper: 2
+        })
+        .is_none());
+        let original = futures::executor::block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&duplicate),
+        ))
+        .err()
+        .unwrap();
+        let fallback = futures::executor::block_on(prepare(FusionReductionControls {
+            values: &duplicate,
+            requested_outputs: 1,
+        }))
+        .err()
+        .unwrap();
+        assert_eq!(original.identifier, fallback.identifier);
+        assert_eq!(original.to_string(), fallback.to_string());
         let input = single(vec![16_777_216.0, 1.0], vec![2, 1]);
         let base = receipt(&input, &[]).unwrap();
         assert_eq!(base.accumulator_class, NumericClass::Double);

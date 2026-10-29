@@ -5428,7 +5428,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn reduction_recipe_candidates(
         &self,
         _recipe: &reduction::ProviderReductionRecipe,
-    ) -> ProviderExecutionResult<Vec<reduction::ReductionStrategy>> {
+        _host_metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<[Option<reduction::ReductionStrategy>; 2]> {
         Err(ProviderExecutionError::from(
             unsupported_provider_operation("typed reduction selection unsupported"),
         ))

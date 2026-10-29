@@ -2,6 +2,53 @@
 //! preflight vector; no second vector, owner Box or payload copy is created.
 use super::{SubmittedAllocationRetention, SubmittedResources};
 use runmat_accelerate_api::{allocation::AllocationLease, GpuTensorHandle, WgpuBufferOwner};
+use runmat_execution::resource::{ProviderHostMetadataAdmission, RetainedHostAllocationClaim};
+use std::sync::Arc;
+
+/// The original one input vector and its exact backing claim travel together.
+/// Field order frees the Vec allocation before refunding its host reservation.
+pub(crate) struct SubmittedReductionInputs {
+    values: Vec<SubmittedReductionInput>,
+    _backing: Option<Arc<dyn RetainedHostAllocationClaim>>,
+}
+
+impl SubmittedReductionInputs {
+    pub(crate) fn reserve(
+        count: usize,
+        metadata: Option<&dyn ProviderHostMetadataAdmission>,
+    ) -> anyhow::Result<Self> {
+        let bytes = std::alloc::Layout::array::<SubmittedReductionInput>(count)?.size();
+        let claim = crate::wgsl::host_buffers::claim_bytes(metadata, bytes)?;
+        let values = runmat_value::exact_capacity_vec(count)?;
+        Ok(Self {
+            values,
+            _backing: claim,
+        })
+    }
+
+    pub(crate) fn push(&mut self, value: SubmittedReductionInput) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.values.len() < self.values.capacity(),
+            "typed reduction input vector exceeded its admitted capacity"
+        );
+        self.values.push(value);
+        Ok(())
+    }
+
+    fn empty() -> Self {
+        Self {
+            values: Vec::new(),
+            _backing: None,
+        }
+    }
+}
+
+impl std::ops::Deref for SubmittedReductionInputs {
+    type Target = [SubmittedReductionInput];
+    fn deref(&self) -> &Self::Target {
+        &self.values
+    }
+}
 
 pub(crate) struct SubmittedReductionInput {
     pub(crate) buffer: WgpuBufferOwner,
@@ -19,15 +66,16 @@ impl SubmittedReductionInput {
 }
 
 pub(crate) struct SubmittedReductionResources {
-    inputs: Vec<SubmittedReductionInput>,
+    inputs: SubmittedReductionInputs,
     partial_input: Option<WgpuBufferOwner>,
     output: WgpuBufferOwner,
     _output_lease: Option<AllocationLease>,
+    completion_claim: crate::wgsl::host_buffers::Claim,
 }
 
 impl SubmittedReductionResources {
     pub(crate) fn producer(
-        inputs: Vec<SubmittedReductionInput>,
+        inputs: SubmittedReductionInputs,
         output: &WgpuBufferOwner,
         published: Option<&GpuTensorHandle>,
     ) -> anyhow::Result<Self> {
@@ -39,6 +87,7 @@ impl SubmittedReductionResources {
             partial_input: None,
             output: output.clone(),
             _output_lease: published.map(|handle| handle.allocation_lease().clone()),
+            completion_claim: None,
         })
     }
 
@@ -47,7 +96,7 @@ impl SubmittedReductionResources {
         output: &WgpuBufferOwner,
         published: &GpuTensorHandle,
     ) -> anyhow::Result<Self> {
-        let mut owner = Self::producer(Vec::new(), output, Some(published))?;
+        let mut owner = Self::producer(SubmittedReductionInputs::empty(), output, Some(published))?;
         owner.partial_input = Some(partial.clone());
         Ok(owner)
     }
@@ -70,6 +119,14 @@ impl SubmittedReductionResources {
 
     pub(crate) fn output_buffer(&self) -> &WgpuBufferOwner {
         &self.output
+    }
+
+    pub(crate) fn retain_completion_claim(&mut self, claim: crate::wgsl::host_buffers::Claim) {
+        self.completion_claim = claim;
+    }
+
+    pub(super) fn take_completion_claim(&mut self) -> crate::wgsl::host_buffers::Claim {
+        self.completion_claim.take()
     }
 
     pub(crate) fn into_retention(self) -> SubmittedAllocationRetention {

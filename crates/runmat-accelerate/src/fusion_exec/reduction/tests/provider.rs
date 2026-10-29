@@ -278,9 +278,14 @@ impl AccelProvider for TypedCallerProvider {
     fn reduction_recipe_candidates(
         &self,
         _: &runmat_accelerate_api::reduction::ProviderReductionRecipe,
-    ) -> ProviderExecutionResult<Vec<ReductionStrategy>> {
+        _: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<[Option<ReductionStrategy>; 2]> {
         self.candidates.fetch_add(1, Ordering::SeqCst);
-        Ok(self.strategies.lock().unwrap().clone())
+        let strategies = self.strategies.lock().unwrap();
+        if strategies.len() > 2 {
+            return Err(anyhow!("invalid test candidate count").into());
+        }
+        Ok([strategies.first().copied(), strategies.get(1).copied()])
     }
 
     fn submit_reduction_recipe(
