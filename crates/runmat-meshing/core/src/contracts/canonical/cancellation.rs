@@ -5,8 +5,11 @@ use super::MeshingContractError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CancellationPolicy {
+    /// Responsiveness target reported by telemetry when a checkpoint gap exceeds it. It is not a
+    /// failure limit: latency depends on machine load, not on the algorithm.
     #[serde(with = "runmat_types::wire_integer")]
     pub maximum_checkpoint_latency_ms: u64,
+    /// Enforced responsiveness contract: search work admitted between two cancellation probes.
     #[serde(with = "runmat_types::wire_integer")]
     pub maximum_work_units_between_checks: u64,
 }
