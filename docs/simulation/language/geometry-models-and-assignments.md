@@ -1,13 +1,17 @@
-# Geometry, models, and assignments
+---
+description: How .fea geometry declarations import, construct or derive CAD, name regions from CAD-authored names, mesh them, and how models assign materials, sections, loads and signals.
+keywords: [.fea geometry, CAD regions, select name, STEP AP242, mesh declaration, material assignment, shell layup, signals, excitations]
+doc_type: language-reference
+---
+# Geometry, models and assignments
 
-Geometry defines topology. A model assigns physical meaning to that topology. Keeping those roles
-separate allows one admitted CAD revision and mesh to support several material or loading studies.
+Geometry defines topology; a model gives that topology physical meaning. Keeping the two apart lets one CAD revision and one mesh serve several material or loading studies.
 
 ## Imported geometry and regions
 
-Keep the CAD declaration and readable region names in the study. Geometry selection tools maintain their exact persistent bindings in CAD-asset metadata.
+Region names come from the CAD file itself: the labels authored in a STEP or IGES file (`select name`) and its presentation layers (`select tag`). To name a face the CAD file leaves unnamed, name it in the CAD tool and re-export, or select it by its canonical persistent id. Each name resolves once, at import, to canonical persistent ids, and the solver matches regions by id only.
 
-```fea
+```fea fragment
 geometry bracket {
     file = "../examples/geometry/box.brep"
     units = m
@@ -25,9 +29,7 @@ geometry bracket {
 
 A region declares one topology role: `vertex`, `edge`, `face`, `solid`, or `cell`. Cardinality is
 stated separately with `expect exactly_one` or `expect one_or_more`; plural topology spellings are
-not accepted. Selectors may use exact inspected ids, persistent ids, imported names or tags,
-feature lineage, and governed geometric predicates. Ambiguity is an error, not a request to choose
-the first match.
+not accepted. Selectors use CAD-authored names (`select name`), presentation layers (`select tag`), canonical persistent ids (`select persistent_id "persistent-entity:sha256:…"`), feature lineage (`select feature.<f>`, `select boundary_introduced_by feature.<f>`), the result of a construction (`select result`), regions returned by a generating function (`select output.region.<r>`), and bounded geometric predicates [not yet in the current release](pending:geometry.select.predicate). Ambiguity is an error, not a request to choose the first match. The full selector table is in the [declaration reference](./reference/declarations.md#geometry).
 
 STEP is the preferred interchange format for exact CAD and product metadata. The compiler records
 which AP242 capabilities were actually found; a STEP schema label alone does not imply that
@@ -37,7 +39,7 @@ parameters, materials, persistent ids, or writable regeneration are available.
 
 The construction syntax defines an immutable feature graph:
 
-```fea
+```fea fragment
 geometry stock {
     input width : length = 120 mm
 
@@ -60,13 +62,23 @@ geometry stock {
 }
 ```
 
-`geometry derived from geometry.source` creates another geometry revision with explicit lineage.
-It does not mutate its source. Parameter changes invalidate only the affected geometry and its
+A derived geometry regenerates another geometry with changed CAD parameters, and records its lineage. It does not change its source:
+
+```fea fragment
+geometry thin_wall from geometry.housing {
+    derive {
+        set source.parameter.wall = 2 mm
+        result = regenerate(source)
+    }
+}
+```
+
+The parameter is declared on the source geometry with `cad_parameter wall : length { select persistent_id "…"; require writable }`. Parameter changes invalidate only the affected geometry and its
 downstream mesh, projection, operator, and result identities.
 
 ## Mesh declarations
 
-```fea
+```fea fragment
 mesh bracket on geometry.bracket {
     tetrahedra {
         order = quadratic
@@ -76,13 +88,13 @@ mesh bracket on geometry.bracket {
 }
 ```
 
-A mesh declaration contains discretization controls, not materials. The study must bind the same
+`tetrahedra` meshes solids (Tet4 or Tet10), `triangles` meshes sheet faces as shells with their edges as segments, and `lines` meshes edges as beams. A mesh declaration contains discretization controls, not materials; the controls and their defaults are in the [declaration reference](./reference/declarations.md#mesh). The study must bind the same
 geometry for which the mesh was declared. Meshing resolves region provenance onto solver entities
 and publishes quality and construction evidence.
 
 ## Materials and capability blocks
 
-```fea
+```fea fragment
 material aluminum {
     name = "Aluminum 6061-T6"
     mass_density = 2700 kg/m^3
@@ -100,7 +112,7 @@ material rather than entries in an unstructured property map.
 
 ## Assign physical ownership
 
-```fea
+```fea fragment
 model bracket {
     assign material.aluminum to geometry.bracket.region.body
 
@@ -125,7 +137,7 @@ A homogeneous shell face receives three independent assignments: material, secti
 orientation. A composite face receives a layup and orientation; each ply names its own material,
 so a second face-level material assignment would be competing constitutive ownership.
 
-```fea
+```fea fragment
 material carbon_epoxy {
     mass_density = 1600 kg/m^3
     orthotropic_lamina {
@@ -141,7 +153,7 @@ material carbon_epoxy {
 model panel {
     orientation fibers {
         cartesian {
-            origin = [0, 0, 0] m
+            origin = [0 m, 0 m, 0 m]
             x_axis = [1, 0, 0]
             y_axis = [0, 1, 0]
         }
@@ -169,22 +181,22 @@ model panel {
 ```
 
 Ply order, ply angle, and reference surface are typed declarations, not signed numeric
-conventions. See [Models](../models#composite-layups) for the complete surface choices, laminate
+conventions. See [models](../models.md#composite-layups) for the complete surface choices, laminate
 equations, mass and damping treatment, and recovery behavior.
 
 ## Loads, constraints, and excitations
 
 Known static loads may use the direct form:
 
-```fea
+```fea fragment
 load service_force {
     force on geometry.bracket.region.mounting_faces = [0, -1, 0] kN
 }
 ```
 
-Time- or frequency-dependent input separates the physical signal from its application:
+Time- or frequency-dependent input separates the physical signal from its application. Both declarations live in a model:
 
-```fea
+```fea fragment
 signal pulse : force over time {
     samples = [
         { at = 0 s, value = 0 N },
@@ -206,5 +218,4 @@ excitation impact {
 ```
 
 The signal owns quantity, independent domain, samples, and interpolation. The excitation owns the
-target, direction, frame, distribution, and kinematics. This split is also what lets the Desktop
-preview show the exact target and function or magnitude attached to it.
+target, direction, frame, distribution, and kinematics. This split lets one signal drive several loads, and lets RunMat Desktop show each target with the function or magnitude attached to it. Standard waveforms (`sine`, `step`, `ramp`, `half_sine_pulse`, `rectangular_pulse`, `triangular_pulse`), tables and `.m`-generated signals are described in [loads](../loads/index.md) and [RunMat function integration](./runmat-function-integration.md).
