@@ -14,8 +14,10 @@ use super::{
 };
 
 const FIELD_PARTITION_PREFIX: &[u8] = b"runmat-fea-recovered-field-partition/v1\0";
+/// Partition size is admitted by the recovery resource plan and checked against it by the
+/// object inventory; the codec bounds it only by the wire range.
 const FIELD_PARTITION_LIMITS: CanonicalLimits =
-    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 4_000_000, 32);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 4_000_000, 32));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -251,7 +253,7 @@ impl RecoveredFieldPartition {
     }
 
     fn derive_identity(&self) -> Result<RecoveredFieldPartitionIdentity, RecoveredFieldError> {
-        encode_contract(
+        crate::contracts::canonical_digest::canonical_contract_digest(
             FIELD_PARTITION_PREFIX,
             "recovered-field-partition-identity",
             &(
@@ -264,7 +266,6 @@ impl RecoveredFieldPartition {
             ),
             FIELD_PARTITION_LIMITS,
         )
-        .map(Digest::sha256)
         .map(RecoveredFieldPartitionIdentity)
         .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
     }

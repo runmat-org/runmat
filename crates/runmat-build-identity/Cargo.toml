@@ -7,3 +7,7 @@ description = "Build-time configuration identity for dependency-aware artifact r
 
 [dependencies]
 sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+sha2-mac = { workspace = true }

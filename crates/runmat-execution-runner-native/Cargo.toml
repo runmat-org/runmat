@@ -58,6 +58,7 @@ rand = "0.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
 uuid = { workspace = true }
@@ -112,4 +113,5 @@ harness = false
 
 [build-dependencies]
 sha2 = { workspace = true }
+hex = { workspace = true }
 serde_json = { workspace = true }

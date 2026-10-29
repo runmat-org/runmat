@@ -31,6 +31,7 @@ pub fn build_nonlinear_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     recovery_workspace_bytes: ByteCount,
     facts: PreparedPhaseResourceFacts,
+    local_execution: super::LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let (partitions, construction_workspace_bytes) = nonlinear_field_recovery_shape(request)?;
     let bytes = partitions.iter().try_fold(0u64, |n, v| {
@@ -59,7 +60,7 @@ pub fn build_nonlinear_field_recovery_resource_plan(
             output: facts.output,
         }),
         output_set: Some(facts.output_set),
-        worker: super::post_process::post_process_worker(),
+        worker: super::post_process::post_process_worker_on(local_execution)?,
         accuracy_ceiling: super::post_process::post_process_ceiling(),
     })
 }

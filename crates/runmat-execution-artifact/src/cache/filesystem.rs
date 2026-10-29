@@ -136,27 +136,86 @@ impl CacheImport for FilesystemObjectStore {
 
 impl CacheExport for FilesystemObjectStore {
     fn write_verified(&mut self, object: &LogicalObject) -> ArtifactResult<()> {
-        object.validate()?;
-        if object.bytes.len() as u64 > self.max_object_bytes {
-            return Err(ArtifactError::Limit(
-                "filesystem object exceeds its configured byte bound".into(),
-            ));
-        }
-        let target = self.path(object.descriptor.digest);
-        if target.exists() {
-            return verify_existing(self, object);
-        }
+        self.write_verified_batch(std::iter::once(object))
+    }
 
-        let mut temporary = tempfile::NamedTempFile::new_in(&self.root)?;
-        temporary.write_all(&object.bytes)?;
-        temporary.as_file_mut().sync_all()?;
-        match fs::hard_link(temporary.path(), &target) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                verify_existing(self, object)
+    /// Stages every new object, sends each to the device, issues one device flush for the
+    /// batch and only then links the content names, so a visible name always holds complete
+    /// durable bytes. Staged files are closed after their write to bound open descriptors.
+    fn write_verified_batch<'a>(
+        &mut self,
+        objects: impl IntoIterator<Item = &'a LogicalObject>,
+    ) -> ArtifactResult<()> {
+        let mut staged: Vec<(PathBuf, tempfile::TempPath, &LogicalObject)> = Vec::new();
+        for object in objects {
+            object.validate()?;
+            if object.bytes.len() as u64 > self.max_object_bytes {
+                return Err(ArtifactError::Limit(
+                    "filesystem object exceeds its configured byte bound".into(),
+                ));
             }
-            Err(error) => Err(ArtifactError::Io(error)),
+            let target = self.path(object.descriptor.digest);
+            if target.exists() {
+                verify_existing(self, object)?;
+                continue;
+            }
+            if staged
+                .iter()
+                .any(|(staged_target, _, _)| *staged_target == target)
+            {
+                // Same digest, already validated: identical canonical bytes.
+                continue;
+            }
+            let mut temporary = tempfile::NamedTempFile::new_in(&self.root)?;
+            temporary.write_all(&object.bytes)?;
+            send_to_device(temporary.as_file())?;
+            staged.push((target, temporary.into_temp_path(), object));
         }
+        let Some((_, last, _)) = staged.last() else {
+            return Ok(());
+        };
+        device_barrier(&fs::File::open(last)?)?;
+        for (target, temporary, object) in &staged {
+            match fs::hard_link(temporary, target) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    verify_existing(self, object)?
+                }
+                Err(error) => return Err(ArtifactError::Io(error)),
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Sends the file's data and metadata to the device. On Apple platforms `fsync(2)` does not
+/// flush the device cache; the batch's single `device_barrier` does that for every file.
+fn send_to_device(file: &fs::File) -> std::io::Result<()> {
+    #[cfg(target_vendor = "apple")]
+    {
+        use std::os::fd::AsRawFd as _;
+        // SAFETY: the descriptor is owned by `file` and stays open for the call.
+        if unsafe { libc::fsync(file.as_raw_fd()) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        file.sync_all()
+    }
+}
+
+/// One full device flush covering everything previously sent (`F_FULLFSYNC` on Apple).
+fn device_barrier(file: &fs::File) -> std::io::Result<()> {
+    #[cfg(target_vendor = "apple")]
+    {
+        file.sync_all()
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        let _ = file;
+        Ok(())
     }
 }
 
@@ -223,6 +282,46 @@ mod tests {
             store.write_verified(&oversized),
             Err(ArtifactError::Limit(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use crate::{LogicalObject, ObjectNamespace};
+
+    use super::*;
+
+    fn object(text: &str) -> LogicalObject {
+        LogicalObject::new(
+            ObjectNamespace::ResultValue,
+            "test/object",
+            "application/vnd.runmat.test",
+            text.as_bytes().to_vec(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_batch_publishes_every_object_once_and_leaves_no_staging() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("objects");
+        let mut store = FilesystemObjectStore::open(&root, 64).unwrap();
+        let existing = object("existing");
+        store.write_verified(&existing).unwrap();
+        let batch = [object("a"), object("b"), object("a"), existing.clone()];
+        store.write_verified_batch(&batch).unwrap();
+        for object in &batch {
+            assert_eq!(
+                store.read_verified(object.descriptor.digest).unwrap(),
+                Some(object.bytes.clone())
+            );
+        }
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 3);
+
+        fs::write(store.path(existing.descriptor.digest), b"poisoned").unwrap();
+        assert!(store
+            .write_verified_batch([&object("c"), &existing])
+            .is_err());
     }
 }
 

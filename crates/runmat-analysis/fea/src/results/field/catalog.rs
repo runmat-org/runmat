@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use runmat_canonical_codec::encode_contract;
 use runmat_execution::Digest;
 
 use crate::topology::AnalysisProjection;
@@ -121,12 +120,11 @@ fn sample_key(
     sample: RecoveredFieldSample,
 ) -> Result<Digest, RecoveredFieldError> {
     sample.validate()?;
-    encode_contract(
+    crate::contracts::canonical_digest::canonical_contract_digest(
         FIELD_PREFIX,
         "recovered-field-sample",
         &(definition, sample),
         FIELD_LIMITS,
     )
-    .map(Digest::sha256)
     .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
 }

@@ -10,7 +10,7 @@ use runmat_meshing_core::StableDigest;
 const WORKLOAD_PREFIX: &[u8] = b"runmat-acoustic-frequency-workload/v1\0";
 const RESULT_PREFIX: &[u8] = b"runmat-acoustic-frequency-result/v1\0";
 const RESULT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 mod publication;
 

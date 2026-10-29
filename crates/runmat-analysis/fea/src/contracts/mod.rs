@@ -3,6 +3,7 @@ pub use static_convergence::{
     SpectralErrorEstimate, StaticOperatorProof, StructuralStaticConvergence,
 };
 pub mod accelerator_admission;
+pub mod canonical_digest;
 mod field_ids;
 mod run_error;
 mod solver_compatibility;

@@ -65,7 +65,7 @@ impl SolverMeshProjection {
             root_stage_manifest_digest: validation_manifest_digest,
             geometry: self.geometry,
             resolved_request: self.resolved_request,
-            topology: self.topology,
+            topology: self.topology.into(),
         };
         artifact.seal_canonical_digest_with_cancellation(cancellation)?;
         Ok(artifact)

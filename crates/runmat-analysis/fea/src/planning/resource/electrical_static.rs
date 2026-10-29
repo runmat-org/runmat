@@ -228,7 +228,7 @@ pub fn build_electrical_static_resource_plan(
         .map_err(invalid)?;
     let inputs = add(
         count(workload.canonical_bytes().map_err(invalid)?.len())?,
-        count(mesh.canonical_encode().map_err(invalid)?.len())?,
+        mesh.canonical_encoded_len().map_err(invalid)?,
     )?;
     if prepared.inputs.encoded_payload_bytes.0 != inputs
         || prepared.result_output.encoded_payload_bytes_upper_bound.0 != payload

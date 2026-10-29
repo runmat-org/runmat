@@ -4,10 +4,7 @@
 //! Borrowed original model/mesh storage is excluded; owned validation/identity,
 //! compiled source, sparse solve and retained/cold-validation copies are included.
 use super::{MaxwellCurrentSample, MaxwellError, MaxwellFieldSample, MaxwellVolumeData};
-use crate::{
-    results::field::{SampledOrientedEdge, VolumeFieldIntegrationSample},
-    topology::AnalysisProjection,
-};
+use crate::{results::field::SampledOrientedEdge, topology::AnalysisProjection};
 use runmat_analysis_core::AnalysisModel;
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 use runmat_meshing_core::SolverMeshArtifact;
@@ -116,7 +113,10 @@ fn from_counts(
     let payload = sum(&[
         8192,
         slots::<SampledOrientedEdge>(edges, 2)?,
-        slots::<VolumeFieldIntegrationSample>(samples, 2)?,
+        // The sampled layout stores identities and corner indices per element and node; sample
+        // identities and geometry are derived on demand.
+        slots::<(runmat_meshing_core::StableDigest, [u32; 4])>(elements, 2)?,
+        slots::<runmat_meshing_core::StableDigest>(nodes, 2)?,
         slots::<MaxwellCurrentSample>(samples, 2)?,
         slots::<MaxwellFieldSample>(samples, 2)?,
         slots::<MaxwellVolumeData>(elements, 2)?,

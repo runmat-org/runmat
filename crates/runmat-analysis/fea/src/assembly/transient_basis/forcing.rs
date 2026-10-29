@@ -2,6 +2,30 @@
 
 use super::super::*;
 
+/// The time-invariant spatial authority of solid load lowering: the structural node space and
+/// the analysis projection of one admitted mesh. Derived once per assembly (and once per
+/// prepared transient basis), never per load or per time sample.
+pub(in crate::assembly) struct SolidLoadDomain {
+    pub topology: crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace,
+    /// A derivation failure is reported against the first load that needs the projection,
+    /// exactly as when each load derived it.
+    pub projection: Result<crate::topology::AnalysisProjection, String>,
+}
+
+impl SolidLoadDomain {
+    pub(in crate::assembly) fn derive(mesh: &SolverMeshArtifact) -> Result<Self, LinearAssemblyError> {
+        let invalid = |error: String| {
+            LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error))
+        };
+        Ok(Self {
+            topology: crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(mesh)
+                .map_err(|error| invalid(error.to_string()))?,
+            projection: crate::topology::AnalysisProjection::derive(mesh)
+                .map_err(|error| error.to_string()),
+        })
+    }
+}
+
 pub(in crate::assembly) struct SolidForcing {
     pub rhs: Vec<f64>,
     pub physical_load: Vec<f64>,
@@ -18,22 +42,19 @@ pub(in crate::assembly) fn lower(
     mesh: &SolverMeshArtifact,
     constraint_plan: &CanonicalStructuralConstraintPlan,
     structural_dof_layout: &StructuralDofLayout,
+    domain: &SolidLoadDomain,
 ) -> Result<SolidForcing, LinearAssemblyError> {
     let mut rhs = vec![0.0; structural_dof_layout.total_dof_count()];
     let mut constrained = vec![false; rhs.len()];
     let mut constraint_matrix = None;
     let mut affine_constraint_reduction = None;
-    let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(mesh)
-                .map_err(|error| {
-                    LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(
-                        error.to_string(),
-                    ))
-                })?;
+    let topology = &domain.topology;
     let source_projection = compile_solid_load_plan(
         excitations,
         mesh,
+        &domain.projection,
         constraint_plan,
-        &topology,
+        topology,
         structural_dof_layout,
     )
     .map_err(|error| {

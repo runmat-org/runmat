@@ -17,11 +17,8 @@ fn longitudinal_impressed_current_is_not_projected_to_a_solenoidal_source() {
                 imaginary: 0.0,
             },
         );
-        for (source, sample) in input
-            .source_current
-            .iter_mut()
-            .zip(input.sampling.integration_samples())
-        {
+        let samples = input.sampling.integration_samples_for(&mesh).unwrap();
+        for (source, sample) in input.source_current.iter_mut().zip(&samples) {
             let electric = fixture::longitudinal(sample.position_m);
             // curl(E)=0, so J=-(sigma+i*omega*epsilon)E. No current cleaning.
             source.current_density_a_per_m2 =

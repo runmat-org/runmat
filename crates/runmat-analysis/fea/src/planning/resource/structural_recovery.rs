@@ -18,6 +18,8 @@ pub struct StructuralFieldRecoveryPlanning<'a> {
     pub mesh: Option<&'a SolverMeshArtifact>,
     pub compilation: &'a ConstraintCompilation<'a>,
     pub facts: PreparedPhaseResourceFacts,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: super::LocalExecutionPlan,
 }
 pub fn structural_field_recovery_shape(
     request: &FieldRecoveryRequest,
@@ -81,7 +83,7 @@ pub fn build_structural_field_recovery_resource_plan(
     if p.facts.output.encoded_payload_bytes_upper_bound.0 != bytes {
         return Err(invalid("structural recovery output shape differs"));
     }
-    let mut worker = super::post_process::post_process_worker();
+    let mut worker = super::post_process::post_process_worker_on(p.local_execution)?;
     worker.maximum_wall_milliseconds = step.accuracy.resources.maximum_wall_time_milliseconds;
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,

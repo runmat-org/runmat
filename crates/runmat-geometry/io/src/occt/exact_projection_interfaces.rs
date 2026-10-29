@@ -130,7 +130,7 @@ fn region_id(solid_id: &PersistentEntityId) -> PersistentEntityId {
     }
     PersistentEntityId::new(
         PersistentEntityKind::Region,
-        format!("solid-region:{:x}", digest.finalize()),
+        format!("solid-region:{}", hex::encode(digest.finalize())),
         solid_id.assembly_path.clone(),
     )
 }

@@ -45,12 +45,13 @@ fn native_magnetic_nonzero_reference_converges_without_reference_solver_outputs(
     let exact_energy = reference::energy(mu, 255);
     let mut errors = Vec::new();
     for cells in [1, 2, 4] {
-        let (_, _, task) = fixture::task(ElementOrder::Tet4, cells, 1.0, 1.0, 8192);
+        let (_, mesh, task) = fixture::task(ElementOrder::Tet4, cells, 1.0, 1.0, 8192);
         let retained = result(&task);
         let response = retained.response();
+        let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
         let mut potential = 0.0;
         let mut flux = 0.0;
-        for sample in &response.samples {
+        for sample in &response.samples(&projection).unwrap() {
             let [x, y, _] = sample.position_m;
             let (a, b) = reference::fields(x, y, mu, 1023);
             for axis in 0..3 {

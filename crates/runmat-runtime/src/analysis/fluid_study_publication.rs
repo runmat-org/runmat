@@ -23,7 +23,7 @@ pub fn publish_fluid_study_result(
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let publication_context = context.clone();
-    let study_id = completed.compiled.study_id.clone();
+    let study_id = completed.compiled().study_id.clone();
     prepare_fluid_study_publication(
         completed,
         source,
@@ -54,7 +54,7 @@ pub fn prepare_fluid_study_publication(
     context: OperationContext,
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<crate::analysis::PreparedStudyPublication, OperationErrorEnvelope> {
-    let invalid = |message| publication_error(&context, &completed.compiled.study_id, message);
+    let invalid = |message| publication_error(&context, &completed.compiled().study_id, message);
     let definition = study.digest();
     let preparation =
         crate::analysis::study_publication::preparation::PublicationPreparation::capture_catalog(
@@ -79,7 +79,7 @@ pub fn prepare_fluid_study_publication(
     };
     // The admitted step family names the run: standalone flow or a coupled flow study.
     let family = completed
-        .workload
+        .workload()
         .model
         .sequence
         .steps
@@ -87,7 +87,7 @@ pub fn prepare_fluid_study_publication(
         .map_or(runmat_analysis_core::PhysicsFamily::Fluid, |step| {
             step.family
         });
-    let run_id = publication_identity.local_run_id(family, definition, &completed.workload.step_id);
+    let run_id = publication_identity.local_run_id(family, definition, &completed.workload().step_id);
     let run = materialization::admit(completed, mesh, options, fields, &run_id, &context)
         .map_err(invalid)?;
     let object_artifact_paths = source
@@ -100,7 +100,7 @@ pub fn prepare_fluid_study_publication(
     let persisted =
         super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
-        step_id: completed.workload.step_id.clone(),
+        step_id: completed.workload().step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
         accelerator_admission: Default::default(),
         solver_options: super::AnalysisSolverOptions::IncompressibleFlow(options.clone()),
@@ -113,7 +113,7 @@ pub fn prepare_fluid_study_publication(
     )
     .map_err(invalid)?;
     let step = super::structural_study::CompletedStudyStep {
-        step_id: completed.workload.step_id.clone(),
+        step_id: completed.workload().step_id.clone(),
         solver_result_identity: completed
             .result
             .identity()
@@ -132,11 +132,11 @@ pub fn prepare_fluid_study_publication(
     let manifest = super::study_result_manifest::StudyResultManifest::new(
         study,
         completed
-            .workload
+            .workload()
             .identity()
             .map_err(|e| invalid(e.to_string()))?
             .digest(),
-        &completed.workload,
+        completed.workload(),
         mesh,
         meshing_evidence,
         FluidNumericalEvidence {

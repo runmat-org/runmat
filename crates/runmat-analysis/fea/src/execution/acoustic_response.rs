@@ -234,6 +234,10 @@ impl AcousticResponseWorkload {
             self,
             mesh,
             PreparedAcousticResponseResourceFacts {
+                local_execution: crate::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                    plan.request.cpu_millicores,
+                )
+                .map_err(invalid)?,
                 inputs: demand.inputs.clone(),
                 result_output: demand.result_output.clone(),
                 receipt_output: demand.receipt_output.clone(),

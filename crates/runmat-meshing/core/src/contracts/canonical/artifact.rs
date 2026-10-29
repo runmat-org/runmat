@@ -27,6 +27,12 @@ impl SolverMeshArtifact {
         &self,
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<(), MeshingContractError> {
+        self.validate_header()?;
+        self.topology.validate(&self.resolved_request, cancellation)
+    }
+
+    /// Schema, stage-manifest, geometry and request checks; the topology is checked separately.
+    pub(super) fn validate_header(&self) -> Result<(), MeshingContractError> {
         if self.schema_version != SOLVER_MESH_ARTIFACT_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
                 "analysis mesh artifact schema version",
@@ -36,8 +42,7 @@ impl SolverMeshArtifact {
         self.root_stage_manifest_digest
             .validate_nonzero("artifact.root_stage_manifest_digest")?;
         self.geometry.validate()?;
-        self.resolved_request.validate()?;
-        self.topology.validate(&self.resolved_request, cancellation)
+        self.resolved_request.validate()
     }
 }
 

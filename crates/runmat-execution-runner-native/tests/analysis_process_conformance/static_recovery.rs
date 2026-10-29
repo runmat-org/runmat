@@ -68,6 +68,7 @@ pub(super) async fn run() {
             program_revision: revision(),
             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: ObjectInventoryLimits::default(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .unwrap();
         assert_eq!(

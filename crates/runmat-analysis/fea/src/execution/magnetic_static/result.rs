@@ -7,8 +7,14 @@ use crate::{
 };
 use std::collections::BTreeSet;
 
-const PREFIX: &[u8] = b"runmat-magnetostatic-result/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+const PREFIX: &[u8] = b"runmat-magnetostatic-result/v2\0";
+/// The retained result grows with the mesh (edges and fifteen samples per element). Its size is
+/// admitted by the magnetostatic resource plan (`result_output`) and checked against it by the
+/// object inventory, so the codec bounds it only by the wire range; its identity is digested
+/// from the streamed encoding.
+const SAMPLES: usize = crate::physics::magnetic::MAGNETIC_SAMPLES_PER_ELEMENT;
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -16,19 +22,21 @@ pub struct MagnetostaticSolverResult {
     data: ResultData,
 }
 
+/// Fields are declared in canonical (UTF-8 key) order so the streamed encoding holds neither
+/// the sampled topology nor the response back for sorting.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResultData {
-    source_workload: AnalysisWorkloadIdentity,
-    producer: StepIdentity,
+    element_order: runmat_meshing_core::ElementOrder,
     formulation: AnalysisRunIdentity,
     mesh_digest: Digest,
+    producer: StepIdentity,
     projection_digest: Digest,
-    sampling_topology: crate::results::field::SampledVolumeFieldTopology,
     publication_declarations: Vec<runmat_analysis_core::StateOutput>,
-    element_order: runmat_meshing_core::ElementOrder,
     relative_residual_target: f64,
     response: MagnetostaticResponse,
+    sampling_topology: crate::results::field::SampledVolumeFieldTopology,
+    source_workload: AnalysisWorkloadIdentity,
 }
 
 impl<'de> Deserialize<'de> for MagnetostaticSolverResult {
@@ -99,20 +107,13 @@ impl MagnetostaticSolverResult {
                 .collect::<BTreeSet<_>>()
                 .len()
                 != d.publication_declarations.len()
-            || !r.edge_node_identities.iter().copied().eq(d
-                .sampling_topology
-                .oriented_edges()
-                .iter()
-                .map(|e| e.node_identities))
-            || r.samples.len() != d.sampling_topology.integration_samples().len()
-            || r.samples
-                .iter()
-                .zip(d.sampling_topology.integration_samples())
-                .any(|(a, b)| {
-                    a.element_identity != b.element_identity
-                        || a.position_m != b.position_m
-                        || a.volume_weight_m3 != b.volume_weight_m3
-                })
+            || r.edge_circulations_wb.canonical_values().len()
+                != d.sampling_topology.oriented_edges().len()
+            || r.sample_count() != d.sampling_topology.integration_sample_count()
+            || r.flux_density_t.canonical_values().len() != 3 * r.sample_count()
+            || r.vector_potential_wb_per_m.canonical_values().len() != 3 * r.sample_count()
+            || r.element_count() != d.sampling_topology.element_identities().len()
+            || r.element_flux_density_t.canonical_values().len() != 3 * r.element_count()
         {
             return Err(invalid(
                 "magnetic retained sampling topology or authored declarations differ",
@@ -132,63 +133,40 @@ impl MagnetostaticSolverResult {
             || !r.magnetic_energy_j.canonical_value().is_finite()
             || r.magnetic_energy_j.canonical_value() < 0.0
             || !r.source_work_j.canonical_value().is_finite()
-            || r.edge_node_identities.is_empty()
-            || r.edge_circulations_wb.canonical_values().len() != r.edge_node_identities.len()
-            || r.edge_circulations_wb
+            || r.edge_circulations_wb.canonical_values().is_empty()
+            || [
+                r.edge_circulations_wb.canonical_values(),
+                r.flux_density_t.canonical_values(),
+                r.vector_potential_wb_per_m.canonical_values(),
+                r.element_flux_density_t.canonical_values(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|v| !v.is_finite())
+            || r.element_permeability_h_per_m
                 .canonical_values()
                 .iter()
-                .any(|v| !v.is_finite())
-            || r.edge_node_identities.iter().any(|[a, b]| a >= b)
-            || r.edge_node_identities
-                .windows(2)
-                .any(|pair| pair[0] >= pair[1])
-            || r.samples.is_empty()
-            || !r.samples.len().is_multiple_of(15)
+                .any(|mu| !mu.is_finite() || *mu <= 0.0)
+            || r.sample_count() == 0
         {
             return Err(invalid(
                 "magnetic formulation, closure or edge inventory is invalid",
             ));
         }
-        let mut elements = BTreeSet::new();
-        let mut energy = 0.0;
-        for group in r.samples.chunks_exact(15) {
-            if !elements.insert(group[0].element_identity) {
-                return Err(invalid("duplicate magnetic sample element"));
-            }
-            for s in group {
-                if s.element_identity != group[0].element_identity
-                    || !s.volume_weight_m3.is_finite()
-                    || s.volume_weight_m3 <= 0.0
-                    || s.position_m
-                        .iter()
-                        .chain(&s.vector_potential_wb_per_m.canonical_value())
-                        .chain(&s.flux_density_t.canonical_value())
-                        .chain(&s.magnetic_field_a_per_m.canonical_value())
-                        .any(|v| !v.is_finite())
-                {
-                    return Err(invalid("invalid retained magnetic sample inventory"));
-                }
-                let density = crate::algebra::dot_canonical(
-                    &s.flux_density_t.canonical_value(),
-                    &s.magnetic_field_a_per_m.canonical_value(),
-                );
-                if !density.is_finite() || density < 0.0 {
-                    return Err(invalid("negative magnetic energy density"));
-                }
-                energy += 0.5 * s.volume_weight_m3 * density;
-            }
-        }
+        // The energy is re-integrated from the samples against mesh weights in `validate_for`;
+        // here the summaries must agree with each other.
         if !close(
-            energy,
-            r.magnetic_energy_j.canonical_value(),
+            2.0 * r.magnetic_energy_j.canonical_value(),
+            r.source_work_j.canonical_value(),
+            16.0 * t,
+        ) || !close(
+            relative_error(
+                2.0 * r.magnetic_energy_j.canonical_value(),
+                r.source_work_j.canonical_value(),
+            ),
+            r.relative_energy_work_error,
             256.0 * f64::EPSILON,
-        ) || !close(2.0 * energy, r.source_work_j.canonical_value(), 16.0 * t)
-            || !close(
-                relative_error(2.0 * energy, r.source_work_j.canonical_value()),
-                r.relative_energy_work_error,
-                256.0 * f64::EPSILON,
-            )
-        {
+        ) {
             return Err(invalid("retained magnetic energy/work summaries disagree"));
         }
         Ok(())
@@ -235,60 +213,78 @@ impl MagnetostaticSolverResult {
         let edges =
             crate::physics::magnetic::validate_projection_envelope(p, &compiled.grounded_faces)
                 .map_err(invalid)?;
+        let r = &d.response;
         if !d
-            .response
-            .edge_node_identities
+            .sampling_topology
+            .oriented_edges()
             .iter()
-            .copied()
+            .map(|e| e.node_identities)
             .eq(edges.edges().iter().map(|e| e.node_identities))
-            || d.response.samples.len()
+            || compiled.volumes.len() != d.sampling_topology.element_identities().len()
+            || r.sample_count()
                 != p.elements
                     .len()
-                    .checked_mul(15)
+                    .checked_mul(SAMPLES)
                     .ok_or_else(|| invalid("sample count overflow"))?
         {
             return Err(invalid(
                 "magnetic result edge/sample inventory differs from mesh",
             ));
         }
+        // Samples are named by (element, rule point): the element's law and the rule's
+        // geometry come from the original mesh, so energy, work and element means are
+        // re-integrated here exactly as the solver did.
         let mut work = 0.0;
+        let mut energy = 0.0;
         for (index, law) in compiled.volumes.iter().enumerate() {
-            let mut sample_index = 0;
-            let mut mismatch = false;
+            let permeability = law.permeability_h_per_m.canonical_value();
+            if law.element_identity != d.sampling_topology.element_identities()[index]
+                || r.element_permeability_h_per_m.canonical_values()[index] != permeability
+            {
+                return Err(invalid(
+                    "magnetic sample geometry or constitutive law substitution",
+                ));
+            }
+            let mut weights = [0.0; SAMPLES];
+            let mut ordinal = 0;
             edges
                 .visit_element_quadrature(p, index, |point| {
-                    let s = &d.response.samples[index * 15 + sample_index];
-                    sample_index += 1;
-                    mismatch |= s.element_identity != law.element_identity
-                        || s.position_m != point.position_m
-                        || s.volume_weight_m3 != point.volume_weight_m3
-                        || s.flux_density_t
-                            .canonical_value()
-                            .iter()
-                            .zip(s.magnetic_field_a_per_m.canonical_value())
-                            .any(|(b, h)| {
-                                !close(
-                                    *b / law.permeability_h_per_m.canonical_value(),
-                                    h,
-                                    256.0 * f64::EPSILON,
-                                )
-                            });
-                    work += s.volume_weight_m3
-                        * crate::algebra::dot_canonical(
-                            &s.vector_potential_wb_per_m.canonical_value(),
-                            &law.current_density_a_per_m2.canonical_value(),
-                        );
+                    if ordinal < SAMPLES {
+                        let sample = index * SAMPLES + ordinal;
+                        let flux = r.flux_density(sample);
+                        let field = flux.map(|v| v / permeability);
+                        weights[ordinal] = point.volume_weight_m3;
+                        energy += 0.5
+                            * point.volume_weight_m3
+                            * crate::algebra::dot_canonical(&flux, &field);
+                        work += point.volume_weight_m3
+                            * crate::algebra::dot_canonical(
+                                &r.vector_potential(sample),
+                                &law.current_density_a_per_m2.canonical_value(),
+                            );
+                    }
+                    ordinal += 1;
                 })
                 .map_err(invalid)?;
-            if mismatch || sample_index != 15 {
+            let mean = crate::physics::magnetic::element_mean(&weights, |o| {
+                r.flux_density(index * SAMPLES + o)
+            });
+            if ordinal != SAMPLES || mean != r.element_flux_density(index) {
                 return Err(invalid(
                     "magnetic sample geometry or constitutive law substitution",
                 ));
             }
         }
         if !close(
+            energy,
+            r.magnetic_energy_j.canonical_value(),
+            256.0 * f64::EPSILON,
+        ) {
+            return Err(invalid("retained magnetic energy/work summaries disagree"));
+        }
+        if !close(
             work,
-            d.response.source_work_j.canonical_value(),
+            r.source_work_j.canonical_value(),
             256.0 * f64::EPSILON,
         ) {
             return Err(invalid(
@@ -326,11 +322,21 @@ impl MagnetostaticSolverResult {
         value.validate_for(workload, mesh)?;
         Ok(value)
     }
-    pub fn source_result_identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
-        SolverResultIdentity::from_step_result(
-            self.data.producer,
-            Digest::sha256(self.canonical_bytes()?),
+    /// SHA-256 of `canonical_bytes`, from the streamed encoding: identifying a result never
+    /// materializes its mesh-sized wire.
+    pub fn payload_digest(&self) -> AnalysisExecutionResult<Digest> {
+        self.validate()?;
+        Ok(
+            crate::contracts::canonical_digest::canonical_contract_digest(
+                PREFIX,
+                "magnetostatic-result",
+                self,
+                LIMITS,
+            )?,
         )
+    }
+    pub fn source_result_identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
+        SolverResultIdentity::from_step_result(self.data.producer, self.payload_digest()?)
     }
     pub fn response(&self) -> &MagnetostaticResponse {
         &self.data.response

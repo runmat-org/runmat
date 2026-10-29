@@ -728,7 +728,7 @@ fn request_digest(
         digest.update(b"\0recovery-recipient\0");
         digest.update(fingerprint.as_bytes());
     }
-    format!("{:x}", digest.finalize())
+    hex::encode(digest.finalize())
 }
 
 fn recovery_recipient(

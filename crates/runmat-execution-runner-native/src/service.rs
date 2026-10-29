@@ -1255,6 +1255,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("native service poisoned");
         let record = state.futures.validate(&future.id, future.outputs)?;
+        // A caller completing a future that was cancelled meanwhile learns of the cancellation.
         if matches!(record, FutureState::Cancelled) {
             return Err(ExecutionServiceError::Cancelled);
         }
@@ -1313,10 +1314,9 @@ impl RuntimeExecutionServices for NativeExecutionService {
             reservation.cancelled = true;
             return Ok(());
         }
-        if matches!(record, FutureState::CancellingGraph(_)) {
-            return Ok(());
-        }
-        if record.has_terminal_outcome() {
+        // Preserve every terminal outcome through the canonical state query;
+        // cancellation already in progress must not be restarted either.
+        if matches!(record, FutureState::CancellingGraph(_)) || record.has_terminal_outcome() {
             return Ok(());
         }
         let previous = std::mem::replace(record, FutureState::Cancelled);

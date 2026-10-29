@@ -34,9 +34,10 @@ pub use partition_set::{
     RecoveredFieldPartitionSet, RecoveredFieldPartitionSetIdentity,
     RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
 };
+pub(crate) use sampling::{RepeatedShape, SampledTopologyShape};
 pub use sampling::{
     SampledOrientedEdge, SampledVolumeFieldTopology, VolumeFieldIntegrationSample,
-    VolumeFieldSamplingRule,
+    VolumeFieldSampleGeometry, VolumeFieldSamplingRule,
 };
 pub use topology::StructuralRecoveredFieldTopology;
 pub use view::{CanonicalFieldPartitions, RecoveredFieldView};

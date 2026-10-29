@@ -186,7 +186,7 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
                 field("faces", FieldTopologyLocation::BoundaryFace, 10..=13),
                 field("edges", FieldTopologyLocation::BoundaryEdge, 20..=25),
             ],
-        },
+        }.into(),
     };
     artifact.seal_canonical_digest().unwrap();
     artifact
@@ -317,28 +317,25 @@ pub fn three_region_tetrahedron_solver_mesh_with_order(order: ElementOrder) -> S
     mesh.topology
         .regions
         .sort_by(|left, right| left.region_id.cmp(&right.region_id));
-    for topology in &mut mesh.topology.field_topologies {
+    let topo = &mut *mesh.topology;
+    for topology in &mut topo.field_topologies {
         topology.ordered_entity_ids = match topology.location {
-            FieldTopologyLocation::Node => mesh
-                .topology
+            FieldTopologyLocation::Node => topo
                 .nodes
                 .iter()
                 .map(|node| node.node_id)
                 .collect(),
-            FieldTopologyLocation::VolumeElement => mesh
-                .topology
+            FieldTopologyLocation::VolumeElement => topo
                 .volume_elements
                 .iter()
                 .map(|element| element.element_id)
                 .collect(),
-            FieldTopologyLocation::BoundaryFace => mesh
-                .topology
+            FieldTopologyLocation::BoundaryFace => topo
                 .boundary_faces
                 .iter()
                 .map(|face| face.face_id)
                 .collect(),
-            FieldTopologyLocation::BoundaryEdge => mesh
-                .topology
+            FieldTopologyLocation::BoundaryEdge => topo
                 .boundary_edges
                 .iter()
                 .map(|edge| edge.edge_id)

@@ -1,6 +1,6 @@
 //! Native retained magnetic array publication: copies only, no operator or recovery rerun.
 use super::*;
-use crate::physics::magnetic::MagneticFieldSample;
+use crate::physics::magnetic::MagnetostaticResponse;
 use crate::{
     execution::{
         FieldRecoveryCost, FieldRecoveryPlan, FieldRecoveryRequest, FieldRecoveryRequirement,
@@ -17,51 +17,35 @@ use runmat_analysis_core::{AnalysisField, FieldLocation, ObservationQuantity, Re
 #[derive(Clone, Copy)]
 pub(in crate::execution) enum NativeMagneticValues<'a> {
     Circulation(&'a [f64]),
-    Potential(&'a [MagneticFieldSample]),
-    Flux(&'a [MagneticFieldSample]),
-    Intensity(&'a [MagneticFieldSample]),
-    /// Element averages (1/V)∫ over each element's fifteen samples.
-    ElementFlux(&'a [MagneticFieldSample]),
-    ElementIntensity(&'a [MagneticFieldSample]),
+    Potential(&'a MagnetostaticResponse),
+    Flux(&'a MagnetostaticResponse),
+    /// H = B / mu with each sample's element permeability.
+    Intensity(&'a MagnetostaticResponse),
+    /// Retained element means (1/V)∫B over each element's fifteen samples.
+    ElementFlux(&'a MagnetostaticResponse),
+    ElementIntensity(&'a MagnetostaticResponse),
 }
 impl<'a> NativeMagneticValues<'a> {
     pub(in crate::execution) fn values(self) -> Box<dyn Iterator<Item = f64> + 'a> {
-        let average = |samples: &'a [MagneticFieldSample],
-                       value: fn(&MagneticFieldSample) -> [f64; 3]|
-         -> Box<dyn Iterator<Item = f64> + 'a> {
-            Box::new(samples.chunks(15).flat_map(move |element| {
-                let volume: f64 = element.iter().map(|s| s.volume_weight_m3).sum();
-                let mut mean = [0.0; 3];
-                for sample in element {
-                    let v = value(sample);
-                    for axis in 0..3 {
-                        mean[axis] += v[axis] * sample.volume_weight_m3 / volume;
-                    }
-                }
-                mean
-            }))
-        };
         match self {
-            Self::ElementFlux(v) => return average(v, |s| s.flux_density_t.canonical_value()),
-            Self::ElementIntensity(v) => {
-                return average(v, |s| s.magnetic_field_a_per_m.canonical_value())
+            Self::Circulation(values) => Box::new(values.iter().copied()),
+            Self::Potential(r) => Box::new(
+                r.vector_potential_wb_per_m
+                    .canonical_values()
+                    .iter()
+                    .copied(),
+            ),
+            Self::Flux(r) => Box::new(r.flux_density_t.canonical_values().iter().copied()),
+            Self::Intensity(r) => {
+                Box::new((0..r.sample_count()).flat_map(move |i| r.magnetic_field(i)))
             }
-            _ => {}
+            Self::ElementFlux(r) => {
+                Box::new(r.element_flux_density_t.canonical_values().iter().copied())
+            }
+            Self::ElementIntensity(r) => {
+                Box::new((0..r.element_count()).flat_map(move |e| r.element_magnetic_field(e)))
+            }
         }
-        let count = match self {
-            Self::Circulation(values) => values.len(),
-            Self::Potential(values) | Self::Flux(values) | Self::Intensity(values) => {
-                values.len() * 3
-            }
-            Self::ElementFlux(_) | Self::ElementIntensity(_) => unreachable!(),
-        };
-        Box::new((0..count).map(move |i| match self {
-            Self::Circulation(v) => v[i],
-            Self::Potential(v) => v[i / 3].vector_potential_wb_per_m.canonical_value()[i % 3],
-            Self::Flux(v) => v[i / 3].flux_density_t.canonical_value()[i % 3],
-            Self::Intensity(v) => v[i / 3].magnetic_field_a_per_m.canonical_value()[i % 3],
-            Self::ElementFlux(_) | Self::ElementIntensity(_) => unreachable!(),
-        }))
     }
 }
 impl Serialize for NativeMagneticValues<'_> {
@@ -78,7 +62,7 @@ pub(in crate::execution) fn native_magnetic_fields(
     result: &MagnetostaticSolverResult,
 ) -> [NativeMagneticField<'_>; 6] {
     let response = result.response();
-    let count = response.samples.len();
+    let count = response.sample_count();
     [
         NativeMagneticField {
             field_id: "magnetic.edge_circulation",
@@ -89,27 +73,27 @@ pub(in crate::execution) fn native_magnetic_fields(
         },
         NativeMagneticField {
             field_id: "magnetic.vector_potential",
-            values: NativeMagneticValues::Potential(&response.samples),
+            values: NativeMagneticValues::Potential(response),
             shape: vec![count, 3],
         },
         NativeMagneticField {
             field_id: "magnetic.flux_density",
-            values: NativeMagneticValues::Flux(&response.samples),
+            values: NativeMagneticValues::Flux(response),
             shape: vec![count, 3],
         },
         NativeMagneticField {
             field_id: "magnetic.field_intensity",
-            values: NativeMagneticValues::Intensity(&response.samples),
+            values: NativeMagneticValues::Intensity(response),
             shape: vec![count, 3],
         },
         NativeMagneticField {
             field_id: "magnetic.element_flux_density",
-            values: NativeMagneticValues::ElementFlux(&response.samples),
+            values: NativeMagneticValues::ElementFlux(response),
             shape: vec![count / 15, 3],
         },
         NativeMagneticField {
             field_id: "magnetic.element_field_intensity",
-            values: NativeMagneticValues::ElementIntensity(&response.samples),
+            values: NativeMagneticValues::ElementIntensity(response),
             shape: vec![count / 15, 3],
         },
     ]
@@ -203,31 +187,31 @@ fn native_magnetic_field_plan(
             ObservationQuantity::MagneticVectorPotential,
             FieldLocation::IntegrationPoint,
             RecoveredFieldEntityDomain::VolumeIntegrationPoints,
-            result.response().samples.len(),
+            result.response().sample_count(),
         ),
         (
             ObservationQuantity::MagneticFluxDensity,
             FieldLocation::IntegrationPoint,
             RecoveredFieldEntityDomain::VolumeIntegrationPoints,
-            result.response().samples.len(),
+            result.response().sample_count(),
         ),
         (
             ObservationQuantity::MagneticFieldIntensity,
             FieldLocation::IntegrationPoint,
             RecoveredFieldEntityDomain::VolumeIntegrationPoints,
-            result.response().samples.len(),
+            result.response().sample_count(),
         ),
         (
             ObservationQuantity::MagneticFluxDensity,
             FieldLocation::Element,
             RecoveredFieldEntityDomain::VolumeElements,
-            result.response().samples.len() / 15,
+            result.response().element_count(),
         ),
         (
             ObservationQuantity::MagneticFieldIntensity,
             FieldLocation::Element,
             RecoveredFieldEntityDomain::VolumeElements,
-            result.response().samples.len() / 15,
+            result.response().element_count(),
         ),
     ];
     let requirements = specs

@@ -140,7 +140,7 @@ pub fn prepare_header_with_declarations_report(
     let metadata = normalize_metadata(NativeLibraryMetadata {
         schema_version: NATIVE_FFI_METADATA_SCHEMA_VERSION,
         target_triple: preparation.target_triple.clone(),
-        source_digest: format!("{:x}", source_hasher.finalize()),
+        source_digest: hex::encode(source_hasher.finalize()),
         libraries: vec![NativeLibrary {
             name: preparation.library_name.clone(),
             path: preparation.library_path.clone(),

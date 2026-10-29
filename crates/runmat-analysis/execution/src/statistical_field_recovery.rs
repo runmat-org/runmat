@@ -32,6 +32,8 @@ pub struct StatisticalFieldRecoveryPreparation {
     pub source_fields: Option<PreparedAnalysisObjects>,
     pub program_revision: ProgramRevision,
     pub output_policy: AnalysisOutputPolicy,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 pub struct PreparedStatisticalFieldRecovery {
@@ -42,6 +44,8 @@ pub struct PreparedStatisticalFieldRecovery {
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,
     pub output_policy: AnalysisOutputPolicy,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 /// The statistical procedure of a recovery's immutable inputs, from its workload kind.
@@ -156,6 +160,7 @@ pub fn prepare_statistical_field_recovery(
         &request,
         &inputs,
         p.output_policy,
+        p.local_execution,
     )?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
@@ -186,6 +191,7 @@ pub fn prepare_statistical_field_recovery(
         inputs,
         resource_plan,
         output_policy: p.output_policy,
+        local_execution: p.local_execution,
     })
 }
 
@@ -338,6 +344,7 @@ pub fn build_prepared_statistical_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let procedure = statistical_procedure(inputs)?;
     let numerical = inputs
@@ -388,6 +395,7 @@ pub fn build_prepared_statistical_field_recovery_resource_plan(
             output: projected_transport_output_resource_facts(&profile)?,
             output_set: projected_output_set_resource_facts(),
         },
+        local_execution,
     )?)
 }
 
@@ -410,6 +418,7 @@ pub fn import_statistical_recovered_fields(
         &prepared.request,
         &prepared.inputs,
         prepared.output_policy,
+        prepared.local_execution,
     )?;
     if expected != prepared.resource_plan
         || prepared.host.workload.execution_plan

@@ -183,7 +183,9 @@ pub(super) async fn run() {
         );
         let mut squared_error = 0.0;
         let mut squared_reference = 0.0;
-        for sample in &response.samples {
+        let projection =
+            runmat_analysis_fea::topology::AnalysisProjection::derive(&result.mesh).unwrap();
+        for sample in &response.samples(&projection).unwrap() {
             let expected = reference_flux(sample.position_m[0], sample.position_m[1], 1023);
             for (actual, expected) in sample
                 .flux_density_t

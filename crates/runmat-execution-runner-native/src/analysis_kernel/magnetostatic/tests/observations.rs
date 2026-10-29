@@ -249,6 +249,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
             source_result: solved.objects.clone(),
             program_revision: task.program.request.recipe.program_revision.clone(),
             output_policy: task.output_policy,
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .unwrap();
         let invoke = |inputs: &[runmat_analysis_execution::PreparedAnalysisObjects], policy| {
@@ -266,6 +267,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
             &recovery.inputs,
             AnalysisOutputPolicy::new(recovery.output_policy.chunk_bytes(), tight).unwrap(),
             runmat_analysis_fea::planning::resource::ByteCount(0),
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         )
         .unwrap_err();
         assert!(error
@@ -636,38 +638,31 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
                 "B" => {
                     let expected = retained
                         .response()
-                        .samples
-                        .iter()
-                        .flat_map(|s| s.flux_density_t.canonical_value())
-                        .collect::<Vec<_>>();
+                        .flux_density_t
+                        .canonical_values()
+                        .clone();
                     assert_eq!(values, expected);
                     assert_eq!(
                         actual.entities,
-                        sampling
-                            .integration_samples()
-                            .iter()
-                            .map(|s| ObservationEntity::IntegrationPoint(s.identity))
+                        (0..sampling.integration_sample_count())
+                            .map(|i| ObservationEntity::IntegrationPoint(
+                                sampling.integration_sample_identity(i).unwrap()
+                            ))
                             .collect::<Vec<_>>()
                     );
                 }
                 "By" => assert_eq!(
                     values,
-                    retained
-                        .response()
-                        .samples
-                        .iter()
-                        .map(|s| s.flux_density_t.canonical_value()[1])
+                    (0..retained.response().sample_count())
+                        .map(|i| retained.response().flux_density(i)[1])
                         .collect::<Vec<_>>()
                 ),
                 "Hnorm" => assert_eq!(
                     values,
-                    retained
-                        .response()
-                        .samples
-                        .iter()
-                        .map(|s| s
-                            .magnetic_field_a_per_m
-                            .canonical_values()
+                    (0..retained.response().sample_count())
+                        .map(|i| retained
+                            .response()
+                            .magnetic_field(i)
                             .iter()
                             .map(|v| v * v)
                             .sum::<f64>()

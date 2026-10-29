@@ -12,10 +12,30 @@ fn original<T: Serialize>(value: &T) -> Vec<u8> {
     bytes
 }
 fn equivalent<T: Serialize>(value: &T) {
-    assert_eq!(
-        encode(b"test\0", "direct", value, LIMITS, &NeverCancelled).unwrap(),
-        original(value)
-    );
+    let encoded = encode(b"test\0", "direct", value, LIMITS, &NeverCancelled).unwrap();
+    assert_eq!(encoded, original(value));
+    assert_eq!(streamed(value), encoded);
+}
+/// The streamed encoding, collected chunk by chunk.
+fn streamed<T: Serialize>(value: &T) -> Vec<u8> {
+    let mut collected = Vec::new();
+    let mut chunks = 0usize;
+    let count = stream(
+        b"test\0",
+        "direct",
+        value,
+        LIMITS,
+        &NeverCancelled,
+        &mut |chunk: &[u8]| {
+            assert!(!chunk.is_empty());
+            chunks += 1;
+            collected.extend_from_slice(chunk);
+        },
+    )
+    .unwrap();
+    assert_eq!(count, collected.len() as u64);
+    assert!(chunks >= 1);
+    collected
 }
 #[derive(Serialize)]
 enum Variant {
@@ -299,4 +319,60 @@ fn declared_maps_fall_back_from_streaming_without_changing_bytes() {
         "outer",
         vec![Keys(&[("x", 1), ("w", 2)], Some(2))],
     )]));
+}
+
+// A digest-only encoding hands out the exact canonical bytes while the root buffer drains:
+// declared-length maps that later fall back to sorted holding rewrite only bytes after their
+// own pinned header, struct fields stream in canonical order, and nested maps unpin in order.
+#[test]
+fn streamed_encoding_is_byte_identical_while_the_root_buffer_drains() {
+    #[derive(Serialize)]
+    struct Wide {
+        zeta: Vec<u64>,
+        alpha: BTreeMap<String, Vec<f64>>,
+        mid: Vec<Variant>,
+    }
+    struct Unsorted(Vec<(&'static str, Vec<u32>)>);
+    impl Serialize for Unsorted {
+        fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            let mut map = s.serialize_map(Some(self.0.len()))?;
+            for (key, value) in &self.0 {
+                map.serialize_entry(key, value)?;
+            }
+            map.end()
+        }
+    }
+    equivalent(&Wide {
+        zeta: (0..5000).collect(),
+        alpha: (0..40)
+            .map(|i| (format!("k{i:03}"), vec![i as f64; 100]))
+            .collect(),
+        mid: (0..300)
+            .map(|i| Variant::Record {
+                z: vec![i as f64; 7],
+                a: Some(i.to_string()),
+            })
+            .collect(),
+    });
+    equivalent(&Unsorted(vec![
+        ("b", (0..500).collect()),
+        ("c", (0..500).collect()),
+        ("a", (0..500).collect()),
+    ]));
+    equivalent(&vec![
+        Unsorted(vec![("x", vec![1; 300]), ("y", vec![2; 300])]),
+        Unsorted(vec![("y", vec![3; 300]), ("x", vec![4; 300])]),
+    ]);
+    // A streamed encoding obeys the same byte ceiling as the materialized one.
+    let tight = CanonicalLimits::new(64, 1_000_000, 65_536, 64);
+    let error = stream(
+        b"test\0",
+        "direct",
+        &vec![0u64; 100],
+        tight,
+        &NeverCancelled,
+        &mut |_: &[u8]| {},
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, crate::CanonicalCodecErrorKind::ResourceLimit);
 }

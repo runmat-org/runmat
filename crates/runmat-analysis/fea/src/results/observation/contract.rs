@@ -26,8 +26,10 @@ pub(super) const OBSERVATION_PREFIX: &[u8] = b"runmat-fea-observation/v1\0";
 // Artifact provenance was replaced, not made backward compatible. Plan/sample codecs remain
 // unchanged because their numerical contracts did not change.
 const OBSERVATION_ARTIFACT_PREFIX: &[u8] = b"runmat-fea-observation-artifact/v2\0";
+/// Observation plans and samples grow with the observed model. Their size is admitted by the
+/// resource plan and checked by the object inventory; the codec bounds them by the wire range.
 pub(crate) const OBSERVATION_LIMITS: CanonicalLimits =
-    CanonicalLimits::content_bounded(1024 * 1024 * 1024, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -71,16 +73,38 @@ pub struct ObservationLimits {
     pub maximum_transfer_bytes: u64,
 }
 
+/// Resolved observation costs are exact functions of the topology and the requests, so no
+/// model-size constant bounds them: entity, value and byte ceilings are the wire range. The
+/// authored request count is a format bound. A run's resident ceiling comes from its step's
+/// resource declaration (`for_step`); stored and transferred bytes are admitted against the
+/// output plan by the object inventory.
 impl Default for ObservationLimits {
     fn default() -> Self {
+        let wire = crate::contracts::canonical_digest::WIRE_BOUND;
         Self {
             maximum_observations: 4096,
-            maximum_selected_entities: 100_000_000,
-            maximum_values: 400_000_000,
-            maximum_operation_count: 10_000_000_000,
-            maximum_peak_resident_bytes: 32 * 1024 * 1024 * 1024,
-            maximum_stored_bytes: 32 * 1024 * 1024 * 1024,
-            maximum_transfer_bytes: 32 * 1024 * 1024 * 1024,
+            maximum_selected_entities: wire,
+            maximum_values: wire,
+            maximum_operation_count: wire as u64,
+            maximum_peak_resident_bytes: wire as u64,
+            maximum_stored_bytes: wire as u64,
+            maximum_transfer_bytes: wire as u64,
+        }
+    }
+}
+
+impl ObservationLimits {
+    /// Limits for one step: the authored resident ceiling, when declared, bounds the peak
+    /// resident bytes of observation resolution and evaluation.
+    pub fn for_step(step: &runmat_analysis_core::ProcedureStep) -> Self {
+        let defaults = Self::default();
+        Self {
+            maximum_peak_resident_bytes: step
+                .accuracy
+                .resources
+                .maximum_resident_bytes
+                .unwrap_or(defaults.maximum_peak_resident_bytes),
+            ..defaults
         }
     }
 }
@@ -196,19 +220,20 @@ pub struct ResolvedObservationPlanContents {
 
 impl ResolvedObservationPlanContents {
     pub fn derive_identity(&self) -> Result<ResolvedObservationPlanIdentity, ObservationError> {
-        let bytes = encode_contract(
-            OBSERVATION_PREFIX,
-            "resolved-observation-plan",
-            &(
-                self.schema_version,
-                self.topology_digest,
-                &self.step_id,
-                &self.independent_domain,
-                &self.observations,
-            ),
-            OBSERVATION_LIMITS,
-        )?;
-        Ok(ResolvedObservationPlanIdentity(Digest::sha256(bytes)))
+        Ok(ResolvedObservationPlanIdentity(
+            crate::contracts::canonical_digest::canonical_contract_digest(
+                OBSERVATION_PREFIX,
+                "resolved-observation-plan",
+                &(
+                    self.schema_version,
+                    self.topology_digest,
+                    &self.step_id,
+                    &self.independent_domain,
+                    &self.observations,
+                ),
+                OBSERVATION_LIMITS,
+            )?,
+        ))
     }
 
     fn validate(&self) -> Result<(), ObservationError> {

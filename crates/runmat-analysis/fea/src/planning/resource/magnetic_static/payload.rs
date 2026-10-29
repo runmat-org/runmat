@@ -1,67 +1,45 @@
 //! Borrowed wire-shape projection. Repeated slots serialize without allocating
 //! field arrays; codec-wide numeric bounds cover every retained SI value.
 use super::*;
-use crate::physics::magnetic::MagneticFieldSample;
-use crate::results::field::VolumeFieldSamplingRule;
-use runmat_meshing_core::StableDigest;
-use serde::{Serialize, Serializer};
+use crate::results::field::{RepeatedShape, SampledTopologyShape, VolumeFieldSamplingRule};
+use runmat_types::physical::{kind, Quantity};
+use serde::Serialize;
 
-struct Repeated<'a, T> {
-    value: &'a T,
-    count: usize,
-}
-impl<T: Serialize> Serialize for Repeated<'_, T> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.collect_seq(std::iter::repeat_n(self.value, self.count))
-    }
-}
+/// Retained response: per-sample A and B (three each), per-element mean B and permeability,
+/// and one circulation per planned edge slot. Mirrors `MagnetostaticResponse` field order.
 #[derive(Serialize)]
-struct SamplingData<'a> {
-    schema_version: u16,
-    mesh_digest: StableDigest,
-    projection_digest: Digest,
-    rule: VolumeFieldSamplingRule,
-    node_identities: Repeated<'a, StableDigest>,
-    element_identities: Repeated<'a, StableDigest>,
-    element_corner_identities: Repeated<'a, [StableDigest; 4]>,
-    oriented_edges: Repeated<'a, crate::results::field::SampledOrientedEdge>,
-    integration_samples: Repeated<'a, crate::results::field::VolumeFieldIntegrationSample>,
-}
-#[derive(Serialize)]
-struct Sampling<'a> {
-    data: SamplingData<'a>,
-    sampling_digest: Digest,
-}
-#[derive(Serialize)]
-struct Response<'a> {
-    edge_node_identities: Repeated<'a, [StableDigest; 2]>,
+struct Response {
     #[serde(with = "runmat_types::physical::canonical_storage")]
-    edge_circulations_wb: runmat_types::physical::Quantity<
-        runmat_types::physical::kind::MagneticFlux,
-        Repeated<'a, f64>,
-    >,
-    samples: Repeated<'a, MagneticFieldSample>,
+    edge_circulations_wb: Quantity<kind::MagneticFlux, RepeatedShape<f64>>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
-    magnetic_energy_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
+    element_flux_density_t: Quantity<kind::MagneticFluxDensity, RepeatedShape<f64>>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
-    source_work_j: runmat_types::physical::Quantity<runmat_types::physical::kind::Energy, f64>,
-    relative_physical_residual: f64,
-    relative_gauge_residual: f64,
-    relative_energy_work_error: f64,
+    element_permeability_h_per_m: Quantity<kind::MagneticPermeability, RepeatedShape<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    flux_density_t: Quantity<kind::MagneticFluxDensity, RepeatedShape<f64>>,
     iterations: u32,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    magnetic_energy_j: Quantity<kind::Energy, f64>,
+    relative_energy_work_error: f64,
+    relative_gauge_residual: f64,
+    relative_physical_residual: f64,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    source_work_j: Quantity<kind::Energy, f64>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    vector_potential_wb_per_m: Quantity<kind::MagneticVectorPotential, RepeatedShape<f64>>,
 }
 #[derive(Serialize)]
 struct ResultProjection<'a> {
-    source_workload: crate::execution::AnalysisWorkloadIdentity,
-    producer: crate::execution::StepIdentity,
+    element_order: runmat_meshing_core::ElementOrder,
     formulation: crate::admission::AnalysisRunIdentity,
     mesh_digest: Digest,
+    producer: crate::execution::StepIdentity,
     projection_digest: Digest,
-    sampling_topology: Sampling<'a>,
     publication_declarations: Vec<&'a runmat_analysis_core::StateOutput>,
-    element_order: runmat_meshing_core::ElementOrder,
     relative_residual_target: f64,
-    response: Response<'a>,
+    response: Response,
+    sampling_topology: SampledTopologyShape,
+    source_workload: crate::execution::AnalysisWorkloadIdentity,
 }
 pub(super) fn profile(
     workload: &MagnetostaticWorkload,
@@ -71,77 +49,24 @@ pub(super) fn profile(
     let edges = elements
         .checked_mul(6)
         .ok_or(ResourcePlanningError::Overflow("magnetic edge slots"))?;
-    let samples = elements
-        .checked_mul(15)
+    let components = elements
+        .checked_mul(crate::physics::magnetic::MAGNETIC_SAMPLES_PER_ELEMENT * 3)
         .ok_or(ResourcePlanningError::Overflow("magnetic sample slots"))?;
-    let stable = StableDigest::from_bytes([0; 32]);
-    let digest = Digest::from_bytes([0; 32]);
-    let pair = [stable; 2];
-    let corners = [stable; 4];
-    let scalar = 0.0;
-    let edge = crate::results::field::SampledOrientedEdge {
-        identity: stable,
-        node_identities: pair,
-    };
-    let sample = crate::results::field::VolumeFieldIntegrationSample {
-        identity: stable,
-        element_identity: stable,
-        ordinal: 0,
-        position_m: [0.0; 3],
-        volume_weight_m3: 0.0,
-    };
-    let physical = MagneticFieldSample {
-        element_identity: stable,
-        position_m: [0.0; 3],
-        volume_weight_m3: 0.0,
-        vector_potential_wb_per_m: runmat_types::physical::Quantity::<
-            runmat_types::physical::kind::MagneticVectorPotential,
-            _,
-        >::new([0.0; 3]),
-        flux_density_t: runmat_types::physical::Quantity::<
-            runmat_types::physical::kind::MagneticFluxDensity,
-            _,
-        >::new([0.0; 3]),
-        magnetic_field_a_per_m: runmat_types::physical::Quantity::<
-            runmat_types::physical::kind::MagneticFieldIntensity,
-            _,
-        >::new([0.0; 3]),
-    };
+    let element_components = elements
+        .checked_mul(3)
+        .ok_or(ResourcePlanningError::Overflow("magnetic element slots"))?;
+    let digest = Digest::from_bytes([0xff; 32]);
     let value = ResultProjection {
         source_workload: workload.identity().map_err(invalid)?,
         producer: workload.producer_identity().map_err(invalid)?,
         formulation: workload.formulation(mesh).map_err(invalid)?,
         mesh_digest: digest,
         projection_digest: digest,
-        sampling_topology: Sampling {
-            sampling_digest: digest,
-            data: SamplingData {
-                schema_version: 1,
-                mesh_digest: stable,
-                projection_digest: digest,
-                rule: VolumeFieldSamplingRule::TetrahedronKeastFifteen,
-                node_identities: Repeated {
-                    value: &stable,
-                    count: mesh.topology.nodes.len(),
-                },
-                element_identities: Repeated {
-                    value: &stable,
-                    count: elements,
-                },
-                element_corner_identities: Repeated {
-                    value: &corners,
-                    count: elements,
-                },
-                oriented_edges: Repeated {
-                    value: &edge,
-                    count: edges,
-                },
-                integration_samples: Repeated {
-                    value: &sample,
-                    count: samples,
-                },
-            },
-        },
+        sampling_topology: SampledTopologyShape::new(
+            mesh.topology.nodes.len(),
+            elements,
+            VolumeFieldSamplingRule::TetrahedronKeastFifteen,
+        ),
         publication_declarations: workload.model.sequence.steps[0]
             .state_outputs
             .iter()
@@ -150,42 +75,18 @@ pub(super) fn profile(
         element_order: mesh.resolved_request.element_order,
         relative_residual_target: workload.relative_residual_target,
         response: Response {
-            edge_node_identities: Repeated {
-                value: &pair,
-                count: edges,
-            },
-            edge_circulations_wb: runmat_types::physical::Quantity::<
-                runmat_types::physical::kind::MagneticFlux,
-                _,
-            >::new(Repeated {
-                value: &scalar,
-                count: edges,
-            }),
-            samples: Repeated {
-                value: &physical,
-                count: samples,
-            },
-            magnetic_energy_j: runmat_types::physical::Quantity::<
-                runmat_types::physical::kind::Energy,
-                _,
-            >::new(0.0),
-            source_work_j: runmat_types::physical::Quantity::<
-                runmat_types::physical::kind::Energy,
-                _,
-            >::new(0.0),
-            relative_physical_residual: 0.0,
-            relative_gauge_residual: 0.0,
-            relative_energy_work_error: 0.0,
+            edge_circulations_wb: Quantity::new(RepeatedShape::new(0.0, edges)),
+            element_flux_density_t: Quantity::new(RepeatedShape::new(0.0, element_components)),
+            element_permeability_h_per_m: Quantity::new(RepeatedShape::new(0.0, elements)),
+            flux_density_t: Quantity::new(RepeatedShape::new(0.0, components)),
             iterations: 0,
+            magnetic_energy_j: Quantity::new(0.0),
+            relative_energy_work_error: 0.0,
+            relative_gauge_residual: 0.0,
+            relative_physical_residual: 0.0,
+            source_work_j: Quantity::new(0.0),
+            vector_potential_wb_per_m: Quantity::new(RepeatedShape::new(0.0, components)),
         },
     };
     runmat_canonical_codec::profile_serialized_shape(&value, LIMITS).map_err(invalid)
-}
-
-impl<T: runmat_types::physical::QuantityStorage> runmat_types::physical::QuantityStorage
-    for Repeated<'_, T>
-{
-    fn all_finite(&self) -> bool {
-        self.value.all_finite()
-    }
 }

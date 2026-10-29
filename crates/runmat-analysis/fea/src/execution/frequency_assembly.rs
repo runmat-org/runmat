@@ -14,7 +14,7 @@ use super::{
 
 const FREQUENCY_ASSEMBLY_PREFIX: &[u8] = b"runmat-structural-frequency-assembly/v1\0";
 const FREQUENCY_ASSEMBLY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

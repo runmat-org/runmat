@@ -17,6 +17,7 @@ runmat-fea-syntax = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

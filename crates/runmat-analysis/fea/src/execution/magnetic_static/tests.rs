@@ -42,7 +42,7 @@ fn magnetic_portable_source_bound_cold_result_preserves_both_orders_and_signs() 
                     .unwrap();
             assert_eq!(cold.source_result_identity().unwrap(), identity);
             assert_eq!(
-                cold.response().samples.len(),
+                cold.response().sample_count(),
                 mesh.topology.volume_elements.len() * 15
             );
             assert!(cold.response().relative_energy_work_error < 1.6e-9);
@@ -76,9 +76,12 @@ fn magnetic_cold_import_rejects_lineage_inventory_fields_and_integral_substituti
         .relative_permeability = runmat_types::physical::RelativePermeability::new(2.0);
     assert!(r.validate_for(&material, &mesh).is_err());
     assert!(r.validate_for(&w, &slab_mesh(1)).is_err());
-    for mutation in 0..8 {
+    for mutation in 0..12 {
         let mut value = serde_json::to_value(&r).unwrap();
         let response = &mut value["response"];
+        let scale = |v: &mut serde_json::Value, factor: f64| {
+            *v = serde_json::json!(v.as_f64().unwrap() * factor + 1e-3);
+        };
         match mutation {
             0 => {
                 response["edge_circulations_wb"]
@@ -87,10 +90,10 @@ fn magnetic_cold_import_rejects_lineage_inventory_fields_and_integral_substituti
                     .pop();
             }
             1 => {
-                response["samples"].as_array_mut().unwrap().pop();
+                response["flux_density_t"].as_array_mut().unwrap().pop();
             }
             2 => {
-                response["samples"][0]["volume_weight_m3"] = serde_json::json!(-1.0);
+                response["element_permeability_h_per_m"][0] = serde_json::json!(-1.0);
             }
             3 => {
                 response["magnetic_energy_j"] = serde_json::json!(123.0);
@@ -98,14 +101,22 @@ fn magnetic_cold_import_rejects_lineage_inventory_fields_and_integral_substituti
             4 => {
                 response["relative_physical_residual"] = serde_json::json!(1.0);
             }
-            5 => {
-                response["edge_node_identities"]
+            // Constitutive-law substitution: H would be derived with a foreign permeability.
+            5 => scale(&mut response["element_permeability_h_per_m"][0], 2.0),
+            6 => scale(&mut response["flux_density_t"][0], 2.0),
+            // A is constrained by the source work: perturb the driven (z) component.
+            7 => scale(&mut response["vector_potential_wb_per_m"][2], 2.0),
+            8 => scale(&mut response["element_flux_density_t"][0], 2.0),
+            // Foreign layouts: a tampered or permuted sampled topology.
+            9 => {
+                value["sampling_topology"]["data"]["element_corner_nodes"][0]
                     .as_array_mut()
                     .unwrap()
                     .swap(0, 1);
             }
-            6 => {
-                response["samples"][0]["flux_density_t"][0] = serde_json::json!(123.0);
+            10 => {
+                value["sampling_topology"]["data"]["rule"] =
+                    serde_json::json!("tetrahedron_four_point");
             }
             _ => {
                 value["relative_residual_target"] = serde_json::json!(0.0);
@@ -156,4 +167,61 @@ fn magnetic_workload_rejects_unsupported_policy_and_resource_ceiling_before_proj
         [0.0, 0.0, 2.0].map(ElectricCurrentDensity::new),
     ));
     assert!(nonglobal.execute(&slab_mesh(2)).is_err());
+}
+
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ magnetostatic/tet4|tet10/public_study; coverage: partial; boundary: The compact retained result (values per (element, rule point), layout identities once, geometry from the mesh) round-trips byte-exactly, stays within its planned wire bound and keeps only A and B per sample.
+#[test]
+fn magnetic_compact_retained_result_round_trips_within_its_planned_wire() {
+    for (order, mesh) in [
+        (ElementOrder::Tet4, slab_mesh(3)),
+        (ElementOrder::Tet10, quadratic_slab_mesh(2)),
+    ] {
+        let w = workload(2.0);
+        let r = w.execute(&mesh).unwrap();
+        let bytes = r.canonical_bytes().unwrap();
+        let reopened = MagnetostaticSolverResult::from_canonical_bytes_for(
+            &bytes,
+            Digest::sha256(&bytes),
+            &w,
+            &mesh,
+        )
+        .unwrap();
+        assert_eq!(reopened, r);
+        assert_eq!(reopened.canonical_bytes().unwrap(), bytes);
+        assert_eq!(r.payload_digest().unwrap(), Digest::sha256(&bytes));
+        let planned =
+            crate::planning::resource::magnetostatic_result_payload_bytes_upper_bound(&w, &mesh)
+                .unwrap();
+        assert!(
+            bytes.len() as u64 <= planned,
+            "{order:?}: {} > {planned}",
+            bytes.len()
+        );
+        // Geometry and identities are derived: samples materialize from the mesh exactly as
+        // the solver integrated them.
+        let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+        let samples = r.response().samples(&projection).unwrap();
+        let topology_samples = r
+            .sampling_topology()
+            .integration_samples_for(&mesh)
+            .unwrap();
+        assert_eq!(samples.len(), topology_samples.len());
+        for (sample, layout) in samples.iter().zip(&topology_samples) {
+            assert_eq!(sample.position_m, layout.position_m);
+            assert_eq!(sample.volume_weight_m3, layout.volume_weight_m3);
+            assert_eq!(sample.element_identity, layout.element_identity);
+        }
+        // Per-sample wire is the six A/B components; everything else is per element, node or
+        // edge.
+        let elements = mesh.topology.volume_elements.len();
+        let per_sample = bytes
+            .len()
+            .saturating_sub(128 * elements + 96 * mesh.topology.nodes.len() + 8192)
+            as f64
+            / r.response().sample_count() as f64;
+        assert!(
+            per_sample <= 6.0 * 9.0,
+            "{order:?}: {per_sample} B per sample"
+        );
+    }
 }

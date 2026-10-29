@@ -123,6 +123,7 @@ pub(super) fn execute(
             &compilation,
             invocation.inputs,
             invocation.host.output_policy,
+            crate::analysis_kernel::admitted_local_execution(&resource_plan)?,
         )?;
     if resource_plan != expected_resource_plan {
         return Err(AnalysisBridgeError::Identity(

@@ -31,7 +31,6 @@ impl ContactPreparationDemand {
             || interfaces.len() != controls.len()
             || node_rows.len() != projection.nodes.len()
             || dof_count == 0
-            || policy.maximum_identity_bytes == 0
         {
             return Err(ContactOperatorError::Invalid);
         }

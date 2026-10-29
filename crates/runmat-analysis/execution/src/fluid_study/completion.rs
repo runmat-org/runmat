@@ -86,38 +86,24 @@ impl CompletedFluidStudy {
 
     /// Original validated preparation, retained for durable artifact packaging.
     pub fn preparation(&self) -> AnalysisBridgeResult<FluidStudyPreparation> {
-        self.compiled
-            .validate_against(&self.replay.mesh)
-            .map_err(|error| invalid(error.to_string()))?;
+        let preparation = self.assemble_preparation();
+        // The sealed product binds its compiled study and workload to the mesh it was
+        // planned on; authenticate the retained mesh and that binding.
+        let preparation = PlannedFluidStudyPreparation::verify(preparation)?.into_preparation();
         self.result.numerical_receipt.validate_against(
-            &self.workload,
+            self.product.workload(),
             &self.result.result,
             &self.replay.mesh,
         )?;
-        let workload =
-            plan_fluid_study_product(self.compiled.clone(), &self.replay.mesh, self.replay.policy)
-                .map_err(|error| invalid(error.to_string()))?
-                .workload;
-        if workload != self.workload {
-            return Err(invalid(
-                "completed fluid workload differs from authored plan",
-            ));
-        }
-        Ok(self.assemble_preparation(workload))
+        Ok(preparation)
     }
 
     /// The preparation from this study's retained parts, without validating them.
-    pub(super) fn assemble_preparation(
-        &self,
-        workload: runmat_analysis_fea::execution::FluidSteadyWorkload,
-    ) -> FluidStudyPreparation {
+    pub(super) fn assemble_preparation(&self) -> FluidStudyPreparation {
         FluidStudyPreparation {
             local_execution: self.replay.local_execution,
             policy: self.replay.policy,
-            product: FluidStudyProduct {
-                compiled: self.compiled.clone(),
-                workload,
-            },
+            product: self.product.clone(),
             mesh: self.replay.mesh.clone(),
             frozen_project_digest: self.replay.frozen_project_digest,
             artifact_access: self.replay.artifact_access.clone(),

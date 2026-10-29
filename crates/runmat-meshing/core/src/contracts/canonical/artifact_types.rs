@@ -180,5 +180,6 @@ pub struct SolverMeshArtifact {
     pub root_stage_manifest_digest: StableDigest,
     pub geometry: GeometryRevisionRef,
     pub resolved_request: MeshingRequest,
-    pub topology: SolverMeshTopology,
+    /// Shared copy-on-write topology carrying this artifact's admitted identity.
+    pub topology: super::SharedSolverMeshTopology,
 }

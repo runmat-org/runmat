@@ -111,8 +111,8 @@ fn assert_signed_release_digest_and_signature_match_the_server_cross_host_golden
         publisher_name: "release workflow".into(),
         public_key: STANDARD_NO_PAD.encode(signing_key.verifying_key().as_bytes()),
         key_fingerprint: format!(
-            "sha256:{:x}",
-            sha2::Sha256::digest(signing_key.verifying_key().as_bytes())
+            "sha256:{}",
+            hex::encode(sha2::Sha256::digest(signing_key.verifying_key().as_bytes())),
         ),
         payload_digest: format!("sha256:{}", "4".repeat(64)),
         sequence: 42,

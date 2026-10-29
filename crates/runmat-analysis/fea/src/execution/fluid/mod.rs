@@ -30,7 +30,7 @@ pub use transient_workload::{
     FluidTransientSolverResult, FluidTransientWorkload, PreparedFluidTransient,
 };
 
-pub use result::{FluidRetainedOriginal, FluidSteadySolverResult};
+pub use result::{FluidResultOnSource, FluidRetainedOriginal, FluidSteadySolverResult};
 pub use workload::{FluidCoupling, FluidSteadyWorkload};
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult};

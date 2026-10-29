@@ -51,6 +51,7 @@ pub(super) fn execute(
                 &request,
                 invocation.inputs,
                 invocation.output_policy,
+                crate::analysis_kernel::admitted_local_execution(&plan)?,
             )?
     {
         return Err(invalid(

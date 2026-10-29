@@ -165,7 +165,6 @@ impl Fixture {
             maximum_coordinates: 20000,
             maximum_patches_per_trial: 100000,
             maximum_refinement_evaluations_per_trial: 100000,
-            maximum_identity_bytes: 1000000,
             maximum_preparation_resident_bytes: 100_000_000,
             maximum_preparation_scalar_operations: 100_000_000,
         }

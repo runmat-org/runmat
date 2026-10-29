@@ -1951,6 +1951,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
     .unwrap();
     assert_eq!(prepared.program.request.requested_outputs, 1);
@@ -2895,6 +2896,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })
         .is_err()
     );

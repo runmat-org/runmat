@@ -3,9 +3,12 @@
 //! This is an execution-local view of a freshly assembled, admitted summary, not portable
 //! authority. It retains no operator/mesh/profile copies. Mixed, explicit, synthetic,
 //! connector and coupled assemblies deliberately keep the original full-assembly path.
-//! The one-time property recompile authenticates its topology/material identity; sampled
-//! projection and constraint validation remain live. Existing prescribed-motion lifting stays
-//! in the transient pipeline. This changes assembly work, not integration or physics gates.
+//! The one-time property recompile authenticates its topology/material identity. The
+//! constraint plan, node space and analysis projection are pure functions of the borrowed
+//! model and mesh, so they are compiled and validated once here; every time sample lowers its
+//! realized sources on them and still checks that the lowered constraints equal the initial
+//! assembly's. Existing prescribed-motion lifting stays in the transient pipeline. This
+//! changes assembly work, not integration or physics gates.
 
 use super::*;
 use crate::excitation::{realize_step_excitations, ExcitationSamplePoint};
@@ -20,6 +23,10 @@ pub(crate) struct PreparedStructuralTransientBasis<'a> {
     step: &'a ProcedureStep,
     mesh: &'a SolverMeshArtifact,
     initial: &'a AssemblySummary,
+    /// Compiled and validated once: a pure function of the borrowed model and mesh.
+    constraint_plan: CanonicalStructuralConstraintPlan,
+    /// Node space and analysis projection of the borrowed mesh, derived once.
+    domain: forcing::SolidLoadDomain,
 }
 
 impl<'a> PreparedStructuralTransientBasis<'a> {
@@ -66,11 +73,18 @@ impl<'a> PreparedStructuralTransientBasis<'a> {
                 "prepared transient properties or mesh differ from initial assembly".into(),
             ));
         }
+        let constraint_plan = CanonicalStructuralConstraintPlan::compile(model, mesh)
+            .map_err(LinearAssemblyError::ConstraintPlan)?;
+        constraint_plan
+            .validate_against(model, mesh)
+            .map_err(LinearAssemblyError::ConstraintPlan)?;
         Ok(Some(Self {
             model,
             step,
             mesh,
             initial,
+            constraint_plan,
+            domain: forcing::SolidLoadDomain::derive(mesh)?,
         }))
     }
 
@@ -86,17 +100,15 @@ impl<'a> PreparedStructuralTransientBasis<'a> {
             StructuralProjectionBasis::CanonicalSolid,
         )
         .map_err(LinearAssemblyError::Structural)?;
-        // Revalidate sampled sources and constraints with the original lowering. This does not
-        // compile properties, recover elements, or assemble any K/M/C contributions.
-        let plan = CanonicalStructuralConstraintPlan::compile(self.model, self.mesh)
-            .map_err(LinearAssemblyError::ConstraintPlan)?;
-        plan.validate_against(self.model, self.mesh)
-            .map_err(LinearAssemblyError::ConstraintPlan)?;
+        // Lower the sampled sources with the original lowering on the constraint plan and
+        // spatial domain compiled once for these immutable inputs. This does not compile
+        // properties, recover elements, or assemble any K/M/C contributions.
         let forcing = forcing::lower(
             &excitations,
             self.mesh,
-            &plan,
+            &self.constraint_plan,
             &self.initial.structural_dof_layout,
+            &self.domain,
         )?;
         if forcing.constrained != self.initial.operator.constrained_dofs()
             || forcing.constraint_matrix != self.initial.constraint_matrix

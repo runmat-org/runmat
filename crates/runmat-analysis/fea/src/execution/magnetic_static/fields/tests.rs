@@ -88,6 +88,30 @@ fn magnetic_detached_native_fields_copy_exact_signed_edges_and_fifteen_point_vec
                 request.plan.requirements[1].output_location,
                 FieldLocation::IntegrationPoint
             );
+            // Element means and H come from the retained B, the mesh weights and the element
+            // permeability, exactly as the per-sample values they summarize.
+            let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+            let samples = retained.response().samples(&projection).unwrap();
+            let element_flux = fields.fields()[4].storage().as_host_f64().unwrap();
+            let intensity = fields.fields()[3].storage().as_host_f64().unwrap();
+            for (element, group) in samples.chunks(15).enumerate() {
+                let volume: f64 = group.iter().map(|s| s.volume_weight_m3).sum();
+                for axis in 0..3 {
+                    let mean: f64 = group
+                        .iter()
+                        .map(|s| {
+                            s.flux_density_t.canonical_value()[axis] * s.volume_weight_m3 / volume
+                        })
+                        .sum();
+                    assert_eq!(element_flux[3 * element + axis], mean);
+                }
+            }
+            for (index, sample) in samples.iter().enumerate() {
+                assert_eq!(
+                    &intensity[3 * index..3 * index + 3],
+                    &sample.magnetic_field_a_per_m.canonical_value()[..]
+                );
+            }
             let wire = fields.canonical_bytes().unwrap();
             assert_eq!(
                 fields,
@@ -123,7 +147,7 @@ fn magnetic_native_fields_reject_wrong_sampling_source_and_edge_vector_relabelin
         .unwrap();
     assert!(result.recover_native_fields_from_result(&foreign).is_err());
     let mut wire = serde_json::to_value(&result).unwrap();
-    wire["response"]["samples"][0]["flux_density_t"] = serde_json::json!([]);
+    wire["response"]["flux_density_t"] = serde_json::json!([]);
     assert!(serde_json::from_value::<MagnetostaticSolverResult>(wire).is_err());
     let mut wire = serde_json::to_value(&result).unwrap();
     wire["response"]["edge_circulations_wb"] = serde_json::json!([]);

@@ -15,9 +15,10 @@ use super::solver_mesh::canonical_tetrahedron_solver_mesh;
 /// Four conforming Tet4 children formed by splitting the canonical tetrahedron at its centroid.
 pub fn connected_tetrahedron_solver_mesh() -> SolverMeshArtifact {
     let mut artifact = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let parent = artifact.topology.volume_elements[0].clone();
+    let topo = &mut *artifact.topology;
+    let parent = topo.volume_elements[0].clone();
     let centroid_id = 5;
-    artifact.topology.nodes.push(SolverMeshNode {
+    topo.nodes.push(SolverMeshNode {
         node_id: centroid_id,
         stable_identity: StableDigest::from_bytes([42; 32]),
         coordinates_m:
@@ -28,7 +29,7 @@ pub fn connected_tetrahedron_solver_mesh() -> SolverMeshArtifact {
         exact_parameters: Vec::new(),
     });
     let children = [[5, 2, 3, 4], [1, 5, 3, 4], [1, 2, 5, 4], [1, 2, 3, 5]];
-    artifact.topology.volume_elements = children
+    topo.volume_elements = children
         .into_iter()
         .enumerate()
         .map(|(index, node_ids)| {
@@ -37,23 +38,21 @@ pub fn connected_tetrahedron_solver_mesh() -> SolverMeshArtifact {
             child.node_ids = node_ids.to_vec();
             child.stable_identity = solver_volume_element_identity(
                 node_ids
-                    .map(|node_id| artifact.topology.nodes[node_id as usize - 1].stable_identity),
+                    .map(|node_id| topo.nodes[node_id as usize - 1].stable_identity),
             );
             child
         })
         .collect();
-    for face in &mut artifact.topology.boundary_faces {
+    for face in &mut topo.boundary_faces {
         let corners = &face.node_ids[..3];
-        face.adjacent_volume_element_ids = artifact
-            .topology
+        face.adjacent_volume_element_ids = topo
             .volume_elements
             .iter()
             .filter(|element| corners.iter().all(|node| element.node_ids.contains(node)))
             .map(|element| element.element_id)
             .collect();
     }
-    artifact.topology.neighbors = artifact
-        .topology
+    topo.neighbors = topo
         .volume_elements
         .iter()
         .flat_map(|element| {
@@ -68,8 +67,7 @@ pub fn connected_tetrahedron_solver_mesh() -> SolverMeshArtifact {
                 MeshNeighbor {
                     element_id: element.element_id,
                     local_face_index: local_face_index as u8,
-                    adjacent_element_id: artifact
-                        .topology
+                    adjacent_element_id: topo
                         .volume_elements
                         .iter()
                         .find(|other| {
@@ -81,8 +79,8 @@ pub fn connected_tetrahedron_solver_mesh() -> SolverMeshArtifact {
             })
         })
         .collect();
-    artifact.topology.regions[0].element_ids = (1..=4).collect();
-    for topology in &mut artifact.topology.field_topologies {
+    topo.regions[0].element_ids = (1..=4).collect();
+    for topology in &mut topo.field_topologies {
         match topology.location {
             FieldTopologyLocation::Node => topology.ordered_entity_ids.push(centroid_id),
             FieldTopologyLocation::VolumeElement => {
@@ -105,16 +103,16 @@ pub fn connected_quadratic_tetrahedron_solver_mesh() -> SolverMeshArtifact {
 /// Elevate a refined canonical connected-Tet4 fixture, retaining its exterior
 /// four source faces and their unit-tetrahedron parameter charts.
 pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> SolverMeshArtifact {
+    let topo = &mut *artifact.topology;
     assert_eq!(artifact.resolved_request.element_order, ElementOrder::Tet4);
-    assert_eq!(artifact.topology.boundary_faces.len(), 4);
-    assert!(artifact
-        .topology
+    assert_eq!(topo.boundary_faces.len(), 4);
+    assert!(topo
         .volume_elements
         .iter()
         .all(|element| element.order == ElementOrder::Tet4));
     let mut source_faces_by_edge: BTreeMap<[u64; 2], Vec<(usize, PersistentEntityId)>> =
         BTreeMap::new();
-    for (face_index, face) in artifact.topology.boundary_faces.iter().enumerate() {
+    for (face_index, face) in topo.boundary_faces.iter().enumerate() {
         for local_edge in [[0, 1], [1, 2], [2, 0]] {
             let mut edge = [face.node_ids[local_edge[0]], face.node_ids[local_edge[1]]];
             edge.sort_unstable();
@@ -131,9 +129,9 @@ pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> Solve
         source_faces.dedup();
     }
 
-    let solid = artifact.topology.volume_elements[0].provenance[0].clone();
+    let solid = topo.volume_elements[0].provenance[0].clone();
     let mut midpoint_by_edge = BTreeMap::new();
-    for element in &artifact.topology.volume_elements {
+    for element in &topo.volume_elements {
         for local_edge in TETRAHEDRON_MIDSIDE_EDGE_CORNERS {
             let mut edge = [
                 element.node_ids[local_edge[0]],
@@ -143,7 +141,7 @@ pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> Solve
             if midpoint_by_edge.contains_key(&edge) {
                 continue;
             }
-            let endpoints = edge.map(|id| &artifact.topology.nodes[id as usize - 1]);
+            let endpoints = edge.map(|id| &topo.nodes[id as usize - 1]);
             let mut provenance = vec![solid.clone()];
             let mut exact_parameters = Vec::new();
             if let Some(source_faces) = source_faces_by_edge.get(&edge) {
@@ -170,8 +168,8 @@ pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> Solve
             provenance.sort();
             provenance.dedup();
             sort_solver_node_exact_parameters(&mut exact_parameters);
-            let node_id = artifact.topology.nodes.len() as u64 + 1;
-            artifact.topology.nodes.push(SolverMeshNode {
+            let node_id = topo.nodes.len() as u64 + 1;
+            topo.nodes.push(SolverMeshNode {
                 node_id,
                 stable_identity: solver_midside_node_identity(
                     endpoints.map(|node| node.stable_identity),
@@ -195,20 +193,20 @@ pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> Solve
         edge.sort_unstable();
         midpoint_by_edge[&edge]
     };
-    for element in &mut artifact.topology.volume_elements {
+    for element in &mut topo.volume_elements {
         let corners = element.node_ids.clone();
         element.node_ids.extend(
             TETRAHEDRON_MIDSIDE_EDGE_CORNERS.map(|[a, b]| midpoint(corners[a], corners[b])),
         );
         element.order = ElementOrder::Tet10;
     }
-    for face in &mut artifact.topology.boundary_faces {
+    for face in &mut topo.boundary_faces {
         let corners = face.node_ids.clone();
         face.node_ids
             .extend([[0, 1], [1, 2], [2, 0]].map(|[a, b]| midpoint(corners[a], corners[b])));
         face.order = BoundaryTriangleOrder::Tri6;
     }
-    for edge in &mut artifact.topology.boundary_edges {
+    for edge in &mut topo.boundary_edges {
         edge.node_ids
             .push(midpoint(edge.node_ids[0], edge.node_ids[1]));
         edge.order = BoundaryEdgeOrder::Line3;
@@ -218,10 +216,10 @@ pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> Solve
         .resolved_request
         .limits
         .maximum_nodes
-        .max(artifact.topology.nodes.len() as u64);
-    for topology in &mut artifact.topology.field_topologies {
+        .max(topo.nodes.len() as u64);
+    for topology in &mut topo.field_topologies {
         if topology.location == FieldTopologyLocation::Node {
-            topology.ordered_entity_ids = (1..=artifact.topology.nodes.len() as u64).collect();
+            topology.ordered_entity_ids = (1..=topo.nodes.len() as u64).collect();
         }
     }
     artifact.canonical_digest = StableDigest::ZERO;

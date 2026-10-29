@@ -2,7 +2,7 @@
 use super::*;
 use crate::execution::{AnalysisWorkloadIdentity, ThermalWorkload};
 use runmat_execution::Digest;
-use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+use runmat_meshing_core::SolverMeshArtifact;
 
 #[cfg(test)]
 mod tests;
@@ -50,7 +50,10 @@ pub fn build_thermal_resource_plan(
         .canonical_bytes()
         .map_err(|e| invalid(&e))?
         .len()
-        .checked_add(mesh.canonical_encode().map_err(|e| invalid(&e))?.len())
+        .checked_add(
+            usize::try_from(mesh.canonical_encoded_len().map_err(|e| invalid(&e))?)
+                .map_err(|_| ResourcePlanningError::Overflow("thermal input bytes"))?,
+        )
         .ok_or(ResourcePlanningError::Overflow("thermal input bytes"))?;
     let source_bytes = prepared
         .field_source

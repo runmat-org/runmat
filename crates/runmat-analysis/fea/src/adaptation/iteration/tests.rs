@@ -98,11 +98,12 @@ fn refine_fixture(
         .collect();
     target.topology.regions[0].element_ids =
         (1..=target.topology.volume_elements.len() as u64).collect();
-    for topology in &mut target.topology.field_topologies {
+    let topo = &mut *target.topology;
+    for topology in &mut topo.field_topologies {
         topology.ordered_entity_ids = match topology.location {
-            FieldTopologyLocation::Node => (1..=target.topology.nodes.len() as u64).collect(),
+            FieldTopologyLocation::Node => (1..=topo.nodes.len() as u64).collect(),
             FieldTopologyLocation::VolumeElement => {
-                (1..=target.topology.volume_elements.len() as u64).collect()
+                (1..=topo.volume_elements.len() as u64).collect()
             }
             FieldTopologyLocation::BoundaryFace | FieldTopologyLocation::BoundaryEdge => Vec::new(),
         };

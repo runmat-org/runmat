@@ -12,10 +12,62 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 /// Compiled definition and exact portable intent, not execution or production admission.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Sealed: only [`plan_fluid_study_product`] constructs it, after validating the compiled
+/// study against its mesh (canonical content and properties) and planning the workload under
+/// `planning`. Holding one is the proof of that planning, so a consumer that receives the
+/// product with its mesh compares the bound identities ([`Self::validate_planned_on`])
+/// instead of re-compiling properties and re-planning the study.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FluidStudyProduct {
-    pub compiled: CompiledAnalysisStudy,
-    pub workload: FluidSteadyWorkload,
+    compiled: CompiledAnalysisStudy,
+    workload: FluidSteadyWorkload,
+    planning: FluidStudyPlanningPolicy,
+}
+
+impl FluidStudyProduct {
+    pub fn compiled(&self) -> &CompiledAnalysisStudy {
+        &self.compiled
+    }
+
+    pub fn workload(&self) -> &FluidSteadyWorkload {
+        &self.workload
+    }
+
+    pub fn planning(&self) -> FluidStudyPlanningPolicy {
+        self.planning
+    }
+
+    /// Give up the seal; re-planning is the only way back.
+    pub fn into_compiled(self) -> CompiledAnalysisStudy {
+        self.compiled
+    }
+
+    /// Require that this product was planned on `mesh` under `planning`. The compiled study
+    /// is bound to the mesh's canonical digest, which [`plan_fluid_study_product`] checked
+    /// against the mesh content; the caller authenticates `mesh` itself.
+    pub fn validate_planned_on(
+        &self,
+        mesh: &SolverMeshArtifact,
+        planning: FluidStudyPlanningPolicy,
+    ) -> Result<(), FluidStudyProductError> {
+        self.validate_on_mesh(mesh)?;
+        if self.planning != planning {
+            return Err(FluidStudyProductError::PlannedElsewhere);
+        }
+        Ok(())
+    }
+
+    /// Require that this product was planned on `mesh`. Its workload carries the effective
+    /// (tightened) numerical and geometry controls the planning produced.
+    pub fn validate_on_mesh(&self, mesh: &SolverMeshArtifact) -> Result<(), FluidStudyProductError> {
+        if self.compiled.solver_mesh_digest != mesh.canonical_digest
+            || self.compiled.properties.identity.mesh_digest != Some(mesh.canonical_digest)
+        {
+            return Err(FluidStudyProductError::PlannedElsewhere);
+        }
+        Ok(())
+    }
 }
 
 pub struct FluidStudyProductInput<'a> {
@@ -56,7 +108,11 @@ pub fn plan_fluid_study_product(
     }
     derive_canonical_fluid_material(&compiled.model, mesh, &compiled.properties)?;
     let workload = plan_fluid_study(&compiled, planning)?;
-    Ok(FluidStudyProduct { compiled, workload })
+    Ok(FluidStudyProduct {
+        compiled,
+        workload,
+        planning,
+    })
 }
 
 #[derive(Debug, Error)]
@@ -69,4 +125,6 @@ pub enum FluidStudyProductError {
     Planning(#[from] FluidStudyPlanningError),
     #[error("authored portable steady fluid currently admits Tet4 only")]
     UnsupportedElementOrder,
+    #[error("fluid study product was planned on another mesh or under another policy")]
+    PlannedElsewhere,
 }

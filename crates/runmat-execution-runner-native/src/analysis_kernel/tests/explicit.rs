@@ -167,6 +167,7 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
     )
     .unwrap();

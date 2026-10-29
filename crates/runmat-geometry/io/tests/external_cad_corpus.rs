@@ -452,7 +452,7 @@ fn sandbox_bracket_samples_stay_inside_original_edge_domains() {
     let path = std::env::var("RUNMAT_CAD_BRACKET_STEP").expect("explicit external corpus path");
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(
-        format!("{:x}", Sha256::digest(&bytes)),
+        hex::encode(Sha256::digest(&bytes)),
         "723b72c4b36e7056f0d246fd528479f213d7073b1480e74fffcb7e78eb53ce3c"
     );
     let imported = import_exact_cad(

@@ -35,6 +35,8 @@ pub struct StructuralFieldRecoveryPreparation {
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 pub struct PreparedStructuralFieldRecovery {
@@ -43,6 +45,8 @@ pub struct PreparedStructuralFieldRecovery {
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: runmat_analysis_fea::planning::resource::FeaResourcePlan,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +68,7 @@ pub fn import_structural_recovered_fields(
             &prepared.request,
             &prepared.inputs,
             prepared.host.output_policy,
+            prepared.local_execution,
         )?
     {
         return Err(AnalysisBridgeError::Identity(

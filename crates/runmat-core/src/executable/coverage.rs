@@ -21,7 +21,7 @@ impl CoveragePlan {
         for site in &self.sites {
             frame(&mut digest, site.id.as_bytes());
         }
-        format!("sha256:{:x}", digest.finalize())
+        format!("sha256:{}", hex::encode(digest.finalize()))
     }
 
     #[cfg(test)]
@@ -328,7 +328,7 @@ fn stable_site_id(key: &SiteKey) -> (String, u64) {
             .try_into()
             .expect("SHA-256 digest contains eight key bytes"),
     );
-    (format!("sha256:{digest:x}"), counter_key)
+    (format!("sha256:{}", hex::encode(digest)), counter_key)
 }
 
 fn line_column(text: &str, byte: usize) -> (u32, u32) {

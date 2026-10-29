@@ -24,6 +24,8 @@ pub struct MaxwellFieldRecoveryPreparation {
     pub source_result: PreparedAnalysisObjects,
     pub program_revision: ProgramRevision,
     pub output_policy: AnalysisOutputPolicy,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 pub struct PreparedMaxwellFieldRecovery {
     pub request: FieldRecoveryRequest,
@@ -32,6 +34,8 @@ pub struct PreparedMaxwellFieldRecovery {
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,
     pub output_policy: AnalysisOutputPolicy,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 pub fn prepare_maxwell_field_recovery(
@@ -118,8 +122,12 @@ pub fn prepare_maxwell_field_recovery(
         p.output_policy.inventory_limits(),
     )?;
     let mut inputs = vec![request_objects, p.workload, p.mesh, p.source_result];
-    let resource_plan =
-        build_prepared_maxwell_field_recovery_resource_plan(&request, &inputs, p.output_policy)?;
+    let resource_plan = build_prepared_maxwell_field_recovery_resource_plan(
+        &request,
+        &inputs,
+        p.output_policy,
+        p.local_execution,
+    )?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),
@@ -163,6 +171,7 @@ pub fn prepare_maxwell_field_recovery(
         inputs,
         resource_plan,
         output_policy: p.output_policy,
+        local_execution: p.local_execution,
     })
 }
 
@@ -171,6 +180,7 @@ pub fn build_prepared_maxwell_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let kinds = [
         AnalysisNumericalObjectKind::FieldRecoveryRequest,
@@ -222,7 +232,13 @@ pub fn build_prepared_maxwell_field_recovery_resource_plan(
         ));
     }
     let workspace = maxwell_recovery_source_validation_workspace(&workload, &mesh)?;
-    build_maxwell_recovery_metadata_resource_plan(request, inputs, policy, workspace)
+    build_maxwell_recovery_metadata_resource_plan(
+        request,
+        inputs,
+        policy,
+        workspace,
+        local_execution,
+    )
 }
 
 /// Authenticate immutable closure profiles and output policy before domain decoding.
@@ -233,6 +249,7 @@ pub fn build_maxwell_recovery_metadata_resource_plan(
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
     source_validation_workspace: ByteCount,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let numerical = inputs
         .iter()
@@ -310,6 +327,7 @@ pub fn build_maxwell_recovery_metadata_resource_plan(
             output: projected_transport_output_resource_facts(&profile)?,
             output_set: projected_output_set_resource_facts(),
         },
+        local_execution,
     )?)
 }
 
@@ -396,6 +414,7 @@ pub fn import_maxwell_recovered_fields(
         &prepared.request,
         &prepared.inputs,
         prepared.output_policy,
+        prepared.local_execution,
     )?;
     if expected != prepared.resource_plan {
         return Err(invalid(

@@ -480,28 +480,98 @@ impl RealSparseMatrix {
         let Some((_, first)) = terms.first() else {
             return Self::diagonal(Vec::new(), role, properties);
         };
-        let mut assembler =
-            RealSparseAssembler::new(first.rows(), first.columns(), role, properties);
-        for (scale, matrix) in terms {
-            if matrix.rows() != first.rows() || matrix.columns() != first.columns() {
-                return Err(RealSparseMatrixError::ShapeMismatch);
-            }
+        let (rows, columns) = (first.rows(), first.columns());
+        if terms
+            .iter()
+            .any(|(_, matrix)| matrix.rows() != rows || matrix.columns() != columns)
+        {
+            return Err(RealSparseMatrixError::ShapeMismatch);
+        }
+        let mut contributions = Vec::new();
+        for (_, matrix) in terms {
             for contribution in matrix.contributions.iter() {
-                if !assembler.contributions.contains(contribution) {
-                    assembler.add_contribution(contribution.clone());
-                }
-            }
-            for row in 0..matrix.rows() {
-                for entry in matrix.pattern.row_range(row) {
-                    assembler.add(
-                        row,
-                        matrix.pattern.column(entry),
-                        *scale * matrix.values[entry],
-                    );
+                if !contributions.contains(contribution) {
+                    contributions.push(contribution.clone());
                 }
             }
         }
-        assembler.finish()
+        // Row-wise merge of the sorted term rows. Every entry accumulates its nonzero scaled
+        // contributions from zero in term order, and entries that sum to exactly zero are
+        // dropped: the same values and support as accumulating term by term into a discovered
+        // assembler, independent of the admitted thread count (rows are independent).
+        const ROWS_PER_TASK: usize = 2048;
+        let block_ids = (0..rows.div_ceil(ROWS_PER_TASK)).collect::<Vec<_>>();
+        let blocks = runmat_cpu_execution::ordered_map(
+            &block_ids,
+            |&block| -> Result<(Vec<u64>, Vec<u64>, Vec<f64>), RealSparseMatrixError> {
+                let range = block * ROWS_PER_TASK..((block + 1) * ROWS_PER_TASK).min(rows);
+                let mut lengths = Vec::with_capacity(range.len());
+                let mut row_columns = Vec::new();
+                let mut row_values = Vec::new();
+                let mut cursors = vec![0usize; terms.len()];
+                for row in range {
+                    let start = row_values.len();
+                    for (cursor, (_, matrix)) in cursors.iter_mut().zip(terms) {
+                        *cursor = matrix.pattern.row_range(row).start;
+                    }
+                    loop {
+                        // Smallest pending column across terms.
+                        let mut next = None::<usize>;
+                        for (cursor, (_, matrix)) in cursors.iter().zip(terms) {
+                            if *cursor < matrix.pattern.row_range(row).end {
+                                let column = matrix.pattern.column(*cursor);
+                                next = Some(next.map_or(column, |c: usize| c.min(column)));
+                            }
+                        }
+                        let Some(column) = next else { break };
+                        let mut sum = 0.0_f64;
+                        let mut touched = false;
+                        for (cursor, (scale, matrix)) in cursors.iter_mut().zip(terms) {
+                            let end = matrix.pattern.row_range(row).end;
+                            if *cursor < end && matrix.pattern.column(*cursor) == column {
+                                let value = *scale * matrix.values[*cursor];
+                                *cursor += 1;
+                                if !value.is_finite() {
+                                    return Err(RealSparseMatrixError::NonFiniteValue { entry: 0 });
+                                }
+                                if value != 0.0 {
+                                    sum += value;
+                                    touched = true;
+                                }
+                            }
+                        }
+                        if touched && sum != 0.0 {
+                            row_columns.push(
+                                u64::try_from(column)
+                                    .map_err(|_| SparsePatternError::DimensionOverflow)?,
+                            );
+                            row_values.push(sum);
+                        }
+                    }
+                    lengths.push((row_values.len() - start) as u64);
+                }
+                Ok((lengths, row_columns, row_values))
+            },
+        );
+        let mut offsets = reserve_payload(rows + 1)?;
+        offsets.push(0_u64);
+        let mut column_indices = Vec::new();
+        let mut values = Vec::new();
+        for block in blocks {
+            let (lengths, block_columns, block_values) = block?;
+            for length in lengths {
+                offsets.push(offsets.last().copied().unwrap_or(0) + length);
+            }
+            column_indices.extend_from_slice(&block_columns);
+            values.extend_from_slice(&block_values);
+        }
+        Self::try_new(
+            SparsePattern::try_new(rows as u64, columns as u64, offsets, column_indices)?,
+            values,
+            role,
+            properties,
+            contributions,
+        )
     }
 }
 mod assembler;

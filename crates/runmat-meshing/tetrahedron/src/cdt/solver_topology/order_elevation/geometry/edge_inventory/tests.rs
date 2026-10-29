@@ -56,7 +56,7 @@ fn borrowed_flat_owners_match_reference_and_release_every_admitted_buffer() {
     owners.sort();
     owners.dedup();
     for observations in [1, 64, 4096] {
-        let mut topology = base.topology.clone();
+        let mut topology = (*base.topology).clone();
         topology
             .volume_elements
             .resize(observations, topology.volume_elements[0].clone());

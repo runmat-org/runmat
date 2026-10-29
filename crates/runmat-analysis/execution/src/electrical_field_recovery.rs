@@ -28,6 +28,8 @@ pub struct ElectricalFieldRecoveryPreparation {
     pub source_result: PreparedAnalysisObjects,
     pub program_revision: ProgramRevision,
     pub output_policy: AnalysisOutputPolicy,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 }
 
 pub struct PreparedElectricalFieldRecovery {
@@ -37,6 +39,38 @@ pub struct PreparedElectricalFieldRecovery {
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,
     pub output_policy: AnalysisOutputPolicy,
+    /// The study's admitted local execution plan; sizes the recovery worker.
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    /// The retained source, decoded and validated once at preparation; import reuses it.
+    pub source: ElectricalRecoverySource,
+}
+
+/// Retained electrical static source (workload, mesh, result), decoded from its transported
+/// objects, authenticated and validated against each other exactly once. Sealed: only
+/// [`decode_electrical_recovery_source`] builds it.
+pub struct ElectricalRecoverySource {
+    workload: ElectricalStaticWorkload,
+    mesh: SolverMeshArtifact,
+    result: ElectricalStaticSolverResult,
+}
+
+impl ElectricalRecoverySource {
+    pub fn workload(&self) -> &ElectricalStaticWorkload {
+        &self.workload
+    }
+
+    pub fn mesh(&self) -> &SolverMeshArtifact {
+        &self.mesh
+    }
+
+    pub fn result(&self) -> &ElectricalStaticSolverResult {
+        &self.result
+    }
+
+    /// The native recovery request of a result already validated against its workload and mesh.
+    pub fn native_field_request(&self) -> AnalysisBridgeResult<FieldRecoveryRequest> {
+        Ok(self.result.native_field_request_from_result()?)
+    }
 }
 
 const SOURCE_KINDS: [AnalysisNumericalObjectKind; 4] = [
@@ -95,8 +129,8 @@ pub fn prepare_electrical_field_recovery(
             ));
         }
     }
-    let (workload, mesh, result) =
-        decode_electrical_recovery_source(&p.workload, &p.mesh, &p.source_result)?;
+    let source = decode_electrical_recovery_source(&p.workload, &p.mesh, &p.source_result)?;
+    let (workload, mesh, result) = (source.workload(), source.mesh(), source.result());
     let original_plan = p
         .source_host
         .workload
@@ -114,7 +148,7 @@ pub fn prepare_electrical_field_recovery(
     {
         return Err(invalid("source electrical execution lineage differs"));
     }
-    let request = result.native_field_request(&workload, &mesh)?;
+    let request = source.native_field_request()?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::FieldRecoveryRequest,
         request.identity().digest(),
@@ -124,8 +158,14 @@ pub fn prepare_electrical_field_recovery(
         p.output_policy.inventory_limits(),
     )?;
     let mut inputs = vec![request_objects, p.workload, p.mesh, p.source_result];
-    let resource_plan =
-        build_prepared_electrical_field_recovery_resource_plan(&request, &inputs, p.output_policy)?;
+    let resource_plan = electrical_field_recovery_resource_plan_on(
+        &request,
+        &inputs,
+        source.workload(),
+        source.mesh(),
+        p.output_policy,
+        p.local_execution,
+    )?;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),
@@ -154,6 +194,8 @@ pub fn prepare_electrical_field_recovery(
         inputs,
         resource_plan,
         output_policy: p.output_policy,
+        local_execution: p.local_execution,
+        source,
     })
 }
 
@@ -181,6 +223,39 @@ pub fn build_prepared_electrical_field_recovery_resource_plan(
     request: &FieldRecoveryRequest,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
+    let unique = |kind| {
+        inputs
+            .iter()
+            .find(|i| i.manifest.kind == kind)
+            .ok_or_else(|| invalid("missing electrical recovery input"))
+    };
+    // Workload and mesh only: the result is decoded after the plan is admitted.
+    let workload = ElectricalStaticWorkload::from_canonical_bytes(
+        &unique(AnalysisNumericalObjectKind::ElectricalStaticWorkload)?.payload(),
+    )?;
+    let mesh =
+        SolverMeshArtifact::canonical_decode(&unique(AnalysisNumericalObjectKind::Mesh)?.payload())
+            .map_err(invalid)?;
+    electrical_field_recovery_resource_plan_on(
+        request,
+        inputs,
+        &workload,
+        &mesh,
+        policy,
+        local_execution,
+    )
+}
+
+/// Resource plan of an electrical recovery whose source was decoded and validated once.
+fn electrical_field_recovery_resource_plan_on(
+    request: &FieldRecoveryRequest,
+    inputs: &[PreparedAnalysisObjects],
+    workload: &ElectricalStaticWorkload,
+    mesh: &SolverMeshArtifact,
+    policy: AnalysisOutputPolicy,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let numerical = inputs
         .iter()
@@ -210,12 +285,6 @@ pub fn build_prepared_electrical_field_recovery_resource_plan(
             .find(|i| i.manifest.kind == kind)
             .ok_or_else(|| invalid("missing electrical recovery input"))
     };
-    let workload = ElectricalStaticWorkload::from_canonical_bytes(
-        &unique(AnalysisNumericalObjectKind::ElectricalStaticWorkload)?.payload(),
-    )?;
-    let mesh =
-        SolverMeshArtifact::canonical_decode(&unique(AnalysisNumericalObjectKind::Mesh)?.payload())
-            .map_err(invalid)?;
     if workload.identity()?.digest()
         != unique(AnalysisNumericalObjectKind::ElectricalStaticWorkload)?
             .manifest
@@ -263,6 +332,7 @@ pub fn build_prepared_electrical_field_recovery_resource_plan(
             output: projected_transport_output_resource_facts(&profile)?,
             output_set: projected_output_set_resource_facts(),
         },
+        local_execution,
     )?)
 }
 
@@ -271,11 +341,7 @@ pub fn decode_electrical_recovery_source(
     workload: &PreparedAnalysisObjects,
     mesh: &PreparedAnalysisObjects,
     source: &PreparedAnalysisObjects,
-) -> AnalysisBridgeResult<(
-    ElectricalStaticWorkload,
-    SolverMeshArtifact,
-    ElectricalStaticSolverResult,
-)> {
+) -> AnalysisBridgeResult<ElectricalRecoverySource> {
     authenticate_objects(
         workload,
         AnalysisNumericalObjectKind::ElectricalStaticWorkload,
@@ -297,7 +363,11 @@ pub fn decode_electrical_recovery_source(
     if source.manifest.logical_identity != r.source_result_identity()?.digest() {
         return Err(invalid("retained electrical source identity differs"));
     }
-    Ok((w, m, r))
+    Ok(ElectricalRecoverySource {
+        workload: w,
+        mesh: m,
+        result: r,
+    })
 }
 
 pub fn import_electrical_recovered_fields(
@@ -316,10 +386,13 @@ pub fn import_electrical_recovered_fields(
             "electrical field import requires its exact recovery task",
         ));
     }
-    let expected = build_prepared_electrical_field_recovery_resource_plan(
+    let expected = electrical_field_recovery_resource_plan_on(
         &prepared.request,
         &prepared.inputs,
+        prepared.source.workload(),
+        prepared.source.mesh(),
         prepared.output_policy,
+        prepared.local_execution,
     )?;
     if expected != prepared.resource_plan {
         return Err(invalid(
@@ -341,12 +414,26 @@ pub fn import_electrical_recovered_fields(
             "electrical recovery original plan differs before retained source validation",
         ));
     }
-    let (workload, mesh, result) = decode_electrical_recovery_source(
-        input(AnalysisNumericalObjectKind::ElectricalStaticWorkload)?,
-        input(AnalysisNumericalObjectKind::Mesh)?,
-        input(AnalysisNumericalObjectKind::SolverResult)?,
-    )?;
-    if prepared.request != result.native_field_request(&workload, &mesh)? {
+    // The inputs are the exact objects the source was decoded and validated from at preparation
+    // (`electrical_field_recovery_resource_plan_on` re-authenticated them above).
+    for (kind, digest) in [
+        (
+            AnalysisNumericalObjectKind::SolverResult,
+            prepared.source.result().source_result_identity()?.digest(),
+        ),
+        (
+            AnalysisNumericalObjectKind::Mesh,
+            Digest::from_bytes(*prepared.source.mesh().canonical_digest.bytes()),
+        ),
+    ] {
+        if input(kind)?.manifest.logical_identity != digest {
+            return Err(invalid(
+                "electrical field import source differs from its preparation",
+            ));
+        }
+    }
+    let (workload, mesh) = (prepared.source.workload(), prepared.source.mesh());
+    if prepared.request != prepared.source.native_field_request()? {
         return Err(invalid(
             "electrical field import differs from original native inventory",
         ));

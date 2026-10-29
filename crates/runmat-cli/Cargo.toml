@@ -97,6 +97,7 @@ runmat-test-runner-execution = { workspace = true }
 runmat-test-runner-native = { workspace = true }
 runmat-python = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)

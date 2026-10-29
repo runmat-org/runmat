@@ -12,9 +12,9 @@ pub(crate) fn digest(kind: &str, parts: &[&str]) -> String {
         write_part(&mut hasher, part);
     }
     format!(
-        "v{}:sha256:{:x}",
+        "v{}:sha256:{}",
         TEST_IDENTITY_ALGORITHM_VERSION,
-        hasher.finalize()
+        hex::encode(hasher.finalize()),
     )
 }
 

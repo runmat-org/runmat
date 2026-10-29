@@ -60,7 +60,7 @@ impl TryFrom<&runmat_execution::security::DirectQuicEndpoint> for PinnedQuicEndp
             certificate_der: endpoint.certificate_der.clone(),
         };
         pinned.validate()?;
-        let actual = format!("{:x}", sha2::Sha256::digest(&pinned.certificate_der));
+        let actual = hex::encode(sha2::Sha256::digest(&pinned.certificate_der));
         if actual != endpoint.certificate_sha256 {
             return Err(TransportError::StaleAuthority);
         }

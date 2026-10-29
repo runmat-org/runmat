@@ -54,14 +54,13 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
     .enumerate()
     {
         let region = format!("anchor_{axis}");
-        let face = mesh
-            .topology
+        let topo = &mut *mesh.topology;
+        let face = topo
             .boundary_faces
             .iter_mut()
             .find(|face| {
                 face.node_ids.iter().all(|id| {
-                    mesh.topology
-                        .nodes
+                    topo.nodes
                         .iter()
                         .find(|n| n.node_id == *id)
                         .unwrap()
@@ -89,14 +88,13 @@ fn fixture(order: ElementOrder, root: &Path) -> (AnalysisModel, SolverMeshArtifa
                 }),
             }));
     }
-    let face = mesh
-        .topology
+    let topo = &mut *mesh.topology;
+    let face = topo
         .boundary_faces
         .iter_mut()
         .find(|face| {
             face.node_ids.iter().all(|id| {
-                let x = mesh
-                    .topology
+                let x = topo
                     .nodes
                     .iter()
                     .find(|n| n.node_id == *id)

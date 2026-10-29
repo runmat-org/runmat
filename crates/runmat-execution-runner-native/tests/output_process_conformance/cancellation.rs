@@ -75,7 +75,7 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
         while !root.join("original-worker-ready").exists() {
             assert!(matches!(
                 service
-                    .begin_await(Value::Task(task.clone().into()))
+                    .begin_await_in_context(Value::Task(task.clone().into()), &original.runtime)
                     .unwrap(),
                 AwaitAction::Pending(_)
             ));
@@ -89,7 +89,10 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
         .unwrap();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            match service.begin_await(Value::Future(future.clone().into())) {
+            match service.begin_await_in_context(
+                Value::Future(future.clone().into()),
+                &original.runtime,
+            ) {
                 Ok(AwaitAction::Pending(_)) => tokio::time::sleep(Duration::from_millis(10)).await,
                 Err(ExecutionServiceError::Cancelled) => break,
                 other => panic!("original running cancellation returned {other:?}"),

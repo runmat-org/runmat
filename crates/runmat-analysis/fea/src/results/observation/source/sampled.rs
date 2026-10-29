@@ -40,7 +40,7 @@ pub(crate) fn validate_sampled_authority(
                         | ObservationQuantity::ElectricEdgeCirculation
                 ) =>
             {
-                sampling.integration_samples().len()
+                sampling.integration_sample_count()
             }
             RecoveredFieldEntityDomain::OrientedEdges
                 if matches!(

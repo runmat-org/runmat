@@ -54,6 +54,7 @@ pub struct CompletedAcousticResponseStudy {
 }
 
 pub struct AcousticResponseStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: AcousticResponseStudyPlanningPolicy,
     pub product: AcousticResponseStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -131,6 +132,7 @@ impl AcousticResponseStudyCoordinator {
             mesh: self.preparation.mesh.clone(),
             output_policy: self.preparation.output_policy,
             required_capabilities: self.preparation.required_capabilities.clone(),
+            local_execution: self.preparation.local_execution,
         })?;
         self.solve_task = Some(task);
         self.phase = AcousticResponseStudyPhase::AwaitingSolve;
@@ -317,6 +319,7 @@ impl AcousticResponseStudyCoordinator {
         let tail = self.tail.expect("completed shared terminal lifecycle");
         Ok(CompletedAcousticResponseStudy {
             replay: completion::AcousticResponseStudyReplayContext {
+                local_execution: self.preparation.local_execution,
                 policy: self.preparation.policy,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,

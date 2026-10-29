@@ -42,6 +42,7 @@ uuid = { version = "1", features = ["v4"], default-features = false }
 runmat-time = { workspace = true }
 runmat-filesystem = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
 futures = "0.3"

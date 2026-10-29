@@ -9,7 +9,8 @@ use runmat_analysis_core::{
 };
 use std::collections::BTreeMap;
 const PREFIX: &[u8] = b"runmat-maxwell-harmonic-result/v2\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 8_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -100,7 +101,7 @@ impl MaxwellHarmonicSolverResult {
                 .iter()
                 .copied()
                 .eq(sampling.oriented_edges().iter().map(|e| e.node_identities))
-            || r.samples.len() != sampling.integration_samples().len()
+            || r.samples.len() != sampling.integration_sample_count()
             || input.source_current.len() != r.samples.len()
             || d.publication_declarations.iter().any(|o| {
                 o.kind != runmat_analysis_core::StateKind::ElectromagneticComplex
@@ -128,21 +129,22 @@ impl MaxwellHarmonicSolverResult {
         }
         let mut wm = 0.0;
         let mut ohmic = 0.0;
-        for ((s, authority), j) in r
-            .samples
-            .iter()
-            .zip(sampling.integration_samples())
-            .zip(&input.source_current)
-        {
+        let points = sampling.rule().points_per_element();
+        for (index, (s, j)) in r.samples.iter().zip(&input.source_current).enumerate() {
             let law = laws
                 .get(&s.element_identity)
                 .ok_or_else(|| invalid("foreign retained element"))?;
-            if s.sample_identity != authority.identity
-                || j.sample_identity != authority.identity
-                || s.element_identity != authority.element_identity
-                || s.ordinal != authority.ordinal
-                || s.position_m != authority.position_m
-                || s.volume_weight_m3 != authority.volume_weight_m3
+            // Sample geometry is derived from the mesh; `validate_for` re-evaluates it.
+            let identity = sampling
+                .integration_sample_identity(index)
+                .map_err(invalid)?;
+            if s.sample_identity != identity
+                || j.sample_identity != identity
+                || s.element_identity != sampling.element_identities()[index / points]
+                || s.ordinal != index % points
+                || !s.volume_weight_m3.is_finite()
+                || s.volume_weight_m3 <= 0.0
+                || s.position_m.iter().any(|v| !v.is_finite())
                 || !law.permeability_h_per_m.canonical_value().is_finite()
                 || law.permeability_h_per_m.canonical_value() <= 0.0
                 || !law.permittivity_f_per_m.canonical_value().is_finite()

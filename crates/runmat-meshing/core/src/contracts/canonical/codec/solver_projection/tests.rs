@@ -20,7 +20,7 @@ fn projection(order: ElementOrder) -> SolverMeshProjection {
         schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
         geometry: artifact.geometry,
         resolved_request: artifact.resolved_request,
-        topology: artifact.topology,
+        topology: artifact.topology.into_topology(),
     }
 }
 

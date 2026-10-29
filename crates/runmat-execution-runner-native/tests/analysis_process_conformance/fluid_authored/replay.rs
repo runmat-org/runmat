@@ -9,7 +9,7 @@ pub(super) fn check(completed: &CompletedFluidStudy, source: &impl CacheImport) 
     let mut changed = completed.preparation().unwrap();
     changed.policy.numerical.momentum_relaxation = 0.75;
     changed.product = runmat_analysis_fea::study::plan_fluid_study_product(
-        changed.product.compiled.clone(),
+        changed.product.compiled().clone(),
         &changed.mesh,
         changed.policy,
     )

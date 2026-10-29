@@ -127,6 +127,7 @@ impl StatisticalStudyObservations {
             source_fields: self.source.source_fields.clone(),
             program_revision: self.source.program_revision.clone(),
             output_policy: self.output_policy()?,
+            local_execution: self.source.local_execution,
         })?;
         self.phase = Phase::AwaitingFieldRecovery(task.host.workload.identity.digest());
         Ok(self.recovery.insert(task))

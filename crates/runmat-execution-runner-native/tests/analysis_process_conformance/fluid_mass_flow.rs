@@ -7,7 +7,8 @@ pub(super) async fn run() {
         let fixture = uniform(2, speed, density, rotated);
         let cold = super::fluid_study_fixture::cold_fixture(&fixture, "signed-mass-flow").await;
         assert!(cold
-            .workload
+            .product
+            .workload()
             .model
             .excitations
             .iter()
