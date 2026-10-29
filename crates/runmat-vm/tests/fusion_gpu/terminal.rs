@@ -156,16 +156,18 @@ fn compiled_fused_compute_then_ordinary_second_store_failure_is_caught_without_r
                 .values
                 .get(slot(&bytecode, "observed_identifier"))
                 .as_deref(),
-            Some(&Value::String("RunMat:FusionFixture:SecondStore".into()))
+            Some(&Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:FusionFixture:SecondStore"
+            )))
         );
         assert_eq!(
             completion
                 .values
                 .get(slot(&bytecode, "observed_message"))
                 .as_deref(),
-            Some(&Value::String(
-                "second workspace publication rejected".into()
-            ))
+            Some(&Value::CharArray(runmat_value::CharArray::new_row(
+                "second workspace publication rejected"
+            )))
         );
         assert!(matches!(
             completion.values.get(slot(&bytecode, "mu")).as_deref(),
@@ -244,18 +246,18 @@ fn compiled_fusion_hard_provider_failure_is_caught_without_cpu_replay() {
                 .values
                 .get(slot(&bytecode, "observed_identifier"))
                 .as_deref(),
-            Some(&Value::String(
-                "RunMat:FusionFixture:ProviderFailure".into()
-            ))
+            Some(&Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:FusionFixture:ProviderFailure"
+            )))
         );
         assert_eq!(
             completion
                 .values
                 .get(slot(&bytecode, "observed_message"))
                 .as_deref(),
-            Some(&Value::String(
-                "selected provider rejected single-output execution".into()
-            ))
+            Some(&Value::CharArray(runmat_value::CharArray::new_row(
+                "selected provider rejected single-output execution"
+            )))
         );
         assert_eq!(
             completion.values.get(slot(&bytecode, "mu")).as_deref(),
