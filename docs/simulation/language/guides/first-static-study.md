@@ -23,7 +23,7 @@ The example declares both solid occurrences, a support on each disconnected part
 on the left part. Each region states its topology role and expected cardinality. Run `runmat fea
 check` after this step; a stale or ambiguous selector should fail before meshing.
 
-The complete example package includes its CAD file and machine-managed named-selection metadata. The study stays in one readable source file; exporting the project preserves its selections.
+The included STEP file carries the authored body and end-face names used below. No operator-local named-selection metadata is required. The study stays in one readable source file; exporting the project preserves its CAD names.
 
 ```fea
 geometry bracket {

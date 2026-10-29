@@ -4053,13 +4053,10 @@ fn analysis_trends_ignore_noncanonical_artifacts() {
     )
     .expect("seed nonlinear run should succeed");
 
-    let run_path = root.join("runs").join(format!("{}.json", run.data.run_id));
-    let raw = fs::read_to_string(&run_path).expect("read wrapped artifact");
-    let wrapped: serde_json::Value = serde_json::from_str(&raw).expect("parse wrapped artifact");
-    let mut legacy = wrapped
-        .get("run")
-        .cloned()
-        .expect("wrapped artifact should have run payload");
+    // Deliberately omit the canonical persisted-artifact envelope. Derive this
+    // invalid legacy record from the typed result, not the current envelope's
+    // implementation fields, and leave the valid canonical record untouched.
+    let mut legacy = serde_json::to_value(&run.data).expect("encode unwrapped run result");
     legacy["run_id"] = serde_json::json!(format!("{}_legacy", run.data.run_id));
     fs::write(
         root.join("runs")
@@ -6108,13 +6105,15 @@ fn analysis_run_transient_with_options_controls_timeline() {
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
+fn analysis_run_linear_static_thermomechanical_rejects_unknown_temperature_field_region() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("nonlinear-temperature-target");
+        write_ready_minimal_analysis_mesh_artifact("linear-thermo-temperature-target");
     let mut model = sample_solid_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "linear_thermo_temperature_target",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Static,
     )];
     set_model_thermo_coupling(
         &mut model,
@@ -6129,22 +6128,30 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
         },
     );
 
-    let err = analysis_run_nonlinear_with_options_op(
+    let published = storage::list_run_metadata().expect("list existing runs").len();
+    let err = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
+        AnalysisRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
+            ..Default::default()
         },
         OperationContext::new(None, None),
     )
     .expect_err("unknown thermo expected region should be rejected");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID");
+    assert_eq!(err.error_code, "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID");
     assert_eq!(err.error_type, OperationErrorType::Validation);
-    assert!(err
-        .message
-        .contains("temperature field targets unknown model region missing_region"));
+    assert!(
+        err.message
+            .contains("temperature field targets unknown model region missing_region"),
+        "expected unknown temperature region diagnostic, got: {err:?}"
+    );
+    assert_eq!(
+        storage::list_run_metadata().expect("list runs after rejection").len(),
+        published,
+        "invalid temperature region must not publish a run"
+    );
     let _ = fs::remove_dir_all(mesh_root);
 }
 
@@ -6529,6 +6536,7 @@ fn analysis_run_acoustic_realizes_complex_frequency_pressure() {
         extrapolation: SignalExtrapolation::HoldEndpoint,
     });
     signal.precision = SignalPrecision::Complex128;
+    signal.evidence.sample_count = 2;
 
     let mut real_model = complex_model.clone();
     let PhysicalSignal::Pressure(signal) = &mut real_model.signals[0] else {

@@ -198,6 +198,10 @@ fn physical_j2_tet4_tet10_history_survives_cold_filesystem_and_query() {
         let (root, path) =
             write_ready_analysis_mesh_artifact(&format!("physical_j2_run_{order:?}"), &mesh);
         let _config = scoped_fea_artifact_roots(&root);
+        storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+            root: root.clone(),
+        })
+        .expect("configure durable physical nonlinear run store");
         let result = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
