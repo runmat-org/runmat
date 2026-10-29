@@ -73,6 +73,7 @@ impl SolidNewtonProblem<'_> {
                 }
                 other => SolidNewtonError::General(other),
             })?;
+            work.record_linear_residual(solved.relative_residual, factor)?;
             return self
                 .reduction
                 .expand_linear(&solved.solution)
@@ -121,8 +122,29 @@ impl SolidNewtonProblem<'_> {
                 reason: format!("physical tangent solve rejected: {:?}", solved.diagnostics),
             });
         }
+        let achieved = solved.relative_residual.ok_or_else(|| SolidNewtonError::NotConverged {
+            factor,
+            cutbacks: 0,
+            reason: "physical tangent solve reported no achieved relative residual".into(),
+        })?;
+        work.record_linear_residual(achieved, factor)?;
         self.reduction
             .expand_linear(&solved.solution)
             .map_err(constraint_error)
+    }
+}
+
+impl SolidAttemptWork {
+    /// The achieved residual is the algebraic accuracy evidence of the correction it produced.
+    fn record_linear_residual(&mut self, relative: f64, factor: f64) -> Result<(), SolidNewtonError> {
+        if !relative.is_finite() || relative < 0.0 {
+            return Err(SolidNewtonError::NotConverged {
+                factor,
+                cutbacks: 0,
+                reason: format!("physical tangent solve reported relative residual {relative}"),
+            });
+        }
+        self.maximum_linear_relative_residual = self.maximum_linear_relative_residual.max(relative);
+        Ok(())
     }
 }

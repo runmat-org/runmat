@@ -75,6 +75,10 @@ pub(crate) struct SolidAttemptWork {
     pub backtracks: usize,
     /// Constitutive assembly evaluations during trial iterations and acceptance replay.
     pub tangent_evaluations: usize,
+    /// Largest achieved relative residual of any completed tangent (linear correction) solve,
+    /// in the solved reduced equation space. Covers cutback trials too, so it bounds the
+    /// algebraic error of every accepted correction.
+    pub maximum_linear_relative_residual: f64,
 }
 
 pub(crate) struct SolidNewtonProblem<'a> {
