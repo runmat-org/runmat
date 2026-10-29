@@ -2,7 +2,7 @@
 use super::*;
 use crate::execution::{AnalysisWorkloadIdentity, ThermalWorkload};
 use runmat_execution::Digest;
-use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+use runmat_meshing_core::SolverMeshArtifact;
 
 #[cfg(test)]
 mod tests;

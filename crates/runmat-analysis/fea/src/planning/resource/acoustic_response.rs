@@ -8,7 +8,7 @@ use crate::{
 use runmat_analysis_core::IndependentDomain;
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 use runmat_execution::Digest;
-use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+use runmat_meshing_core::SolverMeshArtifact;
 
 const LIMITS: CanonicalLimits = CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 /// Fixed result keys, identities, formulation and scalar evidence.
