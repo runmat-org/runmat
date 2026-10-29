@@ -2,6 +2,8 @@
 //! process finalizers. Ordinary provider/cancellation Drop remains nonblocking.
 
 use super::Control;
+#[path = "shutdown/native_thread.rs"]
+mod native_thread;
 use std::{
     io,
     sync::{Arc, Mutex, OnceLock, Weak},
@@ -98,7 +100,7 @@ pub(super) fn spawn(control: &Arc<Control>, run: impl FnOnce() + Send + 'static)
 fn join_unless_current(thread: JoinHandle<()>) {
     // Internal completion callbacks do not exit the process. Nevertheless an
     // embedding host can do so: never deadlock by joining the calling worker.
-    if thread.thread().id() != std::thread::current().id() {
+    if !native_thread::is_current(&thread) {
         let _ = thread.join();
     }
 }
@@ -124,3 +126,7 @@ fn shutdown() {
         join_unless_current(worker.thread);
     }
 }
+
+#[cfg(test)]
+#[path = "shutdown/tests.rs"]
+mod tests;
