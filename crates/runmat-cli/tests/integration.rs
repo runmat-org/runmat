@@ -87,13 +87,20 @@ fn spawned_async_functions_respect_local_worker_capacity() {
     fs::write(
         &script_path,
         r#"
-async function y = delayed_square(x)
+async function y = delayed_square(x, ready, release)
+    fid = fopen(ready, 'w');
+    assert(fid >= 0);
+    fprintf(fid, 'entered');
+    fclose(fid);
+    while exist(release, 'file') ~= 2
+        pause(0.01);
+    end
     pause(0.4);
     y = x * x;
 end
 tic;
-t1 = spawn(delayed_square(3));
-t2 = spawn(delayed_square(4));
+t1 = spawn(delayed_square(3, 'ready-1', 'release-1'));
+t2 = spawn(delayed_square(4, 'ready-2', 'release-2'));
 r1 = await(t1);
 r2 = await(t2);
 elapsed = toc;
@@ -104,7 +111,75 @@ disp(elapsed);
     )
     .unwrap();
 
-    let output = run_runmat(&["--no-jit", "run", script_path.to_str().unwrap()]);
+    let mut child = Command::new(get_binary_path())
+        .args(["--no-jit", "run", script_path.to_str().unwrap()])
+        .current_dir(temp_dir.path())
+        .env("RUNMAT_CONFIG", write_test_config(temp_dir.path()))
+        .env("NO_GUI", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn exact fixture driver");
+    let ready = [
+        temp_dir.path().join("ready-1"),
+        temp_dir.path().join("ready-2"),
+    ];
+    let release = [
+        temp_dir.path().join("release-1"),
+        temp_dir.path().join("release-2"),
+    ];
+    let wait_for_entries = |child: &mut std::process::Child, required: usize| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
+            if ready.iter().filter(|path| path.is_file()).count() >= required {
+                return true;
+            }
+            if child.try_wait().unwrap().is_some() {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    };
+    let admitted = if available_workers >= 2 {
+        // No release exists until BOTH actual task bodies have entered.
+        // A serial scheduler cannot satisfy this barrier by finishing task1.
+        wait_for_entries(&mut child, 2)
+    } else if wait_for_entries(&mut child, 1) {
+        // One worker is allowed to make progress serially. Release exactly
+        // the entered task, then require the other entry before releasing it.
+        let first = usize::from(!ready[0].is_file());
+        fs::write(&release[first], "release").unwrap();
+        wait_for_entries(&mut child, 2)
+    } else {
+        false
+    };
+    if !admitted {
+        // Only the exact driver created above is stopped on fixture timeout.
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        panic!(
+            "task entry barrier failed with {available_workers} workers: status={} stdout={} stderr={}",
+            output.status, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for path in &release {
+        fs::write(path, "release").unwrap();
+    }
+    let completion_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= completion_deadline {
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            panic!(
+                "released tasks did not complete: status={} stderr={}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
     assert!(
         output.status.success(),
         "local execution failed. stdout: {} stderr: {}",
@@ -119,17 +194,9 @@ disp(elapsed);
     assert!(numbers.len() >= 3, "unexpected output: {stdout}");
     assert_eq!(numbers[0], 9.0);
     assert_eq!(numbers[1], 16.0);
-    if available_workers >= 2 {
-        assert!(
-            numbers[2] < 0.7,
-            "tasks were not observably concurrent with {available_workers} available workers: {stdout}"
-        );
-    } else {
-        assert!(
-            numbers[2] < 1.5,
-            "tasks did not complete within the bounded single-worker allowance: {stdout}"
-        );
-    }
+    // elapsed remains diagnostic output, not a machine-load benchmark.
+    // The actual entry/release barrier above is the overlap authority.
+    assert!(numbers[2].is_finite() && numbers[2] >= 0.0, "{stdout}");
 }
 
 #[test]

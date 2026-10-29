@@ -511,10 +511,12 @@ fn cancelling_a_compatible_module_terminates_its_host() {
             r#"
 #include "mex.h"
 #include <stdio.h>
+#include <unistd.h>
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {{
     (void)nlhs; (void)plhs; (void)nrhs; (void)prhs;
     FILE *readiness = fopen("{readiness_c_string}", "wb");
     if (readiness == NULL) mexErrMsgTxt("could not record invocation readiness");
+    fprintf(readiness, "%ld\n", (long)getpid());
     fclose(readiness);
     volatile unsigned long spin = 0;
     for (;;) spin++;
@@ -537,10 +539,26 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {{
         .spawn()
         .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while !readiness.is_file() && std::time::Instant::now() < deadline {
+    let mut host_pid = None;
+    while std::time::Instant::now() < deadline {
+        if let Ok(contents) = fs::read_to_string(&readiness) {
+            if contents.ends_with('\n') {
+                host_pid = contents
+                    .trim()
+                    .parse::<libc::pid_t>()
+                    .ok()
+                    .filter(|pid| *pid > 0);
+                if host_pid.is_some() {
+                    break;
+                }
+            }
+        }
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    if !readiness.is_file() {
+    let Some(host_pid) = host_pid else {
         let _ = child.kill();
         let output = child.wait_with_output().unwrap();
         panic!(
@@ -549,15 +567,65 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {{
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-    }
+    };
+    assert_ne!(
+        host_pid as u32,
+        child.id(),
+        "readiness must identify invoked host, not driver"
+    );
+    assert_ne!(host_pid as u32, std::process::id());
     // SAFETY: `child.id()` is the live process created immediately above.
     assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    let driver_exit_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= driver_exit_deadline {
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            panic!(
+                "cancelled driver did not retire invoked host PID{host_pid}: status={} stderr={}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let output = child.wait_with_output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("RunMat:MEX:Cancelled"),
+        stderr.lines().find(|line| line.starts_with("id:"))
+            == Some("id: RunMat:ExecutionCancelled"),
         "status={} stderr={stderr}",
         output.status
     );
+    assert!(
+        stderr.contains("error: Execution cancelled by user"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("--> main.m:1:1"), "{stderr}");
+    assert!(stderr.contains("main.m @ main.m:1:1"), "{stderr}");
+    if let Some(cleanup) = stderr.find("cleanup also failed:") {
+        assert!(stderr.find("id: RunMat:ExecutionCancelled").unwrap() < cleanup);
+    }
+    // Observe only the exact PID published by the invoked C host. Signal0
+    // neither kills it nor treats driver exit/pipe closure as retirement.
+    let exit_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        // SAFETY: signal0 performs a read-only existence check on the exact
+        // positive PID captured from this fixture's native invocation.
+        if unsafe { libc::kill(host_pid, 0) } == -1 {
+            let error = std::io::Error::last_os_error();
+            assert_eq!(
+                error.raw_os_error(),
+                Some(libc::ESRCH),
+                "host exit is unproven: {error}"
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < exit_deadline,
+            "invoked MEX host PID{host_pid} remains live/unreaped after cancelled driver exited"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }

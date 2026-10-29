@@ -359,11 +359,14 @@ async fn try_kron_gpu_host(
 
 fn release_kron_staged(uploaded: GpuTensorHandle) -> crate::BuiltinResult<()> {
     uploaded.release().map(|_| ()).map_err(|error| {
-        build_runtime_error(format!("kron: staged operand retirement failed: {error}"))
-            .with_builtin(BUILTIN_NAME)
-            .with_identifier("RunMat:kron:Internal")
-            .with_source(error)
-            .build()
+        let mut builder =
+            build_runtime_error(format!("kron: staged operand retirement failed: {error}"))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(error);
+        if let Some(identifier) = KRON_ERROR_INTERNAL.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
     })
 }
 
