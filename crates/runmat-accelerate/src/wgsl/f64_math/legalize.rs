@@ -3,7 +3,7 @@ use std::fmt::{self, Write};
 use std::ops::Range;
 
 use super::intrinsic::{Intrinsic, Shape};
-use super::{include_family, Family};
+use super::include_family;
 
 #[derive(Debug)]
 pub(crate) enum PreparationError {
