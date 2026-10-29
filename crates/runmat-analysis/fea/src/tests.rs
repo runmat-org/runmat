@@ -1502,7 +1502,7 @@ fn linear_static_structural_step_leaves_declared_thermomechanical_domain_inactiv
         },
     )
     .expect_err("a structural-only step must not discard an active temperature field");
-    assert!(matches!(error, crate::FeaRunError::Assembly(message)
+    assert!(matches!(error, crate::FeaRunError::InvalidModel(message)
             if message.contains("active temperature-field coupling (coupled_temperature)")
                 && message.contains("realizes Coupled(Thermomechanical)")));
 }
