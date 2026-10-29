@@ -12,14 +12,14 @@ use runmat_value::{NumericDType, Value};
 mod arithmetic;
 mod bounded_transfer;
 mod complex_components;
-mod exponentials;
 pub(crate) mod convolution;
+mod exponentials;
 pub(crate) mod extrema;
-pub(crate) mod fusion_reduction;
 pub(crate) mod floating_conversion;
 #[cfg(feature = "wgpu")]
 pub(crate) mod fspecial;
 pub(crate) mod fusion_elementwise;
+pub(crate) mod fusion_reduction;
 mod iir;
 mod image_stages;
 pub(crate) mod imfilter;
@@ -64,10 +64,6 @@ const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ),
     (
         fusion_operation_token(&FusionKind::MatmulEpilogue),
-        ProviderOperationFamily::Fusion,
-    ),
-    (
-        fusion_operation_token(&FusionKind::CenteredGram),
         ProviderOperationFamily::Fusion,
     ),
     (
@@ -117,10 +113,6 @@ const WGPU_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ),
     (
         fusion_operation_token(&FusionKind::MatmulEpilogue),
-        ProviderOperationFamily::Fusion,
-    ),
-    (
-        fusion_operation_token(&FusionKind::CenteredGram),
         ProviderOperationFamily::Fusion,
     ),
     (
@@ -861,12 +853,16 @@ mod tests {
             FusionKind::ElementwiseChain,
             FusionKind::Reduction,
             FusionKind::MatmulEpilogue,
-            FusionKind::CenteredGram,
             FusionKind::ImageNormalize,
             FusionKind::PowerStepNormalize,
             FusionKind::ExplainedVariance,
         ];
         let check = |operations: &[(&str, ProviderOperationFamily)]| {
+            assert!(
+                !operations.iter().any(|(operation, _)| *operation
+                    == fusion_operation_token(&FusionKind::CenteredGram)),
+                "structural recognition must not advertise a covariance substitution"
+            );
             for (operation, family) in operations {
                 if matches!(*family, ProviderOperationFamily::Fusion) {
                     assert!(known

@@ -1468,6 +1468,10 @@ impl FusionGroupPlan {
             // integer constants reach generation, where they would be rounded
             // while formatting an f32/f64 literal.
             false
+        } else if plan.kernel.kind == FusionKind::CenteredGram {
+            // Typed recognition is not an implementation proof. The public
+            // covariance algorithm is not the authored centered product.
+            false
         } else if plan.kernel.kind.is_elementwise() {
             // Keep scalar ops on the VM/runtime scalar path. Fusing scalar elementwise
             // spans can materialize scalar GPU handles that later leak into scalar-only
@@ -2404,55 +2408,18 @@ fn detect_centered_gram(
             Some(node) => node,
             None => continue,
         };
-        let mul_op = match mul_node.label {
-            AccelNodeLabel::Primitive(op) => op,
-            _ => continue,
-        };
-        if mul_op != PrimitiveOp::Mul && mul_op != PrimitiveOp::ElemMul {
+        if !mul_node.is_matrix_product() {
             continue;
         }
-        if mul_node.inputs.len() != 2 {
+        // A centered Gram is EXACTLY centered.' * centered. Merely finding
+        // a transpose in either operand cannot justify reordering products or
+        // substituting a different live right-hand value.
+        let Some((transpose_node_id, centered_val_id)) =
+            is_transpose_node(graph, mul_node.inputs[0])
+        else {
             continue;
-        }
-
-        let mut transpose_node_id: Option<NodeId> = None;
-        let mut centered_val_id: Option<ValueId> = None;
-        for input_vid in &mul_node.inputs {
-            let candidate_node_id =
-                match graph.value(*input_vid).and_then(|info| match &info.origin {
-                    ValueOrigin::NodeOutput { node, .. } => Some(*node),
-                    _ => None,
-                }) {
-                    Some(id) => id,
-                    None => continue,
-                };
-            if let Some(trans_node) = graph.node(candidate_node_id) {
-                if matches!(
-                    trans_node.label,
-                    AccelNodeLabel::Primitive(PrimitiveOp::Transpose)
-                ) {
-                    if let Some(centered) = trans_node.inputs.first().copied() {
-                        transpose_node_id = Some(candidate_node_id);
-                        centered_val_id = Some(centered);
-                        break;
-                    }
-                }
-            }
-        }
-
-        let transpose_node_id = match transpose_node_id {
-            Some(id) if !assigned.contains(&id) => id,
-            _ => continue,
         };
-        let centered_val_id = match centered_val_id {
-            Some(id) => id,
-            None => continue,
-        };
-
-        if assigned.contains(&transpose_node_id) {
-            continue;
-        }
-        if graph.node(transpose_node_id).is_none() {
+        if mul_node.inputs[1] != centered_val_id || assigned.contains(&transpose_node_id) {
             continue;
         }
 
@@ -2497,15 +2464,10 @@ fn detect_centered_gram(
         if assigned.contains(&mean_node_id) {
             continue;
         }
-        let mean_node = match graph.node(mean_node_id) {
-            Some(node) => node,
-            None => continue,
+        let Some((_, mean_input, axes)) = match_mean_axes(graph, mean_val_id) else {
+            continue;
         };
-        match &mean_node.label {
-            AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("mean") => {}
-            _ => continue,
-        }
-        if mean_node.inputs.is_empty() || mean_node.inputs[0] != matrix_val_id {
+        if mean_input != matrix_val_id || axes.as_slice() != [1.0] {
             continue;
         }
 
@@ -2514,25 +2476,21 @@ fn detect_centered_gram(
             None => continue,
         };
         let matrix_rows = match &matrix_info.shape {
-            ShapeInfo::Tensor(dims) if !dims.is_empty() => dims[0].unwrap_or(0),
+            ShapeInfo::Tensor(dims) if dims.len() == 2 => dims[0].unwrap_or(0),
             _ => 0,
         };
-        let normalization = if matrix_rows > 1 {
-            if let Some(value) = denom_const {
-                let unbiased = (matrix_rows as f64 - 1.0).max(1.0);
-                let biased = matrix_rows as f64;
-                if approx_eq(value, unbiased) {
-                    CovNormalization::Unbiased
-                } else if approx_eq(value, biased) {
-                    CovNormalization::Biased
-                } else {
-                    CovNormalization::Unbiased
-                }
-            } else {
-                CovNormalization::Unbiased
-            }
-        } else {
+        let Some(denominator) = denom_const.filter(|value| value.is_finite() && *value > 0.0)
+        else {
+            continue;
+        };
+        let normalization = if matrix_rows > 1 && denominator == matrix_rows as f64 - 1.0 {
             CovNormalization::Unbiased
+        } else if matrix_rows > 0 && denominator == matrix_rows as f64 {
+            CovNormalization::Biased
+        } else {
+            // Unknown/live or different divisors retain ordinary execution.
+            // They are not permission to invent an unbiased normalization.
+            continue;
         };
 
         let mut nodes = vec![

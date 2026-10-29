@@ -188,7 +188,10 @@ fn polynomial_polar_and_model_extensions_are_declarative_and_independent() {
         ("polarhistogram", 0),
         ("polarplot", 1),
         ("polarscatter", 0),
-        ("pole", 0),
+        (
+            "pole",
+            runmat_builtins::TF_OR_SS_CONSUMED_PROPERTY_EXTENSIONS.len(),
+        ),
         ("polyder", 1),
         ("polyfit", 3),
         ("polyval", 3),
@@ -202,6 +205,13 @@ fn polynomial_polar_and_model_extensions_are_declarative_and_independent() {
         let builtin =
             runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.extensions.len(), count, "{name}");
+        if builtin.identity == runmat_builtins::POLE_CATALOG_ENTRY.identity {
+            assert_eq!(
+                builtin.extensions,
+                runmat_builtins::TF_OR_SS_CONSUMED_PROPERTY_EXTENSIONS.as_slice(),
+                "pole must join exact canonical consumed-model property declarations",
+            );
+        }
         for extension in builtin.extensions {
             assert_eq!(
                 extension.mode,

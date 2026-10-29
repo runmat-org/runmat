@@ -524,6 +524,10 @@ pub trait FsProvider: Send + Sync + 'static {
     /// publication may leave its commit outcome indeterminate.
     /// `None` means this provider cannot supply that guarantee; callers must
     /// not reconstruct it from a public temporary path and `remove_file`.
+    /// RemoteFsProvider currently does not opt in: its CRUD/versioned upload
+    /// endpoints do not provide this private abort/commit-disposition contract.
+    /// Callers requiring staged replacement (such as writecell/dlmwrite)
+    /// therefore reject that provider before modifying the destination.
     fn begin_staged_replace(
         &self,
         _resolved_absolute_destination: &Path,

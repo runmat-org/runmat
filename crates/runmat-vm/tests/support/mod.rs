@@ -109,7 +109,7 @@ pub fn interpret_with_base_workspace(
     )
 }
 
-fn interpret_in_context(
+pub(super) fn interpret_in_context(
     bytecode: &runmat_vm::Bytecode,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<RootedValues, RuntimeError> {

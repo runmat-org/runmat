@@ -112,6 +112,15 @@ pub enum FusionExecutionOutcome<T> {
     SharedRuntime(FusionCpuObservation),
 }
 
+impl<T> FusionExecutionOutcome<T> {
+    /// Decline an optimization before effects when no implementation proves
+    /// the authored semantics. This grants no selected CPU execution, input
+    /// readback, completion or placement-feedback authority.
+    pub fn implementation_unavailable() -> Self {
+        Self::SharedRuntime(FusionCpuObservation::new(None))
+    }
+}
+
 /// Measures completion of a shared-runtime bytecode region on the host.
 /// Inner calls may submit provider work; this elapsed time is not evidence of
 /// completion of that device work and must not be assigned to a GPU candidate.

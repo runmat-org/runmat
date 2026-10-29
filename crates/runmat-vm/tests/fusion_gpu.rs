@@ -456,7 +456,6 @@ impl AccelProvider for TestProvider {
             ("sum", ProviderOperationFamily::Reduction),
             ("fusion.elementwise", ProviderOperationFamily::Fusion),
             ("fusion.matmul_epilogue", ProviderOperationFamily::Fusion),
-            ("fusion.centered_gram", ProviderOperationFamily::Fusion),
             (
                 "fusion.power_step_normalize",
                 ProviderOperationFamily::Fusion,
@@ -5165,7 +5164,7 @@ fn fused_reduction_scalar_branch_report_tail_matches_expected() {
 }
 
 #[test]
-fn centered_gram_fusion_matches_cpu() {
+fn original_centered_product_matches_cpu_with_provider_available() {
     gc_test_context(|| {
         let rows = 5usize;
         let cols = 3usize;

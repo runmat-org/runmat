@@ -7,6 +7,7 @@ use runmat_value::Value as BuiltinValue;
 
 #[path = "graph/folded_unary.rs"]
 mod folded_unary;
+mod matrix_product;
 
 pub type NodeId = u32;
 pub type ValueId = u32;
@@ -144,6 +145,10 @@ pub struct AccelNode {
 }
 
 impl AccelNode {
+    /// Syntax/compiled-binding identity only, not a numerical execution grant.
+    pub fn is_matrix_product(&self) -> bool {
+        matrix_product::is_matrix_product(self)
+    }
     pub fn is_elementwise(&self) -> bool {
         self.category == AccelOpCategory::Elementwise
     }

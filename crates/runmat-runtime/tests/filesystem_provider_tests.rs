@@ -220,22 +220,7 @@ fn assert_struct_field(value: &Value, name: &str, expected: &Value) {
     );
 }
 
-fn exercise_recent_import_export_builtins_through_provider() {
-    call_builtin("mkdir", &[Value::from("fixtures")]).expect("mkdir fixtures succeeds");
-    call_builtin("mkdir", &[Value::from("exports")]).expect("mkdir exports succeeds");
-
-    block_on(vfs::write_async("fixtures/numeric.csv", b"1,2\n3,4\n"))
-        .expect("write importdata fixture through provider");
-    let imported = call_builtin(
-        "importdata",
-        &[Value::from("fixtures/numeric.csv"), Value::from(",")],
-    )
-    .expect("importdata succeeds");
-    assert_eq!(
-        imported,
-        Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap())
-    );
-
+fn exercise_staged_cell_export_through_provider() {
     let cell = CellArray::new(
         vec![
             Value::Num(1.0),
@@ -260,6 +245,23 @@ fn exercise_recent_import_export_builtins_through_provider() {
     let written = block_on(vfs::read_to_string_async("exports/cells.csv"))
         .expect("read writecell output through provider");
     assert_eq!(written, "1,\"alpha\"\n1,4\n");
+}
+
+fn exercise_recent_import_export_builtins_through_provider() {
+    call_builtin("mkdir", &[Value::from("fixtures")]).expect("mkdir fixtures succeeds");
+    call_builtin("mkdir", &[Value::from("exports")]).expect("mkdir exports succeeds");
+
+    block_on(vfs::write_async("fixtures/numeric.csv", b"1,2\n3,4\n"))
+        .expect("write importdata fixture through provider");
+    let imported = call_builtin(
+        "importdata",
+        &[Value::from("fixtures/numeric.csv"), Value::from(",")],
+    )
+    .expect("importdata succeeds");
+    assert_eq!(
+        imported,
+        Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap())
+    );
 
     block_on(vfs::write_async(
         "fixtures/textscan.txt",
@@ -337,6 +339,7 @@ fn sandbox_provider_supports_repl_and_tabular_builtins() {
 
     exercise_repl_filesystem_builtins_through_provider();
     exercise_recent_import_export_builtins_through_provider();
+    exercise_staged_cell_export_through_provider();
 
     call_builtin("mkdir", &[Value::from("reports")]).expect("mkdir succeeds");
 
@@ -358,9 +361,53 @@ fn sandbox_provider_supports_repl_and_tabular_builtins() {
     assert_eq!(read_back, Value::Tensor(matrix));
 }
 
+fn assert_unsupported_remote_replacement(builtin: &str, args: &[Value], destination: &str) {
+    let old = b"unchanged original destination\n";
+    block_on(vfs::write_async(destination, old))
+        .expect("seed existing destination via supported CRUD");
+    let parent = std::path::Path::new(destination).parent().unwrap();
+    let names = |path: &std::path::Path| {
+        let mut names: Vec<_> = block_on(vfs::read_dir_async(path))
+            .unwrap()
+            .into_iter()
+            .map(vfs::DirEntry::into_path)
+            .collect();
+        names.sort();
+        names
+    };
+    let before_parent = names(parent);
+    let before_root = names(std::path::Path::new("/"));
+    let error =
+        call_builtin(builtin, args).expect_err("remote provider has no staged-replace authority");
+    let mut source: &(dyn std::error::Error + 'static) = &error;
+    loop {
+        if let Some(io) = source.downcast_ref::<std::io::Error>() {
+            assert_eq!(io.kind(), std::io::ErrorKind::Unsupported);
+            break;
+        }
+        source = source
+            .source()
+            .unwrap_or_else(|| panic!("missing typed staged refusal: {error:?}"));
+    }
+    assert_eq!(
+        block_on(vfs::read_async(destination)).unwrap(),
+        old.as_slice()
+    );
+    assert_eq!(
+        names(parent),
+        before_parent,
+        "no public adjacent staging scratch"
+    );
+    assert_eq!(
+        names(std::path::Path::new("/")),
+        before_root,
+        "no public root scratch"
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn remote_provider_supports_repl_and_tabular_builtins() {
+fn remote_provider_supports_reads_and_refuses_unqualified_staged_writes() {
     let _provider_lock = vfs::provider_override_lock();
     let server = remote_test_support::RemoteTestServer::spawn();
     let remote = Arc::new(
@@ -384,11 +431,34 @@ fn remote_provider_supports_repl_and_tabular_builtins() {
     let matrix =
         Tensor::new(vec![10.0, 20.0, 30.0, 40.0], vec![2, 2]).expect("validated test matrix");
     let filename = Value::from("remote/data.csv".to_string());
-    call_builtin(
+    assert_unsupported_remote_replacement(
         "dlmwrite",
         &[filename.clone(), Value::Tensor(matrix.clone())],
+        "remote/data.csv",
+    );
+    block_on(vfs::write_async("remote/data.csv", b"10,30\n20,40\n"))
+        .expect("seed original tabular read fixture through supported remote CRUD");
+    let cell = CellArray::new(
+        vec![
+            Value::Num(1.0),
+            Value::from("alpha"),
+            Value::Bool(true),
+            Value::Num(4.0),
+        ],
+        2,
+        2,
     )
-    .expect("dlmwrite succeeds");
+    .unwrap();
+    assert_unsupported_remote_replacement(
+        "writecell",
+        &[
+            Value::Cell(cell),
+            Value::from("exports/cells.csv"),
+            Value::from("Delimiter"),
+            Value::from(","),
+        ],
+        "exports/cells.csv",
+    );
 
     let roundtrip = call_builtin("dlmread", &[filename]).expect("dlmread succeeds");
     assert_eq!(roundtrip, Value::Tensor(matrix));

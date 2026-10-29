@@ -13,9 +13,9 @@ use crate::placement::{
 };
 use log;
 use runmat_accelerate_api::{
-    provider, AccelProvider, CovRows, CovarianceOptions, GpuTensorHandle, HostTensorView,
-    ImageNormalizeDescriptor, PowerStepEpilogue, ProviderOperationFamily, ProviderPrecision,
-    ProviderRejectionCode, ProviderShaderRequirements, ProviderWorkload,
+    provider, AccelProvider, GpuTensorHandle, HostTensorView, ImageNormalizeDescriptor,
+    PowerStepEpilogue, ProviderOperationFamily, ProviderPrecision, ProviderRejectionCode,
+    ProviderShaderRequirements, ProviderWorkload,
 };
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
@@ -994,86 +994,6 @@ fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
 
 /// Direct provider execution retaining the established value-returning API.
 /// Executors that can run shared bytecode use the placement-aware entrypoint.
-pub async fn execute_centered_gram(
-    request: FusionExecutionRequest<'_>,
-) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
-    match execute_centered_gram_placed(request).await? {
-        FusionExecutionOutcome::Executed(value) => Ok(value),
-        FusionExecutionOutcome::SharedRuntime(_) => {
-            Err((anyhow!("direct fusion request selected shared runtime")).into())
-        }
-    }
-}
-
-pub async fn execute_centered_gram_placed(
-    request: FusionExecutionRequest<'_>,
-) -> runmat_accelerate_api::ProviderExecutionResult<FusionExecutionOutcome<Value>> {
-    let Some(bindings) = AdmittedBindings::new(&request) else {
-        return Ok(FusionExecutionOutcome::SharedRuntime(
-            FusionCpuObservation::new(None),
-        ));
-    };
-    crate::ensure_residency_hooks();
-    reject_native_integer_fusion_inputs(&request)?;
-    if request.plan.group.kind != FusionKind::CenteredGram {
-        return Err((anyhow!("unsupported fusion kind")).into());
-    }
-    let provider = match admit_provider_availability(&request, provider())? {
-        FusionExecutionOutcome::Executed(provider) => provider,
-        FusionExecutionOutcome::SharedRuntime(observation) => {
-            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
-        }
-    };
-    let selection = select_fusion_provider(&request, &bindings, provider, &[], None)?;
-    let selection = match selection {
-        FusionExecutionOutcome::Executed(selection) => selection,
-        FusionExecutionOutcome::SharedRuntime(observation) => {
-            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
-        }
-    };
-    let observer = selection.observer;
-    let (matrix_vid, normalization) = match request.plan.pattern.as_ref() {
-        Some(FusionPattern::CenteredGram {
-            matrix,
-            normalization,
-        }) => (*matrix, *normalization),
-        _ => return Err((anyhow!("centered gram: missing pattern metadata")).into()),
-    };
-
-    let matrix_index = request
-        .plan
-        .inputs
-        .iter()
-        .position(|vid| *vid == matrix_vid)
-        .ok_or_else(|| anyhow!("centered gram: matrix input not found"))?;
-    let matrix_value = request
-        .inputs
-        .get(matrix_index)
-        .ok_or_else(|| anyhow!("centered gram: matrix value missing"))?;
-
-    let matrix_handle = ensure_gpu_tensor(provider, matrix_value, observer)?;
-
-    let options = CovarianceOptions {
-        normalization,
-        rows: CovRows::All,
-        has_weight_vector: false,
-    };
-
-    observer.queue_unmeasured();
-    let mut output = provider
-        .covariance(&matrix_handle, None, None, &options)
-        .await?;
-    observer.kernel_unmeasured();
-
-    drop(matrix_handle);
-
-    mark_fusion_output(&mut output, &request.inputs)?;
-    selection.submitted();
-    Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
-}
-
-/// Direct provider execution retaining the established value-returning API.
-/// Executors that can run shared bytecode use the placement-aware entrypoint.
 pub async fn execute_power_step_normalize(
     request: FusionExecutionRequest<'_>,
 ) -> ExecutionResult<Value> {
@@ -1646,18 +1566,9 @@ mod tests {
                         >,
                     ) {
                     }
-                    require_local_future(execute_centered_gram(request));
-                }
-                1 => require_value_future(execute_power_step_normalize(request)),
-                2 => {
-                    fn require_local_future(
-                        _: impl std::future::Future<
-                            Output = runmat_accelerate_api::ProviderExecutionResult<Value>,
-                        >,
-                    ) {
-                    }
                     require_local_future(execute_explained_variance(request));
                 }
+                1 => require_value_future(execute_power_step_normalize(request)),
                 3 => require_value_future(execute_image_normalize(request)),
                 _ => require_value_future(execute_matmul_epilogue(request)),
             }

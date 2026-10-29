@@ -706,12 +706,6 @@ fn every_placed_family_returns_to_runtime_before_provider_or_domain_work() {
                 FusionExecutionOutcome::SharedRuntime(_)
             ));
             assert!(matches!(
-                execute_centered_gram_placed(request(&plan, &context))
-                    .await
-                    .unwrap(),
-                FusionExecutionOutcome::SharedRuntime(_)
-            ));
-            assert!(matches!(
                 execute_power_step_normalize_placed(request(&plan, &context))
                     .await
                     .unwrap(),

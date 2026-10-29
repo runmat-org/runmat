@@ -4,11 +4,11 @@ use crate::interpreter::errors::mex;
 use crate::interpreter::vars::InterpreterVars;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
-    elementwise_floating_admission, execute_centered_gram_placed, execute_elementwise_placed,
-    execute_explained_variance_placed, execute_matmul_epilogue_placed,
-    execute_power_step_normalize_placed, execute_reduction_with_shape_placed_async,
-    execute_reduction_with_shape_placed_async_vm, CpuReadbackFailure, ElementwiseFloatingAdmission,
-    FusionExecutionOutcome, FusionExecutionRequest, FusionProviderCompletion,
+    elementwise_floating_admission, execute_elementwise_placed, execute_explained_variance_placed,
+    execute_matmul_epilogue_placed, execute_power_step_normalize_placed,
+    execute_reduction_with_shape_placed_async, execute_reduction_with_shape_placed_async_vm,
+    CpuReadbackFailure, ElementwiseFloatingAdmission, FusionExecutionOutcome,
+    FusionExecutionRequest, FusionProviderCompletion,
 };
 use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
@@ -496,7 +496,11 @@ pub async fn execute_fusion_special_kind(
 ) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
     match kind {
         FusionKind::CenteredGram => {
-            finish_provider_execution(execute_centered_gram_placed(request).await, stack_guard)
+            // Recognition is structural only. Covariance's uncentered-moment
+            // algorithm does not implement the authored sequence's classes,
+            // accumulation, operand order or shape. Leave all operands and
+            // stores untouched for the original bytecode, including GPU ones.
+            Ok(FusionExecutionOutcome::implementation_unavailable())
         }
         FusionKind::PowerStepNormalize => finish_provider_execution(
             execute_power_step_normalize_placed(request).await,
