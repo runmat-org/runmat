@@ -1001,10 +1001,9 @@ impl LocalDriver {
                 _ => None,
             };
             let observed = process::execute_attempt(&this, &request, &completion);
-            // Only this process owner can certify that a cancelled
-            // attempt has no live worker tree or foreign callback. Every
-            // non-unverified result from execute_attempt has passed the
-            // bounded tree-retirement path (or failed before spawn).
+            // Only this process owner's private proof can certify no live
+            // worker tree or foreign callback. Neither an ordinary error nor
+            // the public root-exit observation establishes that certificate.
             let cancel_registered = this
                 .driver
                 .lock()
@@ -1013,10 +1012,7 @@ impl LocalDriver {
                 .attempts
                 .get(&request.id)
                 .is_some_and(|attempt| attempt.cancellation_requested_at.is_some());
-            let retired = !matches!(
-                &observed.result,
-                Err(TransferFailure::RetirementUnverified(_))
-            );
+            let retired = observed.has_retirement_proof();
             let verified_cancel = retired
                 && cancel_registered
                 && matches!(&observed.result, Err(TransferFailure::Cancelled));

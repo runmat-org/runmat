@@ -52,6 +52,7 @@ pub(super) async fn run_process(
     meters: &TransportMeters,
     termination: &mut AttemptExecutionTermination,
     console: &mut Option<runmat_execution::console::ConsoleTranscript>,
+    retirement: &mut LocalRetirementEvidence,
 ) -> Result<WorkerResponse, TransferFailure> {
     #[cfg(windows)]
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
@@ -155,8 +156,9 @@ pub(super) async fn run_process(
     }
     command.max_stderr_bytes = driver.config.max_stderr_bytes;
     // Spawn can fail after creating a child (for example during containment).
-    // Until root exit is observed, even an error leaves launch unconfirmed.
+    // Until full-tree retirement is observed, even an error leaves launch unconfirmed.
     *termination = AttemptExecutionTermination::Unconfirmed;
+    *retirement = LocalRetirementEvidence::Unconfirmed;
     let child = match command.spawn().await {
         Ok(child) => child,
         Err(error) if graph_scratch.is_some() => {
@@ -196,9 +198,6 @@ pub(super) async fn run_process(
     let mut child_preserved_reason = None;
     let outcome = async {
     if completion.is_cancelled() {
-        if !matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
-            let _ = child.terminate_tree().await;
-        }
         return Err(TransferFailure::Cancelled);
     }
     let stderr = child.captured_stderr();
@@ -252,7 +251,6 @@ pub(super) async fn run_process(
                             graph_cancel_sent_at = Some(Instant::now());
                         }
                     } else {
-                        let _ = child.terminate_tree().await;
                         return Err(TransferFailure::Cancelled);
                     }
                 }
@@ -346,6 +344,7 @@ pub(super) async fn run_process(
         match tokio::time::timeout(Duration::from_secs(5), child.wait_and_retire_tree()).await {
             Ok(Ok(exit)) => {
                 child_retired = true;
+                *retirement = LocalRetirementEvidence::FullTreeRetired;
                 *termination = AttemptExecutionTermination::ProcessExited {
                     code: exit.code,
                     success: exit.success,
@@ -371,9 +370,19 @@ pub(super) async fn run_process(
             }
         }
     } else {
-        let exit = child.wait().await.map_err(|error| {
-            TransferFailure::WorkerLost(format!("worker exit was not observed: {error}"))
-        })?;
+        // The leader must stay pinned until its entire owned tree retires.
+        drop(writer);
+        let exit = match tokio::time::timeout(Duration::from_secs(5), child.wait_and_retire_tree()).await {
+            Ok(Ok(exit)) => exit,
+            Ok(Err(error)) => return Err(TransferFailure::RetirementUnverified(format!(
+                "worker replied, but its process tree could not be retired: {error}"
+            ))),
+            Err(_) => return Err(TransferFailure::WorkerLost(
+                "worker did not retire after its response".into()
+            )),
+        };
+        child_retired = true;
+        *retirement = LocalRetirementEvidence::FullTreeRetired;
         *termination = AttemptExecutionTermination::ProcessExited {
             code: exit.code,
             success: exit.success,
@@ -410,11 +419,24 @@ pub(super) async fn run_process(
     Ok(response)
     }
     .await;
-    *console = console_receiver
+    // Console validation must not short-circuit the physical-owner cleanup.
+    // Keep the first operation failure; a later cleanup failure takes safety
+    // priority while the scheduler separately retains original cancellation.
+    let console_result = console_receiver
         .map(|receiver| receiver.finish(console_receipt.as_ref()))
         .transpose()
-        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) && !child_retired {
+        .map_err(|error| TransferFailure::Infrastructure(error.to_string()));
+    let outcome = match console_result {
+        Ok(transcript) => {
+            *console = transcript;
+            outcome
+        }
+        Err(error) => match outcome {
+            Err(original) => Err(original),
+            Ok(_) => Err(error),
+        },
+    };
+    if !child_retired {
         if let Some(reason) = child_preserved_reason {
             let AttemptChild::Graph(child) = child else {
                 unreachable!("a staged Graph worker owns a retirement-bound child")
@@ -435,8 +457,13 @@ pub(super) async fn run_process(
         }
         let mut retirement_error = None;
         for _ in 0..2 {
-            match child.terminate_tree().await {
-                Ok(()) => {
+            match child.terminate_and_observe().await {
+                Ok(exit) => {
+                    *retirement = LocalRetirementEvidence::FullTreeRetired;
+                    *termination = AttemptExecutionTermination::ProcessExited {
+                        code: exit.code,
+                        success: exit.success,
+                    };
                     retirement_error = None;
                     break;
                 }
@@ -445,8 +472,11 @@ pub(super) async fn run_process(
         }
         if let Some(error) = retirement_error {
             let message = format!(
-                "Graph worker process tree could not be retired after bounded retries: {error}"
+                "worker process tree could not be retired after bounded retries: {error}; original outcome: {outcome:?}"
             );
+            if !matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
+                return Err(TransferFailure::RetirementUnverified(message));
+            }
             let AttemptChild::Graph(child) = child else {
                 unreachable!("a staged Graph worker owns a retirement-bound child")
             };

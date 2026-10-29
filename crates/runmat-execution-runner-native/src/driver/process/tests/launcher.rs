@@ -27,6 +27,7 @@ async fn run_process(
     let meters = TransportMeters::default();
     let mut termination = runmat_execution_runner::AttemptExecutionTermination::NotStarted;
     let mut console = None;
+    let mut retirement = super::super::LocalRetirementEvidence::NotStarted;
     let owner = super::super::owned::ProcessOwner {
         config: &driver.config,
         artifacts: &driver.artifacts,
@@ -41,6 +42,7 @@ async fn run_process(
         &meters,
         &mut termination,
         &mut console,
+        &mut retirement,
     )
     .await
 }

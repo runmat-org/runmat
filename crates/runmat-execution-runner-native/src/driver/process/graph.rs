@@ -46,6 +46,7 @@ pub(crate) async fn execute_attempt(
     let meters = TransportMeters::default();
     let mut termination = AttemptExecutionTermination::NotStarted;
     let mut console = None;
+    let mut retirement = LocalRetirementEvidence::NotStarted;
     let quarantine = Quarantine::default();
     let result = if control.cancellation().load(Ordering::Acquire) {
         // No staging or child ownership exists for this attempt yet.
@@ -70,6 +71,7 @@ pub(crate) async fn execute_attempt(
                     &meters,
                     &mut termination,
                     &mut console,
+                    &mut retirement,
                 )
                 .await
             }
@@ -89,7 +91,15 @@ pub(crate) async fn execute_attempt(
         result
     };
     drop(quarantine);
-    observe(request, started, result, meters, termination, console)
+    observe(
+        request,
+        started,
+        result,
+        meters,
+        termination,
+        console,
+        retirement,
+    )
 }
 
 fn prepare(

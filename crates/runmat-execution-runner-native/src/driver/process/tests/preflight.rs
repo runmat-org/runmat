@@ -10,6 +10,48 @@ use runmat_execution_runner::{DriverAction, DriverCommand, TaskSubmission};
 use std::collections::BTreeSet;
 
 #[test]
+fn local_retirement_certificate_requires_physical_owner_evidence_not_an_error_or_root_exit() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
+    config.store_root = directory.path().to_path_buf();
+    config.max_workers = 1;
+    let driver =
+        LocalDriver::new(config, ExecutionScopeId::derive(&[b"retirement-proof"])).unwrap();
+    let request = admit(&driver, ArtifactId::derive(&[b"missing-program"]));
+    let mut observed = execute_attempt(&driver, &request, &TaskCompletion::new());
+    // The real preflight did not attempt to spawn anything.
+    assert!(observed.has_retirement_proof());
+    assert!(matches!(
+        observed.report(false),
+        AttemptReport::Failed { .. }
+    ));
+    // Neither an ordinary failure nor a root-only exit observation can upgrade
+    // missing physical-owner proof, even if a caller asks for verified cancellation.
+    observed.retirement = LocalRetirementEvidence::Unconfirmed;
+    for termination in [
+        AttemptExecutionTermination::Unconfirmed,
+        AttemptExecutionTermination::ProcessExited {
+            code: Some(0),
+            success: true,
+        },
+    ] {
+        observed.execution.termination = termination;
+        for failure in [
+            TransferFailure::Cancelled,
+            TransferFailure::Infrastructure("ambiguous spawn or exchange failure".into()),
+            TransferFailure::WorkerLost("original route loss".into()),
+        ] {
+            observed.result = Err(failure);
+            assert!(!observed.has_retirement_proof());
+            assert!(matches!(
+                observed.report(true),
+                AttemptReport::RetirementUnverified { .. }
+            ));
+        }
+    }
+}
+
+#[test]
 fn unreadable_program_preserves_known_prelaunch_consumption() {
     let directory = tempfile::tempdir().unwrap();
     let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();

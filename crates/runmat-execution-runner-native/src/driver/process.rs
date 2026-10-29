@@ -18,8 +18,8 @@ use runmat_process_host::{
     ProcessRetirementLease, RetirementBoundChild,
 };
 use tokio::io::BufReader;
-pub(crate) mod owned;
 pub(crate) mod graph;
+pub(crate) mod owned;
 
 use super::{
     LocalDriver, TaskCompletion, TransferFailure, TransferResult, NATIVE_ARTIFACT_STORE_ROOT_ENV,
@@ -40,12 +40,38 @@ pub(crate) struct LocalAttemptObservation {
     pub execution: AttemptExecutionObservation,
     pub unsuccessful_resources: Option<Box<AttemptResourceAccounting>>,
     pub console: Option<runmat_execution::console::ConsoleTranscript>,
+    retirement: LocalRetirementEvidence,
+}
+
+/// Private physical-owner evidence, distinct from a public root-exit observation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum LocalRetirementEvidence {
+    #[default]
+    NotStarted,
+    Unconfirmed,
+    FullTreeRetired,
 }
 
 impl LocalAttemptObservation {
+    pub(super) fn has_retirement_proof(&self) -> bool {
+        !matches!(&self.result, Err(TransferFailure::RetirementUnverified(_)))
+            && matches!(
+                self.retirement,
+                LocalRetirementEvidence::NotStarted | LocalRetirementEvidence::FullTreeRetired
+            )
+    }
+
     /// A cancellation result carries retirement proof only after the actual
     /// process owner returned. Other original errors are reported separately.
     pub(super) fn report(&self, verified_cancel: bool) -> AttemptReport {
+        if !self.has_retirement_proof() {
+            return AttemptReport::RetirementUnverified {
+                message: self.result.as_ref().err().map_or_else(
+                    || "local attempt has no original process-tree retirement proof".into(),
+                    ToString::to_string,
+                ),
+            };
+        }
         if verified_cancel {
             return AttemptReport::Retired;
         }
@@ -170,6 +196,11 @@ impl AttemptChild {
             Self::Graph(child) => child.terminate_tree().await,
         }
     }
+
+    async fn terminate_and_observe(&mut self) -> ProcessHostResult<ProcessExit> {
+        self.terminate_tree().await?;
+        self.wait().await
+    }
 }
 
 /// The driver owns and joins this final retry. A panic or runtime failure
@@ -269,6 +300,7 @@ pub(super) fn execute_attempt(
     let meters = TransportMeters::default();
     let mut termination = AttemptExecutionTermination::NotStarted;
     let mut console = None;
+    let mut retirement = LocalRetirementEvidence::NotStarted;
     let result = launch_attempt(
         driver,
         request,
@@ -276,6 +308,7 @@ pub(super) fn execute_attempt(
         &meters,
         &mut termination,
         &mut console,
+        &mut retirement,
     );
     let result = if let Some(message) = completion.control_failure() {
         match result {
@@ -287,7 +320,15 @@ pub(super) fn execute_attempt(
     } else {
         result
     };
-    observe(request, started, result, meters, termination, console)
+    observe(
+        request,
+        started,
+        result,
+        meters,
+        termination,
+        console,
+        retirement,
+    )
 }
 
 fn launch_attempt(
@@ -297,6 +338,7 @@ fn launch_attempt(
     meters: &TransportMeters,
     termination: &mut AttemptExecutionTermination,
     console: &mut Option<runmat_execution::console::ConsoleTranscript>,
+    retirement: &mut LocalRetirementEvidence,
 ) -> Result<WorkerResponse, TransferFailure> {
     request
         .validate()
@@ -417,6 +459,7 @@ fn launch_attempt(
         meters,
         termination,
         console,
+        retirement,
     ));
     if let Some((gang, rank)) = spmd_rank {
         driver.terminate_collective_rank(&gang, rank);
@@ -460,6 +503,7 @@ fn observe(
     meters: TransportMeters,
     termination: AttemptExecutionTermination,
     console: Option<runmat_execution::console::ConsoleTranscript>,
+    retirement: LocalRetirementEvidence,
 ) -> LocalAttemptObservation {
     let wall_millis = u64::try_from(started.elapsed().as_millis())
         .unwrap_or(u64::MAX)
@@ -514,6 +558,7 @@ fn observe(
         execution,
         unsuccessful_resources,
         console,
+        retirement,
     }
 }
 
