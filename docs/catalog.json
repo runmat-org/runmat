@@ -138,8 +138,8 @@
       "path": "docs/simulation/guides/what-is-finite-element-analysis.md"
     },
     {
-      "id": "doc:fea/using-fea",
-      "path": "docs/simulation/using-fea.md"
+      "id": "doc:fea/get-started",
+      "path": "docs/simulation/get-started.md"
     },
     {
       "id": "doc:fea/usage-accounting",

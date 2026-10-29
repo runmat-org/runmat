@@ -22,7 +22,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(air), 'fea.FluidDomain'));" },
     }],
     faqs: &[],
-    links: &[BuiltinDocumentationLink { label: "Using FEA", target: BuiltinDocumentationLinkTarget::Documentation("../../fea/using-fea") }],
+    links: &[crate::fea_contract::doc_links::GET_STARTED],
     implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/fea/domains.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/domains.rs") }],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed domain constructor tests", location: "builtins::fea::tests::fea_domain_constructors_preserve_typed_physics_boundaries" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Analysis integration tests", location: "tests/analysis" }],
     notes: &[],

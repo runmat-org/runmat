@@ -78,7 +78,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         BuiltinDocumentationFaq { question: "Which backend runs the study by default?", answer: "Without an `Execution` plan, every procedure step is planned for the CPU backend. Pass a `fea.ExecutionPlan` to request a different backend or formulation maturity." },
         BuiltinDocumentationFaq { question: "Can I reuse a model with a different geometry file?", answer: "No. A model records the geometry id and revision it was built on. Rebuild the model with `fea.model` on the new `geometry.Asset`." },
     ],
-    links: &[doc_links::USING_FEA, doc_links::STUDY_CONTRACTS, doc_links::MESHING],
+    links: &[doc_links::GET_STARTED, doc_links::STUDY_CONTRACTS, doc_links::MESHING],
     implementation: &[doc_links::FEA_MODELING_SOURCE, doc_links::FEA_ENTRYPOINTS_SOURCE],
     verification: &[
         doc_links::STUDY_AND_SWEEP_CONSTRUCTION_TEST,

@@ -60,7 +60,7 @@ If no registered realization satisfies the study's `formulation` requirement, ex
 
 ## Shared references
 
-- [Write and run an FEA study](../using-fea)
+- [Write and run an FEA study](../get-started.md)
 - [FEA language](../language/)
 - [Geometry and region selection](../geometry)
 - [Meshing](../meshing)

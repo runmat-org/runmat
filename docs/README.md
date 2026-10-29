@@ -117,7 +117,7 @@ If you want to understand how the runtime works internally, start with the [Comp
 ## FEA on Geometry
 
 - [FEA on Geometry](./simulation/index.md)
-- [Using FEA](./simulation/using-fea.md)
+- [Get started with FEA](./simulation/get-started.md)
 - [Geometry](./simulation/geometry.md)
 - [Meshing](./simulation/meshing.md)
 - [Models](./simulation/models.md)
