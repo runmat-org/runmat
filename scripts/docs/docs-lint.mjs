@@ -7,6 +7,7 @@
 // - every `pending:<id>` link and ```fea pending=<id> fence names a registry entry;
 // - an entry with `landed_in` set fails while any doc still flags it (the error names file:line to delete);
 // - every open entry is flagged by at least one doc, or carries `doc_less` with a reason;
+// - a ```fea source=<file> block is a verbatim excerpt of docs/simulation/examples/<file>;
 // - front matter, where present, matches docs/schema/doc-front-matter.schema.json;
 // - relative links resolve to a file in docs/simulation and, with `#anchor`, to a heading in it;
 //   links may not leave docs/simulation (the site and the agent corpus only contain that tree).
@@ -105,6 +106,16 @@ export function lintDocs(source) {
         if (!front.data) continue;
         if (!checkFrontMatter(front.data)) error(file, 1, "front-matter", ajv.errorsText(checkFrontMatter.errors, { dataVar: "front matter" }));
         for (const id of front.data.examples ?? []) if (!exampleIds.has(id)) error(file, 1, "front-matter", `examples: unknown catalog id \`${id}\``);
+    }
+
+    // Excerpts of canonical example files: ```fea source=<examples path> must be a verbatim slice.
+    for (const [file, { text }] of parsed) {
+        for (const block of fencedBlocks(text)) {
+            if (typeof block.attributes.source !== "string") continue;
+            const path = join(root, "examples", block.attributes.source);
+            if (!existsSync(path)) error(file, block.line, "source-slice", `source=${block.attributes.source} is not a file in docs/simulation/examples`);
+            else if (!readText(path).includes(block.code.trim())) error(file, block.line, "source-slice", `this block is no longer an exact excerpt of examples/${block.attributes.source}; copy it from the file again`);
+        }
     }
 
     // Links.

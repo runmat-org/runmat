@@ -8,6 +8,7 @@
 //                             When it starts passing, this script fails and names the flag to remove.
 //   ```fea fragment           a syntax illustration, not a whole file; parsed by the fragment parser
 //                             (E-DOC-2) once that entry point exists, and counted here.
+//   ```fea source=<file>      an exact excerpt of docs/simulation/examples/<file>; the whole file is checked.
 //   ```fea study=<name>       forwards `--study <name>` for files with several study roots.
 // Complete snippets resolve relative file paths (CAD files, `.m` generators, imports) against a
 // private copy of docs/simulation/examples, the canonical example package.
@@ -25,7 +26,10 @@ export function collectSnippets(root, { only } = {}) {
         for (const block of fencedBlocks(readText(join(root, file)))) {
             if (block.language !== "fea") continue;
             const kind = block.attributes.fragment ? "fragment" : typeof block.attributes.pending === "string" ? "pending" : "complete";
-            snippets.push({ file, line: block.line, kind, pending: block.attributes.pending, study: block.attributes.study, code: block.code });
+            // An excerpt of a canonical example (docs-lint checks the slice) is checked as the whole file.
+            const source = typeof block.attributes.source === "string" ? block.attributes.source : undefined;
+            const code = source ? readText(join(root, "examples", source)) : block.code;
+            snippets.push({ file, line: block.line, kind, pending: block.attributes.pending, study: block.attributes.study, source, code });
         }
     }
     return snippets;
@@ -40,8 +44,8 @@ export function checkSnippets({ source, runmat, legacyFea = false, only }) {
         cpSync(join(root, "examples"), work, { recursive: true });
         for (const [index, snippet] of snippets.entries()) {
             if (snippet.kind === "fragment") { results.push({ ...snippet, verdict: "fragment" }); continue; }
-            const path = join(work, `snippet-${index}.fea`);
-            writeFileSync(path, snippet.code);
+            const path = snippet.source ? join(work, snippet.source) : join(work, `snippet-${index}.fea`);
+            if (!snippet.source) writeFileSync(path, snippet.code);
             const args = [...(legacyFea ? ["fea", "check"] : ["check"]), path, ...(snippet.study ? ["--study", snippet.study] : [])];
             let passed = true, output = "";
             try { output = execFileSync(runmat, args, { cwd: work, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 }); }
