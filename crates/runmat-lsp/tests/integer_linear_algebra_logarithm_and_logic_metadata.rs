@@ -66,7 +66,7 @@ fn core_operator_runmat_extensions_are_visible_in_lsp_metadata() {
         ("rdivide", &["rdivide-like-prototype"][..]),
         ("power", &["power-like-prototype"][..]),
         ("or", &["or-complex-input", "or-character-input"][..]),
-        ("xor", &["xor-complex-input", "xor-character-input"][..]),
+        ("xor", &["xor-complex-input"][..]),
     ] {
         let builtin =
             runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
@@ -76,5 +76,22 @@ fn core_operator_runmat_extensions_are_visible_in_lsp_metadata() {
             .map(|extension| extension.id)
             .collect::<Vec<_>>();
         assert_eq!(actual, ids, "{name}");
+        for extension in builtin.extensions {
+            assert_eq!(
+                extension.mode,
+                runmat_builtins::BuiltinExtensionMode::RunMatOnly
+            );
+            assert!(
+                extension.error_identifier.is_some(),
+                "{name}: {}",
+                extension.id
+            );
+        }
+        if name == "xor" {
+            assert_eq!(
+                builtin.extensions[0].error_identifier,
+                Some("RunMat:compatibility:XorComplexInputExtension")
+            );
+        }
     }
 }

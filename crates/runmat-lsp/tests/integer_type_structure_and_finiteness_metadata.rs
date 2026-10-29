@@ -1,7 +1,7 @@
 use lsp_types::Position;
 use runmat_lsp::core::analysis::{analyze_document_with_compat, signature_help_at, CompatMode};
 
-const CAPABILITY_NAMES: [&str; 8] = [
+const CAPABILITY_NAMES: [&str; 9] = [
     "ipermute",
     "isUnderlyingType",
     "isa",
@@ -11,9 +11,10 @@ const CAPABILITY_NAMES: [&str; 8] = [
     "isinf",
     // Typed numeric graphics aliases have an explicit canonical integer role.
     "isgraphics",
+    "ishandle",
 ];
 
-const INAPPLICABLE_NAMES: [&str; 17] = [
+const INAPPLICABLE_NAMES: [&str; 16] = [
     "isStringScalar",
     "isVocabularyWord",
     "iscategorical",
@@ -28,7 +29,6 @@ const INAPPLICABLE_NAMES: [&str; 17] = [
     "isfield",
     "isfile",
     "isfolder",
-    "ishandle",
     "ishermitian",
     "isletter",
 ];
@@ -78,6 +78,59 @@ fn type_structure_and_finiteness_integer_metadata_is_explicit() {
         assert!(metadata.capabilities.is_empty(), "{name}");
         assert!(metadata.audit.is_some(), "{name}");
     }
+    let ishandle = runmat_builtins::builtin_catalog_entry_by_name("ishandle").unwrap();
+    let [capability] = ishandle.integer_capabilities else {
+        panic!("one integer-alias role")
+    };
+    let [input] = capability.inputs else {
+        panic!("one handle candidate")
+    };
+    assert_eq!(input.name, "h");
+    assert_eq!(input.classes, &runmat_builtins::ALL_INTEGER_CLASSES);
+    assert_eq!(
+        input.availability,
+        runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly
+    );
+    assert_eq!(
+        input.scalar_double,
+        runmat_builtins::BuiltinIntegerScalarDoubleRule::Allowed
+    );
+    assert_eq!(
+        capability.computation_domain,
+        runmat_builtins::BuiltinIntegerComputationDomain::Predicate
+    );
+    assert_eq!(
+        capability.output_class,
+        runmat_builtins::BuiltinIntegerOutputClassRule::Logical
+    );
+    assert_eq!(
+        capability.overflow,
+        runmat_builtins::BuiltinIntegerOverflowRule::NotApplicable
+    );
+    assert_eq!(
+        capability.backend,
+        runmat_builtins::BuiltinIntegerBackendRule::HostOnly
+    );
+    assert_eq!(
+        capability.overload,
+        runmat_builtins::BuiltinIntegerOverloadKind::ElementwiseShapePreserving
+    );
+    assert!(input
+        .notes
+        .contains("Disabled extensions and nonrepresentable aliases return false"));
+    assert!(capability.notes.contains("no gather or provider work"));
+    let [extension] = ishandle.extensions else {
+        panic!("one integer-alias extension")
+    };
+    assert_eq!(extension.id, "ishandle-integer-handle-alias");
+    assert_eq!(
+        extension.mode,
+        runmat_builtins::BuiltinExtensionMode::RunMatOnly
+    );
+    assert_eq!(
+        extension.error_identifier,
+        Some("RunMat:compatibility:IshandleIntegerHandleExtension")
+    );
 }
 
 #[test]

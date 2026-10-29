@@ -17,7 +17,7 @@ fn image_filter_and_color_integer_metadata_is_public_and_honest() {
         );
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
     }
-    for name in ["imag", "imhist"] {
+    for name in ["imhist"] {
         let builtin =
             runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
@@ -32,6 +32,46 @@ fn image_filter_and_color_integer_metadata_is_public_and_honest() {
             "{name} must expose its bounded evidence gap"
         );
     }
+    let imag = runmat_builtins::builtin_catalog_entry_by_name("imag").unwrap();
+    let [capability] = imag.integer_capabilities else {
+        panic!("one exact component projection")
+    };
+    let [input] = capability.inputs else {
+        panic!("one source role")
+    };
+    assert_eq!(input.classes, &runmat_builtins::ALL_INTEGER_CLASSES);
+    assert_eq!(
+        input.availability,
+        runmat_builtins::BuiltinIntegerInputAvailability::Documented
+    );
+    assert_eq!(
+        input.scalar_double,
+        runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable
+    );
+    assert_eq!(
+        capability.computation_domain,
+        runmat_builtins::BuiltinIntegerComputationDomain::ExactInteger
+    );
+    assert_eq!(
+        capability.output_class,
+        runmat_builtins::BuiltinIntegerOutputClassRule::PreserveInput
+    );
+    assert_eq!(
+        capability.overflow,
+        runmat_builtins::BuiltinIntegerOverflowRule::NotApplicable
+    );
+    assert_eq!(
+        capability.backend,
+        runmat_builtins::BuiltinIntegerBackendRule::HostAndGpu
+    );
+    assert_eq!(
+        capability.overload,
+        runmat_builtins::BuiltinIntegerOverloadKind::ElementwiseShapePreserving
+    );
+    assert!(capability.notes.contains("exact same-class zeros"));
+    assert!(capability
+        .notes
+        .contains("projects its exact imaginary storage"));
 }
 
 #[test]

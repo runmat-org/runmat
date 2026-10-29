@@ -165,7 +165,7 @@ fn matlab_mode_keeps_ecdf_to_erasebetween_extension_metadata_visible() {
         );
     }
 
-    for name in ["eq", "erase"] {
+    for name in ["eq"] {
         let builtin =
             runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
@@ -173,4 +173,72 @@ fn matlab_mode_keeps_ecdf_to_erasebetween_extension_metadata_visible() {
             "{name} has settled integer capability metadata but no compatibility extension"
         );
     }
+    let erase = runmat_builtins::builtin_catalog_entry_by_name("erase").unwrap();
+    let actual = erase
+        .extensions
+        .iter()
+        .map(|extension| {
+            assert_eq!(
+                extension.mode,
+                runmat_builtins::BuiltinExtensionMode::RunMatOnly
+            );
+            (extension.id, extension.error_identifier)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        [
+            (
+                "erase-char-matrix",
+                Some("RunMat:compatibility:EraseCharMatrixExtension")
+            ),
+            (
+                "erase-string-cell",
+                Some("RunMat:compatibility:EraseStringCellExtension")
+            ),
+        ]
+    );
+    let [capability] = erase.integer_capabilities else {
+        panic!("erase has one rejected-input contract")
+    };
+    assert_eq!(
+        capability.backend,
+        runmat_builtins::BuiltinIntegerBackendRule::HostOnly
+    );
+    assert_eq!(
+        capability.computation_domain,
+        runmat_builtins::BuiltinIntegerComputationDomain::FunctionSpecific
+    );
+    assert_eq!(
+        capability.overload,
+        runmat_builtins::BuiltinIntegerOverloadKind::FunctionSpecific
+    );
+    assert_eq!(
+        capability.output_class,
+        runmat_builtins::BuiltinIntegerOutputClassRule::NotApplicable
+    );
+    assert_eq!(
+        capability.overflow,
+        runmat_builtins::BuiltinIntegerOverflowRule::NotApplicable
+    );
+    assert_eq!(
+        capability
+            .inputs
+            .iter()
+            .map(|input| input.name)
+            .collect::<Vec<_>>(),
+        ["str", "match"]
+    );
+    for input in capability.inputs {
+        assert_eq!(input.classes, &runmat_builtins::ALL_INTEGER_CLASSES);
+        assert_eq!(
+            input.availability,
+            runmat_builtins::BuiltinIntegerInputAvailability::Rejected
+        );
+        assert_eq!(
+            input.scalar_double,
+            runmat_builtins::BuiltinIntegerScalarDoubleRule::Rejected
+        );
+    }
+    assert!(capability.notes.contains("rejected without gathering"));
 }
