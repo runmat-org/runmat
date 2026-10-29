@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::shape::{is_scalar_shape, normalize_scalar_shape};
 use crate::builtins::common::spec::{
     checked_reduction_elements, FusionReductionContext, FusionReductionContract,
     FusionReductionControls, FusionReductionCount, FusionReductionDeclaration,
