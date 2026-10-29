@@ -162,12 +162,12 @@ pub fn fluid_state_publication_requests(
     mesh: &SolverMeshArtifact,
     result: &FluidSteadySolverResult,
 ) -> AnalysisExecutionResult<Vec<SemanticStatePublicationRequest>> {
-    result.validate_for(workload, mesh)?;
+    // Validates the result against its prepared source before deriving the layout.
     let topology = result.native_field_topology(workload, mesh)?;
     requests_on(workload, result, &topology)
 }
 
-/// The declared publication requests of a result whose `validate_for` succeeded, on its native
+/// The declared publication requests of a result validated against its source, on its native
 /// field topology.
 fn requests_on(
     workload: &FluidSteadyWorkload,
@@ -198,7 +198,7 @@ pub(super) fn validate_request(
     result: &FluidSteadySolverResult,
 ) -> AnalysisExecutionResult<FiniteVolumeFieldTopology> {
     request.validate()?;
-    result.validate_for(workload, mesh)?;
+    // Validates the result against its prepared source before deriving the layout.
     let topology = result.native_field_topology(workload, mesh)?;
     if !requests_on(workload, result, &topology)?.contains(request) {
         return Err(invalid(

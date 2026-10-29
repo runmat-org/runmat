@@ -15,82 +15,9 @@ pub(in crate::analysis) fn persist_objects(
     catalog.validate().map_err(|error| error.to_string())?;
     let _source_phase = staging.begin_source_phase()?;
     staging.require_source_objects(&catalog.objects)?;
-    let limit = staging.source_workspace_limit()?;
-    let mut paths = Vec::with_capacity(catalog.objects.len());
-    for batch in concurrent_batches(&catalog.objects, limit) {
-        let resident: u64 = batch.iter().map(|reference| reference.encoded_length).sum();
-        // Each object keeps the whole allowance minus the other buffers of its batch, so a
-        // batch of one is charged exactly as a sequential write.
-        let persist = |reference: &runmat_execution::value::ValueRef| {
-            let bytes = source.read_verified(reference)?;
-            staging.persist_catalog_object_within(
-                definition,
-                reference,
-                &bytes,
-                limit - (resident - reference.encoded_length),
-            )
-        };
-        paths.extend(
-            ordered_io_map(batch, persist)
-                .into_iter()
-                .collect::<Result<Vec<_>, _>>()?,
-        );
-    }
-    Ok(paths)
-}
-
-/// Consecutive objects whose read and write buffers (twice the object) fit the source
-/// workspace together; an object that alone exceeds it forms its own batch and fails there.
-fn concurrent_batches(
-    objects: &[runmat_execution::value::ValueRef],
-    limit: u64,
-) -> Vec<&[runmat_execution::value::ValueRef]> {
-    let mut batches = Vec::new();
-    let mut start = 0;
-    let mut charged = 0u64;
-    for (index, object) in objects.iter().enumerate() {
-        let need = object.encoded_length.saturating_mul(2);
-        if index > start && charged.saturating_add(need) > limit {
-            batches.push(&objects[start..index]);
-            start = index;
-            charged = 0;
-        }
-        charged = charged.saturating_add(need);
-    }
-    if start < objects.len() {
-        batches.push(&objects[start..]);
-    }
-    batches
-}
-
-/// Order-preserving map of independent create-and-fsync I/O over a few host threads. The
-/// work is storage latency, not numerical capacity, so it does not take the CPU pool.
-fn ordered_io_map<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let threads = std::thread::available_parallelism()
-            .map_or(1, usize::from)
-            .min(8)
-            .min(items.len());
-        if threads > 1 {
-            let next = std::sync::atomic::AtomicUsize::new(0);
-            let results = std::sync::Mutex::new(Vec::with_capacity(items.len()));
-            std::thread::scope(|scope| {
-                for _ in 0..threads {
-                    scope.spawn(|| loop {
-                        let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(item) = items.get(index) else { break };
-                        let value = work(item);
-                        results.lock().expect("I/O results").push((index, value));
-                    });
-                }
-            });
-            let mut results = results.into_inner().expect("I/O results");
-            results.sort_unstable_by_key(|(index, _)| *index);
-            return results.into_iter().map(|(_, value)| value).collect();
-        }
-    }
-    items.iter().map(work).collect()
+    staging.persist_catalog_objects(definition, &catalog.objects, |reference| {
+        Ok(source.read_verified(reference)?)
+    })
 }
 
 #[cfg(test)]
