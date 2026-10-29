@@ -89,7 +89,9 @@ impl MagnetostaticWorkload {
                 &sampling,
                 mesh,
                 &magnetic_native_field_definition_inventory()?,
-                crate::results::observation::ObservationLimits::default(),
+                crate::results::observation::ObservationLimits::for_step(
+                    &self.model.sequence.steps[0],
+                ),
             )
             .map_err(invalid)?;
         }

@@ -73,16 +73,38 @@ pub struct ObservationLimits {
     pub maximum_transfer_bytes: u64,
 }
 
+/// Resolved observation costs are exact functions of the topology and the requests, so no
+/// model-size constant bounds them: entity, value and byte ceilings are the wire range. The
+/// authored request count is a format bound. A run's resident ceiling comes from its step's
+/// resource declaration (`for_step`); stored and transferred bytes are admitted against the
+/// output plan by the object inventory.
 impl Default for ObservationLimits {
     fn default() -> Self {
+        let wire = crate::contracts::canonical_digest::WIRE_BOUND;
         Self {
             maximum_observations: 4096,
-            maximum_selected_entities: 100_000_000,
-            maximum_values: 400_000_000,
-            maximum_operation_count: 10_000_000_000,
-            maximum_peak_resident_bytes: 32 * 1024 * 1024 * 1024,
-            maximum_stored_bytes: 32 * 1024 * 1024 * 1024,
-            maximum_transfer_bytes: 32 * 1024 * 1024 * 1024,
+            maximum_selected_entities: wire,
+            maximum_values: wire,
+            maximum_operation_count: wire as u64,
+            maximum_peak_resident_bytes: wire as u64,
+            maximum_stored_bytes: wire as u64,
+            maximum_transfer_bytes: wire as u64,
+        }
+    }
+}
+
+impl ObservationLimits {
+    /// Limits for one step: the authored resident ceiling, when declared, bounds the peak
+    /// resident bytes of observation resolution and evaluation.
+    pub fn for_step(step: &runmat_analysis_core::ProcedureStep) -> Self {
+        let defaults = Self::default();
+        Self {
+            maximum_peak_resident_bytes: step
+                .accuracy
+                .resources
+                .maximum_resident_bytes
+                .unwrap_or(defaults.maximum_peak_resident_bytes),
+            ..defaults
         }
     }
 }

@@ -100,7 +100,7 @@ fn square_uniform_current_converges(order: ElementOrder) {
         let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
         let mut potential_error = 0.0;
         let mut field_error = 0.0;
-        for sample in &result.samples {
+        for sample in &result.samples(&projection).unwrap() {
             let [x, y, _] = sample.position_m;
             let (a, b) = reference(x, y, 1.0, 1023);
             for axis in 0..3 {
@@ -141,13 +141,14 @@ fn square_uniform_current_converges(order: ElementOrder) {
 fn sign_permeability_and_affine_geometry_order_preserve_physical_scaling() {
     let (projection, data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
     let base = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
+    let base_samples = base.samples(&projection).unwrap();
     for (order, mu, j) in [
         (ElementOrder::Tet4, 1.25663706212e-6, -2.0),
         (ElementOrder::Tet10, 1.0, 1.0),
     ] {
         let (projection, data) = problem(order, 2, mu, j);
         let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
-        for (sample, expected) in result.samples.iter().zip(&base.samples) {
+        for (sample, expected) in result.samples(&projection).unwrap().iter().zip(&base_samples) {
             for axis in 0..3 {
                 assert!(
                     (sample.flux_density_t.canonical_value()[axis] / (mu * j)
@@ -248,7 +249,10 @@ fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
                 .abs()
                 < 1e-8
         );
-        assert_eq!(result.edge_node_identities, reference.edge_node_identities);
+        assert_eq!(
+            result.edge_circulations_wb.canonical_values().len(),
+            reference.edge_circulations_wb.canonical_values().len()
+        );
         for (a, b) in result
             .edge_circulations_wb
             .canonical_values()
@@ -357,7 +361,8 @@ fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure
     let (projection, data) = problem(ElementOrder::Tet4, 3, 1.0, 1.0);
     let response = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
     let field: std::collections::BTreeMap<_, _> = response
-        .samples
+        .samples(&projection)
+        .unwrap()
         .iter()
         .map(|sample| {
             (
@@ -521,7 +526,8 @@ fn prescribed_tangential_potential_drives_the_exact_uniform_field() {
         case.action_ids.push(ExcitationId("imposed".into()));
     }
     let response = solve_canonical_static(&model, &mesh, "potential", 1e-10).unwrap();
-    for sample in &response.samples {
+    let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+    for sample in &response.samples(&projection).unwrap() {
         let b = sample.flux_density_t;
         assert!((b.canonical_value()[2] - a / l).abs() <= 1e-9 * a / l, "{b:?}");
         assert!(b.canonical_value()[0].abs() <= 1e-9 * a / l && b.canonical_value()[1].abs() <= 1e-9 * a / l, "{b:?}");

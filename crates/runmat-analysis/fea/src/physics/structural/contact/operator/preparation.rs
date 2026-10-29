@@ -15,7 +15,6 @@ impl<'a> CanonicalContactOperator<'a> {
             || controls.len() != interfaces.len()
             || node_rows.len() != projection.nodes.len()
             || dof_count == 0
-            || policy.maximum_identity_bytes == 0
             || policy.maximum_reference_points == 0
             || policy.maximum_patches_per_trial == 0
             || policy.maximum_refinement_evaluations_per_trial == 0
@@ -67,15 +66,14 @@ impl<'a> CanonicalContactOperator<'a> {
         let limits = policy.identity_limits();
         let profile = runmat_canonical_codec::profile_serialized(&identity_source, limits)
             .map_err(|_| ContactOperatorError::Budget)?;
-        let bytes = runmat_canonical_codec::encode_contract(
+        // Streamed: the support-sized identity encoding is never materialized.
+        let identity = crate::contracts::canonical_digest::canonical_contract_digest(
             b"runmat-fea-contact-operator/v1\0",
             "contact-operator",
             &identity_source,
             limits,
         )
         .map_err(|_| ContactOperatorError::Budget)?;
-        let identity = Digest::sha256(&bytes);
-        drop(bytes);
         let identity_construction_bytes = profile
             .materialization_resident_bytes_estimate
             .checked_add(profile.encoded_bytes_upper_bound)

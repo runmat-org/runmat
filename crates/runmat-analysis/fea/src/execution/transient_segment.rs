@@ -17,7 +17,7 @@ use super::{
 
 const TRANSIENT_SEGMENT_PREFIX: &[u8] = b"runmat-structural-transient-segment/v1\0";
 const TRANSIENT_SEGMENT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]

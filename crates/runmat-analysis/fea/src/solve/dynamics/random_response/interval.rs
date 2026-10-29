@@ -23,7 +23,7 @@ pub use assembly::{
 
 const INTERVAL_PREFIX: &[u8] = b"runmat-modal-random-response-interval\0";
 const INTERVAL_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 40_000_000, 65_536, 24);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 24));
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

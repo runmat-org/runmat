@@ -311,7 +311,7 @@ impl<'a> MaxwellDiscretization<'a> {
         voltages: &[ComplexPhasor],
     ) -> Result<MaxwellEvaluation, MaxwellError> {
         let omega = self.input.angular_frequency_rad_per_s.canonical_value();
-        let mut samples = Vec::with_capacity(self.input.sampling.integration_samples().len());
+        let mut samples = Vec::with_capacity(self.input.sampling.integration_sample_count());
         let mut continuity = ChargeContinuity::new(&self.projection, &self.grounded_nodes);
         let mut electric_energy = 0.0;
         let mut magnetic_energy = 0.0;
@@ -337,10 +337,14 @@ impl<'a> MaxwellDiscretization<'a> {
                 }
             }
             let mut ordinal = 0;
+            let element_identity = self.input.sampling.element_identities()[e];
+            let sample_identities = (0..15)
+                .map(|o| self.input.sampling.integration_sample_identity(e * 15 + o))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| topology(error.to_string()))?;
             self.space
                 .visit_element_quadrature(&self.projection, e, |point| {
                     let position = e * 15 + ordinal;
-                    let authority = &self.input.sampling.integration_samples()[position];
                     let volume_source = self.input.source_current[position]
                         .current_density_a_per_m2
                         .canonical_value();
@@ -403,8 +407,8 @@ impl<'a> MaxwellDiscretization<'a> {
                         }
                     }
                     samples.push(MaxwellFieldSample {
-                        sample_identity: authority.identity,
-                        element_identity: authority.element_identity,
+                        sample_identity: sample_identities[ordinal],
+                        element_identity,
                         ordinal,
                         position_m: point.position_m,
                         volume_weight_m3: weight,

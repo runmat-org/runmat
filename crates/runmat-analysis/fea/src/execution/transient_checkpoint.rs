@@ -25,7 +25,7 @@ use crate::{
 const TRANSIENT_CHECKPOINT_PREFIX: &[u8] = b"runmat-structural-transient-checkpoint/v1\0";
 const TRANSIENT_SCOPE_PREFIX: &[u8] = b"runmat-structural-transient-checkpoint-scope/v1\0";
 const TRANSIENT_CHECKPOINT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 const TRANSIENT_SCOPE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(128 * 1024 * 1024, 4_000_000, 65_536, 64);
 

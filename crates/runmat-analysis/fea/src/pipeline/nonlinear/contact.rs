@@ -183,7 +183,6 @@ pub(super) fn prepare_inputs(
         maximum_coordinates: 3 * nodes_total.max(1) * 4,
         maximum_patches_per_trial: 1 << 32,
         maximum_refinement_evaluations_per_trial: 1 << 32,
-        maximum_identity_bytes: 1 << 30,
         maximum_preparation_resident_bytes: maximum_resident_bytes,
         maximum_preparation_scalar_operations: 1 << 40,
     };

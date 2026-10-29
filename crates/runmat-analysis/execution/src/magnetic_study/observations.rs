@@ -43,7 +43,7 @@ impl MagneticStudyCoordinator {
                     &self.preparation.workload().model.sequence,
                 )?,
                 step: self.selected_step().clone(),
-                limits: ObservationLimits::default(),
+                limits: ObservationLimits::for_step(self.selected_step()),
                 program_revision: self.preparation.program_revision.clone(),
                 chunk_bytes: policy.chunk_bytes(),
                 inventory_limits: policy.inventory_limits(),

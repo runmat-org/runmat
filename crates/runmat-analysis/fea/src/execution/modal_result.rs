@@ -13,7 +13,7 @@ use super::{
 
 const MODAL_RESULT_PREFIX: &[u8] = b"runmat-structural-modal-result/v1\0";
 const MODAL_RESULT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 20_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Portable result of one modal-extraction workload.
 ///

@@ -86,31 +86,23 @@ pub(crate) fn canonical_validation_workspace(
     let (nodes, elements, faces, projection, metadata, selected) =
         canonical_validation_facts(model, mesh)?;
     let (support, properties) = validation_components(nodes, elements, faces, metadata, selected)?;
-    // validate_for_mesh independently regenerates the sampled topology. Four
-    // slots cover vector growth and concurrent owned/validated record lists;
-    // uniqueness trees are already included in support. Canonical identity
-    // materialization is charged separately by the retained-copy phase's
+    // validate_for_mesh independently regenerates the sampled layout: node and element
+    // identities, element corner indices and the derived oriented edges (sample identities
+    // and geometry are derived on demand, never stored). Four slots cover vector growth and
+    // concurrent owned/validated copies; uniqueness trees are already included in support.
+    // Canonical identity materialization is charged separately by the retained-copy phase's
     // authenticated full source codec profile.
-    use crate::results::field::{SampledOrientedEdge, VolumeFieldIntegrationSample};
+    use crate::results::field::SampledOrientedEdge;
+    use runmat_meshing_core::StableDigest;
     let sampling = sum(&[
-        mul(
-            mul(nodes, 4)?,
-            std::mem::size_of::<runmat_meshing_core::StableDigest>() as u64,
-        )?,
+        mul(mul(nodes, 4)?, std::mem::size_of::<StableDigest>() as u64)?,
         mul(
             mul(elements, 4)?,
-            std::mem::size_of::<(
-                runmat_meshing_core::StableDigest,
-                [runmat_meshing_core::StableDigest; 4],
-            )>() as u64,
+            std::mem::size_of::<(StableDigest, [u32; 4])>() as u64,
         )?,
         mul(
             mul(mul(elements, 6)?, 4)?,
             std::mem::size_of::<SampledOrientedEdge>() as u64,
-        )?,
-        mul(
-            mul(mul(elements, 15)?, 4)?,
-            std::mem::size_of::<VolumeFieldIntegrationSample>() as u64,
         )?,
     ])?;
     sum(&[support, mul(projection, 3)?, properties, sampling])
@@ -192,24 +184,25 @@ fn from_counts(
     } else {
         runmat_sparse_solvers::estimate::direct_reservation_bytes(
             host_dimension,
-            usize::try_from(support_entries).map_err(|_| resource("saddle entry count overflow"))?,
+            usize::try_from(support_entries)
+                .map_err(|_| resource("saddle entry count overflow"))?,
             false,
         )
     };
     let krylov = sum(&[workspace, mul(mul(dimension, 10)?, 16)?, 4096])?;
     let numerical = add(matrices, krylov)?;
 
-    // Retained response plus explicit storage topology: physical edge slots72,
-    // oriented edge topology96, physical sample136 + explicit sample104, and
-    // node identities32 and element identity+four corners160 logical bytes. Four slots cover growth
-    // and a concurrent retained-result clone, never presumed to share arrays.
-    // This does not reserve encoded result payloads or native field publication.
+    // Retained response plus its sampled layout: per edge slot a circulation (8) and a derived
+    // oriented edge (96); per sample A and B (48); per element mean B and permeability (32)
+    // plus identity and corner indices (48); per node an identity (32). Four slots cover
+    // growth and a concurrent retained-result clone, never presumed to share arrays. This
+    // does not reserve encoded result payloads or native field publication.
     let retained = sum(&[
         4096,
-        mul(edges, 672)?,
-        mul(samples, 960)?,
-        mul(nodes, 128)?,
-        mul(elements, 640)?,
+        mul(edges, 4 * (8 + 96))?,
+        mul(samples, 4 * 48)?,
+        mul(nodes, 4 * 32)?,
+        mul(elements, 4 * (32 + 48))?,
     ])?;
     let total = sum(&[
         support,

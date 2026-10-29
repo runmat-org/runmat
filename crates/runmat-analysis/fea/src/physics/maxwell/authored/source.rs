@@ -42,17 +42,20 @@ pub(super) fn compile(
         .iter()
         .map(|element| (element.stable_identity, element))
         .collect();
-    let mut samples: Vec<_> = sampling
-        .integration_samples()
-        .iter()
-        .map(|point| MaxwellCurrentSample {
-            sample_identity: point.identity,
-            current_density_a_per_m2: runmat_types::physical::Quantity::<
-                runmat_types::physical::kind::ElectricCurrentDensity,
-                _,
-            >::new([ComplexPhasor::ZERO; 3]),
+    let mut samples: Vec<_> = (0..sampling.integration_sample_count())
+        .map(|index| {
+            Ok(MaxwellCurrentSample {
+                sample_identity: sampling
+                    .integration_sample_identity(index)
+                    .map_err(|error| topology(error.to_string()))?,
+                current_density_a_per_m2: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::ElectricCurrentDensity,
+                    _,
+                >::new([ComplexPhasor::ZERO; 3]),
+            })
         })
-        .collect();
+        .collect::<Result<_, MaxwellError>>()?;
+    let points = sampling.rule().points_per_element();
     let loads =
         realize_step_excitations(model, step, ExcitationSamplePoint::frequency(frequency_hz))
             .map_err(invalid)?;
@@ -79,13 +82,14 @@ pub(super) fn compile(
             ));
         }
         let mut matched = false;
-        for (sample, point) in samples.iter_mut().zip(sampling.integration_samples()) {
+        for (index, sample) in samples.iter_mut().enumerate() {
+            let element_identity = sampling.element_identities()[index / points];
             let selected = match &load.target {
                 RealizedExcitationTarget::WholeModel => true,
                 RealizedExcitationTarget::Region(target) => {
                     target.validate_resolution().map_err(invalid)?;
                     let element = raw
-                        .get(&point.element_identity)
+                        .get(&element_identity)
                         .ok_or_else(|| topology("foreign source element"))?;
                     target.entity_dimension == EntityDimension::Volume
                         && (target.matches_persistent_entity(&element.region_id)
@@ -98,7 +102,8 @@ pub(super) fn compile(
             };
             if selected {
                 matched = true;
-                sample.current_density_a_per_m2 = sample.current_density_a_per_m2
+                sample.current_density_a_per_m2 = sample
+                    .current_density_a_per_m2
                     .try_map_canonical_storage(|mut components| {
                         for (axis, current) in components.iter_mut().enumerate() {
                             *current += ComplexPhasor::new(value.real[axis], value.imaginary[axis]);

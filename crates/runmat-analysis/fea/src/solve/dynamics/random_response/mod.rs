@@ -33,7 +33,7 @@ pub use interval::{
 const RESULT_PREFIX: &[u8] = b"runmat-modal-random-response-result\0";
 const EXCITATION_PREFIX: &[u8] = b"runmat-random-excitation-spectrum\0";
 const RESULT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 40_000_000, 65_536, 24);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 24));
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

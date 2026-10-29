@@ -49,7 +49,7 @@ fn sampled_observation_topology_retains_each_original_rule_order_and_identity() 
             for (actual, source) in topology
                 .volume_integration_points
                 .iter()
-                .zip(samples.integration_samples())
+                .zip(samples.integration_samples_for(&mesh).unwrap())
             {
                 assert_eq!(actual.identity, source.identity);
                 assert_eq!(actual.centroid_m, source.position_m);

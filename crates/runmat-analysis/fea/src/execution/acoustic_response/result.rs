@@ -8,7 +8,9 @@ use crate::{
 };
 
 const PREFIX: &[u8] = b"runmat-acoustic-response-result/v2\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 8_000_000, 65_536, 64);
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
+    CanonicalLimits::new(0, 0, 65_536, 64),
+);
 
 pub(super) enum SolvedResponse {
     Modal(CanonicalAcousticModes),

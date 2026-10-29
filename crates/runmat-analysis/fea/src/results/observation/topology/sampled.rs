@@ -8,15 +8,6 @@ impl ObservationTopology<'_> {
     ) -> Result<Self, ObservationError> {
         sampling.validate_for_mesh(mesh).map_err(invalid)?;
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
-        let element_indices = SortedValues::derive(
-            projection
-                .elements
-                .iter()
-                .enumerate()
-                .map(|(i, element)| (element.stable_identity, i)),
-            projection.elements.len(),
-        )
-        .map_err(storage_error)?;
         let node_coordinates = SortedValues::derive(
             projection
                 .nodes
@@ -25,28 +16,35 @@ impl ObservationTopology<'_> {
             projection.nodes.len(),
         )
         .map_err(storage_error)?;
-        let mut integration_points_by_parent = vec![Vec::new(); projection.elements.len()];
-        let volume_integration_points = sampling
-            .integration_samples()
-            .iter()
-            .enumerate()
-            .map(|(index, sample)| {
-                let parent = *element_indices.get(&sample.element_identity).ok_or(
-                    ObservationError::Identity(
-                        "sampled observation parent is absent from canonical projection",
-                    ),
-                )?;
-                integration_points_by_parent[parent].push(index);
-                Ok(ObservationElement {
-                    identity: sample.identity,
-                    region_id: projection.elements[parent]
-                        .region_id
-                        .source_topology_id
-                        .clone(),
-                    centroid_m: sample.position_m,
-                })
+        let points = sampling.rule().points_per_element();
+        let integration_points_by_parent = (0..projection.elements.len())
+            .map(|parent| (parent * points..(parent + 1) * points).collect())
+            .collect::<Vec<Vec<usize>>>();
+        // Samples are named by (element, rule point): identity from that pair, geometry from
+        // the projection and the rule.
+        let mut volume_integration_points = Vec::new();
+        volume_integration_points
+            .try_reserve_exact(sampling.integration_sample_count())
+            .map_err(|_| ObservationError::Limit("sampled integration-point allocation"))?;
+        let mut failure = None;
+        sampling
+            .visit_integration_geometry(&projection, |point| {
+                match sampling.integration_sample_identity(point.index) {
+                    Ok(identity) => volume_integration_points.push(ObservationElement {
+                        identity,
+                        region_id: projection.elements[point.element]
+                            .region_id
+                            .source_topology_id
+                            .clone(),
+                        centroid_m: point.position_m,
+                    }),
+                    Err(error) => failure = failure.take().or(Some(error)),
+                }
             })
-            .collect::<Result<Vec<_>, ObservationError>>()?;
+            .map_err(invalid)?;
+        if let Some(error) = failure {
+            return Err(invalid(error));
+        }
         let oriented_edges = sampling
             .oriented_edges()
             .iter()
