@@ -26,7 +26,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-const JOURNAL: &str = ".artifacts/workspace-publications";
+pub(crate) const JOURNAL: &str = ".artifacts/workspace-publications";
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)

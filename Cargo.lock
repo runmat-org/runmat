@@ -8241,6 +8241,7 @@ dependencies = [
  "fs2",
  "futures",
  "js-sys",
+ "libc",
  "log",
  "once_cell",
  "reqwest 0.12.28",
@@ -9285,6 +9286,7 @@ name = "runmat-workspace-contracts"
 version = "0.6.2"
 dependencies = [
  "ciborium",
+ "runmat-types",
  "schemars",
  "serde",
  "serde_bytes",

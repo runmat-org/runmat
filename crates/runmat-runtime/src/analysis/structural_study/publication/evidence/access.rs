@@ -9,7 +9,10 @@ pub(in crate::analysis) struct StudyEvidenceAccess {
 }
 impl StudyEvidenceAccess {
     pub(in crate::analysis) fn capture() -> Self {
-        Self::new(study_evidence_root(), storage::scoped_artifact_provider().unwrap_or_else(runmat_filesystem::current_provider))
+        Self::new(
+            study_evidence_root(),
+            storage::scoped_artifact_provider().unwrap_or_else(runmat_filesystem::current_provider),
+        )
     }
     pub(in crate::analysis) fn new(
         root: PathBuf,
@@ -23,36 +26,48 @@ impl StudyEvidenceAccess {
         bytes: &[u8],
         maximum: u64,
     ) -> Result<String, Error> {
+        self.persist_immutable_batch(maximum, bytes.len() as u64, |batch| {
+            batch.persist(relative, bytes)
+        })
+    }
+
+    /// One workspace scope and one group commit for a run of immutable objects staged one at
+    /// a time, none larger than `largest` bytes: each object's buffer and its existing-content
+    /// comparison stay within `maximum`, as for a single object. The objects become durable
+    /// and visible together once `stage` returns; nothing is published if it fails.
+    pub(in crate::analysis) fn persist_immutable_batch<T>(
+        &self,
+        maximum: u64,
+        largest: u64,
+        stage: impl FnOnce(&mut ImmutableObjectBatch<'_>) -> Result<T, Error>,
+    ) -> Result<T, Error> {
         let available = maximum
-            .checked_sub(bytes.len() as u64)
-            .filter(|available| *available > 0 && *available >= bytes.len() as u64)
+            .checked_sub(largest)
+            .filter(|available| *available > 0 && *available >= largest)
             .ok_or_else(|| {
                 Error::ResourceLimit {
                     message: format!(
-                        "immutable object buffers exceed their phase allowance: object {} bytes, allowance {maximum} bytes",
-                        bytes.len()
+                        "immutable object buffers exceed their phase allowance: object {largest} bytes, allowance {maximum} bytes"
                     ),
                 }
             })?;
         let scope = self
             .provider
             .workspace_access(&self.root, true, available)?;
-        let path = std::path::Path::new(relative);
-        scope.create_dir_all(path.parent().ok_or("immutable object path has no parent")?)?;
-        match scope.atomic_create_new(path, bytes, available)? {
-            runmat_filesystem::AtomicCreateResult::Published { .. } => {}
-            runmat_filesystem::AtomicCreateResult::Existing(existing) if existing == bytes => {}
-            runmat_filesystem::AtomicCreateResult::Existing(_) => {
-                return Err("immutable object identity already contains different content".into())
-            }
-        }
-        scope.synchronize_immutable(path).map_err(|error| {
-            Error::EvidenceDurabilityIndeterminate {
-                path: self.root.join(path),
+        let mut batch = ImmutableObjectBatch {
+            root: &self.root,
+            batch: scope.immutable_batch()?,
+            available,
+        };
+        let value = stage(&mut batch)?;
+        batch
+            .batch
+            .commit()
+            .map_err(|error| Error::EvidenceDurabilityIndeterminate {
+                path: self.root.clone(),
                 cause: error.to_string(),
-            }
-        })?;
-        Ok(self.root.join(path).display().to_string())
+            })?;
+        Ok(value)
     }
     pub(super) fn persist(
         &self,
@@ -125,5 +140,43 @@ impl StudyEvidenceAccess {
 fn limited(message: &str) -> Error {
     Error::ResourceLimit {
         message: message.into(),
+    }
+}
+
+pub(in crate::analysis) struct ImmutableObjectBatch<'a> {
+    root: &'a std::path::Path,
+    batch: Box<dyn runmat_filesystem::workspace_access::ImmutableBatch + 'a>,
+    available: u64,
+}
+
+impl ImmutableObjectBatch<'_> {
+    /// Stages one immutable object; its returned path is visible once the batch commits.
+    pub(in crate::analysis) fn persist(
+        &mut self,
+        relative: &str,
+        bytes: &[u8],
+    ) -> Result<String, Error> {
+        if bytes.len() as u64 > self.available {
+            return Err(Error::ResourceLimit {
+                message: format!(
+                    "immutable object of {} bytes exceeds its scope allowance of {} bytes",
+                    bytes.len(),
+                    self.available
+                ),
+            });
+        }
+        let path = std::path::Path::new(relative);
+        if path.parent().is_none() {
+            return Err("immutable object path has no parent".into());
+        }
+        match self.batch.stage(path, bytes, self.available)? {
+            runmat_filesystem::workspace_access::ImmutableStage::Staged => {}
+            runmat_filesystem::workspace_access::ImmutableStage::Existing(existing)
+                if existing == bytes => {}
+            runmat_filesystem::workspace_access::ImmutableStage::Existing(_) => {
+                return Err("immutable object identity already contains different content".into())
+            }
+        }
+        Ok(self.root.join(path).display().to_string())
     }
 }
