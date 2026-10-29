@@ -212,9 +212,18 @@ fn single_multiply_sum_never_uses_a_legacy_single_accumulator() {
             placement: None,
             runtime: None,
         };
+        assert!(
+            futures::executor::block_on(super::super::resolve_reduction_program(
+                &request,
+                ProviderPrecision::F32,
+            ))
+            .unwrap()
+            .is_none(),
+            "F32 ownership cannot supply the canonical Double accumulator"
+        );
         let program = futures::executor::block_on(super::super::resolve_reduction_program(
             &request,
-            ProviderPrecision::F32,
+            ProviderPrecision::F64,
         ))
         .unwrap()
         .expect("ordinary multiplication has an admitted mathematical contract");
