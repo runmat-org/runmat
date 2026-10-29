@@ -77,7 +77,7 @@ pub(super) async fn cold_fixture(
     let product = plan_fluid_study_product(compiled, &fixture.mesh, policy).unwrap();
     let mut planned_policy = fixture.policy;
     planned_policy.physical_relative_tolerance = 1e-8;
-    assert_eq!(product.workload.policy, planned_policy);
+    assert_eq!(product.workload().policy, planned_policy);
     let directory = tempfile::tempdir().unwrap();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.store_root = directory.path().join(identity);
@@ -94,7 +94,7 @@ pub(super) async fn cold_fixture(
         cpu_millicores: 1000,
         memory_bytes: ceiling.min(fixture.policy.resident_byte_budget()),
         scratch_bytes: ceiling.min(fixture.policy.resident_byte_budget()),
-        max_wall_millis: product.compiled.model.sequence.steps[0]
+        max_wall_millis: product.compiled().model.sequence.steps[0]
             .accuracy
             .resources
             .maximum_wall_time_milliseconds,
@@ -160,10 +160,9 @@ pub(super) async fn cold_fixture(
             let mut foreign = done.preparation();
             // A different balanced physical source preserves shape and requested work;
             // it still cannot inherit the original fields, receipt or publication.
-            for model in [
-                &mut foreign.product.compiled.model,
-                &mut foreign.product.workload.model,
-            ] {
+            let mut compiled = foreign.product.compiled().clone();
+            {
+                let model = &mut compiled.model;
                 for signal in &mut model.signals {
                     if let PhysicalSignal::MassFlowRate(signal) = signal {
                         let SignalRepresentation::Constant(SignalValue::Scalar(rate)) =
@@ -176,6 +175,12 @@ pub(super) async fn cold_fixture(
                     }
                 }
             }
+            foreign.product = runmat_analysis_fea::study::plan_fluid_study_product(
+                compiled,
+                &foreign.mesh,
+                foreign.policy,
+            )
+            .unwrap();
             assert!(import_fluid_study_completion(&store, foreign, closures.clone()).is_err());
         }
     }
@@ -186,16 +191,16 @@ pub(super) async fn cold_fixture(
     assert_eq!(cold.publication, done.publication);
     assert_eq!(cold.states, done.states);
     assert_eq!(cold.fields.manifest.fields.len(), 3);
-    assert_eq!(cold.workload.policy, planned_policy);
+    assert_eq!(cold.product.workload().policy, planned_policy);
     let request = cold
         .result
         .result
-        .native_field_request(&cold.workload, &fixture.mesh)
+        .native_field_request(cold.product.workload(), &fixture.mesh)
         .unwrap();
     let expected = cold
         .result
         .result
-        .recover_native_fields(&cold.workload, &fixture.mesh, &request)
+        .recover_native_fields(cold.product.workload(), &fixture.mesh, &request)
         .unwrap();
     for (entry, original) in cold.fields.manifest.fields.iter().zip(expected.fields()) {
         let partitions = entry
@@ -233,7 +238,7 @@ pub(super) async fn cold_fixture(
         runmat_analysis_fea::results::accuracy::AccuracyStatus::Indeterminate
     );
     let gate = runmat_analysis_fea::results::accuracy::publication_gate(
-        &cold.workload.model.sequence.steps[0].accuracy,
+        &cold.product.workload().model.sequence.steps[0].accuracy,
         cold.accuracy.artifact.evaluation(),
     )
     .unwrap();
@@ -244,7 +249,7 @@ pub(super) async fn cold_fixture(
 
     cold.result
         .numerical_receipt
-        .validate_against(&cold.workload, &cold.result.result, &fixture.mesh)
+        .validate_against(cold.product.workload(), &cold.result.result, &fixture.mesh)
         .unwrap();
     cold
 }

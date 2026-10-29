@@ -174,7 +174,7 @@ impl CompletedFeaStudyResult {
         &self,
     ) -> Option<&runmat_analysis_fea::study::CompiledAnalysisStudy> {
         match self {
-            Self::Fluid(result) => Some(&result.completion.compiled),
+            Self::Fluid(result) => Some(result.completion.compiled()),
             Self::Nonlinear(result) => Some(&result.completion.compiled),
             Self::Acoustic(result) => Some(&result.completion.compiled),
             Self::AcousticResponse(result) => Some(&result.completion.compiled),

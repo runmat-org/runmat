@@ -377,8 +377,8 @@ pub(crate) fn plan_family_study(
             )
             .map_err(|error| error.to_string())?;
             let product = &planned.preparation().product;
-            let mut step = single_step(&product.compiled.model, kind)?;
-            step.0 = step.0.min(product.workload.policy.resident_byte_budget());
+            let mut step = single_step(&product.compiled().model, kind)?;
+            step.0 = step.0.min(product.workload().policy.resident_byte_budget());
             (FamilyStudyPreparation::Fluid(Box::new(planned)), step)
         }
         StudyRootPlanning::NonlinearSolid(policy) => {

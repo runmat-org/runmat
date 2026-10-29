@@ -220,8 +220,7 @@ fn completion(
             .workload
             .identity
             .digest(),
-        compiled: completed.compiled.clone(),
-        workload: completed.workload.clone(),
+        product: completed.product.clone(),
         result: completed.result.result.clone(),
         numerical_receipt: completed.result.numerical_receipt.clone(),
         fields: completed.fields.manifest.clone(),
