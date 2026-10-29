@@ -876,6 +876,7 @@ pub(super) fn assemble_linear_system_impl(
                 mesh,
                 constraint_plan,
                 &structural_dof_layout,
+                &transient_basis::forcing::SolidLoadDomain::derive(mesh)?,
             )?;
             rhs = forcing.rhs;
             physical_load = forcing.physical_load;

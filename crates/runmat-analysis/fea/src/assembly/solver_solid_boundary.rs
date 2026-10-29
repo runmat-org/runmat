@@ -29,10 +29,32 @@ pub(super) fn apply_solver_mesh_structural_loads(
     rhs: &mut [f64],
     strict_region_mapping: bool,
 ) -> Result<StructuralSourceProjection, SolverMeshRegionMappingError> {
-    rhs.fill(0.0);
     let projection = AnalysisProjection::derive(mesh).map_err(|error| {
         SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
     })?;
+    apply_solver_mesh_structural_loads_on_projection(
+        excitations,
+        mesh,
+        &projection,
+        constraint_plan,
+        layout,
+        rhs,
+        strict_region_mapping,
+    )
+}
+
+/// [`apply_solver_mesh_structural_loads`] on the analysis projection already derived from
+/// `mesh`, so repeated load samples (transient steps, per-load compilation) derive it once.
+pub(super) fn apply_solver_mesh_structural_loads_on_projection(
+    excitations: &RealizedExcitations,
+    mesh: &SolverMeshArtifact,
+    projection: &AnalysisProjection,
+    constraint_plan: &CanonicalStructuralConstraintPlan,
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    strict_region_mapping: bool,
+) -> Result<StructuralSourceProjection, SolverMeshRegionMappingError> {
+    rhs.fill(0.0);
     let node_coordinates_m = projection
         .nodes
         .iter()
