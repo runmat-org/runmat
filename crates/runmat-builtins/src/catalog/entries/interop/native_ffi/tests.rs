@@ -18,13 +18,14 @@ fn text() -> ValueFact {
 }
 
 #[test]
-fn eight_native_identities_are_canonical_and_ordered() {
+fn native_identities_are_canonical_and_ordered() {
     let names: std::collections::BTreeSet<_> =
         ENTRIES.iter().map(|entry| entry.identity.name).collect();
     assert_eq!(
         names,
         std::collections::BTreeSet::from([
             "calllib",
+            "clibgen.buildInterface",
             "libfunctions",
             "libisloaded",
             "libpointer",
@@ -103,6 +104,19 @@ fn call_outputs_remain_dynamic_and_statement_forms_return_nothing() {
 
 #[test]
 fn load_options_use_one_typed_case_insensitive_vocabulary() {
+    assert_eq!(
+        NativeBuildOption::parse("LIBRARIES"),
+        Some(NativeBuildOption::Libraries)
+    );
+    assert_eq!(
+        NativeBuildOption::parse("interfaceName"),
+        Some(NativeBuildOption::InterfaceName)
+    );
+    assert_eq!(
+        NativeBuildOption::parse("IncludeDirectories"),
+        Some(NativeBuildOption::IncludePath)
+    );
+    assert_eq!(NativeBuildOption::parse("compilerflags"), None);
     for spelling in ["Alias", "alias", "IncludePath", "includePATH", "AddHeader"] {
         assert!(NativeLoadOption::parse(spelling).is_some());
     }
@@ -119,6 +133,57 @@ fn load_options_use_one_typed_case_insensitive_vocabulary() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-NATIVE-FFI-OPTION"));
+}
+
+#[test]
+fn qualified_interface_preparation_has_one_canonical_process_link_and_text_contract() {
+    let entry = crate::builtin_catalog_entry_by_name("clibgen.buildInterface").unwrap();
+    assert_eq!(
+        entry.identity,
+        CLIBGEN_BUILD_INTERFACE_CATALOG_ENTRY.identity
+    );
+    assert_eq!(
+        entry.link.policy,
+        BuiltinLinkPolicy::ForeignRuntime(ForeignAdapterFamily::NativeFfi)
+    );
+    assert_eq!(
+        entry.link.execution_stack,
+        ExecutionStackRequirement::Process
+    );
+    assert_eq!(entry.contract.purity, BuiltinPurity::Impure);
+    assert_eq!(
+        entry.placement.accelerator,
+        BuiltinAcceleratorPolicy::Forbidden
+    );
+    let mut valid = request(vec![text(), text(), text()], 1);
+    valid.literals = LiteralContext::new(vec![
+        LiteralValue::String("fixture.h".into()),
+        LiteralValue::String("Libraries".into()),
+        LiteralValue::String("fixture".into()),
+    ]);
+    let result = infer_catalog_call(entry, &valid);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(result.outputs[0].kind, ValueKindFact::String);
+    assert_eq!(result.outputs[0].shape, ShapeFact::Scalar);
+    assert!(result
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::NativeCode));
+    assert!(result
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::ForeignRuntime));
+    assert!(result.effects.0.contains(&EffectKind::FilesystemRead));
+    assert!(result.effects.0.contains(&EffectKind::FilesystemWrite));
+    valid.literals = LiteralContext::new(vec![
+        LiteralValue::String("fixture.h".into()),
+        LiteralValue::String("InterfaceName".into()),
+        LiteralValue::String("fixture".into()),
+    ]);
+    assert!(infer_catalog_call(entry, &valid)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-NATIVE-FFI-LIBRARY"));
 }
 
 #[test]

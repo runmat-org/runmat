@@ -2,6 +2,7 @@ mod adapter;
 mod isolation;
 mod request;
 mod session;
+pub(crate) use adapter::declared_pointer_method;
 
 pub(super) use adapter::{is_callable, isolated_callback_value};
 pub use adapter::{

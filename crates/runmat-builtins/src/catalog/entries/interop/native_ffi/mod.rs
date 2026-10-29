@@ -2,6 +2,7 @@
 //! remains the sole authority for ABI handles and prepared artifacts.
 
 mod contract;
+mod build_interface;
 mod calllib;
 mod descriptor;
 mod documentation_support;
@@ -17,8 +18,11 @@ mod setdatatype;
 mod tests;
 mod unloadlibrary;
 
+pub use build_interface::{
+    CLIBGEN_BUILD_INTERFACE_CATALOG_ENTRY, CLIBGEN_BUILD_INTERFACE_DESCRIPTOR,
+};
 pub use calllib::{CALLLIB_CATALOG_ENTRY, CALLLIB_DESCRIPTOR};
-pub use contract::NativeLoadOption;
+pub use contract::{NativeBuildOption, NativeLoadOption};
 pub use descriptor::{
     NATIVE_FFI_ERROR_HOST_UNAVAILABLE, NATIVE_FFI_ERROR_INVALID, NATIVE_FFI_ERROR_UNAVAILABLE,
 };
@@ -32,6 +36,7 @@ pub use setdatatype::{SETDATATYPE_CATALOG_ENTRY, SETDATATYPE_DESCRIPTOR};
 pub use unloadlibrary::{UNLOADLIBRARY_CATALOG_ENTRY, UNLOADLIBRARY_DESCRIPTOR};
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
+    &CLIBGEN_BUILD_INTERFACE_CATALOG_ENTRY,
     &LOADLIBRARY_CATALOG_ENTRY,
     &UNLOADLIBRARY_CATALOG_ENTRY,
     &LIBISLOADED_CATALOG_ENTRY,

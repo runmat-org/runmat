@@ -67,6 +67,7 @@ mod direct_snapshot;
 mod library;
 pub(super) use library::PreparedLibraryReadError;
 mod pointer_roles;
+pub(crate) use pointer_roles::declared_pointer_method;
 mod pointer_storage;
 mod pointer_view;
 mod project_catalog;

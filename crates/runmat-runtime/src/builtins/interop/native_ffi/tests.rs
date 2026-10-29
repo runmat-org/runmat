@@ -41,6 +41,15 @@ mod native {
         let (runtime, calls) = recording_context();
         let invalid = Value::output_list(Vec::new());
         let results = [
+            futures::executor::block_on(clibgen_build_interface_builtin(
+                Some(runtime.clone()),
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("fixture.h".into()),
+                    Value::String("InterfaceName".into()),
+                    Value::String("missing_library".into()),
+                ]),
+            )),
             futures::executor::block_on(loadlibrary_builtin(
                 Some(runtime.clone()),
                 None,
@@ -117,6 +126,15 @@ mod native {
     fn impossible_public_output_counts_fail_before_foreign_service() {
         let (runtime, calls) = recording_context();
         let checks = [
+            futures::executor::block_on(clibgen_build_interface_builtin(
+                Some(runtime.clone()),
+                Some(2),
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("fixture.h".into()),
+                    Value::String("Libraries".into()),
+                    Value::String("fixture".into()),
+                ]),
+            )),
             futures::executor::block_on(loadlibrary_builtin(
                 Some(runtime.clone()),
                 Some(3),

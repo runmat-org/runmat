@@ -66,7 +66,7 @@ pub(super) async fn try_bound_identity(
     std::ops::ControlFlow::Break(result)
 }
 
-/// Native adapters retain the same clibgen → clib → Python order. Their
+/// Qualified native calls retain the clib → Python order. Their
 /// rooted argument owner is transferred once at each Continue boundary.
 #[inline(never)]
 pub(super) async fn try_external_foreign_adapters(
@@ -76,14 +76,6 @@ pub(super) async fn try_external_foreign_adapters(
 ) -> super::super::CallableAttempt {
     let Some(context) = crate::context::legacy::active() else {
         return std::ops::ControlFlow::Continue(args);
-    };
-    args = match crate::foreign::try_invoke_clibgen(context.clone(), name, args, requested_outputs)
-        .await
-    {
-        crate::foreign::ForeignAttempt::Break(result) => {
-            return std::ops::ControlFlow::Break(result)
-        }
-        crate::foreign::ForeignAttempt::Continue(args) => args,
     };
     args = match crate::foreign::try_invoke_clib(context.clone(), name, args, requested_outputs)
         .await

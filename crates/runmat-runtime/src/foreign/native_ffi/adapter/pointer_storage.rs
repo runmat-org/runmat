@@ -29,7 +29,7 @@ impl NativeFfiAdapter {
             pointer,
             resolved.metadata,
             type_name,
-            "lib.pointer".into(),
+            super::pointer_roles::POINTER_TYPE_NAME.into(),
             resolved.library,
         )
     }
@@ -205,7 +205,9 @@ impl NativeFfiAdapter {
         let reference = self.handles.register_resource(
             &self.host_identity,
             ForeignResourceMetadata {
-                type_identity: pointer_type_identity("lib.pointer".into()),
+                type_identity: pointer_type_identity(
+                    super::pointer_roles::POINTER_TYPE_NAME.into(),
+                ),
                 ownership,
                 affinity: ForeignAffinity::OriginThread,
                 lifetime: ForeignLifetime::Session,

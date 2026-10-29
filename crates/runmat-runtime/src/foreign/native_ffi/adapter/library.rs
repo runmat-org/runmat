@@ -308,25 +308,25 @@ impl NativeFfiAdapter {
         for index in (1..arguments.len()).step_by(2) {
             let name = String::try_from(arguments.get(index).expect("validated option pair"))
                 .map_err(|_| invalid_call("buildInterface option names must be text"))?;
-            match name.to_ascii_lowercase().as_str() {
-                "libraries" => {
+            match runmat_builtins::NativeBuildOption::parse(&name) {
+                Some(runmat_builtins::NativeBuildOption::Libraries) => {
                     library = Some(String::try_from(arguments.get(index + 1).expect("validated option pair")).map_err(|_| {
                         invalid_call("buildInterface Libraries must name one shared library")
                     })?);
                 }
-                "interfacename" => {
+                Some(runmat_builtins::NativeBuildOption::InterfaceName) => {
                     alias = Some(String::try_from(arguments.get(index + 1).expect("validated option pair")).map_err(|_| {
                         invalid_call("buildInterface InterfaceName must be text")
                     })?);
                 }
-                "includepath" | "includedirectories" => {
+                Some(runmat_builtins::NativeBuildOption::IncludePath) => {
                     includes.push(PathBuf::from(String::try_from(arguments.get(index + 1).expect("validated option pair")).map_err(|_| {
                         invalid_call("buildInterface include path must be text")
                     })?));
                 }
-                unsupported => {
+                None => {
                     return Err(invalid_call(format!(
-                        "buildInterface option `{unsupported}` is not supported by the C ABI interface builder"
+                        "buildInterface option `{name}` is not supported by the C ABI interface builder"
                     )))
                 }
             }

@@ -159,6 +159,31 @@ fn prepared_interface_is_installed_and_admitted_before_session_execution() {
     execution_session
         .admit_interop_manifest(&manifest.interop_manifest())
         .unwrap();
+    // This independent selected unit receives the exact prepared closure from
+    // its frozen declaration, not from an ambient adapter installed earlier.
+    std::fs::create_dir(temporary.path().join("src")).unwrap();
+    let project_manifest = temporary.path().join("runmat.toml");
+    std::fs::write(&project_manifest, format!(
+        "[package]\nname = \"prepared-native-interface\"\n[sources]\nroots = [\"src\"]\n[native-interfaces.prepared_fixture]\nmanifest = \"{}\"\nlibrary = \"{}\"\n",
+        manifest_path.file_name().unwrap().to_str().unwrap(),
+        library_path.file_name().unwrap().to_str().unwrap(),
+    )).unwrap();
+    let frozen = runmat_package::build_frozen_project(
+        &project_manifest,
+        std::collections::BTreeSet::from([runmat_package::HostCapability::NativeLibrary]),
+    )
+    .unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime
+        .block_on(
+            execution_session
+                .install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen)),
+        )
+        .unwrap();
+    let _entered = runtime.enter();
     let result = runmat_core::execute_text_request_for_testing(
         &mut execution_session,
         "total = clib.prepared_fixture.fixture_add(int32(20), int32(22)); total",

@@ -474,7 +474,7 @@ pub(super) fn pointer_type_identity(nominal_type: String) -> ForeignTypeIdentity
     ForeignTypeIdentity {
         family: NATIVE_FFI_ADAPTER_ID.into(),
         name: nominal_type,
-        version: 1,
+        version: super::pointer_roles::POINTER_TYPE_VERSION,
     }
 }
 

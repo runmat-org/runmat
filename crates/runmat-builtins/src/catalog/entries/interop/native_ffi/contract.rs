@@ -2,6 +2,29 @@ use crate::*;
 use runmat_types::ExecutionStackRequirement;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBuildOption {
+    Libraries,
+    InterfaceName,
+    IncludePath,
+}
+
+impl NativeBuildOption {
+    pub fn parse(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("Libraries") {
+            Some(Self::Libraries)
+        } else if name.eq_ignore_ascii_case("InterfaceName") {
+            Some(Self::InterfaceName)
+        } else if name.eq_ignore_ascii_case("IncludePath")
+            || name.eq_ignore_ascii_case("IncludeDirectories")
+        {
+            Some(Self::IncludePath)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeLoadOption {
     Alias,
     IncludePath,

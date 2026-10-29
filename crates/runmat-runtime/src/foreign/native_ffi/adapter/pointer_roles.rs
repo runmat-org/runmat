@@ -20,10 +20,29 @@ impl PointerMember {
     }
 }
 
-pub(super) enum PointerMethod {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PointerMethod {
     SetDataType,
     IsNull,
     Reshape,
+}
+
+pub(super) const POINTER_TYPE_NAME: &str = "lib.pointer";
+pub(super) const POINTER_TYPE_VERSION: u32 = 1;
+
+/// Nominal dispatch classification only, not a resource/host capability.
+/// The adapter still validates the live handle and required access on invoke.
+pub(crate) fn declared_pointer_method(
+    identity: &runmat_types::ForeignTypeIdentity,
+    member: &str,
+) -> Option<PointerMethod> {
+    if identity.family != super::NATIVE_FFI_ADAPTER_ID
+        || identity.name != POINTER_TYPE_NAME
+        || identity.version != POINTER_TYPE_VERSION
+    {
+        return None;
+    }
+    PointerMethod::parse(member)
 }
 
 impl PointerMethod {
@@ -62,5 +81,20 @@ mod tests {
             Some(PointerMethod::IsNull)
         ));
         assert!(PointerMethod::parse("unknown").is_none());
+        let mut identity =
+            super::super::pointer_view::pointer_type_identity(POINTER_TYPE_NAME.into());
+        assert_eq!(
+            declared_pointer_method(&identity, "setDataType"),
+            Some(PointerMethod::SetDataType)
+        );
+        assert!(declared_pointer_method(&identity, "Value").is_none());
+        identity.name = "lib.fixture_record".into();
+        assert!(declared_pointer_method(&identity, "setdatatype").is_none());
+        identity.name = POINTER_TYPE_NAME.into();
+        identity.version += 1;
+        assert!(declared_pointer_method(&identity, "setdatatype").is_none());
+        identity.version = POINTER_TYPE_VERSION;
+        identity.family = "another-adapter".into();
+        assert!(declared_pointer_method(&identity, "setdatatype").is_none());
     }
 }

@@ -27,6 +27,8 @@ clibgen.buildInterface("include/filters.h", ...
 
 Both entrypoints use the same native-interface preparation library. RunMat writes a canonical `.runmat.json` manifest that records the normalized declarations, target triple, exact library digest and length, and a content-derived interface identity. Moving the manifest and matching library together does not change that identity; changing either file does.
 
+The current `clibgen.buildInterface` implementation prepares one C ABI library and returns its loaded interface alias as a scalar string. It does not implement MATLAB's C++ definition-object customization/build workflow or accept multiple libraries.
+
 Header preparation uses a compiler frontend so structures, aliases, enumerations, pointers, arrays, calling conventions, and platform layout come from the target ABI. RunMat does not infer an interface from function calls in source code.
 
 ## Declaring Prepared Interfaces
@@ -40,6 +42,8 @@ library = "native/libfilters.dylib"
 ```
 
 Both paths are relative to that package's manifest and cannot escape the package root. The declaration name must match the interface name in the prepared manifest. Dependencies can declare their own interfaces; project resolution collects the complete set from the frozen package graph and rejects duplicate public interface names.
+
+To reuse an already-prepared interface from a later independent selected unit that calls only `clib.filters.*`, select its exact manifest/library closure through the frozen declaration above or an admitted executable bundle. Adapter installation and manifest validation alone do not attach that closure to another unit. A unit that prepares or loads an interface uses its own admitted native preparation frontdoor; unrelated selected code does not inherit an ambient foreign port.
 
 The interface manifest and library bytes participate in the package tree identity. `--locked` and `--frozen` therefore detect changes to either artifact just as they detect source changes. Publish native packages with `runmat package publish --allow-native`, and include target-specific libraries only for targets the package supports.
 

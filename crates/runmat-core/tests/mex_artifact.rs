@@ -306,13 +306,32 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {{
     }
     let revision = session.project_revision();
     let manifest_bytes = std::fs::read(&artifact.manifest).unwrap();
-    std::fs::write(&artifact.manifest, b"invalid MEX manifest").unwrap();
+    let frozen_artifact = handoff
+        .project
+        .mex_artifacts
+        .iter()
+        .find(|entry| entry.name == "project_fixture")
+        .unwrap();
+    let manifest_path = &frozen_artifact.manifest_path;
+    let expected_digest = &frozen_artifact.manifest_digest;
+    assert_eq!(
+        expected_digest,
+        &runmat_package::ContentDigest::sha256(&manifest_bytes)
+    );
+    let changed_manifest = b"invalid MEX manifest";
+    std::fs::write(&artifact.manifest, changed_manifest).unwrap();
     let rejected = runtime
         .block_on(session.install_project_handoff(handoff.clone()))
         .expect_err("invalid replacement must not retire the live project");
-    assert!(rejected
-        .to_string()
-        .contains("MEX manifest changed after project resolution"));
+    let runmat_package::FrozenProjectHandoffError::Revision(message) = &rejected else {
+        panic!("expected the exact frozen artifact digest refusal: {rejected}");
+    };
+    assert!(message.contains(&format!(
+        "foreign artifact {} changed after project resolution: expected {}, found {}",
+        manifest_path.display(),
+        expected_digest,
+        runmat_package::ContentDigest::sha256(changed_manifest),
+    )));
     assert_eq!(session.project_revision(), revision);
     assert!(
         !marker.exists(),

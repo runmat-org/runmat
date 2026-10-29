@@ -9,9 +9,9 @@ use runmat_builtins::{
     BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinParamArity, NativeFfiOperation,
 };
 pub use runmat_builtins::{
-    NativeLoadOption, CALLLIB_DESCRIPTOR, LIBFUNCTIONS_DESCRIPTOR, LIBISLOADED_DESCRIPTOR,
-    LIBPOINTER_DESCRIPTOR, LIBSTRUCT_DESCRIPTOR, LOADLIBRARY_DESCRIPTOR, SETDATATYPE_DESCRIPTOR,
-    UNLOADLIBRARY_DESCRIPTOR,
+    NativeBuildOption, NativeLoadOption, CALLLIB_DESCRIPTOR, CLIBGEN_BUILD_INTERFACE_DESCRIPTOR,
+    LIBFUNCTIONS_DESCRIPTOR, LIBISLOADED_DESCRIPTOR, LIBPOINTER_DESCRIPTOR, LIBSTRUCT_DESCRIPTOR,
+    LOADLIBRARY_DESCRIPTOR, SETDATATYPE_DESCRIPTOR, UNLOADLIBRARY_DESCRIPTOR,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -69,6 +69,50 @@ async fn invoke_native(
             |error| error.into_runtime_error(),
         )
     }
+}
+
+#[runtime_builtin(
+    name = "clibgen.buildInterface",
+    binding_variant = "default",
+    context = true,
+    requested_outputs = true,
+    builtin_path = "crate::builtins::interop::native_ffi"
+)]
+async fn clibgen_build_interface_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<RootedValue> {
+    validate_output_count(
+        &CLIBGEN_BUILD_INTERFACE_DESCRIPTOR,
+        "clibgen.buildInterface",
+        requested_outputs,
+    )?;
+    if arguments.len() < 3 || arguments.len().is_multiple_of(2) {
+        return Err(invalid_builtin_call(
+            "clibgen.buildInterface requires a header and name-value pairs including Libraries",
+        ));
+    }
+    validate_text_argument(&arguments[0], "clibgen.buildInterface header")?;
+    let mut libraries = false;
+    for index in (1..arguments.len()).step_by(2) {
+        let name = text_argument(
+            &arguments[index],
+            "buildInterface option names",
+            context.as_ref(),
+        )?;
+        let option = NativeBuildOption::parse(&name).ok_or_else(|| {
+            invalid_builtin_call("unsupported C ABI interface preparation option")
+        })?;
+        validate_text_argument(&arguments[index + 1], "buildInterface option value")?;
+        libraries |= option == NativeBuildOption::Libraries;
+    }
+    if !libraries {
+        return Err(invalid_builtin_call(
+            "buildInterface requires the Libraries option",
+        ));
+    }
+    invoke_native(context, NativeFfiOperation::BuildInterface, arguments, 1).await
 }
 
 #[runtime_builtin(

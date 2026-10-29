@@ -349,6 +349,20 @@ pub(in crate::session) fn install_bound_invoker(
                 } else {
                     runtime.without_selected_object_class()
                 };
+                #[cfg(not(target_arch = "wasm32"))]
+                // A dynamic source loader may already have issued this exact
+                // child a path-MEX route. Preserve only that issuance, never
+                // ambient session lookup or another selected body's grant.
+                let ordinary_native = match runtime.native_resolution_scope() {
+                    runmat_runtime::user_functions::NativeResolutionScope::SelectedOrdinary {
+                        route, mex, source_owner,
+                    } if source_owner.is_bound_in(&runtime)
+                        && selected_body.selected_source_owner.as_ref().is_some_and(|owner| owner.same_issuance(source_owner)) =>
+                    {
+                        Some((Rc::clone(route), Rc::clone(mex), source_owner.clone()))
+                    }
+                    _ => None,
+                };
                 let runtime = runtime
                     .without_selected_graph_program()
                     .with_selected_native_route(None);
@@ -433,6 +447,24 @@ pub(in crate::session) fn install_bound_invoker(
                 } else {
                     let ports = runtime.service_ports().clone().without_foreign();
                     runtime.with_service_ports(ports)
+                };
+                #[cfg(not(target_arch = "wasm32"))]
+                let runtime = if let Some((issued_route, mex, source_owner)) = ordinary_native {
+                    if !source_owner.is_bound_in(&runtime) {
+                        return Err(build_runtime_error("bound ordinary MEX body changed its exact issued source")
+                            .with_identifier("RunMat:MEX:SourceAuthority").build());
+                    }
+                    let route = match runtime.native_resolution_scope() {
+                        runmat_runtime::user_functions::NativeResolutionScope::Selected(pinned) =>
+                            // Newly selected sealed artifacts retain priority.
+                            super::ordinary_native_route(Some(Rc::clone(pinned)), Rc::clone(&mex), source_owner.clone()),
+                        runmat_runtime::user_functions::NativeResolutionScope::SelectedClosed => issued_route,
+                        _ => return Err(build_runtime_error("bound ordinary MEX body has an unexpected native grant")
+                            .with_identifier("RunMat:MEX:SourceAuthority").build()),
+                    };
+                    runtime.with_ordinary_selected_native_route(route, mex, source_owner)
+                } else {
+                    runtime
                 };
                 let runtime = registry.bind_selected_body_sites(
                     runtime,

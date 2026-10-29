@@ -22,6 +22,25 @@ mod python;
 mod runtime;
 mod telemetry;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ForeignDottedMemberRole {
+    ReservedMethod,
+    StoredOrUnknown,
+}
+
+pub(crate) fn dotted_member_role(
+    reference: &runmat_value::ForeignRef,
+    member: &str,
+) -> ForeignDottedMemberRole {
+    #[cfg(not(target_arch = "wasm32"))]
+    if native_ffi::declared_pointer_method(&reference.type_identity, member).is_some() {
+        return ForeignDottedMemberRole::ReservedMethod;
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (reference, member);
+    ForeignDottedMemberRole::StoredOrUnknown
+}
+
 pub use callback::*;
 pub use conversion::*;
 pub use error::*;
@@ -374,38 +393,6 @@ pub async fn try_invoke_clib(
                     adapter: "native-ffi".into(),
                     symbol: "call".into(),
                     arguments: call_arguments,
-                    requested_outputs,
-                },
-            ))
-            .await
-            .into_invoked_result(),
-    )
-}
-
-/// Route supported interface-generation entrypoints into the native adapter.
-pub async fn try_invoke_clibgen(
-    context: crate::context::RuntimeContext,
-    name: &str,
-    arguments: crate::call::RootedFunctionArguments,
-    requested_outputs: usize,
-) -> ForeignAttempt {
-    if name != "clibgen.buildInterface" {
-        return ForeignAttempt::Continue(arguments);
-    }
-    let Some(service) = context.service_ports().foreign().cloned() else {
-        return ForeignAttempt::Break(Err(foreign_error(
-            ForeignErrorKind::UnsupportedOnWasm,
-            "native interface generation is unavailable on this host",
-        )));
-    };
-    ForeignAttempt::Break(
-        context
-            .scope(service.invoke(
-                context.clone(),
-                crate::context::ForeignCall {
-                    adapter: "native-ffi".into(),
-                    symbol: "build_interface".into(),
-                    arguments,
                     requested_outputs,
                 },
             ))

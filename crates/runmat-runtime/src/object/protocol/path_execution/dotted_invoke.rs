@@ -100,6 +100,20 @@ pub(super) fn try_execute<'a, A: std::borrow::Borrow<super::super::ObjectAccessC
                             runtime,
                         )?;
                         SelectedCall::Declared { method, arguments }
+                    } else if matches!(&base, Value::Foreign(reference)
+                        if crate::foreign::dotted_member_role(reference, member.as_str())
+                            == crate::foreign::ForeignDottedMemberRole::ReservedMethod)
+                    {
+                        // Only an exact adapter-owned reserved method skips
+                        // property lookup. Unknown foreign members and stored
+                        // fields retain their existing read/index semantics.
+                        let arguments = call_arguments(runtime, components)?;
+                        SelectedCall::Fallback {
+                            base,
+                            member,
+                            arguments: arguments.into(),
+                            semantic: None,
+                        }
                     } else if crate::object::resolve::has_stored_member(
                         &base,
                         &member.as_str().into(),
