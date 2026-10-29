@@ -160,7 +160,13 @@ async fn escalation_routes_original_control_and_cannot_signal_a_foreign_saved_pi
         )
         .await
         .unwrap();
-    assert_eq!(read_json::<AttemptRequest>(&marker).unwrap(), request);
+    let cancellation =
+        read_json::<crate::process_provider::cancellation::CancellationCommand>(&marker).unwrap();
+    assert_eq!(cancellation.request, request);
+    assert_eq!(
+        crate::process_provider::cancellation::reason(&request, cancellation.cause).unwrap(),
+        runmat_execution::CancellationReason::User
+    );
     assert!(is_owned(&directory, &request).unwrap());
     assert!(unrelated.try_wait().unwrap().is_none());
     unrelated.terminate_tree().await.unwrap();

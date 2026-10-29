@@ -647,6 +647,24 @@ async fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     original.request.console = None;
     original.request.resources.memory_bytes = 512 * 1024 * 1024;
     original.request.resources.max_wall_millis = 15_000;
+    // The caller's original grant must authorize the actual native Graph
+    // worker and the decoder selected by this request's current wire schema.
+    original
+        .request
+        .resources
+        .required_capabilities
+        .insert(runmat_execution::resource::Capability::ProcessIsolation);
+    if let Some(capability) =
+        runmat_execution::value::GraphRequiredSchema::from_version(retained.request.schema_version)
+            .expect("current Graph schema")
+            .required_capability()
+    {
+        original
+            .request
+            .resources
+            .required_capabilities
+            .insert(capability);
+    }
     retained.task = Some(original.clone());
     retained.validate().unwrap();
     let admitted = retained.request.clone().into_validated().unwrap();
