@@ -243,10 +243,16 @@ mod tests {
     #[cfg(target_family = "wasm")]
     #[test]
     fn valid_build_text_rejects_unsupported_target_before_source_access() {
-        let error = mex_builtin(vec![Value::from("missing.c")]).unwrap_err();
+        let error = mex_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("missing.c")],
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:UnsupportedTarget"));
         assert!(error.source.is_some());
-        let cuda_error = mexcuda_builtin(vec![Value::from("missing.cu")]).unwrap_err();
+        let cuda_error = mexcuda_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("missing.cu")],
+        ))
+        .unwrap_err();
         assert_eq!(
             cuda_error.identifier(),
             Some("RunMat:MEX:UnsupportedTarget")
@@ -260,7 +266,10 @@ mod tests {
     ))]
     #[test]
     fn mexcuda_requires_a_cuda_translation_unit_on_supported_targets() {
-        let error = mexcuda_builtin(vec![Value::from("gateway.cpp")]).unwrap_err();
+        let error = mexcuda_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("gateway.cpp")],
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
         assert!(error.source.is_some());
     }
