@@ -1,6 +1,5 @@
 use lsp_types::{CompletionItemKind, Range, SymbolKind};
 use runmat_analysis_language::FeaSymbolKind;
-use runmat_lexer::fea::{FeaTokenKind, FeaTriviaKind};
 use runmat_parser::fea::{FeaDeclarationKind, FeaImportKind};
 use runmat_types::{OperationParameter, OperationParameterArity, OperationTypePattern, Span};
 
@@ -13,29 +12,6 @@ pub(super) fn span_range(source: &str, span: Span) -> Range {
         offset_to_position(source, start),
         offset_to_position(source, end),
     )
-}
-
-pub(super) fn semantic_token_type(kind: FeaTokenKind) -> Option<u32> {
-    Some(match kind {
-        FeaTokenKind::Keyword(_) => 0,
-        FeaTokenKind::Identifier => 2,
-        FeaTokenKind::String => 5,
-        FeaTokenKind::Number => 6,
-        FeaTokenKind::Trivia(FeaTriviaKind::Comment) => 8,
-        FeaTokenKind::Equal
-        | FeaTokenKind::EqualEqual
-        | FeaTokenKind::BangEqual
-        | FeaTokenKind::Less
-        | FeaTokenKind::LessEqual
-        | FeaTokenKind::Greater
-        | FeaTokenKind::GreaterEqual
-        | FeaTokenKind::Plus
-        | FeaTokenKind::Minus
-        | FeaTokenKind::Star
-        | FeaTokenKind::Slash
-        | FeaTokenKind::Caret => 7,
-        _ => return None,
-    })
 }
 
 pub(super) fn parameter_label(parameter: &OperationParameter) -> String {
