@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
-#[path = "support/fea_admission.rs"]
-mod fea_admission;
+#[path = "support/local_offline.rs"]
+mod local_offline;
 
 const STUDY: &str = include_str!("fixtures/typed_box_loaded_static.fea");
 
@@ -51,7 +51,7 @@ fn run(policy: Option<(u32, u32)>) -> ResultIdentity {
             "RUNMAT_EXECUTION_STATE_DIR",
             project.path().join("execution-state"),
         );
-    fea_admission::configure(&mut command, project.path());
+    local_offline::configure(&mut command, project.path());
     // Preserve the authored solver-state location after admission config sets its defaults.
     let output = command
         .env(

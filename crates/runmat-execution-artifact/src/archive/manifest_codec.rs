@@ -23,10 +23,10 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
             "bundle code closure is too large".to_string(),
         ));
     }
-    let mut bytes = b"runmat-execution-bundle-manifest-v5\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-manifest-v6\0".to_vec();
     let mut encoder = Encoder::new(&mut bytes);
     encoder
-        .array(13)
+        .array(14)
         .and_then(|encoder| encoder.u16(manifest.schema_version))
         .and_then(|encoder| {
             encoder.bytes(
@@ -123,16 +123,27 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
             .and_then(|encoder| encoder.str(value))
             .map_err(encode_error)?;
     }
+    match &manifest.project_runtime_policy {
+        Some(policy) => encode_descriptor_to(&mut encoder, policy)?,
+        None => {
+            encoder.null().map_err(encode_error)?;
+        }
+    }
     Ok(bytes)
 }
 
 pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
     let payload = bytes
-        .strip_prefix(b"runmat-execution-bundle-manifest-v5\0")
+        .strip_prefix(b"runmat-execution-bundle-manifest-v6\0")
         .ok_or_else(|| ArtifactError::Invalid("invalid bundle manifest domain".into()))?;
     let mut decoder = Decoder::new(payload);
-    require_len(decoder.array(), 13, "bundle manifest")?;
+    require_len(decoder.array(), 14, "bundle manifest")?;
     let schema_version = decoder.u16().map_err(decode_error)?;
+    if schema_version != crate::EXECUTION_BUNDLE_SCHEMA_VERSION {
+        return Err(ArtifactError::Invalid(
+            "unsupported execution bundle schema".into(),
+        ));
+    }
     let revision = decoder.bytes().map_err(decode_error)?;
     let program_revision = ProgramRevision::from_canonical_bytes(revision)
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
@@ -227,6 +238,22 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
         require_len(decoder.array(), 2, "environment entry")?;
         portable_environment.push((decode_text(&mut decoder)?, decode_text(&mut decoder)?));
     }
+    let project_runtime_policy = match decoder.datatype().map_err(decode_error)? {
+        minicbor::data::Type::Null => {
+            decoder.null().map_err(decode_error)?;
+            None
+        }
+        minicbor::data::Type::Array => {
+            let descriptor = decode_descriptor_from(&mut decoder)?;
+            crate::validate_project_runtime_policy_descriptor(&descriptor)?;
+            Some(descriptor)
+        }
+        _ => {
+            return Err(ArtifactError::Invalid(
+                "invalid project runtime policy descriptor".into(),
+            ))
+        }
+    };
     if decoder.position() != payload.len() {
         return Err(ArtifactError::Invalid(
             "bundle manifest contains trailing CBOR data".into(),
@@ -240,6 +267,7 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
         sources,
         foreign_artifacts,
         foreign_artifact_closures,
+        project_runtime_policy,
         callables,
         recipes,
         artifacts,
@@ -493,6 +521,9 @@ fn encode_capability(
     match capability {
         Capability::GraphSelectedValuesV11 => encoder.array(1).and_then(|encoder| encoder.u8(5)),
         Capability::GraphCallableArgumentsV12 => encoder.array(1).and_then(|encoder| encoder.u8(6)),
+        Capability::GraphProjectRuntimePolicyV13 => {
+            encoder.array(1).and_then(|encoder| encoder.u8(7))
+        }
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),
@@ -515,6 +546,7 @@ fn decode_capability(decoder: &mut Decoder<'_>) -> ArtifactResult<Capability> {
     match (tag, length) {
         (5, 1) => Ok(Capability::GraphSelectedValuesV11),
         (6, 1) => Ok(Capability::GraphCallableArgumentsV12),
+        (7, 1) => Ok(Capability::GraphProjectRuntimePolicyV13),
         (0, 1) => Ok(Capability::ProcessIsolation),
         (1, 1) => Ok(Capability::BrowserWorker),
         (2, 1) => Ok(Capability::NetworkDenied),
@@ -541,6 +573,7 @@ fn decode_namespace(value: u8) -> ArtifactResult<ObjectNamespace> {
         7 => Ok(ObjectNamespace::Checkpoint),
         8 => Ok(ObjectNamespace::ForeignArtifact),
         9 => Ok(ObjectNamespace::ForeignPolicy),
+        10 => Ok(ObjectNamespace::ProjectRuntimePolicy),
         _ => Err(ArtifactError::Invalid("invalid object namespace".into())),
     }
 }

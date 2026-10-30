@@ -21,7 +21,7 @@ pub use foreign::{
     UnmanifestedMexPolicy,
 };
 pub use language::{error_namespace_for_language_compat, LanguageCompatMode, LanguageConfig};
-pub use logging::{LogLevel, LoggingConfig};
+pub use logging::{LogLevel, LoggingConfig, OtelConfig, OtelProtocol, OtelSignal};
 pub use plotting::{ExportConfig, ExportFormat, GuiConfig, PlotBackend, PlotMode, PlottingConfig};
 pub use root::RunMatRuntimeConfig;
 pub use telemetry::{TelemetryConfig, TelemetryDrainMode};

@@ -20,21 +20,56 @@ mod remote_study;
 use remote_study::execute_study_remotely;
 
 pub(super) async fn execute(
-    _path: PathBuf,
-    source: NativeCheckedFeaSource,
-    root: ResolvedFeaRoot,
+    path: PathBuf,
+    mut source: NativeCheckedFeaSource,
+    mut root: ResolvedFeaRoot,
     execution: ExecutionTargetArgs,
-    _cli: &Cli,
+    cli: &Cli,
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
-    let execution = resolve_execution(&source, &root, &execution)?;
+    let mut resolved_execution = resolve_execution(&source, &root, &execution)?;
+    let project_policy = if matches!(resolved_execution.target, ExecutionTarget::Remote(_)) {
+        let frozen = source
+            .frozen_project
+            .as_ref()
+            .context("cluster FEA requires a frozen project")?;
+        Some(
+            runmat_config::runtime::ClusterRuntimePolicy::from_project_file(&frozen.manifest_path)?,
+        )
+    } else {
+        None
+    };
+    let project_runtime = project_policy
+        .as_ref()
+        .map(|policy| policy.runtime_config())
+        .transpose()?;
+    let config = project_runtime.as_ref().unwrap_or(config);
+    if project_policy.is_some() {
+        let selector = match &root {
+            ResolvedFeaRoot::Study(study) => runmat_runtime::analysis::FeaRootSelector::Study {
+                id: study.study.study_id.clone(),
+            },
+            ResolvedFeaRoot::Sweep(sweep) => runmat_runtime::analysis::FeaRootSelector::Sweep {
+                id: sweep.sweep.sweep_id.clone(),
+            },
+        };
+        source = super::source::check_source_for_cluster(&path, cli, config).await?;
+        if !source.check_result().status.is_valid() {
+            bail!("FEA source is invalid under project-only cluster language policy");
+        }
+        root = source
+            .resolve_root(Some(&selector))
+            .map_err(anyhow::Error::new)?;
+        resolved_execution = resolve_execution(&source, &root, &execution)?;
+    }
+    resolved_execution.project_runtime_policy = project_policy;
     match root {
         ResolvedFeaRoot::Study(study) => {
-            execute_study(&source, study, Vec::new(), execution, config, json).await
+            execute_study(&source, study, Vec::new(), resolved_execution, config, json).await
         }
         ResolvedFeaRoot::Sweep(sweep) => {
-            execute_sweep(&source, sweep, execution, config, json).await
+            execute_sweep(&source, sweep, resolved_execution, config, json).await
         }
     }
 }
@@ -90,6 +125,9 @@ async fn execute_study(
                 inputs,
                 target,
                 execution.compute,
+                execution
+                    .project_runtime_policy
+                    .context("cluster FEA policy was not captured before compilation")?,
                 config,
                 json,
             )
@@ -142,6 +180,9 @@ async fn execute_sweep(
                 cases,
                 target,
                 execution.compute,
+                execution
+                    .project_runtime_policy
+                    .context("cluster FEA policy was not captured before compilation")?,
                 config,
                 json,
             )
@@ -191,6 +232,7 @@ async fn execute_sweep_remotely(
     cases: Vec<runmat_analysis_core::AuthoredSweepCase>,
     target: RemoteExecutionTarget,
     compute: FeaComputeAllocation,
+    project_policy: runmat_config::runtime::ClusterRuntimePolicy,
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
@@ -228,8 +270,13 @@ async fn execute_sweep_remotely(
         .map(|case| case.case_id.clone())
         .collect::<Vec<_>>();
     let revision = placeholder.revision.clone();
-    let mut builder =
-        ExecutionBundleBuilder::native(frozen, revision.clone())?.with_compiled_package_closure();
+    runmat_core::cluster_settings::validate_program_environment(&project_policy, &revision)
+        .map_err(anyhow::Error::msg)?;
+    let runtime_policy = runmat_core::cluster_settings::capture_project_policy(&project_policy)
+        .map_err(anyhow::Error::msg)?;
+    let mut builder = ExecutionBundleBuilder::native(frozen, revision.clone())?
+        .with_compiled_package_closure()
+        .with_project_runtime_policy_object(runtime_policy)?;
     for program in placeholder.root.required_programs() {
         builder = builder.with_materialized_program(
             program.recipe,
@@ -367,6 +414,7 @@ async fn prepare_sweep_root(
 struct ResolvedFeaExecution {
     target: ExecutionTarget,
     compute: FeaComputeAllocation,
+    project_runtime_policy: Option<runmat_config::runtime::ClusterRuntimePolicy>,
 }
 
 fn resolve_execution(
@@ -444,7 +492,11 @@ fn resolve_execution(
         ResolvedFeaRoot::Sweep(root) => &root.study.study.sequence.steps,
     };
     let compute = resolve_compute_allocation(policy, steps, &target, allocation_profile)?;
-    Ok(ResolvedFeaExecution { target, compute })
+    Ok(ResolvedFeaExecution {
+        target,
+        compute,
+        project_runtime_policy: None,
+    })
 }
 
 /// Resolves the authored placement into one compute allocation through the shared accelerator

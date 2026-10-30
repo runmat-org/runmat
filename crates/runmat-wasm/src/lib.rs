@@ -8,6 +8,8 @@ mod runtime;
 mod wire;
 
 #[cfg(not(feature = "graphics-replay"))]
+pub use api::cluster_program::{prepare_cluster_graph, prepare_cluster_program};
+#[cfg(not(feature = "graphics-replay"))]
 pub use api::config::{migrate_legacy_runmat_config, patch_runmat_config, resolve_runmat_config};
 #[cfg(not(feature = "graphics-replay"))]
 pub use api::execution_artifact::{
@@ -18,11 +20,17 @@ pub use api::execution_program::{execute_program_artifact, execute_worker_progra
 #[cfg(not(feature = "graphics-replay"))]
 pub use api::init::{init_runmat, string_element_wire_schema_version};
 #[cfg(not(feature = "graphics-replay"))]
+pub use api::observability::{
+    flush_open_telemetry, open_telemetry_stats, send_open_telemetry_test, shutdown_open_telemetry,
+};
+#[cfg(not(feature = "graphics-replay"))]
 pub use api::package::{
     build_git_snapshot, package_cache_acquire_lease, package_cache_gc, package_cache_release_lease,
     package_cache_renew_lease, package_cache_status, plan_git_acquisition, resolve_project,
     validate_git_snapshot,
 };
+#[cfg(not(feature = "graphics-replay"))]
+pub use api::settings::{edit_user_runtime_settings, resolve_runtime_settings};
 // Plotting and figure APIs.
 pub use api::plot::{
     bind_surface_to_figure, create_plot_surface, destroy_plot_surface, fit_plot_surface_extents,

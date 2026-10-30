@@ -27,6 +27,9 @@ pub(crate) struct GenericNativeCache {
     dependencies: DependencyTracker,
     project_scope_revision: String,
     tiering: TieringSession,
+    /// Immutable within one cache generation. Reconfiguration replaces the
+    /// complete cache, so old entries/pending results cannot cross policy.
+    optimization: runmat_jit::CompilerOptimization,
     pending: BTreeMap<CompilationKey, PendingCompilation>,
     failed_compilations: BTreeSet<CompilationKey>,
     #[cfg(test)]
@@ -138,6 +141,7 @@ impl Default for GenericNativeCache {
             dependencies,
             project_scope_revision: "loose".to_string(),
             tiering: TieringSession::default(),
+            optimization: runmat_jit::CompilerOptimization::TierDefault,
             pending: BTreeMap::new(),
             failed_compilations: BTreeSet::new(),
             #[cfg(test)]
@@ -147,6 +151,42 @@ impl Default for GenericNativeCache {
 }
 
 impl GenericNativeCache {
+    pub(crate) fn with_compilation_policy(
+        tiering: runmat_jit::tiering::TieringConfig,
+        optimization: runmat_jit::CompilerOptimization,
+    ) -> Result<Self, &'static str> {
+        Ok(Self {
+            tiering: TieringSession::new(tiering)?,
+            optimization,
+            ..Self::default()
+        })
+    }
+
+    pub(crate) fn compilation_policy(
+        &self,
+    ) -> (
+        runmat_jit::tiering::TieringConfig,
+        runmat_jit::CompilerOptimization,
+    ) {
+        (self.tiering.config(), self.optimization)
+    }
+
+    pub(crate) fn reconfigure_compilation_policy(
+        &mut self,
+        tiering: runmat_jit::tiering::TieringConfig,
+        optimization: runmat_jit::CompilerOptimization,
+    ) -> Result<(), &'static str> {
+        if self.compilation_policy() == (tiering, optimization) {
+            return Ok(());
+        }
+        let mut replacement = Self::with_compilation_policy(tiering, optimization)?;
+        // Keep the installed project/catalog authority, not stale compiled
+        // products. Active PublishedEntry owners retain their Rc executors.
+        std::mem::swap(&mut replacement.dependencies, &mut self.dependencies);
+        replacement.project_scope_revision = std::mem::take(&mut self.project_scope_revision);
+        *self = replacement;
+        Ok(())
+    }
     pub(crate) fn has_retained_entries(&self) -> bool {
         self.entries.retained_cell_count() != 0
     }
@@ -245,7 +285,8 @@ impl GenericNativeCache {
             return Ok(entry);
         }
 
-        let compiled = super::compile::compile(unit, preferred_function)?;
+        let compiled =
+            super::compile::compile_with_policy(unit, preferred_function, self.optimization)?;
         #[cfg(test)]
         {
             self.compilations += 1;
@@ -411,7 +452,11 @@ impl GenericNativeCache {
                 }
                 match mode {
                     CompilationMode::DeterministicSynchronous => {
-                        let compiled = match super::compile::compile(unit, preferred_function) {
+                        let compiled = match super::compile::compile_with_policy(
+                            unit,
+                            preferred_function,
+                            self.optimization,
+                        ) {
                             Ok(compiled) => compiled,
                             Err(error) => {
                                 log::warn!("adaptive native compilation failed: {error}");
@@ -646,7 +691,12 @@ impl GenericNativeCache {
         if self.pending.contains_key(&key) {
             return Ok(());
         }
-        let prepared = super::compile::prepare(unit, preferred_function, specialization)?;
+        let prepared = super::compile::prepare_with_policy(
+            unit,
+            preferred_function,
+            specialization,
+            self.optimization,
+        )?;
         diagnostics::scheduled(&key, &dependencies);
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::Builder::new()
@@ -671,10 +721,11 @@ impl GenericNativeCache {
         &mut self,
         request: SpecializedCompilationRequest<'_>,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
-        let compiled = super::compile::compile_prepared(super::compile::prepare(
+        let compiled = super::compile::compile_prepared(super::compile::prepare_with_policy(
             request.unit,
             request.preferred_function,
             Some(request.profile.clone()),
+            self.optimization,
         )?)?;
         if self
             .entries
@@ -940,10 +991,15 @@ impl GenericNativeCache {
         preferred_function: Option<&str>,
         profile: &RepresentationProfile,
     ) -> usize {
-        super::compile::prepare(unit, preferred_function, Some(profile.clone()))
-            .and_then(super::compile::compile_prepared)
-            .map(|compiled| compiled.executor.optimized_region_count())
-            .unwrap_or(0)
+        super::compile::prepare_with_policy(
+            unit,
+            preferred_function,
+            Some(profile.clone()),
+            self.optimization,
+        )
+        .and_then(super::compile::compile_prepared)
+        .map(|compiled| compiled.executor.optimized_region_count())
+        .unwrap_or(0)
     }
 }
 

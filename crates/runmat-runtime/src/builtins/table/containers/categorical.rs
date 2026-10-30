@@ -1264,7 +1264,7 @@ mod tests {
         let values = Tensor::from_f32(vec![1.25, f32::NAN], vec![1, 2]).unwrap();
         assert_eq!(
             categorical_labels(&Value::Tensor(values)).unwrap(),
-            vec!["1.25", ""]
+            vec!["1.25".into(), runmat_value::StringElement::Missing]
         );
 
         let codes = Tensor::from_f32(vec![2.0, f32::NAN, 1.5], vec![1, 3]).unwrap();

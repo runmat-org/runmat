@@ -227,15 +227,13 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
             },
             ProviderObservationStatus::Pending => return None,
         };
-        let delivery = self
-            .authority
-            .delivery(runmat_execution::PlacementFeedback {
-                signature: self.signature.clone(),
-                candidate: self.candidate.clone(),
-                kind: self.kind,
-                total_elapsed_ns: elapsed,
-                succeeded,
-            });
+        let delivery = self.authority.delivery(
+            &self.signature,
+            &self.candidate,
+            self.kind,
+            elapsed,
+            succeeded,
+        );
         if delivery.is_none() {
             self.terminal_without_feedback = true;
         }
@@ -280,6 +278,27 @@ pub(in crate::placement) fn whole_work_source_for_test(
     source.candidate = selected.decision.selected.candidate.clone();
     source.kind = selected.decision.selected.kind;
     source.authority = LocalPlacementFeedbackAuthority::WholeWork(std::sync::Arc::new(
+        std::sync::Mutex::new(Some(selected)),
+    ));
+    Box::new(source)
+}
+
+#[cfg(test)]
+pub(in crate::placement) fn managed_whole_work_source_for_test(
+    receipt: ProviderOperationReceipt,
+    selected: runmat_runtime::context::RuntimeManagedWholeWorkSelection,
+    signature: runmat_execution::PlacementSignature,
+) -> Box<dyn RuntimePlacementFeedbackSource> {
+    let mut source = source_for_test(
+        receipt,
+        CandidateTimingBoundary::FullCall {
+            prelude: std::time::Duration::ZERO,
+        },
+    );
+    source.signature = signature;
+    source.candidate = selected.selected.candidate.to_string();
+    source.kind = selected.selected.kind;
+    source.authority = LocalPlacementFeedbackAuthority::Managed(std::sync::Arc::new(
         std::sync::Mutex::new(Some(selected)),
     ));
     Box::new(source)

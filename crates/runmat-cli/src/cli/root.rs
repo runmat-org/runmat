@@ -483,6 +483,11 @@ pub enum Commands {
         #[command(subcommand)]
         job_command: JobCommand,
     },
+    /// Create offline organization recovery keys and decrypt run results
+    RecoveryKey {
+        #[command(subcommand)]
+        command: super::JobRecoveryCommand,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -510,6 +515,9 @@ pub enum ConfigCommand {
         /// Output format
         #[arg(long, value_enum, default_value = "toml")]
         format: ConfigFormat,
+        /// Include exact per-field provenance (JSON output)
+        #[arg(long)]
+        provenance: bool,
     },
     /// Generate a starter runmat config file (project + runtime sections)
     Generate {
@@ -527,6 +535,35 @@ pub enum ConfigCommand {
     },
     /// Show configuration file locations
     Paths,
+    /// Read or edit only user settings, preserving other application settings
+    User {
+        #[command(subcommand)]
+        command: ConfigUserCommand,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+pub enum ConfigUserCommand {
+    Show {
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
+    Set {
+        /// Runtime-relative path segments, e.g. jit enabled
+        #[arg(required = true, num_args = 1..)]
+        field: Vec<String>,
+        /// Typed JSON value, e.g. false, 4, or '"speed"'
+        #[arg(long)]
+        value: String,
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
+    Reset {
+        #[arg(required = true, num_args = 1..)]
+        field: Vec<String>,
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
 }
 
 #[cfg(test)]

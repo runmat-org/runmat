@@ -8,9 +8,7 @@ use runmat_runtime::builtins::wasm_registry;
 
 use crate::api::plot::ensure_figure_event_bridge;
 use crate::api::session::RunMatWasm;
-use crate::runtime::config::{
-    apply_plotting_overrides, ApplicationSettingsMode, InitOptions, SessionConfig,
-};
+use crate::runtime::config::{ApplicationSettingsMode, InitOptions, SessionConfig};
 use crate::runtime::execution::{execution_host_from_options, BrowserExecutionService};
 use crate::runtime::filesystem::install_js_fs_provider;
 use crate::runtime::gpu::{
@@ -39,12 +37,20 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             )
         })?
     };
-    if let Some(level) = parsed_opts.log_level.as_deref() {
-        set_log_filter_override(level);
-    }
-    init_logging_once();
+    let config = SessionConfig::from_options(&parsed_opts)
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
     #[cfg(target_arch = "wasm32")]
     ensure_getrandom_js();
+    crate::api::observability::configure_for_session(&config.runtime.logging.otel, &options)?;
+    let effective_log_level = if config.runtime.logging.debug {
+        "debug".to_owned()
+    } else {
+        format!("{:?}", config.runtime.logging.level).to_ascii_lowercase()
+    };
+    set_log_filter_override(&effective_log_level);
+    init_logging_once();
+    crate::runtime::settings::apply_resources(&config.runtime)
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
     #[cfg(target_arch = "wasm32")]
     ensure_figure_event_bridge();
     let dialog_host = install_fs_provider_from_options(&options).map_err(|err| {
@@ -74,14 +80,12 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         }
     }
 
-    apply_plotting_overrides(&parsed_opts);
     wasm_registry::register_all();
     let builtin_count = runmat_builtins::builtin_functions().len();
     log::info!("RunMat wasm: builtins registered ({builtin_count})");
     #[cfg(target_arch = "wasm32")]
     web_sys::console::log_1(&format!("RunMat wasm: builtins registered ({builtin_count})").into());
 
-    let config = SessionConfig::from_options(&parsed_opts);
     config.apply_env_overrides();
     let mut session = runmat_core::RunMatSession::with_options(config.enable_jit, config.verbose)
         .map_err(|err| {
@@ -90,6 +94,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             format!("Failed to initialize RunMat session: {err}"),
         )
     })?;
+    session
+        .apply_runtime_config(&config.runtime)
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error.to_string()))?;
     if let Some(host) = dialog_host.clone() {
         session.install_host_service(host);
     }
@@ -134,6 +141,13 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                     }
                 }
                 Err(err) => {
+                    if !config.runtime.accelerate.allow_inprocess_fallback {
+                        return Err(init_error_with_details(
+                            InitErrorCode::SessionCreation,
+                            "GPU initialization failed and CPU fallback is disabled",
+                            Some(err),
+                        ));
+                    }
                     let message = js_value_to_string(err.clone());
                     log::warn!(
                         "RunMat wasm: GPU initialization failed (falling back to CPU): {message}"
@@ -143,6 +157,12 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                 }
             },
             Err(reason) => {
+                if !config.runtime.accelerate.allow_inprocess_fallback {
+                    return Err(init_error(
+                        InitErrorCode::SessionCreation,
+                        format!("WebGPU unavailable and CPU fallback is disabled: {reason}"),
+                    ));
+                }
                 log::warn!(
                     "RunMat wasm: WebGPU capability preflight failed (falling back to CPU): {reason}"
                 );

@@ -36,6 +36,7 @@ mod route;
 pub(crate) mod structural_study;
 pub(crate) mod value_transfer;
 mod worker_bundle;
+pub(crate) mod runtime_settings;
 mod worker_entry;
 mod worker_env;
 mod worker_execution;

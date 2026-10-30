@@ -31,6 +31,23 @@ pub(crate) async fn check_source(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<NativeCheckedFeaSource> {
+    check_source_with_settings(path, cli, config, false).await
+}
+
+pub(super) async fn check_source_for_cluster(
+    path: &Path,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+) -> Result<NativeCheckedFeaSource> {
+    check_source_with_settings(path, cli, config, true).await
+}
+
+async fn check_source_with_settings(
+    path: &Path,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    cluster: bool,
+) -> Result<NativeCheckedFeaSource> {
     let project = crate::commands::package::resolve_for_source(path, cli).await?;
     let source_root = project
         .as_ref()
@@ -43,6 +60,9 @@ pub(crate) async fn check_source(
         config,
         "create FEA source-check session",
     )?;
+    if cluster {
+        session.apply_cluster_runtime_config(config)?;
+    }
     if let Some(project) = project.as_ref() {
         session
             .install_project_handoff(runmat_package::FrozenProjectHandoff::new(

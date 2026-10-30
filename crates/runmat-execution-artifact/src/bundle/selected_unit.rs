@@ -43,13 +43,17 @@ impl ExecutionBundle {
         }
         let objects = selection.objects().cloned().collect();
         let closures = selection.closures().cloned().collect();
-        Self::from_selected_executable_unit_with_policy(
+        let selected = Self::from_selected_executable_unit_with_policy(
             canonical_v3,
             objects,
             closures,
             selection.policy_object().cloned(),
             self.manifest.resources.clone(),
-        )
+        )?;
+        match self.project_runtime_policy_object()? {
+            Some(policy) => selected.with_project_runtime_policy_object(policy.clone()),
+            None => Ok(selected),
+        }
     }
 
     /// Package one already-admitted V3 unit and its frozen foreign objects.
@@ -162,6 +166,7 @@ impl ExecutionBundle {
                 sources: Vec::new(),
                 foreign_artifacts,
                 foreign_artifact_closures,
+                project_runtime_policy: None,
                 callables: Vec::new(),
                 recipes: vec![recipe],
                 artifacts: vec![artifact],

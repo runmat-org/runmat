@@ -67,13 +67,20 @@ pub(in crate::catalog::entries::math::elementwise::binary_arithmetic) fn infer_t
     };
     let mut output = ValueFact::proven(ValueKindFact::String, shape, StorageFact::Dense);
     output.residency = ResidencyFact::Host;
-    if request
-        .arguments
-        .iter()
-        .take(2)
-        .any(|argument| matches!(argument.kind, ValueKindFact::Unknown))
+    if !diagnostics.is_empty() {
+        output.certainty = CertaintyFact::Dynamic(DynamicReason::UnsupportedRepresentation);
+    } else if let Some(reason) =
+        request
+            .arguments
+            .iter()
+            .take(2)
+            .find_map(|argument| match &argument.certainty {
+                CertaintyFact::Dynamic(reason) => Some(reason.clone()),
+                _ if argument.kind == ValueKindFact::Unknown => Some(DynamicReason::RuntimeValue),
+                _ => None,
+            })
     {
-        output.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
+        output.certainty = CertaintyFact::Dynamic(reason);
     }
     Some(finish_fixed(entry, request, output, diagnostics))
 }

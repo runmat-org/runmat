@@ -1023,18 +1023,29 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn drops_missing_unique_ngram_and_count_column() {
-        let ngrams = StringArray::new(
-            vec!["a".into(), "<missing>".into(), "b".into(), "ignored".into()],
-            vec![2, 2],
-        )
-        .unwrap();
-        let counts = Tensor::new(vec![4.0, 9.0, 5.0, 9.0], vec![2, 2]).unwrap();
-        let bag =
-            object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
-        assert_eq!(bag.properties().get("NumNgrams"), Some(&Value::Num(1.0)));
-        let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape(), [2, 1]);
-        assert_eq!(counts.materialize_f64(), vec![4.0, 9.0]);
+        for element in [runmat_value::StringElement::Missing, "<missing>".into()] {
+            let missing = element.is_missing();
+            let ngrams = StringArray::from_elements_unbounded(
+                vec!["a".into(), element, "b".into(), "ignored".into()],
+                vec![2, 2],
+            )
+            .unwrap();
+            let original = vec![4.0, 9.0, 5.0, 9.0];
+            let counts = Tensor::new(original.clone(), vec![2, 2]).unwrap();
+            let bag =
+                object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
+            let columns = if missing { 1 } else { 2 };
+            assert_eq!(
+                bag.properties().get("NumNgrams"),
+                Some(&Value::Num(columns as f64))
+            );
+            let counts = tensor_property(&bag, "Counts");
+            assert_eq!(counts.shape(), [2, columns]);
+            assert_eq!(
+                counts.materialize_f64(),
+                if missing { vec![4.0, 9.0] } else { original }
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

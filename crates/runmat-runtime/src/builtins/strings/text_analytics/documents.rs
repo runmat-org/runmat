@@ -3695,21 +3695,37 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bag_of_words_drops_missing_unique_word_and_count_column() {
-        let words = StringArray::new(
-            vec!["alpha".into(), "<missing>".into(), "beta".into()],
-            vec![1, 3],
-        )
-        .unwrap();
-        let counts = Tensor::new(vec![1.0, 0.0, 9.0, 9.0, 2.0, 3.0], vec![2, 3]).unwrap();
-        let bag =
-            object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
-        assert_eq!(
-            string_array_property(&bag, "Vocabulary"),
-            vec!["alpha", "beta"]
-        );
-        let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape(), [2, 2]);
-        assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 2.0, 3.0]);
+        for middle in [runmat_value::StringElement::Missing, "<missing>".into()] {
+            let missing = middle.is_missing();
+            let words = StringArray::from_elements_unbounded(
+                vec!["alpha".into(), middle, "beta".into()],
+                vec![1, 3],
+            )
+            .unwrap();
+            let original = vec![1.0, 0.0, 9.0, 9.0, 2.0, 3.0];
+            let counts = Tensor::new(original.clone(), vec![2, 3]).unwrap();
+            let bag = object(
+                run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"),
+            );
+            assert_eq!(
+                string_array_property(&bag, "Vocabulary"),
+                if missing {
+                    vec!["alpha", "beta"]
+                } else {
+                    vec!["alpha", "<missing>", "beta"]
+                }
+            );
+            let counts = tensor_property(&bag, "Counts");
+            assert_eq!(counts.shape(), [2, if missing { 2 } else { 3 }]);
+            assert_eq!(
+                counts.materialize_f64(),
+                if missing {
+                    vec![1.0, 0.0, 2.0, 3.0]
+                } else {
+                    original
+                }
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -6,11 +6,24 @@ use std::sync::Arc;
 use tracing::subscriber::DefaultGuard;
 use tracing::Subscriber;
 use tracing_log::LogTracer;
-#[cfg(feature = "otlp")]
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
+
+pub mod otel;
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
+mod export_model;
+#[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
+pub mod browser_otel;
+#[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+mod native_otel;
+#[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+pub use native_otel::{
+    configure_otel, emit_test_otel, flush_otel, otel_layer, otel_stats, retained_otel_layer,
+    shutdown_otel_result, ExportStats,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 use tracing_subscriber::reload;
@@ -18,11 +31,11 @@ use tracing_subscriber::reload;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
-#[cfg(feature = "otlp")]
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 use opentelemetry::trace::TraceContextExt;
-#[cfg(feature = "otlp")]
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
-#[cfg(feature = "otlp")]
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 use opentelemetry::Context as OtelContext;
 
 const DEFAULT_LOG_FILTER: &str = "info";
@@ -132,8 +145,31 @@ where
 }
 
 pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
-    // Install LogTracer so log:: macros flow into tracing
-    let _ = LogTracer::init();
+    init_logging_impl(opts, false)
+}
+
+/// A host that owns `log::Log` forwards records explicitly through [`forward_log_record`].
+/// Do not compete with that owner by attempting to install another global logger.
+pub fn init_logging_with_host_logger(opts: LoggingOptions) -> LoggingGuard {
+    init_logging_impl(opts, true)
+}
+
+pub fn log_metadata_enabled(metadata: &tracing_log::log::Metadata<'_>) -> bool {
+    use tracing_log::AsTrace;
+    tracing::dispatcher::get_default(|dispatch| dispatch.enabled(&metadata.as_trace()))
+}
+
+pub fn forward_log_record(record: &tracing_log::log::Record<'_>) -> std::io::Result<()> {
+    tracing_log::format_trace(record)
+}
+
+fn init_logging_impl(opts: LoggingOptions, host_logger: bool) -> LoggingGuard {
+    if !host_logger {
+        // Hosts with an existing log owner must use init_logging_with_host_logger.
+        if LogTracer::init().is_err() {
+            eprintln!("RunMat: log bridge was not installed because the host already owns log::Log; forward records explicitly");
+        }
+    }
 
     let fallback_filter = opts.default_filter.as_deref().unwrap_or(DEFAULT_LOG_FILTER);
 
@@ -172,11 +208,14 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
 
     let (subscriber, filter_handle) = build_subscriber();
 
-    #[cfg(feature = "otlp")]
-    let subscriber = {
-        let otel_layer = opts.enable_otlp.then(otel_layer);
-        subscriber.with(otel_layer)
-    };
+    #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+    let subscriber = { subscriber.with(opts.enable_otlp.then(otel_layer).flatten()) };
+    #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
+    let subscriber = subscriber.with(
+        opts.enable_otlp
+            .then(browser_otel::browser_otel_layer)
+            .flatten(),
+    );
 
     let guard = match tracing::subscriber::set_global_default(subscriber) {
         Ok(()) => {
@@ -193,7 +232,18 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
             let _ = filter_handle;
             None
         }
-        Err(_) => Some(tracing::subscriber::set_default(build_subscriber().0)),
+        Err(_) => {
+            let subscriber = build_subscriber().0;
+            #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+            let subscriber = subscriber.with(opts.enable_otlp.then(otel_layer).flatten());
+            #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
+            let subscriber = subscriber.with(
+                opts.enable_otlp
+                    .then(browser_otel::browser_otel_layer)
+                    .flatten(),
+            );
+            Some(tracing::subscriber::set_default(subscriber))
+        }
     };
 
     LoggingGuard { _guard: guard }
@@ -203,12 +253,16 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
 ///
 /// Short-lived native hosts call this before exiting so their final spans are not left in the
 /// batch exporter's queue.
-#[cfg(feature = "otlp")]
+#[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
 pub fn shutdown_otel() {
-    opentelemetry::global::shutdown_tracer_provider();
+    if otel_stats().is_some() {
+        if shutdown_otel_result().is_err() {
+            native_otel::record_shutdown_failure();
+        }
+    }
 }
 
-#[cfg(not(feature = "otlp"))]
+#[cfg(any(not(feature = "otlp"), target_arch = "wasm32"))]
 pub fn shutdown_otel() {}
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -242,7 +296,7 @@ fn build_signal_span(trace_id: &str, name: &str) -> Option<tracing::Span> {
         signal = name,
         trace_id = trace_id
     );
-    #[cfg(feature = "otlp")]
+    #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
     {
         if let Some((trace_id, span_id)) = parse_trace_parent(trace_id) {
             let context = SpanContext::new(
@@ -258,7 +312,7 @@ fn build_signal_span(trace_id: &str, name: &str) -> Option<tracing::Span> {
     Some(span)
 }
 
-#[cfg(feature = "otlp")]
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 fn parse_trace_parent(trace_id: &str) -> Option<(TraceId, SpanId)> {
     if trace_id.len() != 32 {
         return None;
@@ -268,7 +322,7 @@ fn parse_trace_parent(trace_id: &str) -> Option<(TraceId, SpanId)> {
     Some((trace_id, span_id))
 }
 
-#[cfg(feature = "otlp")]
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 fn trace_id_hex_tail(trace_id: TraceId) -> String {
     let hex = trace_id.to_string();
     hex.chars()
@@ -312,15 +366,21 @@ fn now_timestamp_micros() -> i64 {
 
 impl<S> Layer<S> for LogBridgeLayer
 where
-    S: Subscriber,
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    fn on_event(
-        &self,
-        event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         let mut visitor = JsonVisitor::default();
         event.record(&mut visitor);
+        let oversized = visitor.overflow;
+        #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
+        let (otel_context, span_started) = event_otel_context(event, &ctx);
+        #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
+        let (trace_id, span_id) = valid_context_ids(&otel_context);
+        #[cfg(not(any(feature = "otlp", feature = "browser-otlp")))]
+        let (trace_id, span_id) = {
+            let _ = &ctx;
+            current_trace_span_ids()
+        };
 
         let record = RuntimeLogRecord {
             ts: now_rfc3339(),
@@ -329,8 +389,8 @@ where
             message: visitor
                 .message
                 .unwrap_or_else(|| event.metadata().name().to_string()),
-            trace_id: current_trace_id(),
-            span_id: current_span_id(),
+            trace_id,
+            span_id,
             fields: visitor
                 .fields
                 .and_then(|v| v.as_object().cloned().map(JsonValue::Object))
@@ -340,7 +400,59 @@ where
         if let Some(hook) = LOG_HOOK.get() {
             hook(&record);
         }
+        #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+        if oversized {
+            native_otel::drop_export_record();
+        } else {
+            native_otel::export_log(&record, &otel_context, span_started);
+        }
+        #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
+        if oversized {
+            browser_otel::drop_export_record();
+        } else {
+            browser_otel::export_log(&record, &otel_context);
+        }
+        #[cfg(not(any(feature = "otlp", feature = "browser-otlp")))]
+        let _ = oversized;
     }
+}
+
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
+fn valid_context_ids(context: &OtelContext) -> (Option<String>, Option<String>) {
+    let span = context.span();
+    let identity = span.span_context();
+    if identity.is_valid() {
+        (
+            Some(identity.trace_id().to_string()),
+            Some(identity.span_id().to_string()),
+        )
+    } else {
+        (None, None)
+    }
+}
+
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
+fn event_otel_context<S>(
+    event: &tracing::Event<'_>,
+    ctx: &tracing_subscriber::layer::Context<'_, S>,
+) -> (OtelContext, Option<std::time::SystemTime>)
+where
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    let Some(span) = ctx.event_span(event) else {
+        return (OtelContext::new(), None);
+    };
+    let mut extensions = span.extensions_mut();
+    let Some(data) = extensions.get_mut::<tracing_opentelemetry::OtelData>() else {
+        return (OtelContext::new(), None);
+    };
+    let started = data.builder.start_time;
+    #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+    return (native_otel::context_for(data), started);
+    #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
+    return (browser_otel::context_for(data), started);
+    #[allow(unreachable_code)]
+    (OtelContext::new(), started)
 }
 
 impl<S> Layer<S> for TraceBridgeLayer
@@ -453,7 +565,7 @@ fn current_span_id() -> Option<String> {
 }
 
 fn current_trace_span_ids() -> (Option<String>, Option<String>) {
-    #[cfg(feature = "otlp")]
+    #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
     {
         use opentelemetry::trace::TraceContextExt;
         use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -467,6 +579,7 @@ fn current_trace_span_ids() -> (Option<String>, Option<String>) {
                 Some(sc.span_id().to_string()),
             );
         }
+        return (None, None);
     }
     let span_id = tracing::Span::current()
         .id()
@@ -506,68 +619,102 @@ fn next_event_span_id() -> String {
 struct JsonVisitor {
     message: Option<String>,
     fields: Option<JsonValue>,
+    overflow: bool,
+    bytes: usize,
+}
+
+struct BoundedText {
+    value: String,
+    limit: usize,
+    overflow: bool,
+}
+impl std::fmt::Write for BoundedText {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        let remaining = self.limit.saturating_sub(self.value.len());
+        if value.len() <= remaining {
+            self.value.push_str(value);
+            return Ok(());
+        }
+        let mut end = remaining;
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.value.push_str(&value[..end]);
+        self.overflow = true;
+        Err(std::fmt::Error)
+    }
 }
 
 impl tracing::field::Visit for JsonVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        let entry = serde_json::json!(format!("{value:?}"));
-        if field.name() == "message" {
-            self.message = Some(entry.as_str().unwrap_or_default().to_string());
+        use std::fmt::Write;
+        let limit = if field.name() == "message" {
+            8192
         } else {
-            let obj = self
-                .fields
-                .get_or_insert_with(|| JsonValue::Object(Default::default()));
-            if let JsonValue::Object(map) = obj {
-                map.insert(field.name().to_string(), entry);
-            }
+            4096
+        };
+        let mut text = BoundedText {
+            value: String::new(),
+            limit,
+            overflow: false,
+        };
+        if write!(&mut text, "{value:?}").is_err() {
+            text.overflow = true;
         }
+        self.overflow |= text.overflow;
+        self.record_text(field, text.value);
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        let entry = JsonValue::String(value.to_string());
-        if field.name() == "message" {
-            self.message = Some(value.to_string());
-        } else {
-            let obj = self
-                .fields
-                .get_or_insert_with(|| JsonValue::Object(Default::default()));
-            if let JsonValue::Object(map) = obj {
-                map.insert(field.name().to_string(), entry);
-            }
+        use std::fmt::Write;
+        let mut text = BoundedText {
+            value: String::new(),
+            limit: if field.name() == "message" {
+                8192
+            } else {
+                4096
+            },
+            overflow: false,
+        };
+        if text.write_str(value).is_err() {
+            text.overflow = true;
         }
+        self.overflow |= text.overflow;
+        self.record_text(field, text.value);
     }
 }
 
-#[cfg(feature = "otlp")]
-fn otel_layer<S>() -> tracing_opentelemetry::OpenTelemetryLayer<S, opentelemetry_sdk::trace::Tracer>
-where
-    S: tracing::Subscriber,
-    for<'span> S: tracing_subscriber::registry::LookupSpan<'span>,
-{
-    use opentelemetry::KeyValue;
-    use opentelemetry_otlp::WithExportConfig;
-    use opentelemetry_sdk::{runtime::Tokio, trace, Resource};
-
-    let endpoint = std::env::var("RUNMAT_OTEL_ENDPOINT").unwrap_or_default();
-    let http_client = reqwest::Client::builder()
-        .no_proxy()
-        .build()
-        .expect("failed to construct OTEL HTTP client");
-    let otel_exporter = opentelemetry_otlp::new_exporter()
-        .http()
-        .with_http_client(http_client)
-        .with_endpoint(endpoint);
-    let otel_tracer = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(otel_exporter)
-        .with_trace_config(
-            trace::config()
-                .with_resource(Resource::new(vec![KeyValue::new("service.name", "runmat")])),
-        )
-        .install_batch(Tokio)
-        .expect("failed to install OTEL pipeline");
-
-    tracing_opentelemetry::OpenTelemetryLayer::new(otel_tracer)
+impl JsonVisitor {
+    fn record_text(&mut self, field: &tracing::field::Field, mut value: String) {
+        if self.overflow {
+            value.push_str(" [truncated]");
+        }
+        if self
+            .bytes
+            .saturating_add(value.len())
+            .saturating_add(field.name().len())
+            > 32 * 1024
+            || field.name().len() > 256
+        {
+            self.overflow = true;
+            return;
+        }
+        self.bytes += value.len() + field.name().len();
+        if field.name() == "message" {
+            self.message = Some(value);
+        } else {
+            let fields = self
+                .fields
+                .get_or_insert_with(|| JsonValue::Object(Default::default()));
+            if let JsonValue::Object(map) = fields {
+                if map.len() >= 32 {
+                    self.overflow = true;
+                    return;
+                }
+                map.insert(field.name().to_owned(), JsonValue::String(value));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -575,6 +722,82 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
     use tracing::warn;
+
+    #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+    #[test]
+    fn permanent_layer_resolves_explicit_parent_without_phantom_root_ids() {
+        struct Capture(Arc<Mutex<Vec<(Option<String>, Option<String>)>>>);
+        impl<S> Layer<S> for Capture
+        where
+            S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+        {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(valid_context_ids(&event_otel_context(event, &ctx).0));
+            }
+        }
+        let ids = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry()
+            .with(retained_otel_layer())
+            .with(Capture(ids.clone()));
+        tracing::subscriber::with_default(subscriber, || {
+            let parent = tracing::info_span!("explicit_parent");
+            let expected = valid_context_ids(&parent.context());
+            tracing::info!(parent:&parent,"explicit parent, not entered");
+            tracing::info!(parent:None,"unparented event");
+            let actual = ids.lock().unwrap();
+            assert_eq!(actual[0], expected);
+            assert!(actual[0].0.is_some());
+            assert_eq!(actual[1], (None, None));
+        });
+    }
+
+    #[test]
+    fn host_log_owner_forwards_original_records_into_real_subscriber() {
+        struct Capture(Arc<Mutex<Vec<String>>>);
+        impl<S: Subscriber> Layer<S> for Capture {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                let mut visitor = JsonVisitor::default();
+                event.record(&mut visitor);
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(visitor.message.unwrap_or_default());
+            }
+        }
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry()
+            .with(EnvFilter::new("debug"))
+            .with(Capture(captured.clone()));
+        tracing::subscriber::with_default(subscriber, || {
+            let metadata = tracing_log::log::Metadata::builder()
+                .level(tracing_log::log::Level::Debug)
+                .target("bridge_fixture")
+                .build();
+            assert!(
+                log_metadata_enabled(&metadata),
+                "subscriber-only debug must be enabled independently of the terminal sink"
+            );
+            forward_log_record(
+                &tracing_log::log::Record::builder()
+                    .metadata(metadata)
+                    .args(format_args!("original bridge message"))
+                    .build(),
+            )
+            .unwrap();
+        });
+        assert_eq!(*captured.lock().unwrap(), vec!["original bridge message"]);
+    }
 
     #[test]
     fn log_hook_receives_record() {

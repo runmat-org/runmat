@@ -227,6 +227,10 @@ pub(super) fn exact_study_fixture_with_wall_time(
         };
     let mut builder = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &revision,
+        ))
+        .unwrap()
         .with_compiled_package_closure();
     for (recipe, artifact) in programs {
         builder =

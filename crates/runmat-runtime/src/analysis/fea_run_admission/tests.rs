@@ -29,12 +29,14 @@ impl FeaRunAdmission for Host {
     }
 }
 fn request() -> FeaRunRequest {
-    FeaRunRequest::local(
+    let mut request = FeaRunRequest::local(
         FeaRunKind::MeshAndSolve,
         2000,
         runmat_execution::Digest::sha256(b"study"),
     )
-    .unwrap()
+    .unwrap();
+    request.site = FeaRunSite::Dispatched;
+    request
 }
 
 #[test]
@@ -100,9 +102,36 @@ fn invalid_transport_request_is_rejected_before_host_admission() {
         Err(FeaRunDenied::LicenseInvalid)
     ));
     let mut wrong_site = request();
-    wrong_site.site = FeaRunSite::Dispatched;
+    wrong_site.site = FeaRunSite::Local;
     let scope = FeaRunScope::admit_with(request(), &host).unwrap();
     scope.run_sync(|| assert!(FeaRunScope::admit(wrong_site).is_err()));
     scope.settle(FeaRunOutcome::Completed);
     assert_eq!(events.lock().unwrap().admitted.len(), 1);
+}
+
+#[test]
+fn local_runs_never_consult_default_explicit_or_poll_local_billing_hosts() {
+    struct ForbiddenHost;
+    impl FeaRunAdmission for ForbiddenHost {
+        fn admit(&self, _: &FeaRunRequest) -> Result<Box<dyn FeaRunPermit>, FeaRunDenied> {
+            panic!("local execution must not call a billing host")
+        }
+    }
+    for kind in [FeaRunKind::Meshing, FeaRunKind::Solve, FeaRunKind::MeshAndSolve] {
+        let mut local = request();
+        local.site = FeaRunSite::Local;
+        local.kind = kind;
+        let context = crate::analysis::fea_run_admission::FeaRunAdmissionContext::new(
+            Arc::new(ForbiddenHost),
+        );
+        let scopes = [
+            FeaRunScope::admit(local.clone()).expect("no host or sign-in needed"),
+            FeaRunScope::admit_with(local.clone(), &ForbiddenHost).expect("explicit host bypassed"),
+            context.run_sync(|| FeaRunScope::admit(local)).expect("poll-local host bypassed"),
+        ];
+        for scope in scopes {
+            scope.run_sync(|| assert_eq!(FeaRunScope::current_allocation(), Some(2000)));
+            scope.settle(FeaRunOutcome::Completed);
+        }
+    }
 }

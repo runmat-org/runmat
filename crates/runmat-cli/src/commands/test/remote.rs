@@ -36,6 +36,7 @@ pub(super) struct RemoteTestBackendConfig {
     pub project_handoff: FrozenProjectHandoff,
     pub interop: runmat_types::InteropManifest,
     pub foreign_policy: LogicalObject,
+    pub runtime_policy: LogicalObject,
     pub foreign_artifacts: Vec<LogicalObject>,
     pub foreign_artifact_closures: Vec<ForeignArtifactClosure>,
 }
@@ -157,6 +158,8 @@ impl WorkerBackend for RemoteTestBackend {
                 program.artifact.executable_bytes.clone(),
             )
             .with_foreign_policy_object(self.config.foreign_policy.clone())
+            .map_err(protocol)?
+            .with_project_runtime_policy_object(self.config.runtime_policy.clone())
             .map_err(protocol)?;
             drop(program);
             for artifact in &self.config.foreign_artifacts {

@@ -1,7 +1,7 @@
-//! Denial witnesses at effectful public roots, without re-running numerical suites.
+//! Local public roots bypass billing while preserving cancellation/provider guards.
 use super::*;
 use crate::analysis::fea_run_admission::{
-    FeaRunAdmission, FeaRunAdmissionContext, FeaRunDenied, FeaRunKind, FeaRunPermit, FeaRunRequest,
+    FeaRunAdmission, FeaRunAdmissionContext, FeaRunDenied, FeaRunPermit, FeaRunRequest,
 };
 
 #[derive(Default)]
@@ -13,9 +13,18 @@ impl FeaRunAdmission for DenyingHost {
     }
 }
 
-fn assert_denied(error: OperationErrorEnvelope, root: &str) {
-    assert_eq!(error.error_code, "RM.FEA.SignInRequired", "{root}");
-    assert_eq!(error.error_type, OperationErrorType::Capacity, "{root}");
+fn assert_not_billing_denied(error: OperationErrorEnvelope, root: &str) {
+    assert!(
+        ![
+            "RM.FEA.SignInRequired",
+            "RM.FEA.AllowanceUsed",
+            "RM.FEA.LeaseInvalid",
+            "RM.FEA.ServerUnreachable"
+        ]
+        .contains(&error.error_code.as_str()),
+        "{root}: {}",
+        error.message
+    );
 }
 
 type ModelRoot = fn(
@@ -25,8 +34,11 @@ type ModelRoot = fn(
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope>;
 
 #[test]
-fn model_execution_roots_deny_before_numerical_execution() {
+fn local_model_execution_roots_reach_cancellation_or_domain_validation_without_billing() {
     let _host_state = analysis_test_guard();
+    let _interrupt = crate::interrupt::replace_interrupt(Some(
+        runmat_execution::CancellationToken::from_shared(Arc::new(AtomicBool::new(true))),
+    ));
     let host = Arc::new(DenyingHost::default());
     let context = FeaRunAdmissionContext::new(host.clone());
     let model = sample_model();
@@ -69,21 +81,25 @@ fn model_execution_roots_deny_before_numerical_execution() {
                     OperationContext::new(None, None),
                 )
             })
-            .expect_err("execution must stop at admission");
-        assert_denied(error, name);
+            .expect_err("cancelled or incompatible model must not complete");
+        assert!(
+            matches!(
+                error.error_type,
+                OperationErrorType::Cancelled | OperationErrorType::Validation
+            ),
+            "{name}: local admission must preserve cancellation/domain guards: {}",
+            error.error_code
+        );
+        assert_not_billing_denied(error, name);
     }
     let requests = host.0.lock().unwrap();
-    assert_eq!(
-        requests.len(),
-        roots.len(),
-        "exactly one request per public root"
+    assert!(
+        requests.is_empty(),
+        "local public roots must never consult the billing host"
     );
-    assert!(requests
-        .iter()
-        .all(|request| request.kind == FeaRunKind::Solve));
     drop(requests);
 
-    // Retired reduced coupled-flow model roots are validation-only, not billable roots.
+    // Retired reduced coupled-flow model roots remain validation-only.
     for error in context.run_sync(|| {
         [
             analysis_run_cht_op(&model, OperationContext::new(None, None)).unwrap_err(),
@@ -93,20 +109,20 @@ fn model_execution_roots_deny_before_numerical_execution() {
         assert!(error.error_code.ends_with(".AUTHORED_STUDY_REQUIRED"));
         assert_eq!(error.error_type, OperationErrorType::Validation);
     }
-    assert_eq!(host.0.lock().unwrap().len(), roots.len());
+    assert!(host.0.lock().unwrap().is_empty());
 }
 
-struct NeverExecute;
-impl StructuralLinearExecutor for NeverExecute {
+struct RejectExecution;
+impl StructuralLinearExecutor for RejectExecution {
     fn execute(
         &self,
         _: &runmat_analysis_fea::execution::StructuralLinearWorkload,
         _: &runmat_meshing_core::SolverMeshArtifact,
     ) -> Result<runmat_analysis_fea::execution::StructuralLinearWorkloadResult, String> {
-        panic!("denied study must not execute its numerical executor")
+        Err("local numerical executor rejected the workload".into())
     }
 }
-impl StructuralStudyPlacementExecutor for NeverExecute {
+impl StructuralStudyPlacementExecutor for RejectExecution {
     fn allocated_cpu_millicores(&self, _: usize) -> u32 {
         1000
     }
@@ -114,15 +130,15 @@ impl StructuralStudyPlacementExecutor for NeverExecute {
         &'a self,
         _: &'a [StructuralStudyPlacementEntry<'a>],
     ) -> StructuralStudyPlacementFuture<'a> {
-        panic!("denied study must not dispatch its placement executor")
+        Box::pin(async { Err("local placement executor rejected the workload".into()) })
     }
 }
 
 #[test]
-fn study_placement_and_meshing_roots_deny_before_provider_effects() {
+fn local_study_placement_and_meshing_preserve_provider_errors_without_billing() {
     let _host_state = analysis_test_guard();
     let _meshing = crate::meshing::replace_meshing_execution_provider(Some(Arc::new(|_| {
-        panic!("denied root must not enter the meshing provider")
+        Err("offline local meshing provider reached".into())
     })))
     .unwrap();
     let host = Arc::new(DenyingHost::default());
@@ -145,7 +161,7 @@ fn study_placement_and_meshing_roots_deny_before_provider_effects() {
                 analysis_run_study_with_structural_executor_op(
                     &study,
                     operation_context(),
-                    &NeverExecute,
+                    &RejectExecution,
                 )
                 .unwrap_err(),
             ),
@@ -155,28 +171,28 @@ fn study_placement_and_meshing_roots_deny_before_provider_effects() {
             ),
         ]
     }) {
-        assert_denied(error, name);
+        assert_not_billing_denied(error, name);
     }
     let placement_errors = pollster::block_on(context.run_future(async {
         [
             analysis_execute_structural_study_with_placement(
                 &study,
                 operation_context(),
-                &NeverExecute,
+                &RejectExecution,
             )
             .await
             .unwrap_err(),
             analysis_execute_structural_sweep_with_placement(
                 &sweep,
                 operation_context(),
-                &NeverExecute,
+                &RejectExecution,
             )
             .await
             .unwrap_err(),
         ]
     }));
     for error in placement_errors {
-        assert_denied(error, "placement");
+        assert_not_billing_denied(error, "placement");
     }
     let error = context
         .run_sync(|| {
@@ -191,16 +207,11 @@ fn study_placement_and_meshing_roots_deny_before_provider_effects() {
         .unwrap_err();
     assert!(matches!(
         error,
-        crate::meshing::MeshingExecutionError::Admission(FeaRunDenied::SignInRequired)
+        crate::meshing::MeshingExecutionError::Provider(ref message) if message == "offline local meshing provider reached"
     ));
     let requests = host.0.lock().unwrap();
-    assert_eq!(
-        requests.len(),
-        6,
-        "one request per study/placement/mesh root"
+    assert!(
+        requests.is_empty(),
+        "local study/placement/mesh roots must not consult billing"
     );
-    assert!(requests[..5]
-        .iter()
-        .all(|request| request.kind == FeaRunKind::MeshAndSolve));
-    assert_eq!(requests[5].kind, FeaRunKind::Meshing);
 }

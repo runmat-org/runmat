@@ -44,7 +44,7 @@ fn every_fixed_width_replacement_class_is_preserved() {
 }
 
 #[test]
-fn text_replacements_preserve_input_shape_and_use_empty_missing_values() {
+fn text_replacements_preserve_input_shape_and_typed_missing_values() {
     let output = call(
         Value::Tensor(Tensor::new(vec![-1.0, 0.5, 1.5], vec![3, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap()),
@@ -57,7 +57,14 @@ fn text_replacements_preserve_input_shape_and_use_empty_missing_values() {
         panic!("expected string array");
     };
     assert_eq!(output.shape, vec![3, 1]);
-    assert_eq!(output.data(), vec!["", "low", "high"]);
+    assert_eq!(
+        output.data(),
+        vec![
+            runmat_value::StringElement::Missing,
+            "low".into(),
+            "high".into()
+        ]
+    );
 }
 
 #[test]

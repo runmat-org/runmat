@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context as _, Result};
 use runmat_node_agent::enrollment::CredentialStore;
 use runmat_node_agent::service::{HttpNodeControlPlane, NodeAgentService, Shutdown};
 use runmat_node_agent::{AgentConfig, AgentFileConfig};
@@ -14,14 +14,27 @@ pub(super) async fn execute(args: NodeJoinArgs) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&inventory)?);
             Ok(())
         }
-        NodeJoinCommand::Enroll { token } => {
+        NodeJoinCommand::Enroll { token, token_stdin } => {
+            let token = if *token_stdin {
+                use std::io::Read as _;
+                let mut value = String::new();
+                std::io::stdin()
+                    .take(16 * 1024 + 1)
+                    .read_to_string(&mut value)?;
+                if value.len() > 16 * 1024 || value.trim().is_empty() {
+                    anyhow::bail!("stdin enrollment token is empty or exceeds 16 KiB");
+                }
+                value.trim().to_owned()
+            } else {
+                token.clone().context("an enrollment token is required")?
+            };
             let config = config(&args, false)?;
             let inventory = runmat_node_agent::inventory::collect(config.trust_tier)?;
             let control = Arc::new(HttpNodeControlPlane::new(config.server_url.clone())?);
             runmat_node_agent::enrollment::enroll(
                 control,
                 &CredentialStore::new(&config.state_directory),
-                token.clone(),
+                token,
                 inventory,
                 config.heartbeat_ttl.as_secs(),
             )
@@ -147,6 +160,11 @@ fn install_service(args: &NodeJoinArgs, dry_run: bool) -> Result<()> {
     if dry_run {
         println!("{}", serde_json::to_string_pretty(&plan)?);
     } else {
+        CredentialStore::new(&config.state_directory)
+            .load()
+            .context(
+            "enroll this machine using the same --state-directory before installing its service",
+        )?;
         runmat_node_agent::service_install::apply_install(&plan, &config.state_directory)?;
         println!("installed and started RunMat execution-node service");
     }
@@ -180,7 +198,7 @@ mod tests {
         };
         assert!(matches!(
             args.command,
-            NodeJoinCommand::Enroll { token } if token == "secret"
+            NodeJoinCommand::Enroll { token: Some(token), token_stdin: false } if token == "secret"
         ));
     }
 }

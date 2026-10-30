@@ -20,7 +20,7 @@ runmat fea plan cantilever-static.fea
 runmat fea run cantilever-static.fea
 ```
 
-Meshing and solving need a signed-in RunMat account: run `runmat login` once. `check`, `plan`, geometry import and viewing results work without one.
+Meshing and solving on your own computer need no account. Runs sent to a cluster use core-hours; see [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits).
 
 `runmat check file.fea` and `runmat run file.fea` are shorthand for the corresponding `runmat fea` commands. If a root module declares more than one runnable root, select it with `--study <id>` or `--sweep <id>`.
 

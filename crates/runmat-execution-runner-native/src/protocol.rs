@@ -33,6 +33,8 @@ pub(crate) struct StagedGraphWorkerReference {
     pub assignment: runmat_execution::ProgramExecutionAssignment,
     pub context: runmat_execution::ProgramInvocationContext,
     pub requested_outputs: u16,
+    /// The original scheduler reservation, never inferred from project policy.
+    pub resources: runmat_execution::resource::ResourceRequest,
 }
 
 pub const NATIVE_WORKER_MESSAGE_SCHEMA_V2: u16 = 2;

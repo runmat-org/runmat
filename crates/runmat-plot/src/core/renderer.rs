@@ -829,7 +829,7 @@ impl WgpuRenderer {
         }
     }
 
-    fn depth_format() -> wgpu::TextureFormat {
+    pub(crate) fn depth_format() -> wgpu::TextureFormat {
         // Prefer a higher-precision depth buffer on native; keep a web-friendly format on wasm.
         #[cfg(target_arch = "wasm32")]
         {

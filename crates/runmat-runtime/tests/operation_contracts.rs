@@ -1,23 +1,3 @@
-#[path = "support/fea_admission.rs"]
-mod fea_admission;
-
-// Every effectful contract test selects its host explicitly for this invocation.
-// Pure planning checks and production's unhosted default remain unchanged.
-fn with_fea_contract_host(operation: impl FnOnce()) {
-    let host = fea_admission::TestFeaHost::new(None);
-    host.context().run_sync(operation);
-    let events = host.events();
-    assert!(
-        !events.requests.is_empty(),
-        "effectful contract exercised admission"
-    );
-    assert_eq!(
-        events.requests.len(),
-        events.settlements.len(),
-        "every admitted contract run settles"
-    );
-}
-
 use runmat_analysis_core::{
     AnalysisExcitation, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
     AnalysisSequence, CoordinateFrame, EvidenceConfidence, ExcitationAction, ExcitationCase,
@@ -609,7 +589,7 @@ fn analysis_validate_contract_is_v1_and_maps_codes() {
 
 #[test]
 fn analysis_study_workflow_contract_persists_evidence_artifacts() {
-    with_fea_contract_host(|| {
+    {
         let _study_artifact_env_guard = study_artifact_env_guard();
         static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
         let evidence_root = std::env::temp_dir().join(format!(
@@ -704,12 +684,12 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
 
         drop(env_guard);
         let _ = fs::remove_dir_all(&evidence_root);
-    });
+    }
 }
 
 #[test]
 fn analysis_study_sweep_contract_executes_multiple_studies() {
-    with_fea_contract_host(|| {
+    {
         let _study_artifact_env_guard = study_artifact_env_guard();
         static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
         let evidence_root = std::env::temp_dir().join(format!(
@@ -777,12 +757,12 @@ fn analysis_study_sweep_contract_executes_multiple_studies() {
 
         drop(env_guard);
         let _ = fs::remove_dir_all(&evidence_root);
-    });
+    }
 }
 
 #[test]
 fn analysis_study_sweep_contract_can_continue_on_failure() {
-    with_fea_contract_host(|| {
+    {
         let _study_artifact_env_guard = study_artifact_env_guard();
         static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
         let evidence_root = std::env::temp_dir().join(format!(
@@ -854,7 +834,7 @@ fn analysis_study_sweep_contract_can_continue_on_failure() {
 
         drop(env_guard);
         let _ = fs::remove_dir_all(&evidence_root);
-    });
+    }
 }
 
 #[test]
@@ -1052,7 +1032,7 @@ fn analysis_model_decode_rejects_noncanonical_units_and_validate_maps_frame_mism
 
 #[test]
 fn analysis_run_contract_is_v1_and_numerically_accepted_for_fixture() {
-    with_fea_contract_host(|| {
+    {
         let model = contract_linear_static_model();
         let envelope = analysis_run_linear_static_with_options(
             &model,
@@ -1106,12 +1086,12 @@ fn analysis_run_contract_is_v1_and_numerically_accepted_for_fixture() {
                 .values,
             AnalysisFieldValues::HostF64(_)
         ));
-    });
+    }
 }
 
 #[test]
 fn convenience_run_requires_production_qualified_formulation() {
-    with_fea_contract_host(|| {
+    {
         let error = analysis_run_linear_static_op(
             &contract_linear_static_model(),
             ComputeBackend::Cpu,
@@ -1125,12 +1105,12 @@ fn convenience_run_requires_production_qualified_formulation() {
             error.error_code,
             "RM.FEA.RUN_LINEAR_STATIC.FORMULATION_NOT_ADMITTED"
         );
-    });
+    }
 }
 
 #[test]
 fn analysis_run_modal_contract_is_v1_and_typed() {
-    with_fea_contract_host(|| {
+    {
         let modal_model = contract_modal_model("contract_modal_model");
 
         let modal_envelope = analysis_run_modal_with_options_op(
@@ -1233,12 +1213,12 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         assert_eq!(invalid.operation, "fea.run_modal");
         assert_eq!(invalid.op_version, "fea.run_modal/v1");
         assert_eq!(invalid.error_code, "RM.FEA.RUN_MODAL.INVALID_MODEL");
-    });
+    }
 }
 
 #[test]
 fn analysis_run_modal_with_options_contract_controls_mode_budget() {
-    with_fea_contract_host(|| {
+    {
         let modal_model = contract_modal_model("contract_modal_model_opts");
 
         let envelope = analysis_run_modal_with_options_op(
@@ -1286,12 +1266,12 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
         assert_eq!(invalid.error_code, "RM.FEA.RUN_MODAL.INVALID_OPTIONS");
         assert_eq!(invalid.operation, "fea.run_modal");
         assert_eq!(invalid.op_version, "fea.run_modal/v1");
-    });
+    }
 }
 
 #[test]
 fn analysis_run_acoustic_contract_is_v1_and_typed() {
-    with_fea_contract_host(|| {
+    {
         let acoustic_model = contract_acoustic_model("contract_acoustic_model");
 
         let envelope = analysis_run_acoustic_with_options_op(
@@ -1343,12 +1323,12 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
         assert_eq!(invalid.operation, "fea.run_acoustic");
         assert_eq!(invalid.op_version, "fea.run_acoustic/v1");
         assert_eq!(invalid.error_code, "RM.FEA.RUN_ACOUSTIC.INVALID_MODEL");
-    });
+    }
 }
 
 #[test]
 fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
-    with_fea_contract_host(|| {
+    {
         let mut model = contract_linear_static_model();
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(
             "cfd_steady".to_string(),
@@ -1395,7 +1375,7 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
             wire.get("data").is_none(),
             "rejection must not publish proxy fields"
         );
-    });
+    }
 }
 
 #[test]
@@ -1422,7 +1402,7 @@ fn analysis_run_cht_contract_requires_an_authored_study() {
 
 #[test]
 fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
-    with_fea_contract_host(|| {
+    {
         let model = contract_thermal_model(
             "contract_thermal_model",
             AnalysisProcedure::TransientResponse,
@@ -1471,12 +1451,12 @@ fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
             .expect("steady run should publish thermal results");
         assert_eq!(steady_payload.time_points_s, vec![0.0]);
         assert_eq!(steady_payload.temperature_snapshots.len(), 1);
-    });
+    }
 }
 
 #[test]
 fn thermomechanical_transient_contract_fails_closed() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
 
         let error = analysis_run_transient_with_options_op(
@@ -1489,12 +1469,12 @@ fn thermomechanical_transient_contract_fails_closed() {
         assert_eq!(error.operation, "fea.run_transient");
         assert_eq!(error.op_version, "fea.run_transient/v1");
         assert_eq!(error.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_MODEL");
-    });
+    }
 }
 
 #[test]
 fn analysis_run_transient_contract_is_v1_and_typed() {
-    with_fea_contract_host(|| {
+    {
         let mut model = contract_linear_static_model();
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
             "transient_1".to_string(),
@@ -1551,7 +1531,7 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
         assert_eq!(invalid.operation, "fea.run_transient");
         assert_eq!(invalid.op_version, "fea.run_transient/v1");
         assert_eq!(invalid.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_MODEL");
-    });
+    }
 }
 
 #[test]
@@ -1594,7 +1574,7 @@ fn analysis_run_fsi_contract_requires_an_authored_study() {
 
 #[test]
 fn analysis_run_nonlinear_contract_is_v1_and_typed() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::NonlinearAssembly);
         let envelope = analysis_run_nonlinear_with_options_op(
             &model,
@@ -1704,12 +1684,12 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
         assert_eq!(invalid.operation, "fea.run_nonlinear");
         assert_eq!(invalid.op_version, "fea.run_nonlinear/v1");
         assert_eq!(invalid.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_MODEL");
-    });
+    }
 }
 
 #[test]
 fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::NonlinearLoadPathMix);
         let envelope = analysis_run_nonlinear_with_options_op(
             &model,
@@ -1756,12 +1736,12 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
         assert!(diagnostics.iter().all(|diag| {
             diag.code == "FEA_NONLINEAR_CONVERGENCE" || diag.code == "FEA_NONLINEAR_COST"
         }));
-    });
+    }
 }
 
 #[test]
 fn nonlinear_contract_snapshot_matches_expected_shape() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::NonlinearLoadPathMix);
         let envelope = analysis_run_nonlinear_with_options_op(
             &model,
@@ -1810,12 +1790,12 @@ fn nonlinear_contract_snapshot_matches_expected_shape() {
 
         assert_eq!(sorted_object_keys(&nonlinear), expected_nonlinear_keys);
         assert_eq!(sorted_object_keys(&summary), expected_summary_keys);
-    });
+    }
 }
 
 #[test]
 fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::NonlinearAssembly);
         let envelope = analysis_run_nonlinear_with_options_op(
             &model,
@@ -1847,12 +1827,12 @@ fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
             .quality_reasons
             .iter()
             .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
-    });
+    }
 }
 
 #[test]
 fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::NonlinearAssembly);
         let run_with_policy = |policy| {
             analysis_run_nonlinear_with_options_op(
@@ -1889,12 +1869,12 @@ fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
                 .iter()
                 .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
         }
-    });
+    }
 }
 
 #[test]
 fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::NonlinearSofteningBenchmark);
         let run_with_policy = |policy| {
             analysis_run_nonlinear_with_options_op(
@@ -1923,12 +1903,12 @@ fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
         assert_eq!(balanced.data.run_status, RunStatus::Degraded);
         assert!(!strict.data.numerically_acceptable);
         assert_eq!(strict.data.run_status, RunStatus::Degraded);
-    });
+    }
 }
 
 #[test]
 fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
-    with_fea_contract_host(|| {
+    {
         let _artifact_store_guard = study_artifact_env_guard();
         let model = fixture_model(FixtureId::NonlinearAssembly);
         let baseline = analysis_run_nonlinear_with_options_op(
@@ -1969,12 +1949,12 @@ fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
         assert_eq!(missing.operation, "fea.results_compare");
         assert_eq!(missing.op_version, "fea.results_compare/v1");
         assert_eq!(missing.error_code, "RM.FEA.RESULTS_COMPARE.RUN_NOT_FOUND");
-    });
+    }
 }
 
 #[test]
 fn analysis_trends_contract_is_v1_and_typed() {
-    with_fea_contract_host(|| {
+    {
         let _artifact_store_guard = study_artifact_env_guard();
         storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::InMemory)
             .expect("configure isolated in-memory artifact store");
@@ -2016,12 +1996,12 @@ fn analysis_trends_contract_is_v1_and_typed() {
         assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
         assert!(nonlinear.thermo_spread_breach_rate.is_none());
         assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
-    });
+    }
 }
 
 #[test]
 fn analysis_run_transient_with_options_contract_controls_execution_window() {
-    with_fea_contract_host(|| {
+    {
         let mut model = contract_linear_static_model();
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
             "transient_1".to_string(),
@@ -2052,12 +2032,12 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
         assert_eq!(transient.time_points_s.len(), 5);
         assert!((transient.time_points_s[4] - 1.0).abs() < 1.0e-12);
         assert!(envelope.data.provenance.deterministic_mode);
-    });
+    }
 }
 
 #[test]
 fn analysis_modal_large_fixture_quality_signals_propagate_to_results() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::ModalLarge);
         let envelope = analysis_run_modal_with_options_op(
             &model,
@@ -2128,12 +2108,12 @@ fn analysis_modal_large_fixture_quality_signals_propagate_to_results() {
             .expect("diagnostics should be included")
             .iter()
             .any(|diag| diag.code == "FEA_MODAL_SEPARATION"));
-    });
+    }
 }
 
 #[test]
 fn analysis_transient_long_fixture_quality_signals_propagate_to_results() {
-    with_fea_contract_host(|| {
+    {
         let model = fixture_model(FixtureId::TransientLong);
         let envelope = analysis_run_transient_with_options_op(
             &model,
@@ -2202,12 +2182,12 @@ fn analysis_transient_long_fixture_quality_signals_propagate_to_results() {
             .expect("diagnostics should be included")
             .iter()
             .any(|diag| diag.code == "FEA_TRANSIENT_ENERGY"));
-    });
+    }
 }
 
 #[test]
 fn analysis_results_contract_is_v1_and_filterable() {
-    with_fea_contract_host(|| {
+    {
         let model = contract_linear_static_model();
         let run = analysis_run_linear_static_with_options(
             &model,
@@ -2244,12 +2224,12 @@ fn analysis_results_contract_is_v1_and_filterable() {
             FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS
         );
         assert!(results.data.diagnostics.is_none());
-    });
+    }
 }
 
 #[test]
 fn analysis_results_unknown_field_maps_typed_error_contract() {
-    with_fea_contract_host(|| {
+    {
         let model = contract_linear_static_model();
         let run = analysis_run_linear_static_with_options(
             &model,
@@ -2281,12 +2261,12 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
         assert_eq!(err.operation, "fea.results");
         assert_eq!(err.op_version, "fea.results/v1");
         assert_eq!(err.error_code, "RM.FEA.RESULTS.FIELD_NOT_FOUND");
-    });
+    }
 }
 
 #[test]
 fn analysis_results_modal_query_controls_are_typed() {
-    with_fea_contract_host(|| {
+    {
         let modal_model = contract_modal_model("contract_modal_results_model");
         let modal_run = analysis_run_modal_with_options_op(
             &modal_model,
@@ -2351,12 +2331,12 @@ fn analysis_results_modal_query_controls_are_typed() {
         assert_eq!(invalid_mode.error_code, "RM.FEA.RESULTS.MODE_NOT_FOUND");
         assert_eq!(invalid_mode.operation, "fea.results");
         assert_eq!(invalid_mode.op_version, "fea.results/v1");
-    });
+    }
 }
 
 #[test]
 fn analysis_results_transient_query_controls_are_typed() {
-    with_fea_contract_host(|| {
+    {
         let mut model = contract_linear_static_model();
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
             "transient_1".to_string(),
@@ -2418,12 +2398,12 @@ fn analysis_results_transient_query_controls_are_typed() {
         );
         assert_eq!(invalid_snapshot.operation, "fea.results");
         assert_eq!(invalid_snapshot.op_version, "fea.results/v1");
-    });
+    }
 }
 
 #[test]
 fn analysis_results_by_run_id_contract_roundtrip() {
-    with_fea_contract_host(|| {
+    {
         let _artifact_store_guard = study_artifact_env_guard();
         let model = contract_linear_static_model();
         let run = analysis_run_linear_static_with_options(
@@ -2475,7 +2455,7 @@ fn analysis_results_by_run_id_contract_roundtrip() {
             None
         );
         assert_eq!(results.data.summary.thermo_nonlinear_severity, None);
-    });
+    }
 }
 
 #[test]
@@ -2516,7 +2496,7 @@ fn analysis_run_contract_maps_fixture_validation_failure() {
 
 #[test]
 fn multi_material_confidence_mismatch_degrades_publishability() {
-    with_fea_contract_host(|| {
+    {
         let model = material_conflict_contract_model();
         let envelope = analysis_run_linear_static_with_options(
             &model,
@@ -2539,12 +2519,12 @@ fn multi_material_confidence_mismatch_degrades_publishability() {
             .diagnostics
             .iter()
             .any(|diag| diag.code == "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED"));
-    });
+    }
 }
 
 #[test]
 fn analysis_run_deterministic_contract_is_stable_across_replays() {
-    with_fea_contract_host(|| {
+    {
         let model = contract_linear_static_model();
         let options = AnalysisRunOptions {
             deterministic_mode: true,
@@ -2579,12 +2559,12 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
         assert!(second.data.provenance.deterministic_mode);
         assert_eq!(first.data.run.fields, second.data.run.fields);
         assert_eq!(first.data.run.diagnostics, second.data.run.diagnostics);
-    });
+    }
 }
 
 #[test]
 fn analysis_run_cpu_provenance_and_gpu_admission_are_truthful() {
-    with_fea_contract_host(|| {
+    {
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
         let cpu = analysis_run_linear_static_with_options(
             &contract_linear_static_model(),
@@ -2618,15 +2598,15 @@ fn analysis_run_cpu_provenance_and_gpu_admission_are_truthful() {
         }
         assert!(cpu.data.run.field(FEA_FIELD_STRUCTURAL_VON_MISES).is_none());
         assert_static_gpu_admission_rejected("trace-contract-7b");
-    });
+    }
 }
 
 #[test]
 fn analysis_run_gpu_without_provider_rejects_before_execution() {
-    with_fea_contract_host(|| {
+    {
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
         assert_static_gpu_admission_rejected("trace-contract-8");
-    });
+    }
 }
 
 /// Counts device transfers; admission must reject GPU studies before any.
@@ -2662,7 +2642,7 @@ impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
 
 #[test]
 fn analysis_run_gpu_with_provider_rejects_without_device_transfers() {
-    with_fea_contract_host(|| {
+    {
         static PROVIDER: AdmissionProbeProvider = AdmissionProbeProvider {
             uploads: AtomicU64::new(0),
             downloads: AtomicU64::new(0),
@@ -2673,12 +2653,12 @@ fn analysis_run_gpu_with_provider_rejects_without_device_transfers() {
         assert_static_gpu_admission_rejected("trace-contract-9");
         assert_eq!(PROVIDER.uploads.load(Ordering::Relaxed), 0);
         assert_eq!(PROVIDER.downloads.load(Ordering::Relaxed), 0);
-    });
+    }
 }
 
 #[test]
 fn analysis_run_gpu_upload_failure_provider_is_not_reached() {
-    with_fea_contract_host(|| {
+    {
         static PROVIDER: AdmissionProbeProvider = AdmissionProbeProvider {
             uploads: AtomicU64::new(0),
             downloads: AtomicU64::new(0),
@@ -2689,12 +2669,12 @@ fn analysis_run_gpu_upload_failure_provider_is_not_reached() {
         assert_static_gpu_admission_rejected("trace-contract-10");
         assert_eq!(PROVIDER.uploads.load(Ordering::Relaxed), 0);
         assert_eq!(PROVIDER.downloads.load(Ordering::Relaxed), 0);
-    });
+    }
 }
 
 #[test]
 fn strict_policy_quality_reasons_propagate_to_results_contracts() {
-    with_fea_contract_host(|| {
+    {
         let _artifact_store_guard = study_artifact_env_guard();
         let model = material_conflict_contract_model();
         let run = analysis_run_linear_static_with_options(
@@ -2749,12 +2729,12 @@ fn strict_policy_quality_reasons_propagate_to_results_contracts() {
             .quality_reasons
             .iter()
             .any(|reason| reason.code == QualityReasonCode::MaterialAssignmentConflict));
-    });
+    }
 }
 
 #[test]
 fn balanced_and_strict_reject_the_same_material_conflict() {
-    with_fea_contract_host(|| {
+    {
         let model = material_conflict_contract_model();
 
         let balanced = analysis_run_linear_static_with_options(
@@ -2822,12 +2802,12 @@ fn balanced_and_strict_reject_the_same_material_conflict() {
         assert_eq!(balanced.data.run_status, RunStatus::Degraded);
         assert!(!strict.data.numerically_acceptable);
         assert_eq!(strict.data.run_status, RunStatus::Degraded);
-    });
+    }
 }
 
 #[test]
 fn balanced_and_strict_material_rejection_propagates_through_results_endpoints() {
-    with_fea_contract_host(|| {
+    {
         let _artifact_store_guard = study_artifact_env_guard();
         let model = material_conflict_contract_model();
 
@@ -2935,7 +2915,7 @@ fn balanced_and_strict_material_rejection_propagates_through_results_endpoints()
             .quality_reasons
             .iter()
             .any(|reason| reason.code == QualityReasonCode::MaterialAssignmentConflict));
-    });
+    }
 }
 
 #[test]

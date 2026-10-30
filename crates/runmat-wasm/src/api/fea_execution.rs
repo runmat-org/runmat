@@ -1,5 +1,5 @@
 //! Browser adapter for checked-source serial execution.
-use super::fea_run_admission::{self, BrowserFeaPermit, BrowserFeaRunRequest};
+use super::fea_run_context::LocalFeaRunContext;
 use super::session::RunMatWasm;
 use crate::wire::errors::{js_error, js_value_to_string};
 use runmat_analysis_execution::{
@@ -30,7 +30,7 @@ pub(crate) struct BrowserFeaSelection {
     checked_revision: [u8; 32],
 }
 struct BrowserGeometryHost<'a> {
-    permit: &'a BrowserFeaPermit,
+    context: &'a LocalFeaRunContext,
 }
 #[wasm_bindgen]
 extern "C" {
@@ -68,8 +68,8 @@ impl FeaGeometryExecutionHost for BrowserGeometryHost<'_> {
         serde_json::from_str(
             &exact_execute(
                 &json,
-                self.permit
-                    .delegation(&json)
+                self.context
+                    .worker_context(&json)
                     .map_err(preparation_error_from_js)?,
             )
             .await
@@ -106,18 +106,6 @@ fn resident_bytes() -> u64 {
 }
 #[wasm_bindgen]
 impl RunMatWasm {
-    /// Install the host's asynchronous lease adapter. Clearing it fails closed.
-    #[wasm_bindgen(js_name=setFeaRunAdmission)]
-    pub fn set_fea_run_admission_js(&self, admission: JsValue) -> Result<(), JsValue> {
-        if admission.is_null() || admission.is_undefined() {
-            self.fea_run_admission.borrow_mut().take();
-        } else {
-            fea_run_admission::validate_admission(&admission)?;
-            *self.fea_run_admission.borrow_mut() = Some(admission);
-        }
-        Ok(())
-    }
-
     #[wasm_bindgen(js_name=planFeaSource)]
     pub async fn plan_fea_source_js(
         &self,
@@ -260,30 +248,24 @@ impl RunMatWasm {
             .borrow_mut()
             .take()
             .ok_or_else(|| js_error("The selected execution options are no longer available."))?;
-        // Source checks/planning remain open. The single lease covers the first
-        // mesh, every frequency/load case, solving and result publication.
-        let request = fea_run_admission::new_request(
-            FeaRunKind::MeshAndSolve,
-            checked_study_identity(&fresh)?,
-        )?;
-        let admission = self.fea_run_admission.borrow().clone();
-        let permit = BrowserFeaPermit::admit(admission, request, true).await?;
-        if let Err(error) = ensure_not_cancelled(&cancellation) {
-            permit.settle(FeaRunOutcome::Cancelled);
-            return Err(error);
-        }
+        // Local work has no billing gate; retain one allocation identity and
+        // usage scope through preparation, numerical work and publication.
+        let context =
+            LocalFeaRunContext::new(FeaRunKind::MeshAndSolve, checked_study_identity(&fresh)?)?;
+        let scope = context.scope()?;
+        ensure_not_cancelled(&cancellation)?;
         let observation = session
             .fea_execution_timing_profile()
             .for_source(&fresh, runmat_core::FeaTimingRoute::BrowserCheckedSource, 1)
             .ok()
             .map(|key| key.start());
-        let outcome = async {
+        let outcome = scope.run_future(async {
             // First mesh only after explicit Run. The existing preparation and
             // exact resource planner remain the sole allocation authority.
             if resident_bytes().saturating_add((512 + 128 + 64) << 20) > BROWSER_MEMORY_BYTES {
                 return Err(js_error("Not enough browser memory to prepare this simulation. Continue in the desktop app."));
             }
-            let study = fresh.prepare_serial_fea_study(&BrowserGeometryHost { permit: &permit }, &format!("browser-fea:{plan_id}"))
+            let study = fresh.prepare_serial_fea_study(&BrowserGeometryHost { context: &context }, &format!("browser-fea:{plan_id}"))
                 .await.map_err(|error| crate::wire::json_contract_to_js(&error.diagnostic()).unwrap_or_else(|_| js_error(&error.to_string())))?;
             ensure_not_cancelled(&cancellation)?;
             let available_memory = BROWSER_MEMORY_BYTES.saturating_sub(resident_bytes()).saturating_sub(ARTIFACT_BYTES).saturating_sub(64 << 20);
@@ -296,7 +278,7 @@ impl RunMatWasm {
             let json = execute_prepared(
                 &request,
                 available_memory as f64,
-                permit.delegation(&request)?,
+                context.worker_context(&request)?,
             )
             .await?
             .as_string()
@@ -333,14 +315,14 @@ impl RunMatWasm {
             let payload =
                 crate::wire::json_contract_to_js(&payload).map_err(|e| js_error(&e.to_string()))?;
             Ok(payload)
-        }
+        })
         .await;
         if let Some(observation) = observation {
             if !cancellation.token().is_cancelled() {
                 observation.complete(outcome.is_ok());
             }
         }
-        permit.settle(if cancellation.token().is_cancelled() {
+        scope.settle(if cancellation.token().is_cancelled() {
             FeaRunOutcome::Cancelled
         } else if outcome.is_ok() {
             FeaRunOutcome::Completed
@@ -401,85 +383,21 @@ fn forward_progress(event: runmat_analysis_fea::FeaProgressEvent) {
 
 /// Runs inside an owned worker. Its scheduler, receipts and result validation
 /// are the same as the in-process serial host; termination belongs to the host.
-#[wasm_bindgen(js_name=feaRunAdmissionSupported)]
-pub fn fea_run_admission_supported() -> bool {
-    true
-}
-
 #[wasm_bindgen(js_name=executePreparedFeaStudy)]
 pub async fn execute_prepared_fea_study(
     json: String,
     memory_bytes: f64,
-    worker_admission: JsValue,
+    worker_context: JsValue,
 ) -> Result<String, JsValue> {
-    // No raw boolean or bearer object bypasses admission. An owned worker must
-    // ask its host to authorize the exact parent identity before numerical work.
-    let admission = js_sys::Reflect::get(&worker_admission, &"admission".into())
-        .ok()
-        .filter(|value| !value.is_null() && !value.is_undefined());
-    if admission.is_none() {
-        return Err(fea_run_admission::sign_in_required());
-    }
-    let delegation = js_sys::Reflect::get(&worker_admission, &"delegation".into())
-        .ok()
-        .filter(|value| !value.is_null() && !value.is_undefined());
-    let prepared_digest = Digest::sha256(json.as_bytes());
-    let prepared_identity = prepared_digest.to_string();
-    let parent = if let Some(delegation) = delegation {
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Delegation {
-            request: BrowserFeaRunRequest,
-            permit_id: String,
-            prepared_study_identity: String,
-        }
-        let parent: Delegation = serde_wasm_bindgen::from_value(delegation)
-            .map_err(|_| fea_run_admission::lease_invalid("Invalid FEA delegation."))?;
-        if parent.prepared_study_identity != prepared_identity
-            || parent.request.allocated_cpu_millicores != 1000
-            || parent.request.run_id.is_empty()
-            || parent.request.study_identity.is_empty()
-            || parent.permit_id.is_empty()
-        {
-            return Err(fea_run_admission::lease_invalid(
-                "FEA delegation does not match this worker request.",
-            ));
-        }
-        Some((parent.request, parent.permit_id))
-    } else {
-        None
-    };
+    // Local execution is unmetered, but an owned worker still checks the exact
+    // parent payload and canonical source identity before numerical execution.
     validate_numerical_input(json.len(), memory_bytes)?;
     let study: PreparedSerialFeaStudy =
         serde_json::from_str(&json).map_err(|error| js_error(&error.to_string()))?;
-    let (request, parent_permit_id) = if let Some((request, permit_id)) = parent {
-        if request.study_identity != study.authored_study_digest.to_string()
-            || request.kind == FeaRunKind::Meshing
-        {
-            return Err(fea_run_admission::lease_invalid(
-                "FEA delegation does not match the canonical study identity.",
-            ));
-        }
-        (request, Some(permit_id))
-    } else {
-        (
-            fea_run_admission::new_request(FeaRunKind::Solve, study.authored_study_digest)?,
-            None,
-        )
-    };
-    let permit = BrowserFeaPermit::admit(admission, request, parent_permit_id.is_none()).await?;
-    if parent_permit_id
-        .as_deref()
-        .is_some_and(|expected| expected != permit.permit_id())
-    {
-        permit.reject_delegation();
-        return Err(fea_run_admission::lease_invalid(
-            "Worker admission did not authorize the parent permit.",
-        ));
-    }
-    let scope = permit.native_scope()?;
-    let result =
-        scope.run_sync(|| execute_prepared_fea_study_admitted(study, memory_bytes, &permit));
+    let context =
+        LocalFeaRunContext::for_worker(worker_context, &json, study.authored_study_digest)?;
+    let scope = context.scope()?;
+    let result = scope.run_sync(|| execute_prepared_fea_study_local(study, memory_bytes));
     let outcome = if runmat_runtime::interrupt::is_cancelled() {
         FeaRunOutcome::Cancelled
     } else if result.is_ok() {
@@ -488,7 +406,6 @@ pub async fn execute_prepared_fea_study(
         FeaRunOutcome::Failed
     };
     scope.settle(outcome);
-    permit.settle(outcome);
     result
 }
 
@@ -510,10 +427,9 @@ fn validate_numerical_input(json_len: usize, memory_bytes: f64) -> Result<(), Js
     Ok(())
 }
 
-fn execute_prepared_fea_study_admitted(
+fn execute_prepared_fea_study_local(
     study: PreparedSerialFeaStudy,
     memory_bytes: f64,
-    permit: &BrowserFeaPermit,
 ) -> Result<String, JsValue> {
     let available_memory = memory_bytes as u64;
     runmat_runtime::builtins::wasm_registry::register_all();
@@ -555,10 +471,7 @@ fn execute_prepared_fea_study_admitted(
         .execute(
             &mut host,
             &mut store,
-            &|| {
-                permit.heartbeat_if_due();
-                js_sys::Date::now() as u64
-            },
+            &|| js_sys::Date::now() as u64,
             &runmat_runtime::interrupt::is_cancelled,
         )
         .map_err(|e| js_error(&e))?;

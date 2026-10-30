@@ -1,4 +1,4 @@
-//! Malformed physical models fail their existing domain contract before paid admission.
+//! Local billing bypass does not bypass physical domain validation.
 use super::*;
 use crate::analysis::fea_run_admission::{
     FeaRunAdmission, FeaRunDenied, FeaRunPermit, FeaRunRequest,
@@ -14,7 +14,7 @@ impl FeaRunAdmission for DenyingHost {
 }
 
 #[test]
-fn malformed_physical_models_keep_domain_diagnostics_without_requesting_a_lease() {
+fn malformed_physical_models_keep_domain_diagnostics_with_unmetered_local_execution() {
     let _guard = analysis_test_guard();
     let host = Arc::new(DenyingHost::default());
     let _admission = fea_run_admission::replace_fea_run_admission(Some(host.clone())).unwrap();
@@ -93,11 +93,11 @@ fn malformed_physical_models_keep_domain_diagnostics_without_requesting_a_lease(
     assert_eq!(
         host.0.load(Ordering::SeqCst),
         0,
-        "invalid domain must not request a lease"
+        "invalid local domains must not consult billing"
     );
 
     let mut executed = false;
-    let error = fea_run_admission::entrypoints::run_model(
+    fea_run_admission::entrypoints::run_model(
         &sample_model(),
         AnalysisOperation::LinearStatic,
         &OperationContext::new(None, None),
@@ -106,11 +106,10 @@ fn malformed_physical_models_keep_domain_diagnostics_without_requesting_a_lease(
             Ok(())
         },
     )
-    .unwrap_err();
-    assert_eq!(error.error_code, "RM.FEA.SignInRequired");
-    assert_eq!(host.0.load(Ordering::SeqCst), 1);
+    .expect("valid local domain reaches execution without billing authorization");
+    assert_eq!(host.0.load(Ordering::SeqCst), 0);
     assert!(
-        !executed,
-        "valid models still require authorization before execution"
+        executed,
+        "valid local models reach execution even when an installed billing host denies"
     );
 }

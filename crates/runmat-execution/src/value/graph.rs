@@ -53,6 +53,8 @@ pub const GRAPH_REQUEST_SCHEMA_V11: u16 = 11;
 /// Callable roots carry only explicitly supplied arguments. Captures remain
 /// on the callable target and are not repeated in invocation arguments.
 pub const GRAPH_REQUEST_SCHEMA_V12: u16 = 12;
+/// Digest-bound project-only runtime policy on a remotely executed Graph.
+pub const GRAPH_REQUEST_SCHEMA_V13: u16 = 13;
 
 /// Minimum schema required by actual graph nodes. A producer may require V11
 /// for selected code capable of returning V11 nodes even when inputs are V10.
@@ -61,6 +63,7 @@ pub enum GraphRequiredSchema {
     V10,
     SelectedValuesV11,
     CallableArgumentsV12,
+    ProjectRuntimePolicyV13,
 }
 
 impl GraphRequiredSchema {
@@ -69,6 +72,7 @@ impl GraphRequiredSchema {
             GRAPH_REQUEST_SCHEMA_V10 => Some(Self::V10),
             GRAPH_REQUEST_SCHEMA_V11 => Some(Self::SelectedValuesV11),
             GRAPH_REQUEST_SCHEMA_V12 => Some(Self::CallableArgumentsV12),
+            GRAPH_REQUEST_SCHEMA_V13 => Some(Self::ProjectRuntimePolicyV13),
             _ => None,
         }
     }
@@ -78,6 +82,7 @@ impl GraphRequiredSchema {
             Self::V10 => GRAPH_REQUEST_SCHEMA_V10,
             Self::SelectedValuesV11 => GRAPH_REQUEST_SCHEMA_V11,
             Self::CallableArgumentsV12 => GRAPH_REQUEST_SCHEMA_V12,
+            Self::ProjectRuntimePolicyV13 => GRAPH_REQUEST_SCHEMA_V13,
         }
     }
 
@@ -87,6 +92,9 @@ impl GraphRequiredSchema {
             Self::SelectedValuesV11 => Some(crate::resource::Capability::GraphSelectedValuesV11),
             Self::CallableArgumentsV12 => {
                 Some(crate::resource::Capability::GraphCallableArgumentsV12)
+            }
+            Self::ProjectRuntimePolicyV13 => {
+                Some(crate::resource::Capability::GraphProjectRuntimePolicyV13)
             }
         }
     }

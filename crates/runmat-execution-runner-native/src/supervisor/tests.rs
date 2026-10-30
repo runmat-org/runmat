@@ -463,14 +463,18 @@ async fn failed_detached_launch_retains_original_unknown_attempt_accounting() {
     assert!(history.resource_aggregate(1).is_err());
     drop(supervisor);
     let reopened = LocalSupervisor::open(config).unwrap();
-    assert_eq!(
-        reopened
-            .attach(record.handle.id, 0, 0)
-            .await
-            .unwrap()
-            .execution,
-        Some(history)
-    );
+    let mut restored = reopened
+        .attach(record.handle.id, 0, 0)
+        .await
+        .unwrap()
+        .execution
+        .expect("original attempt history survives reopen");
+    restored.validate().unwrap();
+    assert!(restored.resource_aggregate(1).is_err());
+    // This is the time of the new driver's observation, not a persisted
+    // attempt field. Compare every original task/attempt/fence fact exactly.
+    restored.observed_at_driver_millis = history.observed_at_driver_millis;
+    assert_eq!(restored, history);
 }
 
 #[test]
@@ -566,6 +570,7 @@ async fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     let artifact =
         ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV4, bytes).unwrap();
     let request = GraphExecutionRequest {
+        project_runtime_policy: None,
         schema_version: runmat_execution_artifact::GRAPH_EXECUTION_REQUEST_SCHEMA_V10,
         recipe,
         artifact,

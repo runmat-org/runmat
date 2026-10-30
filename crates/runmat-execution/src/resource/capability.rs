@@ -10,6 +10,8 @@ pub enum Capability {
     /// Supplied-only callable arguments in Graph V12; older workers cannot
     /// interpret this invocation contract even when they admit V11 values.
     GraphCallableArgumentsV12,
+    /// Graph V13 owns digest-bound project-only execution settings.
+    GraphProjectRuntimePolicyV13,
     ProcessIsolation,
     BrowserWorker,
     NetworkDenied,

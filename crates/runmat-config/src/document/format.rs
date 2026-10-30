@@ -1,7 +1,8 @@
 use super::RunmatConfigDocumentError;
 use std::path::Path;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RunmatConfigFormat {
     Toml,
     Json,

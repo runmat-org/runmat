@@ -22,17 +22,37 @@ runmat cluster create --name workstation-pool --queue default
 runmat cluster enroll CLUSTER_ID --ttl-seconds 900
 ```
 
-Transfer the enrollment secret through the organization's secret-delivery channel. On the intended host, run the node enrollment flow shown by `runmat cluster join --help`. Do not place the secret in a service file, shell profile, image, or log.
+Transfer the enrollment secret through the organization's secret-delivery channel. Install a verified RunMat executable for the server's OS/architecture (the same executable runs the worker); no separate worker daemon download is required:
+
+```bash
+sudo install -m 0755 /path/to/verified/runmat /usr/local/bin/runmat
+/usr/local/bin/runmat --version
+```
+
+On Linux with systemd, use `/var/lib/runmat/node-agent` below. On macOS use `/Library/Application Support/RunMat/node-agent` instead. Enrollment and service installation **must use the same state directory and OS identity**. A user's foreground enrollment does not enroll the system service. In an interactive Bash/Zsh shell, read the token without echo or shell-history exposure:
+
+```bash
+sudo -v
+read -r -s NODE_ENROLLMENT_SECRET
+printf '%s' "$NODE_ENROLLMENT_SECRET" | sudo /usr/local/bin/runmat cluster join \
+  --server https://api.runmat.com \
+  --state-directory /var/lib/runmat/node-agent \
+  --runmat /usr/local/bin/runmat enroll --token-stdin
+unset NODE_ENROLLMENT_SECRET
+```
+
+The shell's built-in `printf` passes the secret over stdin, not in the worker's process arguments or environment. Use a non-traced shell (no `set -x`); `sudo -v` authenticates before stdin carries the secret. Do not place the secret in a service file, shell profile, image, or log. Existing `--token` and `RUNMAT_NODE_ENROLLMENT_TOKEN` remain available for managed secret injection.
 
 Inspect the native service plan before installing it:
 
 ```bash
-runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
-sudo runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
-runmat cluster join service inspect
+sudo /usr/local/bin/runmat cluster join --server https://api.runmat.com --state-directory /var/lib/runmat/node-agent --runmat /usr/local/bin/runmat service install --dry-run
+sudo /usr/local/bin/runmat cluster join --server https://api.runmat.com --state-directory /var/lib/runmat/node-agent --runmat /usr/local/bin/runmat service install
 ```
 
 The agent uses systemd on Linux, launchd on macOS, and the Windows Service Control Manager on Windows. Installation persists non-secret startup configuration only. The enrolled node credential remains in the agent's private state directory and survives service removal so a service can be repaired without creating a second node identity.
+
+For foreground diagnosis instead of installing a service, use the same server, executable and state-directory flags followed by `run`. Do not run the foreground agent alongside its service. Linux status: `sudo systemctl status runmat-node-agent`; macOS status: `sudo launchctl print system/com.runmat.node-agent`. `service print` prints the exact host plan; it is not a live service-status command.
 
 Use `runmat cluster nodes CLUSTER_ID` to wait for the node to become active. Hosted-node clusters use the same submission and scheduling contract; RunMat operates enrollment and service lifecycle for those nodes.
 
@@ -94,13 +114,13 @@ Browser submissions fetch the project execution policy before encryption. When o
 Recovery is optional and organization-administered. Generate the private key on a trusted custodian host:
 
 ```bash
-runmat job recovery keygen \
+runmat recovery-key create \
   --output runmat-recovery-2026.json \
   --valid-days 365 \
   --custodian-uri kms://example/runmat-recovery
 ```
 
-`keygen` refuses to overwrite an existing file and creates a private `0600` file on Unix. Back up that file through the organization's key-custody process before configuring its public recipient:
+`create` refuses to overwrite an existing file and creates a private `0600` file on Unix. Windows uses a protected owner-and-SYSTEM DACL supplied atomically at file creation, never inherited directory permissions. Imported Windows keys granting access beyond owner and SYSTEM are rejected. Back up that file through the organization's key-custody process before configuring its public recipient:
 
 ```bash
 runmat job recovery configure --org ORG_ID --key runmat-recovery-2026.json
@@ -118,6 +138,18 @@ runmat job recovery recover RUN_ID \
 ```
 
 The Server authorizes access and returns ciphertext plus the matching envelope. Decryption happens only in the CLI. The Server never receives the private key, unwrapped run key, result, or detailed diagnostic. Disable the requirement with `runmat job recovery disable --org ORG_ID`; keep old private keys for the retention period of runs encrypted to them.
+
+Key creation requires no network or sign-in. `--json` emits only the path and public recipient, suitable for transferring to an online administrator. The server recipient is camelCase JSON: suite `x25519-hkdf-sha256-aes128gcm-v1`, unpadded base64url `publicKey` (32 raw X25519 bytes), lowercase hex `fingerprint` computed by `recipient_fingerprint` (SHA-256 of ASCII `runmat-execution-recipient-key-v1`, one zero byte, then the raw public key), millisecond validity bounds, and optional `custodianUri`. The private file also contains `schemaVersion: 1` and `privateKey` (unpadded base64url of the raw 32-byte X25519 secret). Never transfer the private file to configure a server; transfer only its `recipient` object. Existing `job recovery keygen` remains accepted.
+
+For an offline recovery, export the authorized server recovery response and encrypted artifact on an online machine. Decode its `envelope` field from unpadded base64url to canonical binary CBOR, transfer that binary envelope and ciphertext to the custodian, and run:
+
+```bash
+runmat recovery-key decrypt --key runmat-recovery-2026.json \
+  --run-id RUN_ID --envelope envelope.cbor --artifact result.cbor \
+  --output recovered-result.json
+```
+
+Use `--diagnostic` for a diagnostic artifact. This authenticates the recipient, run identity, epoch (currently 1), purpose and ciphertext before writing any plaintext. Output is a new private file; existing files are not overwritten. Keep the output under the same custody policy as the original result. Desktop/native/browser hosts can call `runmat_execution_artifact::encryption::open_recovery_artifact` with a `PortableExecutionPrivateKey`, the canonical binary inputs and an explicit `RecoveryArtifactScope`; this uses the existing HPKE and run-object wire formats, not a second crypto implementation.
 
 ## Drain and Retire a Node
 

@@ -44,6 +44,8 @@ fn materialize(
     bundle: ExecutionBundle,
     stored_bytes: u64,
 ) -> Result<InstalledBundle, String> {
+    runmat_core::cluster_settings::decode_project_policy(&bundle)?
+        .ok_or("cluster bundle lacks digest-bound project-only runtime settings; rebuild the bundle for this cluster target")?;
     let materialized_project = bundle
         .requires_materialization()
         .then(|| MaterializedProject::from_bundle(&bundle))

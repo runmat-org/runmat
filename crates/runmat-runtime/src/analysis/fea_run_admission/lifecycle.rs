@@ -1,5 +1,5 @@
 use super::{
-    scope, FeaRunAdmission, FeaRunDenied, FeaRunOutcome, FeaRunPermit, FeaRunRequest,
+    scope, FeaRunAdmission, FeaRunDenied, FeaRunOutcome, FeaRunPermit, FeaRunRequest, FeaRunSite,
     ScopedFeaRunFuture,
 };
 use runmat_execution::resource::ResourceUsage;
@@ -62,8 +62,19 @@ pub struct FeaRunScope {
     owns_permit: bool,
 }
 
+/// Local execution records allocated usage without authorizing or contacting
+/// a billing service. Cluster allocation is admitted by its trusted host.
+struct UnmeteredLocalPermit;
+
+impl FeaRunPermit for UnmeteredLocalPermit {
+    fn settle(self: Box<Self>, _outcome: FeaRunOutcome, _usage: &ResourceUsage) {}
+}
+
 impl FeaRunScope {
     pub fn admit(request: FeaRunRequest) -> Result<Self, FeaRunDenied> {
+        if request.site == FeaRunSite::Local {
+            return Self::admit_local(request);
+        }
         if let Some(scope) = Self::nested(&request)? {
             return Ok(scope);
         }
@@ -77,10 +88,26 @@ impl FeaRunScope {
         request: FeaRunRequest,
         admission: &dyn FeaRunAdmission,
     ) -> Result<Self, FeaRunDenied> {
+        // An installed or explicit host cannot turn a local run into a billed
+        // run, including by denying it or starting a lease heartbeat.
+        if request.site == FeaRunSite::Local {
+            return Self::admit_local(request);
+        }
         if let Some(scope) = Self::nested(&request)? {
             return Ok(scope);
         }
         let permit = admission.admit(&request)?;
+        Self::start(request, permit)
+    }
+
+    fn admit_local(request: FeaRunRequest) -> Result<Self, FeaRunDenied> {
+        if let Some(scope) = Self::nested(&request)? {
+            return Ok(scope);
+        }
+        Self::start(request, Box::new(UnmeteredLocalPermit))
+    }
+
+    fn start(request: FeaRunRequest, permit: Box<dyn FeaRunPermit>) -> Result<Self, FeaRunDenied> {
         let state = Arc::new(RunState {
             request,
             started: runmat_time::Instant::now(),
@@ -89,10 +116,12 @@ impl FeaRunScope {
             heartbeat: heartbeat::Heartbeat::default(),
         });
         #[cfg(not(target_arch = "wasm32"))]
-        state
-            .heartbeat
-            .start(Arc::downgrade(&state))
-            .map_err(|_| FeaRunDenied::ServerUnreachable)?;
+        if state.request.site == FeaRunSite::Dispatched {
+            state
+                .heartbeat
+                .start(Arc::downgrade(&state))
+                .map_err(|_| FeaRunDenied::ServerUnreachable)?;
+        }
         Ok(Self {
             state,
             owns_permit: true,

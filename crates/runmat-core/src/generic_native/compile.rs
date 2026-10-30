@@ -26,6 +26,7 @@ pub(super) struct PreparedGenericUnit {
     entrypoint: FunctionId,
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
     prepare_ns: u64,
+    optimization: runmat_jit::CompilerOptimization,
 }
 
 pub(super) struct BackgroundCompiledGenericUnit {
@@ -44,11 +45,29 @@ pub(super) struct BackgroundCompiledGenericUnit {
     >,
 }
 
+#[cfg(test)]
 pub(super) fn compile(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
 ) -> Result<CompiledGenericUnit, runmat_runtime::RuntimeError> {
-    let compiled = compile_prepared(prepare(unit, preferred_function, None)?)?;
+    compile_with_policy(
+        unit,
+        preferred_function,
+        runmat_jit::CompilerOptimization::TierDefault,
+    )
+}
+
+pub(super) fn compile_with_policy(
+    unit: &ExecutableUnit,
+    preferred_function: Option<&str>,
+    optimization: runmat_jit::CompilerOptimization,
+) -> Result<CompiledGenericUnit, runmat_runtime::RuntimeError> {
+    let compiled = compile_prepared(prepare_with_policy(
+        unit,
+        preferred_function,
+        None,
+        optimization,
+    )?)?;
     Ok(CompiledGenericUnit {
         executor: Rc::new(compiled.executor),
         entrypoint: compiled.entrypoint,
@@ -60,10 +79,11 @@ pub(super) fn compile(
     })
 }
 
-pub(super) fn prepare(
+pub(super) fn prepare_with_policy(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
+    optimization: runmat_jit::CompilerOptimization,
 ) -> Result<PreparedGenericUnit, runmat_runtime::RuntimeError> {
     let started = std::time::Instant::now();
     let native = unit.prepare_native_compilation_for(preferred_function)?;
@@ -74,6 +94,7 @@ pub(super) fn prepare(
         entrypoint,
         specialization,
         prepare_ns,
+        optimization,
     })
 }
 
@@ -149,21 +170,14 @@ pub(super) fn compile_prepared(
             (function.id, points)
         })
         .collect();
-    let executor = match prepared.specialization {
-        Some(profile) => runmat_jit::GenericCompiler::compile_specialized_executor_with_metadata(
-            assembly,
-            Some(program_capture),
-            interpreter_resume_points,
-            coverage_sites,
-            profile,
-        ),
-        None => runmat_jit::GenericCompiler::compile_executor_with_metadata(
-            assembly,
-            Some(program_capture),
-            interpreter_resume_points,
-            coverage_sites,
-        ),
-    }
+    let executor = runmat_jit::GenericCompiler::compile_executor_with_policy(
+        assembly,
+        Some(program_capture),
+        interpreter_resume_points,
+        coverage_sites,
+        prepared.specialization,
+        prepared.optimization,
+    )
     .map_err(super::error::from_jit_error)?;
     Ok(BackgroundCompiledGenericUnit {
         executor,

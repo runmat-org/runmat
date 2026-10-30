@@ -5,6 +5,7 @@
 
 use crate::core::interaction::Modifiers;
 use crate::core::{ClipPolicy, DepthMode};
+use crate::core::{NavigationOptions, NavigationPreset, OrbitCenter};
 use glam::{Mat4, Quat, Vec2, Vec3};
 
 /// Camera projection type
@@ -647,6 +648,9 @@ pub struct CameraController {
     pub active_button: Option<MouseButton>,
     pub last_mouse_pos: Vec2,
     pub mouse_delta: Vec2,
+    navigation: NavigationOptions,
+    cursor_orbit_anchor: Option<Vec3>,
+    drag_orbit_pivot: Option<Vec3>,
 }
 
 impl CameraController {
@@ -654,16 +658,104 @@ impl CameraController {
         Self::default()
     }
 
+    pub fn navigation_options(&self) -> NavigationOptions {
+        self.navigation
+    }
+
+    pub fn set_navigation_options(
+        &mut self,
+        options: NavigationOptions,
+    ) -> Result<(), &'static str> {
+        options.validate()?;
+        self.navigation = options;
+        self.active_button = None;
+        self.cursor_orbit_anchor = None;
+        self.drag_orbit_pivot = None;
+        Ok(())
+    }
+
+    /// Supply an exact host-picked point for under-cursor orbit. If absent, use
+    /// the cursor ray's intersection with the view-target plane, not the origin.
+    pub fn set_cursor_orbit_anchor(&mut self, anchor: Option<Vec3>) -> Result<(), &'static str> {
+        if anchor.is_some_and(|point| !point.is_finite()) {
+            return Err("orbit anchor must be finite");
+        }
+        self.cursor_orbit_anchor = anchor;
+        self.drag_orbit_pivot = None;
+        Ok(())
+    }
+
+    fn orbit(&mut self, camera: &mut Camera, delta: Vec2, position: Vec2, viewport: (u32, u32)) {
+        let pivot = self
+            .drag_orbit_pivot
+            .unwrap_or_else(|| match self.navigation.orbit_center {
+                OrbitCenter::ViewCenter => camera.target,
+                OrbitCenter::Origin => Vec3::ZERO,
+                OrbitCenter::UnderCursor => self.cursor_orbit_anchor.unwrap_or_else(|| {
+                    let size = Vec2::new(viewport.0.max(1) as f32, viewport.1.max(1) as f32);
+                    let near = camera.screen_to_world(position, size, 0.0);
+                    let far = camera.screen_to_world(position, size, 1.0);
+                    let direction = (far - near).normalize_or_zero();
+                    let normal = (camera.target - camera.position).normalize_or_zero();
+                    let denominator = direction.dot(normal);
+                    if denominator.abs() < 1e-6 {
+                        return camera.target;
+                    }
+                    let distance = (camera.target - near).dot(normal) / denominator;
+                    let point = near + direction * distance;
+                    if point.is_finite() && distance >= 0.0 {
+                        point
+                    } else {
+                        camera.target
+                    }
+                }),
+            });
+        self.drag_orbit_pivot = Some(pivot);
+        let target = camera.target;
+        let before = camera.position - pivot;
+        camera.target = pivot;
+        camera.rotate(delta);
+        // Rotate the look target with the eye so a non-central pivot stays at
+        // its screen position instead of snapping the view to the cursor/origin.
+        let after = camera.position - pivot;
+        if before.length_squared() > 1e-9 && after.length_squared() > 1e-9 {
+            let rotation = Quat::from_rotation_arc(before.normalize(), after.normalize());
+            camera.target = pivot + rotation * (target - pivot);
+            if self.navigation.orbit_center != OrbitCenter::ViewCenter {
+                camera.up = (rotation * camera.up).normalize_or_zero();
+            }
+            camera.mark_dirty();
+        }
+    }
+
+    /// Two-finger scroll pans when enabled; Ctrl/Cmd pinch remains zoom. The
+    /// host must identify trackpad scroll separately from a detented wheel.
+    pub fn trackpad_scroll(
+        &mut self,
+        delta: Vec2,
+        position: Vec2,
+        viewport: (u32, u32),
+        mut modifiers: Modifiers,
+        camera: &mut Camera,
+    ) {
+        if self.navigation.trackpad_pan && !modifiers.ctrl && !modifiers.meta {
+            modifiers.shift = true;
+        }
+        self.mouse_wheel(delta, position, viewport, modifiers, camera);
+    }
+
     /// Handle mouse press
     pub fn mouse_press(&mut self, position: Vec2, button: MouseButton, _modifiers: Modifiers) {
         self.last_mouse_pos = position;
         self.active_button = Some(button);
+        self.drag_orbit_pivot = None;
     }
 
     /// Handle mouse release
     pub fn mouse_release(&mut self, _position: Vec2, button: MouseButton, _modifiers: Modifiers) {
         if self.active_button == Some(button) {
             self.active_button = None;
+            self.drag_orbit_pivot = None;
         }
     }
 
@@ -710,9 +802,45 @@ impl CameraController {
                 };
                 let d = self.mouse_delta * fine;
 
+                if self.navigation.preset != NavigationPreset::Legacy {
+                    let orbit = match self.navigation.preset {
+                        NavigationPreset::Cad => button == MouseButton::Middle && !modifiers.shift,
+                        NavigationPreset::Dcc => modifiers.alt && button == MouseButton::Left,
+                        NavigationPreset::Legacy => unreachable!(),
+                    };
+                    let pan = match self.navigation.preset {
+                        NavigationPreset::Cad => {
+                            button == MouseButton::Right
+                                || (button == MouseButton::Middle && modifiers.shift)
+                        }
+                        NavigationPreset::Dcc => modifiers.alt && button == MouseButton::Middle,
+                        NavigationPreset::Legacy => unreachable!(),
+                    };
+                    if orbit {
+                        self.orbit(camera, d, self.last_mouse_pos, viewport_px);
+                    } else if pan {
+                        camera.pan(d);
+                    } else if self.navigation.preset == NavigationPreset::Dcc
+                        && modifiers.alt
+                        && button == MouseButton::Right
+                    {
+                        self.mouse_wheel(
+                            Vec2::new(0.0, (-d.y / 120.0).clamp(-5.0, 5.0)),
+                            position,
+                            viewport_px,
+                            modifiers,
+                            camera,
+                        );
+                    }
+                    self.last_mouse_pos = position;
+                    return;
+                }
+
                 if modifiers.alt {
                     match button {
-                        MouseButton::Left => camera.rotate(d),
+                        MouseButton::Left => {
+                            self.orbit(camera, d, self.last_mouse_pos, viewport_px)
+                        }
                         MouseButton::Middle => camera.pan(d),
                         MouseButton::Right => {
                             // Alt+RMB drag zoom (dolly). Positive drag up should zoom in.
@@ -743,7 +871,7 @@ impl CameraController {
                                     camera,
                                 );
                             } else {
-                                camera.rotate(d);
+                                self.orbit(camera, d, self.last_mouse_pos, viewport_px);
                             }
                         }
                         MouseButton::Left => {
@@ -759,7 +887,7 @@ impl CameraController {
                                     camera,
                                 );
                             } else {
-                                camera.rotate(d);
+                                self.orbit(camera, d, self.last_mouse_pos, viewport_px);
                             }
                         }
                     }
@@ -814,7 +942,18 @@ impl CameraController {
         //
         // Don't treat Ctrl/Cmd as "fine wheel" because macOS trackpad pinch-to-zoom gestures
         // report Ctrl as pressed. Keeping wheel zoom consistent feels more natural.
-        let delta_y = delta.y;
+        let delta_y = delta.y
+            * self.navigation.zoom_speed
+            * if self.navigation.reverse_zoom {
+                -1.0
+            } else {
+                1.0
+            };
+        let position_px = if self.navigation.zoom_to_cursor {
+            position_px
+        } else {
+            Vec2::new(viewport_px.0 as f32, viewport_px.1 as f32) * 0.5
+        };
 
         match &mut camera.projection {
             ProjectionType::Perspective { .. } => {
@@ -945,6 +1084,142 @@ pub enum MouseButton {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_options_preserve_defaults_and_apply_trackpad_zoom_and_pivots() {
+        let mut controller = CameraController::new();
+        assert_eq!(
+            controller.navigation_options(),
+            NavigationOptions::default()
+        );
+        for speed in [f32::NAN, f32::INFINITY, 0.0, -1.0] {
+            assert!(controller
+                .set_navigation_options(NavigationOptions {
+                    zoom_speed: speed,
+                    ..Default::default()
+                })
+                .is_err());
+        }
+        for (reverse, expected_in) in [(false, true), (true, false)] {
+            controller
+                .set_navigation_options(NavigationOptions {
+                    reverse_zoom: reverse,
+                    zoom_to_cursor: false,
+                    ..Default::default()
+                })
+                .unwrap();
+            let mut camera = Camera::new();
+            let before = camera.position.distance(camera.target);
+            // Wheel dolly translates target too; inspect movement toward the
+            // original target rather than eye-to-target distance.
+            let target = camera.target;
+            controller.mouse_wheel(
+                Vec2::Y,
+                Vec2::ZERO,
+                (800, 600),
+                Modifiers::default(),
+                &mut camera,
+            );
+            assert_eq!(camera.position.distance(target) < before, expected_in);
+        }
+        controller
+            .set_navigation_options(NavigationOptions {
+                trackpad_pan: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let mut camera = Camera::new_2d((-1.0, 1.0, -1.0, 1.0));
+        controller.trackpad_scroll(
+            Vec2::new(3.0, 4.0),
+            Vec2::ZERO,
+            (800, 600),
+            Modifiers::default(),
+            &mut camera,
+        );
+        let ProjectionType::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            ..
+        } = camera.projection
+        else {
+            unreachable!()
+        };
+        assert!((right - left - 2.0).abs() < 1e-6 && (top - bottom - 2.0).abs() < 1e-6);
+        assert_ne!(left, -1.0);
+        for center in [
+            OrbitCenter::ViewCenter,
+            OrbitCenter::Origin,
+            OrbitCenter::UnderCursor,
+        ] {
+            controller
+                .set_navigation_options(NavigationOptions {
+                    orbit_center: center,
+                    ..Default::default()
+                })
+                .unwrap();
+            let mut camera = Camera::new();
+            camera.target = Vec3::new(0.3, 0.1, 0.0);
+            let pivot = match center {
+                OrbitCenter::ViewCenter => camera.target,
+                OrbitCenter::Origin => Vec3::ZERO,
+                OrbitCenter::UnderCursor => Vec3::new(0.5, 0.2, 0.0),
+            };
+            if center == OrbitCenter::UnderCursor {
+                controller.set_cursor_orbit_anchor(Some(pivot)).unwrap();
+            }
+            let distance = camera.position.distance(pivot);
+            controller.mouse_press(
+                Vec2::new(100.0, 100.0),
+                MouseButton::Left,
+                Modifiers::default(),
+            );
+            controller.mouse_move(
+                Vec2::new(110.0, 105.0),
+                Vec2::new(10.0, 5.0),
+                (800, 600),
+                Modifiers::default(),
+                &mut camera,
+            );
+            assert!((camera.position.distance(pivot) - distance).abs() < 1e-5);
+            assert!(camera.position.is_finite() && camera.target.is_finite());
+        }
+        for preset in [
+            NavigationPreset::Legacy,
+            NavigationPreset::Cad,
+            NavigationPreset::Dcc,
+        ] {
+            controller
+                .set_navigation_options(NavigationOptions {
+                    preset,
+                    ..Default::default()
+                })
+                .unwrap();
+            let mut camera = Camera::new();
+            let before = camera.position;
+            let (button, modifiers) = match preset {
+                NavigationPreset::Legacy => (MouseButton::Left, Modifiers::default()),
+                NavigationPreset::Cad => (MouseButton::Middle, Modifiers::default()),
+                NavigationPreset::Dcc => (
+                    MouseButton::Left,
+                    Modifiers {
+                        alt: true,
+                        ..Default::default()
+                    },
+                ),
+            };
+            controller.mouse_press(Vec2::ZERO, button, modifiers);
+            controller.mouse_move(
+                Vec2::new(10.0, 5.0),
+                Vec2::new(10.0, 5.0),
+                (800, 600),
+                modifiers,
+                &mut camera,
+            );
+            assert_ne!(camera.position, before);
+        }
+    }
 
     #[test]
     fn test_camera_creation() {

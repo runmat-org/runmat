@@ -43,6 +43,9 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
     }
     validate_code_closure(bundle)?;
     validate_inventory(&bundle.objects, ObjectInventoryLimits::default())?;
+    if let Some(descriptor) = &bundle.manifest.project_runtime_policy {
+        crate::validate_project_runtime_policy_descriptor(descriptor)?;
+    }
     validate_foreign_artifact_closures(bundle)?;
     let descriptors = bundle
         .objects
@@ -51,6 +54,7 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
         .collect::<Vec<_>>();
     let mut manifest_descriptors = bundle.manifest.sources.clone();
     manifest_descriptors.extend(bundle.manifest.foreign_artifacts.clone());
+    manifest_descriptors.extend(bundle.manifest.project_runtime_policy.clone());
     let policy_descriptors = bundle
         .manifest
         .recipes
@@ -83,6 +87,10 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
         || bundle.objects.iter().any(|object| {
             object.descriptor.namespace == ObjectNamespace::ForeignPolicy
                 && crate::object::validate_foreign_policy_object(object).is_err()
+        })
+        || bundle.objects.iter().any(|object| {
+            object.descriptor.namespace == ObjectNamespace::ProjectRuntimePolicy
+                && crate::validate_project_runtime_policy_object(object).is_err()
         })
         || bundle
             .manifest
@@ -236,7 +244,9 @@ fn validate_code_closure(bundle: &ExecutionBundle) -> ArtifactResult<()> {
                 || bundle.objects.iter().any(|object| {
                     !matches!(
                         object.descriptor.namespace,
-                        ObjectNamespace::ForeignArtifact | ObjectNamespace::ForeignPolicy
+                        ObjectNamespace::ForeignArtifact
+                            | ObjectNamespace::ForeignPolicy
+                            | ObjectNamespace::ProjectRuntimePolicy
                     )
                 })
                 || bundle.manifest.artifacts.is_empty()
@@ -340,14 +350,14 @@ fn validate_project_handoff(
 }
 
 pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
-    let mut bytes = b"runmat-execution-bundle-v5\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-v6\0".to_vec();
     let revision = manifest
         .program_revision
         .canonical_bytes()
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
     let mut encoder = Encoder::new(&mut bytes);
     encoder
-        .array(14)
+        .array(15)
         .and_then(|encoder| encoder.u16(manifest.schema_version))
         .and_then(|encoder| encoder.bytes(&revision))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
@@ -441,6 +451,21 @@ pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
             .and_then(|encoder| encoder.str(value))
             .map_err(encoding)?;
     }
+    match &manifest.project_runtime_policy {
+        Some(policy) => {
+            encoder
+                .array(5)
+                .and_then(|encoder| encoder.u8(policy.namespace as u8))
+                .and_then(|encoder| encoder.str(&policy.logical_name))
+                .and_then(|encoder| encoder.bytes(policy.digest.bytes()))
+                .and_then(|encoder| encoder.u64(policy.encoded_length))
+                .and_then(|encoder| encoder.str(&policy.media_type))
+                .map_err(encoding)?;
+        }
+        None => {
+            encoder.null().map_err(encoding)?;
+        }
+    }
     Ok(Digest::sha256(bytes))
 }
 
@@ -451,6 +476,9 @@ fn encode_capability(
     match capability {
         Capability::GraphSelectedValuesV11 => encoder.array(1).and_then(|encoder| encoder.u8(5)),
         Capability::GraphCallableArgumentsV12 => encoder.array(1).and_then(|encoder| encoder.u8(6)),
+        Capability::GraphProjectRuntimePolicyV13 => {
+            encoder.array(1).and_then(|encoder| encoder.u8(7))
+        }
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),

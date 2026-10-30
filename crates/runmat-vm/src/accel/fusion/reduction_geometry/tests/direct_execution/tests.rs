@@ -9,7 +9,7 @@ use runmat_value::Value;
 use std::sync::atomic::Ordering;
 
 #[test]
-fn forced_reduction_executes_actual_geometry_and_keeps_cached_plan_unchanged() {
+fn forced_reduction_respects_provider_geometry_and_keeps_cached_plan_unchanged() {
     runmat_gc::gc_test_context(|| {
         let provider = Provider::fixture();
         let _scope = ThreadProviderGuard::set(Some(provider));
@@ -75,7 +75,7 @@ fn forced_reduction_executes_actual_geometry_and_keeps_cached_plan_unchanged() {
                 &plan,
                 FusionExecutionRequest {
                     plan: &plan,
-                    inputs,
+                    inputs: inputs.clone(),
                     placement: None,
                     runtime: None,
                 },
@@ -83,6 +83,17 @@ fn forced_reduction_executes_actual_geometry_and_keeps_cached_plan_unchanged() {
                 None,
             ))
             .unwrap();
+            // This provider exposes only the matrix-shaped legacy hook, not a
+            // checked typed recipe. N-D inputs must retain their operands for
+            // canonical runtime execution rather than enter that raw hook.
+            if shape.len() > 2 {
+                assert!(matches!(output, FusionExecutionOutcome::SharedRuntime(_)));
+                assert_eq!(stack.as_slice(), inputs.as_slice());
+                assert_eq!(provider.reductions.load(Ordering::SeqCst), before);
+                assert_eq!(plan.reduction_dim, original_dimension);
+                assert_eq!(plan.const_values, original_constants);
+                continue;
+            }
             let FusionExecutionOutcome::Executed(result) = output else {
                 panic!("supported direct route must execute")
             };

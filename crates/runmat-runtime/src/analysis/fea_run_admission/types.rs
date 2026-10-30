@@ -129,15 +129,15 @@ impl FeaRunDenied {
 impl std::fmt::Display for FeaRunDenied {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SignInRequired => f.write_str("Meshing and solving need a signed-in RunMat account. Run `runmat login`, then run this study again."),
+            Self::SignInRequired => f.write_str("Sending a run to a cluster needs a signed-in RunMat account. Run `runmat login`, then send it again."),
             Self::AllowanceUsed { refills_at_unix_seconds } => {
                 let date = refills_at_unix_seconds.and_then(|v| chrono::DateTime::from_timestamp(v, 0));
-                f.write_str("You've used this week's core-hours. ")?;
+                f.write_str("You've used this week's cluster core-hours. ")?;
                 if let Some(date) = date { write!(f, "They refill on {}. ", date.format("%Y-%m-%d %H:%M UTC"))?; }
-                f.write_str("To keep going now, add a core-hour pack or move to Scale: https://runmat.com/pricing")
+                f.write_str("To keep going now, run it on your own computer, add a core-hour pack or move to Scale: https://runmat.com/pricing")
             }
-            Self::LeaseExpired | Self::LicenseInvalid => f.write_str("Your RunMat sign-in needs refreshing. Run `runmat login`, then run this study again."),
-            Self::ServerUnreachable => f.write_str("Meshing and solving need a connection to RunMat Server to start. Check the connection, then run this study again."),
+            Self::LeaseExpired | Self::LicenseInvalid => f.write_str("Your cluster authorization needs refreshing. Run `runmat login`, then send the run again."),
+            Self::ServerUnreachable => f.write_str("Sending a run to a cluster needs a connection to RunMat Server. Check the connection, then send it again; local runs work offline."),
         }
     }
 }

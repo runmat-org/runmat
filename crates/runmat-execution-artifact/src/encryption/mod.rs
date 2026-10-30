@@ -9,6 +9,7 @@ mod portable;
 mod program_chunk;
 mod program_manifest;
 mod provider;
+mod recovery;
 mod run_key;
 mod suite;
 
@@ -36,6 +37,7 @@ pub use program_manifest::{
     MAX_PROGRAM_CHUNK_MANIFEST_ENCODED_OBJECT_BYTES,
 };
 pub use provider::ExecutionEncryptionProvider;
+pub use recovery::{open_recovery_artifact, RecoveryArtifactScope};
 pub use run_key::{
     open_run_key, seal_run_key, EncryptedRunObject, RunKeyEnvelope, RunKeyMaterial,
     RunObjectEncryption, RunObjectEncryptionSuite,

@@ -261,6 +261,18 @@ async fn execute_host_selected_graph_request(
             });
         }
     };
+    let runtime_config = if admitted.request().project_runtime_policy.is_some() {
+        match runmat_core::cluster_settings::validate_graph_policy(admitted.request())
+            .and_then(|policy| policy.runtime_config().map_err(|error| error.to_string()))
+        {
+            Ok(config) => Some(config),
+            Err(message) => {
+                return GraphHostExecution::Completed(ProgramExecutionResponse::Failure { message })
+            }
+        }
+    } else {
+        None
+    };
     if scratch.is_none() && admitted.selected_bundles().iter().any(Option::is_some) {
         return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
             message: "selected foreign bundles require parent-owned attempt scratch".into(),
@@ -298,7 +310,12 @@ async fn execute_host_selected_graph_request(
         return GraphHostExecution::Completed(ProgramExecutionResponse::Failure { message });
     }
     let (admitted, admitted_bundles) = admitted.into_admitted_with_bundles();
-    let session = match runmat_core::RunMatSession::with_options(true, false) {
+    let mut session = match runmat_core::RunMatSession::with_options(
+        runtime_config
+            .as_ref()
+            .map_or(true, |config| config.jit.enabled),
+        false,
+    ) {
         Ok(session) => session,
         Err(error) => {
             return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
@@ -306,6 +323,13 @@ async fn execute_host_selected_graph_request(
             });
         }
     };
+    if let Some(config) = &runtime_config {
+        if let Err(error) = session.apply_cluster_runtime_config(config) {
+            return GraphHostExecution::Completed(ProgramExecutionResponse::Failure {
+                message: error.to_string(),
+            });
+        }
+    }
     let runtime =
         session.execution_runtime_context(admitted.request().recipe.program_revision.clone());
     let runtime = if let Some(cancellation) = cancellation {
@@ -639,6 +663,13 @@ async fn execute_test_attempt_inner(
         request.environment.entries().to_vec(),
     )
     .map_err(|error| format!("failed to initialize test execution session: {error}"))?;
+    if let Some(bundle) = bundle.as_ref() {
+        if let Some(config) = runmat_core::cluster_settings::runtime_config(bundle)? {
+            session
+                .apply_cluster_runtime_config(&config)
+                .map_err(|error| error.to_string())?;
+        }
+    }
     if let Some(materialized) = materialized {
         session
             .attach_foreign_private_root(materialized.private_root())
@@ -1130,6 +1161,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         )
         .unwrap();
         let graph_request = GraphExecutionRequest {
+            project_runtime_policy: None,
             schema_version: GRAPH_EXECUTION_REQUEST_SCHEMA_V11,
             recipe: bundle.manifest.recipes[0].clone(),
             artifact: bundle.manifest.artifacts[0].clone(),

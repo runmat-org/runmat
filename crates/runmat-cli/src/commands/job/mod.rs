@@ -13,6 +13,10 @@ use runmat_server_client::execution::ExecutionClient;
 
 use crate::cli::{Cli, JobCommand};
 
+pub async fn execute_recovery(command: crate::cli::JobRecoveryCommand) -> Result<()> {
+    recovery::execute(command).await
+}
+
 pub async fn execute(
     command: JobCommand,
     cli: &Cli,

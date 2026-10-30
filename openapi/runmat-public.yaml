@@ -848,6 +848,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    patch:
+      tags:
+      - auth::name
+      operationId: update_auth_me
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthMeUpdateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMeResponse'
+        '400':
+          description: '`user.name_required`, `user.name_too_long` or `user.name_invalid`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: '`user.service_account_forbidden`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: '`user.name_managed_by_directory`: an organization''s directory manages this name'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/auth/preferences:
     put:
       tags:
@@ -878,32 +919,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/auth/resend-verification:
-    post:
-      tags:
-      - auth::resend_verification
-      operationId: auth_resend_verification
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AuthResendVerificationRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthResendVerificationResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-      security:
-      - {}
   /v1/auth/resolve:
     post:
       tags:
@@ -980,16 +995,16 @@ paths:
       - billing::pricing
       operationId: pricing
       parameters:
-      - name: currency
+      - name: country
         in: query
-        description: Requested ISO 4217 presentment currency
+        description: ISO 3166-1 alpha-2 country; picks the price tier and the default currency. Defaults to the request's location
         required: false
         schema:
           type: string
           nullable: true
-      - name: country
+      - name: currency
         in: query
-        description: ISO 3166-1 alpha-2 location used to select a presentment currency
+        description: Optional ISO 4217 currency; amounts fall back to USD when the tier's price does not fix it
         required: false
         schema:
           type: string
@@ -1022,16 +1037,16 @@ paths:
         schema:
           type: integer
           format: int32
-      - name: currency
+      - name: country
         in: query
-        description: Requested ISO 4217 presentment currency
+        description: ISO 3166-1 alpha-2 country; picks the price tier and the default currency. Defaults to the request's location
         required: false
         schema:
           type: string
           nullable: true
-      - name: country
+      - name: currency
         in: query
-        description: ISO 3166-1 alpha-2 location used to select a presentment currency
+        description: Optional ISO 4217 currency; amounts fall back to USD when the tier's price does not fix it
         required: false
         schema:
           type: string
@@ -1043,20 +1058,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PublicResourceQuoteResponse'
-      security:
-      - {}
-  /v1/execution/core-hour-lease-keys:
-    get:
-      tags:
-      - Execution
-      operationId: list_core_hour_lease_keys
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CoreHourLeaseKeysResponse'
       security:
       - {}
   /v1/execution/drivers/{driverLeaseId}/artifacts:
@@ -2074,6 +2075,28 @@ paths:
       responses:
         '200':
           description: ''
+  /v1/integrations/slack/pricing/actions:
+    post:
+      tags:
+      - integrations::slack_pricing
+      operationId: pricing_actions
+      requestBody:
+        description: ''
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+        required: true
+      responses:
+        '200':
+          description: ''
+        '401':
+          description: ''
+        '403':
+          description: ''
+        '404':
+          description: ''
   /v1/lifecycle/intake:
     post:
       tags:
@@ -2556,166 +2579,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '409':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/execution/core-hour-leases:
-    post:
-      tags:
-      - Execution
-      operationId: create_core_hour_lease
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateCoreHourLeaseRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CoreHourLeaseResponse'
-        '201':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CoreHourLeaseResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '401':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '402':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '409':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '503':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/execution/core-hour-leases/{leaseId}/heartbeat:
-    post:
-      tags:
-      - Execution
-      operationId: heartbeat_core_hour_lease
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: leaseId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CoreHourLeaseUsageRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CoreHourLeaseResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/execution/core-hour-leases/{leaseId}/settle:
-    post:
-      tags:
-      - Execution
-      operationId: settle_core_hour_lease
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: leaseId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SettleCoreHourLeaseRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CoreHourLeaseResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '404':
           description: ''
           content:
             application/json:
@@ -7708,6 +7571,33 @@ components:
           items:
             $ref: '#/components/schemas/AcceleratorFeatureBody'
       additionalProperties: false
+    AccountNameLockedReason:
+      type: string
+      description: Why the name cannot be edited.
+      enum:
+      - managed_by_directory
+      - service_account
+    AccountNameSettings:
+      type: object
+      required:
+      - editable
+      - source
+      properties:
+        editable:
+          type: boolean
+        lockedReason:
+          allOf:
+          - $ref: '#/components/schemas/AccountNameLockedReason'
+          nullable: true
+        source:
+          $ref: '#/components/schemas/AccountNameSource'
+    AccountNameSource:
+      type: string
+      description: Who set the account name.
+      enum:
+      - provider
+      - user
+      - directory
     ActivateAcademicRequest:
       type: object
       required:
@@ -8361,6 +8251,7 @@ components:
       - canCreateCourse
       - academicProgramEnabled
       - feedback
+      - nameSettings
       properties:
         academicProgramEnabled:
           type: boolean
@@ -8370,6 +8261,8 @@ components:
           type: boolean
         feedback:
           $ref: '#/components/schemas/UserFeedbackStateResponse'
+        nameSettings:
+          $ref: '#/components/schemas/AccountNameSettings'
         orgMemberships:
           type: array
           items:
@@ -8382,20 +8275,16 @@ components:
           $ref: '#/components/schemas/UserPreferencesResponse'
         user:
           $ref: '#/components/schemas/server_identity.UserProfile'
-    AuthResendVerificationRequest:
+    AuthMeUpdateRequest:
       type: object
+      description: '`PATCH /v1/auth/me`: the signed-in person renames themselves.'
       required:
-      - email
+      - name
       properties:
-        email:
+        name:
           type: string
-    AuthResendVerificationResponse:
-      type: object
-      required:
-      - accepted
-      properties:
-        accepted:
-          type: boolean
+          description: Trimmed; 1–100 characters; no control characters.
+      additionalProperties: false
     AuthResolveRequest:
       type: object
       properties:
@@ -8583,124 +8472,6 @@ components:
         token:
           type: string
       additionalProperties: false
-    CoreHourClientSurfaceBody:
-      type: string
-      enum:
-      - cli
-      - desktop
-      - browser
-    CoreHourLeaseKeyResponse:
-      type: object
-      required:
-      - keyId
-      - algorithm
-      - publicKey
-      properties:
-        algorithm:
-          type: string
-          description: Always `Ed25519`.
-        keyId:
-          type: string
-        publicKey:
-          type: string
-          description: base64url without padding, 32 bytes.
-    CoreHourLeaseKeysResponse:
-      type: object
-      required:
-      - keys
-      properties:
-        keys:
-          type: array
-          items:
-            $ref: '#/components/schemas/CoreHourLeaseKeyResponse'
-    CoreHourLeaseResponse:
-      type: object
-      required:
-      - leaseId
-      - orgId
-      - userId
-      - idempotencyKey
-      - status
-      - allocatedCpuMillicores
-      - reservedCoreMicroHours
-      - usedCoreMicroHours
-      - overageCoreMicroHours
-      - issuedAt
-      - expiresAt
-      properties:
-        allocatedCpuMillicores:
-          type: integer
-          format: int64
-        chargedCoreMicroHours:
-          type: integer
-          format: int64
-          nullable: true
-        expiresAt:
-          type: string
-          format: date-time
-        idempotencyKey:
-          type: string
-        issuedAt:
-          type: string
-          format: date-time
-        leaseId:
-          type: string
-        orgId:
-          type: string
-        outcome:
-          type: string
-          description: '`completed`, `cancelled`, `failed`, or null.'
-          nullable: true
-        overageCoreMicroHours:
-          type: integer
-          format: int64
-        refillsAt:
-          type: string
-          format: date-time
-          nullable: true
-        reservedCoreMicroHours:
-          type: integer
-          format: int64
-        status:
-          type: string
-          description: '`active`, `settled`, `released` or `expired`.'
-        token:
-          type: string
-          description: Present on create responses only.
-          nullable: true
-        usedCoreMicroHours:
-          type: integer
-          format: int64
-        userId:
-          type: string
-    CoreHourLeaseUsageRequest:
-      type: object
-      description: Cumulative usage since the run started (`ResourceUsage` so far).
-      required:
-      - wallMillis
-      - cpuCoreMillis
-      properties:
-        cpuCoreMillis:
-          type: integer
-          format: int64
-          minimum: 0
-        wallMillis:
-          type: integer
-          format: int64
-          minimum: 0
-      additionalProperties: false
-    CoreHourRunKindBody:
-      type: string
-      enum:
-      - meshing
-      - solve
-      - meshAndSolve
-    CoreHourRunOutcomeBody:
-      type: string
-      enum:
-      - completed
-      - cancelled
-      - failed
     CourseAllocationResponse:
       type: object
       required:
@@ -8863,36 +8634,6 @@ components:
           type: array
           items:
             type: string
-      additionalProperties: false
-    CreateCoreHourLeaseRequest:
-      type: object
-      required:
-      - idempotencyKey
-      - allocatedCpuMillicores
-      - kind
-      - clientSurface
-      properties:
-        allocatedCpuMillicores:
-          type: integer
-          format: int64
-          description: What the run reserves, 1 to 4,096,000.
-          minimum: 0
-        clientSurface:
-          $ref: '#/components/schemas/CoreHourClientSurfaceBody'
-        estimatedWallSeconds:
-          type: integer
-          format: int64
-          description: 1 to 604,800; 900 when absent.
-          nullable: true
-          minimum: 0
-        idempotencyKey:
-          type: string
-          description: 'The run id. 1-128 characters from `A-Z a-z 0-9 . _ : -`.'
-        kind:
-          $ref: '#/components/schemas/CoreHourRunKindBody'
-        studyIdentity:
-          type: string
-          nullable: true
       additionalProperties: false
     CreateCourseRequest:
       type: object
@@ -9262,14 +9003,6 @@ components:
           type: integer
           format: int32
           minimum: 0
-        driverAcceleratorDevices:
-          type: array
-          items:
-            $ref: '#/components/schemas/AcceleratorDeviceBody'
-          description: |-
-            Concrete devices from this driver's authenticated allocation lease.
-            This Server emits an empty array for CPU-only allocations.
-          nullable: true
         driverLeaseId:
           type: string
         driverResources:
@@ -12078,6 +11811,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/UploadChunkTargetResponse'
+    PriceTierResponse:
+      type: string
+      description: 'A regional price tier: `1` (US), `2` (other high-income), `2b`, `3`.'
+      enum:
+      - '1'
+      - '2'
+      - 2b
+      - '3'
     ProjectCreateRequest:
       type: object
       required:
@@ -12326,6 +12067,7 @@ components:
       - planKey
       - displayName
       - highlights
+      - canPurchaseCoreHours
       - features
       properties:
         agentCreditsPerWeek:
@@ -12339,6 +12081,11 @@ components:
         billingUnit:
           type: string
           nullable: true
+        canPurchaseCoreHours:
+          type: boolean
+          description: |-
+            Whether organizations on this plan can buy core-hour packs (Scale and
+            Enterprise only). Agent credit and storage packs sell on every plan.
         coreHoursPerWeek:
           type: integer
           format: int32
@@ -12444,34 +12191,63 @@ components:
           type: string
     PublicPricingResponse:
       type: object
+      description: |-
+        The visitor's prices: only their tier (picked by `country`), in
+        `requestedCurrency`.
       required:
       - requestedCurrency
+      - priceTier
+      - supportedCurrencies
+      - chargedInLocalCurrencyAtCheckout
       - academicProgramEnabled
       - free
       - selfServeOffers
       - enterprise
       - agentCreditPack
-      - coreHourPack
       - storageAddon
+      - coreHourPack
+      - packs
       properties:
         academicProgramEnabled:
           type: boolean
         agentCreditPack:
           $ref: '#/components/schemas/PublicResourcePricingResponse'
+        chargedInLocalCurrencyAtCheckout:
+          type: boolean
+          description: |-
+            True when the amounts are in USD but checkout charges in the
+            visitor's own currency, converted from USD.
         coreHourPack:
           $ref: '#/components/schemas/PublicResourcePricingResponse'
         enterprise:
           $ref: '#/components/schemas/PublicPricingPlanResponse'
         free:
           $ref: '#/components/schemas/PublicPricingPlanResponse'
+        packs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicResourcePricingResponse'
+          description: |-
+            The same three packs in display order: Agent credits, storage,
+            core-hours.
+        priceTier:
+          $ref: '#/components/schemas/PriceTierResponse'
         requestedCurrency:
           type: string
+          description: |-
+            The currency every amount is in: the visitor's currency when the
+            tier's price fixes it, else USD.
         selfServeOffers:
           type: array
           items:
             $ref: '#/components/schemas/PublicPricingPlanResponse'
         storageAddon:
           $ref: '#/components/schemas/PublicResourcePricingResponse'
+        supportedCurrencies:
+          type: array
+          items:
+            type: string
+          description: Currencies RunMat prices can fix (ISO 4217).
     PublicResourcePricingResponse:
       type: object
       required:
@@ -14122,24 +13898,6 @@ components:
           nullable: true
         status:
           $ref: '#/components/schemas/ReleaseStatusRequest'
-      additionalProperties: false
-    SettleCoreHourLeaseRequest:
-      type: object
-      required:
-      - outcome
-      - wallMillis
-      - cpuCoreMillis
-      properties:
-        cpuCoreMillis:
-          type: integer
-          format: int64
-          minimum: 0
-        outcome:
-          $ref: '#/components/schemas/CoreHourRunOutcomeBody'
-        wallMillis:
-          type: integer
-          format: int64
-          minimum: 0
       additionalProperties: false
     StagePublicationRequest:
       type: object

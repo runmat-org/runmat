@@ -52,6 +52,7 @@ mod command_profiling;
 mod compile;
 pub(crate) use compile::program_sources::SourceCompileProjection;
 mod config;
+mod settings;
 mod dynamic;
 mod dynamic_cache;
 mod error_conversion;

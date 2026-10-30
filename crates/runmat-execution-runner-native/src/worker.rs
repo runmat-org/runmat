@@ -148,7 +148,28 @@ async fn execute_staged_graph(
     channel: collective::StdioCollectiveChannel,
 ) -> NativeExecutionResult<WorkerExecutionOutcome> {
     let attempt_id = reference.assignment.attempt_id;
+    reference
+        .resources
+        .validate()
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    reference
+        .assignment
+        .resources
+        .validate_for_request(&reference.resources)
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let resources = reference.resources.clone();
     let request = open_staged_graph(reference)?;
+    if request.project_runtime_policy.is_some() {
+        let policy = runmat_core::cluster_settings::validate_graph_policy(&request)
+            .map_err(NativeExecutionError::Protocol)?;
+        crate::remote::runtime_settings::admit_config(
+            &policy
+                .runtime_config()
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
+            &resources,
+        )
+        .map_err(NativeExecutionError::Protocol)?;
+    }
     let scratch = std::env::var(crate::driver::NATIVE_GRAPH_ATTEMPT_SCRATCH_ENV).map_err(|_| {
         NativeExecutionError::Protocol("selected Graph attempt scratch is absent".into())
     })?;

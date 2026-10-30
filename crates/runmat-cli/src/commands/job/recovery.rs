@@ -1,4 +1,4 @@
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,6 +19,10 @@ use zeroize::{Zeroize as _, Zeroizing};
 
 use crate::cli::JobRecoveryCommand;
 
+#[cfg(windows)]
+#[path = "recovery_windows.rs"]
+mod windows;
+
 const RECOVERY_SUITE: &str = "x25519-hkdf-sha256-aes128gcm-v1";
 const MAX_ENVELOPE_BYTES: usize = 64 * 1024;
 const MILLIS_PER_DAY: u64 = 24 * 60 * 60 * 1_000;
@@ -28,7 +32,24 @@ const MILLIS_PER_DAY: u64 = 24 * 60 * 60 * 1_000;
 struct RecoveryKeyFile {
     schema_version: u16,
     recipient: RecoveryRecipientFile,
-    private_key: String,
+    #[serde(
+        serialize_with = "serialize_secret",
+        deserialize_with = "deserialize_secret"
+    )]
+    private_key: Zeroizing<String>,
+}
+
+fn serialize_secret<S: serde::Serializer>(
+    value: &Zeroizing<String>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_str(value.as_str())
+}
+
+fn deserialize_secret<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Zeroizing<String>, D::Error> {
+    String::deserialize(deserializer).map(Zeroizing::new)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -81,6 +102,38 @@ pub(super) async fn execute(command: JobRecoveryCommand) -> Result<()> {
             key,
             json,
         } => recover(&run_id, project, &key, json).await,
+        JobRecoveryCommand::Decrypt {
+            key,
+            envelope,
+            artifact,
+            run_id,
+            diagnostic,
+            output,
+        } => {
+            let key = load_key(&key)?;
+            let envelope = read_bounded(&envelope, MAX_ENVELOPE_BYTES)?;
+            let artifact = read_bounded(&artifact, 64 * 1024 * 1024)?;
+            let plaintext = Zeroizing::new(
+                runmat_execution_artifact::encryption::open_recovery_artifact(
+                    &key.private_key,
+                    &envelope,
+                    &artifact,
+                    runmat_execution_artifact::encryption::RecoveryArtifactScope {
+                        run_identity: &run_id,
+                        key_epoch: 1,
+                        purpose: if diagnostic {
+                            EncryptionPurpose::DetailedEvent
+                        } else {
+                            EncryptionPurpose::Result
+                        },
+                    },
+                    64 * 1024 * 1024,
+                )?,
+            );
+            write_new_private_bytes(&output, &plaintext)?;
+            println!("Recovered plaintext written to {}", output.display());
+            Ok(())
+        }
     }
 }
 
@@ -101,8 +154,9 @@ fn keygen(output: &Path, valid_days: u32, custodian_uri: Option<String>, json: b
     let mut document = RecoveryKeyFile {
         schema_version: 1,
         recipient: RecoveryRecipientFile::from_recipient(&recipient),
-        private_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(private_bytes.as_slice()),
+        private_key: Zeroizing::new(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(private_bytes.as_slice()),
+        ),
     };
     write_new_key(output, &document)?;
     document.private_key.zeroize();
@@ -121,6 +175,8 @@ fn keygen(output: &Path, valid_days: u32, custodian_uri: Option<String>, json: b
             output.display()
         );
         println!("fingerprint\t{}", document.recipient.fingerprint);
+        println!("public_key\t{}", document.recipient.public_key);
+        println!("suite\t{}", document.recipient.suite);
         println!(
             "{}",
             crate::presentation::stdout().muted(
@@ -410,9 +466,20 @@ impl RecoveryRecipientFile {
 
 fn load_key(path: &Path) -> Result<LoadedRecoveryKey> {
     require_private_file(path)?;
-    let encoded = Zeroizing::new(
-        std::fs::read(path).with_context(|| format!("read recovery key {}", path.display()))?,
-    );
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path).context("open private recovery key")?;
+    if !file.metadata()?.is_file() {
+        bail!("recovery key must be a regular file");
+    }
+    #[cfg(windows)]
+    windows::verify_file(&file)?;
+    let encoded = Zeroizing::new(read_file_bounded(file, MAX_ENVELOPE_BYTES)?);
     let mut document: RecoveryKeyFile =
         serde_json::from_slice(encoded.as_slice()).context("recovery key file is malformed")?;
     if document.schema_version != 1 {
@@ -437,6 +504,27 @@ fn load_key(path: &Path) -> Result<LoadedRecoveryKey> {
 }
 
 fn write_new_key(path: &Path, value: &RecoveryKeyFile) -> Result<()> {
+    let encoded = Zeroizing::new(serde_json::to_vec_pretty(value)?);
+    write_new_private_bytes(path, &encoded)
+}
+
+fn read_bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
+    read_file_bounded(
+        std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?,
+        maximum,
+    )
+}
+
+fn read_file_bounded(file: std::fs::File, maximum: usize) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    file.take(maximum as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > maximum {
+        bail!("input exceeds the {} byte limit", maximum);
+    }
+    Ok(bytes)
+}
+
+fn write_new_private_bytes(path: &Path, encoded: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -447,13 +535,16 @@ fn write_new_key(path: &Path, value: &RecoveryKeyFile) -> Result<()> {
             parent.display()
         );
     }
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).context("create temporary recovery key")?;
-    set_private_file(temporary.path())?;
-    let encoded = Zeroizing::new(serde_json::to_vec_pretty(value)?);
-    temporary
-        .write_all(encoded.as_slice())
-        .context("write recovery key")?;
+    #[cfg(windows)]
+    let mut temporary = windows::create_temporary(parent)?;
+    #[cfg(not(windows))]
+    let mut temporary = {
+        let temporary =
+            tempfile::NamedTempFile::new_in(parent).context("create temporary recovery key")?;
+        set_private_file(temporary.path())?;
+        temporary
+    };
+    temporary.write_all(encoded).context("write recovery key")?;
     temporary.flush().context("flush recovery key")?;
     temporary
         .as_file()
@@ -498,9 +589,9 @@ fn set_private_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn set_private_file(_path: &Path) -> Result<()> {
-    Ok(())
+    bail!("private recovery-file creation requires an OS access-control adapter on this platform")
 }
 
 #[cfg(unix)]
@@ -550,8 +641,9 @@ mod tests {
         let document = RecoveryKeyFile {
             schema_version: 1,
             recipient: RecoveryRecipientFile::from_recipient(&recipient),
-            private_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(private_key.to_bytes()),
+            private_key: Zeroizing::new(
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(private_key.to_bytes()),
+            ),
         };
         write_new_key(&path, &document).unwrap();
         let loaded = load_key(&path).unwrap();

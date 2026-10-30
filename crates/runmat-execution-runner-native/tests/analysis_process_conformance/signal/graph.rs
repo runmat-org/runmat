@@ -48,6 +48,7 @@ pub(super) fn graph_descriptor(
         arguments: Vec::new(),
     };
     let request = GraphExecutionRequest {
+        project_runtime_policy: None,
         schema_version: runmat_execution_artifact::GRAPH_EXECUTION_REQUEST_SCHEMA_V12,
         recipe: descriptor.recipe,
         artifact: descriptor.artifact,

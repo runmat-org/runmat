@@ -257,22 +257,7 @@ pub fn resolve_public_project_id(
     )?))
 }
 
-pub async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> Result<String> {
-    let credential = resolve_auth_token_without_usage_replay(config, server_url).await?;
-    // This boundary is reached by authenticated online commands, not CLI startup.
-    // Reuse the exact resolved credential: calling from_environment here would
-    // recursively resolve auth. Reporting failures must not break the command.
-    if let Ok(client) =
-        crate::usage::CoreHourLeaseClient::from_auth_context(config, server_url, &credential)
-    {
-        if let Err(error) = client.replay_pending().await {
-            eprintln!("Warning: core-hour usage replay deferred: {error}");
-        }
-    }
-    Ok(credential)
-}
-
-async fn resolve_auth_token_without_usage_replay(
+pub async fn resolve_auth_token(
     config: &mut RemoteConfig,
     server_url: &str,
 ) -> Result<String> {

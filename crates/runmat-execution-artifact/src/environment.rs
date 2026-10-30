@@ -25,6 +25,9 @@ pub(crate) fn validate(entries: &[(String, String)]) -> ArtifactResult<()> {
             || name.contains('=')
             || name.chars().any(char::is_control)
             || value.chars().any(char::is_control)
+            || upper.starts_with("OTEL_")
+            || upper.starts_with("RUNMAT_OTEL_")
+            || upper.starts_with("RUNMAT_RUNTIME__LOGGING__OTEL__")
             || ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"]
                 .iter()
                 .any(|marker| upper.contains(marker))

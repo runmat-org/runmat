@@ -4,8 +4,59 @@ use crate::{
     POWER_CATALOG_ENTRY, RDIVIDE_CATALOG_ENTRY, TIMES_CATALOG_ENTRY,
 };
 use runmat_types::{
-    LiteralValue, NumericClass, NumericDomain, NumericFact, ValueFact, ValueKindFact,
+    CertaintyFact, DynamicReason, LiteralValue, NumericClass, NumericDomain, NumericFact,
+    ValueFact, ValueKindFact,
 };
+
+#[test]
+fn arithmetic_certainty_preserves_semantic_proof_without_claiming_placement() {
+    let operand = numeric(
+        NumericClass::Double,
+        NumericDomain::Real,
+        &[Some(2), Some(3)],
+    );
+    for entry in [
+        &PLUS_CATALOG_ENTRY,
+        &MINUS_CATALOG_ENTRY,
+        &TIMES_CATALOG_ENTRY,
+        &RDIVIDE_CATALOG_ENTRY,
+        &LDIVIDE_CATALOG_ENTRY,
+    ] {
+        let result = infer_catalog_call(entry, &request(vec![operand.clone(), operand.clone()]));
+        assert!(result.diagnostics.is_empty(), "{}", entry.identity.name);
+        assert_eq!(result.outputs[0].certainty, CertaintyFact::Proven);
+        assert_eq!(
+            result.outputs[0].residency,
+            runmat_types::ResidencyFact::Unknown
+        );
+        let mut dynamic = operand.clone();
+        dynamic.certainty = CertaintyFact::Dynamic(DynamicReason::ExternalData);
+        for arguments in [
+            vec![dynamic.clone(), operand.clone()],
+            vec![operand.clone(), dynamic],
+        ] {
+            let result = infer_catalog_call(entry, &request(arguments));
+            assert_eq!(
+                result.outputs[0].certainty,
+                CertaintyFact::Dynamic(DynamicReason::ExternalData)
+            );
+        }
+        let mismatched = numeric(
+            NumericClass::Double,
+            NumericDomain::Real,
+            &[Some(4), Some(3)],
+        );
+        let result = infer_catalog_call(entry, &request(vec![operand.clone(), mismatched]));
+        assert!(!result.diagnostics.is_empty());
+        assert_ne!(result.outputs[0].certainty, CertaintyFact::Proven);
+    }
+    // Real base/exponent classes alone do not prove a real power result.
+    let result = infer_catalog_call(
+        &POWER_CATALOG_ENTRY,
+        &request(vec![operand.clone(), operand]),
+    );
+    assert_ne!(result.outputs[0].certainty, CertaintyFact::Proven);
+}
 
 #[test]
 fn integer_inference_rejects_non_numeric_and_complex_pairs() {

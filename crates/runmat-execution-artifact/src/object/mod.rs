@@ -3,6 +3,7 @@ mod catalog;
 mod descriptor;
 mod inventory;
 mod policy;
+mod project_runtime_policy;
 
 pub use access::ArtifactAccess;
 pub use catalog::ArtifactPublishedObjectSource;
@@ -15,4 +16,10 @@ pub use policy::{
     capture_typed_foreign_policy, decode_typed_foreign_policy, foreign_policy_descriptor,
     foreign_policy_object, foreign_policy_object_from_json_value, foreign_policy_ref,
     validate_foreign_policy_descriptor, validate_foreign_policy_object, MAX_FOREIGN_POLICY_BYTES,
+};
+pub use project_runtime_policy::{
+    capture_typed_project_runtime_policy, decode_typed_project_runtime_policy,
+    validate_project_runtime_policy_descriptor, validate_project_runtime_policy_object,
+    MAX_PROJECT_RUNTIME_POLICY_BYTES, PROJECT_RUNTIME_POLICY_MEDIA_TYPE,
+    PROJECT_RUNTIME_POLICY_SCHEMA_VERSION,
 };

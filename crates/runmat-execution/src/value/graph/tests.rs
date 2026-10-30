@@ -20,6 +20,14 @@ fn callable_argument_revision_is_distinct_from_selected_value_revision() {
         Some(crate::resource::Capability::GraphCallableArgumentsV12)
     );
     assert!(GraphRequiredSchema::CallableArgumentsV12 > GraphRequiredSchema::SelectedValuesV11);
+    assert_eq!(
+        GraphRequiredSchema::from_version(GRAPH_REQUEST_SCHEMA_V13),
+        Some(GraphRequiredSchema::ProjectRuntimePolicyV13)
+    );
+    assert_eq!(
+        GraphRequiredSchema::ProjectRuntimePolicyV13.required_capability(),
+        Some(crate::resource::Capability::GraphProjectRuntimePolicyV13)
+    );
 }
 
 mod negative;

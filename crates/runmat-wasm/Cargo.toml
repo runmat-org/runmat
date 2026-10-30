@@ -68,7 +68,7 @@ base64 = "0.22"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
 zeroize = "1"
-runmat-logging = { path = "../runmat-logging", version = "=0.6.2" }
+runmat-logging = { path = "../runmat-logging", version = "=0.6.2", features = ["browser-otlp"] }
 tracing = "0.1"
 runmat-telemetry = { workspace = true }
 

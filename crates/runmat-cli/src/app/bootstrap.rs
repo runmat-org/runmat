@@ -3,7 +3,8 @@ use env_logger::Env;
 use log::{debug, error, info, warn};
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_config::runtime::{
-    self as config, ConfigLoader, FeaArtifactStoreMode, PlotMode, RunMatRuntimeConfig,
+    self as config, ConfigLoadOptions, ConfigLoader, ConfigSource, FeaArtifactStoreMode, PlotMode,
+    ResolvedRuntimeConfig, RunMatRuntimeConfig,
 };
 
 use crate::app::dispatch;
@@ -19,11 +20,37 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         return Ok(());
     }
 
-    let mut config = match load_configuration(&cli) {
-        Ok(c) => c,
-        Err(e) => return Err(e),
-    };
-    apply_cli_overrides(&mut config, &cli, &sources);
+    let mut resolved = load_configuration(&cli)?;
+    apply_cli_overrides(&mut resolved.config, &cli, &sources);
+    mark_cli_sources(&mut resolved, &cli, &sources);
+    let config = resolved.config;
+
+    // Configuration inspection/editing must not initialize execution, GPU or
+    // collectors. The values and sources here include explicit CLI overrides.
+    if let Some(Commands::Config { config_command }) = &cli.command {
+        if matches!(
+            config_command,
+            crate::cli::ConfigCommand::Show {
+                provenance: true,
+                ..
+            }
+        ) {
+            let canonical: serde_json::Value =
+                serde_json::from_str(&ConfigLoader::render_runtime_config(
+                    &config,
+                    std::path::Path::new("resolved.json"),
+                )?)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"config":canonical,"sources":resolved.sources})
+                )?
+            );
+            return Ok(());
+        }
+        return crate::commands::config::execute_config_command(config_command.clone(), &config)
+            .await;
+    }
 
     telemetry::init(&config.telemetry);
 
@@ -39,17 +66,15 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         }
     };
 
-    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+    let terminal_logger = env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .filter_level(log_level)
         .format(format_log_record)
-        .init();
-    let _otel = crate::observability::init_from_env();
+        .build();
+    let _logging = crate::observability::init_with_terminal(&config.logging, terminal_logger)
+        .map_err(|error| anyhow::anyhow!("failed to initialize CLI logging: {error}"))?;
 
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
-
-    // Also covers the native graphics lane, which returns before ordinary dispatch.
-    let _fea_run_admission = super::fea_run_admission::install()?;
 
     let compilation_only = matches!(
         cli.command,
@@ -132,27 +157,74 @@ pub(super) fn initialize_execution_lane(
 }
 
 /// Load configuration from files and environment
-fn load_configuration(cli: &Cli) -> Result<RunMatRuntimeConfig> {
-    if let Some(config_file) = &cli.config {
-        if config_file.is_dir() {
-            error!(
-                "Specified config path is a directory, expected a file: {}",
-                config_file.display()
-            );
-            std::process::exit(1);
-        }
-        if !config_file.is_file() {
-            error!(
-                "Specified config file does not exist: {}",
-                config_file.display()
-            );
-            std::process::exit(1);
-        }
-        info!("Loading configuration from: {}", config_file.display());
-        return ConfigLoader::load_from_file(config_file);
-    }
+fn load_configuration(cli: &Cli) -> Result<ResolvedRuntimeConfig> {
+    ConfigLoader::load_with_options(&ConfigLoadOptions {
+        explicit_file: cli.config.clone(),
+        ..ConfigLoadOptions::native()
+    })
+}
 
-    ConfigLoader::load()
+fn mark_cli_sources(resolved: &mut ResolvedRuntimeConfig, cli: &Cli, sources: &CliOverrideSources) {
+    for (field, provided, argument) in [
+        ("jit.enabled", cli.no_jit, "--no-jit"),
+        ("jit.threshold", sources.jit_threshold, "--jit-threshold"),
+        (
+            "jit.optimization_level",
+            sources.jit_opt_level,
+            "--jit-opt-level",
+        ),
+        (
+            "callstack_limit",
+            sources.callstack_limit,
+            "--callstack-limit",
+        ),
+        (
+            "error_namespace",
+            cli.error_namespace.is_some(),
+            "--error-namespace",
+        ),
+        ("verbose", sources.verbose, "--verbose"),
+        ("gc.preset", cli.gc_preset.is_some(), "--gc-preset"),
+        (
+            "gc.young_size_mb",
+            cli.gc_young_size.is_some(),
+            "--gc-young-size",
+        ),
+        ("gc.threads", cli.gc_threads.is_some(), "--gc-threads"),
+        ("gc.collect_stats", sources.gc_stats, "--gc-stats"),
+        ("plotting.mode", cli.plot_mode.is_some(), "--plot-mode"),
+        (
+            "plotting.force_headless",
+            cli.plot_headless,
+            "--plot-headless",
+        ),
+        (
+            "plotting.backend",
+            cli.plot_backend.is_some(),
+            "--plot-backend",
+        ),
+        (
+            "plotting.scatter_target_points",
+            cli.plot_scatter_target.is_some(),
+            "--plot-scatter-target",
+        ),
+        (
+            "plotting.surface_vertex_budget",
+            cli.plot_surface_vertex_budget.is_some(),
+            "--plot-surface-vertex-budget",
+        ),
+        ("logging.debug", sources.debug, "--debug"),
+        ("logging.level", sources.log_level, "--log-level"),
+    ] {
+        if provided {
+            resolved.sources.insert(
+                format!("runtime.{field}"),
+                ConfigSource::CommandLine {
+                    argument: argument.into(),
+                },
+            );
+        }
+    }
 }
 
 /// Apply CLI argument overrides to configuration

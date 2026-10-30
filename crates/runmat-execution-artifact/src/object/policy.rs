@@ -108,7 +108,7 @@ pub fn foreign_policy_descriptor(policy: ForeignPolicyRef) -> ArtifactResult<Obj
     Ok(descriptor)
 }
 
-fn sort_json(value: serde_json::Value) -> serde_json::Value {
+pub(super) fn sort_json(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => {
             let mut entries = map.into_iter().collect::<Vec<_>>();

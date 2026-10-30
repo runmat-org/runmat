@@ -48,6 +48,9 @@ pub fn validate_inventory(
     let validation = (|| {
         for object in objects {
             object.validate()?;
+            if object.descriptor.namespace == ObjectNamespace::ProjectRuntimePolicy {
+                super::validate_project_runtime_policy_object(object)?;
+            }
             if object.descriptor.encoded_length > limits.max_object_bytes {
                 return Err(ArtifactError::Limit(format!(
                     "object {} is too large",

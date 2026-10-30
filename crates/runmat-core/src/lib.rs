@@ -11,6 +11,7 @@ mod executable;
 mod execution;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod foreign_artifacts;
+pub mod cluster_settings;
 #[cfg(not(target_arch = "wasm32"))]
 mod foreign_unit_host;
 mod fusion;

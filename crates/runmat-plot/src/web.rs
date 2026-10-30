@@ -128,6 +128,7 @@ pub struct WebRenderer {
     camera_controller: CameraController,
     render_config: PlotRenderConfig,
     options: WebRendererOptions,
+    supported_antialiasing: Vec<crate::core::Antialiasing>,
     msaa_texture: Option<wgpu::Texture>,
     msaa_extent: (u32, u32),
     pixels_per_point: f32,
@@ -275,6 +276,38 @@ impl WebRenderer {
 
         let capabilities = surface.get_capabilities(&adapter);
         let format = pick_surface_format(&capabilities);
+        // Match the renderer's actual depth attachment format. Adapter-specific
+        // format capabilities require the corresponding enabled device feature.
+        let device_features = access.with_shared(|emission| emission.device().features())?;
+        let format_features = |format: wgpu::TextureFormat| {
+            if device_features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
+                adapter.get_texture_format_features(format)
+            } else {
+                format.guaranteed_format_features(device_features)
+            }
+        };
+        let supported_antialiasing: Vec<_> = [
+            crate::core::Antialiasing::Off,
+            crate::core::Antialiasing::X2,
+            crate::core::Antialiasing::X4,
+            crate::core::Antialiasing::X8,
+        ]
+        .into_iter()
+        .filter(|mode| {
+            mode.supported_by_formats(
+                format_features(format),
+                format_features(wgpu::TextureFormat::Depth24Plus),
+            )
+        })
+        .collect();
+        let requested = crate::core::Antialiasing::from_samples(options.msaa_samples)
+            .map_err(|error| WebRendererError::Render(error.into()))?;
+        if !supported_antialiasing.contains(&requested) {
+            return Err(WebRendererError::Render(format!(
+                "{}x anti-aliasing is unsupported by the active color/depth formats",
+                requested.samples()
+            )));
+        }
         let present_mode = pick_present_mode(&capabilities, options.present_mode);
         let alpha_mode = pick_alpha_mode(&capabilities);
 
@@ -333,6 +366,7 @@ impl WebRenderer {
                 ..Default::default()
             },
             options,
+            supported_antialiasing,
             msaa_texture: None,
             msaa_extent: (0, 0),
             pixels_per_point: 1.0,
@@ -364,6 +398,60 @@ impl WebRenderer {
 
     /// Apply a user interaction event (mouse/keyboard) to the renderer state.
     /// Returns `true` when a re-render is recommended.
+    pub fn navigation_options(&self) -> crate::core::NavigationOptions {
+        self.camera_controller.navigation_options()
+    }
+
+    pub fn set_navigation_options(
+        &mut self,
+        options: crate::core::NavigationOptions,
+    ) -> Result<(), WebRendererError> {
+        self.camera_controller
+            .set_navigation_options(options)
+            .map_err(|error| WebRendererError::Render(error.into()))
+    }
+
+    pub fn supported_antialiasing(&self) -> &[crate::core::Antialiasing] {
+        &self.supported_antialiasing
+    }
+
+    pub fn set_antialiasing(
+        &mut self,
+        mode: crate::core::Antialiasing,
+    ) -> Result<(), WebRendererError> {
+        if !self.supported_antialiasing.contains(&mode) {
+            return Err(WebRendererError::Render(format!(
+                "{}x anti-aliasing is unsupported by the active color/depth formats",
+                mode.samples()
+            )));
+        }
+        self.options.msaa_samples = mode.samples();
+        self.render_config.msaa_samples = mode.samples();
+        self.msaa_texture = None;
+        self.msaa_extent = (0, 0);
+        Ok(())
+    }
+
+    /// Host-classified two-finger scroll. Pinch (Ctrl/Cmd) remains zoom.
+    pub fn handle_trackpad_scroll(
+        &mut self,
+        position: glam::Vec2,
+        delta: glam::Vec2,
+        mut modifiers: crate::core::interaction::Modifiers,
+    ) -> bool {
+        if self.camera_controller.navigation_options().trackpad_pan
+            && !modifiers.ctrl
+            && !modifiers.meta
+        {
+            modifiers.shift = true;
+        }
+        self.handle_event(PlotEvent::MouseWheel {
+            position,
+            delta,
+            modifiers,
+        })
+    }
+
     pub fn handle_event(&mut self, event: PlotEvent) -> bool {
         #[cfg(feature = "egui-overlay")]
         let overlay_pointer_captured = self

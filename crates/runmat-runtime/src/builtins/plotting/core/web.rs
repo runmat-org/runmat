@@ -526,6 +526,67 @@ pub(crate) mod wasm {
         })
     }
 
+    pub(super) fn configure_surface_viewer_impl(
+        surface_id: u32,
+        navigation: runmat_plot::core::NavigationOptions,
+        antialiasing: runmat_plot::core::Antialiasing,
+    ) -> BuiltinResult<()> {
+        navigation.validate().map_err(web_error)?;
+        SURFACES.with(|slot| {
+            let mut surfaces = slot.borrow_mut();
+            let entry = surfaces
+                .get_mut(&surface_id)
+                .ok_or_else(|| web_error("Plotting surface not registered"))?;
+            // Validate AA before changing navigation so rejected settings leave
+            // the previous complete viewer configuration intact.
+            entry
+                .renderer
+                .set_antialiasing(antialiasing)
+                .map_err(|error| web_error(error.to_string()))?;
+            entry
+                .renderer
+                .set_navigation_options(navigation)
+                .map_err(|error| web_error(error.to_string()))?;
+            entry
+                .renderer
+                .render_current_scene()
+                .map_err(|error| web_error(error.to_string()))
+        })
+    }
+
+    pub(super) fn surface_antialiasing_modes_impl(
+        surface_id: u32,
+    ) -> BuiltinResult<Vec<runmat_plot::core::Antialiasing>> {
+        SURFACES.with(|slot| {
+            let surfaces = slot.borrow();
+            let entry = surfaces
+                .get(&surface_id)
+                .ok_or_else(|| web_error("Plotting surface not registered"))?;
+            Ok(entry.renderer.supported_antialiasing().to_vec())
+        })
+    }
+
+    pub(super) fn handle_surface_trackpad_scroll_impl(
+        surface_id: u32,
+        position: glam::Vec2,
+        delta: glam::Vec2,
+        modifiers: runmat_plot::core::interaction::Modifiers,
+    ) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut surfaces = slot.borrow_mut();
+            let entry = surfaces
+                .get_mut(&surface_id)
+                .ok_or_else(|| web_error("Plotting surface not registered"))?;
+            entry
+                .renderer
+                .handle_trackpad_scroll(position, delta, modifiers);
+            entry
+                .renderer
+                .render_current_scene()
+                .map_err(|error| web_error(error.to_string()))
+        })
+    }
+
     pub(super) fn set_surface_camera_state_impl(
         surface_id: u32,
         state: PlotSurfaceCameraState,
@@ -885,6 +946,32 @@ pub fn set_surface_camera_state(
     expected_target: Option<runmat_plot::collaboration::PresenceTarget>,
 ) -> BuiltinResult<()> {
     wasm::set_surface_camera_state_impl(surface_id, state, expected_target)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub fn configure_surface_viewer(
+    surface_id: u32,
+    navigation: runmat_plot::core::NavigationOptions,
+    antialiasing: runmat_plot::core::Antialiasing,
+) -> BuiltinResult<()> {
+    wasm::configure_surface_viewer_impl(surface_id, navigation, antialiasing)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub fn surface_antialiasing_modes(
+    surface_id: u32,
+) -> BuiltinResult<Vec<runmat_plot::core::Antialiasing>> {
+    wasm::surface_antialiasing_modes_impl(surface_id)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+pub fn handle_surface_trackpad_scroll(
+    surface_id: u32,
+    position: glam::Vec2,
+    delta: glam::Vec2,
+    modifiers: runmat_plot::core::interaction::Modifiers,
+) -> BuiltinResult<()> {
+    wasm::handle_surface_trackpad_scroll_impl(surface_id, position, delta, modifiers)
 }
 
 pub fn take_surface_host_actions(surface_id: u32) -> BuiltinResult<Vec<PlotSurfaceHostAction>> {

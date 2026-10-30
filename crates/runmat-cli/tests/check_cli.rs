@@ -8,12 +8,12 @@ use tempfile::TempDir;
 use runmat_analysis_core::{AnalysisModel, ExcitationTarget, PropertyRegionScope};
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshArtifact};
 
-#[path = "support/fea_admission.rs"]
-mod fea_admission;
+#[path = "support/local_offline.rs"]
+mod local_offline;
 
 fn runmat(temp: &TempDir, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
-    fea_admission::configure(&mut command, temp.path());
+    local_offline::configure(&mut command, temp.path());
     command.current_dir(temp.path()).args(args);
     command
         .env_remove("RUNMAT_CONFIG")
@@ -30,7 +30,7 @@ fn runmat(temp: &TempDir, args: &[&str]) -> Output {
 
 fn runmat_with_env(temp: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
-    fea_admission::configure(&mut command, temp.path());
+    local_offline::configure(&mut command, temp.path());
     command.current_dir(temp.path()).args(args);
     command
         .env_remove("RUNMAT_CONFIG")
@@ -90,7 +90,7 @@ fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
     )
     .unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
-    fea_admission::configure(&mut command, temp.path());
+    local_offline::configure(&mut command, temp.path());
     command
         .current_dir(repository)
         .args(args)
