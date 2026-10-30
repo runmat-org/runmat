@@ -402,7 +402,7 @@ pub enum AnalysisFigureMeshSource {
 pub use operations::{
     analysis_field_page_by_run_id_op, analysis_observation_history_sample_by_run_id_op,
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
-    analysis_trends_op,
+    analysis_trends_op, bounded_default_results_query, RESULTS_INLINE_FIELD_BYTES,
 };
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};

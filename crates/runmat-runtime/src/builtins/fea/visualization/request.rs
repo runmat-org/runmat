@@ -253,9 +253,14 @@ fn bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<bool> 
 
 pub(super) fn reject_requested_device_field(request: &FeaPlotRequest) -> BuiltinResult<()> {
     let field_id = request.field_id.as_str();
-    let results = analysis_results_by_run_id_op(
+    let query = crate::analysis::bounded_default_results_query(
         &request.run_id,
         AnalysisResultsQuery::default(),
+    )
+    .map_err(|err| builtin_error(PLOT_NAME, &ERROR_OPERATION, err))?;
+    let results = analysis_results_by_run_id_op(
+        &request.run_id,
+        query,
         OperationContext::new(None, None),
     )
     .map(|envelope| envelope.data)

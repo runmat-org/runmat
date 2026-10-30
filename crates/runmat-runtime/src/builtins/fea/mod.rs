@@ -378,9 +378,9 @@ async fn create_results_object_from_args(
         }
     }
     let requested = run_id_from_value(RESULTS_NAME, &args[0])?;
-    let query = results_query_from_args(args.view().range(1..)?)?;
+    let (query, explicit_field_values) = results_query_from_args(args.view().range(1..)?)?;
     artifact_access::read(RESULTS_NAME, || {
-        create_persisted_results_object(args, requested, query)
+        create_persisted_results_object(args, requested, query, explicit_field_values)
     })
     .await
 }
@@ -389,6 +389,7 @@ fn create_persisted_results_object(
     args: crate::call::BuiltinArguments,
     requested: String,
     query: AnalysisResultsQuery,
+    explicit_field_values: bool,
 ) -> BuiltinResult<Value> {
     // A definition run id names every attempt; the object reports the attempt it holds.
     let run_id = crate::analysis::storage::resolve_run_attempt(&requested).map_err(|err| {
@@ -398,6 +399,13 @@ fn create_persisted_results_object(
             format!("failed to resolve the latest FEA run attempt: {err}"),
         )
     })?;
+    // Without a field-value option the object opens bounded; an explicit request is answered.
+    let query = if explicit_field_values {
+        query
+    } else {
+        crate::analysis::bounded_default_results_query(&run_id, query)
+            .map_err(|err| builtin_error(RESULTS_NAME, &ERROR_OPERATION, err))?
+    };
     let envelope = analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None))
         .map_err(|err| operation_error(RESULTS_NAME, &ERROR_OPERATION, err))?;
     let mut public_data = envelope.data;
@@ -714,7 +722,7 @@ fn object_payload_omitting<T: DeserializeOwned>(
 
 fn results_query_from_args(
     args: crate::call::FunctionArgumentView<'_>,
-) -> BuiltinResult<AnalysisResultsQuery> {
+) -> BuiltinResult<(AnalysisResultsQuery, bool)> {
     let mut query = AnalysisResultsQuery::default();
     let mut seen = HashSet::new();
     for pair in expect_name_value_tail(RESULTS_NAME, args)? {
@@ -768,7 +776,7 @@ fn results_query_from_args(
             }
         }
     }
-    Ok(query)
+    Ok((query, seen.contains("includefieldvalues")))
 }
 
 fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<String> {

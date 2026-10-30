@@ -3649,6 +3649,73 @@ fn analysis_results_unavailable_beam_continuum_field_maps_typed_error() {
 }
 
 #[test]
+fn explicit_field_values_are_returned_beyond_the_default_inline_budget() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let model = sample_model();
+    let mut run = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        Default::default(),
+        OperationContext::new(Some("trace-results-explicit-values".to_string()), None),
+    )
+    .expect("run should pass")
+    .data;
+    // One field past the default inline budget, as a large mesh produces.
+    let entries = (RESULTS_INLINE_FIELD_BYTES / 8 + 1) as usize;
+    run.run_id = format!("{}-large", run.run_id);
+    run.run.fields.push(AnalysisField::host_f64(
+        "test.large_nodal_field",
+        vec![entries],
+        (0..entries).map(|index| index as f64).collect(),
+    ));
+    storage::persist_run_result(&run).expect("large run should persist");
+    let field_count = run.run.fields.len();
+
+    let bounded =
+        bounded_default_results_query(&run.run_id, AnalysisResultsQuery::default()).unwrap();
+    assert!(!bounded.include_field_values, "the default view opens bounded");
+    let default_view =
+        analysis_results_by_run_id_op(&run.run_id, bounded, OperationContext::new(None, None))
+            .expect("bounded results");
+    assert!(default_view.data.fields.is_empty());
+    assert_eq!(default_view.data.field_descriptors.len(), field_count);
+
+    // A selection that fits the budget keeps its values in the default view.
+    let small = bounded_default_results_query(
+        &run.run_id,
+        AnalysisResultsQuery {
+            include_fields: vec![FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()],
+            ..AnalysisResultsQuery::default()
+        },
+    )
+    .unwrap();
+    assert!(small.include_field_values);
+
+    let explicit = analysis_results_by_run_id_op(
+        &run.run_id,
+        AnalysisResultsQuery {
+            include_field_values: true,
+            ..AnalysisResultsQuery::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("explicit field values");
+    assert_eq!(explicit.data.fields.len(), field_count);
+    let large = explicit
+        .data
+        .fields
+        .iter()
+        .find(|field| field.field_id == "test.large_nodal_field")
+        .expect("the large field is returned");
+    let AnalysisFieldValues::HostF64(values) = &large.values else {
+        panic!("host values expected");
+    };
+    assert_eq!(values.len(), entries);
+    assert_eq!(values[entries - 1], (entries - 1) as f64);
+}
+
+#[test]
 fn analysis_results_by_run_id_roundtrip_works() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
