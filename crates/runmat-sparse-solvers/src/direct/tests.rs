@@ -152,7 +152,12 @@ fn indefinite_shifted_laplacian_bunch_kaufman_inertia_counts_eigenvalues() {
     for kind in [FactorKind::BunchKaufman, FactorKind::Ldlt] {
         let solver = DirectSolver::<f64>::new(
             shifted.as_ref().into(),
-            DirectOptions::new(kind),
+            DirectOptions {
+                // Exercise the stagnation boundary instead of stopping at the first
+                // already-small residual. The report must describe the returned vector.
+                refinement_tolerance: 0.0,
+                ..DirectOptions::new(kind)
+            },
             SolveControl::NONE,
         )
         .unwrap();
@@ -164,6 +169,11 @@ fn indefinite_shifted_laplacian_bunch_kaufman_inertia_counts_eigenvalues() {
             .solve_refined(shifted.as_ref().into(), &b, &mut x, 1)
             .unwrap();
         assert!(report.relative_residual < 1e-12, "{kind:?} {report:?}");
+        assert_eq!(
+            report.relative_residual,
+            relative_residual(&shifted, &x, &b),
+            "{kind:?}: the report must certify the returned solution"
+        );
     }
 }
 

@@ -584,7 +584,9 @@ impl<T: FactorScalar> DirectSolver<T> {
                 };
                 steps += 1;
                 if next.partial_cmp(&(0.5 * relative)) != Some(std::cmp::Ordering::Less) {
-                    relative = next.min(relative);
+                    // xc already contains this correction. Report its measured residual,
+                    // not the better value belonging to the preceding iterate.
+                    relative = next;
                     break;
                 }
                 relative = next;
