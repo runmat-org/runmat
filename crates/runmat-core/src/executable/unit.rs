@@ -577,6 +577,7 @@ impl ExecutableUnit {
     /// session namespace; native compilation retains the immutable MIR identity.
     /// A class-source request may use its typed constructor owner when no
     /// function has the exact public name.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn native_function_id(&self, name: &str) -> Option<runmat_hir::FunctionId> {
         native_function_id_in_mir(&self.mir, name)
     }
@@ -607,6 +608,7 @@ impl ExecutableUnit {
     }
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn native_function_id_in_mir(
     mir: &runmat_mir::MirAssembly,
     name: &str,
