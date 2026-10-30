@@ -526,6 +526,13 @@ fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
         "future creation should not trigger input prompts"
     );
 
+    let replacement = runmat_core::execute_text_request_for_testing(
+        &mut session,
+        "async function y = asks(); y = 99; end;",
+    )
+    .map_err(anyhow::Error::new)?;
+    assert!(replacement.error.is_none(), "{:#?}", replacement.error);
+
     let spawned = runmat_core::execute_text_request_for_testing(
         &mut session,
         "t = spawn(fut); marker_after_spawn = 7; out = await(t);",
@@ -533,7 +540,8 @@ fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
     .map_err(anyhow::Error::new)?;
     assert!(
         spawned.error.is_none(),
-        "spawning deferred future should not raise runtime errors"
+        "spawning deferred future should not raise runtime errors: {:#?}",
+        spawned.error
     );
     assert_eq!(
         spawned.stdin_events.len(),
@@ -553,5 +561,16 @@ fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
         .as_ref()
         .expect("spawn follow-up marker should be readable");
     assert_eq!(value_as_f64(marker_value), Some(7.0));
+    let original = runmat_core::execute_text_request_for_testing(&mut session, "out")
+        .map_err(anyhow::Error::new)?;
+    assert_eq!(original.value.as_ref().and_then(value_as_f64), Some(5.0));
+    let failure = runmat_core::execute_text_request_for_testing(
+        &mut session,
+        "async function y = fails(); error('RunMat:Future:Original', 'original failure'); end; \
+         failed = spawn(fails()); for k = 1:2; caught = false; \
+         try; await(failed); catch e; caught = strcmp(e.identifier, 'RunMat:Future:Original'); end; \
+         assert(caught); end;",
+    ).map_err(anyhow::Error::new)?;
+    assert!(failure.error.is_none(), "{:#?}", failure.error);
     Ok(())
 }

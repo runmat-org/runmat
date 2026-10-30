@@ -127,6 +127,9 @@ pub(super) fn semantic_definition_fingerprint_with_source(
     // enter publication or import without an explicit identity decision.
     let super::FunctionBytecode {
         function,
+        // Admission renews this nonwire evidence from the same canonical MIR.
+        // Its local presence is not part of a portable semantic identity.
+        spawn_contract: _,
         definition_owner: _,
         display_name,
         class_method_owner,

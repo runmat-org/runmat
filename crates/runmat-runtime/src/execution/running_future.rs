@@ -66,6 +66,7 @@ mod tests {
 
     fn deferred() -> DeferredCall {
         DeferredCall {
+            spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
             invocation: DeferredInvocation::callable(
                 crate::call::descriptor::CallableDescriptor::resolved(
                     runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(1)),

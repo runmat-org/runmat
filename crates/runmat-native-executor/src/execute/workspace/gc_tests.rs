@@ -12,6 +12,7 @@ fn workspace_for_context(
     context: Option<&runmat_runtime::context::RuntimeContext>,
 ) -> NativeWorkspaceState {
     let function = NativeFunction {
+        spawn_safety: runmat_types::SpawnSafetyFact::SpawnSafe,
         lexical_bindings: Vec::new(),
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,
@@ -141,6 +142,7 @@ fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
         );
         let canonical: Rc<dyn RuntimeWorkspaceService> = projection.clone();
         let function = NativeFunction {
+            spawn_safety: runmat_types::SpawnSafetyFact::SpawnSafe,
             lexical_bindings: Vec::new(),
             inherited_storage_bindings: Vec::new(),
             creates_lexical_environment: false,

@@ -51,6 +51,7 @@ fn admitted_program_call() -> DeferredCall {
     let program = b"unexecuted checkpoint witness".to_vec();
     let digest = runmat_execution::Digest::sha256(&program);
     DeferredCall {
+        spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
         invocation: DeferredInvocation::Program {
@@ -80,6 +81,7 @@ fn fixture() -> (Mutex<State>, FutureHandle) {
     let scope_id = crate::config::fresh_scope_id(b"materialization-test", 1);
     let id = FutureId::derive(&[scope_id.bytes(), b"future"]);
     let call = DeferredCall {
+        spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
         invocation: DeferredInvocation::callable(CallableDescriptor {

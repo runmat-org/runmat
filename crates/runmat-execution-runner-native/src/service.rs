@@ -426,6 +426,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         for rank_number in 1..=call.gang.labs.0 {
             let rank = runmat_types::LabRank(rank_number);
             let invocation = runmat_runtime::execution::DeferredCall {
+                spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 invocation: runmat_runtime::execution::DeferredInvocation::Program {
                     callable: runmat_execution::ProgramCallable::spmd_region(call.region),
                     context: runmat_execution::ProgramInvocationContext::SpmdTask {

@@ -170,6 +170,8 @@ pub struct NativeFunction {
     /// executors use this contract when a function becomes an async target;
     /// they do not reconstruct semantics from lowered instructions.
     pub capabilities: CapabilitySet,
+    /// Canonical capture policy derived from the same source MIR body.
+    pub spawn_safety: runmat_types::SpawnSafetyFact,
     pub abi: NativeFunctionAbi,
     pub argument_validations: Vec<NativeFunctionArgumentValidation>,
     pub locals: Vec<NativeLocalMetadata>,

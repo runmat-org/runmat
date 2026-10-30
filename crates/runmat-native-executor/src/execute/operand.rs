@@ -339,6 +339,20 @@ pub(super) fn evaluate_rvalue(
             let selected_function = state
                 .runtime
                 .selected_graph_function_binding(state.function.id, &identity);
+            let spawn_safety = if let Some(selected) = &selected_function {
+                selected.spawn_safety.clone()
+            } else {
+                state
+                    .functions
+                    .iter()
+                    .find(|candidate| candidate.id == *function)
+                    .map(|function| function.spawn_safety.clone())
+                    .ok_or_else(|| {
+                        NativeExecutorError::Host(
+                            "async callable has no exact Native IR spawn contract".into(),
+                        )
+                    })?
+            };
             let capabilities = match &selected_function {
                 Some(selected) => selected.capabilities.clone(),
                 None if matches!(
@@ -412,6 +426,7 @@ pub(super) fn evaluate_rvalue(
                 .runtime
                 .execution()
                 .create_future(runmat_runtime::execution::DeferredCall {
+                    spawn_safety,
                     invocation,
                     retry: runmat_execution::RetryPolicy::Never,
                     environment: runmat_runtime::execution::capture_deferred_environment(
@@ -475,7 +490,7 @@ fn native_function_capabilities(
 fn execution_service_error(
     error: runmat_runtime::execution::ExecutionServiceError,
 ) -> NativeExecutorError {
-    runmat_runtime::runtime_error::semantic_error("ExecutionService", error.to_string()).into()
+    error.into_runtime_error().into()
 }
 
 pub(super) fn materialize_operand(

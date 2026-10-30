@@ -98,6 +98,7 @@ fn exact_native_detach_keeps_old_value_and_does_not_erase_rebinding() {
 pub(super) fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
     let binding = BindingId(0);
     let function = NativeFunction {
+        spawn_safety: runmat_types::SpawnSafetyFact::SpawnSafe,
         lexical_bindings: Vec::new(),
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,

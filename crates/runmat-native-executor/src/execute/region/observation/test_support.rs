@@ -82,6 +82,7 @@ pub(in crate::execute) fn observed_state_with_retirement(
 pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
     let runtime = runtime(probe);
     let function = NativeFunction {
+        spawn_safety: runmat_types::SpawnSafetyFact::SpawnSafe,
         lexical_bindings: Vec::new(),
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,

@@ -114,48 +114,25 @@ impl WgpuProvider {
         cols: usize,
         denom: f64,
     ) -> Result<GpuTensorHandle> {
-        let rows_f64 = rows as f64;
         let means_entry = self.get_entry(means)?;
-        let mut means_used = means.clone();
-        let mut casted_means = false;
-        if means_entry.precision != matrix_entry.precision {
-            means_used = self
-                .cast_tensor_precision(means, matrix_entry.precision)
-                .await?;
-            casted_means = true;
-        }
+        let means_used = if means_entry.precision != matrix_entry.precision {
+            self.cast_tensor_precision(means, matrix_entry.precision)
+                .await?
+        } else {
+            means.clone()
+        };
 
-        // Compute X^T * X using the SYRK pipeline (no explicit transpose required).
-        let xtx = self.syrk_exec(matrix)?;
-
-        // Form n * μ μᵀ without materialising a centered copy of X.
-        let means_scaled = self.scalar_mul(&means_used, rows_f64)?;
-        let means_col = self
-            .reshape(&means_scaled, &[cols, 1])
-            .map_err(|e| anyhow!("centered_gram: reshape means col failed: {e}"))?;
-        let means_row_scaled = self
-            .reshape(&means_scaled, &[1, cols])
-            .map_err(|e| anyhow!("centered_gram: reshape means row failed: {e}"))?;
-
-        let outer_scaled = self.matmul_exec_with_usage(
-            &means_col,
-            &means_row_scaled,
-            BufferUsageClass::FusionOut,
+        // Center before multiplying: subtracting two uncentered moments can
+        // overflow for finite constant observations or erase a small variance.
+        // Broadcast the mean row using the ordinary typed elementwise path.
+        let centered = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Sub,
+            matrix,
+            &means_used,
         )?;
-        let outer = self.scalar_mul(&outer_scaled, 1.0 / rows_f64)?;
-
-        drop(means_col);
-        drop(means_row_scaled);
-        drop(outer_scaled);
-
-        let centered =
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &xtx, &outer)?;
-
-        drop(xtx);
-        drop(outer);
-        drop(means_scaled);
-
-        let handle = self.scalar_mul(&centered, 1.0 / denom)?;
+        let gram = self.syrk_exec(&centered)?;
+        let handle = self.scalar_mul(&gram, 1.0 / denom)?;
+        drop(gram);
         drop(centered);
 
         self.mark_buffer_usage(&handle, BufferUsageClass::FusionOut);
@@ -175,10 +152,6 @@ impl WgpuProvider {
             {
                 log::warn!("centered_gram debug instrumentation failed: {err}");
             }
-        }
-
-        if casted_means {
-            drop(means_used);
         }
 
         Ok(handle)
@@ -1453,6 +1426,51 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 mod covariance_conversion_tests {
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
+
+    #[test]
+    #[ignore = "requires shader-f64 hardware; run explicitly in the F64 qualification gate"]
+    fn covariance_large_finite_f64_offsets_center_before_products() {
+        let provider = register_wgpu_provider(WgpuProviderOptions {
+            precision: crate::backend::wgpu::provider::WgpuPrecisionPolicy::RequireF64,
+            ..Default::default()
+        })
+        .expect("F64 qualification requires an actual shader-f64 adapter");
+        let options = runmat_accelerate_api::CovarianceOptions {
+            normalization: runmat_accelerate_api::CovNormalization::Unbiased,
+            rows: runmat_accelerate_api::CovRows::All,
+            has_weight_vector: false,
+        };
+        for (data, expected) in [
+            ([1.0e200; 4], 0.0),
+            (
+                [
+                    1099511627775.0,
+                    1099511627777.0,
+                    1099511627775.0,
+                    1099511627777.0,
+                ],
+                2.0,
+            ),
+        ] {
+            let matrix = provider
+                .upload(&HostTensorView {
+                    data: &data,
+                    shape: &[2, 2],
+                })
+                .unwrap();
+            let output = pollster::block_on(provider.covariance(&matrix, None, None, &options))
+                .expect("resident finite covariance");
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            let values = pollster::block_on(provider.download(&output)).unwrap();
+            assert_eq!(values.shape, [2, 2]);
+            assert_eq!(values.data, [expected; 4]);
+            matrix.release().unwrap();
+            output.release().unwrap();
+        }
+    }
 
     #[test]
     fn covariance_to_correlation_wgpu_returns_resident_outputs() {

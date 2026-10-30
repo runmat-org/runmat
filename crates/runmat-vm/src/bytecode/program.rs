@@ -265,8 +265,16 @@ pub struct InheritedStorageSlot {
     pub kind: InheritedStorageKind,
 }
 
+#[path = "program/future_spawn.rs"]
+mod future_spawn;
+pub use future_spawn::CompilerSpawnContract;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionBytecode {
+    /// Compiler-owned metadata travels with this body, like its capabilities.
+    /// Portable admission renews it from accepted MIR, never serialized facts.
+    #[serde(skip)]
+    pub spawn_contract: Option<CompilerSpawnContract>,
     pub function: FunctionId,
     /// Process-local identity of this immutable definition. Serialized
     /// artifacts hydrate a fresh owner; they never import a local lease.
@@ -382,6 +390,7 @@ pub struct FunctionBytecode {
 impl Default for FunctionBytecode {
     fn default() -> Self {
         Self {
+            spawn_contract: None,
             function: FunctionId(0),
             definition_owner: fresh_definition_owner(),
             display_name: String::new(),
@@ -2538,6 +2547,7 @@ mod function_registry_tests {
 
     fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
         FunctionBytecode {
+            spawn_contract: None,
             function: FunctionId(id),
             definition_owner: fresh_definition_owner(),
             display_name: display_name.into(),

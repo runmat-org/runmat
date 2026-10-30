@@ -48,11 +48,12 @@ fn general_chain_reject_cancel_and_drop_at_publication_never_issue_full_call_rec
                     reached.clone(),
                 ),
             };
-            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+            let vars =
+                crate::InterpreterVars::from_owned(vec![Value::Num(0.0); bytecode.var_count]);
             if fault_kind == 2 {
                 let mut pending = Box::pin(scoped_faultable_run(
                     bytecode,
-                    &mut vars,
+                    vars,
                     runtime.clone(),
                     Some(fault),
                 ));
@@ -69,12 +70,14 @@ fn general_chain_reject_cancel_and_drop_at_publication_never_issue_full_call_rec
             } else {
                 let result = block_on(scoped_faultable_run(
                     bytecode,
-                    &mut vars,
+                    vars,
                     runtime.clone(),
                     Some(fault),
                 ));
                 if caught {
-                    result.expect("ordinary catch handles the actual checked-store failure");
+                    let crate::InterpreterOutcome::Completed(completion) =
+                        result.expect("ordinary catch handles the actual checked-store failure");
+                    let vars = &completion.values;
                     assert_eq!(
                         *vars.get(caught_slot.unwrap()).unwrap(),
                         Value::CharArray(runmat_value::CharArray::new_row(

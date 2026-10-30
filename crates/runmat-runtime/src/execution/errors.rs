@@ -11,6 +11,8 @@ use crate::{
 
 #[derive(Clone, Debug, Error)]
 pub enum ExecutionServiceError {
+    #[error("future cannot be spawned: {0:?}")]
+    SpawnUnsafe(runmat_types::SpawnSafetyReason),
     #[error("owned CPU control allocation failed: {0}")]
     HostAllocation(#[source] crate::context::host_allocation::HostAllocationError),
     #[error("execution handle belongs to a different scope")]
@@ -39,6 +41,7 @@ impl PartialEq for ExecutionServiceError {
     fn eq(&self, other: &Self) -> bool {
         use ExecutionServiceError as Error;
         match (self, other) {
+            (Error::SpawnUnsafe(a), Error::SpawnUnsafe(b)) => a == b,
             (Error::HostAllocation(a), Error::HostAllocation(b)) => a == b,
             (Error::ForeignScope, Error::ForeignScope)
             | (Error::UnknownHandle, Error::UnknownHandle)
@@ -93,6 +96,11 @@ impl ExecutionServiceError {
     /// outcomes and user-visible runtime errors.
     pub fn into_runtime_error(self) -> RuntimeError {
         match self {
+            Self::SpawnUnsafe(reason) => crate::runtime_error::semantic_error_with_source(
+                "RunMat:parallel:SpawnUnsafe",
+                Self::SpawnUnsafe(reason).to_string(),
+                Self::SpawnUnsafe(reason),
+            ),
             Self::HostAllocation(cause) => {
                 crate::context::host_allocation::host_allocation_runtime_error(
                     None,

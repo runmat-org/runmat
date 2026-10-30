@@ -344,6 +344,7 @@ fn local_state_with(
         span: ProgramSpan { start: 0, end: 0 },
     };
     let function = NativeFunction {
+        spawn_safety: runmat_types::SpawnSafetyFact::SpawnSafe,
         lexical_bindings: Vec::new(),
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,

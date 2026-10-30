@@ -42,7 +42,7 @@ fn one_host_fault(case: FaultCase) {
             cancellation.token(),
         )
         .with_service_ports(RuntimeServicePorts::default().with_placement(placement.clone()));
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let vars = crate::InterpreterVars::from_owned(vec![Value::Num(0.0); bytecode.var_count]);
         let reached = Rc::new(Cell::new(false));
         let fault = match case {
             FaultCase::Reject => VmFusionPublicationFault::Reject(
@@ -64,7 +64,7 @@ fn one_host_fault(case: FaultCase) {
         let result = if matches!(case, FaultCase::DropPending) {
             let mut pending = Box::pin(scoped_faultable_run(
                 bytecode.clone(),
-                &mut vars,
+                vars,
                 runtime.clone(),
                 Some(fault),
             ));
@@ -80,7 +80,7 @@ fn one_host_fault(case: FaultCase) {
         } else {
             Some(block_on(scoped_faultable_run(
                 bytecode.clone(),
-                &mut vars,
+                vars,
                 runtime.clone(),
                 Some(fault),
             )))

@@ -7,10 +7,16 @@ use runmat_hir::{BindingId, FunctionId, Span};
 use runmat_types::{SpawnSafetyFact, SpawnSafetyReason};
 use std::collections::{BTreeSet, HashMap};
 
+mod definition;
+mod targets;
+pub use definition::function_spawn_safety;
+use targets::{entry_targets, FutureTargets};
+
 #[derive(Debug, Clone, PartialEq)]
 struct CaptureFacts {
     reads_captures: BTreeSet<BindingId>,
     writes_captures: BTreeSet<BindingId>,
+    requires_isolation: bool,
 }
 
 fn analyze_capture_facts(body: &MirBody) -> CaptureFacts {
@@ -146,6 +152,7 @@ fn analyze_capture_facts(body: &MirBody) -> CaptureFacts {
     CaptureFacts {
         reads_captures,
         writes_captures,
+        requires_isolation: false,
     }
 }
 
@@ -458,7 +465,7 @@ pub(super) fn analyze_assembly_spawn_boundaries(
     let capture_facts: HashMap<_, _> = assembly
         .bodies
         .values()
-        .map(|body| (body.function, analyze_capture_facts(body)))
+        .map(|body| (body.function, definition::capture_facts(assembly, body)))
         .collect();
     assembly
         .bodies
@@ -489,7 +496,7 @@ fn analyze_spawn_boundaries_with_capture_facts(
             .get(&block.id)
             .and_then(|idx| in_states.get(*idx))
             .cloned()
-            .unwrap_or_else(|| vec![BTreeSet::new(); body.locals.len()]);
+            .unwrap_or_else(|| vec![FutureTargets::new(); body.locals.len()]);
         for stmt in &block.statements {
             walk_spawn_statement(body, stmt, &mut state, &mut |value, span, state| {
                 collect_classified_spawn_rvalue(value, span, capture_facts, state, &mut boundaries);
@@ -499,7 +506,7 @@ fn analyze_spawn_boundaries_with_capture_facts(
     boundaries
 }
 
-fn future_target_in_states(body: &MirBody) -> Vec<Vec<BTreeSet<FunctionId>>> {
+fn future_target_in_states(body: &MirBody) -> Vec<Vec<FutureTargets>> {
     let local_count = body.locals.len();
     let block_index: HashMap<BasicBlockId, usize> = body
         .blocks
@@ -517,14 +524,14 @@ fn future_target_in_states(body: &MirBody) -> Vec<Vec<BTreeSet<FunctionId>>> {
             }
         }
     }
-    let unknown = || vec![BTreeSet::new(); local_count];
-    let mut in_states: Vec<Option<Vec<BTreeSet<FunctionId>>>> = vec![None; body.blocks.len()];
+    let unknown = || vec![FutureTargets::new(); local_count];
+    let mut in_states: Vec<Option<Vec<FutureTargets>>> = vec![None; body.blocks.len()];
     let mut out_states = in_states.clone();
     let mut changed = true;
     while changed {
         changed = false;
         for (index, block) in body.blocks.iter().enumerate() {
-            let mut incoming = (index == 0).then(unknown);
+            let mut incoming = (index == 0).then(|| entry_targets(body));
             for &predecessor in &predecessors[index] {
                 if let Some(state) = &out_states[predecessor] {
                     match &mut incoming {
@@ -550,21 +557,13 @@ fn future_target_in_states(body: &MirBody) -> Vec<Vec<BTreeSet<FunctionId>>> {
         .collect()
 }
 
-fn join_future_targets(joined: &mut [BTreeSet<FunctionId>], incoming: &[BTreeSet<FunctionId>]) {
+fn join_future_targets(joined: &mut [FutureTargets], incoming: &[FutureTargets]) {
     for (target, source) in joined.iter_mut().zip(incoming) {
-        if target.is_empty() || source.is_empty() {
-            target.clear();
-        } else {
-            target.extend(source.iter().copied());
-        }
+        target.join(source);
     }
 }
 
-fn transfer_future_targets(
-    body: &MirBody,
-    block: &crate::BasicBlock,
-    state: &mut [BTreeSet<FunctionId>],
-) {
+fn transfer_future_targets(body: &MirBody, block: &crate::BasicBlock, state: &mut [FutureTargets]) {
     for stmt in &block.statements {
         walk_spawn_statement(body, stmt, state, &mut |_, _, _| {});
     }
@@ -577,14 +576,14 @@ fn transfer_future_targets(
     }
 }
 
-type SpawnClassifier<'a> = dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]) + 'a;
+type SpawnClassifier<'a> = dyn FnMut(&MirRvalue, Span, &[FutureTargets]) + 'a;
 
 /// Execute the same ordered static transfer for classification and the
 /// predecessor fixed point. Descriptor-only phases do not replay selectors.
 fn walk_spawn_statement(
     body: &MirBody,
     statement: &crate::MirStmt,
-    state: &mut [BTreeSet<FunctionId>],
+    state: &mut [FutureTargets],
     classify: &mut SpawnClassifier<'_>,
 ) {
     match &statement.kind {
@@ -598,7 +597,7 @@ fn walk_spawn_statement(
             {
                 state[local.0] = match &region.argument {
                     crate::MirCallArg::Single(operand) => operand_future_targets(operand, state),
-                    _ => BTreeSet::new(),
+                    _ => FutureTargets::new(),
                 };
             }
         }
@@ -669,7 +668,7 @@ fn walk_spawn_statement(
 fn walk_statement_preparation(
     body: &MirBody,
     statement: &crate::MirStmt,
-    state: &mut [BTreeSet<FunctionId>],
+    state: &mut [FutureTargets],
     classify: &mut SpawnClassifier<'_>,
 ) {
     statement
@@ -682,7 +681,7 @@ fn walk_statement_preparation(
 fn walk_spawn_steps(
     body: &MirBody,
     steps: &[crate::MirExpressionStep],
-    state: &mut [BTreeSet<FunctionId>],
+    state: &mut [FutureTargets],
     classify: &mut SpawnClassifier<'_>,
 ) {
     for step in steps {
@@ -704,7 +703,7 @@ fn walk_spawn_rvalue(
     body: &MirBody,
     value: &MirRvalue,
     span: Span,
-    state: &mut [BTreeSet<FunctionId>],
+    state: &mut [FutureTargets],
     classify: &mut SpawnClassifier<'_>,
 ) {
     if let MirRvalue::ShortCircuit { right_temps, .. } = value {
@@ -731,30 +730,25 @@ fn walk_spawn_rvalue(
     }
 }
 
-fn operand_future_targets(
-    operand: &MirOperand,
-    state: &[BTreeSet<FunctionId>],
-) -> BTreeSet<FunctionId> {
+fn operand_future_targets(operand: &MirOperand, state: &[FutureTargets]) -> FutureTargets {
     match operand {
         MirOperand::Local(local) => state[local.0].clone(),
-        MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => BTreeSet::new(),
+        MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => FutureTargets::new(),
     }
 }
-fn rvalue_future_targets(
-    value: &MirRvalue,
-    state: &[BTreeSet<FunctionId>],
-) -> BTreeSet<FunctionId> {
+fn rvalue_future_targets(value: &MirRvalue, state: &[FutureTargets]) -> FutureTargets {
     match value {
-        MirRvalue::Future { function, .. } => BTreeSet::from([*function]),
+        MirRvalue::Future { function, .. } => FutureTargets::from([*function]),
+        MirRvalue::ExternalFuture { .. } => FutureTargets::runtime_checked(),
         MirRvalue::Use(operand) => operand_future_targets(operand, state),
-        _ => BTreeSet::new(),
+        _ => FutureTargets::new(),
     }
 }
 fn assign_future_targets(
     body: &MirBody,
     place: &MirPlace,
     value: &MirRvalue,
-    state: &mut [BTreeSet<FunctionId>],
+    state: &mut [FutureTargets],
 ) {
     if let MirPlace::Local(local) = place {
         state[local.0] = rvalue_future_targets(value, state);
@@ -763,7 +757,7 @@ fn assign_future_targets(
     }
 }
 
-fn invalidate_place(body: &MirBody, place: &MirPlace, state: &mut [BTreeSet<FunctionId>]) {
+fn invalidate_place(body: &MirBody, place: &MirPlace, state: &mut [FutureTargets]) {
     if let Some(local) = place.root_local() {
         state[local.0].clear();
         return;
@@ -783,7 +777,7 @@ fn invalidate_place(body: &MirBody, place: &MirPlace, state: &mut [BTreeSet<Func
     }
 }
 
-fn invalidate_workspace(body: &MirBody, state: &mut [BTreeSet<FunctionId>]) {
+fn invalidate_workspace(body: &MirBody, state: &mut [FutureTargets]) {
     for local in super::workspace_effect::current_scope_bindings(body) {
         state[local.0].clear();
     }
@@ -805,7 +799,7 @@ fn collect_classified_spawn_rvalue(
     value: &MirRvalue,
     span: Span,
     capture_facts: &HashMap<FunctionId, CaptureFacts>,
-    future_targets: &[BTreeSet<FunctionId>],
+    future_targets: &[FutureTargets],
     boundaries: &mut Vec<SpawnBoundary>,
 ) {
     let MirRvalue::Spawn(future) = value else {
@@ -823,23 +817,23 @@ fn collect_classified_spawn_rvalue(
 fn classify_spawn_boundary(
     boundary: &SpawnBoundary,
     capture_facts: &HashMap<FunctionId, CaptureFacts>,
-    future_targets: &[BTreeSet<FunctionId>],
+    future_targets: &[FutureTargets],
 ) -> SpawnSafetyFact {
     let Some(targets) = spawn_targets(&boundary.future, future_targets) else {
         return SpawnSafetyFact::NotSpawnSafe {
             reason: SpawnSafetyReason::UnknownDynamicCapture,
         };
     };
-    let mut requires_isolation = false;
-    for target in targets {
+    let mut requires_isolation = targets.requires_runtime_owner();
+    for target in targets.known() {
         let Some(summary) = capture_facts.get(&target) else {
             requires_isolation = true;
             continue;
         };
-        if !summary.reads_captures.is_empty() || !summary.writes_captures.is_empty() {
-            return SpawnSafetyFact::NotSpawnSafe {
-                reason: SpawnSafetyReason::MutableLexicalCapture,
-            };
+        match definition::capture_safety(summary) {
+            denied @ SpawnSafetyFact::NotSpawnSafe { .. } => return denied,
+            SpawnSafetyFact::RequiresIsolation => requires_isolation = true,
+            SpawnSafetyFact::SpawnSafe => {}
         }
     }
     if requires_isolation {
@@ -849,10 +843,7 @@ fn classify_spawn_boundary(
     }
 }
 
-fn spawn_targets(
-    future: &MirOperand,
-    future_targets: &[BTreeSet<FunctionId>],
-) -> Option<BTreeSet<FunctionId>> {
+fn spawn_targets(future: &MirOperand, future_targets: &[FutureTargets]) -> Option<FutureTargets> {
     match future {
         MirOperand::Local(local) => future_targets
             .get(local.0)
@@ -934,6 +925,32 @@ mod tests {
     }
 
     #[test]
+    fn value_snapshot_callbacks_and_live_lexical_captures_have_distinct_admission() {
+        for (source, role, expected) in [
+            (
+                "function h=outer(); cap=1; h=@(x) x+cap; end",
+                runmat_types::FunctionSourceRole::Anonymous,
+                SpawnSafetyFact::RequiresIsolation,
+            ),
+            (
+                "function h=outer(); cap=1; function y=read(); y=cap; end; h=@read; end",
+                runmat_types::FunctionSourceRole::Nested,
+                SpawnSafetyFact::NotSpawnSafe {
+                    reason: SpawnSafetyReason::MutableLexicalCapture,
+                },
+            ),
+        ] {
+            let assembly = lower(source);
+            let (function, _) = assembly
+                .functions
+                .iter()
+                .find(|(_, metadata)| metadata.source_role == role)
+                .expect("captured definition");
+            assert_eq!(function_spawn_safety(&assembly, *function), Some(expected));
+        }
+    }
+
+    #[test]
     fn phased_selector_and_prepared_rhs_classify_original_future_targets() {
         for tail in [
             "a(c{:}, spawn(work())) = 1;",
@@ -981,7 +998,7 @@ mod tests {
                 })
             })
             .unwrap();
-        let mut state = vec![BTreeSet::new(); body.locals.len()];
+        let mut state = vec![FutureTargets::new(); body.locals.len()];
         let mut observed = false;
         for block in &body.blocks {
             let before = state.clone();
@@ -1027,7 +1044,7 @@ mod tests {
     fn conditional_overwrite_does_not_promote_unknown_to_known_safe() {
         let assembly = lower("a=1;");
         let body = assembly.bodies.values().next().unwrap();
-        let mut state = vec![BTreeSet::from([FunctionId(7)])];
+        let mut state = vec![FutureTargets::from([FunctionId(7)])];
         let value = MirRvalue::ShortCircuit {
             left: MirOperand::Local(MirLocalId(0)),
             op: crate::MirShortCircuitOp::And,
@@ -1059,6 +1076,27 @@ mod tests {
                 reason: SpawnSafetyReason::UnknownDynamicCapture
             }
         );
+    }
+
+    #[test]
+    fn runtime_future_input_requires_its_issued_owner_and_store_discards_provenance() {
+        for (store, expected) in [
+            ("", SpawnSafetyFact::RequiresIsolation),
+            (
+                "fut=1;",
+                SpawnSafetyFact::NotSpawnSafe {
+                    reason: SpawnSafetyReason::UnknownDynamicCapture,
+                },
+            ),
+        ] {
+            let assembly = lower(&format!(
+                "function y=consume(fut); {store} y=spawn(fut); end"
+            ));
+            let boundaries = analyze_assembly_spawn_boundaries(&assembly);
+            let boundaries: Vec<_> = boundaries.values().flatten().collect();
+            assert_eq!(boundaries.len(), 1);
+            assert_eq!(boundaries[0].safety, expected, "{store}");
+        }
     }
 
     #[test]
@@ -1098,7 +1136,7 @@ mod tests {
         let assembly = lower("a=1; b=2;");
         let body = assembly.bodies.values().next().unwrap();
         let binding = super::super::workspace_effect::current_scope_bindings(body)[0];
-        let mut state = vec![BTreeSet::from([FunctionId(7)]); body.locals.len()];
+        let mut state = vec![FutureTargets::from([FunctionId(7)]); body.locals.len()];
         let statement = crate::MirStmt {
             kind: MirStmtKind::WorkspaceEffect {
                 effect: runmat_types::WorkspaceEffect::ClearsBinding,
@@ -1113,7 +1151,7 @@ mod tests {
 
         // Even a nested write changes its root's future provenance, but does
         // not alter the independent value retained in another scalar local.
-        state[binding.0] = BTreeSet::from([FunctionId(7)]);
+        state[binding.0] = FutureTargets::from([FunctionId(7)]);
         let place = MirPlace::DynamicMember(
             Box::new(MirPlace::Local(binding)),
             MirOperand::Local(binding),
@@ -1137,7 +1175,7 @@ mod tests {
         receipt.binding = None;
         body.locals.push(receipt);
         let body = &body;
-        let mut state = vec![BTreeSet::from([FunctionId(7)]); body.locals.len()];
+        let mut state = vec![FutureTargets::from([FunctionId(7)]); body.locals.len()];
         let annotation = crate::MirStmt {
             kind: MirStmtKind::WorkspaceEffect {
                 effect: runmat_types::WorkspaceEffect::DynamicEval,

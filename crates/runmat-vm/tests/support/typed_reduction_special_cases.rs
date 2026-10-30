@@ -210,7 +210,8 @@ pub(crate) async fn assert_borrowed_nan_min(provider: &'static dyn AccelProvider
         .iter()
         .zip(&input)
         .all(|(actual, expected)| actual.to_bits() == expected.to_bits()));
-    drop(vars);
+    drop(output_value);
+    drop(completion);
     assert_eq!(
         borrowed
             .release()

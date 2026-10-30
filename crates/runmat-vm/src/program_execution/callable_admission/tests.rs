@@ -32,6 +32,7 @@ fn retained_builtin_selects_real_numeric_worker_program_and_keeps_runtime_failur
                 "normal builtin must reach worker admission"
             );
             let call = DeferredCall {
+                spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 invocation: DeferredInvocation::Program {
                     callable: runmat_execution::ProgramCallable::builtin(name).unwrap(),
                     context: runmat_execution::ProgramInvocationContext::Direct,

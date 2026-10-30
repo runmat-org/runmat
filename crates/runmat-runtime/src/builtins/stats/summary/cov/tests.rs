@@ -708,7 +708,10 @@ fn cov_gpu_rejects_negative_resident_weights() {
 #[cfg(feature = "wgpu")]
 fn cov_wgpu_matches_cpu() {
     let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions {
+            precision: runmat_accelerate::backend::wgpu::provider::WgpuPrecisionPolicy::RequireF32,
+            ..Default::default()
+        },
     ) else {
         return;
     };
@@ -758,79 +761,77 @@ fn cov_wgpu_matches_cpu() {
 fn cov_wgpu_noncentered_f32_cancellation_matches_quantized_oracle() {
     let _accel_guard = test_support::accel_test_lock();
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions {
+            precision: runmat_accelerate::backend::wgpu::provider::WgpuPrecisionPolicy::RequireF32,
+            ..Default::default()
+        },
     )
     .expect("this covariance witness requires a real WGPU adapter");
-    let tensor = Tensor::new_with_dtype(
-        vec![4.0, 4.2, 3.9, 4.3, 4.1, 2.0, 2.1, 2.0, 2.1, 2.2],
-        vec![5, 2],
-        runmat_value::NumericDType::F32,
-    )
-    .expect("typed single observations");
-    let quantized = tensor.materialize_f64();
-    let n = 5;
-    let means = [
-        quantized[..n].iter().sum::<f64>() / n as f64,
-        quantized[n..].iter().sum::<f64>() / n as f64,
-    ];
-    let mut expected = [0.0; 4];
-    let mut cancellation_scale = [0.0; 4];
-    for col in 0..2 {
-        for row in 0..2 {
-            let index = col * 2 + row;
-            let mut centered = 0.0;
-            let mut raw_products = 0.0;
-            for sample in 0..n {
-                let left = quantized[row * n + sample];
-                let right = quantized[col * n + sample];
-                centered += (left - means[row]) * (right - means[col]);
-                raw_products += (left * right).abs();
+    for (data, n) in [
+        (vec![4.0, 4.2, 3.9, 4.3, 4.1, 2.0, 2.1, 2.0, 2.1, 2.2], 5),
+        (vec![1.0e20; 4], 2),
+        (vec![1048575.0, 1048577.0, 1048575.0, 1048577.0], 2),
+    ] {
+        let tensor = Tensor::new_with_dtype(data, vec![n, 2], runmat_value::NumericDType::F32)
+            .expect("typed single observations");
+        let quantized = tensor.materialize_f64();
+        let means = [
+            quantized[..n].iter().sum::<f64>() / n as f64,
+            quantized[n..].iter().sum::<f64>() / n as f64,
+        ];
+        let mut expected = [0.0; 4];
+        for col in 0..2 {
+            for row in 0..2 {
+                expected[col * 2 + row] = (0..n)
+                    .map(|sample| {
+                        (quantized[row * n + sample] - means[row])
+                            * (quantized[col * n + sample] - means[col])
+                    })
+                    .sum::<f64>()
+                    / (n - 1) as f64;
             }
-            expected[index] = centered / (n - 1) as f64;
-            cancellation_scale[index] =
-                (raw_products + n as f64 * (means[row] * means[col]).abs()) / (n - 1) as f64;
         }
-    }
-    assert!(expected[0] > 0.0 && expected[0] < 0.1);
-
-    let cpu_result = block_on(cov_builtin(
-        Value::Tensor(tensor.clone()),
-        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
-    ))
-    .expect("host typed single covariance");
-    let Value::Tensor(cpu_tensor) = cpu_result else {
-        panic!("expected host tensor covariance");
-    };
-    assert_eq!(cpu_tensor.numeric_dtype(), runmat_value::NumericDType::F32);
-    for (got, want) in cpu_tensor.materialize_f64().iter().zip(expected) {
-        assert!((got - want).abs() <= 2.0 * f32::EPSILON as f64 * want.abs());
-    }
-
-    let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("typed single upload");
-    assert_eq!(
-        runmat_accelerate_api::handle_precision(&handle),
-        Some(runmat_accelerate_api::ProviderPrecision::F32)
-    );
-    let gpu_value = cov_builtin_sync(Value::GpuTensor(handle), Vec::new())
-        .expect("resident noncentered covariance");
-    assert!(matches!(&gpu_value, Value::GpuTensor(_)));
-    let gathered = test_support::gather(gpu_value).expect("gather resident covariance");
-    assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F32);
-    assert_eq!(gathered.shape(), [2, 2]);
-    // The provider forms XᵀX - nμμᵀ before dividing by n-1. For five rows,
-    // a dot product takes at most five products/four additions; mean reduction
-    // and division take five more steps; the outer product, subtraction, and
-    // final scaling fit within twenty F32 roundings along either branch.
-    // Use gamma_20 = 20u/(1-20u), u = epsilon/2, against the magnitudes of
-    // the cancelling terms for each cell, not a fixed absolute tolerance.
-    let unit_roundoff = f32::EPSILON as f64 / 2.0;
-    let gamma_20 = 20.0 * unit_roundoff / (1.0 - 20.0 * unit_roundoff);
-    for (index, (got, want)) in gathered.materialize_f64().iter().zip(expected).enumerate() {
-        let tolerance = gamma_20 * cancellation_scale[index];
-        assert!(
-            (got - want).abs() <= tolerance,
-            "noncentered covariance {index}: got {got}, quantized oracle {want}, bound {tolerance}"
+        let cpu_result = cov_builtin_sync(Value::Tensor(tensor.clone()), Vec::new())
+            .expect("host typed single covariance");
+        let Value::Tensor(cpu_tensor) = cpu_result else {
+            panic!("host covariance tensor")
+        };
+        assert_eq!(cpu_tensor.numeric_dtype(), runmat_value::NumericDType::F32);
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("typed single upload");
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&handle),
+            Some(runmat_accelerate_api::ProviderPrecision::F32)
         );
+        let gpu_value = cov_builtin_sync(Value::GpuTensor(handle), Vec::new())
+            .expect("resident noncentered covariance");
+        assert!(matches!(&gpu_value, Value::GpuTensor(_)));
+        let gathered = test_support::gather(gpu_value).expect("gather resident covariance");
+        assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(gathered.shape(), [2, 2]);
+        for ((host, got), want) in cpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(gathered.materialize_f64())
+            .zip(expected)
+        {
+            assert!(
+                got.is_finite(),
+                "finite observations must not overflow uncentered moments"
+            );
+            if want == 0.0 {
+                assert_eq!(got, 0.0, "constant observations have exact zero covariance");
+                assert_eq!(*host, 0.0);
+            } else {
+                // Error is relative to centered products, not the arbitrarily
+                // large uncentered offset that the implementation subtracts.
+                let tolerance = 32.0 * f32::EPSILON as f64 * want.abs();
+                assert!((*host - want).abs() <= 2.0 * f32::EPSILON as f64 * want.abs());
+                assert!(
+                    (got - want).abs() <= tolerance,
+                    "got {got}, quantized oracle {want}, centered bound {tolerance}"
+                );
+            }
+        }
     }
 }
 

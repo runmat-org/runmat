@@ -1,6 +1,6 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::program_execution::callable_admission::{
-    bind_selected_semantic_target, callable_capabilities,
+    bind_selected_semantic_target, callable_execution_contract, CallableExecutionContract,
 };
 use crate::FunctionRegistry;
 use runmat_runtime::RuntimeError;
@@ -114,7 +114,10 @@ pub(super) fn create_future(
     function_registry: &FunctionRegistry,
 ) -> Result<runmat_execution::FutureHandle, RuntimeError> {
     runmat_runtime::execution::validate_spawn_captures(&descriptor.args)?;
-    let capabilities = callable_capabilities(&descriptor, function_registry)?;
+    let CallableExecutionContract {
+        capabilities,
+        spawn_safety,
+    } = callable_execution_contract(&descriptor, function_registry)?;
     let mut invocation = runmat_runtime::execution::DeferredInvocation::callable(descriptor);
     let graph_required =
         runmat_runtime::execution::value_codec::deferred_invocation_requires_graph(&invocation);
@@ -184,14 +187,17 @@ pub(super) fn create_future(
                 arguments: descriptor.args,
                 requested_outputs: descriptor.requested_outputs,
             };
-        } else {
-            let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) =
-                &mut invocation
-            else {
-                unreachable!("future admission created a callable invocation")
-            };
-            bind_selected_semantic_target(descriptor, function_registry)?;
         }
+    }
+    // A local service may retain this lazy call across commands too. Capture
+    // the selected body now, before a later command can replace its numeric ID.
+    // Bare VM embeddings have no selected source graph and remain local-only.
+    if !builtin && context.graph_program.is_some() {
+        let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) = &mut invocation
+        else {
+            unreachable!("future admission created a callable invocation")
+        };
+        bind_selected_semantic_target(descriptor, function_registry)?;
     }
     let program_revision = program
         .program_revision(context.runtime.program_revision())
@@ -200,6 +206,7 @@ pub(super) fn create_future(
         .runtime
         .execution()
         .create_future(runmat_runtime::execution::DeferredCall {
+            spawn_safety,
             invocation,
             retry: runmat_execution::RetryPolicy::Never,
             program_revision,
@@ -366,9 +373,16 @@ async fn await_sequence(
                         }
                     }
                 };
-                let stored = result.as_ref().map(Clone::clone).map_err(|error| {
-                    runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
-                });
+                let (stored, result) = match result {
+                    Ok(sequence) => (Ok(sequence.clone()), Ok(sequence)),
+                    Err(error) => {
+                        let original = runmat_runtime::runtime_error::RuntimeErrorOwner::new(error);
+                        (
+                            Err(runmat_runtime::execution::ExecutionServiceError::LocalizedRuntimeFailure(original.clone())),
+                            Err(RuntimeError::from_shared_original(original)),
+                        )
+                    }
+                };
                 running.complete(stored).map_err(execution_error)?;
                 return result;
             }

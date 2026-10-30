@@ -43,7 +43,8 @@ flowchart TD
   Runtime --> Gate
   Gate -->|yes| Inputs --> Request --> Execute --> Provider --> Result
   Gate -->|no| Fallback
-  Execute -->|barrier or error| Fallback
+  Execute -->|pre-effect decline| Fallback
+  Execute -->|terminal failure| Failure["report original error"]
 ```
 
 ## Fusion Group Kinds
@@ -55,12 +56,16 @@ The VM maps semantic instruction windows into `FusionKind` variants, then runtim
 | `ElementwiseChain` | Chains of compatible elementwise operations over the same non-scalar shape. |
 | `Reduction` | Single reduction operations or reduction-shaped execution windows. |
 | `MatmulEpilogue` | Matrix multiplication followed by simple elementwise epilogue work. |
-| `CenteredGram` | Specialized centered Gram/covariance-style patterns. |
+| `CenteredGram` | Recognized centered-product patterns; execution retains the original operations. |
 | `ImageNormalize` | Image normalization chains with optional gain, bias, and gamma values. |
 | `PowerStepNormalize` | Power iteration normalization pattern. |
 | `ExplainedVariance` | Explained-variance computation pattern. |
 
 Specialized patterns are detected before generic elementwise grouping so they are not swallowed by a broader chain.
+
+`CenteredGram` recognition does not authorize a covariance substitution. The
+runtime executes the original mean, subtraction, transpose, multiplication and
+division, retaining their output classes, shapes and explicit GPU intent.
 
 Matrix epilogues are checked in source order before uploads. The provider descriptor uses `MatmulAffine`: optional multiplication followed by `Add`, `Subtract`, or `SubtractFrom`. An absent phase performs no arithmetic, including no implicit `+0`. Provider implementations preserve this order rather than algebraically combine operations.
 

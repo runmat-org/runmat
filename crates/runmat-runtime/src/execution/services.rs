@@ -78,6 +78,9 @@ impl DeferredInvocation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeferredCall {
+    /// Retained at creation from the selected compiler/catalog owner, not
+    /// reconstructed later from a Future's wire/type representation.
+    pub spawn_safety: runmat_types::SpawnSafetyFact,
     pub invocation: DeferredInvocation,
     /// Retry semantics proven at the call's semantic origin. Execution
     /// adapters must carry this value unchanged into their task request.
@@ -96,6 +99,23 @@ pub struct DeferredCall {
     /// The serial service does not inspect this payload. Execution adapters may
     /// require it to reproduce the callable in an isolated worker.
     pub program: DeferredProgram,
+}
+
+impl DeferredCall {
+    pub fn require_spawn_admission(
+        &self,
+        outputs: &OutputContract,
+    ) -> Result<(), ExecutionServiceError> {
+        if outputs.requested_outputs as usize != self.invocation.requested_outputs()
+            || outputs.owned_work.is_some()
+        {
+            return Err(ExecutionServiceError::InvalidOutputContract);
+        }
+        if let runmat_types::SpawnSafetyFact::NotSpawnSafe { reason } = self.spawn_safety {
+            return Err(ExecutionServiceError::SpawnUnsafe(reason));
+        }
+        Ok(())
+    }
 }
 
 /// Exact compiler-bound SPMD program submitted as one gang operation.
@@ -556,8 +576,11 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("execution service state poisoned");
         match state.futures.get(&future.id) {
-            Some(FutureState::Deferred(_))
-                if !state.tasks.values().any(|task| task.future_id == future.id) => {}
+            Some(FutureState::Deferred(call))
+                if !state.tasks.values().any(|task| task.future_id == future.id) =>
+            {
+                call.require_spawn_admission(&future.outputs)?;
+            }
             Some(_) => {
                 return Err(ExecutionServiceError::Failed(
                     "future has already been scheduled".into(),
@@ -906,6 +929,7 @@ mod tests {
 
     fn deferred_call(function: usize, arguments: Vec<Value>) -> DeferredCall {
         DeferredCall {
+            spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
             invocation: DeferredInvocation::callable(
                 crate::call::descriptor::CallableDescriptor::resolved(
                     runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(
@@ -1049,9 +1073,38 @@ mod tests {
     #[test]
     fn future_task_lifecycle_is_backed_by_service_state() {
         let service = RuntimeExecutionService::new();
+        let mut rejected_call = deferred_call(7, vec![Value::Num(3.0)]);
+        rejected_call.spawn_safety = runmat_types::SpawnSafetyFact::NotSpawnSafe {
+            reason: runmat_types::SpawnSafetyReason::MutableLexicalCapture,
+        };
+        let rejected = service.create_future(rejected_call).unwrap();
+        assert_eq!(
+            service.spawn(&rejected),
+            Err(ExecutionServiceError::SpawnUnsafe(
+                runmat_types::SpawnSafetyReason::MutableLexicalCapture,
+            ))
+        );
+        assert!(service.state.lock().unwrap().tasks.is_empty());
+        assert_eq!(
+            service.inspect_future(&rejected).unwrap().state,
+            ExecutionHandleState::Deferred
+        );
+        // Local awaiting does not request isolated scheduling or discard the
+        // original lexical owner. Refusing spawn must leave that path intact.
+        assert!(matches!(
+            service.begin_await(Value::Future(rejected.into())),
+            Ok(AwaitAction::ExecuteFuture { .. })
+        ));
         let future = service
             .create_future(deferred_call(7, vec![Value::Num(3.0)]))
             .unwrap();
+        let mut altered = future.clone();
+        altered.outputs.requested_outputs += 1;
+        assert_eq!(
+            service.spawn(&altered),
+            Err(ExecutionServiceError::InvalidOutputContract)
+        );
+        assert!(service.state.lock().unwrap().tasks.is_empty());
         let task = service.spawn(&future).unwrap();
         let action = service
             .begin_await(Value::Task(task.clone().into()))

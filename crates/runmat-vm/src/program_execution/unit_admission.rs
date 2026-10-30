@@ -640,7 +640,7 @@ pub fn admit_executable_unit(
         .ok_or(ExecutableUnitAdmissionError::MissingComponent(
             "function registry",
         ))?;
-    let registry = serde_json::from_slice(&registry_payload.bytes)
+    let mut registry: FunctionRegistry = serde_json::from_slice(&registry_payload.bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidRegistry)?;
     crate::validate_compiled_parallel_contracts(
         &bytecode,
@@ -671,6 +671,12 @@ pub fn admit_executable_unit(
     )?;
     let (static_imports, linked_native_imports) =
         static_import::admit(&envelope, &bytecode, &registry)?;
+    // The validated MIR, registry and layout share this admitted unit. Wire
+    // reconstruction cannot supply a local compiler spawn certificate.
+    for body in registry.functions.values_mut() {
+        body.spawn_contract = runmat_mir::analysis::function_spawn_safety(&mir, body.function)
+            .map(crate::bytecode::program::CompilerSpawnContract::issue);
+    }
     Ok(AdmittedExecutableUnit {
         envelope,
         canonical_v3: Arc::from(bytes),

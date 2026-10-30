@@ -46,6 +46,12 @@ pub(crate) fn bind_function_resolvers(
                 | CallableIdentity::AnonymousFunction(function) => {
                     if let Some(binding) = registry.exact_bound_binding(*function) {
                         return Some(SelectedGraphFunction {
+                            spawn_safety: registry
+                                .get(*function)?
+                                .spawn_contract
+                                .as_ref()?
+                                .safety()
+                                .clone(),
                             binding,
                             capabilities: registry.get(*function)?.capabilities.clone(),
                         });
@@ -87,6 +93,7 @@ pub(crate) fn bind_function_resolvers(
                 .view
                 .get_owned(function, binding.authority.local_definition()?)?;
             Some(SelectedGraphFunction {
+                spawn_safety: body.spawn_contract.as_ref()?.safety().clone(),
                 binding,
                 capabilities: body.capabilities.clone(),
             })

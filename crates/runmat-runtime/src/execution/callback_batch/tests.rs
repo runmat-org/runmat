@@ -20,6 +20,7 @@ fn selected(runtime: &RuntimeContext, name: &str) -> SelectedWorkerCallable {
     SelectedWorkerCallable::new(
         source.selected_descriptor().clone(),
         runmat_builtins::builtin_required_capabilities(name),
+        runmat_types::SpawnSafetyFact::RequiresIsolation,
         source,
         // A routing marker only. The VM sibling control captures and executes
         // the real InterpreterV2 bytes; this test never executes this marker.

@@ -80,6 +80,7 @@ fn deferred_callable_targets_keep_activation_ancestors_anonymous_captures_and_ar
         let registration =
             ValueRootRegistration::new(Box::new(DeferredServiceRoot(Rc::clone(&service)))).unwrap();
         let call = DeferredCall {
+            spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
             invocation: DeferredInvocation::callable(CallableDescriptor {
                 target: CallableTarget::BoundLexical {
                     binding,
@@ -102,6 +103,7 @@ fn deferred_callable_targets_keep_activation_ancestors_anonymous_captures_and_ar
         service.create_future(call).unwrap();
         service
             .create_future(DeferredCall {
+                spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 invocation: DeferredInvocation::callable(CallableDescriptor {
                     target: CallableTarget::FevalForward(Value::Closure(Closure::from_data(
                         runmat_value::ClosureData {

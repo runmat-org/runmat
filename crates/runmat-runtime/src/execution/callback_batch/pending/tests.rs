@@ -87,6 +87,7 @@ impl RuntimeExecutionServices for Service {
 }
 fn call() -> DeferredCall {
     DeferredCall {
+        spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
         invocation: DeferredInvocation::Program {
             callable: runmat_execution::ProgramCallable::builtin("abs").unwrap(),
             context: runmat_execution::ProgramInvocationContext::Direct,

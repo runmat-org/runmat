@@ -2,17 +2,26 @@
 use crate::FunctionRegistry;
 use runmat_runtime::RuntimeError;
 
-pub fn callable_capabilities(
+/// Semantic requirements travel together from the exact selected body.
+pub struct CallableExecutionContract {
+    pub capabilities: runmat_types::CapabilitySet,
+    pub spawn_safety: runmat_types::SpawnSafetyFact,
+}
+
+/// Imported bodies renew their nonwire spawn evidence from validated MIR.
+/// Names, numeric IDs and generic Future facts do not supply that evidence.
+pub fn callable_execution_contract(
     descriptor: &runmat_runtime::call::descriptor::CallableDescriptor,
     registry: &FunctionRegistry,
-) -> Result<runmat_types::CapabilitySet, RuntimeError> {
+) -> Result<CallableExecutionContract, RuntimeError> {
     use runmat_hir::CallableIdentity;
-
     use runmat_runtime::call::descriptor::CallableTarget;
-
     if let Some(name) = descriptor.target.selected_builtin_name() {
         return if runmat_builtins::builtin_name_is_known(name) {
-            Ok(runmat_builtins::builtin_required_capabilities(name))
+            Ok(CallableExecutionContract {
+                capabilities: runmat_builtins::builtin_required_capabilities(name),
+                spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
+            })
         } else {
             Err(crate::interpreter::errors::mex(
                 "ExecutionProgram",
@@ -20,56 +29,38 @@ pub fn callable_capabilities(
             ))
         };
     }
-
-    if let CallableTarget::Bound(binding) | CallableTarget::BoundLexical { binding, .. } =
-        &descriptor.target
-    {
-        let function = runmat_hir::FunctionId(binding.function);
-        let selected = registry
-            .owned_view(function, &binding.authority)
-            .and_then(|view| view.get(function).map(|body| body.capabilities.clone()))
-            .ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    "async bound callable has no exact selected definition",
-                )
-            })?;
-        return Ok(selected);
-    }
-    let identity = match &descriptor.target {
-        CallableTarget::Resolved { identity, .. }
-        | CallableTarget::CapturedResolved { identity, .. } => identity.as_identity(),
-        _ => {
-            return Err(crate::interpreter::errors::mex(
-                "ExecutionProgram",
-                "async execution requires an exact selected callable before capability binding",
-            ));
-        }
+    let read = |body: &crate::bytecode::FunctionBytecode| {
+        body.spawn_contract
+            .as_ref()
+            .map(|contract| CallableExecutionContract {
+                capabilities: body.capabilities.clone(),
+                spawn_safety: contract.safety().clone(),
+            })
     };
-    match identity {
-        CallableIdentity::BoundFunction(function)
-        | CallableIdentity::AnonymousFunction(function)
-        | CallableIdentity::ExternalFunction { function, .. } => registry
-            .get(*function)
-            .map(|function| function.capabilities.clone())
-            .ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    "async callable is absent from the exact function registry",
-                )
-            }),
-        CallableIdentity::Builtin(name) if runmat_builtins::builtin_name_is_known(&name.0) => {
-            Ok(runmat_builtins::builtin_required_capabilities(&name.0))
+    let selected = match &descriptor.target {
+        CallableTarget::Bound(binding) | CallableTarget::BoundLexical { binding, .. } => {
+            let function = runmat_hir::FunctionId(binding.function);
+            registry
+                .owned_view(function, &binding.authority)
+                .and_then(|view| view.get(function).and_then(read))
         }
-        CallableIdentity::Builtin(_) => Err(crate::interpreter::errors::mex(
-            "ExecutionProgram",
-            "async builtin is absent from the exact builtin registry",
-        )),
-        _ => Err(crate::interpreter::errors::mex(
-            "ExecutionProgram",
-            "async callable kind has no portable execution identity",
-        )),
-    }
+        CallableTarget::Resolved { identity, .. }
+        | CallableTarget::CapturedResolved { identity, .. } => match identity.as_identity() {
+            CallableIdentity::BoundFunction(function)
+            | CallableIdentity::AnonymousFunction(function)
+            | CallableIdentity::ExternalFunction { function, .. } => {
+                registry.get(*function).and_then(read)
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    selected.ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "SpawnContractUnavailable",
+            "async callable has no exact compiler-owned execution contract",
+        )
+    })
 }
 
 /// A semantic name is resolved only at Future admission, while its selected
@@ -132,7 +123,10 @@ pub fn select_retained_worker_callable(
     registry: &FunctionRegistry,
 ) -> Result<runmat_runtime::execution::SelectedWorkerCallable, RuntimeError> {
     let mut descriptor = target.selected_descriptor().clone();
-    let capabilities = callable_capabilities(&descriptor, registry)?;
+    let CallableExecutionContract {
+        capabilities,
+        spawn_safety,
+    } = callable_execution_contract(&descriptor, registry)?;
     bind_selected_semantic_target(&mut descriptor, registry)?;
     let direct_builtin = if descriptor.target.selected_builtin_name().is_some() {
         Some(capture_builtin_program(runtime, registry)?)
@@ -142,6 +136,7 @@ pub fn select_retained_worker_callable(
     Ok(runmat_runtime::execution::SelectedWorkerCallable::new(
         descriptor,
         capabilities,
+        spawn_safety,
         target,
         direct_builtin,
     ))

@@ -89,6 +89,7 @@ fn reserve(
             ));
         }
     };
+    call.require_spawn_admission(&future.outputs)?;
     let id = state.next_materialization;
     state.next_materialization = id.checked_add(1).ok_or_else(|| {
         ExecutionServiceError::Infrastructure("native materialization identity exhausted".into())

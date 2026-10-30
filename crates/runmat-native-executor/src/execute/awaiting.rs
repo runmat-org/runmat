@@ -283,6 +283,7 @@ mod tests {
         let runtime = RuntimeContext::new(service.clone());
         let future = service
             .create_future(DeferredCall {
+                spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 invocation: DeferredInvocation::callable(
                     runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                         CallableIdentity::BoundFunction(FunctionId(1)),

@@ -887,6 +887,8 @@ fn compile_semantic_functions(
         functions.insert(
             function.id,
             FunctionBytecode {
+                spawn_contract: runmat_mir::analysis::function_spawn_safety(mir, function.id)
+                    .map(super::program::CompilerSpawnContract::issue),
                 function: function.id,
                 definition_owner: std::sync::Arc::new(
                     runmat_value::FunctionDefinitionOwner::default(),

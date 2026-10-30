@@ -1027,6 +1027,7 @@ mod tests {
         runtime
             .execution()
             .create_future(crate::execution::DeferredCall {
+                spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 invocation: crate::execution::DeferredInvocation::callable(
                     crate::call::descriptor::CallableDescriptor::resolved(
                         runmat_types::CallableIdentity::Builtin(runmat_types::BuiltinId(

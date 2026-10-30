@@ -416,6 +416,15 @@ pub(super) fn lower_function(
             .at_function(function)
         })?;
     Ok(NativeFunction {
+        spawn_safety: runmat_mir::analysis::function_spawn_safety(assembly, function).ok_or_else(
+            || {
+                NativeCodegenError::new(
+                    "native.lowering.spawn_contract",
+                    "function has no source MIR spawn contract",
+                )
+                .at_function(function)
+            },
+        )?,
         id: function,
         portable_id: ctx.portable_function,
         mir_body_digest,

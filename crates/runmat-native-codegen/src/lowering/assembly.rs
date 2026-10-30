@@ -318,6 +318,15 @@ pub fn verify_against_mir(
             )
             .at_function(function_id));
         }
+        if Some(&native.spawn_safety)
+            != runmat_mir::analysis::function_spawn_safety(mir, function_id).as_ref()
+        {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_spawn_contract",
+                "Native IR spawn policy differs from the canonical MIR definition",
+            )
+            .at_function(function_id));
+        }
         if native.locals.len() != body.locals.len() {
             return Err(NativeCodegenError::new(
                 "native.ir.mir_locals",

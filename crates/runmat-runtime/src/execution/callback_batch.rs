@@ -31,6 +31,7 @@ pub(crate) enum CallbackParallelMode {
 pub struct SelectedWorkerCallable {
     descriptor: CallableDescriptor,
     capabilities: runmat_types::CapabilitySet,
+    spawn_safety: runmat_types::SpawnSafetyFact,
     _source: crate::call::descriptor::RepeatableCallable,
     direct_builtin: Option<std::sync::Arc<[u8]>>,
 }
@@ -38,12 +39,14 @@ impl SelectedWorkerCallable {
     pub fn new(
         descriptor: CallableDescriptor,
         capabilities: runmat_types::CapabilitySet,
+        spawn_safety: runmat_types::SpawnSafetyFact,
         source: crate::call::descriptor::RepeatableCallable,
         direct_builtin: Option<std::sync::Arc<[u8]>>,
     ) -> Self {
         Self {
             descriptor,
             capabilities,
+            spawn_safety,
             _source: source,
             direct_builtin,
         }
@@ -278,6 +281,7 @@ impl CallbackBatch {
                 .program_revision(runtime.program_revision())
                 .cloned();
             wave.calls.push(DeferredCall {
+                spawn_safety: self.selected.spawn_safety.clone(),
                 invocation,
                 retry: RetryPolicy::Never,
                 program_revision: revision,

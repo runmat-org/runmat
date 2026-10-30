@@ -7,6 +7,7 @@ mod parallel;
 mod reachability;
 mod regions;
 mod spawn_safety;
+pub use spawn_safety::function_spawn_safety;
 mod store;
 mod workspace_effect;
 

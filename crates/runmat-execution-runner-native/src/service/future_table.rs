@@ -67,7 +67,9 @@ impl FutureTable {
     }
 
     pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = (&FutureId, &mut FutureState)> {
-        self.0.iter_mut().map(|(id, record)| (id, &mut record.state))
+        self.0
+            .iter_mut()
+            .map(|(id, record)| (id, &mut record.state))
     }
 
     #[cfg(test)]

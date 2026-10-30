@@ -57,10 +57,9 @@ impl CoreHourLeaseClient {
             .map_err(|_| AdmissionError::SignInRequired)?
             .to_string();
         let config = crate::auth::config_path().map_err(|_| AdmissionError::LicenseInvalid)?;
-        let scope = format!(
-            "{:x}",
-            Sha256::digest(format!("{}\n{}", server.trim_end_matches('/'), org).as_bytes())
-        );
+        let scope = hex::encode(Sha256::digest(
+            format!("{}\n{}", server.trim_end_matches('/'), org).as_bytes(),
+        ));
         let path = config
             .parent()
             .ok_or(AdmissionError::LicenseInvalid)?

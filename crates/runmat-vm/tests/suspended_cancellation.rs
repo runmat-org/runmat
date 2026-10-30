@@ -194,6 +194,7 @@ fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
     let bytecode = runmat_vm::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).unwrap();
     let service = Rc::new(RuntimeExecutionService::new());
     let deferred = || DeferredCall {
+        spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
         invocation: DeferredInvocation::callable(
             runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                 runmat_types::CallableIdentity::Builtin(runmat_types::BuiltinId("sin".into())),

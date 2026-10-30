@@ -72,7 +72,8 @@ fn checked_reduction_relowering_rejects_forged_shader_stage() {
         config(),
     );
     let physical = built.physical();
-    validate_lowered_sources(physical).expect("owner-built checked shader must re-lower exactly");
+    validate_lowered_sources(physical, None)
+        .expect("owner-built checked shader must re-lower exactly");
     let mut forged = physical.sources().clone();
     forged.pass1.push_str("\n// forged stage");
     let forged = ProviderReductionRecipe::new_checked(
@@ -83,7 +84,7 @@ fn checked_reduction_relowering_rejects_forged_shader_stage() {
         physical.scalar_inputs().to_vec(),
     )
     .unwrap();
-    assert!(validate_lowered_sources(&forged).is_err());
+    assert!(validate_lowered_sources(&forged, None).is_err());
 }
 fn try_recipe(
     name: &str,
@@ -553,7 +554,7 @@ fn unused_two_pass_limits_do_not_reject_checked_single_pass_recipe() {
         ProviderPrecision::F32,
     )
     .expect("input 16 and output 4 bytes fit the selected binding limit");
-    validate_lowered_sources(built.physical()).unwrap();
+    validate_lowered_sources(built.physical(), None).unwrap();
     assert_eq!(built.work().output_requested_bytes, 4);
     assert_eq!(built.work().partial_requested_bytes, 48);
     let single = ReductionSelection::new(built.physical(), ReductionStrategy::SinglePass)
@@ -572,7 +573,7 @@ fn unused_two_pass_limits_do_not_reject_checked_single_pass_recipe() {
         ProviderPrecision::F32,
     )
     .expect("single dispatch fits while alternate first-stage grid does not");
-    validate_lowered_sources(built.physical()).unwrap();
+    validate_lowered_sources(built.physical(), None).unwrap();
     assert_eq!(built.geometry().single.workgroups, [1, 1, 1]);
     assert_eq!(built.geometry().pass1.logical_groups, 4);
     assert!(ReductionSelection::new(built.physical(), ReductionStrategy::SinglePass).is_ok());
@@ -589,7 +590,7 @@ fn unused_two_pass_limits_do_not_reject_checked_single_pass_recipe() {
         ProviderPrecision::F32,
     )
     .expect("all eight partial groups fit the enabled three-dimensional grid");
-    validate_lowered_sources(built.physical()).unwrap();
+    validate_lowered_sources(built.physical(), None).unwrap();
     assert_eq!(built.geometry().partial_elements, 8);
     assert_eq!(built.geometry().pass1.logical_groups, 8);
     assert_eq!(built.geometry().pass1.workgroups, [2, 2, 2]);

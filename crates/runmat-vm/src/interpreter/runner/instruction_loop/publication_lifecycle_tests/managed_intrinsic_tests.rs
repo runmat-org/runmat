@@ -158,7 +158,7 @@ fn managed_intrinsics_consume_source_ordered_owners_and_refund_exact_outputs() {
             drop(receipt);
             let outcome = block_on(scoped_faultable_run(
                 bytecode.clone(),
-                &mut vars,
+                crate::InterpreterVars::from_owned(vars),
                 runtime.clone(),
                 None,
             ))
@@ -182,21 +182,23 @@ fn managed_intrinsics_consume_source_ordered_owners_and_refund_exact_outputs() {
                 });
             if !selected {
                 drop(outcome);
-                drop(vars);
                 continue;
             }
 
-            assert_f32(&vars[slots[0]], &[1.0, 2.0]);
+            let crate::InterpreterOutcome::Completed(completion) = outcome;
+            let input = (*completion.values.get(slots[0]).unwrap()).clone();
+            let output = (*completion.values.get(slots[1]).unwrap()).clone();
+            assert_f32(&input, &[1.0, 2.0]);
             assert_f32(
-                &vars[slots[1]],
+                &output,
                 &[f64::from(2.0_f32.sin()), f64::from(4.0_f32.sin())],
             );
-            // The completed frame owns its admitted value-vector and root
-            // metadata as well as aliases of the returned values. Retire it
-            // before measuring the independently published tensor owners.
-            drop(outcome);
+            // Only the two immutable tensor headers are retained; they share
+            // the original numeric buffers. Retire the sole frame and its
+            // root metadata before measuring those independent owners.
+            drop(completion);
             let retained = ledger.snapshot().live_claimed_bytes;
-            drop(vars);
+            drop((input, output));
             let after_drop = ledger.snapshot().live_claimed_bytes;
             assert_eq!(
                 retained - after_drop,

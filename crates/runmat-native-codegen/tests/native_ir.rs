@@ -1215,6 +1215,17 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
     assembly.verify().unwrap();
     verify_against_mir(&assembly, &mir, Some(&names)).unwrap();
 
+    let mut forged_contract = assembly.clone();
+    forged_contract.functions[0].spawn_safety = runmat_types::SpawnSafetyFact::NotSpawnSafe {
+        reason: runmat_types::SpawnSafetyReason::UnknownDynamicCapture,
+    };
+    assert_eq!(
+        verify_against_mir(&forged_contract, &mir, Some(&names))
+            .unwrap_err()
+            .code,
+        "native.ir.mir_spawn_contract"
+    );
+
     let mut tampered = assembly;
     tampered.functions[0].locals[0].name = Some("different".into());
     assert_eq!(

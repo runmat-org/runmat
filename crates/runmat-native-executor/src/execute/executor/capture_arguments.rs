@@ -133,6 +133,7 @@ mod tests {
 
     fn body() -> runmat_native_codegen::NativeFunction {
         runmat_native_codegen::NativeFunction {
+            spawn_safety: runmat_types::SpawnSafetyFact::SpawnSafe,
             lexical_bindings: Vec::new(),
             inherited_storage_bindings: Vec::new(),
             creates_lexical_environment: false,

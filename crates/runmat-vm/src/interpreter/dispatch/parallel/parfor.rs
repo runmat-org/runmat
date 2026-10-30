@@ -378,6 +378,7 @@ async fn execute_parfor_tasks(
             .runtime
             .execution()
             .create_future(runmat_runtime::execution::DeferredCall {
+                spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 invocation: runmat_runtime::execution::DeferredInvocation::Program {
                     callable: runmat_execution::ProgramCallable::parallel_region(
                         executable.contract.id,
