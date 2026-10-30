@@ -77,6 +77,29 @@ impl ExecutableUnit {
         )
     }
 
+    /// Resolve the canonical compiled entrypoint without requiring portable
+    /// serialization. Local invocation must not acquire a transport requirement.
+    pub fn entrypoint_identity(
+        &self,
+        preferred_function: Option<&str>,
+    ) -> Result<
+        (
+            runmat_execution::ExecutableEntrypointKind,
+            Option<runmat_types::ProgramFunctionId>,
+        ),
+        String,
+    > {
+        match super::portable_entrypoint::resolve(self, preferred_function)? {
+            super::portable_entrypoint::PortableEntrypoint::Callable { kind, function, .. } => {
+                Ok((kind, Some(function)))
+            }
+            super::portable_entrypoint::PortableEntrypoint::DeclarationOnly(_) => Ok((
+                runmat_execution::ExecutableEntrypointKind::DeclarationOnly,
+                None,
+            )),
+        }
+    }
+
     /// Publish a dynamically selected class source through its unique typed
     /// primary constructor body, not through an unqualified filename alias.
     pub(crate) fn portable_envelope_for_constructor_source(

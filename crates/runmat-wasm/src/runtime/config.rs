@@ -6,7 +6,7 @@ use runmat_telemetry::TelemetryRunKind;
 use serde::Deserialize;
 use wasm_bindgen::prelude::JsValue;
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InitOptions {
     #[serde(default)]
@@ -59,6 +59,8 @@ pub(crate) enum ApplicationSettingsMode {
 
 #[derive(Clone)]
 pub(crate) struct SessionConfig {
+    /// Original host layers/overrides, never an already merged project's policy.
+    pub(crate) original_options: std::rc::Rc<InitOptions>,
     pub(crate) runtime: runmat_config::runtime::RunMatRuntimeConfig,
     pub(crate) enable_jit: bool,
     pub(crate) verbose: bool,
@@ -163,6 +165,7 @@ impl SessionConfig {
             runtime.runtime.error_namespace.clone()
         };
         Ok(Self {
+            original_options: std::rc::Rc::new(opts.clone()),
             enable_jit: runtime.jit.enabled
                 && cfg!(feature = "jit")
                 && !cfg!(target_arch = "wasm32"),
@@ -183,6 +186,29 @@ impl SessionConfig {
             error_namespace,
             runtime,
         })
+    }
+
+    pub(crate) fn for_project(
+        &self,
+        project: runmat_config::runtime::HostConfigDocument,
+        user_settings_json: Option<String>,
+    ) -> Result<Self, String> {
+        let mut options = self.original_options.as_ref().clone();
+        let inherited_user = options
+            .runtime_settings
+            .as_ref()
+            .filter(|layers| layers.policy == runmat_config::runtime::ConfigurationPolicy::Local)
+            .and_then(|layers| layers.user_settings_json.clone());
+        options.runtime_settings = Some(runmat_config::runtime::HostRuntimeSettings {
+            user_settings_json: user_settings_json.or(inherited_user),
+            project: Some(project),
+            policy: runmat_config::runtime::ConfigurationPolicy::Local,
+        });
+        let mut selected = Self::from_options(&options)?;
+        // Preserve the initial user/explicit host layer for the next project;
+        // the just-selected manifest must not become inherited input.
+        selected.original_options = self.original_options.clone();
+        Ok(selected)
     }
 
     pub(crate) fn to_accel_options(&self) -> AccelerateInitOptions {
@@ -323,6 +349,49 @@ mod compatibility_tests {
                 .unwrap()
                 .error_namespace,
             "RunMat"
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn named_project_policy_uses_captured_user_not_previous_project_and_keeps_host_override() {
+        use runmat_config::document::RunmatConfigFormat;
+        use runmat_config::runtime::{HostConfigDocument, HostRuntimeSettings};
+        let document = |compat: &str| HostConfigDocument {
+            source: format!("[runtime.language]\ncompat = '{compat}'\n"),
+            format: RunmatConfigFormat::Toml,
+        };
+        let initial = SessionConfig::from_options(&InitOptions {
+            runtime_settings: Some(HostRuntimeSettings {
+                user_settings_json: Some("{\"runtime\":{\"runtime\":{\"callstack_limit\":91},\"language\":{\"compat\":\"strict\"}}}".into()),
+                project: Some(document("matlab")), ..Default::default()
+            }),
+            enable_gpu: Some(false), ..Default::default()
+        }).unwrap();
+        let next = initial.for_project(document("runmat"), None).unwrap();
+        assert_eq!(next.language_compat, CompatMode::RunMat);
+        assert_eq!(next.callstack_limit, 91);
+        assert!(!next.enable_gpu);
+        let next = next
+            .for_project(
+                document("matlab"),
+                Some("{\"runtime\":{\"runtime\":{\"callstack_limit\":37}}}".into()),
+            )
+            .unwrap();
+        assert_eq!(next.language_compat, CompatMode::Matlab);
+        assert_eq!(next.callstack_limit, 37);
+        let next = next.for_project(document("runmat"), None).unwrap();
+        assert_eq!(next.callstack_limit, 91);
+        let explicit = SessionConfig::from_options(&InitOptions {
+            language_compat: Some("strict".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            explicit
+                .for_project(document("matlab"), None)
+                .unwrap()
+                .language_compat,
+            CompatMode::Strict
         );
     }
 

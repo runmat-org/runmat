@@ -23,19 +23,25 @@ impl FsPathNamespace {
     }
 }
 
-fn snapshot_provider() -> (Arc<dyn FsProvider>, Option<PathBuf>) {
-    if let Some(selected) = crate::invocation::snapshot() {
-        return selected;
+fn snapshot_provider() -> io::Result<(Arc<dyn FsProvider>, Option<PathBuf>)> {
+    if let Some((provider, directory)) = crate::invocation::snapshot() {
+        return Ok((crate::captured_read::selected_view(&provider)?, directory));
+    }
+    if let Some(selected) = crate::captured_read::snapshot() {
+        return Ok(selected);
     }
     let state = provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned");
-    (state.provider.clone(), state.current_dir_override.clone())
+    Ok((state.provider.clone(), state.current_dir_override.clone()))
 }
 
 fn captured_cwd(virtual_dir: Option<PathBuf>) -> io::Result<PathBuf> {
     if let Some(dir) = virtual_dir {
         return Ok(dir);
+    }
+    if crate::captured_read::snapshot().is_some() {
+        return Err(crate::captured_read::missing_directory());
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -63,7 +69,7 @@ fn resolve_with_cwd(
 /// CWD lookup occur after releasing the registry lock. Absolute paths need no
 /// working-directory service.
 pub fn capture_provider_path(path: &Path) -> io::Result<(Arc<dyn FsProvider>, PathBuf)> {
-    let (provider, virtual_dir) = snapshot_provider();
+    let (provider, virtual_dir) = snapshot_provider()?;
     let resolved = resolve_with_cwd(provider.path_namespace(), path, virtual_dir, || {
         captured_cwd(None)
     })?;
@@ -75,7 +81,7 @@ pub fn capture_provider_path(path: &Path) -> io::Result<(Arc<dyn FsProvider>, Pa
 pub fn capture_provider_for_paths(
     paths: &[&Path],
 ) -> io::Result<(Arc<dyn FsProvider>, Option<PathBuf>)> {
-    let (provider, virtual_dir) = snapshot_provider();
+    let (provider, virtual_dir) = snapshot_provider()?;
     let namespace = provider.path_namespace();
     let cwd = if paths.iter().all(|path| namespace.is_absolute(path)) {
         None
@@ -89,7 +95,7 @@ pub(super) fn capture_provider_pair(
     from: &Path,
     to: &Path,
 ) -> io::Result<(Arc<dyn FsProvider>, PathBuf, PathBuf)> {
-    let (provider, virtual_dir) = snapshot_provider();
+    let (provider, virtual_dir) = snapshot_provider()?;
     let namespace = provider.path_namespace();
     let cwd = if namespace.is_absolute(from) && namespace.is_absolute(to) {
         None
@@ -111,7 +117,7 @@ pub(super) fn capture_provider_pair(
 pub(super) fn capture_provider_many(
     paths: &[PathBuf],
 ) -> io::Result<(Arc<dyn FsProvider>, Vec<PathBuf>)> {
-    let (provider, virtual_dir) = snapshot_provider();
+    let (provider, virtual_dir) = snapshot_provider()?;
     let namespace = provider.path_namespace();
     let cwd = if paths.iter().all(|path| namespace.is_absolute(path)) {
         None

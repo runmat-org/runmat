@@ -19,6 +19,11 @@ pub struct PinnedFsProvider {
     mounts: super::mounts::ReadonlyMounts,
 }
 impl PinnedFsProvider {
+    /// Internal identity check for a local captured execution scope. Never
+    /// expose or substitute the original live provider through this port.
+    pub(crate) fn base_matches(&self, provider: &Arc<dyn FsProvider>) -> bool {
+        Arc::ptr_eq(&self.base, provider)
+    }
     pub fn new(base: Arc<dyn FsProvider>, manifest: InputManifest) -> io::Result<Self> {
         Ok(Self {
             base,

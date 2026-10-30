@@ -160,6 +160,44 @@ pub(crate) fn install_wasm_interrupt(
     }
 }
 
+impl RunMatWasm {
+    pub(crate) fn config_for_named_project(
+        &self,
+        project: runmat_config::runtime::HostConfigDocument,
+        user: Option<String>,
+    ) -> Result<SessionConfig, String> {
+        if self.disposed.get() {
+            return Err("RunMat session has been disposed".into());
+        }
+        self.config.borrow().for_project(project, user)
+    }
+
+    /// Session mechanisms and the WASM request adapter consume one admitted
+    /// configuration. Startup-owned physical/resource settings cannot silently
+    /// change under another project in the same browser host.
+    pub(crate) fn admit_named_config(&self, next: &SessionConfig) -> Result<(), String> {
+        let current = self.config.borrow();
+        let startup = |runtime: &runmat_config::runtime::RunMatRuntimeConfig| {
+            serde_json::to_value((
+                &runtime.gc,
+                &runtime.plotting,
+                &runtime.logging,
+                &runtime.fea,
+                &runtime.accelerate,
+            ))
+            .map_err(|error| error.to_string())
+        };
+        if startup(&current.runtime)? != startup(&next.runtime)? {
+            return Err("selected project changes browser startup-owned GPU, GC, plotting, logging or FEA storage settings; initialize a host with the selected project settings".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn publish_named_config(&self, next: SessionConfig) {
+        self.config.replace(next);
+    }
+}
+
 fn ensure_runtime_not_cancelled(operation: &str) -> Result<(), String> {
     if runmat_runtime::interrupt::is_cancelled() {
         Err(format!("{operation} cancelled by user"))

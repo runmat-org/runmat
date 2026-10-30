@@ -1,5 +1,21 @@
 use runmat_config::runtime::{FeaArtifactStoreMode, RunMatRuntimeConfig};
 
+/// This browser host installs no native foreign adapters or generic host bridge.
+/// Use the canonical typed admission owner rather than a family-name/Python test.
+pub(crate) fn validate_browser_interop(
+    manifest: &runmat_types::InteropManifest,
+) -> Result<(), String> {
+    runmat_runtime::foreign::admit_interop_manifest(
+        manifest,
+        &Default::default(),
+        runmat_runtime::foreign::ForeignPlatform::Wasm {
+            host_bridge_available: false,
+        },
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
 /// Pure admission, before logging, GC, plots, filesystem or provider effects.
 /// Native paths have no browser storage authority; resolving them is not proof
 /// that this host can honor them.
@@ -95,5 +111,27 @@ mod tests {
         supported.fea.artifact_store = Some(FeaArtifactStoreMode::InMemory);
         supported.fea.artifact_max_runs = Some(3);
         assert!(validate_browser_capabilities(&supported).is_ok());
+        assert!(validate_browser_interop(&runmat_types::InteropManifest::empty()).is_ok());
+        use runmat_builtins::ForeignAdapterFamily;
+        for family in [
+            ForeignAdapterFamily::Python,
+            ForeignAdapterFamily::Java,
+            ForeignAdapterFamily::Mex,
+            ForeignAdapterFamily::NativeFfi,
+        ] {
+            let mut interop = runmat_types::InteropManifest::empty();
+            interop
+                .adapters
+                .push(runmat_types::ForeignAdapterRequirement {
+                    adapter: runmat_types::ForeignAdapterId::new(family.adapter_id()).unwrap(),
+                    minimum_version: 1,
+                    capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
+                        runmat_types::CapabilityRequirement::ForeignRuntime,
+                    ])),
+                    execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                    artifact_identities: Vec::new(),
+                });
+            assert!(validate_browser_interop(&interop).is_err(), "{family:?}");
+        }
     }
 }

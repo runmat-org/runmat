@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, Span};
+use runmat_static_analysis::project::check_report::{project_diagnostic, source_position};
 use runmat_static_analysis::project::{ProjectAnalysis, ProjectSource};
 use runmat_types::ProgramSourceId;
-use serde::Serialize;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -335,15 +335,11 @@ async fn check_m_file(
     )
     .await
     .with_context(|| format!("Failed to analyze project source: {}", path.display()))?;
-    project.analysis.diagnostics.extend(catalog_diagnostics);
-    project.analysis.diagnostics.sort_by_key(|diagnostic| {
-        (
-            diagnostic.primary.source.unwrap_or(ProgramSourceId(0)),
-            diagnostic.primary.span.start,
-            diagnostic.primary.span.end,
-            diagnostic.code.clone(),
-        )
-    });
+    project.analysis.extend_diagnostics(
+        catalog_diagnostics,
+        runmat_static_analysis::frontend::DiagnosticStage::Resolution,
+    );
+    project.analysis.sort_diagnostics(false);
     let analysis = &project.analysis;
     let sources = CheckSources::Project(&project, &path);
 
@@ -366,7 +362,12 @@ async fn check_m_file(
         let diagnostics = analysis
             .diagnostics
             .iter()
-            .map(|diagnostic| CheckDiagnostic::from_hir(diagnostic, &sources))
+            .enumerate()
+            .map(|(index, diagnostic)| {
+                project_diagnostic(diagnostic, analysis.diagnostic_stage(index), |id| {
+                    sources.source(id)
+                })
+            })
             .collect::<Vec<_>>();
         let payload = json!({
             "schema_version": 1,
@@ -481,112 +482,6 @@ fn project_source_paths(
         .collect()
 }
 
-#[derive(Serialize)]
-struct CheckDiagnostic<'a> {
-    code: &'a str,
-    severity: &'static str,
-    message: &'a str,
-    category: Option<&'a str>,
-    primary: CheckDiagnosticSpan<'a>,
-    secondary: Vec<CheckDiagnosticSpan<'a>>,
-    notes: Vec<&'a str>,
-    help: Option<&'a str>,
-    suggestions: Vec<CheckSuggestion<'a>>,
-}
-
-#[derive(Serialize)]
-struct CheckDiagnosticSpan<'a> {
-    source_id: ProgramSourceId,
-    path: Option<&'a Path>,
-    start: usize,
-    end: usize,
-    line: Option<usize>,
-    column: Option<usize>,
-    end_line: Option<usize>,
-    end_column: Option<usize>,
-    label: Option<&'a str>,
-}
-
-#[derive(Serialize)]
-struct CheckSuggestion<'a> {
-    span: CheckDiagnosticSpan<'a>,
-    replacement: &'a str,
-    message: &'a str,
-}
-
-impl<'a> CheckDiagnostic<'a> {
-    fn from_hir(diagnostic: &'a HirDiagnostic, sources: &CheckSources<'a>) -> Self {
-        Self {
-            code: &diagnostic.code,
-            severity: diagnostic_severity_name(&diagnostic.severity),
-            message: &diagnostic.message,
-            category: diagnostic.category.as_deref(),
-            primary: CheckDiagnosticSpan::from_hir(
-                diagnostic.primary.span,
-                diagnostic.primary.label.as_deref(),
-                diagnostic.primary.source,
-                sources,
-            ),
-            secondary: diagnostic
-                .secondary
-                .iter()
-                .map(|span| {
-                    CheckDiagnosticSpan::from_hir(
-                        span.span,
-                        span.label.as_deref(),
-                        span.source,
-                        sources,
-                    )
-                })
-                .collect(),
-            notes: diagnostic
-                .notes
-                .iter()
-                .map(|note| note.message.as_str())
-                .collect(),
-            help: diagnostic.help.as_deref(),
-            suggestions: diagnostic
-                .suggestions
-                .iter()
-                .map(|suggestion| CheckSuggestion {
-                    span: CheckDiagnosticSpan::from_hir(
-                        suggestion.span,
-                        None,
-                        suggestion.source,
-                        sources,
-                    ),
-                    replacement: &suggestion.replacement,
-                    message: &suggestion.message,
-                })
-                .collect(),
-        }
-    }
-}
-
-impl<'a> CheckDiagnosticSpan<'a> {
-    fn from_hir(
-        span: Span,
-        label: Option<&'a str>,
-        source: Option<ProgramSourceId>,
-        sources: &CheckSources<'a>,
-    ) -> Self {
-        let located = sources.source(source);
-        let start = located.map(|(_, text)| source_position(text, span.start));
-        let end = located.map(|(_, text)| source_position(text, span.end));
-        Self {
-            source_id: source.unwrap_or(ProgramSourceId(0)),
-            path: located.map(|(path, _)| path),
-            start: span.start,
-            end: span.end,
-            line: start.map(|(line, _)| line),
-            column: start.map(|(_, column)| column),
-            end_line: end.map(|(line, _)| line),
-            end_column: end.map(|(_, column)| column),
-            label,
-        }
-    }
-}
-
 enum CheckSources<'a> {
     Project(&'a ProjectAnalysis, &'a Path),
     #[cfg(test)]
@@ -612,27 +507,6 @@ impl<'a> CheckSources<'a> {
             Self::Single(_, _) => None,
         }
     }
-}
-
-fn diagnostic_severity_name(severity: &HirDiagnosticSeverity) -> &'static str {
-    match severity {
-        HirDiagnosticSeverity::Error => "error",
-        HirDiagnosticSeverity::Warning => "warning",
-        HirDiagnosticSeverity::Information => "information",
-        HirDiagnosticSeverity::Help => "help",
-    }
-}
-
-fn source_position(source: &str, offset: usize) -> (usize, usize) {
-    let offset = offset.min(source.len());
-    let line_start = source[..offset].rfind('\n').map_or(0, |index| index + 1);
-    let line = source[..line_start]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1;
-    let column = source[line_start..offset].chars().count() + 1;
-    (line, column)
 }
 
 fn source_catalog_diagnostic(message: String) -> HirDiagnostic {

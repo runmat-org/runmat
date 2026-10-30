@@ -7,6 +7,24 @@ import type { CapturedProjectResolver } from "./package-cache/browser-resolver.j
 import { invokeOpenTelemetry } from "./observability.js";
 import type { OpenTelemetryNativeExports, OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
 export type { OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
+import { checkNativeSource } from "./source-check.js";
+import { listNativeProjectEntrypoints, runNativeProjectEntrypoint, prepareNativeNamedClusterProgram } from "./project-entrypoints.js";
+import type {
+  NamedProjectEntrypoint, ProjectEntrypointContext, ProjectEntrypointDescription,
+  RunProjectEntrypointOptions, ProjectEntrypointRunResult,
+  ProjectEntrypointSessionExports, ProjectEntrypointModuleExports,
+} from "./project-entrypoints.js";
+export type {
+  NamedProjectEntrypoint, ProjectEntrypointContext, ProjectEntrypointDescription,
+  ProjectEntrypointFailure, ProjectEntrypointSupport, RunProjectEntrypointOptions,
+  ProjectEntrypointRunResult,
+} from "./project-entrypoints.js";
+import type { SourceCheckNativeExports, SourceCheckRequest, SourceCheckReport } from "./source-check.js";
+export type {
+  SourceCheckTarget, SourceCheckRequest, SourceCheckOutcome, SourceCheckLocation,
+  SourceCheckDiagnostic, SourceCheckSummary, SourceCheckDocument, SourceCheckReport,
+  SourceAnalysisCompleteness,
+} from "./source-check.js";
 import type {
   RunMatProgramTaskCancellation,
   RunMatProgramTaskTerminal,
@@ -1194,6 +1212,8 @@ export type { LocalFeaWorkerContext } from "./fea-run-context.js";
 import type { LocalFeaWorkerContext } from "./fea-run-context.js";
 
 export interface RunMatSessionHandle {
+  listProjectEntrypoints(projectPath: string, context?: ProjectEntrypointContext): Promise<ProjectEntrypointDescription[]>;
+  runProjectEntrypoint(selection: NamedProjectEntrypoint, options?: RunProjectEntrypointOptions): Promise<ProjectEntrypointRunResult>;
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
@@ -1299,7 +1319,7 @@ interface NativeInitOptions {
   executionHost?: RunMatExecutionHost;
 }
 
-interface RunMatNativeSession {
+interface RunMatNativeSession extends ProjectEntrypointSessionExports {
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
@@ -1531,7 +1551,7 @@ export interface GeometryScenePickResult {
 }
 
 
-interface RunMatNativeModule extends OpenTelemetryNativeExports, RuntimeSettingsNativeExports {
+interface RunMatNativeModule extends OpenTelemetryNativeExports, RuntimeSettingsNativeExports, SourceCheckNativeExports, ProjectEntrypointModuleExports {
   default: (
     module?:
       | { module_or_path: WasmInitInput | Promise<WasmInitInput> }
@@ -1825,9 +1845,18 @@ export async function editUserRuntimeSettings(source: string, edits: UserRuntime
   return editNativeUserRuntimeSettings(await loadNativeModule(wasmModule), source, edits);
 }
 
+/** Check scripts, functions or a project without executing user code. */
+export async function checkSource(request: SourceCheckRequest, wasmModule?: WasmInitInput): Promise<SourceCheckReport> {
+  return checkNativeSource(await loadNativeModule(wasmModule), request);
+}
+
 /** Freeze a project and compile under project-only cluster policy, never laptop user defaults. */
-export async function prepareClusterProgram(sourcePath: string, functionName?: string, wasmModule?: WasmInitInput): Promise<PreparedClusterProgram> {
+export async function prepareClusterProgram(sourcePath: string | NamedProjectEntrypoint, functionName?: string, wasmModule?: WasmInitInput): Promise<PreparedClusterProgram> {
   const native = await loadNativeModule(wasmModule);
+  if (typeof sourcePath !== "string") {
+    if (functionName !== undefined) throw new TypeError("A named entrypoint cannot override its declared function");
+    return prepareNativeNamedClusterProgram(native, sourcePath);
+  }
   if (!native.prepareClusterProgram) throw new Error("The loaded RunMat module lacks project-only cluster program preparation; rebuild the browser runtime assets.");
   return native.prepareClusterProgram(sourcePath, functionName);
 }
@@ -2612,6 +2641,16 @@ class WebRunMatSession implements RunMatSessionHandle {
       typeof figureHandle === "number" ? figureHandle : null,
       typeof geometrySceneHandle === "number" ? geometrySceneHandle : null,
     );
+  }
+
+  async listProjectEntrypoints(projectPath: string, context?: ProjectEntrypointContext): Promise<ProjectEntrypointDescription[]> {
+    this.ensureActive();
+    return listNativeProjectEntrypoints(this.native, projectPath, context);
+  }
+
+  async runProjectEntrypoint(selection: NamedProjectEntrypoint, options?: RunProjectEntrypointOptions): Promise<ProjectEntrypointRunResult> {
+    this.ensureActive();
+    return runNativeProjectEntrypoint(this.native, selection, options);
   }
 
   async feaCapabilities(): Promise<FeaCapabilities> {

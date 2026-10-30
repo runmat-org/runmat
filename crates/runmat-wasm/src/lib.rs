@@ -30,7 +30,11 @@ pub use api::package::{
     validate_git_snapshot,
 };
 #[cfg(not(feature = "graphics-replay"))]
+pub use api::project_entrypoints::prepare_named_cluster_program;
+#[cfg(not(feature = "graphics-replay"))]
 pub use api::settings::{edit_user_runtime_settings, resolve_runtime_settings};
+#[cfg(not(feature = "graphics-replay"))]
+pub use api::source_check::check_source;
 // Plotting and figure APIs.
 pub use api::plot::{
     bind_surface_to_figure, create_plot_surface, destroy_plot_surface, fit_plot_surface_extents,

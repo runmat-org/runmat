@@ -115,11 +115,16 @@ mod tests {
         );
         let mut session = crate::RunMatSession::with_options(false, false).unwrap();
         let unit = block_on(session.compile_executable_unit(source, None)).unwrap();
-        let bytes = unit
-            .portable_envelope_for(Some("pulse"))
-            .unwrap()
-            .canonical_bytes()
-            .unwrap();
+        let envelope = unit.portable_envelope_for(Some("pulse")).unwrap();
+        assert_eq!(
+            unit.entrypoint_identity(Some("pulse")).unwrap(),
+            (
+                envelope.manifest.identity.entrypoint_kind,
+                envelope.manifest.identity.entrypoint_function,
+            )
+        );
+        assert!(unit.entrypoint_identity(Some("absent")).is_err());
+        let bytes = envelope.canonical_bytes().unwrap();
         assert!(!bytes
             .windows(lookup_path.len())
             .any(|window| window == lookup_path.as_bytes()));

@@ -1,6 +1,7 @@
 //! Browser adapter for checked-source serial execution.
 use super::fea_run_context::LocalFeaRunContext;
 use super::session::RunMatWasm;
+use crate::runtime::filesystem::captured::CapturedFilesystem;
 use crate::wire::errors::{js_error, js_value_to_string};
 use runmat_analysis_execution::{
     GeometryProviderProfile, PreparedFeaGeometry, PreparedGeometryMaterializationProgram,
@@ -9,21 +10,18 @@ use runmat_analysis_execution::{
 use runmat_core::{FeaGeometryExecutionHost, PreparedSerialFeaStudy};
 use runmat_execution::Digest;
 use runmat_runtime::analysis::fea_run_admission::{FeaRunKind, FeaRunOutcome};
-use runmat_runtime::analysis::{
-    AnalysisExecutionCandidate, AnalysisExecutionChoices, AnalysisExecutionMode,
-    AnalysisExecutionReadiness,
-};
+use runmat_runtime::analysis::AnalysisExecutionReadiness;
 use std::path::Path;
 use wasm_bindgen::{prelude::*, JsCast};
+
+mod plan;
+pub(super) use plan::browser_fea_plan;
 
 const BROWSER_MEMORY_BYTES: u64 = 1 << 30;
 const ARTIFACT_BYTES: u64 = 128 << 20;
 const PUBLICATION_HOST_REASON: &str = "Result storage is unavailable in this browser workspace.";
 
 // Capability metadata does not open or materialize storage while showing choices.
-fn supports_result_publication(provider: &dyn runmat_filesystem::FsProvider) -> bool {
-    provider.supports_workspace_transactions()
-}
 pub(crate) struct BrowserFeaSelection {
     id: String,
     path: String,
@@ -112,94 +110,10 @@ impl RunMatWasm {
         path: String,
         inputs: JsValue,
     ) -> Result<JsValue, JsValue> {
-        let result_provider = runmat_filesystem::current_provider();
-        let _filesystem = pin_inputs(inputs)?;
-        let cancellation = runmat_execution::cancellation::CancellationSource::new();
-        let _interrupt =
-            super::session::install_wasm_interrupt(&self.active_interrupt, cancellation.clone());
-        let mut session = self.take_session()?;
-        self.fea_selection.borrow_mut().take();
-        let source = session
-            .load_and_check_fea_source_path(Path::new(&path))
-            .await
-            .map_err(|e| js_error(&e))?;
-        ensure_not_cancelled(&cancellation)?;
-        let preflight = source.fea_execution_preflight().map_err(|e| js_error(&e))?;
-        let id = uuid::Uuid::new_v4().to_string();
-        let revision = source.check_result().revision.0;
-        let publication_supported = supports_result_publication(result_provider.as_ref());
-        let resident = resident_bytes();
-        let preparation_fits =
-            resident.saturating_add((512 + 128 + 64) << 20) <= BROWSER_MEMORY_BYTES;
-        let ready = preflight.browser_supported && publication_supported && preparation_fits;
-        let available = BROWSER_MEMORY_BYTES
-            .saturating_sub(resident)
-            .saturating_sub(ARTIFACT_BYTES)
-            .saturating_sub(64 << 20);
-        let reason = if !preflight.browser_supported {
-            preflight.desktop_reason
-        } else if !publication_supported {
-            Some(PUBLICATION_HOST_REASON)
-        } else if !preparation_fits {
-            Some("This session needs more memory for geometry preparation. Continue in the desktop app.")
-        } else if preflight
-            .approximate_memory_bytes
-            .is_some_and(|bytes| bytes > available)
-        {
-            Some("Desktop recommended for memory")
-        } else {
-            Some("Runs in this browser")
-        };
-        let duration = ready
-            .then(|| {
-                session
-                    .fea_execution_timing_profile()
-                    .for_source(
-                        &source,
-                        runmat_core::FeaTimingRoute::BrowserCheckedSource,
-                        1,
-                    )
-                    .ok()
-                    .and_then(|key| key.estimate())
-            })
-            .flatten();
-        let plan = AnalysisExecutionChoices {
-            schema_version: 1,
-            plan_id: id.clone(),
-            revision,
-            candidates: vec![
-                AnalysisExecutionCandidate {
-                    mode: AnalysisExecutionMode::SingleCore,
-                    cores: Some(1),
-                    memory_bytes: preflight.approximate_memory_bytes,
-                    estimated_millis: duration.as_ref().map(|value| value.0),
-                    duration_evidence: duration.map(|value| value.1),
-                    readiness: if ready {
-                        AnalysisExecutionReadiness::Ready
-                    } else {
-                        AnalysisExecutionReadiness::DesktopRequired
-                    },
-                    reason: reason.map(str::to_owned),
-                },
-                AnalysisExecutionCandidate {
-                    mode: AnalysisExecutionMode::MultiCore,
-                    cores: None,
-                    memory_bytes: None,
-                    estimated_millis: None,
-                    duration_evidence: None,
-                    readiness: AnalysisExecutionReadiness::DesktopRequired,
-                    reason: Some("Multi-core simulation runs in the desktop app.".into()),
-                },
-            ],
-        };
-        // A choice is bound to checked inputs, not to a prematurely generated mesh.
-        *self.fea_selection.borrow_mut() = ready.then_some(BrowserFeaSelection {
-            id,
-            path,
-            checked_revision: revision,
-        });
-        crate::wire::json_contract_to_js(&plan).map_err(|e| js_error(&e.to_string()))
+        let (filesystem, path) = CapturedFilesystem::simulation(&path, inputs)?;
+        self.plan_fea_source_in_scope(path, &filesystem).await
     }
+
     #[wasm_bindgen(js_name=runFeaSource)]
     pub async fn run_fea_source_js(
         &self,
@@ -207,10 +121,59 @@ impl RunMatWasm {
         plan_id: String,
         inputs: JsValue,
     ) -> Result<JsValue, JsValue> {
-        if !supports_result_publication(runmat_filesystem::current_provider().as_ref()) {
+        let (filesystem, path) = CapturedFilesystem::simulation(&path, inputs)?;
+        self.run_fea_source_in_scope(path, plan_id, &filesystem)
+            .await
+    }
+}
+
+impl RunMatWasm {
+    pub(super) async fn plan_fea_source_in_scope(
+        &self,
+        path: String,
+        filesystem: &CapturedFilesystem,
+    ) -> Result<JsValue, JsValue> {
+        let publication_supported = filesystem.publication_supported().await?;
+        filesystem
+            .read
+            .run(async {
+                let cancellation = runmat_execution::cancellation::CancellationSource::new();
+                let _interrupt = super::session::install_wasm_interrupt(
+                    &self.active_interrupt,
+                    cancellation.clone(),
+                );
+                let mut session = self.take_session()?;
+                self.fea_selection.borrow_mut().take();
+                let source = session
+                    .load_and_check_fea_source_path(Path::new(&path))
+                    .await
+                    .map_err(|e| js_error(&e))?;
+                ensure_not_cancelled(&cancellation)?;
+                let plan = browser_fea_plan(&session, &source, publication_supported)?;
+                let ready = plan
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.readiness == AnalysisExecutionReadiness::Ready);
+                // A choice is bound to checked inputs, not to a prematurely generated mesh.
+                *self.fea_selection.borrow_mut() = ready.then_some(BrowserFeaSelection {
+                    id: plan.plan_id.clone(),
+                    path,
+                    checked_revision: plan.revision,
+                });
+                crate::wire::json_contract_to_js(&plan).map_err(|e| js_error(&e.to_string()))
+            })
+            .await
+            .map_err(|error| js_error(&error.to_string()))?
+    }
+    pub(super) async fn run_fea_source_in_scope(
+        &self,
+        path: String,
+        plan_id: String,
+        filesystem: &CapturedFilesystem,
+    ) -> Result<JsValue, JsValue> {
+        if !filesystem.publication_supported().await? {
             return Err(js_error(PUBLICATION_HOST_REASON));
         }
-        let _filesystem = pin_inputs(inputs)?;
         let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let _interrupt =
             super::session::install_wasm_interrupt(&self.active_interrupt, cancellation.clone());
@@ -224,9 +187,11 @@ impl RunMatWasm {
             },
         );
         let mut session = self.take_session()?;
-        let fresh = session
-            .load_and_check_fea_source_path(Path::new(&path))
+        let fresh = filesystem
+            .read
+            .run(session.load_and_check_fea_source_path(Path::new(&path)))
             .await
+            .map_err(|error| js_error(&error.to_string()))?
             .map_err(|e| js_error(&e))?;
         ensure_not_cancelled(&cancellation)?;
         let checked = fresh.check_result();
@@ -260,6 +225,7 @@ impl RunMatWasm {
             .ok()
             .map(|key| key.start());
         let outcome = scope.run_future(async {
+            let result = filesystem.run(async {
             // First mesh only after explicit Run. The existing preparation and
             // exact resource planner remain the sole allocation authority.
             if resident_bytes().saturating_add((512 + 128 + 64) << 20) > BROWSER_MEMORY_BYTES {
@@ -301,7 +267,9 @@ impl RunMatWasm {
             .map_err(|e| js_error(&e))?;
             // Frozen source inputs have finished their job. Result I/O uses the
             // original provider and its canonical workspace transaction authority.
-            drop(_filesystem);
+            Ok::<_, JsValue>(result)
+            }).await??;
+            filesystem.run_original(async {
             let publication_identity = runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!("browser-fea:{plan_id}")).map_err(|e| js_error(&e))?;
             let payload = runmat_runtime::analysis::storage::with_artifact_access(true, |_| {
                 let publication = runmat_runtime::analysis::publish_structural_study_result(
@@ -315,6 +283,7 @@ impl RunMatWasm {
             let payload =
                 crate::wire::json_contract_to_js(&payload).map_err(|e| js_error(&e.to_string()))?;
             Ok(payload)
+            }).await?
         })
         .await;
         if let Some(observation) = observation {
@@ -354,21 +323,6 @@ fn checked_study_identity(
     .map_err(|error| js_error(&error.to_string()))
 }
 
-fn pin_inputs(inputs: JsValue) -> Result<Option<runmat_filesystem::ProviderGuard>, JsValue> {
-    if inputs.is_null() || inputs.is_undefined() {
-        return Ok(None);
-    }
-    let manifest: runmat_filesystem::pinned::InputManifest = serde_wasm_bindgen::from_value(inputs)
-        .map_err(|e| js_error(&format!("Invalid simulation inputs: {e}")))?;
-    let provider = runmat_filesystem::pinned::PinnedFsProvider::new(
-        runmat_filesystem::current_provider(),
-        manifest,
-    )
-    .map_err(|e| js_error(&e.to_string()))?;
-    Ok(Some(runmat_filesystem::replace_provider(
-        std::sync::Arc::new(provider),
-    )))
-}
 fn forward_progress(event: runmat_analysis_fea::FeaProgressEvent) {
     if let Ok(callback) =
         js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__runmatFeaProgress"))

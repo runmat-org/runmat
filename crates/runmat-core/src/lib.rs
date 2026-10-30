@@ -12,6 +12,7 @@ mod execution;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod foreign_artifacts;
 pub mod cluster_settings;
+pub mod project_entrypoints;
 #[cfg(not(target_arch = "wasm32"))]
 mod foreign_unit_host;
 mod fusion;
@@ -21,6 +22,7 @@ mod parallel_runtime;
 mod profiling;
 mod session;
 mod source_pool;
+pub mod source_check;
 mod telemetry;
 pub mod testing;
 mod value_metadata;

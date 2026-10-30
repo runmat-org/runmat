@@ -34,6 +34,17 @@ pub async fn prepare_cluster_program(
     let handoff = runmat_package::FrozenProjectHandoff::new(project);
     handoff.validate().map_err(error)?;
     let policy = project_policy(&handoff.project).await?;
+    prepare_project_program(handoff, source_path, function, policy).await
+}
+
+/// Both direct-path and named selection consume this one project-only producer.
+pub(super) async fn compile_project_program(
+    handoff: &runmat_package::FrozenProjectHandoff,
+    source_path: &str,
+    function: Option<&str>,
+    policy: &ClusterRuntimePolicy,
+) -> Result<(runmat_execution::ExecutableUnitEnvelope, ProgramRevision), JsValue> {
+    handoff.validate().map_err(error)?;
     let config = policy.runtime_config().map_err(error)?;
     let compatibility = match config.language.compat {
         runmat_config::runtime::LanguageCompatMode::RunMat => runmat_core::CompatMode::RunMat,
@@ -56,7 +67,7 @@ pub async fn prepare_cluster_program(
         .map_err(error)?;
     let source = runmat_core::ExecutableSource::capture_project_primary(
         &handoff.project,
-        std::path::Path::new(&source_path),
+        std::path::Path::new(source_path),
     )
     .await
     .map_err(error)?;
@@ -64,11 +75,25 @@ pub async fn prepare_cluster_program(
         .compile_executable_unit(source, Some(revision.clone()))
         .await
         .map_err(error)?;
-    if unit.requires_python_runtime() {
-        return Err(JsValue::from_str("browser cluster preparation cannot build native Python/Java/MEX artifacts; use a native prepared execution bundle"));
+    let envelope = unit.portable_envelope_for(function).map_err(error)?;
+    if envelope.manifest.identity.entrypoint_function.is_none() {
+        return Err(JsValue::from_str(
+            "cluster programs require an executable script or function",
+        ));
     }
-    let envelope = unit
-        .portable_envelope_for(function.as_deref())
+    session.close_gracefully().await.map_err(error)?;
+    Ok((envelope, revision))
+}
+
+pub(super) async fn prepare_project_program(
+    handoff: runmat_package::FrozenProjectHandoff,
+    source_path: String,
+    function: Option<String>,
+    policy: ClusterRuntimePolicy,
+) -> Result<JsValue, JsValue> {
+    let (envelope, revision) =
+        compile_project_program(&handoff, &source_path, function.as_deref(), &policy).await?;
+    crate::runtime::settings::validate_browser_interop(&envelope.manifest.interop)
         .map_err(error)?;
     let identity = &envelope.manifest.identity;
     let outputs = match identity.entrypoint_kind {
@@ -139,7 +164,6 @@ pub async fn prepare_cluster_program(
     let mut archive = Vec::new();
     runmat_execution_artifact::archive::write_bundle(&bundle, &mut archive, Default::default())
         .map_err(error)?;
-    session.close_gracefully().await.map_err(error)?;
     let result = js_sys::Object::new();
     js_sys::Reflect::set(
         &result,

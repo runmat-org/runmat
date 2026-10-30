@@ -5033,15 +5033,24 @@ end
 
     #[test]
     fn parse_failures_keep_the_shared_frontend_code() {
-        let text = "value = ;";
-        let analysis = analyze_document_with_compat(text, CompatMode::default());
-        let diagnostics = diagnostics_for_document(text, &analysis);
-        assert!(diagnostics.iter().any(|diagnostic| {
-            matches!(
+        for (text, expected) in [
+            ("value = ;", Position::new(0, 8)),
+            ("if true\n    value = ;\nend", Position::new(1, 12)),
+            ("function out = f()\nif true\n    value = ;\nend\nend", Position::new(2, 12)),
+            ("% 😀é\nclassdef C\nmethods\nfunction out = f(obj)\nif true\n    value = ;\nend\nend\nend\nend", Position::new(5, 12)),
+            ("if true\n    label = \"😀é\"; value = ;\nend", Position::new(1, 27)),
+        ] {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let syntax = analysis.syntax_error.as_ref().expect("syntax failure");
+            assert_eq!(syntax.position, text.find("value = ;").unwrap() + "value = ".len(), "{text}");
+            let diagnostics = diagnostics_for_document(text, &analysis);
+            let diagnostic = diagnostics.iter().find(|diagnostic| matches!(
                 &diagnostic.code,
                 Some(lsp_types::NumberOrString::String(code)) if code == "RunMat:ParseError"
-            )
-        }));
+            )).expect("shared parse diagnostic");
+            assert_eq!(diagnostic.range.start, expected, "{text}");
+            assert_eq!(diagnostic.range.end, Position::new(expected.line, expected.character + 1), "{text}");
+        }
     }
 
     #[test]

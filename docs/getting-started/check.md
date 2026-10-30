@@ -42,6 +42,58 @@ runmat check [OPTIONS] <FILE>
 ```
 `<FILE>` is the `.m` script to check. For a multi-file project, check the script you normally run. Configure source roots—the directories RunMat searches for your project's functions—when those functions live in other directories. Do not treat this command as a recursive check of every independent script in a directory.
 
+## JavaScript and browser checks
+
+After installing the host filesystem through `initRunMat`, the public SDK's
+`checkSource` calls the same Rust project frontend as the CLI. No JavaScript
+parser or shadow checker runs, and checking does not execute user code.
+
+```typescript
+import { checkSource } from "runmat";
+
+const script = await checkSource({ target: { kind: "script", path: "/project/src/main.m" } });
+const fn = await checkSource({
+  target: { kind: "function", path: "/project/src/helper.m", function: "helper" },
+});
+const project = await checkSource({ target: { kind: "project", path: "/project/runmat.toml" } });
+const diagnostics = project.documents.flatMap(document => document.diagnostics);
+```
+
+Script/function checks compose the statically reached source closure. A project
+check additionally checks **every indexed root-package `.m` source**, including
+unreached scripts/functions. Each document has its own source table; never join
+source IDs from different document reports. Shared dependency diagnostics can
+occur in more than one root report. The compiler's completeness/resolution fields
+remain visible; a clean report does not prove runtime-dependent calls safe.
+
+`userSettingsJson` supplies the optional host-owned user layer; project settings,
+including language compatibility, come from the selected project's actual
+manifest. `policy: "clusterWorker"` excludes the user layer. `searchPaths` uses
+the original captured filesystem CWD, as the CLI does. Function selection uses
+the actual primary HIR module's top-level function identities, not a filename,
+public-callability catalog or name-only match in a companion source. A private
+function file or `server.m` declaring `main` can be checked directly. Parse and
+lowering errors remain their original diagnostics when no HIR is available.
+
+Optional `inputManifest` uses the existing immutable versioned filesystem
+contract. Include the manifest, primary source and any reached sources; missing
+versions reject rather than reading live replacements. Otherwise the check uses
+the current host filesystem captured at request admission. It retains that
+authority across asynchronous reads using a filesystem-owned thread/poll-local
+read scope, without mutating the process provider. Selected runtime filesystem
+authority takes precedence; a different selected owner is refused, never masked.
+Infrastructure/configuration/selection failures reject the
+Promise; compiler findings remain structured diagnostics in the returned report.
+
+Diagnostics retain CLI `code`, `severity`, `category`, `primary`, `secondary`,
+notes/help/suggestions, plus typed producer `stage` and `location`/`related`
+aliases. Stages come from compiler operations, never diagnostic message/category
+strings. Locations preserve UTF-8 byte `start`/`end` and one-based
+Unicode-scalar line/column coordinates. They are **not** zero-based LSP UTF-16
+positions. A span with an unknown explicit source ID stays unlocated rather
+than borrowing another document's coordinates. Older WASM without `checkSource`
+rejects explicitly and requires matching rebuilt browser assets.
+
 ## What gets checked
 
 `runmat check` analyzes your script and the project functions available through its source configuration. It uses the same analysis as RunMat's editor tooling and can report:

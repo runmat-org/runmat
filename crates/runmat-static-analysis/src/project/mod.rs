@@ -1,6 +1,7 @@
 //! Project checking composes only statically reached source units. Source bytes
 //! and filesystem/revision admission remain explicit adapter inputs.
 pub mod composition;
+pub mod check_report;
 mod reachability;
 
 use std::collections::{HashMap, HashSet};
@@ -205,16 +206,11 @@ where
                 let contextual = runmat_mir::analysis::diagnose_call_contexts(mir);
                 call_context_budget_exhausted = contextual.budget_exhausted;
                 call_context_precision_withheld = contextual.precision_withheld;
-                analysis.diagnostics.extend(contextual.diagnostics);
-                analysis.diagnostics.sort_by_key(|diagnostic| {
-                    (
-                        diagnostic.primary.source,
-                        diagnostic.primary.span.start,
-                        diagnostic.primary.span.end,
-                        diagnostic.code.clone(),
-                    )
-                });
-                analysis.diagnostics.dedup();
+                analysis.extend_diagnostics(
+                    contextual.diagnostics,
+                    frontend::DiagnosticStage::Analysis,
+                );
+                analysis.sort_diagnostics(true);
             }
             if !incomplete_sources.is_empty() {
                 analysis.domains.name_resolution = AnalysisCompleteness::Partial;

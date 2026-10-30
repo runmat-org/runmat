@@ -64,7 +64,12 @@ fn project_diagnostic_json_and_text_use_each_span_source() {
     let project = project();
     let sources = CheckSources::Project(&project, Path::new("project/driver.m"));
     let diagnostic = diagnostic(&project);
-    let json = serde_json::to_value(CheckDiagnostic::from_hir(&diagnostic, &sources)).unwrap();
+    let json = serde_json::to_value(project_diagnostic(
+        &diagnostic,
+        runmat_static_analysis::frontend::DiagnosticStage::Semantic,
+        |id| sources.source(id),
+    ))
+    .unwrap();
     assert_eq!(json["primary"]["path"], "project/driver.m");
     assert_eq!(json["primary"]["source_id"], 0);
     assert_eq!(json["primary"]["line"], 3);
@@ -95,7 +100,12 @@ fn explicit_unknown_diagnostic_source_never_uses_driver_coordinates() {
     diagnostic.primary.source = Some(ProgramSourceId(99));
     diagnostic.secondary[0].source = Some(ProgramSourceId(98));
     diagnostic.suggestions[0].source = Some(ProgramSourceId(97));
-    let json = serde_json::to_value(CheckDiagnostic::from_hir(&diagnostic, &sources)).unwrap();
+    let json = serde_json::to_value(project_diagnostic(
+        &diagnostic,
+        runmat_static_analysis::frontend::DiagnosticStage::Semantic,
+        |id| sources.source(id),
+    ))
+    .unwrap();
     for span in [
         &json["primary"],
         &json["secondary"][0],
@@ -118,7 +128,12 @@ fn primary_display_path_does_not_replace_absolute_analysis_identity() {
     project.sources[0].path = "/absolute/project/driver.m".into();
     let sources = CheckSources::Project(&project, Path::new("driver.m"));
     let diagnostic = diagnostic(&project);
-    let json = serde_json::to_value(CheckDiagnostic::from_hir(&diagnostic, &sources)).unwrap();
+    let json = serde_json::to_value(project_diagnostic(
+        &diagnostic,
+        runmat_static_analysis::frontend::DiagnosticStage::Semantic,
+        |id| sources.source(id),
+    ))
+    .unwrap();
     assert_eq!(json["primary"]["path"], "driver.m");
     assert_eq!(
         json["secondary"][0]["path"],

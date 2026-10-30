@@ -7,6 +7,8 @@ use runmat_mir::{analysis::AnalysisStore, MirAssembly, MirStmtKind};
 use runmat_parser::{CompatMode, ParserOptions};
 use runmat_vm::CompileError;
 use serde::{Deserialize, Serialize};
+mod diagnostic_stage;
+pub use diagnostic_stage::DiagnosticStage;
 
 pub const DIAGNOSTIC_UNRESOLVED_FUNCTION: &str = "RM-RES0001";
 pub const DIAGNOSTIC_RUNTIME_DEPENDENT_RESOLUTION: &str = "RM-RES0002";
@@ -109,6 +111,9 @@ pub struct FrontendAnalysis {
     pub facts: Option<AnalysisStore>,
     pub semantic_facts: Option<crate::semantic::SemanticDocumentFacts>,
     pub diagnostics: Vec<HirDiagnostic>,
+    /// Explicit pipeline ownership, parallel to diagnostics. Category/message
+    /// strings never determine this stage. External unannotated additions are Unknown.
+    pub diagnostic_stages: Vec<DiagnosticStage>,
     pub parse_failure: Option<ParseFailure>,
     pub lowering_failure: Option<HirError>,
     pub compile_failure: Option<CompileError>,
@@ -174,6 +179,7 @@ pub fn analyze_source_with_catalog(
                 )
                 .with_primary_label("syntax error occurs here")
                 .with_category("syntax")],
+                diagnostic_stages: vec![DiagnosticStage::Syntax],
                 parse_failure: Some(failure),
                 lowering_failure: None,
                 compile_failure: None,
@@ -219,6 +225,7 @@ pub fn analyze_program_with_catalog(
                 )
                 .with_primary_label("semantic error occurs here")
                 .with_category("semantic")],
+                diagnostic_stages: vec![DiagnosticStage::Semantic],
                 parse_failure: None,
                 lowering_failure: Some(error),
                 compile_failure: None,
@@ -251,6 +258,7 @@ pub fn analyze_program_with_catalog(
                 )
                 .with_primary_label("MIR lowering failed here")
                 .with_category("mir-lowering")],
+                diagnostic_stages: vec![DiagnosticStage::MirLowering],
                 parse_failure: None,
                 lowering_failure: Some(error),
                 compile_failure: None,
@@ -271,14 +279,20 @@ pub fn analyze_program_with_catalog(
         .filter(|diagnostic| diagnostic.code != "RM-MIR0009")
         .cloned()
         .collect::<Vec<_>>();
+    let mut diagnostic_stages = vec![DiagnosticStage::Analysis; diagnostics.len()];
     let environment_effects = environment_effects(&mir);
     let resolution = call_resolution_diagnostics(&lowering, &environment_effects, source_catalog);
     let runtime_dependent = resolution.runtime_dependent;
+    diagnostic_stages.extend(std::iter::repeat_n(
+        DiagnosticStage::Resolution,
+        resolution.diagnostics.len(),
+    ));
     diagnostics.extend(resolution.diagnostics);
 
     let compiled = compile_lowering(&lowering, &mir, &facts);
     let compile_failure = compiled.as_ref().err().cloned();
     if let Some(error) = &compile_failure {
+        diagnostic_stages.push(DiagnosticStage::Compile);
         diagnostics.push(
             HirDiagnostic::new(
                 error
@@ -294,7 +308,8 @@ pub fn analyze_program_with_catalog(
         );
     }
 
-    diagnostics.sort_by_key(|diagnostic| {
+    let mut records: Vec<_> = diagnostics.into_iter().zip(diagnostic_stages).collect();
+    records.sort_by_key(|(diagnostic, _)| {
         (
             diagnostic.primary.source,
             diagnostic.primary.span.start,
@@ -302,7 +317,7 @@ pub fn analyze_program_with_catalog(
             diagnostic.code.clone(),
         )
     });
-    diagnostics.dedup_by(|left, right| {
+    records.dedup_by(|(left, _), (right, _)| {
         left.code == right.code
             && left.severity == right.severity
             && left.execution == right.execution
@@ -310,6 +325,7 @@ pub fn analyze_program_with_catalog(
             && left.primary.span == right.primary.span
             && left.message == right.message
     });
+    let (diagnostics, diagnostic_stages) = records.into_iter().unzip();
 
     let mut domains = AnalysisDomains::completed_frontend();
     if runtime_dependent {
@@ -322,6 +338,7 @@ pub fn analyze_program_with_catalog(
         facts: Some(facts),
         semantic_facts: Some(semantic_facts),
         diagnostics,
+        diagnostic_stages,
         parse_failure: None,
         lowering_failure: None,
         compile_failure,

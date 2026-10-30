@@ -20,6 +20,7 @@ mod native;
 mod native_path;
 mod native_path_intent;
 mod provider_path;
+mod captured_read;
 mod resource;
 mod selected_provider;
 mod staged_output;
@@ -37,6 +38,7 @@ mod wasm;
 #[cfg(not(target_arch = "wasm32"))]
 mod workspace_native;
 
+pub use captured_read::{CapturedExecutionScope, CapturedPinnedScope, CapturedReadScope};
 pub use dialog::*;
 pub use invocation::{
     register_invocation_filesystem_resolver, InvocationFilesystem, InvocationFilesystemSelection,
@@ -888,7 +890,13 @@ pub fn provider_override_lock() -> MutexGuard<'static, ()> {
 }
 
 fn current_dir_override() -> Option<PathBuf> {
-    if let Some((_, directory)) = invocation::snapshot() {
+    if let Some((provider, directory)) = invocation::snapshot() {
+        if captured_read::check_selected(&provider).is_err() {
+            return None;
+        }
+        return directory;
+    }
+    if let Some((_, directory)) = captured_read::snapshot() {
         return directory;
     }
     provider_state_lock()
@@ -963,6 +971,10 @@ pub fn with_provider_override<R>(provider: Arc<dyn FsProvider>, f: impl FnOnce()
 /// Returns the currently installed provider.
 pub fn current_provider() -> Arc<dyn FsProvider> {
     if let Some((provider, _)) = invocation::snapshot() {
+        return captured_read::selected_view(&provider)
+            .unwrap_or_else(|_| Arc::new(UnavailableFsProvider));
+    }
+    if let Some((provider, _)) = captured_read::snapshot() {
         return provider;
     }
     provider_state_lock()
@@ -977,9 +989,16 @@ pub fn current_provider() -> Arc<dyn FsProvider> {
 /// the provider; native process CWD is copied after that state is released.
 pub fn current_provider_with_current_dir() -> io::Result<(Arc<dyn FsProvider>, PathBuf)> {
     if let Some((provider, directory)) = invocation::snapshot() {
+        let provider = captured_read::selected_view(&provider)?;
         return Ok((
             provider,
             directory.expect("selected filesystem has virtual CWD"),
+        ));
+    }
+    if let Some((provider, directory)) = captured_read::snapshot() {
+        return Ok((
+            provider,
+            directory.ok_or_else(captured_read::missing_directory)?,
         ));
     }
     let (provider, virtual_dir) = {
@@ -1011,6 +1030,9 @@ pub fn current_provider_supports_read() -> bool {
 }
 
 pub fn current_dir() -> io::Result<PathBuf> {
+    if let Some((provider, _)) = invocation::snapshot() {
+        captured_read::check_selected(&provider)?;
+    }
     match invocation::selected() {
         Some(InvocationFilesystemSelection::Selected(owner)) => return owner.current_dir(),
         Some(InvocationFilesystemSelection::Denied {
@@ -1022,6 +1044,9 @@ pub fn current_dir() -> io::Result<PathBuf> {
                 .ok_or_else(invocation::denied_environment)
         }
         None => {}
+    }
+    if let Some((_, directory)) = captured_read::snapshot() {
+        return directory.ok_or_else(captured_read::missing_directory);
     }
     if let Some(current) = current_dir_override() {
         return Ok(current);
@@ -1041,6 +1066,10 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
 }
 
 pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
+    captured_read::require_directory_write()?;
+    if let Some((provider, _)) = invocation::snapshot() {
+        captured_read::check_selected(&provider)?;
+    }
     match invocation::selected() {
         Some(InvocationFilesystemSelection::Selected(owner)) => {
             if !owner.environment_write_allowed() {
@@ -1082,6 +1111,9 @@ pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
             ));
         }
         None => {}
+    }
+    if captured_read::set_local_directory(path.as_ref()).await? {
+        return Ok(());
     }
     let (provider, selected_dir) = {
         let state = provider_state_lock()

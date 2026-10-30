@@ -40,6 +40,39 @@ impl RunMatSession {
             .is_some_and(|project| &project.inputs == inputs)
     }
 
+    /// Mint a scope from the canonical immutable-input/owned-output cache.
+    /// The filesystem owner verifies the exact captured effective base before
+    /// this session publishes the cache selection. No provider reference escapes.
+    pub fn capture_input_filesystem(
+        &mut self,
+        original: &runmat_filesystem::CapturedReadScope,
+        inputs: InputManifest,
+    ) -> Result<runmat_filesystem::CapturedPinnedScope, crate::RunError> {
+        let provider = self
+            .pinned_provider(&inputs, original)
+            .map_err(|error| input_runtime_error(error.to_string()))?;
+        let scope = original
+            .pinned(Arc::clone(&provider))
+            .map_err(|error| input_runtime_error(error.to_string()))?;
+        self.pinned_inputs = Some((inputs, provider));
+        Ok(scope)
+    }
+
+    /// Invoke the same immutable executor with the input/output scope issued
+    /// before named resolution and compilation, not a second live filesystem.
+    pub async fn invoke_executable_with_inputs(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        invocation: crate::ProcedureInvocation,
+        control: &crate::InvocationControl,
+        filesystem: &runmat_filesystem::CapturedPinnedScope,
+    ) -> Result<runmat_runtime::execution::RootedValueSequence, crate::RunError> {
+        filesystem
+            .run(self.invoke_executable(unit, invocation, control))
+            .await
+            .map_err(|error| input_runtime_error(error.to_string()))?
+    }
+
     /// Execute against the caller's captured project inventory. Both hosts use
     /// this scope; filesystem reads may never consult newer live input versions.
     pub async fn execute_request_with_inputs(
@@ -52,6 +85,12 @@ impl RunMatSession {
             self.captured_project = None;
             return self.execute_request(request).await;
         };
+        let (captured_filesystem, _) =
+            match runmat_filesystem::CapturedReadScope::capture(&[std::path::Path::new(".")], None)
+            {
+                Ok(scope) => scope,
+                Err(error) => return input_error(&request, error.to_string()),
+            };
         // Notebook cells execute captured source text while their file reads and
         // companion discovery share the same immutable project inventory.
         // Cells in one notebook run share output ownership as well as inputs.
@@ -69,17 +108,7 @@ impl RunMatSession {
             Err(error) => return input_error(&request, error.to_string()),
         };
         let captured_handoff = prepared.map(|project| project.handoff.clone());
-        let provider = if let Some(project) = prepared {
-            Some(Arc::clone(&project.provider))
-        } else if let Some((manifest, provider)) = &self.pinned_inputs {
-            (manifest == &inputs).then(|| Arc::clone(provider))
-        } else {
-            None
-        };
-        let provider = match provider.map(Ok).unwrap_or_else(|| {
-            PinnedFsProvider::new(runmat_filesystem::current_provider(), inputs.clone())
-                .map(Arc::new)
-        }) {
+        let provider = match self.pinned_provider(&inputs, &captured_filesystem) {
             Ok(provider) => provider,
             Err(error) => {
                 return ExecutionResponse {
@@ -93,20 +122,45 @@ impl RunMatSession {
                 };
             }
         };
+        let filesystem = match captured_filesystem.pinned(Arc::clone(&provider)) {
+            Ok(scope) => scope,
+            Err(error) => return input_error(&request, error.to_string()),
+        };
+        let original_execution = match captured_filesystem.execution() {
+            Ok(scope) => scope,
+            Err(error) => return input_error(&request, error.to_string()),
+        };
         // A pre-existing source catalog was resolved against live content.
         // Discovery for this request must instead read the captured inventory.
         let previous_handoff = self.project_handoff().cloned();
-        if let Err(error) = self.clear_handoff_for_target().await {
+        if let Err(error) = filesystem
+            .run(self.clear_handoff_for_target())
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()))
+        {
             return input_error(&request, error.to_string());
         }
         if let Some(handoff) = captured_handoff {
-            if let Err(error) = self.install_handoff_for_target(handoff).await {
+            if let Err(error) = filesystem
+                .run(self.install_handoff_for_target(handoff))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()))
+            {
                 // The install error is reported; a failed rollback is folded in below.
-                let _ = self.clear_handoff_for_target().await;
+                let _ = original_execution
+                    .run(self.clear_handoff_for_target())
+                    .await;
                 if let Some(previous) = previous_handoff {
                     // Report restoration failure as well; never execute against
                     // a partially installed dependency graph.
-                    if let Err(restore) = self.install_handoff_for_target(previous).await {
+                    if let Err(restore) = original_execution
+                        .run(self.install_handoff_for_target(previous))
+                        .await
+                        .map_err(|error| error.to_string())
+                        .and_then(|result| result.map_err(|error| error.to_string()))
+                    {
                         return input_error(
                             &request,
                             format!("{error}; restore failed: {restore}"),
@@ -117,11 +171,32 @@ impl RunMatSession {
             }
         }
         self.pinned_inputs = Some((inputs, Arc::clone(&provider)));
-        let filesystem = runmat_filesystem::replace_provider(provider);
-        let mut response = self.execute_request(request).await;
+        // A scope failure is infrastructure, not a source-span diagnostic.
+        // Retain only its display name, never copy an entire source/workspace.
+        let failure_context = crate::abi::ExecutionSourceContext {
+            name: match &request.source {
+                crate::abi::SourceInput::Path(path) => path.clone(),
+                crate::abi::SourceInput::Text { name, .. } => name.clone(),
+                crate::abi::SourceInput::CapturedPath(source) => source.display_name().to_owned(),
+            },
+            text: None,
+            identity: None,
+        };
+        let mut response = match filesystem.run(self.execute_request(request)).await {
+            Ok(response) => response,
+            Err(error) => ExecutionResponse {
+                dependency_lock: None,
+                source_context: failure_context,
+                result: Err(input_runtime_error(error.to_string())),
+            },
+        };
         response.dependency_lock = dependency_lock;
-        drop(filesystem);
-        if let Err(error) = self.clear_handoff_for_target().await {
+        if let Err(error) = original_execution
+            .run(self.clear_handoff_for_target())
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()))
+        {
             response.result = Err(crate::RunError::Runtime(
                 runmat_runtime::build_runtime_error(format!(
                     "Cannot release captured project context: {error}"
@@ -132,7 +207,12 @@ impl RunMatSession {
             return response;
         }
         if let Some(handoff) = previous_handoff {
-            if let Err(error) = self.install_handoff_for_target(handoff).await {
+            if let Err(error) = original_execution
+                .run(self.install_handoff_for_target(handoff))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()))
+            {
                 response.result = Err(crate::RunError::Runtime(
                     runmat_runtime::build_runtime_error(format!(
                         "Cannot restore project context: {error}"
@@ -144,6 +224,34 @@ impl RunMatSession {
         }
         response
     }
+
+    fn pinned_provider(
+        &self,
+        inputs: &InputManifest,
+        original: &runmat_filesystem::CapturedReadScope,
+    ) -> std::io::Result<Arc<PinnedFsProvider>> {
+        if let Some(project) = self
+            .captured_project
+            .as_ref()
+            .filter(|project| &project.inputs == inputs)
+        {
+            return Ok(Arc::clone(&project.provider));
+        }
+        if let Some((manifest, provider)) = &self.pinned_inputs {
+            if manifest == inputs {
+                return Ok(Arc::clone(provider));
+            }
+        }
+        original.pin_inputs(inputs.clone())
+    }
+}
+
+fn input_runtime_error(message: String) -> crate::RunError {
+    crate::RunError::Runtime(
+        runmat_runtime::build_runtime_error(message)
+            .with_identifier("RunMat:InvalidRunInputs")
+            .build(),
+    )
 }
 
 fn input_error(request: &ExecutionRequest, message: String) -> ExecutionResponse {
@@ -345,6 +453,33 @@ mod tests {
         assert_eq!(
             second.read(Path::new("/result.txt")).await.unwrap(),
             b"cell one"
+        );
+        let cwd = runmat_filesystem::current_dir().unwrap();
+        let (original, _) =
+            runmat_filesystem::CapturedReadScope::capture(&[Path::new(".")], None).unwrap();
+        let scoped = session
+            .capture_input_filesystem(&original, manifest.clone())
+            .unwrap();
+        scoped
+            .run(async {
+                runmat_filesystem::create_dir_async("/owned").await.unwrap();
+                runmat_filesystem::set_current_dir_async("/owned")
+                    .await
+                    .unwrap();
+                runmat_filesystem::write_async("proof.txt", b"owned scope")
+                    .await
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        assert_eq!(runmat_filesystem::current_dir().unwrap(), cwd);
+        assert!(Arc::ptr_eq(
+            &first,
+            &session.pinned_inputs.as_ref().unwrap().1
+        ));
+        assert_eq!(
+            first.read(Path::new("/owned/proof.txt")).await.unwrap(),
+            b"owned scope"
         );
         let next = InputManifest {
             snapshot_id: "second".into(),

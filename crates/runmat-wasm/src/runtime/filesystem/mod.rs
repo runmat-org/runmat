@@ -1,4 +1,5 @@
 mod bindings;
+pub(crate) mod captured;
 mod convert;
 mod handle;
 mod provider;

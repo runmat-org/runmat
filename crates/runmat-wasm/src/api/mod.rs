@@ -4,6 +4,10 @@ pub(crate) mod config;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod settings;
 #[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod source_check;
+#[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod project_entrypoints;
+#[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod cluster_program;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod execution_artifact;
