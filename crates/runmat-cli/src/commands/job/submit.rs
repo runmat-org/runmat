@@ -197,13 +197,7 @@ pub async fn submit(
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        callable: runmat_execution::ProgramCallable::semantic(
-            runmat_execution::ProgramFunctionId(
-                u32::try_from(executable_function)
-                    .context("compiled entrypoint exceeds the portable function identity range")?,
-            ),
-            None,
-        ),
+        callable: runmat_execution::ProgramCallable::semantic(callable_function, None),
         requested_outputs,
     })?;
     let inputs = ProgramExecutionInputs {
