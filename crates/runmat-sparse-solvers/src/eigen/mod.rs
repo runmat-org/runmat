@@ -80,7 +80,8 @@ pub struct EigenResult {
     pub values: Vec<f64>,
     /// `n × values.len()` column-major, normalized in the problem's inner product.
     pub vectors: Vec<f64>,
-    /// True relative residuals `‖A x − λ B x‖ / (‖A x‖ + |λ| ‖B x‖)`.
+    /// True relative residuals `‖A x − λ B x‖ / (‖A x‖ + |λ| ‖B x‖)`; for [`buckling`], the
+    /// relative load-factor error bound `‖K φ − λ (−K_G) φ‖_{K⁻¹} / ‖φ‖_K`.
     pub residuals: Vec<f64>,
     pub converged: bool,
     pub restarts: usize,
@@ -365,7 +366,7 @@ fn dense_modal(
         }
     }
     let residuals = true_residuals(k, m, &values, &vectors);
-    Ok(EigenResult {
+    return Ok(EigenResult {
         converged: values.len() == count,
         values,
         vectors,
@@ -376,7 +377,7 @@ fn dense_modal(
         factorization: None,
         factor_kind: None,
         sturm: None,
-    })
+    });
 }
 
 fn sturm_count(
@@ -420,10 +421,8 @@ pub fn buckling(
     }
     let count = options.count.min(n);
     let p = options.block_size.max(1);
-    let negative_kg = CsrMatrix::linear_combination(&[(-1.0, kg)])?;
-    if n <= 400 || n <= 3 * basis_size(options, n).max(count + 2 * p) {
-        return dense_buckling(k, negative_kg.as_ref(), count);
-    }
+    // The Cholesky factor of K is the Lanczos operator and the norm of the residual bound, so
+    // the dense path for small pencils factors K as well.
     let solver = DirectSolver::<f64>::new(
         k.into(),
         DirectOptions {
@@ -432,7 +431,8 @@ pub fn buckling(
         },
         control,
     )?;
-    buckling_with_factor(k, kg, &solver, options, control)
+    let dense = n <= 400 || n <= 3 * basis_size(options, n).max(count + 2 * p);
+    solve_buckling(k, kg, &solver, options, control, dense)
 }
 
 /// Buckling with a caller-provided Cholesky factorization of `K`.
@@ -444,7 +444,28 @@ pub fn buckling_with_factor(
     control: SolveControl<'_>,
 ) -> SolverResult<EigenResult> {
     let n = k.nrows();
-    if solver.dimension() != n || kg.nrows() != n {
+    let count = options.count.min(n);
+    let p = options.block_size.max(1);
+    solve_buckling(
+        k,
+        kg,
+        solver,
+        options,
+        control,
+        n <= 400 || n < count + 4 * p,
+    )
+}
+
+fn solve_buckling(
+    k: CsrRef<'_, f64>,
+    kg: CsrRef<'_, f64>,
+    solver: &DirectSolver<f64>,
+    options: &EigenOptions,
+    control: SolveControl<'_>,
+    dense: bool,
+) -> SolverResult<EigenResult> {
+    let n = k.nrows();
+    if solver.dimension() != n || kg.nrows() != n || kg.ncols() != n {
         return Err(SolverError::Dimension(
             "factorization does not match the pencil".into(),
         ));
@@ -452,47 +473,55 @@ pub fn buckling_with_factor(
     let count = options.count.min(n);
     let p = options.block_size.max(1);
     let negative_kg = CsrMatrix::linear_combination(&[(-1.0, kg)])?;
-    if n <= 400 || n < count + 4 * p {
-        return dense_buckling(k, negative_kg.as_ref(), count);
-    }
-    let config = LanczosConfig {
-        n,
-        nev: count,
-        block: p,
-        max_basis: basis_size(options, n),
-        tolerance: options.tolerance,
-        max_restarts: options.max_restarts,
-        selection: lanczos::Selection::LargestAlgebraic,
-        seed: 0x6275_636b_6c00_0001,
+    let (values, vectors, lanczos_converged, restarts, operator_applications) = if dense {
+        let (values, vectors) = dense_buckling(k, negative_kg.as_ref(), count)?;
+        (values, vectors, true, 0, 0)
+    } else {
+        let config = LanczosConfig {
+            n,
+            nev: count,
+            block: p,
+            max_basis: basis_size(options, n),
+            tolerance: options.tolerance,
+            max_restarts: options.max_restarts,
+            selection: lanczos::Selection::LargestAlgebraic,
+            seed: 0x6275_636b_6c00_0001,
+        };
+        let mut apply_op = |x: &[f64], y: &mut [f64], cols: usize| -> SolverResult<()> {
+            blas::spmm(negative_kg.as_ref(), x, y, cols);
+            solver.solve_in_place(y, cols)
+        };
+        let apply_b = |x: &[f64], y: &mut [f64], cols: usize| blas::spmm(k, x, y, cols);
+        let output = thick_restart_block_lanczos(&config, &mut apply_op, &apply_b, control)?;
+        let mut pairs: Vec<(f64, usize)> = output
+            .theta
+            .iter()
+            .enumerate()
+            .filter(|(_, &t)| t > 0.0)
+            .map(|(i, &t)| (1.0 / t, i))
+            .collect();
+        pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let values: Vec<f64> = pairs.iter().map(|p| p.0).collect();
+        let mut vectors = vec![0.0; n * values.len()];
+        for (c, &(_, i)) in pairs.iter().enumerate() {
+            vectors[c * n..(c + 1) * n].copy_from_slice(&output.vectors[i * n..(i + 1) * n]);
+        }
+        (
+            values,
+            vectors,
+            output.converged >= count,
+            output.restarts,
+            output.operator_applications,
+        )
     };
-    let mut apply_op = |x: &[f64], y: &mut [f64], cols: usize| -> SolverResult<()> {
-        blas::spmm(negative_kg.as_ref(), x, y, cols);
-        solver.solve_in_place(y, cols)
-    };
-    let apply_b = |x: &[f64], y: &mut [f64], cols: usize| blas::spmm(k, x, y, cols);
-    let output = thick_restart_block_lanczos(&config, &mut apply_op, &apply_b, control)?;
-    let mut pairs: Vec<(f64, usize)> = output
-        .theta
-        .iter()
-        .enumerate()
-        .filter(|(_, &t)| t > 0.0)
-        .map(|(i, &t)| (1.0 / t, i))
-        .collect();
-    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    let values: Vec<f64> = pairs.iter().map(|p| p.0).collect();
-    let mut vectors = vec![0.0; n * values.len()];
-    for (c, &(_, i)) in pairs.iter().enumerate() {
-        vectors[c * n..(c + 1) * n].copy_from_slice(&output.vectors[i * n..(i + 1) * n]);
-    }
-    // Residual of K φ = λ (−K_G) φ.
-    let residuals = true_residuals(k, negative_kg.as_ref(), &values, &vectors);
+    let residuals = buckling_residuals(k, negative_kg.as_ref(), solver, &values, &vectors)?;
     Ok(EigenResult {
-        converged: output.converged >= count && values.len() == count,
+        converged: lanczos_converged && values.len() == count,
         values,
         vectors,
         residuals,
-        restarts: output.restarts,
-        operator_applications: output.operator_applications,
+        restarts,
+        operator_applications,
         shift: 0.0,
         factorization: Some(solver.symbolic().estimate()),
         factor_kind: Some(FactorKind::Cholesky),
@@ -500,11 +529,60 @@ pub fn buckling_with_factor(
     })
 }
 
+/// Relative load-factor error bounds `η = ‖K φ − λ (−K_G) φ‖_{K⁻¹} / ‖φ‖_K` of buckling Ritz pairs.
+///
+/// `K` is SPD, so `(−K_G) φ = θ K φ` with `θ = 1/λ` is a definite pencil, and the residual
+/// bound in the `K⁻¹` norm places an exact eigenvalue within `θ̃ (1 ± η)` (Parlett, *The
+/// Symmetric Eigenvalue Problem*, Thm. 4.5.1 applied to `K^{-1/2}(−K_G)K^{-1/2}`). `η` is
+/// therefore the relative load-factor error to first order, and it is invariant to the
+/// scaling and conditioning of `K`. It is the quantity the `K`-inner-product Lanczos drives
+/// below its tolerance; a Euclidean residual scaled by `‖K φ‖` is not, because `‖K φ‖` of a
+/// smooth mode is small against `‖K‖ ‖φ‖`.
+fn buckling_residuals(
+    k: CsrRef<'_, f64>,
+    negative_kg: CsrRef<'_, f64>,
+    solver: &DirectSolver<f64>,
+    values: &[f64],
+    vectors: &[f64],
+) -> SolverResult<Vec<f64>> {
+    let n = k.nrows();
+    let cols = values.len();
+    if cols == 0 {
+        return Ok(Vec::new());
+    }
+    let mut kx = vec![0.0; n * cols];
+    let mut bx = vec![0.0; n * cols];
+    blas::spmm(k, vectors, &mut kx, cols);
+    blas::spmm(negative_kg, vectors, &mut bx, cols);
+    let mut residual = kx.clone();
+    for (c, &lambda) in values.iter().enumerate() {
+        par::axpy(
+            -lambda,
+            &bx[c * n..(c + 1) * n],
+            &mut residual[c * n..(c + 1) * n],
+        );
+    }
+    let mut preconditioned = residual.clone();
+    solver.solve_in_place(&mut preconditioned, cols)?;
+    Ok((0..cols)
+        .map(|c| {
+            let range = c * n..(c + 1) * n;
+            let energy = par::dot(&vectors[range.clone()], &kx[range.clone()]);
+            let defect = par::dot(&residual[range.clone()], &preconditioned[range]).abs();
+            if energy > 0.0 {
+                (defect / energy).sqrt()
+            } else {
+                f64::INFINITY
+            }
+        })
+        .collect())
+}
+
 fn dense_buckling(
     k: CsrRef<'_, f64>,
     negative_kg: CsrRef<'_, f64>,
     count: usize,
-) -> SolverResult<EigenResult> {
+) -> SolverResult<(Vec<f64>, Vec<f64>)> {
     let n = k.nrows();
     // −K_G φ = θ K φ with θ = 1/λ.
     let (theta, x) = dense_generalized(negative_kg, k)?;
@@ -521,19 +599,7 @@ fn dense_buckling(
     for (c, &(_, i)) in pairs.iter().enumerate() {
         vectors[c * n..(c + 1) * n].copy_from_slice(&x[i * n..(i + 1) * n]);
     }
-    let residuals = true_residuals(k, negative_kg, &values, &vectors);
-    Ok(EigenResult {
-        converged: values.len() == count,
-        values,
-        vectors,
-        residuals,
-        restarts: 0,
-        operator_applications: 0,
-        shift: 0.0,
-        factorization: None,
-        factor_kind: None,
-        sturm: None,
-    })
+    Ok((values, vectors))
 }
 
 /// Extreme eigenpairs of a real symmetric `A` without shift-invert (`eigs` with `'largestabs'`

@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::{
     algebra::{
-        spmv, AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
+        AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
         RealSparseMatrix,
     },
     assembly::AssemblySummary,
@@ -19,6 +19,7 @@ pub(crate) const BUCKLING_ORTHOGONALIZATION_PASSES: usize = 2;
 #[serde(deny_unknown_fields)]
 pub struct BucklingMode {
     pub load_factor: f64,
+    /// Relative load-factor error bound `‖K φ + λ K_G φ‖_{K⁻¹} / ‖φ‖_K`.
     pub residual_norm: f64,
     pub dof_shape: Vec<f64>,
 }
@@ -161,14 +162,26 @@ pub fn solve_eigenvalue_buckling(
         },
     )
     .map_err(|error| BucklingSolveError::InnerSolve(error.to_string()))?;
-    let basis = (0..result.values.len())
-        .map(|index| {
-            let mut vector = result.vectors[index * dimension..(index + 1) * dimension].to_vec();
-            canonicalize_sign(&mut vector);
-            vector
-        })
-        .collect::<Vec<_>>();
-    let mut modes = build_modes(&system, &geometric, &reduction, &basis)?;
+    // Load factors and their relative error bounds come from the shared eigensolver: one
+    // definition of the residual for the Lanczos stopping test and for this acceptance test.
+    let mut modes = Vec::with_capacity(result.values.len());
+    for (index, (&load_factor, &residual_norm)) in
+        result.values.iter().zip(&result.residuals).enumerate()
+    {
+        if !load_factor.is_finite() || 1.0 / load_factor <= POSITIVE_MULTIPLIER_TOLERANCE {
+            continue;
+        }
+        let mut vector = result.vectors[index * dimension..(index + 1) * dimension].to_vec();
+        canonicalize_sign(&mut vector);
+        modes.push(BucklingMode {
+            load_factor,
+            residual_norm,
+            dof_shape: reduction
+                .expand_linear(&vector)
+                .map_err(|error| BucklingSolveError::ConstraintReduction(error.to_string()))?,
+        });
+    }
+    modes.sort_by(|left, right| left.load_factor.total_cmp(&right.load_factor));
     modes.truncate(requested_mode_count);
     let converged = result.converged
         && modes.len() == requested_mode_count
@@ -181,57 +194,6 @@ pub fn solve_eigenvalue_buckling(
         preconditioner: SpdPreconditionerKind::Direct,
         modes,
     })
-}
-
-fn build_modes(
-    system: &AssembledRealSystem,
-    geometric: &RealSparseMatrix,
-    reduction: &crate::constraints::AffineConstraintReduction,
-    basis: &[Vec<f64>],
-) -> Result<Vec<BucklingMode>, BucklingSolveError> {
-    let mut modes = Vec::new();
-    for vector in basis {
-        let elastic = spmv(system.operators().stiffness(), vector)
-            .map_err(|error| BucklingSolveError::ConstraintReduction(format!("{error:?}")))?;
-        let initial_stress = spmv(geometric, vector)
-            .map_err(|error| BucklingSolveError::ConstraintReduction(format!("{error:?}")))?;
-        let denominator = dot(vector, &elastic);
-        let multiplier = -dot(vector, &initial_stress) / denominator.max(1.0e-24);
-        if !multiplier.is_finite() || multiplier <= POSITIVE_MULTIPLIER_TOLERANCE {
-            continue;
-        }
-        let load_factor = 1.0 / multiplier;
-        let residual = elastic
-            .iter()
-            .zip(&initial_stress)
-            .map(|(k, kg)| (k + load_factor * kg).powi(2))
-            .sum::<f64>()
-            .sqrt();
-        let scale = elastic
-            .iter()
-            .map(|value| value * value)
-            .sum::<f64>()
-            .sqrt()
-            + load_factor.abs()
-                * initial_stress
-                    .iter()
-                    .map(|value| value * value)
-                    .sum::<f64>()
-                    .sqrt();
-        modes.push(BucklingMode {
-            load_factor,
-            residual_norm: residual / scale.max(1.0e-24),
-            dof_shape: reduction
-                .expand_linear(vector)
-                .map_err(|error| BucklingSolveError::ConstraintReduction(error.to_string()))?,
-        });
-    }
-    modes.sort_by(|left, right| left.load_factor.total_cmp(&right.load_factor));
-    Ok(modes)
-}
-
-fn dot(left: &[f64], right: &[f64]) -> f64 {
-    left.iter().zip(right).map(|(a, b)| a * b).sum()
 }
 
 fn canonicalize_sign(vector: &mut [f64]) {
