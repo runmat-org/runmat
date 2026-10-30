@@ -93,7 +93,7 @@ pub const FEA_RESULTS_CATALOG_ENTRY: BuiltinCatalogEntry =
         inference: infer,
         integer_capabilities: &FEA_RESULTS_INTEGER_CAPABILITIES,
         integer_audit: None,
-        effects: OperationEffectProfile::SynchronousArtifactRead,
+        effects: OperationEffectProfile::ArtifactRead,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
     });

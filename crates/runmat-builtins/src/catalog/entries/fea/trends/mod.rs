@@ -71,7 +71,7 @@ pub const FEA_TRENDS_CATALOG_ENTRY: BuiltinCatalogEntry =
         inference: infer,
         integer_capabilities: &FEA_TRENDS_INTEGER_CAPABILITIES,
         integer_audit: None,
-        effects: OperationEffectProfile::SynchronousArtifactRead,
+        effects: OperationEffectProfile::ArtifactRead,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
     });

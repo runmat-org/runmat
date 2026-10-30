@@ -50,7 +50,7 @@ pub const FEA_PLOT_METHOD_CATALOG_ENTRY: BuiltinCatalogEntry =
         inference: infer,
         integer_capabilities: &[],
         integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
-        effects: OperationEffectProfile::SynchronousFigure,
+        effects: OperationEffectProfile::Figure,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
     });

@@ -176,3 +176,70 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
         suppress_auto_output: false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artifact_readers_and_figures_admit_provider_suspension() {
+        use crate::catalog::{
+            FEA_COMPARE_CATALOG_ENTRY, FEA_FIELD_CATALOG_ENTRY, FEA_FIELD_PAGE_CATALOG_ENTRY,
+            FEA_MESH_METHOD_CATALOG_ENTRY, FEA_PLOT_METHOD_CATALOG_ENTRY,
+            FEA_RESULTS_CATALOG_ENTRY, FEA_TRENDS_CATALOG_ENTRY,
+        };
+        for (entry, purity, kind) in [
+            (
+                &FEA_RESULTS_CATALOG_ENTRY,
+                BuiltinPurity::DeterministicReadOnly,
+                BuiltinSemanticKind::Filesystem,
+            ),
+            (
+                &FEA_FIELD_CATALOG_ENTRY,
+                BuiltinPurity::DeterministicReadOnly,
+                BuiltinSemanticKind::Filesystem,
+            ),
+            (
+                &FEA_FIELD_PAGE_CATALOG_ENTRY,
+                BuiltinPurity::DeterministicReadOnly,
+                BuiltinSemanticKind::Filesystem,
+            ),
+            (
+                &FEA_COMPARE_CATALOG_ENTRY,
+                BuiltinPurity::DeterministicReadOnly,
+                BuiltinSemanticKind::Filesystem,
+            ),
+            (
+                &FEA_TRENDS_CATALOG_ENTRY,
+                BuiltinPurity::DeterministicReadOnly,
+                BuiltinSemanticKind::Filesystem,
+            ),
+            (
+                &FEA_PLOT_METHOD_CATALOG_ENTRY,
+                BuiltinPurity::Impure,
+                BuiltinSemanticKind::Plotting,
+            ),
+            (
+                &FEA_MESH_METHOD_CATALOG_ENTRY,
+                BuiltinPurity::Impure,
+                BuiltinSemanticKind::Plotting,
+            ),
+        ] {
+            let contract = &entry.contract;
+            assert_eq!(
+                contract.async_behavior,
+                BuiltinAsyncBehavior::MaySuspend,
+                "{}",
+                entry.identity.name
+            );
+            assert!(contract.effects.contains(&EffectKind::MaySuspend));
+            assert!(contract.effects.contains(&EffectKind::FilesystemRead));
+            assert_eq!(contract.purity, purity);
+            assert_eq!(contract.semantic_kind, kind);
+            // In-memory stores need no universal filesystem capability.
+            assert!(!contract
+                .capabilities
+                .contains(&CapabilityRequirement::Filesystem));
+        }
+    }
+}

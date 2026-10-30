@@ -23,7 +23,7 @@ fn entry() -> BuiltinCatalogEntry {
         inference: |request, entry| infer_result(request, entry, FeaResultKind::Results),
         integer_capabilities: &[],
         integer_audit: None,
-        effects: OperationEffectProfile::SynchronousArtifactRead,
+        effects: OperationEffectProfile::ArtifactRead,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
     })

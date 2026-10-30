@@ -75,7 +75,7 @@ pub const FEA_COMPARE_CATALOG_ENTRY: BuiltinCatalogEntry =
         inference: infer,
         integer_capabilities: &[],
         integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
-        effects: OperationEffectProfile::SynchronousArtifactRead,
+        effects: OperationEffectProfile::ArtifactRead,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
     });
