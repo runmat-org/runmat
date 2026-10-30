@@ -458,7 +458,7 @@ fn traced_substage<T>(
 ) -> Result<T, DelaunayVolumeMeshError> {
     let span = tracing::info_span!("meshing.tetrahedron.substage", stage);
     let _guard = span.enter();
-    let started = std::time::Instant::now();
+    let started = runmat_time::Instant::now();
     tracing::info!(stage, state = "started", "tetrahedral meshing substage");
     let result = operation();
     tracing::info!(

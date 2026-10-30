@@ -229,7 +229,7 @@ pub(in crate::cdt) fn run_in_state<'ctx>(
                 )
         });
         if has_complete_source {
-            let started = std::time::Instant::now();
+            let started = runmat_time::Instant::now();
             tracing::info!(
                 pass,
                 "volume optimization entering complete relocation handoff"

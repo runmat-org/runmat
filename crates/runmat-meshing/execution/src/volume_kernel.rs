@@ -154,7 +154,7 @@ impl ExactVolumeKernel {
             surface_encoded_bytes,
             "volume construction started; encoded input released"
         );
-        let construction_started = std::time::Instant::now();
+        let construction_started = runmat_time::Instant::now();
         let observer = diagnostic::Observer {
             store: cache,
             binding: runmat_meshing_tetrahedron::cdt::VolumeQualityBinding {
@@ -192,7 +192,7 @@ impl ExactVolumeKernel {
             element_count = mesh.topology.tetrahedra.len(),
             "volume construction independently validated; publication encoding started"
         );
-        let encoding_started = std::time::Instant::now();
+        let encoding_started = runmat_time::Instant::now();
         let codec = crate::codec_control::CodecControl::new(&cancellation);
         let codec_failure = |error| match codec.take_failure() {
             Some(failure) => {

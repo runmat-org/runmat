@@ -1,4 +1,4 @@
-use std::time::Instant;
+use runmat_time::Instant;
 
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingChunkMediaType, MeshingEvidence};
 

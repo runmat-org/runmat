@@ -4,7 +4,7 @@ mod stage;
 mod surface;
 mod terminal;
 
-use std::time::Instant;
+use runmat_time::Instant;
 
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheExport;

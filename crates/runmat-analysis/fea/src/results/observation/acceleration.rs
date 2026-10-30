@@ -161,7 +161,7 @@ pub(crate) fn evaluate_observation_partition_with_provider(
         ));
     }
     let attempt_id = observation_attempt_id(partition.identity.digest());
-    let started = std::time::Instant::now();
+    let started = runmat_time::Instant::now();
     let input = execution
         .provider
         .upload_numeric(&HostNumericTensorView {

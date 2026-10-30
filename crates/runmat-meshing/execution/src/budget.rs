@@ -2,10 +2,10 @@ use crate::checkpoint_clock::CheckpointClock;
 mod allocation_phase;
 #[cfg(test)]
 mod tests;
+use runmat_time::Instant;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 use runmat_meshing_core::{
     InvariantEvidence, MeshingCancellationSignal, MeshingDiagnosticEntry, MeshingDiagnosticValue,

@@ -1,7 +1,7 @@
 use crate::checkpoint_clock::CheckpointClock;
+use runmat_time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,

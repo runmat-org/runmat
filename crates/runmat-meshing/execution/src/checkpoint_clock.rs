@@ -7,10 +7,10 @@
 //! thread consumed since its previous probe of this clock (sampled at most every
 //! [`CPU_SAMPLE_INTERVAL_NS`]), never more than the wall time. Short latencies stay on the
 //! wall-clock fast path.
+use runmat_time::Instant;
 use std::{
     cell::Cell,
     sync::atomic::{AtomicU64, Ordering},
-    time::Instant,
 };
 
 const CPU_CHARGE_THRESHOLD_NS: u64 = 100_000_000;

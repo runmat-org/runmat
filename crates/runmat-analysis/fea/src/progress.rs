@@ -230,13 +230,13 @@ mod control_tests;
 /// (`target = "runmat_fea::phase"`, fields `phase`, `elapsed_ms`, `threads`).
 pub struct PhaseTimer {
     phase: &'static str,
-    started: std::time::Instant,
+    started: runmat_time::Instant,
 }
 
 pub fn phase_timer(phase: &'static str) -> PhaseTimer {
     PhaseTimer {
         phase,
-        started: std::time::Instant::now(),
+        started: runmat_time::Instant::now(),
     }
 }
 

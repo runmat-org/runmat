@@ -9,6 +9,7 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
+runmat-time = { workspace = true }
 runmat-types = { workspace = true }
 minicbor = { workspace = true }
 runmat-cpu-execution = { workspace = true }
