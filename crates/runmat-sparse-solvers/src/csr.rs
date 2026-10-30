@@ -10,6 +10,8 @@ use crate::error::{SolverError, SolverResult};
 use crate::par;
 use crate::scalar::Scalar;
 
+mod residual;
+
 /// Rows per parallel SpMV task. Fixed so work partitioning is independent of thread count.
 const SPMV_ROWS_PER_TASK: usize = 1024;
 

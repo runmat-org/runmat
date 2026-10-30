@@ -21,11 +21,17 @@ pub(crate) fn prepare(
     cells: usize,
     quadratic: bool,
 ) -> (AnalysisModel, SolverMeshArtifact, AssemblySummary) {
-    let mesh = if quadratic {
+    prepare_mesh(if quadratic {
         quadratic_slab_mesh(cells)
     } else {
         slab_mesh(cells)
-    };
+    })
+}
+
+/// The same uniaxial-strain fixture on a caller-supplied unit-cube slab mesh.
+pub(crate) fn prepare_mesh(
+    mesh: SolverMeshArtifact,
+) -> (AnalysisModel, SolverMeshArtifact, AssemblySummary) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.constraints.clear();
     model.boundaries.clear();
