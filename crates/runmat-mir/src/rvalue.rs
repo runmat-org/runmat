@@ -80,6 +80,38 @@ pub enum MirRvalue {
     Collective(crate::parallel::MirCollectiveOp),
 }
 
+impl MirRvalue {
+    /// Whether an expression statement carries a statement-output result.
+    /// This is a source role, not a retained sequence's runtime cardinality.
+    pub fn has_statement_result(&self) -> bool {
+        match self {
+            Self::Call(call) => call.requested_outputs.known_count() != Some(0),
+            Self::SubscriptChain(chain) => chain.sequence_use != runmat_types::SequenceUse::Discard,
+            Self::Member { sequence_use, .. } | Self::DynamicMember { sequence_use, .. } => {
+                *sequence_use != runmat_types::SequenceUse::Discard
+            }
+            Self::Use(_)
+            | Self::Unary(..)
+            | Self::Binary(..)
+            | Self::ShortCircuit { .. }
+            | Self::Range { .. }
+            | Self::Aggregate { .. }
+            | Self::StructLiteral { .. }
+            | Self::ObjectLiteral { .. }
+            | Self::Index { .. }
+            | Self::WorkspaceFirstStaticProperty { .. }
+            | Self::MetaClass(_)
+            | Self::Colon
+            | Self::End
+            | Self::Future { .. }
+            | Self::ExternalFuture { .. }
+            | Self::Spawn(_)
+            | Self::Distributed(_)
+            | Self::Collective(_) => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MirShortCircuitOp {
     And,

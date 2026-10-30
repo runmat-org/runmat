@@ -25,7 +25,12 @@ impl Gate {
     pub(super) fn has_submission(&self) -> bool {
         self.pending.lock().unwrap().is_some()
     }
-    pub(super) fn release(&self) -> wgpu::SubmissionIndex {
+    pub(super) fn release(
+        &self,
+    ) -> (
+        wgpu::SubmissionIndex,
+        futures::channel::oneshot::Receiver<()>,
+    ) {
         let pending = self
             .pending
             .lock()
@@ -33,11 +38,19 @@ impl Gate {
             .take()
             .expect("real submitted cast ticket");
         let index = pending.submission.clone();
+        let (retired, retirement) = futures::channel::oneshot::channel();
+        let completion = runmat_accelerate_api::observation::WgpuObservationCompletion::new(
+            Box::new(move |status| {
+                pending.cleanup.finish(status);
+                let _ = retired.send(());
+            }),
+            [None, None],
+        );
         pending
             .reservation
-            .submit(pending.submission, pending.cleanup)
+            .submit(pending.submission, completion)
             .expect("native progress accepts exact ticket");
-        index
+        (index, retirement)
     }
 }
 

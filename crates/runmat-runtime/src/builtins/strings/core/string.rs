@@ -13,7 +13,7 @@ use runmat_value::{
     SparseTensor, StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
 };
 
-use crate::builtins::common::format::{complex_to_string, format_variadic, number_to_string};
+use crate::builtins::common::format::{complex_to_string, format_variadic};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -732,10 +732,10 @@ async fn convert_to_string_array(
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
         Value::Cell(cell) => cell_array_to_string_array(cell, encoding).await,
-        Value::Num(n) => string_scalar(number_to_string(n)),
+        Value::Num(n) => string_scalar(numeric_scalar_to_string(NumericScalar::F64(n))),
         Value::Int(i) => string_scalar(int_value_to_string(&i)),
         Value::Bool(b) => string_scalar(bool_to_string(b).to_string()),
-        Value::Complex(re, im) => string_scalar(complex_to_string(re, im)),
+        Value::Complex(re, im) => string_scalar(complex_scalar_to_string(re, im)),
         Value::GpuTensor(handle) => {
             // Defensive fallback: gather and retry.
             let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
@@ -785,6 +785,9 @@ fn char_array_to_string_array(
     array: CharArray,
     _encoding: StringEncoding,
 ) -> BuiltinResult<StringArray> {
+    if array.rows == 0 {
+        return string_scalar("");
+    }
     let mut rows: Vec<String> = Vec::with_capacity(array.rows);
     for r in 0..array.rows {
         let start = r
@@ -846,14 +849,20 @@ fn numeric_scalar_to_value(value: NumericScalar) -> Value {
 }
 
 fn numeric_scalar_to_string(value: NumericScalar) -> String {
-    match value {
-        NumericScalar::F64(value) => number_to_string(value),
-        NumericScalar::F32(value) => number_to_string(f64::from(value)),
-        integer => int_value_to_string(
-            &integer
-                .into_int_value()
-                .expect("non-floating numeric scalar is integer"),
-        ),
+    use crate::builtins::common::format::scalar_text::{numeric_is_missing, write_numeric_text};
+    if numeric_is_missing(value) {
+        return "<missing>".to_owned();
+    }
+    let mut output = String::new();
+    write_numeric_text(&mut output, value).expect("String formatting is infallible");
+    output
+}
+
+fn complex_scalar_to_string(real: f64, imaginary: f64) -> String {
+    if real.is_nan() || imaginary.is_nan() {
+        "<missing>".to_owned()
+    } else {
+        complex_to_string(real, imaginary)
     }
 }
 
@@ -861,13 +870,27 @@ fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<String
     let len = tensor::complex_tensor_element_len(&tensor);
     let mut strings = Vec::with_capacity(len);
     for idx in 0..len {
-        strings.push(tensor.format_element(idx));
+        strings.push(complex_tensor_element_to_string(&tensor, idx)?);
     }
     let (storage, shape) = tensor.into_complex_storage_and_shape();
     let result =
         StringArray::new(strings, shape.to_vec()).map_err(|e| string_flow(format!("string: {e}")));
     drop(storage);
     result
+}
+
+fn complex_tensor_element_to_string(tensor: &ComplexTensor, index: usize) -> BuiltinResult<String> {
+    use crate::builtins::common::format::scalar_text::numeric_is_missing;
+    let (real, imaginary) = tensor
+        .numeric_value_at(index)
+        .ok_or_else(|| string_flow("string: complex tensor storage is inconsistent"))?;
+    Ok(
+        if numeric_is_missing(real) || numeric_is_missing(imaginary) {
+            "<missing>".to_owned()
+        } else {
+            tensor.format_element(index)
+        },
+    )
 }
 
 fn logical_array_to_string_array(logical: LogicalArray) -> BuiltinResult<StringArray> {
@@ -936,7 +959,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
                 ))
             }
         }
-        Value::Num(n) => Ok(number_to_string(*n)),
+        Value::Num(n) => Ok(numeric_scalar_to_string(NumericScalar::F64(*n))),
         Value::Int(i) => Ok(int_value_to_string(i)),
         Value::Bool(b) => Ok(bool_to_string(*b).to_string()),
         Value::LogicalArray(array) => {
@@ -951,16 +974,18 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
                 if let Some(value) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                     Ok(int_value_to_string(&value))
                 } else {
-                    Ok(number_to_string(tensor::tensor_value_f64(t, 0)))
+                    Ok(numeric_scalar_to_string(t.numeric_value_at(0).ok_or_else(
+                        || string_flow("string: scalar tensor storage is inconsistent"),
+                    )?))
                 }
             } else {
                 Err(string_flow("string: cell numeric values must be scalar"))
             }
         }
-        Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
+        Value::Complex(re, im) => Ok(complex_scalar_to_string(*re, *im)),
         Value::ComplexTensor(t) => {
             if complex_tensor_is_scalar(t) {
-                Ok(t.format_element(0))
+                complex_tensor_element_to_string(t, 0)
             } else {
                 Err(string_flow("string: cell complex values must be scalar"))
             }

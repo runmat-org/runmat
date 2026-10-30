@@ -130,6 +130,57 @@ impl AccelProvider for Provider {
     ) -> AccelNumericDownloadFuture<'a> {
         self.inner.download_numeric(input)
     }
+    fn query_numeric_download_feasibility(
+        &self,
+        source: &GpuTensorHandle,
+        query: &ProviderFeasibilityQuery,
+    ) -> ProviderFeasibility {
+        self.inner.query_numeric_download_feasibility(source, query)
+    }
+    fn download_numeric_host_workspace_bound(
+        &self,
+        source: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        self.inner.download_numeric_host_workspace_bound(source)
+    }
+    fn download_numeric_provider_scratch_bound(
+        &self,
+        source: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        self.inner.download_numeric_provider_scratch_bound(source)
+    }
+    fn download_numeric_completion_host_bound(
+        &self,
+        source: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        self.inner.download_numeric_completion_host_bound(source)
+    }
+    fn download_numeric_queue_slots(&self, source: &GpuTensorHandle) -> u32 {
+        self.inner.download_numeric_queue_slots(source)
+    }
+    fn prepare_numeric_download_stage(
+        &self,
+        source: &GpuTensorHandle,
+        query: &ProviderFeasibilityQuery,
+        claim: Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> anyhow::Result<PreparedNumericDownloadStage> {
+        self.inner
+            .prepare_numeric_download_stage(source, query, claim)
+    }
+    fn download_numeric_admitted<'a>(
+        &'a self,
+        source: &'a GpuTensorHandle,
+        claim: Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> AccelNumericDownloadFuture<'a> {
+        self.inner.download_numeric_admitted(source, claim)
+    }
+    fn download_numeric_admitted_stage<'a>(
+        &'a self,
+        source: &'a GpuTensorHandle,
+        stage: PreparedNumericDownloadStage,
+    ) -> AccelNumericDownloadFuture<'a> {
+        self.inner.download_numeric_admitted_stage(source, stage)
+    }
     fn elem_add<'a>(
         &'a self,
         left: &'a GpuTensorHandle,

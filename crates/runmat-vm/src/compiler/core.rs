@@ -1067,23 +1067,7 @@ impl Compiler {
             MirStmtKind::Expr(value) => {
                 self.pending_place_mutation = None;
                 self.compile_mir_rvalue(value)?;
-                let produces_no_value = match value {
-                    MirRvalue::Call(call) => call.requested_outputs.known_count() == Some(0),
-                    MirRvalue::Member {
-                        sequence_use: runmat_types::SequenceUse::Discard,
-                        ..
-                    }
-                    | MirRvalue::DynamicMember {
-                        sequence_use: runmat_types::SequenceUse::Discard,
-                        ..
-                    }
-                    | MirRvalue::SubscriptChain(runmat_mir::MirSubscriptChain {
-                        sequence_use: runmat_types::SequenceUse::Discard,
-                        ..
-                    }) => true,
-                    _ => false,
-                };
-                if !produces_no_value
+                if value.has_statement_result()
                     && !matches!(next, Some(MirStmtKind::StatementOutput(output))
                         if matches!(output.source, runmat_mir::MirStatementOutputSource::Expression))
                 {

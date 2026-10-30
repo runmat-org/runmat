@@ -117,6 +117,7 @@ fn native_single_unsupported_after_typed_upload_never_replays_on_host() {
         .allocate_zeroed(vec![1, 2], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
     let error = futures::executor::block_on(super::super::super::resident::power_gpu_host_left(
+        None,
         resident.handle.clone(),
         Value::Tensor(Tensor::from_f32(vec![1.8], vec![1, 1]).unwrap()),
     ))
@@ -151,6 +152,7 @@ fn exact_double_two_literal_keeps_mixed_route_from_runtime_value_parser() {
         .allocate_zeroed(vec![1, 2], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
     let error = futures::executor::block_on(super::super::super::resident::power_gpu_host_left(
+        None,
         resident.handle.clone(),
         Value::Num(2.0),
     ))

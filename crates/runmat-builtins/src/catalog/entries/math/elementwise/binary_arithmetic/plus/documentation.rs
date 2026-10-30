@@ -5,7 +5,15 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Element-wise addition and implicit expansion",
         paragraphs: &[
             "`plus(A, B)` and `A + B` add corresponding elements. Equal dimensions align directly and singleton dimensions expand to the other operand. Incompatible non-singleton dimensions produce a size-mismatch error. Empty dimensions remain empty in the broadcasted result.",
-            "Real and complex operands may be combined. Character inputs contribute their Unicode code points and logical inputs contribute zero or one. String-array append through `plus` is not implemented yet and remains an explicit compatibility gap.",
+            "Real and complex numeric operands may be combined. When neither operand is a string, character inputs contribute their Unicode code points and logical inputs contribute zero or one.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "String addition",
+        paragraphs: &[
+            "When either operand is a string scalar or string array, `A + B` appends text element by element. Numeric and logical operands convert to decimal text and `true` or `false`; character-matrix rows convert to string-column entries without trimming spaces. Cells must contain values that each convert to a scalar string. Converted shapes follow the same singleton-expansion rules as numeric addition.",
+            "Integer formatting reads the native integer payload, including values above the exact double range. Floating-point presentation uses RunMat's string-conversion spelling. Missing strings and NaN observations produce missing string elements. Unicode characters retain their UTF-16 row boundaries and UTF-8 output text.",
+            "String addition executes on the host and does not select a numeric GPU or fusion kernel. Gather provider-resident numeric values explicitly before appending them to text. The numeric `like` output-prototype form does not apply to string addition.",
         ],
     },
     BuiltinDocumentationSection {
@@ -25,6 +33,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 ];
 
 const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample { id: "string-append", title: "Append numbers to string prefixes", program: "names = \"sample-\" + [1, 2]", display_output: Some("names = [\"sample-1\", \"sample-2\"]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(names, [\"sample-1\", \"sample-2\"]));" } },
     BuiltinExample { id: "matrices", title: "Add two matrices", program: "A = [1 2 3; 4 5 6];\nB = [7 8 9; 1 2 3];\nS = plus(A, B)", display_output: Some("S = [8 10 12; 5 7 9]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(S, [8 10 12; 5 7 9]));" } },
     BuiltinExample { id: "scalar", title: "Add a scalar to an array", program: "A = [8 1 6; 3 5 7; 4 9 2];\nshifted = plus(A, 0.5)", display_output: Some("shifted = [8.5 1.5 6.5; 3.5 5.5 7.5; 4.5 9.5 2.5]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(shifted, A + 0.5));" } },
     BuiltinExample { id: "implicit-expansion", title: "Expand a column and row", program: "col = (1:3)';\nrow = [10 20 30];\nS = plus(col, row)", display_output: Some("S = [11 21 31; 12 22 32; 13 23 33]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(S, [11 21 31; 12 22 32; 13 23 33]));" } },
@@ -36,13 +45,13 @@ const EXAMPLES: &[BuiltinExample] = &[
 
 const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "Does plus use implicit expansion?", answer: "Yes. Singleton dimensions expand to compatible dimensions of the other operand; incompatible non-singleton dimensions produce a size-mismatch error." },
-    BuiltinDocumentationFaq { question: "What class does plus return?", answer: "Floating arithmetic follows the participating floating class rules. Integer arithmetic preserves the integer class when the operands use the same class or pair an integer with scalar double. Logical and character inputs produce numeric output." },
+    BuiltinDocumentationFaq { question: "What class does plus return?", answer: "A string operand selects string output. Otherwise, floating arithmetic follows the participating floating class rules, integer arithmetic preserves the integer class when the operands use the same class or pair an integer with scalar double, and logical and character inputs produce numeric output." },
     BuiltinDocumentationFaq { question: "How does integer overflow behave?", answer: "Fixed-width integer sums saturate at the minimum or maximum of their class." },
     BuiltinDocumentationFaq { question: "Can host scalars be added to provider-resident arrays?", answer: "Yes. RunMat uses a provider scalar operation when supported and otherwise follows the owner-aware fallback path." },
     BuiltinDocumentationFaq { question: "How can the result be placed on a particular device?", answer: "In RunMat mode, pass `'like'` and a provider-resident prototype. A host prototype requests a host result." },
     BuiltinDocumentationFaq { question: "Does plus preserve sparse matrices?", answer: "It preserves sparse storage when the mathematical result remains sparse. Forms that turn implicit zeros into nonzero values require materialization." },
     BuiltinDocumentationFaq { question: "What happens with empty arrays?", answer: "Compatible empty dimensions propagate into the broadcasted output shape." },
-    BuiltinDocumentationFaq { question: "Can plus append strings?", answer: "Not yet. String-array append through plus remains a known compatibility gap." },
+    BuiltinDocumentationFaq { question: "Can plus append strings?", answer: "Yes. A string operand selects text addition, converts supported host values to string elements, and implicitly expands their shapes. Character-plus-character without a string operand remains numeric arithmetic." },
 ];
 
 const RELATED: &[&str] = &[
@@ -60,8 +69,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("plus"),
     slug: Some("plus"),
-    summary: "Add arrays element by element.",
-    description: "`plus(A, B)` and `A + B` add compatible numeric, logical, character, sparse, symbolic, or provider-resident operands using implicit expansion.",
+    summary: "Add arrays or append strings element by element.",
+    description: "`plus(A, B)` and `A + B` add compatible numeric, logical, character, sparse, symbolic, or provider-resident operands using implicit expansion. A string operand selects element-wise text addition with converted host operands.",
     keywords: &["plus", "addition", "element-wise", "implicit expansion", "integer", "sparse", "gpu"],
     related: RELATED,
     sections: SECTIONS,
@@ -76,7 +85,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Scalar, dense, complex, sparse, integer, and provider fallback behavior", location: "builtins::math::elementwise::binary_arithmetic::plus::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Catalog examples", location: "scripts/runtime/verify-builtin-examples.mjs" },
         ],
-        notes: &["String-array append through plus is not implemented and is intentionally documented as a compatibility gap."],
+        notes: &["Numeric addition and host string addition have distinct conversion and placement contracts. Floating-point string spelling is RunMat behavior; exact integer text does not pass through double."],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

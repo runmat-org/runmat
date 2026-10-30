@@ -2,10 +2,11 @@
 use super::*;
 
 mod kernels;
+mod observation;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Operation {
     Add,
     Sub,
@@ -35,7 +36,9 @@ impl InProcessProvider {
             let rhs = Operand::new(rhs, right)?;
             evaluate(lhs, rhs, operation)?
         };
-        self.allocate_numeric_data(data, shape, storage)
+        let output = self.allocate_numeric_data(data, shape, storage)?;
+        self.confirm_native_arithmetic(operation);
+        Ok(output)
     }
 
     pub(super) fn native_scalar(
@@ -67,7 +70,9 @@ impl InProcessProvider {
                 evaluate(input, scalar, operation)?
             }
         };
-        self.allocate_numeric_data(data, input.shape().to_vec(), storage)
+        let output = self.allocate_numeric_data(data, input.shape().to_vec(), storage)?;
+        self.confirm_native_arithmetic(operation);
+        Ok(output)
     }
 }
 

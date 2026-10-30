@@ -19,6 +19,7 @@ fn explicit_floating_decline_is_not_host_authority() {
         .unwrap();
     let scalar = Value::Num(1.5);
     let error = HostFallbackAdmission::new(
+        None,
         &runmat_builtins::PLUS_CATALOG_ENTRY,
         &Value::GpuTensor(explicit.clone()),
         &scalar,
@@ -31,6 +32,7 @@ fn explicit_floating_decline_is_not_host_authority() {
         Some("RunMat:gpu:ExplicitProviderRequired")
     );
     HostFallbackAdmission::new(
+        None,
         &runmat_builtins::PLUS_CATALOG_ENTRY,
         &Value::GpuTensor(automatic),
         &scalar,
@@ -66,10 +68,14 @@ fn exact_integer_form_requires_provider_publication_before_download() {
                         .unwrap(),
                     Some((BuiltinIntegerClass::Int32, vec![2, 1]))
                 );
-                let error =
-                    HostFallbackAdmission::new(entry, &Value::GpuTensor(resident.clone()), &scalar)
-                        .err()
-                        .expect("fixture lacks exact integer upload evidence");
+                let error = HostFallbackAdmission::new(
+                    None,
+                    entry,
+                    &Value::GpuTensor(resident.clone()),
+                    &scalar,
+                )
+                .err()
+                .expect("fixture lacks exact integer upload evidence");
                 assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
                 assert!(
                     fixture.upload_evidence_queries() > 0,
@@ -104,6 +110,7 @@ fn explicit_integer_fallback_rejects_mismatched_class_and_shape_before_gather() 
         (wrong_shape, "dimension"),
     ] {
         let error = HostFallbackAdmission::new(
+            None,
             &runmat_builtins::PLUS_CATALOG_ENTRY,
             &Value::GpuTensor(left.clone()),
             &Value::GpuTensor(right),
@@ -128,6 +135,7 @@ fn integer_form_does_not_certify_nonscalar_double_or_unsupported_storage() {
         .unwrap();
     let nonscalar = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
     let error = HostFallbackAdmission::new(
+        None,
         &runmat_builtins::TIMES_CATALOG_ENTRY,
         &Value::GpuTensor(integer.clone()),
         &nonscalar,
@@ -146,6 +154,7 @@ fn integer_form_does_not_certify_nonscalar_double_or_unsupported_storage() {
         .unwrap()
         .handle;
     let error = HostFallbackAdmission::new(
+        None,
         &runmat_builtins::TIMES_CATALOG_ENTRY,
         &Value::GpuTensor(integer.clone()),
         &Value::GpuTensor(complex),
@@ -174,6 +183,7 @@ fn wgpu_exact_integer_form_materializes_the_certified_result_class() {
         .with_provenance(GpuHandleProvenance::Explicit)
         .unwrap();
     let admitted = HostFallbackAdmission::new(
+        None,
         &runmat_builtins::PLUS_CATALOG_ENTRY,
         &Value::GpuTensor(resident.clone()),
         &Value::Num(2.0),

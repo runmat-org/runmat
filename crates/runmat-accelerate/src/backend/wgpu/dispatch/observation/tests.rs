@@ -670,11 +670,12 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
             let physical = command_a
                 .expect("matched command retained through retirement")
                 .seal();
-            if panicking {
-                assert_eq!(physical.physical_submissions.unwrap().missing, 1);
-            } else {
-                assert_eq!(physical.physical_submissions.unwrap().failed, 1);
-            }
+            // Dropping the accepted callback delivers a typed progress error,
+            // including during unwind. That is known failed observation, not
+            // a missing callback or successful physical measurement.
+            let submissions = physical.physical_submissions.unwrap();
+            assert_eq!(submissions.failed, 1);
+            assert_eq!(submissions.missing, 0);
             assert_eq!(physical.kernel_count, None);
         }
     }

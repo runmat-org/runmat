@@ -1716,23 +1716,11 @@ fn rvalue_output_locals(
             .collect(),
         MirStmtKind::SequenceAssign { .. } => Ok(Vec::new()),
         MirStmtKind::CaptureSequence { .. } => Ok(Vec::new()),
-        MirStmtKind::Expr(value) => Ok((!matches!(
-            value,
-            runmat_mir::MirRvalue::Call(call)
-                if call.requested_outputs.known_count() == Some(0)
-        ) && !matches!(
-            value,
-            runmat_mir::MirRvalue::Member {
-                sequence_use: runmat_types::SequenceUse::Discard,
-                ..
-            } | runmat_mir::MirRvalue::DynamicMember {
-                sequence_use: runmat_types::SequenceUse::Discard,
-                ..
-            }
-        ))
-        .then_some(None)
-        .into_iter()
-        .collect()),
+        MirStmtKind::Expr(value) => Ok(value
+            .has_statement_result()
+            .then_some(None)
+            .into_iter()
+            .collect()),
         MirStmtKind::PrepareFixedAssignment(_)
         | MirStmtKind::PlaceMutation(_)
         | MirStmtKind::StatementOutput(_)

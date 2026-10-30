@@ -8,6 +8,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, Po
 use runmat_value::Value;
 
 pub(in super::super) async fn power_gpu_pair(
+    runtime: Option<&crate::context::RuntimeContext>,
     lhs: GpuTensorHandle,
     rhs: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
@@ -20,7 +21,7 @@ pub(in super::super) async fn power_gpu_pair(
             }
         }
     }
-    gather_pair_and_evaluate(lhs, rhs).await
+    gather_pair_and_evaluate(runtime, lhs, rhs).await
 }
 
 pub(super) async fn try_real_pair(
@@ -148,10 +149,12 @@ pub(in super::super) fn typed_provider_error(
 }
 
 async fn gather_pair_and_evaluate(
+    runtime: Option<&crate::context::RuntimeContext>,
     lhs: GpuTensorHandle,
     rhs: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
     let fallback = HostFallbackAdmission::new(
+        runtime,
         &runmat_builtins::POWER_CATALOG_ENTRY,
         &Value::GpuTensor(lhs.clone()),
         &Value::GpuTensor(rhs.clone()),

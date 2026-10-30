@@ -77,12 +77,30 @@ fn evaluate(
             "arithmetic.operand_count",
         );
     }
-    let element_type = ProviderElementType::from(precision);
-    if query
-        .inputs
-        .iter()
-        .chain(&query.outputs)
-        .any(|v| v.element_type != element_type)
+    let in_process = matches!(profile, HookProfile::InProcess);
+    let element_type = if in_process {
+        if query
+            .inputs
+            .iter()
+            .any(|v| v.element_type == ProviderElementType::F32)
+        {
+            ProviderElementType::F32
+        } else {
+            ProviderElementType::F64
+        }
+    } else {
+        ProviderElementType::from(precision)
+    };
+    if query.inputs.iter().any(|v| {
+        if in_process {
+            !matches!(
+                v.element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        } else {
+            v.element_type != element_type
+        }
+    }) || query.outputs.iter().any(|v| v.element_type != element_type)
     {
         return reject(
             ProviderRejectionCode::UnsupportedElementType,
@@ -103,10 +121,13 @@ fn evaluate(
     let left = &query.inputs[0].shape;
     let right = &query.inputs[1].shape;
     let rank = left.len().max(right.len());
-    let expands = matches!(
-        operation,
-        Operation::Add | Operation::Subtract | Operation::Multiply
-    );
+    // Native in-process kernels broadcast borrowed operands directly. WGPU's
+    // add/subtract/multiply route explicitly materializes expanded operands.
+    let expands = !in_process
+        && matches!(
+            operation,
+            Operation::Add | Operation::Subtract | Operation::Multiply
+        );
     if left != right && (left.len() < 2 || right.len() < 2) {
         // Runtime repmat currently retains the physical leading extent of a
         // rank-one handle; it cannot implement row-shorthand alignment safely.
@@ -171,6 +192,7 @@ fn evaluate(
     let mut accounted = query.clone();
     if accounted.outputs.is_empty() {
         let mut output = query.inputs[0].clone();
+        output.element_type = element_type;
         output.shape = shape.clone();
         output.residency = ProviderResidency::Device;
         accounted.outputs.push(output);
@@ -194,7 +216,17 @@ fn evaluate(
             expansions += 1;
         }
     }
-    match dense_feasibility(snapshot, &accounted) {
+    let feasibility = if in_process {
+        dense_feasibility_with_extra_elements(
+            snapshot,
+            &accounted,
+            ProviderRepresentation::checked_byte_len,
+            &[ProviderElementType::F32, ProviderElementType::F64],
+        )
+    } else {
+        dense_feasibility(snapshot, &accounted)
+    };
+    match feasibility {
         ProviderFeasibility::Supported { mut estimate } => {
             estimate.dispatches = Some(1 + expansions);
             ProviderFeasibility::supported(estimate)

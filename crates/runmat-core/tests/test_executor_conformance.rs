@@ -391,7 +391,12 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let unit = session
         .compile_executable_unit(
-            ExecutableSource::new("path:portable-script", "script.m", "answer = 42;\nanswer\n"),
+            // An expression assigns ans; displaying a named variable does not.
+            ExecutableSource::new(
+                "path:portable-script",
+                "script.m",
+                "answer = 42;\nanswer + 0\n",
+            ),
             None,
         )
         .await
@@ -410,6 +415,22 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
         runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0]).unwrap(),
         runmat_value::Value::Num(42.0)
     );
+    let display_only = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:portable-display",
+                "display.m",
+                "answer = 42;\nanswer\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        execute_portable_envelope(&display_only.portable_envelope().unwrap()).await,
+        runmat_execution_artifact::ProgramExecutionResponse::Failure { message }
+            if message == "script did not produce the requested ans value"
+    ));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

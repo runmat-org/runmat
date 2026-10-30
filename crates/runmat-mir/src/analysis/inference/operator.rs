@@ -4,8 +4,9 @@ use runmat_types::{
 };
 
 /// Infers a binary language operator through the same typed class-method
-/// catalog used by ordinary calls. Primitive numeric inference remains the
-/// fallback only when neither operand can select object dispatch.
+/// catalog used by ordinary calls. Primitive operator identities resolve
+/// their canonical builtin contracts; uncataloged primitives retain the
+/// generic value rules. No builtin-specific inference belongs in MIR.
 pub(crate) fn infer_binary_operator(
     operator: OperatorKind,
     left: ValueFact,
@@ -20,6 +21,11 @@ pub(crate) fn infer_binary_operator(
     let has_object_receiver = matches!(&left.kind, ValueKindFact::Object(_))
         || matches!(&right.kind, ValueKindFact::Object(_));
     if !has_object_receiver {
+        if let Some(entry) = operator.overload_name().and_then(|method| {
+            runmat_builtins::builtin_catalog_entry_by_name(method.display_name())
+        }) {
+            return infer_entry_operator(entry, vec![left, right], literals.to_vec());
+        }
         return runmat_types::infer_binary(operator, &left, &right);
     }
     infer_cataloged_operator(
@@ -72,6 +78,14 @@ fn infer_cataloged_operator(
         // instead of emitting a false primitive-numeric diagnostic.
         return dynamic_dispatch();
     };
+    infer_entry_operator(entry, arguments, literals)
+}
+
+fn infer_entry_operator(
+    entry: &runmat_builtins::BuiltinCatalogEntry,
+    arguments: Vec<ValueFact>,
+    literals: Vec<LiteralValue>,
+) -> FactInference {
     let inferred = runmat_builtins::infer_catalog_call(
         entry,
         &CallRequest {

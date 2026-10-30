@@ -126,6 +126,7 @@ async fn rdivide_builtin(
     let template =
         super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
             .await?;
+    let provider_runtime = runtime.clone();
     super::preparation::execute(
         runtime.as_ref(),
         RDIVIDE_CATALOG_ENTRY.identity,
@@ -134,7 +135,9 @@ async fn rdivide_builtin(
         lhs,
         rhs,
         |lhs, rhs| async move {
-            let base = super::division::execute(DIVISION_CONTEXT, lhs, rhs).await?;
+            let base =
+                super::division::execute(provider_runtime.as_ref(), DIVISION_CONTEXT, lhs, rhs)
+                    .await?;
             let base = RootedValue::new(base).map_err(|cause| cause.into_runtime_error())?;
             let value =
                 apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base.value().clone(), &template)

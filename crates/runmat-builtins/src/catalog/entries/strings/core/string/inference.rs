@@ -63,7 +63,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         match first {
             Some(input) if matches!(input.kind, ValueKindFact::Character) => {
                 input.shape.known_dims().map_or(ShapeFact::Unknown, |dims| {
-                    ShapeFact::from(vec![dims.first().copied().flatten(), Some(1)])
+                    ShapeFact::from(vec![
+                        dims.first().copied().flatten().map(|rows| rows.max(1)),
+                        Some(1),
+                    ])
                 })
             }
             Some(input) if matches!(input.kind, ValueKindFact::Unknown) => ShapeFact::Unknown,

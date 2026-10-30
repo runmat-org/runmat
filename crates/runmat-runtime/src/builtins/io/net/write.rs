@@ -3,11 +3,11 @@
 use crate::context::RuntimeTcpInvocation;
 use crate::tcp::{TcpTransportError, TcpTransportErrorKind, TcpWriteProgress};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, NetDataType as DataType, WRITE_ERROR_CONNECTION_CLOSED,
-    WRITE_ERROR_INTERNAL, WRITE_ERROR_INVALID_CLIENT, WRITE_ERROR_INVALID_DATA,
-    WRITE_ERROR_INVALID_DATATYPE, WRITE_ERROR_INVALID_INPUT, WRITE_ERROR_NOT_CONNECTED,
-    WRITE_ERROR_TIMEOUT, WRITE_EXPLICIT_GPU_EXTENSION, WRITE_LOGICAL_EXTENSION,
-    WRITE_NONVECTOR_EXTENSION, WRITE_SPARSE_EXTENSION,
+    BuiltinErrorDescriptor, NetDataType as DataType, NET_ERROR_CANCELLED,
+    WRITE_ERROR_CONNECTION_CLOSED, WRITE_ERROR_INTERNAL, WRITE_ERROR_INVALID_CLIENT,
+    WRITE_ERROR_INVALID_DATA, WRITE_ERROR_INVALID_DATATYPE, WRITE_ERROR_INVALID_INPUT,
+    WRITE_ERROR_NOT_CONNECTED, WRITE_ERROR_TIMEOUT, WRITE_EXPLICIT_GPU_EXTENSION,
+    WRITE_LOGICAL_EXTENSION, WRITE_NONVECTOR_EXTENSION, WRITE_SPARSE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -73,11 +73,13 @@ fn map_write_await_failure(failure: super::transport::TcpAwaitFailure) -> Runtim
     };
     let source = TcpTransportError::with_source(TcpTransportErrorKind::Io, message, failure.cause)
         .with_write_progress(progress);
-    build_runtime_error(message)
+    let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .with_identifier("RunMat:Cancelled")
-        .with_source(source)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = NET_ERROR_CANCELLED.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(

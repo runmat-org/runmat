@@ -21,10 +21,20 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) struct HostFallbac
 
 impl HostFallbackAdmission {
     pub(in crate::builtins::math::elementwise::binary_arithmetic) fn new(
+        runtime: Option<&crate::context::RuntimeContext>,
         entry: &'static BuiltinCatalogEntry,
         left: &Value,
         right: &Value,
     ) -> BuiltinResult<Self> {
+        // A provider decline is not authority to allocate a host result.
+        // Selected finite host execution consumes its prepared output before
+        // reaching this legacy continuation. Otherwise refuse before gather,
+        // source copying or ordinary arithmetic can allocate unowned storage.
+        if matches!(left, Value::GpuTensor(_)) || matches!(right, Value::GpuTensor(_)) {
+            if let Some(runtime) = runtime {
+                super::super::preparation::managed::require_unbounded_host_output(runtime)?;
+            }
+        }
         let builtin = entry.identity.name;
         let resident = [left, right]
             .into_iter()

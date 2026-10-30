@@ -100,6 +100,7 @@ fn unadvertised_legacy_integral_power_stays_resident_without_typed_probe() {
         .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let result = futures::executor::block_on(super::super::super::resident::power_gpu_host_left(
+        None,
         resident.handle.clone(),
         Value::Num(2.0),
     ))
@@ -141,6 +142,7 @@ fn legacy_after_fill_unsupported_is_terminal_without_host_replay() {
         .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let error = futures::executor::block_on(super::super::super::resident::power_gpu_host_left(
+        None,
         resident.handle.clone(),
         Value::Num(2.0),
     ))
@@ -172,6 +174,7 @@ fn legacy_malformed_alias_does_not_retire_borrowed_resident() {
         .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let error = futures::executor::block_on(super::super::super::resident::power_gpu_host_left(
+        None,
         resident.handle.clone(),
         Value::Num(2.0),
     ))

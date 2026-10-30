@@ -139,7 +139,17 @@ where
                 .and_then(|context| managed::execute(context, output, operator, &left, &right)),
         )),
         None => {
-            let permitted = context.map_or(Ok(()), managed::require_unbounded_host_output);
+            // A resident body uses its provider's allocation authority. Its
+            // canonical host fallback separately refuses unprepared finite
+            // allocation before any gather; do not demand a host output owner
+            // before giving an admitted device operation a chance to execute.
+            let resident =
+                matches!(left, Value::GpuTensor(_)) || matches!(right, Value::GpuTensor(_));
+            let permitted = if resident {
+                Ok(())
+            } else {
+                context.map_or(Ok(()), managed::require_unbounded_host_output)
+            };
             match permitted {
                 Err(error) => Either::Left(std::future::ready(Err(error))),
                 Ok(()) => Either::Right(body(left, right)),

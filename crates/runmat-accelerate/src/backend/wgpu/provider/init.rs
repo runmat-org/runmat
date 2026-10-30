@@ -24,6 +24,8 @@ use crate::telemetry::AccelTelemetry;
 
 #[path = "init/timestamp_features.rs"]
 mod timestamp_features;
+#[path = "init/adapter.rs"]
+mod adapter;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_required_features(precision: NumericPrecision) -> wgpu::Features {
@@ -175,15 +177,7 @@ impl WgpuProvider {
             instance_desc.backends = wgpu::Backends::BROWSER_WEBGPU;
         }
 
-        let instance = Arc::new(crate::backend::wgpu::compat::instance_new(instance_desc));
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: opts.power_preference,
-                force_fallback_adapter: opts.force_fallback_adapter,
-                compatible_surface: None,
-            })
-            .await
-            .ok_or_else(|| anyhow!("wgpu: no compatible adapter found"))?;
+        let (instance, adapter) = adapter::request(instance_desc, &opts).await?;
 
         let adapter_info = adapter.get_info();
         let adapter_features = adapter.features();

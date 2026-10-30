@@ -250,7 +250,8 @@ fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
 pub(crate) fn in_process_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 16, IN_PROCESS_OPERATIONS);
+    // Native mixed-precision arithmetic and synchronous hook observations.
+    let mut snapshot = dense_capability_snapshot(provider, 17, IN_PROCESS_OPERATIONS);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);

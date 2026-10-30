@@ -12,6 +12,44 @@ fn number() -> ValueFact {
     }))
 }
 
+#[test]
+fn primitive_operators_use_their_canonical_call_contract() {
+    let text = ValueFact::scalar(ValueKindFact::String);
+    let chars = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(2), Some(4)]),
+        StorageFact::Dense,
+    );
+    for (left, right) in [(text.clone(), chars.clone()), (chars, text)] {
+        let inferred = infer_binary_operator(
+            OperatorKind::Add,
+            left,
+            right,
+            [LiteralValue::Unknown, LiteralValue::Unknown],
+        );
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+        assert_eq!(inferred.fact.kind, ValueKindFact::String);
+        assert_eq!(inferred.fact.shape, ShapeFact::from(vec![Some(2), Some(1)]));
+        assert_eq!(inferred.fact.residency, runmat_types::ResidencyFact::Host);
+    }
+    let inferred = infer_binary_operator(
+        OperatorKind::Add,
+        number(),
+        number(),
+        [LiteralValue::Unknown, LiteralValue::Unknown],
+    );
+    assert!(
+        inferred.diagnostics.is_empty(),
+        "{:?}",
+        inferred.diagnostics
+    );
+    assert_eq!(inferred.fact.kind, number().kind);
+}
+
 fn object(class: ClassIdentity, properties: BTreeMap<String, ValueFact>) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {

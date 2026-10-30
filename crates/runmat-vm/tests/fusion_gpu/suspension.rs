@@ -91,7 +91,14 @@ fn publish_borrowed(
 }
 
 fn unpublish_borrowed(runtime: &runmat_runtime::context::RuntimeContext) {
-    block_on(runtime.scope(async {
+    // Cleanup is a subsequent command in the same session, not permission for
+    // the cancelled invocation to mutate its published workspace. Keep every
+    // service/workspace owner while giving that command its own control token.
+    let cleanup_control = runmat_execution::cancellation::CancellationSource::new();
+    let cleanup = runtime
+        .clone()
+        .with_cancellation_token(cleanup_control.token());
+    block_on(cleanup.scope(async {
         for name in runmat_runtime::workspace::session::global_names() {
             if name.starts_with("suspension_borrowed_") {
                 runmat_runtime::workspace::session::store_global_named(&name, Value::Num(0.0))

@@ -18,20 +18,23 @@ pub(super) enum ResidentOperand {
 }
 
 pub(in super::super) async fn power_gpu_host_left(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: GpuTensorHandle,
     exponent: Value,
 ) -> BuiltinResult<Value> {
-    power_gpu_host(base, exponent, ResidentOperand::Base).await
+    power_gpu_host(runtime, base, exponent, ResidentOperand::Base).await
 }
 
 pub(in super::super) async fn power_gpu_host_right(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     exponent: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    power_gpu_host(exponent, base, ResidentOperand::Exponent).await
+    power_gpu_host(runtime, exponent, base, ResidentOperand::Exponent).await
 }
 
 async fn power_gpu_host(
+    runtime: Option<&crate::context::RuntimeContext>,
     resident: GpuTensorHandle,
     host: Value,
     resident_operand: ResidentOperand,
@@ -40,7 +43,7 @@ async fn power_gpu_host(
         || is_integer(&host)
         || runmat_accelerate_api::handle_integer_type(&resident).is_some()
     {
-        return gather_and_evaluate(resident, host, resident_operand).await;
+        return gather_and_evaluate(runtime, resident, host, resident_operand).await;
     }
 
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&resident) {
@@ -85,7 +88,7 @@ async fn power_gpu_host(
         }
     }
 
-    gather_and_evaluate(resident, host, resident_operand).await
+    gather_and_evaluate(runtime, resident, host, resident_operand).await
 }
 
 async fn try_resident_scalar(
@@ -147,17 +150,20 @@ fn service_error(
 }
 
 async fn gather_and_evaluate(
+    runtime: Option<&crate::context::RuntimeContext>,
     resident: GpuTensorHandle,
     host: Value,
     resident_operand: ResidentOperand,
 ) -> BuiltinResult<Value> {
     let fallback = match resident_operand {
         ResidentOperand::Base => HostFallbackAdmission::new(
+            runtime,
             &runmat_builtins::POWER_CATALOG_ENTRY,
             &Value::GpuTensor(resident.clone()),
             &host,
         )?,
         ResidentOperand::Exponent => HostFallbackAdmission::new(
+            runtime,
             &runmat_builtins::POWER_CATALOG_ENTRY,
             &host,
             &Value::GpuTensor(resident.clone()),

@@ -53,6 +53,11 @@ async fn owner_with_scalar(scalar: Option<u32>) -> &'static WgpuProvider {
         )));
     }
     let provider = Box::leak(Box::new(provider));
+    assert_eq!(
+        provider.precision,
+        crate::backend::wgpu::types::NumericPrecision::F32,
+        "the validated triangular device recipe requires its F32 shader ABI"
+    );
     // SAFETY: the actual provider remains live for the process.
     unsafe { runmat_accelerate_api::register_device_provider(provider) };
     provider

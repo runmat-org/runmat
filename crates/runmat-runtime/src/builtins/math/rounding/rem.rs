@@ -216,11 +216,13 @@ async fn rem_values(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => rem_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
             let gathered = super::binary::gather_real(&a).await?;
-            rem_host(Value::Tensor(gathered), other)
+            let output = rem_host(Value::Tensor(gathered), other)?;
+            gpu_helpers::restore_class_preserving_value(&a, output, BUILTIN_NAME)
         }
         (other, Value::GpuTensor(b)) => {
             let gathered = super::binary::gather_real(&b).await?;
-            rem_host(other, Value::Tensor(gathered))
+            let output = rem_host(other, Value::Tensor(gathered))?;
+            gpu_helpers::restore_class_preserving_value(&b, output, BUILTIN_NAME)
         }
         (left, right) => rem_host(left, right),
     }

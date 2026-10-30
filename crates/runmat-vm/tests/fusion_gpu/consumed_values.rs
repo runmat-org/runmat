@@ -213,7 +213,7 @@ fn borrowed_initial_workspace_survives_error_and_retires_only_after_replacement(
                 result.outcome
             );
             assert_eq!(
-                projection.lookup("x").unwrap(),
+                block_on(runtime.scope(async { projection.lookup("x") })).unwrap(),
                 Some(Value::Num(3.0)),
                 "staged prefix survives terminalization"
             );

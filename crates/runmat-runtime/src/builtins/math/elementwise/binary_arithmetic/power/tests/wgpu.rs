@@ -15,7 +15,7 @@ fn power_wgpu_matches_cpu_elementwise() {
     let he = gpu_helpers::upload_tensor(provider, &exp).unwrap();
     let base_lease = hb.allocation_lease().downgrade();
     let exponent_lease = he.allocation_lease().downgrade();
-    let gpu = block_on(power_gpu_pair(hb.clone(), he.clone())).unwrap();
+    let gpu = block_on(power_gpu_pair(None, hb.clone(), he.clone())).unwrap();
     let gathered = test_support::gather(gpu).expect("gather");
     let cpu_tensor = match cpu {
         Value::Tensor(t) => t,

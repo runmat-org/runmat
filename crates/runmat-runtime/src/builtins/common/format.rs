@@ -11,6 +11,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 mod conversion;
 mod floating;
+pub(crate) mod scalar_text;
 use conversion::{FloatStyle, FormatConversion};
 pub(crate) use floating::format_delimited_numeric;
 use floating::format_float;
@@ -781,32 +782,15 @@ fn value_to_f64(value: &Value) -> BuiltinResult<f64> {
 }
 
 pub(crate) fn number_to_string(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value.is_infinite() {
-        return if value.is_sign_negative() {
-            "-Inf".to_string()
-        } else {
-            "Inf".to_string()
-        };
-    }
-    if value == 0.0 {
-        return "0".to_string();
-    }
-    value.to_string()
+    let mut output = String::new();
+    scalar_text::write_number_text(&mut output, value).expect("String formatting is infallible");
+    output
 }
 
 pub(crate) fn complex_to_string(re: f64, im: f64) -> String {
-    if im == 0.0 {
-        number_to_string(re)
-    } else if re == 0.0 {
-        format!("{}i", number_to_string(im))
-    } else if im < 0.0 {
-        format!("{}-{}i", number_to_string(re), number_to_string(im.abs()))
-    } else {
-        format!("{}+{}i", number_to_string(re), number_to_string(im))
-    }
+    let mut output = String::new();
+    scalar_text::write_complex_text(&mut output, re, im).expect("String formatting is infallible");
+    output
 }
 
 fn value_to_string(value: &Value) -> BuiltinResult<String> {

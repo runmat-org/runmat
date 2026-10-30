@@ -16,6 +16,11 @@ pub(in crate::catalog) fn infer_binary_arithmetic(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
+    if matches!(rule, BinaryArithmeticInferenceRule::Add) {
+        if let Some(inferred) = plus::infer_text(request, entry) {
+            return inferred;
+        }
+    }
     inference::infer(policy_for_rule(rule), request, entry)
 }
 

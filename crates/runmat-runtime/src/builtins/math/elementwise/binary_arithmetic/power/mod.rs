@@ -122,6 +122,7 @@ async fn power_builtin(
     let template =
         super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
             .await?;
+    let provider_runtime = runtime.clone();
     preparation::execute(
         runtime.as_ref(),
         2 + rest.len(),
@@ -129,9 +130,15 @@ async fn power_builtin(
         rhs,
         |lhs, rhs| async move {
             let base_result = match (lhs, rhs) {
-                (Value::GpuTensor(la), Value::GpuTensor(lb)) => power_gpu_pair(la, lb).await,
-                (Value::GpuTensor(la), rhs) => power_gpu_host_left(la, rhs).await,
-                (lhs, Value::GpuTensor(rb)) => power_gpu_host_right(lhs, rb).await,
+                (Value::GpuTensor(la), Value::GpuTensor(lb)) => {
+                    power_gpu_pair(provider_runtime.as_ref(), la, lb).await
+                }
+                (Value::GpuTensor(la), rhs) => {
+                    power_gpu_host_left(provider_runtime.as_ref(), la, rhs).await
+                }
+                (lhs, Value::GpuTensor(rb)) => {
+                    power_gpu_host_right(provider_runtime.as_ref(), lhs, rb).await
+                }
                 (lhs, rhs) => Ok(power_host(lhs, rhs)?),
             }?;
             RootedValue::new(base_result).map_err(|cause| cause.into_runtime_error())

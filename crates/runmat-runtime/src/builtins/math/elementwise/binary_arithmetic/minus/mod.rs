@@ -158,6 +158,7 @@ async fn minus_builtin(
     let template =
         super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
             .await?;
+    let provider_runtime = runtime.clone();
     super::preparation::execute(
         runtime.as_ref(),
         MINUS_CATALOG_ENTRY.identity,
@@ -167,9 +168,15 @@ async fn minus_builtin(
         rhs,
         |lhs, rhs| async move {
             let base = match (lhs, rhs) {
-                (Value::GpuTensor(la), Value::GpuTensor(lb)) => minus_gpu_pair(la, lb).await,
-                (Value::GpuTensor(la), rhs) => minus_gpu_host_left(la, rhs).await,
-                (lhs, Value::GpuTensor(rb)) => minus_gpu_host_right(lhs, rb).await,
+                (Value::GpuTensor(la), Value::GpuTensor(lb)) => {
+                    minus_gpu_pair(provider_runtime.as_ref(), la, lb).await
+                }
+                (Value::GpuTensor(la), rhs) => {
+                    minus_gpu_host_left(provider_runtime.as_ref(), la, rhs).await
+                }
+                (lhs, Value::GpuTensor(rb)) => {
+                    minus_gpu_host_right(provider_runtime.as_ref(), lhs, rb).await
+                }
                 (lhs, rhs) => minus_host(lhs, rhs),
             }?;
             let base = RootedValue::new(base).map_err(|cause| cause.into_runtime_error())?;

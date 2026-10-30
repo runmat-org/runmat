@@ -458,13 +458,21 @@ fn callback_waves_release_only_internal_records_after_rooted_result_handoff() {
             .ensure_pool(runmat_execution::PoolRequest::automatic())
             .unwrap();
         let cancellation = runmat_execution::cancellation::CancellationSource::new();
-        assert!(service
+        // Opaque program bytes are validated by their execution owner, not
+        // by this transport boundary. Fail the actual publication boundary
+        // to exercise retirement before a task record becomes observable.
+        service.driver.fail_next_checkpoint_for_test();
+        let failure = service
             .submit_callback_batch(
                 vec![admitted_program_call()],
                 &pool.handle,
                 cancellation.token(),
             )
-            .is_err());
+            .unwrap_err();
+        assert!(
+            matches!(failure, ExecutionServiceError::Infrastructure(message)
+            if message.contains("injected checkpoint publication failure"))
+        );
         {
             let state = service.state.lock().unwrap();
             assert_eq!(state.futures.len(), 1, "unpublished private Future retired");

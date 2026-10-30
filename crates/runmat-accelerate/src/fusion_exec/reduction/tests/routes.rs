@@ -493,9 +493,20 @@ fn cancelled_canonical_session_refuses_before_preparation_effects() {
         .err()
         .expect("cancelled placement must not begin selected preparation");
         assert!(!error.is_after_effect());
-        assert_eq!(provider.configs.load(Ordering::SeqCst), 1);
-        assert_eq!(provider.candidates.load(Ordering::SeqCst), 1);
-        assert_eq!(provider.feasibility.load(Ordering::SeqCst), 1);
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        while !matches!(
+            cause.downcast_ref::<runmat_runtime::context::host_allocation::HostAllocationError>(),
+            Some(runmat_runtime::context::host_allocation::HostAllocationError::Cancelled)
+        ) {
+            cause = cause
+                .source()
+                .expect("original cancellation cause retained");
+        }
+        // Canonical allocation-policy admission observes cancellation before
+        // even querying provider configuration or preparation candidates.
+        assert_eq!(provider.configs.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.candidates.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.feasibility.load(Ordering::SeqCst), 0);
         assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
         assert_eq!(provider.submissions.load(Ordering::SeqCst), 0);
         assert!(provider.probes.lock().unwrap().is_empty());

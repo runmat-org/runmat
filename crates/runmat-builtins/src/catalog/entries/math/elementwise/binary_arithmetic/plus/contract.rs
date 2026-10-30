@@ -16,6 +16,14 @@ const SIGNATURES: &[BuiltinSignatureDescriptor] = &[
         inputs: &[INPUT_A, INPUT_B, LIKE, PROTOTYPE],
         outputs: &[OUTPUT],
     },
+    BuiltinSignatureDescriptor {
+        label: "S = plus(A, B)",
+        inputs: &[
+            BuiltinParamDescriptor { name: "A", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Required, default: None, description: "Host string or convertible numeric, logical, character, or scalar-convertible cell data; at least one operand must be a string." },
+            BuiltinParamDescriptor { name: "B", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Required, default: None, description: "Second host operand; converted string shapes must permit implicit expansion." },
+        ],
+        outputs: &[BuiltinParamDescriptor { name: "S", ty: BuiltinParamType::StringScalar, arity: BuiltinParamArity::Required, default: None, description: "String scalar or array with the broadcasted converted shape; missing values propagate." }],
+    },
 ];
 
 pub const PLUS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -27,7 +35,7 @@ pub const PLUS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDesc
 pub const PLUS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.PLUS.INVALID_INPUT",
     identifier: Some("RunMat:plus:InvalidInput"),
-    when: "Operands or prototypes cannot be converted into supported numeric or symbolic forms.",
+    when: "Operands or prototypes cannot be converted into the selected numeric, symbolic, or host string form.",
     message: "plus: invalid input",
 };
 pub const PLUS_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -100,4 +108,10 @@ pub const PLUS_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDesc
 pub const PLUS_EXTENSIONS: &[BuiltinExtensionDescriptor] = &[PLUS_LIKE_EXTENSION];
 
 pub const PLUS_INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] =
-    &[BuiltinIntegerCapabilityDescriptor { form: "C = plus(A, B)", inputs: INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "Same-class integer sums are exact and saturating. Scalar-double arithmetic uses MATLAB rounding, including the extended-precision 64-bit rule; resident paths use native kernels when supported and otherwise gather authoritative storage." }];
+    &[
+        BuiltinIntegerCapabilityDescriptor { form: "C = plus(A, B)", inputs: INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "Same-class integer sums are exact and saturating. Scalar-double arithmetic uses MATLAB rounding, including the extended-precision 64-bit rule; resident paths use native kernels when supported and otherwise gather authoritative storage." },
+        BuiltinIntegerCapabilityDescriptor { form: "S = plus(A, B)", inputs: &[
+            BuiltinIntegerInputCapability { name: "A", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "An integer operand converts directly from its native class when the other operand is a string; all integer bits contribute to decimal text." },
+            BuiltinIntegerInputCapability { name: "B", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "String addition preserves exact integer text and applies implicit expansion to the converted shapes." },
+        ], computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::BroadcastCompatible, notes: "String addition returns host strings, not integer sums. Explicitly gather device values first; numeric output prototypes do not apply." },
+    ];

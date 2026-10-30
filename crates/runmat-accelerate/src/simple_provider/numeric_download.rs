@@ -1,5 +1,6 @@
 //! Exact readback admission belongs to the registry's native payload, not this
 //! provider's preferred F64 computation class. No payload is cloned or scanned.
+mod staging;
 use super::*;
 use runmat_accelerate_api::{
     ProviderFeasibility, ProviderFeasibilityQuery, ProviderRejectionCode as Rejection,

@@ -3,6 +3,7 @@ use crate::{
     catalog::inference::infer_catalog_call, BuiltinOutputMode, BuiltinParamArity,
     BuiltinPortability,
 };
+use crate::{BuiltinAcceleratorPolicy, BuiltinLinkPolicy, BuiltinPurity, ForeignAdapterFamily};
 use runmat_types::*;
 
 fn request(arguments: Vec<ValueFact>, count: usize) -> CallRequest {

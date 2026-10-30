@@ -508,9 +508,7 @@ fn rvalue_result(statement: &MirStmtKind) -> NativeCodegenResult<NativeRvalueRes
         MirStmtKind::SequenceAssign { target, .. } => {
             NativeRvalueResult::SequenceAssignment(target.clone())
         }
-        MirStmtKind::Expr(value) if expression_produces_value(value) => {
-            NativeRvalueResult::Expression
-        }
+        MirStmtKind::Expr(value) if value.has_statement_result() => NativeRvalueResult::Expression,
         MirStmtKind::Expr(_) => NativeRvalueResult::Discard,
         MirStmtKind::StatementOutput(_) => {
             return Err(NativeCodegenError::new(
@@ -566,7 +564,8 @@ fn statement_rvalue_outputs(
         MirStmtKind::StatementOutput(_) => None,
         MirStmtKind::Expr(value) => Some((
             value,
-            expression_produces_value(value)
+            value
+                .has_statement_result()
                 .then_some(None)
                 .into_iter()
                 .collect(),
@@ -577,22 +576,6 @@ fn statement_rvalue_outputs(
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => None,
     }
-}
-
-fn expression_produces_value(value: &runmat_mir::MirRvalue) -> bool {
-    !matches!(value, runmat_mir::MirRvalue::Call(call) if call.requested_outputs.known_count() == Some(0))
-        && !matches!(value, runmat_mir::MirRvalue::SubscriptChain(chain)
-            if chain.sequence_use == runmat_types::SequenceUse::Discard)
-        && !matches!(
-            value,
-            runmat_mir::MirRvalue::Member {
-                sequence_use: runmat_types::SequenceUse::Discard,
-                ..
-            } | runmat_mir::MirRvalue::DynamicMember {
-                sequence_use: runmat_types::SequenceUse::Discard,
-                ..
-            }
-        )
 }
 
 fn statement_output_roots(statement: &MirStmtKind) -> Vec<MirLocalId> {

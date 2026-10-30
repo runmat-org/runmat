@@ -26,7 +26,6 @@ struct Selection {
     operation: &'static str,
     kind: ExecutionCandidateKind,
     requests: RefCell<Vec<WholeWorkDecision>>,
-    feedback: RefCell<Vec<PlacementFeedback>>,
 }
 
 impl RuntimePlacementService for Selection {
@@ -82,9 +81,7 @@ impl RuntimePlacementService for Selection {
         RuntimePlacementService::plan(&self.session, request)
     }
     fn observe(&self, feedback: PlacementFeedback) -> Result<(), RuntimeError> {
-        RuntimePlacementService::observe(&self.session, feedback.clone())?;
-        self.feedback.borrow_mut().push(feedback);
-        Ok(())
+        RuntimePlacementService::observe(&self.session, feedback)
     }
     fn defer_feedback(
         &self,
@@ -109,7 +106,6 @@ fn context(
         operation,
         kind,
         requests: RefCell::new(vec![]),
-        feedback: RefCell::new(vec![]),
     });
     let context = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
@@ -203,11 +199,17 @@ fn assert_execution(selection: &Selection, provider: bool, operands: usize) {
         .iter()
         .filter(|event| event.kind == PlacementEventKind::Upload)
         .count();
-    let samples = selection.feedback.borrow();
-    let samples = samples
+    let decision = requests
         .iter()
-        .filter(|sample| sample.signature.operation == selection.operation)
-        .collect::<Vec<_>>();
+        .find(|request| request.signature.operation == selection.operation)
+        .unwrap();
+    // Completed observations are drained by the owning session, not replayed
+    // through this facade's observe method. Query the actual pricing evidence.
+    let evidence = selection.session.observed_candidate_duration(
+        &decision.signature,
+        &decision.selected.candidate,
+        decision.selected.kind,
+    );
     if provider {
         assert_eq!(uploads, operands);
         assert!(trace
@@ -220,8 +222,11 @@ fn assert_execution(selection: &Selection, provider: bool, operands: usize) {
             .events
             .iter()
             .any(|event| event.kind == PlacementEventKind::Complete));
-        assert!(
-            samples.is_empty(),
+        assert_eq!(
+            evidence,
+            runmat_execution::CandidateObservationEvidence::Unavailable(
+                runmat_execution::CandidateCostUnavailable::NoObservations
+            ),
             "enqueue is not a measured device completion"
         );
     } else {
@@ -231,8 +236,15 @@ fn assert_execution(selection: &Selection, provider: bool, operands: usize) {
             .iter()
             .any(|event| event.kind == PlacementEventKind::Complete
                 && event.variant == Some(PlacementVariant::SharedRuntime)));
-        assert_eq!(samples.len(), 1);
-        assert!(samples[0].succeeded);
+        assert_eq!(
+            evidence,
+            runmat_execution::CandidateObservationEvidence::Unavailable(
+                runmat_execution::CandidateCostUnavailable::InsufficientObservations {
+                    successful: 1,
+                    failed: 0
+                }
+            )
+        );
     }
 }
 

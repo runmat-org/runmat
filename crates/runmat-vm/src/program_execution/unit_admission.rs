@@ -71,6 +71,14 @@ enum RuntimeBoundEntrypoint {
 }
 
 impl AdmittedExecutableUnit {
+    /// Move accepted code into a compiler-owned session reconstruction.
+    /// Nonwire execution contracts remain attached to these exact bodies;
+    /// decoding the registry again would discard their admitted MIR evidence.
+    /// This grants no runtime source ownership or invocation capabilities.
+    pub fn into_compiler_components(self) -> (Bytecode, FunctionRegistry, VmAssemblyLayout) {
+        (self.bytecode, self.registry, self.layout)
+    }
+
     /// Validated code and class declarations retained by this admitted unit.
     pub fn bytecode(&self) -> &Bytecode {
         &self.bytecode

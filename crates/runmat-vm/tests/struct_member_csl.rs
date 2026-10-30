@@ -133,7 +133,12 @@ fn absent_cell_root_is_created_only_at_successful_sequence_commit() {
         "{error}"
     );
     execute_source(
-        "try; [fresh{2}, other{2}] = deal(9); catch; end; assert(exist('fresh', 'var') == 0); assert(exist('other', 'var') == 0); c = {1}; try; [c{1}, c{2}] = deal(9); catch; end; assert(c{1} == 1);",
+        // A single deal input is replicated and succeeds. Three inputs for
+        // two destinations are rejected before any destination is committed.
+        "[replicated{1}, replicated{2}] = deal(9); assert(isequal(replicated, {9, 9}));\n\
+         try; [fresh{2}, other{2}] = deal(9, 8, 7); catch; end;\n\
+         assert(exist('fresh', 'var') == 0); assert(exist('other', 'var') == 0);\n\
+         c = {1}; try; [c{1}, c{2}] = deal(9, 8, 7); catch; end; assert(c{1} == 1);",
     )
     .unwrap();
 }

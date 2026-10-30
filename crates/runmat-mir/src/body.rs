@@ -88,19 +88,7 @@ impl MirBody {
                     MirStmtKind::Expr(value) => {
                         assignment_roots.clear();
                         assignment_span = None;
-                        let produces_value = match value {
-                            crate::MirRvalue::Call(call) => {
-                                call.requested_outputs.known_count() != Some(0)
-                            }
-                            crate::MirRvalue::Member { sequence_use, .. }
-                            | crate::MirRvalue::DynamicMember { sequence_use, .. } => {
-                                *sequence_use != runmat_types::SequenceUse::Discard
-                            }
-                            crate::MirRvalue::SubscriptChain(chain) => {
-                                chain.sequence_use != runmat_types::SequenceUse::Discard
-                            }
-                            _ => true,
-                        };
+                        let produces_value = value.has_statement_result();
                         let direct_binding = match value {
                             crate::MirRvalue::Use(crate::MirOperand::Local(local)) => self
                                 .locals

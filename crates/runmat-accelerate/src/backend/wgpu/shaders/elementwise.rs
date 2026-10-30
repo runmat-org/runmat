@@ -1636,6 +1636,9 @@ const SMALL_REFLECTION_CUTOFF: f64 = 1.0e-305;
 const FACTORIAL_MAX: u32 = 170u;
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 fn expm1_precise(a: f64) -> f64 {
+    if a == f64(0.0) {
+        return a;
+    }
     let abs_a = abs(a);
     if abs_a < f64(1.0e-6) {
         let a2 = a * a;
@@ -1648,6 +1651,9 @@ fn expm1_precise(a: f64) -> f64 {
 }
 
 fn log1p_precise(a: f64) -> f64 {
+    if a == f64(0.0) {
+        return a;
+    }
     let abs_a = abs(a);
     if abs_a < f64(1.0e-6) {
         let a2 = a * a;
@@ -2099,6 +2105,9 @@ const SMALL_REFLECTION_CUTOFF: f32 = 1.0e-30;
 const FACTORIAL_MAX_F32: u32 = 170u;
 const FACTORIAL_INT_TOL_F32: f32 = 1.0e-4;
 fn expm1_precise(a: f32) -> f32 {
+    if a == 0.0 {
+        return a;
+    }
     let abs_a = abs(a);
     if abs_a < 1.0e-4 {
         let a2 = a * a;
@@ -2111,6 +2120,9 @@ fn expm1_precise(a: f32) -> f32 {
 }
 
 fn log1p_precise(a: f32) -> f32 {
+    if a == 0.0 {
+        return a;
+    }
     let abs_a = abs(a);
     if abs_a < 1.0e-4 {
         let a2 = a * a;

@@ -39,21 +39,22 @@ impl ExecutableUnit {
             .validate_for(&runmat_execution::ExecutableSectionSupport::default())
             .map_err(|error| error.to_string())?;
         require_environment(envelope)?;
+        // Use the same admission boundary as worker execution, including its
+        // MIR-derived nonwire contracts. Move the accepted registry rather
+        // than issuing evidence from copied flags or decoding it a second time.
+        let canonical = envelope
+            .canonical_bytes()
+            .map_err(|error| error.to_string())?;
+        let admitted =
+            runmat_vm::admit_executable_unit(&canonical).map_err(|error| error.to_string())?;
+        let (mut bytecode, registry, layout) = admitted.into_compiler_components();
+        drop(canonical);
         let mir: runmat_mir::MirAssembly = decode(envelope, Kind::Mir)?;
         let analysis: runmat_mir::analysis::AnalysisStore = decode(envelope, Kind::Analysis)?;
         analysis
             .revision
             .validate_current()
             .map_err(|error| error.to_string())?;
-        let mut bytecode: runmat_vm::Bytecode = decode(envelope, Kind::Bytecode)?;
-        if !bytecode.bound_functions.is_empty()
-            || !bytecode.function_registry.functions.is_empty()
-            || bytecode.layout.is_some()
-        {
-            return Err("portable bytecode contains duplicate component authorities".into());
-        }
-        let registry: runmat_vm::FunctionRegistry = decode(envelope, Kind::FunctionRegistry)?;
-        let layout: runmat_vm::VmAssemblyLayout = decode(envelope, Kind::VmLayout)?;
         let (source, source_map) = sources::decode(envelope, &bytecode)?;
         let revision = ExecutableRevision::derive(
             &source,

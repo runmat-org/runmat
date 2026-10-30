@@ -150,6 +150,18 @@ async fn plus_builtin(
     {
         return Err(builtin_error("complex integer arithmetic is not supported"));
     }
+    if matches!(lhs, Value::String(_) | Value::StringArray(_))
+        || matches!(rhs, Value::String(_) | Value::StringArray(_))
+    {
+        if !rest.is_empty() {
+            return Err(plus_error_with_detail(
+                &PLUS_ERROR_INVALID_ARGUMENT,
+                "numeric output prototypes do not apply to string addition",
+            ));
+        }
+        let result = text::concatenate(runtime.as_ref(), &lhs, &rhs).await?;
+        return RootedValue::new(result).map_err(|cause| cause.into_runtime_error());
+    }
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
     let template = parse_output_template(OUTPUT_PROTOTYPE_CONTEXT, rest.view())?;
     if matches!(template, OutputTemplate::Like(_)) {
@@ -170,10 +182,16 @@ async fn plus_builtin(
         |lhs, rhs| async move {
             let (base, host_branch) = match (lhs, rhs) {
                 (Value::GpuTensor(la), Value::GpuTensor(lb)) => {
-                    (plus_gpu_pair(la, lb).await?, false)
+                    (plus_gpu_pair(branch_runtime.as_ref(), la, lb).await?, false)
                 }
-                (Value::GpuTensor(la), rhs) => (plus_gpu_host_left(la, rhs).await?, false),
-                (lhs, Value::GpuTensor(rb)) => (plus_gpu_host_right(lhs, rb).await?, false),
+                (Value::GpuTensor(la), rhs) => (
+                    plus_gpu_host_left(branch_runtime.as_ref(), la, rhs).await?,
+                    false,
+                ),
+                (lhs, Value::GpuTensor(rb)) => (
+                    plus_gpu_host_right(branch_runtime.as_ref(), lhs, rb).await?,
+                    false,
+                ),
                 (lhs, rhs) => {
                     let typed_host_pair = matches!((&lhs, &rhs),
                         (Value::Tensor(left), Value::Tensor(right))
@@ -209,6 +227,7 @@ mod provider;
 use provider::{plus_gpu_host_left, plus_gpu_host_right, plus_gpu_pair};
 
 mod publication;
+mod text;
 
 mod host;
 use host::{is_real_integer_operand, plus_host};

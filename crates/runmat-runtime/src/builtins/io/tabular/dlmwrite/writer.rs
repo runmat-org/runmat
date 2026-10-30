@@ -12,6 +12,20 @@ pub(super) async fn write_dlm(
     let cols = tensor.cols();
     let newline = options.newline.as_str();
     let layout = validate_output_layout(rows, cols, options)?;
+    let write_lock = await_io(
+        runtime,
+        BUILTIN_NAME,
+        super::super::write_owner::write_lock_for_path(selected),
+    )
+    .await?
+    .map_err(|source| {
+        dlmwrite_error_with_source(
+            &DLMWRITE_ERROR_IO,
+            "dlmwrite: write authority unavailable",
+            source,
+        )
+    })?;
+    let _write_guard = await_io(runtime, BUILTIN_NAME, write_lock.lock()).await?;
 
     let (existing_nonempty, ends_with_newline) = if options.append {
         match await_io(runtime, BUILTIN_NAME, selected.metadata()).await? {
@@ -47,26 +61,8 @@ pub(super) async fn write_dlm(
         (false, false)
     };
 
-    let mut open = OpenOptions::new();
-    open.create(true);
-    if options.append {
-        open.append(true);
-    } else {
-        open.write(true).truncate(true);
-    }
-
-    let mut file = await_io(runtime, BUILTIN_NAME, selected.open_with(&open))
-        .await?
-        .map_err(|err| {
-            dlmwrite_error_with_source(
-                &DLMWRITE_ERROR_IO,
-                format!(
-                    "dlmwrite: unable to open \"{}\" for writing ({err})",
-                    path.display()
-                ),
-                err,
-            )
-        })?;
+    let mut file =
+        super::output::DlmOutput::begin(runtime, cooperation, selected, options.append).await?;
 
     let mut bytes = 0usize;
 
@@ -102,17 +98,7 @@ pub(super) async fn write_dlm(
     }
 
     if rows == 0 || cols == 0 {
-        check_dlm_owner(selected)?;
-        await_io(runtime, BUILTIN_NAME, file.flush_async())
-            .await?
-            .map_err(|err| {
-                dlmwrite_error_with_source(
-                    &DLMWRITE_ERROR_IO,
-                    format!("dlmwrite: failed to flush output ({err})"),
-                    err,
-                )
-            })?;
-        check_dlm_owner(selected)?;
+        file.finish(cooperation, selected).await?;
         return Ok(bytes);
     }
 
@@ -159,23 +145,13 @@ pub(super) async fn write_dlm(
         .await?;
     }
 
-    check_dlm_owner(selected)?;
-    await_io(runtime, BUILTIN_NAME, file.flush_async())
-        .await?
-        .map_err(|err| {
-            dlmwrite_error_with_source(
-                &DLMWRITE_ERROR_IO,
-                format!("dlmwrite: failed to flush output ({err})"),
-                err,
-            )
-        })?;
-    check_dlm_owner(selected)?;
+    file.finish(cooperation, selected).await?;
     Ok(bytes)
 }
 
 pub(super) async fn write_blank_row(
     cooperation: &mut TabularCooperation<'_>,
-    file: &mut File,
+    file: &mut super::output::DlmOutput<'_>,
     selected: &TabularFsPath,
     field_count: usize,
     delimiter: &str,
@@ -192,7 +168,7 @@ pub(super) async fn write_blank_row(
     write_dlm_bytes(file, cooperation, selected, newline.as_bytes(), bytes).await
 }
 
-fn check_dlm_owner(selected: &TabularFsPath) -> BuiltinResult<()> {
+pub(super) fn check_dlm_owner(selected: &TabularFsPath) -> BuiltinResult<()> {
     selected.check().map_err(|source| {
         dlmwrite_error_with_source(
             &DLMWRITE_ERROR_IO,
@@ -203,64 +179,13 @@ fn check_dlm_owner(selected: &TabularFsPath) -> BuiltinResult<()> {
 }
 
 async fn write_dlm_bytes(
-    file: &mut File,
+    file: &mut super::output::DlmOutput<'_>,
     cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
     bytes: &[u8],
     total: &mut usize,
 ) -> BuiltinResult<()> {
-    for chunk in bytes.chunks(4096) {
-        (*total).checked_add(chunk.len()).ok_or_else(|| {
-            dlmwrite_error_with(
-                &DLMWRITE_ERROR_SIZE,
-                "dlmwrite: byte count overflow while writing output",
-            )
-        })?;
-        let mut remaining = chunk;
-        while !remaining.is_empty() {
-            check_dlm_owner(selected)?;
-            let count = match file.write(remaining) {
-                Ok(count) => count,
-                Err(source) if source.kind() == io::ErrorKind::Interrupted => {
-                    cooperation.completed(1).await?;
-                    continue;
-                }
-                Err(source) => {
-                    return Err(dlmwrite_error_with_source(
-                        &DLMWRITE_ERROR_IO,
-                        format!("dlmwrite: failed to write output ({source})"),
-                        source,
-                    ));
-                }
-            };
-            if count > remaining.len() {
-                let source = io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "dlmwrite: provider reported more bytes than requested",
-                );
-                return Err(dlmwrite_error_with_source(
-                    &DLMWRITE_ERROR_IO,
-                    source.to_string(),
-                    source,
-                ));
-            }
-            if count == 0 {
-                let source = io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "dlmwrite: provider made no progress writing output",
-                );
-                return Err(dlmwrite_error_with_source(
-                    &DLMWRITE_ERROR_IO,
-                    source.to_string(),
-                    source,
-                ));
-            }
-            add_written_bytes(total, count)?;
-            remaining = &remaining[count..];
-            cooperation.completed(count).await?;
-        }
-    }
-    Ok(())
+    file.write_bytes(cooperation, selected, bytes, total).await
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

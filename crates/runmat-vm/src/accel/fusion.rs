@@ -496,8 +496,7 @@ pub async fn execute_fusion_special_kind(
 ) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
     match kind {
         FusionKind::CenteredGram => {
-            // Recognition is structural only. Covariance's uncentered-moment
-            // algorithm does not implement the authored sequence's classes,
+            // Structural recognition does not prove equivalent classes,
             // accumulation, operand order or shape. Leave all operands and
             // stores untouched for the original bytecode, including GPU ones.
             Ok(FusionExecutionOutcome::implementation_unavailable())

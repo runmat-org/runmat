@@ -237,6 +237,9 @@ use controls::*;
 mod writer;
 use writer::*;
 
+#[path = "dlmwrite/output.rs"]
+mod output;
+
 #[path = "dlmwrite/format.rs"]
 mod format;
 use format::*;

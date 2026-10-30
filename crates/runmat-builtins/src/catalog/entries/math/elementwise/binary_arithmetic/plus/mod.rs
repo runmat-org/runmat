@@ -1,5 +1,7 @@
 mod contract;
 mod documentation;
+mod inference;
+pub(super) use inference::infer_text;
 
 #[cfg(test)]
 mod inference_tests;

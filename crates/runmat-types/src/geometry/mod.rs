@@ -2,5 +2,7 @@
 mod broadcast;
 mod flip;
 
-pub use broadcast::{broadcast_concrete_shape, ConcreteBroadcastError};
+pub use broadcast::{
+    broadcast_concrete_shape, ConcreteBroadcastDimensions, ConcreteBroadcastError,
+};
 pub use flip::FlipGeometry;

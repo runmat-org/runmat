@@ -111,8 +111,12 @@ fn late_filesystem_failure_keeps_every_child_and_root_hidden_and_retryable() {
     let identity = prepared.descriptor.identity().unwrap();
     let private = filesystem::directory(&store, identity);
     std::fs::create_dir_all(&private).unwrap();
-    // Records are written before the manifest; force that late write to fail.
-    std::fs::create_dir(private.join("manifest.json")).unwrap();
+    // Immutable content and the manifest commit as one group before child
+    // records. Block the second child after that barrier and the first record,
+    // keeping the final visibility marker absent rather than corrupting it.
+    std::fs::create_dir(private.join("runs")).unwrap();
+    let blocked_child = private.join("runs").join(format!("{}.json", ids[1]));
+    std::fs::create_dir(&blocked_child).unwrap();
     assert!(store.commit_publication(prepared).is_err());
     assert!(private
         .join("runs")
@@ -132,7 +136,7 @@ fn late_filesystem_failure_keeps_every_child_and_root_hidden_and_retryable() {
     let mut stolen = run.clone();
     stolen.run_id = ids[0].into();
     assert!(store.persist_run(&stolen).is_err());
-    std::fs::remove_dir(private.join("manifest.json")).unwrap();
+    std::fs::remove_dir(blocked_child).unwrap();
     store.commit_publication(prepare(&run, &ids)).unwrap();
     assert_eq!(store.list_runs().unwrap().len(), 2);
     std::fs::remove_dir_all(root).unwrap();

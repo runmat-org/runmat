@@ -3,6 +3,9 @@ use crate::{ExactArrayStorage, ExactHostNumericAllocationError, SharedShape, Utf
 use super::shape_rows_cols;
 
 fn string_element_count(shape: &[usize]) -> Option<usize> {
+    if shape.contains(&0) {
+        return Some(0);
+    }
     shape
         .iter()
         .try_fold(1usize, |count, extent| count.checked_mul(*extent))

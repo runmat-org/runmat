@@ -3970,14 +3970,19 @@ impl AccelProvider for InProcessProvider {
         use runmat_accelerate_api::observation::{
             ProviderObservationCapability, ProviderObservationOverhead,
         };
-        if !matches!(
-            query.operation.0.as_str(),
-            "conv"
-                | "conv2"
-                | "transfer.upload"
-                | runmat_accelerate_api::random::PROVIDER_GPU_RANDOM_OPERATION
-                | runmat_accelerate_api::random::PROVIDER_GPU_INTEGER_OPERATION
-        ) || !self.query_feasibility(query).is_supported()
+        let observed_arithmetic = query.family
+            == runmat_accelerate_api::ProviderOperationFamily::Elementwise
+            && arithmetic::Operation::for_identity(&query.operation).is_some();
+        if !(observed_arithmetic
+            || matches!(
+                query.operation.0.as_str(),
+                "conv"
+                    | "conv2"
+                    | "transfer.upload"
+                    | runmat_accelerate_api::random::PROVIDER_GPU_RANDOM_OPERATION
+                    | runmat_accelerate_api::random::PROVIDER_GPU_INTEGER_OPERATION
+            ))
+            || !self.query_feasibility(query).is_supported()
         {
             return ProviderObservationCapability::Unsupported;
         }
@@ -4459,25 +4464,40 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
-        Box::pin(async move {
-            let data = {
-                let guard = numeric_registry()
-                    .lock_for(self.device_id)
-                    .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
-                let source = guard
-                    .get(handle)
-                    .ok_or_else(|| anyhow!("numeric buffer not found: {}", handle.buffer_id()))?;
-                source.clone()
-            };
-            self.telemetry.record_download_bytes(data.byte_len());
-            let output = HostNumericTensorOwned {
-                data: data.into_host_numeric(),
-                shape: handle.shape().to_vec(),
-                storage: runmat_accelerate_api::handle_storage(handle),
-            };
-            output.validate()?;
-            Ok(output)
-        })
+        Box::pin(self.download_registry_numeric(handle, None, None))
+    }
+
+    fn download_numeric_admitted<'a>(
+        &'a self,
+        source: &'a GpuTensorHandle,
+        claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(self.download_registry_numeric(source, Some(claim), None))
+    }
+
+    fn prepare_numeric_download_stage(
+        &self,
+        source: &GpuTensorHandle,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> anyhow::Result<runmat_accelerate_api::PreparedNumericDownloadStage> {
+        self.prepare_registry_numeric_download(source, query, claim)
+    }
+
+    fn download_numeric_admitted_stage<'a>(
+        &'a self,
+        source: &'a GpuTensorHandle,
+        stage: runmat_accelerate_api::PreparedNumericDownloadStage,
+    ) -> AccelNumericDownloadFuture<'a> {
+        let claim = stage.completion_claim();
+        Box::pin(self.download_registry_numeric(source, Some(claim), Some(stage)))
+    }
+
+    fn download_numeric_completion_host_bound(
+        &self,
+        source: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        self.registry_numeric_download_completion_bound(source)
     }
 
     fn query_numeric_download_feasibility(

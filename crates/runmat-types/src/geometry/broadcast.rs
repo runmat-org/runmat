@@ -1,5 +1,7 @@
 //! Column-major implicit expansion of known concrete dimensions.
 use std::fmt;
+mod dimensions;
+pub use dimensions::ConcreteBroadcastDimensions;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConcreteBroadcastError {
@@ -34,38 +36,18 @@ pub fn broadcast_concrete_shape(
     left: &[usize],
     right: &[usize],
 ) -> Result<Vec<usize>, ConcreteBroadcastError> {
-    let rank = left.len().max(right.len());
+    let dimensions = ConcreteBroadcastDimensions::new(left, right)?;
+    let rank = dimensions.rank();
     let mut output = Vec::new();
     output
         .try_reserve_exact(rank)
         .map_err(|_| ConcreteBroadcastError::ShapeAllocation)?;
     for axis in 0..rank {
-        let extent = |shape: &[usize]| {
-            if rank >= 2 && shape.len() == 1 {
-                if axis == 1 {
-                    shape[0]
-                } else {
-                    1
-                }
-            } else {
-                shape.get(axis).copied().unwrap_or(1)
-            }
-        };
-        let a = extent(left);
-        let b = extent(right);
-        output.push(if a == b {
-            a
-        } else if a == 1 {
-            b
-        } else if b == 1 {
-            a
-        } else {
-            return Err(ConcreteBroadcastError::IncompatibleAxis {
-                axis: axis + 1,
-                left: a,
-                right: b,
-            });
-        });
+        output.push(
+            dimensions
+                .dimension(axis)
+                .expect("validated broadcast rank"),
+        );
     }
     Ok(output)
 }

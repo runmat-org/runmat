@@ -131,7 +131,7 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
         "publication cannot complete the still-held private fence"
     );
 
-    let submission = gate.release();
+    let (submission, retirement) = gate.release();
     let AccelContextHandle::Wgpu(context) = provider
         .inner
         .export_context(AccelContextKind::Plotting)
@@ -140,6 +140,10 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
     // Wait for this exact ticket, never a newest/global queue prefix or a sleep.
     let access = context.access.clone();
     access.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
+    // Device completion and delivery by the separate progress owner are
+    // distinct events. Await this exact callback's retirement, not a sleep
+    // or another global queue poll, before expecting its published receipt.
+    futures::executor::block_on(retirement).expect("original progress callback retired");
     let mut source = probe.source.borrow_mut().take().unwrap();
     let feedback = source
         .take_ready()

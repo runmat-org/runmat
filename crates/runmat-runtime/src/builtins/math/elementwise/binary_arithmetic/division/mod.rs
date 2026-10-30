@@ -105,6 +105,7 @@ pub(super) fn execute_host(
 }
 
 pub(super) async fn execute(
+    runtime: Option<&crate::context::RuntimeContext>,
     context: DivisionContext,
     numerator: Value,
     denominator: Value,
@@ -141,6 +142,7 @@ pub(super) async fn execute(
         .any(runmat_accelerate_api::handle_is_explicit);
     let (public_left, public_right) = context.public_operands(&numerator, &denominator);
     let fallback = super::provider_support::HostFallbackAdmission::new(
+        runtime,
         context.entry,
         public_left,
         public_right,

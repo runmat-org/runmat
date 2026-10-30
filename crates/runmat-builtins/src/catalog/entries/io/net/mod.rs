@@ -14,7 +14,7 @@ mod tcpserver;
 mod write;
 
 pub use accept::*;
-pub use capability::NET_ERROR_UNSUPPORTED_TARGET;
+pub use capability::{NET_ERROR_CANCELLED, NET_ERROR_UNSUPPORTED_TARGET};
 pub use class::{TCPCLIENT_CLASS, TCPSERVER_CLASS};
 pub use constructor_option::NetConstructorOption;
 pub use datatype::NetDataType;

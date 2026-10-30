@@ -122,7 +122,7 @@ fn plus_wgpu_matches_cpu_elementwise() {
     let provider = runmat_accelerate_api::provider().unwrap();
     let ha = gpu_helpers::upload_tensor(provider, &lhs).unwrap();
     let hb = gpu_helpers::upload_tensor(provider, &rhs).unwrap();
-    let gpu = block_on(plus_gpu_pair(ha, hb)).unwrap();
+    let gpu = block_on(plus_gpu_pair(None, ha, hb)).unwrap();
     let gathered = test_support::gather(gpu).expect("gather");
     match cpu {
         Value::Tensor(t) => assert_eq!(

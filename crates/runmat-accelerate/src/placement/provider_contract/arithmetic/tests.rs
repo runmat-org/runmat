@@ -62,15 +62,31 @@ fn declarations_match_real_in_process_arithmetic_hooks() {
         )
         .unwrap()
         .is_supported());
-        let output = block_on(match operation {
-            Operation::Add => provider.elem_add(&left, &right),
-            Operation::Subtract => provider.elem_sub(&left, &right),
-            Operation::Multiply => provider.elem_mul(&left, &right),
-            Operation::RightDivide => provider.elem_div(&left, &right),
-            Operation::LeftDivide => provider.elem_div(&right, &left),
-            Operation::Power => unreachable!(),
-        })
+        let request = query(operation);
+        let mut receipt = runmat_accelerate_api::observation::ProviderOperationReceipt::new();
+        receipt.require_provider_execution(provider.device_id(), request.operation);
+        let output = runmat_accelerate_api::observation::with_provider_observation(
+            Some(receipt.recorder()),
+            || {
+                block_on(match operation {
+                    Operation::Add => provider.elem_add(&left, &right),
+                    Operation::Subtract => provider.elem_sub(&left, &right),
+                    Operation::Multiply => provider.elem_mul(&left, &right),
+                    Operation::RightDivide => provider.elem_div(&left, &right),
+                    Operation::LeftDivide => provider.elem_div(&right, &left),
+                    Operation::Power => unreachable!(),
+                })
+            },
+        )
         .unwrap();
+        receipt.publish().unwrap();
+        assert!(matches!(
+            receipt.status(),
+            runmat_accelerate_api::observation::ProviderObservationStatus::Completed {
+                submissions: 0,
+                ..
+            }
+        ));
         assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
         output.release().unwrap();
     }
@@ -86,7 +102,7 @@ fn declarations_match_real_in_process_arithmetic_hooks() {
 }
 
 #[test]
-fn broadcast_resources_include_expanded_buffers_and_missing_output_description() {
+fn broadcast_resources_match_direct_native_hooks_and_missing_output_description() {
     let provider = InProcessProvider::new();
     let snapshot = snapshot(&provider);
     let mut request = query(Operation::Add);
@@ -100,9 +116,9 @@ fn broadcast_resources_include_expanded_buffers_and_missing_output_description()
     .unwrap() else {
         panic!("broadcast support")
     };
-    assert_eq!(estimate.transient_bytes, Some(184));
+    assert_eq!(estimate.transient_bytes, Some(88));
     assert_eq!(estimate.output_bytes, Some(48));
-    assert_eq!(estimate.dispatches, Some(3));
+    assert_eq!(estimate.dispatches, Some(1));
     for operation in [Operation::RightDivide, Operation::LeftDivide] {
         request.operation = ProviderOperationIdentity::new(identity(operation));
         let ProviderFeasibility::Supported { estimate } = feasibility(
@@ -169,11 +185,7 @@ fn division_hook_broadcasts_without_replicating_inputs() {
 fn representation_and_shape_rejections_do_not_claim_hook_support() {
     let provider = InProcessProvider::new();
     let snapshot = snapshot(&provider);
-    for element_type in [
-        ProviderElementType::F32,
-        ProviderElementType::U64,
-        ProviderElementType::ComplexF64,
-    ] {
+    for element_type in [ProviderElementType::U64, ProviderElementType::ComplexF64] {
         let mut request = query(Operation::Add);
         request.inputs[0].element_type = element_type;
         assert!(!feasibility(
@@ -185,6 +197,39 @@ fn representation_and_shape_rejections_do_not_claim_hook_support() {
         .unwrap()
         .is_supported());
     }
+    let mut mixed = query(Operation::Add);
+    mixed.inputs[0].element_type = ProviderElementType::F32;
+    assert!(feasibility(
+        HookProfile::InProcess,
+        provider.precision(),
+        &snapshot,
+        &mixed
+    )
+    .unwrap()
+    .is_supported());
+    let mut wrong_output = representation(&[1, 2]);
+    wrong_output.residency = ProviderResidency::Device;
+    mixed.outputs.push(wrong_output);
+    assert!(
+        !feasibility(
+            HookProfile::InProcess,
+            provider.precision(),
+            &snapshot,
+            &mixed
+        )
+        .unwrap()
+        .is_supported(),
+        "a mixed native result is Single, not Double"
+    );
+    mixed.outputs[0].element_type = ProviderElementType::F32;
+    assert!(feasibility(
+        HookProfile::InProcess,
+        provider.precision(),
+        &snapshot,
+        &mixed
+    )
+    .unwrap()
+    .is_supported());
     let mut request = query(Operation::Add);
     request.inputs[1].shape = vec![1, 3];
     assert!(!feasibility(

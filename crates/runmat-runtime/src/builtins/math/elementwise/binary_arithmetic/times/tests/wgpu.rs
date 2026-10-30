@@ -72,7 +72,7 @@ fn times_wgpu_matches_cpu_elementwise() {
     };
     let ha = provider.upload(&view_l).unwrap();
     let hb = provider.upload(&view_r).unwrap();
-    let gpu = block_on(times_gpu_pair(ha, hb)).unwrap();
+    let gpu = block_on(times_gpu_pair(None, ha, hb)).unwrap();
     let gathered = test_support::gather(gpu).expect("gather");
     match cpu {
         Value::Tensor(t) => assert_eq!(gathered.materialize_f64(), t.materialize_f64()),
