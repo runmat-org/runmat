@@ -104,14 +104,12 @@ The [linear static guide](./guides/linear-static.md) reads these results against
 ## How a study runs
 
 ```mermaid
-flowchart LR
-    A[".fea source"] --> B["check: types, units, references, CAD names, procedures"]
-    B --> C["geometry: import, construct or derive"]
-    C --> D["mesh"]
-    D --> E["assemble element matrices"]
-    E --> F["solve each analysis step"]
-    F --> G["recover fields and outputs"]
-    G --> H["published result with provenance"]
+flowchart TD
+    A["<b>1. Check</b><br/>types, units, references,<br/>CAD names, procedures"]
+    B["<b>2. Geometry and mesh</b><br/>import, construct or derive<br/>the geometry, then mesh it"]
+    C["<b>3. Solve</b><br/>assemble element matrices,<br/>solve each analysis step"]
+    D["<b>4. Results</b><br/>recover fields and outputs,<br/>publish with provenance"]
+    A --> B --> C --> D
 ```
 
 Nothing is meshed or solved until the whole study checks clean. Every result is content-addressed: it records the source, CAD, mesh, solver settings and execution provider that produced it, so an unchanged geometry or mesh is reused rather than rebuilt.

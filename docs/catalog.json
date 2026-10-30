@@ -278,10 +278,6 @@
       "path": "docs/simulation/trust.md"
     },
     {
-      "id": "doc:fea/status",
-      "path": "docs/simulation/status.md"
-    },
-    {
       "id": "doc:fea/release-status",
       "path": "docs/simulation/release-status.md"
     },

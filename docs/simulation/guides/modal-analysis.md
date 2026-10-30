@@ -1,13 +1,15 @@
 ---
-description: Worked modal analysis in RunMat. Extract a steel tuning fork's natural frequencies and mode shapes, check the lowest frequency against an excitation band, and run the study from the CLI.
+description: Learn modal analysis in RunMat on a steel tuning fork. Model and mesh the part, extract its natural frequencies and mode shapes, read them the way a vibration engineer does, check the lowest frequency against an excitation band, and try design changes.
 keywords: [modal analysis, natural frequency, mode shape, eigenfrequency, vibration, resonance, tuning fork, Tet10, frequency margin, excitation band]
 doc_type: guide
 family: [structural]
 examples: [tuning-fork-modal]
 ---
-A modal analysis finds the natural frequencies of a supported structure and the shape it moves in at each one. Use it to keep resonances away from the frequencies a machine, a road or a motor will drive. Use it also to see which parts of a design are flexible, and to choose the modes a forced-response study needs. A mode shape is a pattern of motion, not an amplitude: how far the structure actually moves depends on the forcing and the damping, which a [harmonic or transient response](../language/reference/procedures.md#structural-procedures) adds.
+A modal analysis finds the natural frequencies of a supported structure and the shape it moves in at each one. Use it to keep resonances away from the frequencies a machine, a road or a motor will drive, to see which parts of a design are flexible, and to choose the modes a forced-response study needs. A mode shape is a pattern of motion, not an amplitude: how far the structure actually moves depends on the forcing and the damping, which a [harmonic or transient response](../language/reference/procedures.md#structural-procedures) adds.
 
-## The question
+This guide takes one part from the question to a design decision.
+
+## 1. The engineering question
 
 A steel tuning fork is clamped at the bottom of its stem and mounted on equipment that vibrates anywhere from 0 to 250 Hz.
 
@@ -16,92 +18,157 @@ A steel tuning fork is clamped at the bottom of its stem and mounted on equipmen
 
 <!-- fea:example:tuning-fork-modal:setup -->
 
-| Input | Value | Where |
-| --- | --- | --- |
-| Geometry | 100 mm tall; tines 8 mm wide, 6 mm thick, 65 mm above the bridge, 20 mm apart | `tuning-fork.step`, millimeters |
-| Support | all displacement fixed | the stem's bottom face, "Stem end" |
-| Steel | E = 200 GPa, ν = 0.3, ρ = 7,850 kg/m³ | the body, "Tuning fork" |
-| Mesh | quadratic tetrahedra (Tet10), 30 mm target size, 0.1 mm surface deviation; 11,144 nodes | |
-| Analysis | `structural modal`, 2 modes | |
+## The physics you already know
 
-No load is applied: a modal analysis asks how the supported structure can vibrate freely. Density matters as much as stiffness, because the frequencies come from their ratio.
+A mass on a spring vibrates at $f = \frac{1}{2\pi}\sqrt{k/m}$: stiffer means higher, heavier means lower. A uniform cantilever, such as one tine, has a first bending frequency of
 
-## Inspect the model
+$$
+f_1 = \frac{1.875^2}{2\pi}\sqrt{\frac{EI}{\rho A L^4}},
+$$
+
+so the frequency rises with the tine's thickness and falls with the square of its length. These scalings are the design levers: shorten or thicken a tine to raise its frequency.
+
+A real part is many springs and masses coupled together. Finite-element analysis builds the stiffness matrix $\mathbf K$ and the mass matrix $\mathbf M$ of the meshed part and finds the shapes $\boldsymbol\phi$ that vibrate at a single frequency,
+
+$$
+\mathbf K\boldsymbol\phi = \omega^2 \mathbf M \boldsymbol\phi, \qquad f = \frac{\omega}{2\pi}.
+$$
+
+Each solution is a mode: one natural frequency and its shape. This is the spring–mass equation with matrices in place of numbers. The [structural physics reference](../physics/structural.md) covers the eigen solver and the mass matrix.
+
+## 2. Model it
+
+### Geometry
+
+Import the fork from CAD and name the face that is clamped.
+
+```fea source=tuning-fork-modal.fea
+geometry fork {
+    file = "./geometry/tuning-fork.step"
+    units = mm
+    region body : solid { select name "Tuning fork"; expect exactly_one }
+    region fixed_end : face { select name "Stem end"; expect exactly_one }
+}
+```
 
 <!-- fea:example:tuning-fork-modal:geometry -->
 
-Only the stem's bottom face is fixed; the rest of the stem, the bridge and both tines are free to move. The 30 mm target size is larger than the part's features, so the 6 mm tines and the 0.1 mm surface deviation set the actual element size.
+### Material
 
-## Results
+Frequencies come from the ratio of stiffness to mass, so the density matters as much as Young's modulus. Check both.
+
+```fea source=tuning-fork-modal.fea
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+```
+
+### Supports, and no loads
+
+A modal analysis asks how the supported structure vibrates freely, so it has no loads. The supports, though, are part of the answer: the stiffer the support, the higher the frequencies. Here the stem's bottom face is fully fixed, an idealized rigid clamp. A real fixture is a little flexible and lowers the frequencies somewhat, so treat the computed values as an upper estimate for the mounted part. A part with no supports at all has six zero-frequency rigid-body modes before its first elastic one.
+
+```fea source=tuning-fork-modal.fea
+model supported_fork {
+    assign material.steel to geometry.fork.region.body
+    constraint fixed_end {
+        structural.fixed { target = geometry.fork.region.fixed_end }
+    }
+}
+```
+
+## 3. Mesh it
+
+Use quadratic tetrahedra (Tet10): mode shapes are bending shapes, and linear tetrahedra are too stiff in bending, which pushes frequencies up. The 30 mm target size is larger than the fork's features, so the 6 mm tines and the 0.1 mm surface deviation set the actual element size; the mesh has 11,144 nodes.
+
+```fea source=tuning-fork-modal.fea
+mesh fork on geometry.fork {
+    tetrahedra {
+        order = quadratic
+        target_size = 30 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+```
+
+## 4. Run it
+
+The analysis requests the number of modes and keeps the modal basis for later response steps.
+
+```fea source=tuning-fork-modal.fea
+study fork_modes {
+    geometry = geometry.fork
+    mesh = mesh.fork
+    model = model.supported_fork
+    analysis modes { structural modal { modes = 2 } retain basis }
+    output shapes = analysis.modes.field.node.displacement
+}
+```
+
+The complete project opens in RunMat Desktop with the STEP geometry, the study and the saved modes:
+
+<!-- fea:example:tuning-fork-modal:edit -->
+
+From the command line:
+
+```sh
+runmat check tuning-fork-modal.fea
+runmat run tuning-fork-modal.fea
+```
+
+`run` meshes the fork, extracts the requested modes and publishes the frequencies and mode shapes. Read them in `.m` code with `fea.results(runId, "ModeIndices", [1 2])`; see [get started](../get-started.md#read-results-in-m-code).
+
+## 5. Read the results
 
 ### Mode 1
 
 <!-- fea:example:tuning-fork-modal:mode-1 -->
 
-The first natural frequency is **[364.85 Hz](receipt:tuning-fork-modal#mode-1-frequency)**. Color shows the relative amplitude of the mode shape, scaled so that its largest displacement is 1; the deformed shape is exaggerated for viewing. Rotate the view to see whether the tines move in the plane of the fork or across it, and whether they move together or against each other.
+The first natural frequency is **[364.85 Hz](receipt:tuning-fork-modal#mode-1-frequency)**. Color shows the relative amplitude of the mode shape, scaled so that its largest displacement is 1; the deformed shape is exaggerated for viewing. Rotate the view and note whether the tines move in the plane of the fork or across it, and whether they move together or against each other.
 
 ### Mode 2
 
 <!-- fea:example:tuning-fork-modal:mode-2 -->
 
-The second natural frequency is **[475.17 Hz](receipt:tuning-fork-modal#mode-2-frequency)**. Compare the tine tips and the bridge with mode 1. The lowest modes of a clamped fork are not necessarily the familiar audible mode, in which the tines move against each other in the plane of the fork. The stem's stiffness, the tine section and the bridge decide the order.
+The second natural frequency is **[475.17 Hz](receipt:tuning-fork-modal#mode-2-frequency)**. Compare the tine tips and the bridge with mode 1.
 
-A mode shape's sign is arbitrary: the same mode can be stored with every displacement reversed.
+Three habits help when reading modes:
 
-## Check against the criterion
+- **Don't assume the order.** The lowest modes of a clamped fork are not necessarily the familiar audible mode, in which the tines move against each other in the plane of the fork. The stem's stiffness, the tine section and the bridge decide the order.
+- **Ignore the amplitude and the sign.** A mode is normalized, not loaded; its colors show where the part moves most, not how far. The same mode can appear with every displacement reversed.
+- **Look for the flexible part.** The region with the largest motion in the lowest mode is the place to stiffen if the frequency must rise.
 
-| Criterion | Limit | Result | Margin |
-| --- | --- | --- | --- |
-| Lowest natural frequency | above 300 Hz (250 Hz + 20 %) | [364.85 Hz](receipt:tuning-fork-modal#mode-1-frequency) | 46 % above the band's 250 Hz top |
+### The decision
 
-The first mode is well clear of the excitation band. If the band reached 330 Hz, the margin would fall to 11 % and a stiffer stem or a shorter tine would be the design response. A frequency is mesh-dependent like any result: before relying on a margin this size, rerun with a finer mesh and confirm the first frequency changes by much less than the margin. The [mesh refinement guide](./mesh-refinement.md) shows the procedure.
+| Criterion | Limit | Result |
+| --- | --- | --- |
+| Lowest natural frequency | above 300 Hz (250 Hz + 20 %) | [364.85 Hz](receipt:tuning-fork-modal#mode-1-frequency) |
 
-## Build and modify the study
+The first mode is 46 % above the top of the band, well clear. If the band reached 330 Hz, the margin would fall to 11 %, and a stiffer stem or a shorter tine would be the design response.
 
-The complete project opens in RunMat Desktop with the STEP geometry, the study and the saved modes.
+## 6. Decide whether to refine
 
-<!-- fea:example:tuning-fork-modal:edit -->
+A frequency is mesh-dependent like any result, and a coarse mesh is too stiff, so frequencies fall slightly as the mesh is refined. Before relying on a margin, rerun with a smaller `target_size` and confirm that the first frequency changes by much less than the margin. A 46 % margin tolerates a lot; an 11 % margin deserves a refinement run and a closer look at the support stiffness. The [mesh refinement guide](./mesh-refinement.md) walks through a refinement sequence.
 
-The analysis step requests the number of modes and retains the modal basis for later steps:
+## 7. Try a change
 
-```fea source=tuning-fork-modal.fea
-    analysis modes { structural modal { modes = 2 } retain basis }
-```
-
-A modal basis feeds the modal-superposition procedures: harmonic response, transient response, response spectrum and random vibration (see [studies, analyses and state](../language/studies-analyses-and-state.md#order-steps-and-pass-state)). To state the criterion in the study, publish the frequencies as an output of the study ([not yet in the current release](pending:output.mode-location)):
+- **Use aluminum** (E = 68.9 GPa, ρ = 2,700 kg/m³). The ratio E/ρ is almost the same as steel's, so the frequencies barely change: frequency scales with $\sqrt{E/\rho}$ when only the material changes.
+- **Request more modes** (`modes = 10`) to see the next bending and twisting patterns and how far above the band they lie.
+- **Shorten the tines in CAD** and re-export with the same face names. The tine bending frequencies rise roughly with the inverse square of the tine length.
+- **Fix more of the stem.** Fixing extra faces raises the frequencies, just as a rigid clamp does compared with a real fixture.
+- **Publish the frequencies as an output** to state the criterion in the study ([not yet in the current release](pending:output.mode-location)):
 
 ```fea fragment
 output frequencies = analysis.modes.field.mode.modal_frequency
 ```
 
-## Try a change
+A retained modal basis feeds the modal-superposition procedures: harmonic response, transient response, response spectrum and random vibration (see [studies, analyses and state](../language/studies-analyses-and-state.md#order-steps-and-pass-state)).
 
-- **Use aluminum** (E = 68.9 GPa, ρ = 2,700 kg/m³). The ratio E/ρ is almost the same as steel's, so the frequencies barely change. Frequency scales with $\sqrt{E/\rho}$ when only the material changes.
-- **Request more modes** (`modes = 10`) to see the next bending and twisting patterns and how far above the band they lie.
-- **Shorten the tines in CAD** and re-export with the same face names. Frequency rises roughly with the inverse square of the tine length for the tine bending modes.
-- **Fix more of the stem.** A support's stiffness is part of the vibration problem: fixing extra faces raises the frequencies, and so does an idealized rigid clamp compared with a real fixture.
+## Next
 
-## Run from the command line
-
-```sh
-runmat check tuning-fork-modal.fea
-runmat plan tuning-fork-modal.fea
-runmat run tuning-fork-modal.fea
-```
-
-`run` meshes the fork, extracts the requested modes and publishes the frequencies and the mode shapes, as nodal displacement fields with the modal basis. Read them in `.m` code with `fea.results(runId, "ModeIndices", [1 2])`; see [get started](../get-started.md#read-results-in-m-code).
-
-## How RunMat computes this
-
-RunMat assembles the stiffness matrix $\mathbf K$ and the mass matrix $\mathbf M$ from the Tet10 elements, removes the fixed degrees of freedom, and solves the generalized eigenproblem
-
-$$
-\mathbf K\boldsymbol\phi_i=\omega_i^2\mathbf M\boldsymbol\phi_i,
-\qquad f_i=\frac{\omega_i}{2\pi},
-$$
-
-for the lowest `modes` eigenpairs with a subspace iteration on the shared sparse solver. Each mode vector is normalized to unit modal mass, $\boldsymbol\phi_i^{\mathsf T}\mathbf M\boldsymbol\phi_i = 1$, and the retained basis is stored with the result for later modal-superposition steps. The figures rescale each mode for display; the stored vectors keep their mass normalization. The element matrices, the eigen solver options and the treatment of rigid-body modes are in the [structural physics reference](../physics/structural.md).
-
-## Validation
-
-[Modal validation](../validation/modal.md) states how frequencies are checked against independent references and mesh refinement, and how the basis is checked for residual, mass normalization and orthogonality.
+- [Linear static analysis](./linear-static.md): deflection, stress and reactions under load.
+- [Structural physics reference](../physics/structural.md): the eigenproblem, mass matrix and solver.
+- [Modal validation](../validation/modal.md): how frequencies and mode bases are checked.
