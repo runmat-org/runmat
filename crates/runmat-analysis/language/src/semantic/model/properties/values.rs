@@ -176,14 +176,17 @@ pub(in crate::semantic::model) fn required_quantity(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
     let value = required_assignment(declaration, statements, name, diagnostics)?;
-    if !(value.value_type).is_quantity(dimension.into()) {
-        invalid(
-            declaration,
-            value,
-            name,
-            "quantity of the required dimension",
-            diagnostics,
-        );
+    let expected = dimension.into();
+    if !(value.value_type).is_quantity(expected) {
+        use runmat_types::physical::QuantitySpec;
+        let requirement = if expected.semantic_kind()
+            == Some(runmat_types::physical::QuantityKind::Angle)
+        {
+            "quantity with an angle unit (deg or rad)"
+        } else {
+            "quantity of the required dimension"
+        };
+        invalid(declaration, value, name, requirement, diagnostics);
         return None;
     }
     scalar(value).or_else(|| {

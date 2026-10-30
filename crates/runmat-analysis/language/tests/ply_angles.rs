@@ -34,6 +34,7 @@ model structure {
         ply b { material = material.steel; thickness = 0.2 mm; angle = 45 deg }
         ply c { material = material.steel; thickness = 0.2 mm; angle = -45 deg }
         ply d { material = material.steel; thickness = 0.2 mm; angle = 0 rad }
+        ply e { material = material.steel; thickness = 0.2 mm; angle = 0.785 rad }
     }
     assign layup.skin to geometry.part.region.skin
     assign orientation.axes_zero to geometry.part.region.skin
@@ -57,8 +58,30 @@ fn zero_and_signed_ply_angles_check_and_lower_to_radians() {
         .map(|ply| ply.angle_rad.canonical_value())
         .collect::<Vec<_>>();
     let quarter = std::f64::consts::FRAC_PI_4;
-    assert_eq!(angles.len(), 4);
-    for (actual, expected) in angles.iter().zip([0.0, quarter, -quarter, 0.0]) {
+    assert_eq!(angles.len(), 5);
+    for (actual, expected) in angles.iter().zip([0.0, quarter, -quarter, 0.0, 0.785]) {
         assert!((actual - expected).abs() < 1e-12, "{angles:?}");
     }
+}
+
+/// A bare number has no angle unit; the check asks for one instead of guessing deg or rad.
+#[test]
+fn bare_ply_angle_asks_for_an_angle_unit() {
+    let source = SOURCE.replace("angle = 45 deg", "angle = 45");
+    let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", &source, 1),
+        },
+    });
+    assert!(!program.is_valid());
+    assert!(
+        program
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("`angle`")
+                && diagnostic.message.contains("deg or rad")),
+        "{:#?}",
+        program.diagnostics
+    );
 }
