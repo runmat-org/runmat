@@ -440,14 +440,14 @@ async fn worker(
                 let mut size = record.bytes.len();
                 let mut records = vec![record];
                 while records.len() < 256 {
-                    match receiver.try_next() {
-                        Ok(Some(Command::Record(record)))
+                    match receiver.try_recv() {
+                        Ok(Command::Record(record))
                             if size + record.bytes.len() <= MAX_BATCH_BYTES =>
                         {
                             size += record.bytes.len();
                             records.push(record);
                         }
-                        Ok(Some(command)) => {
+                        Ok(command) => {
                             pending = Some(command);
                             break;
                         }

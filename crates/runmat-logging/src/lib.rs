@@ -376,8 +376,13 @@ where
         let mut visitor = JsonVisitor::default();
         event.record(&mut visitor);
         let oversized = visitor.overflow;
-        #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
+        #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
         let (otel_context, span_started) = event_otel_context(event, &ctx);
+        #[cfg(all(
+            any(feature = "otlp", feature = "browser-otlp"),
+            any(target_arch = "wasm32", not(feature = "otlp"))
+        ))]
+        let (otel_context, _) = event_otel_context(event, &ctx);
         #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
         let (trace_id, span_id) = valid_context_ids(&otel_context);
         #[cfg(not(any(feature = "otlp", feature = "browser-otlp")))]
