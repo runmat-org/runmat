@@ -106,6 +106,11 @@ pub fn resolve_resident_compute_owner(
     let readback = runmat_accelerate_api::numeric_readback_for_handle(handle)
         .map_err(|_| ResidentComputeDecline::InvalidOwner)?;
     if let Some(provider) = exact_provider_for_handle(handle) {
+        // First registration can supersede a scoped owner between lookups.
+        // Computation must use the same facade whose source was validated.
+        readback
+            .authorize_provider(provider)
+            .map_err(|_| ResidentComputeDecline::InvalidOwner)?;
         return Ok(provider);
     }
     let has_wgpu_access = readback
