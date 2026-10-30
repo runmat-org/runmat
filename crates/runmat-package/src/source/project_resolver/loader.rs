@@ -13,7 +13,7 @@ use crate::{
     ServerProjectSourceId, ServerSnapshotSelector, SourceId, TargetEnvironment,
 };
 use runmat_config::project::{
-    load_project_manifest_async_with_options, ProjectManifestValidationOptions, ProjectSourceFile,
+    load_project_manifest_async_with_provider, ProjectManifestValidationOptions, ProjectSourceFile,
     PROJECT_MANIFEST_FILENAME,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -26,6 +26,7 @@ pub(super) struct Loader<'a> {
     pub(super) existing_lock: Option<&'a PackageLock>,
     pub(super) options: &'a ProjectResolveOptions,
     pub(super) sources: &'a dyn PackageSourceProvider,
+    pub(super) filesystem: &'a dyn runmat_filesystem::FsProvider,
     pub(super) packages: BTreeMap<String, LoadedPackage>,
     pub(super) acquired_git_sources: BTreeSet<GitSourceId>,
     pub(super) acquired_server_sources: BTreeSet<ServerProjectSourceId>,
@@ -115,7 +116,7 @@ impl Loader<'_> {
         active: &'a mut Vec<(String, String)>,
     ) -> LoadFuture<'a> {
         Box::pin(async move {
-            let manifest_path = canonical_path(&manifest_path).await;
+            let manifest_path = canonical_path(self.filesystem, &manifest_path).await;
             let key = package_key(&manifest_path, &origin);
             if let Some(index) = active.iter().position(|(candidate, _)| candidate == &key) {
                 let mut cycle = active[index..]
@@ -145,11 +146,12 @@ impl Loader<'_> {
                 return Ok(key);
             }
 
-            let config = load_project_manifest_async_with_options(
+            let config = load_project_manifest_async_with_provider(
                 &manifest_path,
                 ProjectManifestValidationOptions {
                     check_dependency_paths: !self.options.source_policy.frozen,
                 },
+                self.filesystem,
             )
             .await
             .map_err(|error| ProjectResolveError::Manifest {
@@ -162,11 +164,13 @@ impl Loader<'_> {
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf();
-            let (sources, source_index) = load_sources(&root, &config).await?;
-            let native_interfaces = super::source::load_native_interfaces(&root, &config).await?;
-            let mex_artifacts = super::source::load_mex_artifacts(&root, &config).await?;
-            let java_artifacts = load_java_artifacts(&root, &config).await?;
-            let python_artifacts = load_python_artifacts(&root, &config).await?;
+            let (sources, source_index) = load_sources(self.filesystem, &root, &config).await?;
+            let native_interfaces =
+                super::source::load_native_interfaces(self.filesystem, &root, &config).await?;
+            let mex_artifacts =
+                super::source::load_mex_artifacts(self.filesystem, &root, &config).await?;
+            let java_artifacts = load_java_artifacts(self.filesystem, &root, &config).await?;
+            let python_artifacts = load_python_artifacts(self.filesystem, &root, &config).await?;
             let source = source_identity(
                 &self.workspace_root,
                 &manifest_path,
@@ -313,10 +317,10 @@ impl Loader<'_> {
                                 })?;
                             crate::validate_git_acquisition(&plan, &mount.source)?;
                             self.acquired_git_sources.insert(mount.source.clone());
-                            let child_manifest = find_manifest(&mount.root)
+                            let child_manifest = find_manifest(self.filesystem, &mount.root)
                                 .await
                                 .unwrap_or_else(|| mount.root.join(PROJECT_MANIFEST_FILENAME));
-                            if !is_file(&child_manifest).await {
+                            if !is_file(self.filesystem, &child_manifest).await {
                                 return Err(ProjectResolveError::MissingManifest {
                                     package: domain.local_name.clone(),
                                     dependency: dependency.alias.to_string(),
@@ -365,10 +369,10 @@ impl Loader<'_> {
                                 )));
                             }
                             let dependency_root = self.workspace_root.join(vendored.path.as_str());
-                            let child_manifest = find_manifest(&dependency_root)
+                            let child_manifest = find_manifest(self.filesystem, &dependency_root)
                                 .await
                                 .unwrap_or_else(|| dependency_root.join(PROJECT_MANIFEST_FILENAME));
-                            if !is_file(&child_manifest).await {
+                            if !is_file(self.filesystem, &child_manifest).await {
                                 return Err(ProjectResolveError::MissingManifest {
                                     package: domain.local_name.clone(),
                                     dependency: dependency.alias.to_string(),
@@ -381,10 +385,10 @@ impl Loader<'_> {
                             )
                         } else {
                             let dependency_root = root.join(path.as_str());
-                            let child_manifest = find_manifest(&dependency_root)
+                            let child_manifest = find_manifest(self.filesystem, &dependency_root)
                                 .await
                                 .unwrap_or_else(|| dependency_root.join(PROJECT_MANIFEST_FILENAME));
-                            if !is_file(&child_manifest).await {
+                            if !is_file(self.filesystem, &child_manifest).await {
                                 return Err(ProjectResolveError::MissingManifest {
                                     package: domain.local_name.clone(),
                                     dependency: dependency.alias.to_string(),
@@ -418,10 +422,10 @@ impl Loader<'_> {
                         })?;
                         crate::validate_git_acquisition(&plan, &mount.source)?;
                         self.acquired_git_sources.insert(mount.source.clone());
-                        let child_manifest = find_manifest(&mount.root)
+                        let child_manifest = find_manifest(self.filesystem, &mount.root)
                             .await
                             .unwrap_or_else(|| mount.root.join(PROJECT_MANIFEST_FILENAME));
-                        if !is_file(&child_manifest).await {
+                        if !is_file(self.filesystem, &child_manifest).await {
                             return Err(ProjectResolveError::MissingManifest {
                                 package: domain.local_name.clone(),
                                 dependency: dependency.alias.to_string(),
@@ -464,10 +468,10 @@ impl Loader<'_> {
                                 })?;
                         crate::validate_server_project_acquisition(&plan, &mount.source)?;
                         self.acquired_server_sources.insert(mount.source.clone());
-                        let child_manifest = find_manifest(&mount.root)
+                        let child_manifest = find_manifest(self.filesystem, &mount.root)
                             .await
                             .unwrap_or_else(|| mount.root.join(PROJECT_MANIFEST_FILENAME));
-                        if !is_file(&child_manifest).await {
+                        if !is_file(self.filesystem, &child_manifest).await {
                             return Err(ProjectResolveError::MissingManifest {
                                 package: domain.local_name.clone(),
                                 dependency: dependency.alias.to_string(),

@@ -7,12 +7,16 @@ use runmat_package::*;
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 struct GitFixture {
     root: PathBuf,
     source: GitSourceId,
+    blocked: AtomicBool,
 }
 impl PackageSourceProvider for GitFixture {
     fn acquire_git<'a>(
@@ -22,6 +26,14 @@ impl PackageSourceProvider for GitFixture {
     {
         async move {
             validate_git_acquisition(plan, &self.source).map_err(|e| e.to_string())?;
+            std::future::poll_fn(|_| {
+                if self.blocked.load(Ordering::SeqCst) {
+                    std::task::Poll::Pending
+                } else {
+                    std::task::Poll::Ready(())
+                }
+            })
+            .await;
             Ok(GitPackageMount {
                 root: self.root.clone(),
                 source: self.source.clone(),
@@ -49,6 +61,7 @@ fn captured_workspace_resolves_external_sources_without_reading_live_workspace_f
         )
         .unwrap();
         let git = GitFixture {
+            blocked: AtomicBool::new(true),
             root: cache_root.clone(),
             source: GitSourceId::new(
                 "https://example.test/helper.git",
@@ -97,19 +110,59 @@ fn captured_workspace_resolves_external_sources_without_reading_live_workspace_f
             source_intent: SourceAcquisitionIntent::Execute,
             source_policy: SourceAcquisitionPolicy::default(),
         };
-        let result = resolve_captured_project_async(
+        let inputs = InputManifest {
+            snapshot_id: "capture".into(),
+            entries,
+        };
+        let ambient: Arc<dyn FsProvider> = Arc::new(MemoryFsProvider::new());
+        ambient
+            .write(Path::new("/unrelated.txt"), b"ambient")
+            .await
+            .unwrap();
+        let _ambient = runmat_filesystem::replace_provider(ambient.clone());
+        let mut resolution = Box::pin(resolve_captured_project_async(
             Path::new("/runmat.toml"),
-            InputManifest {
-                snapshot_id: "capture".into(),
-                entries,
-            },
+            inputs.clone(),
+            options.clone(),
+            &git,
+            workspace.clone(),
+            Arc::new(NativeFsProvider),
+        ));
+        assert!(futures::poll!(resolution.as_mut()).is_pending());
+        assert!(Arc::ptr_eq(
+            &runmat_filesystem::current_provider(),
+            &ambient
+        ));
+        assert_eq!(
+            runmat_filesystem::read_async("/unrelated.txt")
+                .await
+                .unwrap(),
+            b"ambient"
+        );
+        let mut cancelled = Box::pin(resolve_captured_project_async(
+            Path::new("/runmat.toml"),
+            inputs,
             options,
             &git,
             workspace.clone(),
             Arc::new(NativeFsProvider),
-        )
-        .await
-        .unwrap();
+        ));
+        assert!(futures::poll!(cancelled.as_mut()).is_pending());
+        assert!(Arc::ptr_eq(
+            &runmat_filesystem::current_provider(),
+            &ambient
+        ));
+        drop(cancelled);
+        assert!(Arc::ptr_eq(
+            &runmat_filesystem::current_provider(),
+            &ambient
+        ));
+        git.blocked.store(false, Ordering::SeqCst);
+        let result = resolution.await.unwrap();
+        assert!(Arc::ptr_eq(
+            &runmat_filesystem::current_provider(),
+            &ambient
+        ));
         assert_eq!(result.project.frozen.graph.packages.len(), 2);
         assert!(!result
             .project

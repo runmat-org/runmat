@@ -5,11 +5,12 @@ use super::loader::{
 use super::ProjectResolveError;
 use crate::{ContentDigest, NormalizedRelativePath, PathSourceId, SourceId};
 use runmat_config::project::{
-    build_project_source_index_async, ProjectManifest, PROJECT_MANIFEST_FILENAMES,
+    build_project_source_index_async_with_provider, ProjectManifest, PROJECT_MANIFEST_FILENAMES,
 };
 use std::path::{Path, PathBuf};
 
 pub(super) async fn load_sources(
+    filesystem: &dyn runmat_filesystem::FsProvider,
     root: &Path,
     manifest: &ProjectManifest,
 ) -> Result<
@@ -19,7 +20,7 @@ pub(super) async fn load_sources(
     ),
     ProjectResolveError,
 > {
-    let index = build_project_source_index_async(root, manifest)
+    let index = build_project_source_index_async_with_provider(root, manifest, filesystem)
         .await
         .map_err(|error| ProjectResolveError::SourceInventory {
             package: manifest.package.name.clone(),
@@ -30,12 +31,14 @@ pub(super) async fn load_sources(
         let path = root
             .join(&descriptor.source_root)
             .join(&descriptor.relative_path);
-        let bytes = runmat_filesystem::read_async(&path)
-            .await
-            .map_err(|error| ProjectResolveError::SourceRead {
-                path,
-                reason: error.to_string(),
-            })?;
+        let bytes =
+            filesystem
+                .read(&path)
+                .await
+                .map_err(|error| ProjectResolveError::SourceRead {
+                    path,
+                    reason: error.to_string(),
+                })?;
         sources.push(LoadedSource {
             descriptor: descriptor.clone(),
             bytes,
@@ -45,15 +48,16 @@ pub(super) async fn load_sources(
 }
 
 pub(super) async fn load_native_interfaces(
+    filesystem: &dyn runmat_filesystem::FsProvider,
     root: &Path,
     manifest: &ProjectManifest,
 ) -> Result<Vec<LoadedNativeInterface>, ProjectResolveError> {
     let mut interfaces = Vec::with_capacity(manifest.native_interfaces.len());
     for (name, declaration) in &manifest.native_interfaces {
         let manifest_path = root.join(&declaration.manifest);
-        let manifest_bytes = read_native_artifact(&manifest_path).await?;
+        let manifest_bytes = read_native_artifact(filesystem, &manifest_path).await?;
         let library_path = root.join(&declaration.library);
-        let library_bytes = read_native_artifact(&library_path).await?;
+        let library_bytes = read_native_artifact(filesystem, &library_path).await?;
         interfaces.push(LoadedNativeInterface {
             name: name.clone(),
             manifest_path,
@@ -66,13 +70,14 @@ pub(super) async fn load_native_interfaces(
 }
 
 pub(super) async fn load_java_artifacts(
+    filesystem: &dyn runmat_filesystem::FsProvider,
     root: &Path,
     manifest: &ProjectManifest,
 ) -> Result<Vec<LoadedJavaArtifact>, ProjectResolveError> {
     let mut artifacts = Vec::with_capacity(manifest.java_artifacts.len());
     for (name, declaration) in &manifest.java_artifacts {
         let path = root.join(&declaration.path);
-        let bytes = read_project_artifact(&path).await?;
+        let bytes = read_project_artifact(filesystem, &path).await?;
         artifacts.push(LoadedJavaArtifact {
             name: name.clone(),
             path,
@@ -83,13 +88,14 @@ pub(super) async fn load_java_artifacts(
 }
 
 pub(super) async fn load_python_artifacts(
+    filesystem: &dyn runmat_filesystem::FsProvider,
     root: &Path,
     manifest: &ProjectManifest,
 ) -> Result<Vec<LoadedPythonArtifact>, ProjectResolveError> {
     let mut artifacts = Vec::with_capacity(manifest.python_artifacts.len());
     for (name, declaration) in &manifest.python_artifacts {
         let path = root.join(&declaration.path);
-        let bytes = read_project_artifact(&path).await?;
+        let bytes = read_project_artifact(filesystem, &path).await?;
         artifacts.push(LoadedPythonArtifact {
             name: name.clone(),
             module: declaration.module.clone(),
@@ -101,15 +107,16 @@ pub(super) async fn load_python_artifacts(
 }
 
 pub(super) async fn load_mex_artifacts(
+    filesystem: &dyn runmat_filesystem::FsProvider,
     root: &Path,
     manifest: &ProjectManifest,
 ) -> Result<Vec<LoadedMexArtifact>, ProjectResolveError> {
     let mut artifacts = Vec::with_capacity(manifest.mex_artifacts.len());
     for (name, declaration) in &manifest.mex_artifacts {
         let manifest_path = root.join(&declaration.manifest);
-        let manifest_bytes = read_project_artifact(&manifest_path).await?;
+        let manifest_bytes = read_project_artifact(filesystem, &manifest_path).await?;
         let module_path = root.join(&declaration.module);
-        let module_bytes = read_project_artifact(&module_path).await?;
+        let module_bytes = read_project_artifact(filesystem, &module_path).await?;
         artifacts.push(LoadedMexArtifact {
             name: name.clone(),
             manifest_path,
@@ -129,8 +136,12 @@ pub(super) struct PackageContent<'a> {
     pub(super) python_artifacts: &'a [LoadedPythonArtifact],
 }
 
-async fn read_native_artifact(path: &Path) -> Result<Vec<u8>, ProjectResolveError> {
-    runmat_filesystem::read_async(path)
+async fn read_native_artifact(
+    filesystem: &dyn runmat_filesystem::FsProvider,
+    path: &Path,
+) -> Result<Vec<u8>, ProjectResolveError> {
+    filesystem
+        .read(path)
         .await
         .map_err(|error| ProjectResolveError::SourceRead {
             path: path.to_path_buf(),
@@ -138,8 +149,12 @@ async fn read_native_artifact(path: &Path) -> Result<Vec<u8>, ProjectResolveErro
         })
 }
 
-async fn read_project_artifact(path: &Path) -> Result<Vec<u8>, ProjectResolveError> {
-    runmat_filesystem::read_async(path)
+async fn read_project_artifact(
+    filesystem: &dyn runmat_filesystem::FsProvider,
+    path: &Path,
+) -> Result<Vec<u8>, ProjectResolveError> {
+    filesystem
+        .read(path)
         .await
         .map_err(|error| ProjectResolveError::SourceRead {
             path: path.to_path_buf(),
@@ -315,24 +330,32 @@ fn append_native_artifact(
     Ok(())
 }
 
-pub(super) async fn find_manifest(root: &Path) -> Option<PathBuf> {
+pub(super) async fn find_manifest(
+    filesystem: &dyn runmat_filesystem::FsProvider,
+    root: &Path,
+) -> Option<PathBuf> {
     for filename in PROJECT_MANIFEST_FILENAMES {
         let candidate = root.join(filename);
-        if is_file(&candidate).await {
+        if is_file(filesystem, &candidate).await {
             return Some(candidate);
         }
     }
     None
 }
 
-pub(super) async fn is_file(path: &Path) -> bool {
-    runmat_filesystem::metadata_async(path)
+pub(super) async fn is_file(filesystem: &dyn runmat_filesystem::FsProvider, path: &Path) -> bool {
+    filesystem
+        .metadata(path)
         .await
         .is_ok_and(|metadata| metadata.is_file())
 }
 
-pub(super) async fn canonical_path(path: &Path) -> PathBuf {
-    runmat_filesystem::canonicalize_async(path)
+pub(super) async fn canonical_path(
+    filesystem: &dyn runmat_filesystem::FsProvider,
+    path: &Path,
+) -> PathBuf {
+    filesystem
+        .canonicalize(path)
         .await
         .unwrap_or_else(|_| path.to_path_buf())
 }

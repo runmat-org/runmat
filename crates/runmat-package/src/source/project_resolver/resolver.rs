@@ -18,21 +18,46 @@ pub async fn resolve_project_async(
     options: ProjectResolveOptions,
     sources: &dyn PackageSourceProvider,
 ) -> Result<ResolvedProject, ProjectResolveError> {
+    let (filesystem, root_manifest) = runmat_filesystem::capture_provider_path(root_manifest)
+        .map_err(|error| ProjectResolveError::Invalid(error.to_string()))?;
+    resolve_project_with_provider_async(
+        &root_manifest,
+        existing_lock,
+        options,
+        sources,
+        filesystem.as_ref(),
+    )
+    .await
+}
+
+pub(in crate::source) async fn resolve_project_with_provider_async(
+    root_manifest: &Path,
+    existing_lock: Option<&PackageLock>,
+    options: ProjectResolveOptions,
+    sources: &dyn PackageSourceProvider,
+    filesystem: &dyn runmat_filesystem::FsProvider,
+) -> Result<ResolvedProject, ProjectResolveError> {
     if let Some(lock) = existing_lock {
         lock.validate()?;
     }
-    let root_manifest = canonical_path(root_manifest).await;
+    let root_manifest = canonical_path(filesystem, root_manifest).await;
     let workspace_root = root_manifest
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
-    let vendor =
-        load_vendor_manifest(&workspace_root, existing_lock, options.source_policy.frozen).await?;
+    let vendor = load_vendor_manifest(
+        filesystem,
+        &workspace_root,
+        existing_lock,
+        options.source_policy.frozen,
+    )
+    .await?;
     let mut loader = Loader {
         workspace_root: workspace_root.clone(),
         existing_lock,
         options: &options,
         sources,
+        filesystem,
         packages: BTreeMap::new(),
         acquired_git_sources: BTreeSet::new(),
         acquired_server_sources: BTreeSet::new(),
@@ -174,6 +199,7 @@ pub async fn resolve_project_async(
 }
 
 async fn load_vendor_manifest(
+    filesystem: &dyn runmat_filesystem::FsProvider,
     workspace_root: &Path,
     existing_lock: Option<&PackageLock>,
     frozen: bool,
@@ -182,14 +208,12 @@ async fn load_vendor_manifest(
         return Ok(None);
     }
     let path = workspace_root.join(crate::VENDOR_MANIFEST_FILENAME);
-    if !is_file(&path).await {
+    if !is_file(filesystem, &path).await {
         return Ok(None);
     }
-    let bytes = runmat_filesystem::read_async(&path)
-        .await
-        .map_err(|error| {
-            ProjectResolveError::Invalid(format!("cannot read {}: {error}", path.display()))
-        })?;
+    let bytes = filesystem.read(&path).await.map_err(|error| {
+        ProjectResolveError::Invalid(format!("cannot read {}: {error}", path.display()))
+    })?;
     let manifest: crate::VendorManifest = serde_json::from_slice(&bytes).map_err(|error| {
         ProjectResolveError::Invalid(format!("cannot decode {}: {error}", path.display()))
     })?;

@@ -147,7 +147,7 @@ impl UserSettingsDocument {
             RunmatConfigFormat::Toml => {
                 let mut document = toml_edit::DocumentMut::from_str(&self.source)?;
                 for (path, new) in changes {
-                    let item = if new.as_ref().map_or(true, Value::is_null) {
+                    let item = if new.as_ref().is_none_or(Value::is_null) {
                         if new == Some(Value::Null) {
                             let defaults = serde_json::json!({"runtime":canonical_value(&RunMatRuntimeConfig::default())?});
                             let inherited =

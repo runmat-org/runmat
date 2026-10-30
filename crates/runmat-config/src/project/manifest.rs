@@ -703,18 +703,39 @@ impl ProjectManifest {
         project_root: &Path,
         options: ProjectManifestValidationOptions,
     ) -> Result<(), ProjectManifestValidationError> {
+        let (provider, project_root) = runmat_filesystem::capture_provider_path(project_root)
+            .map_err(|error| ProjectManifestValidationError {
+                messages: vec![error.to_string()],
+            })?;
+        self.validate_async_with_provider(&project_root, options, provider.as_ref())
+            .await
+    }
+
+    /// Validate paths against the retained project filesystem, not ambient state.
+    pub async fn validate_async_with_provider(
+        &self,
+        project_root: &Path,
+        options: ProjectManifestValidationOptions,
+        provider: &dyn runmat_filesystem::FsProvider,
+    ) -> Result<(), ProjectManifestValidationError> {
         let (mut messages, path_requirements) = self.validation_plan(project_root, options);
         for requirement in path_requirements {
             match requirement {
                 PathRequirement::Directory {
                     path,
                     missing_message,
-                } if !path_is_dir_async(&path).await => messages.push(missing_message),
+                } if !provider
+                    .metadata(&path)
+                    .await
+                    .is_ok_and(|metadata| metadata.is_dir()) =>
+                {
+                    messages.push(missing_message)
+                }
                 PathRequirement::Entrypoint {
                     project_root,
                     path,
                     missing_message,
-                } if resolve_entrypoint_path_async(&project_root, &path)
+                } if resolve_entrypoint_path_from_provider(&project_root, &path, provider)
                     .await
                     .is_none() =>
                 {
@@ -723,7 +744,11 @@ impl ProjectManifest {
                 PathRequirement::File {
                     path,
                     missing_message,
-                } if !path_is_file_async(&path).await => {
+                } if !provider
+                    .metadata(&path)
+                    .await
+                    .is_ok_and(|metadata| metadata.is_file()) =>
+                {
                     messages.push(missing_message);
                 }
                 _ => {}
@@ -833,38 +858,45 @@ pub fn load_project_manifest(path: &Path) -> Result<ProjectManifest, ProjectMani
 pub async fn load_project_manifest_async(
     path: &Path,
 ) -> Result<ProjectManifest, ProjectManifestLoadError> {
-    let content = runmat_filesystem::read_to_string_async(path)
+    load_project_manifest_async_with_options(path, ProjectManifestValidationOptions::default())
         .await
-        .map_err(|source| ProjectManifestLoadError::Read {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    let manifest = parse_project_manifest(path, &content)?;
-    let project_root = path.parent().unwrap_or_else(|| Path::new("."));
-    manifest
-        .validate_async(project_root)
-        .await
-        .map_err(|source| ProjectManifestLoadError::Validation {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    Ok(manifest)
 }
 
 pub async fn load_project_manifest_async_with_options(
     path: &Path,
     options: ProjectManifestValidationOptions,
 ) -> Result<ProjectManifest, ProjectManifestLoadError> {
-    let content = runmat_filesystem::read_to_string_async(path)
+    let (provider, resolved) =
+        runmat_filesystem::capture_provider_path(path).map_err(|source| {
+            ProjectManifestLoadError::Read {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+    load_project_manifest_async_with_provider(&resolved, options, provider.as_ref()).await
+}
+
+/// Read and validate one manifest through the caller's retained filesystem owner.
+pub async fn load_project_manifest_async_with_provider(
+    path: &Path,
+    options: ProjectManifestValidationOptions,
+    provider: &dyn runmat_filesystem::FsProvider,
+) -> Result<ProjectManifest, ProjectManifestLoadError> {
+    let bytes = provider
+        .read(path)
         .await
         .map_err(|source| ProjectManifestLoadError::Read {
             path: path.to_path_buf(),
             source,
         })?;
+    let content = String::from_utf8(bytes).map_err(|error| ProjectManifestLoadError::Read {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()),
+    })?;
     let manifest = parse_project_manifest(path, &content)?;
     let project_root = path.parent().unwrap_or_else(|| Path::new("."));
     manifest
-        .validate_async_with_options(project_root, options)
+        .validate_async_with_provider(project_root, options, provider)
         .await
         .map_err(|source| ProjectManifestLoadError::Validation {
             path: path.to_path_buf(),
@@ -970,13 +1002,30 @@ pub(super) async fn resolve_entrypoint_path_async(
     project_root: &Path,
     path: &Path,
 ) -> Option<PathBuf> {
+    let (provider, project_root) = runmat_filesystem::capture_provider_path(project_root).ok()?;
+    resolve_entrypoint_path_from_provider(&project_root, path, provider.as_ref()).await
+}
+
+async fn resolve_entrypoint_path_from_provider(
+    project_root: &Path,
+    path: &Path,
+    provider: &dyn runmat_filesystem::FsProvider,
+) -> Option<PathBuf> {
     let direct = project_root.join(path);
-    if path_is_file_async(&direct).await {
+    if provider
+        .metadata(&direct)
+        .await
+        .is_ok_and(|metadata| metadata.is_file())
+    {
         return Some(direct);
     }
     if path.extension().is_none() {
         let inferred = direct.with_extension("m");
-        if path_is_file_async(&inferred).await {
+        if provider
+            .metadata(&inferred)
+            .await
+            .is_ok_and(|metadata| metadata.is_file())
+        {
             return Some(inferred);
         }
     }

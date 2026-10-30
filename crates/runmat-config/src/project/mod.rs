@@ -19,16 +19,17 @@ pub use execution_profile::{ProjectAcceleratorProfile, ProjectExecutionProfile};
 pub use manifest::{
     discover_project_manifest_from, discover_project_manifest_from_async, load_project_manifest,
     load_project_manifest_async, load_project_manifest_async_with_options,
-    parse_project_manifest_json, parse_project_manifest_toml, ProjectEntrypoint,
-    ProjectJavaArtifact, ProjectManifest, ProjectManifestLoadError, ProjectManifestValidationError,
-    ProjectManifestValidationOptions, ProjectNativeInterface, ProjectPackage,
-    ProjectPythonArtifact, ProjectSources, PROJECT_MANIFEST_FILENAME, PROJECT_MANIFEST_FILENAMES,
+    load_project_manifest_async_with_provider, parse_project_manifest_json,
+    parse_project_manifest_toml, ProjectEntrypoint, ProjectJavaArtifact, ProjectManifest,
+    ProjectManifestLoadError, ProjectManifestValidationError, ProjectManifestValidationOptions,
+    ProjectNativeInterface, ProjectPackage, ProjectPythonArtifact, ProjectSources,
+    PROJECT_MANIFEST_FILENAME, PROJECT_MANIFEST_FILENAMES,
 };
 pub use source_index::{
     build_loose_source_index, build_loose_source_index_async, build_project_source_index,
-    build_project_source_index_async, build_project_source_index_excluding,
-    build_project_source_index_excluding_async, project_source_file_from_path, ProjectSourceFile,
-    ProjectSourceIndex, ProjectSourceIndexError,
+    build_project_source_index_async, build_project_source_index_async_with_provider,
+    build_project_source_index_excluding, build_project_source_index_excluding_async,
+    project_source_file_from_path, ProjectSourceFile, ProjectSourceIndex, ProjectSourceIndexError,
 };
 pub use testing::{
     ProjectCoverageFormat, ProjectTestArtifacts, ProjectTestCluster, ProjectTestConfig,

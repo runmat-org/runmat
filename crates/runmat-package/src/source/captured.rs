@@ -76,15 +76,14 @@ pub async fn resolve_captured_project_async(
         immutable_cache,
         mounted: RefCell::new(BTreeSet::new()),
     };
-    let scope = runmat_filesystem::replace_provider(filesystem.clone());
-    let project = super::project_resolver::resolve_project_async(
+    let project = super::project_resolver::resolve_project_with_provider_async(
         manifest_path,
         lock.as_ref(),
         options,
         &acquired,
+        filesystem.as_ref(),
     )
     .await;
-    drop(scope);
     Ok(CapturedResolvedProject {
         inputs,
         project: project?,

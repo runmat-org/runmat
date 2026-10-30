@@ -259,7 +259,8 @@ async fn resolve_fresh(
                 "exact registry metadata differs from candidate metadata".to_string(),
             ));
         }
-        let manifest_path = registry_manifest(&mount.root, &source.package).await?;
+        let manifest_path =
+            registry_manifest(loader.filesystem, &mount.root, &source.package).await?;
         let key = loader
             .load(
                 manifest_path,
@@ -327,7 +328,8 @@ async fn resolve_locked(
                 package: source.package.to_string(),
                 reason,
             })?;
-        let manifest_path = registry_manifest(&mount.root, &source.package).await?;
+        let manifest_path =
+            registry_manifest(loader.filesystem, &mount.root, &source.package).await?;
         let key = loader
             .load(
                 manifest_path,
@@ -484,13 +486,14 @@ fn wire_fresh(
 }
 
 async fn registry_manifest(
+    filesystem: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     package: &CanonicalPackageId,
 ) -> Result<std::path::PathBuf, ProjectResolveError> {
-    let manifest = find_manifest(root)
+    let manifest = find_manifest(filesystem, root)
         .await
         .unwrap_or_else(|| root.join(PROJECT_MANIFEST_FILENAME));
-    if !is_file(&manifest).await {
+    if !is_file(filesystem, &manifest).await {
         return Err(ProjectResolveError::MissingManifest {
             package: package.to_string(),
             dependency: package.to_string(),
