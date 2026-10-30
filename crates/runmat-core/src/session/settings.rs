@@ -81,6 +81,11 @@ impl RunMatSession {
         Ok(())
     }
 
+    /// Validate collector capabilities without changing process-owned state.
+    pub fn validate_gc_runtime_config(config: &RunMatRuntimeConfig) -> Result<()> {
+        resolved_gc_config(config).map(|_| ())
+    }
+
     /// Configure process-owned GC before execution. A worker host must first
     /// clamp/reject this policy against its admitted resources.
     pub fn configure_gc_from_runtime_config(config: &RunMatRuntimeConfig) -> Result<()> {
@@ -128,6 +133,9 @@ impl RunMatSession {
 }
 
 fn resolved_gc_config(config: &RunMatRuntimeConfig) -> Result<GcConfig> {
+    if config.gc.threads.is_some_and(|threads| threads != 1) {
+        anyhow::bail!("gc.threads supports only 1: the current collector is serial; parallel GC workers are unavailable");
+    }
     let mut gc = match config.gc.preset {
         Some(GcPreset::LowLatency) => GcConfig::low_latency(),
         Some(GcPreset::HighThroughput) => GcConfig::high_throughput(),
@@ -234,6 +242,10 @@ mod tests {
             session.selected_foreign_config.as_ref().unwrap()
         ));
         let mut over_budget = RunMatRuntimeConfig::default();
+        over_budget.gc.threads = Some(1);
+        assert!(RunMatSession::validate_gc_runtime_config(&over_budget).is_ok());
+        over_budget.gc.threads = Some(2);
+        assert!(RunMatSession::validate_gc_runtime_config(&over_budget).is_err());
         over_budget.gc.threads = Some(4);
         assert!(RunMatSession::configure_gc_with_resource_limits(
             &over_budget,

@@ -129,6 +129,8 @@ impl SessionConfig {
         if let Some(vertices) = opts.surface_vertex_budget {
             runtime.plotting.surface_vertex_budget = Some(vertices);
         }
+        #[cfg(target_arch = "wasm32")]
+        crate::runtime::settings::validate_browser_capabilities(&runtime)?;
         let language_compat = match runtime.language.compat {
             LanguageCompatMode::RunMat => CompatMode::RunMat,
             LanguageCompatMode::Matlab => CompatMode::Matlab,

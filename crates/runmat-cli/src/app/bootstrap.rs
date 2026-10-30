@@ -52,8 +52,6 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
             .await;
     }
 
-    telemetry::init(&config.telemetry);
-
     let log_level = if config.logging.debug || cli.debug {
         log::LevelFilter::Debug
     } else {
@@ -70,75 +68,85 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         .filter_level(log_level)
         .format(format_log_record)
         .build();
-    let _logging = crate::observability::init_with_terminal(&config.logging, terminal_logger)
+    let logging = crate::observability::init_with_terminal(&config.logging, terminal_logger)
         .map_err(|error| anyhow::anyhow!("failed to initialize CLI logging: {error}"))?;
 
-    info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
-    debug!("Configuration loaded: {config:?}");
+    let result = async move {
+        telemetry::init(&config.telemetry);
+        info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
+        debug!("Configuration loaded: {config:?}");
 
-    let compilation_only = matches!(
-        cli.command,
-        Some(Commands::Compile { .. } | Commands::Mesh { .. } | Commands::NativeInterface { .. })
-    );
-    let wants_gui = match config.plotting.mode {
-        PlotMode::Gui => !compilation_only && !config.plotting.force_headless,
-        PlotMode::Auto => {
-            !compilation_only && !config.plotting.force_headless && is_gui_available()
-        }
-        PlotMode::Headless => false,
-    };
-
-    #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
-    if wants_gui && super::native_graphics::applies(&cli) {
-        return super::native_graphics::run(cli, config);
-    }
-
-    initialize_execution_lane(&config, compilation_only)?;
-
-    let _gui_initialized = if wants_gui {
-        info!("Initializing GUI plotting system");
-
-        runmat_plot::register_main_thread();
-
-        match runmat_plot::gui::initialize_native_window() {
-            Ok(()) => {
-                info!("Native window system initialized successfully");
+        let compilation_only = matches!(
+            cli.command,
+            Some(
+                Commands::Compile { .. } | Commands::Mesh { .. } | Commands::NativeInterface { .. }
+            )
+        );
+        let wants_gui = match config.plotting.mode {
+            PlotMode::Gui => !compilation_only && !config.plotting.force_headless,
+            PlotMode::Auto => {
+                !compilation_only && !config.plotting.force_headless && is_gui_available()
             }
-            Err(e) => {
-                info!("Native window initialization failed: {e}, using thread manager");
-            }
+            PlotMode::Headless => false,
+        };
+
+        #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+        if wants_gui && super::native_graphics::applies(&cli) {
+            return super::native_graphics::run(cli, config);
         }
 
-        match runmat_plot::initialize_gui_manager() {
-            Ok(()) => {
-                info!("GUI thread manager initialized successfully");
+        initialize_execution_lane(&config, compilation_only)?;
 
-                match runmat_plot::health_check_global() {
-                    Ok(result) => {
-                        info!("GUI system health check: {result}");
-                        true
-                    }
-                    Err(e) => {
-                        error!("GUI system health check failed: {e}");
-                        true
-                    }
+        let _gui_initialized = if wants_gui {
+            info!("Initializing GUI plotting system");
+
+            runmat_plot::register_main_thread();
+
+            match runmat_plot::gui::initialize_native_window() {
+                Ok(()) => {
+                    info!("Native window system initialized successfully");
+                }
+                Err(e) => {
+                    info!("Native window initialization failed: {e}, using thread manager");
                 }
             }
-            Err(e) => {
-                error!("Failed to initialize GUI thread manager: {e}");
-                false
+
+            match runmat_plot::initialize_gui_manager() {
+                Ok(()) => {
+                    info!("GUI thread manager initialized successfully");
+
+                    match runmat_plot::health_check_global() {
+                        Ok(result) => {
+                            info!("GUI system health check: {result}");
+                            true
+                        }
+                        Err(e) => {
+                            error!("GUI system health check failed: {e}");
+                            true
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to initialize GUI thread manager: {e}");
+                    false
+                }
             }
-        }
-    } else {
-        false
-    };
+        } else {
+            false
+        };
 
-    let _meshing_execution_provider = runmat_runtime::meshing::replace_meshing_execution_provider(
-        Some(crate::commands::mesh::meshing_execution_provider()),
-    )
-    .map_err(|error| anyhow::anyhow!("failed to install native meshing execution: {error}"))?;
+        let _meshing_execution_provider =
+            runmat_runtime::meshing::replace_meshing_execution_provider(Some(
+                crate::commands::mesh::meshing_execution_provider(),
+            ))
+            .map_err(|error| {
+                anyhow::anyhow!("failed to install native meshing execution: {error}")
+            })?;
 
-    dispatch::dispatch(&cli, &config).await
+        dispatch::dispatch(&cli, &config).await
+    }
+    .await;
+    crate::observability::complete_command(result, logging)
 }
 
 pub(super) fn initialize_execution_lane(

@@ -16,7 +16,7 @@ default = ["gpu"]
 # Session-free saved-scene playback; uses the same renderer implementation.
 graphics-replay = []
 jit = ["runmat-core/jit"]
-gpu = ["runmat-accelerate/wgpu"]
+gpu = ["runmat-accelerate/wgpu", "dep:wgpu"]
 occt-wasm-host = [
     "runmat-core/occt-wasm-host",
     "runmat-geometry-io/occt-wasm-host",
@@ -37,6 +37,7 @@ runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
+wgpu = { workspace = true, optional = true }
 runmat-vm = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-config = { workspace = true }

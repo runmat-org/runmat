@@ -40,6 +40,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     let config = SessionConfig::from_options(&parsed_opts)
         .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
     #[cfg(target_arch = "wasm32")]
+    crate::runtime::gpu::admit_browser_provider(&config)
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
+    #[cfg(target_arch = "wasm32")]
     ensure_getrandom_js();
     crate::api::observability::configure_for_session(&config.runtime.logging.otel, &options)?;
     let effective_log_level = if config.runtime.logging.debug {
@@ -153,7 +156,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                         "RunMat wasm: GPU initialization failed (falling back to CPU): {message}"
                     );
                     gpu_status.error = Some(message);
-                    install_cpu_provider(&config);
+                    install_cpu_provider(&config)?;
                 }
             },
             Err(reason) => {
@@ -167,11 +170,11 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                     "RunMat wasm: WebGPU capability preflight failed (falling back to CPU): {reason}"
                 );
                 gpu_status.error = Some(reason);
-                install_cpu_provider(&config);
+                install_cpu_provider(&config)?;
             }
         }
     } else {
-        install_cpu_provider(&config);
+        install_cpu_provider(&config)?;
     }
 
     // Build the browser scheduler after provider initialization so its typed

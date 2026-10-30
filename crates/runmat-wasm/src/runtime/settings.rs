@@ -1,5 +1,26 @@
 use runmat_config::runtime::{FeaArtifactStoreMode, RunMatRuntimeConfig};
 
+/// Pure admission, before logging, GC, plots, filesystem or provider effects.
+/// Native paths have no browser storage authority; resolving them is not proof
+/// that this host can honor them.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn validate_browser_capabilities(config: &RunMatRuntimeConfig) -> Result<(), String> {
+    if config.logging.file.is_some() {
+        return Err("logging.file requires a native host; browser logging does not write native filesystem paths".into());
+    }
+    if config.fea.artifact_store == Some(FeaArtifactStoreMode::Filesystem)
+        || config.fea.artifact_root.is_some()
+        || config.fea.study_artifact_root.is_some()
+    {
+        return Err("native FEA filesystem storage and artifact/study roots require a native host; use in_memory without native roots in this browser".into());
+    }
+    if config.foreign != runmat_config::runtime::ForeignConfig::default() {
+        return Err("native Python, Java and MEX settings require a native execution host".into());
+    }
+    runmat_core::RunMatSession::validate_gc_runtime_config(config)
+        .map_err(|error| error.to_string())
+}
+
 /// Apply process-owned browser mechanisms only after typed layer resolution.
 pub(crate) fn apply_resources(config: &RunMatRuntimeConfig) -> Result<(), String> {
     runmat_core::RunMatSession::configure_gc_from_runtime_config(config)
@@ -42,4 +63,37 @@ pub(crate) fn apply_resources(config: &RunMatRuntimeConfig) -> Result<(), String
         max_runs_per_kind: config.fea.artifact_max_runs_per_kind,
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_capability_matrix_rejects_native_only_settings_without_effects() {
+        let base = RunMatRuntimeConfig::default();
+        assert!(validate_browser_capabilities(&base).is_ok());
+        let changes: [fn(&mut RunMatRuntimeConfig); 6] = [
+            |config: &mut RunMatRuntimeConfig| config.logging.file = Some("runtime.log".into()),
+            |config: &mut RunMatRuntimeConfig| config.fea.artifact_root = Some("results".into()),
+            |config: &mut RunMatRuntimeConfig| {
+                config.fea.study_artifact_root = Some("studies".into())
+            },
+            |config: &mut RunMatRuntimeConfig| {
+                config.fea.artifact_store = Some(FeaArtifactStoreMode::Filesystem)
+            },
+            |config: &mut RunMatRuntimeConfig| config.foreign.java.options.push("-Xmx1g".into()),
+            |config: &mut RunMatRuntimeConfig| config.gc.threads = Some(2),
+        ];
+        for change in changes {
+            let mut config = base.clone();
+            change(&mut config);
+            assert!(validate_browser_capabilities(&config).is_err());
+        }
+        let mut supported = base;
+        supported.gc.threads = Some(1);
+        supported.fea.artifact_store = Some(FeaArtifactStoreMode::InMemory);
+        supported.fea.artifact_max_runs = Some(3);
+        assert!(validate_browser_capabilities(&supported).is_ok());
+    }
 }

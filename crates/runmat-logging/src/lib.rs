@@ -13,6 +13,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
 pub mod otel;
+#[cfg(not(target_arch = "wasm32"))]
+mod file_sink;
 #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 mod export_model;
 #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
@@ -98,12 +100,35 @@ static LOG_FILTER_RELOADER: OnceCell<LogFilterReloader> = OnceCell::new();
 
 pub struct LoggingGuard {
     _guard: Option<DefaultGuard>,
+    #[cfg(not(target_arch = "wasm32"))]
+    file_sink: Option<file_sink::FileSink>,
 }
 
 impl LoggingGuard {
     /// A guard for hosts that installed their own global subscriber.
     pub fn host_managed() -> Self {
-        Self { _guard: None }
+        Self {
+            _guard: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            file_sink: None,
+        }
+    }
+
+    /// Reports a latched configured-file error even if the final flush succeeds.
+    pub fn flush_file_result(&self) -> Result<(), String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(sink) = &self.file_sink {
+            return sink.flush_result();
+        }
+        Ok(())
+    }
+}
+
+impl Drop for LoggingGuard {
+    fn drop(&mut self) {
+        // Owned file sinks warn once themselves; legacy/no-file guards are
+        // unchanged. Explicit hosts use flush_file_result to report failure.
+        let _ = self.flush_file_result();
     }
 }
 
@@ -149,13 +174,38 @@ where
 }
 
 pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
-    init_logging_impl(opts, false)
+    init_logging_impl(
+        opts,
+        false,
+        #[cfg(not(target_arch = "wasm32"))]
+        None,
+        false,
+    )
+    .expect("non-strict logging always retains its thread-local fallback")
 }
 
 /// A host that owns `log::Log` forwards records explicitly through [`forward_log_record`].
 /// Do not compete with that owner by attempting to install another global logger.
 pub fn init_logging_with_host_logger(opts: LoggingOptions) -> LoggingGuard {
-    init_logging_impl(opts, true)
+    init_logging_impl(
+        opts,
+        true,
+        #[cfg(not(target_arch = "wasm32"))]
+        None,
+        false,
+    )
+    .expect("non-strict logging always retains its thread-local fallback")
+}
+
+/// Add one owned native file sink to the existing subscriber. Unlike legacy
+/// initializers, this rejects an occupied global subscriber without installing
+/// a competing thread-local subscriber. The host still owns `log::Log`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn init_logging_with_host_logger_and_file(
+    opts: LoggingOptions,
+    file: std::fs::File,
+) -> Result<LoggingGuard, String> {
+    init_logging_impl(opts, true, Some(file_sink::FileSink::new(file)), true)
 }
 
 pub fn log_metadata_enabled(metadata: &tracing_log::log::Metadata<'_>) -> bool {
@@ -167,7 +217,12 @@ pub fn forward_log_record(record: &tracing_log::log::Record<'_>) -> std::io::Res
     tracing_log::format_trace(record)
 }
 
-fn init_logging_impl(opts: LoggingOptions, host_logger: bool) -> LoggingGuard {
+fn init_logging_impl(
+    opts: LoggingOptions,
+    host_logger: bool,
+    #[cfg(not(target_arch = "wasm32"))] file_sink: Option<file_sink::FileSink>,
+    global_only: bool,
+) -> Result<LoggingGuard, String> {
     if !host_logger {
         // Hosts with an existing log owner must use init_logging_with_host_logger.
         if LogTracer::init().is_err() {
@@ -195,6 +250,16 @@ fn init_logging_impl(opts: LoggingOptions, host_logger: bool) -> LoggingGuard {
             let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
             let subscriber = tracing_subscriber::registry()
                 .with(filter_layer)
+                .with(file_sink.as_ref().map(|sink| {
+                    tracing_subscriber::fmt::layer()
+                        .with_ansi(false)
+                        .with_writer(sink.clone())
+                        .log_internal_errors(false)
+                        .with_span_events(
+                            tracing_subscriber::fmt::format::FmtSpan::NEW
+                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+                        )
+                }))
                 .with(bridge_layer)
                 .with(trace_layer.clone());
             (subscriber, Some(filter_handle))
@@ -236,6 +301,7 @@ fn init_logging_impl(opts: LoggingOptions, host_logger: bool) -> LoggingGuard {
             let _ = filter_handle;
             None
         }
+        Err(_) if global_only => return Err("Another tracing subscriber is already installed; configured file logging was not activated".into()),
         Err(_) => {
             let subscriber = build_subscriber().0;
             #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
@@ -250,7 +316,11 @@ fn init_logging_impl(opts: LoggingOptions, host_logger: bool) -> LoggingGuard {
         }
     };
 
-    LoggingGuard { _guard: guard }
+    Ok(LoggingGuard {
+        _guard: guard,
+        #[cfg(not(target_arch = "wasm32"))]
+        file_sink,
+    })
 }
 
 /// Flushes and shuts down the process-global OpenTelemetry trace provider.

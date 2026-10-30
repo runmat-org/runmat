@@ -1,6 +1,6 @@
 # Configuration Reference
 
-RunMat utilizes a hierarchical configuration system that manages project-level metadata, source organization, and runtime execution parameters. The configuration is primarily driven by a manifest file (`runmat.toml` or `runmat.json`) and can be overridden by environment variables and CLI arguments.
+RunMat reads project metadata and runtime settings from `runmat.toml` or `runmat.json`. User settings supply defaults for fields a project leaves unset; environment variables and CLI arguments can override them.
 
 For a user-facing guide to project layout, source roots, dependencies, and named entrypoints, see [Projects](/docs/runtime/getting-started/projects). This page is the reference for manifest and runtime settings.
 
@@ -8,10 +8,16 @@ For a user-facing guide to project layout, source roots, dependencies, and named
 
 RunMat resolves configuration settings using a specific precedence. Lower-numbered levels are overridden by higher-numbered levels:
 
-1. Built-in Defaults
-2. Project Manifest: Settings found in `runmat.toml` or `runmat.json`. The system automatically discovers this file by walking up the directory tree from the source file being executed
-3. Environment Variables: Variables such as `RUNMAT_CONFIG` or `RUNMAT_JIT_THRESHOLD`
-4. CLI Arguments: Explicit flags passed to the `runmat` binary (e.g., `--no-jit` or `--gc-preset`)
+1. Built-in defaults.
+2. User settings in `~/.config/runmat/settings-v1.json`, or the settings document supplied by the host. If that file is absent, native discovery checks `config.toml` and `config.json` in the same directory.
+3. The nearest project manifest, discovered by walking upward from the project directory.
+4. Explicit configuration files: `RUNMAT_CONFIG`, then the CLI's `--config` file when supplied.
+5. Field-specific environment overrides, such as `RUNMAT_JIT_THRESHOLD`.
+6. Individual CLI arguments, such as `--no-jit` or `--gc-preset`.
+
+Tables merge recursively, arrays replace, and an omitted field inherits its lower-layer value. `runmat config show --provenance` reports each effective field's source. `runmat config user show`, `runmat config user set jit enabled --value false`, and `runmat config user reset jit enabled` inspect or change only the user layer; edits preserve unrelated fields and comments where supported. `RUNMAT_USER_SETTINGS` selects another user settings path.
+
+Browser hosts supply a JSON user document instead of a home-directory file. Cluster runs carry only project settings and built-in defaults: neither the submitter's nor the worker's personal settings or environment become run policy. Worker resource limits and device assignments remain authoritative.
 
 ## Example Project Manifest (`runmat.toml`)
 
@@ -163,7 +169,7 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 
 | Key               | Type    | Default | Notes                                                                                    |
 | ----------------- | ------- | ------- | ---------------------------------------------------------------------------------------- |
-| `callstack_limit` | integer | `200`   | Max retained call stack frames for diagnostics.                                          |
+| `callstack_limit` | integer | `200`   | Session call-stack limit.                                          |
 | `error_namespace` | string  | `""`    | Error ID namespace. Empty value is normalized at startup by [language compatibility mode](/docs/runtime/matlab-compatibility) (set to `RunMat` in `compat = "runmat"` mode). |
 | `verbose`         | boolean | `false` | Enables verbose execution output.                                                        |
 
@@ -186,6 +192,8 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 | `timeout_ms` | positive integer | unset | — | Terminates an isolated host when an invocation or lifecycle callback exceeds the configured duration. An unset value applies no automatic invocation deadline; clear and shutdown retain a 30-second teardown ceiling. Cancellation also terminates the host. |
 
 Modules with a valid RunMat build manifest retain exact admission and run in the owning session. The `unmanifested` setting applies only to the separately checked binary-compatibility tier; it does not bypass architecture, suffix, or adapter-ABI checks.
+
+A configured MEX deadline is rejected before loading a manifested in-process module: arbitrary native instructions cannot be safely preempted. The default has no invocation deadline. Supported isolated routes enforce their configured deadlines by terminating the host.
 
 Use `[mex-artifacts.<name>]` for a RunMat-built MEX module that belongs to the project. The declaration names the module and its canonical sidecar manifest relative to the package root. RunMat freezes both files, validates their shared identity for the current target, and carries them through packages, native compilation, and remote execution:
 
@@ -260,12 +268,12 @@ The isolated extension host contains crashes and can be terminated on cancellati
 | Key                  | Type    | Default   | Notes                                   |
 | -------------------- | ------- | --------- | --------------------------------------- |
 | `enabled`            | boolean | `true`    | Enables JIT compilation.                |
-| `threshold`          | integer | `10`      | Accepted but does not control native tiering. |
-| `optimization_level` | string  | `"speed"` | Accepts `none`, `size`, `speed`, `aggressive`; does not select native compiler optimization. |
+| `threshold`          | positive integer | `10`      | Base activity threshold for native tiering. |
+| `optimization_level` | string  | `"speed"` | `none`, `size`, `speed`, `aggressive`. |
 
-`threshold`, `RUNMAT_JIT_THRESHOLD`, and `--jit-threshold` are accepted inputs, but their value does not control native compilation or specialization. Tiering tracks function and loop activity, profiles of runtime representations, and compilation budgets. Placement separately chooses among eligible implementations. See [JIT Compilation Pipeline](/docs/runtime/jit/pipeline).
+For threshold N, native tiering uses N for generic compilation, 2N for specialization and 4N for loops. `aggressive` specializes at N. Runtime representation profiles and compilation budgets also govern eligibility; placement separately selects eligible implementations. See [JIT Compilation Pipeline](/docs/runtime/jit/pipeline).
 
-`optimization_level` and `--jit-opt-level` are parsed and retained as configuration, but do not select the native compiler's optimization policy.
+`none`, `size` and `speed` select the native compiler's corresponding optimization policy; `aggressive` uses speed optimization with earlier specialization. Changing JIT policy creates a fresh compiler-cache generation without discarding active executors. Browser execution has no native JIT backend.
 
 
 ### `[runtime.gc]`
@@ -275,8 +283,10 @@ The isolated extension host contains crashes and can be terminated on cancellati
 | --------------- | ------- | ------- | -------------------------------------------------------- |
 | `preset`        | string  | unset   | `low-latency`, `high-throughput`, `low-memory`, `debug`. |
 | `young_size_mb` | integer | unset   | Young generation size override (MB).                     |
-| `threads`       | integer | unset   | GC worker thread override.                               |
-| `collect_stats` | boolean | `false` | Enables GC statistics collection.                        |
+| `threads`       | integer | unset   | Explicit collector thread count; only `1` is supported. Other counts reject. |
+| `collect_stats` | boolean | `false` | Retained statistics preference; existing collector counters are maintained independently of this flag. |
+
+The collector is serial; this setting does not limit numerical kernels or FEA worker threads. Desktop GC configuration belongs to the process. Its first runtime selects the policy; a different later GC request requires a Desktop restart rather than silently changing another window's collector. Cluster workers also check GC settings against their admitted CPU and memory resources.
 
 
 ### `[runtime.accelerate]`
@@ -289,6 +299,8 @@ The isolated extension host contains crashes and can be terminated on cancellati
 | `allow_inprocess_fallback`    | boolean | `true`   | Falls back to in-process provider if hardware provider fails. |
 | `wgpu_power_preference`       | string  | `"auto"` | `auto`, `high-performance`, `low-power`.                      |
 | `wgpu_force_fallback_adapter` | boolean | `false`  | Forces WGPU fallback adapter selection.                       |
+
+Desktop retains a provider for each physical settings tuple and reuses it across sessions with matching settings. Runtime acceleration and fallback restrictions remain invocation-scoped. Disabling computation does not invalidate the owner of an existing GPU value: an authorized readback can still gather it, but cannot grant new device computation.
 
 
 #### `[runtime.accelerate.auto_offload]`
@@ -395,7 +407,25 @@ study_artifact_root = "artifacts/studies"
 | ------- | ------- | -------- | ------------------------------------------------------------------------- |
 | `level` | string  | `"warn"` | `error`, `warn`, `info`, `debug`, `trace`.                                |
 | `debug` | boolean | `false`  | Forces debug logging path.                                                |
-| `file`  | string  | unset    | Reserved log file path option (runtime currently logs to process logger). |
+| `file`  | string  | unset    | Native append-log path; unsupported by the browser host. |
+
+Desktop's local file/filter selection is process-owned. Its owning window can change it; a different window with conflicting settings receives an explicit error. Collector export is separate from both local logging and RunMat product telemetry.
+
+#### `[runtime.logging.otel]`
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `enabled` | `false` | Enables export to the user's collector. |
+| `endpoint` | `"http://localhost:4318"` | OTLP base URL; HTTP appends `/v1/traces` and `/v1/logs`. |
+| `protocol` | `"http/protobuf"` | Native supports `http/protobuf` and `grpc`; browsers require HTTP and collector CORS permission. |
+| `signals` | `["traces", "logs"]` | Requested signals. Metrics are unsupported and reject at startup. |
+| `headers_from_env` | `"RUNMAT_OTEL_HEADERS"` | Name of the startup environment variable containing collector headers, not the headers themselves. Desktop supplies secrets from its keychain. |
+| `service_name` | `"runmat"` | Service resource name. |
+| `resource_attributes` | `{}` | String-valued resource attributes. |
+
+Export uses bounded queues and counts dropped records instead of waiting for collector networking on the execution path. A process owns one collector configuration; incompatible later selections require a restart. The test-export operation waits for an actual collector acknowledgement, not only queue insertion. Logs carry trace/span IDs where a trace context exists. Never put authorization headers in project or user settings.
+
+Standard `OTEL_EXPORTER_OTLP_*`, `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` variables are supported. Per-signal HTTP endpoints are complete URLs. `RUNMAT_OTEL_ENDPOINT` is a shortcut that enables export; `RUNMAT_OTEL_ENABLED=false` explicitly disables it. Cluster runs do not carry personal collector settings or secrets; workers use an administrator-selected collector or none.
 
 
 ## Environment Variables
@@ -403,6 +433,9 @@ study_artifact_root = "artifacts/studies"
 ### Config Selection
 
 - `RUNMAT_CONFIG`: absolute or relative path to `runmat.toml` / `runmat.json`
+- `RUNMAT_USER_SETTINGS`: explicit native user settings file
+
+Runtime fields also accept `RUNMAT_RUNTIME__<SECTION>__<FIELD>` overrides, for example `RUNMAT_RUNTIME__ACCELERATE__AUTO_OFFLOAD__ENABLED=false`. Values are JSON literals, with plain text accepted for strings. Arrays replace their lower-layer values.
 
 ### Service/Auth
 

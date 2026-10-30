@@ -9311,6 +9311,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
+ "wgpu",
  "zeroize",
 ]
 

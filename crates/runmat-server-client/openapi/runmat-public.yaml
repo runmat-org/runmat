@@ -9003,6 +9003,14 @@ components:
           type: integer
           format: int32
           minimum: 0
+        driverAcceleratorDevices:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
+          description: |-
+            Exact devices granted by the authenticated live driver allocation.
+            CPU-only allocations carry an explicit empty list.
+          nullable: true
         driverLeaseId:
           type: string
         driverResources:
@@ -13823,6 +13831,10 @@ components:
           type: boolean
         requireManualApproval:
           type: boolean
+          description: |-
+            Off by default. When off, a verified publication that meets the
+            policy is approved automatically (approved by its publisher); when on,
+            it stays verified until an admin approves it.
         requireProvenance:
           type: boolean
         requireSbom:
@@ -13854,6 +13866,10 @@ components:
           type: boolean
         requireManualApproval:
           type: boolean
+          description: |-
+            Off by default. When off, a verified publication that meets the
+            policy is approved automatically (approved by its publisher); when on,
+            it stays verified until an admin approves it.
         requireProvenance:
           type: boolean
         requireSbom:

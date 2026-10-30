@@ -42,6 +42,40 @@ env_logger sink and forwards the same records to tracing. The terminal and
 subscriber filters are independent, so terminal-only filtering cannot suppress
 collector logs. This is a logger bridge, not a side effect of a formatter.
 
+### Native CLI file output
+
+```toml
+[logging]
+level = "info"
+debug = false
+file = "runmat.log"
+```
+
+The CLI opens `logging.file` in append mode before initializing collectors or
+execution. Relative paths use the CLI process working directory; parent
+directories must already exist. Opening failure is a startup error, not a
+silently disabled sink. Terminal formatting, machine-readable stdout and the
+single `log::Log` owner are unchanged. `debug=true` selects the debug filter;
+otherwise the typed `level` selects its corresponding filter.
+
+`init_logging_with_host_logger_and_file(options, owned_file)` adds one non-ANSI
+formatted sink inside the existing native subscriber: original bridged log
+records, tracing events and enabled span creation/close records reach the file.
+It does not consume the runtime log hook, install another logger, or start an
+exporter. An occupied global subscriber is rejected explicitly rather than
+silently putting configured file logging on a competing thread-local subscriber.
+Existing non-file initializers retain their legacy behavior.
+
+File I/O is synchronous and has no extra queue. A write/flush failure is latched
+and emits one non-recursive stderr warning without echoing the failed event.
+Hosts call `LoggingGuard::flush_file_result()` at their result boundary; the CLI
+does this after collector shutdown. A command that otherwise succeeds returns
+an error if its configured file failed. When user code also fails, its original
+error and cause chain remain primary and the file error is reported alongside
+it. Drop still performs a best-effort flush. Files contain the same structured
+runtime data as logging generally; existing secret-redaction obligations apply.
+Hidden environment-only workers do not inherit a personal file sink implicitly.
+
 `configure_otel` expects already-layered options; it does not reapply generic
 environment overrides after the config loader. Environment-only hosts use
 `OtelOptions::default().resolve_environment()` first. `RUNMAT_OTEL_ENDPOINT`
