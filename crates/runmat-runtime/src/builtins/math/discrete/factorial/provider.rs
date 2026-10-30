@@ -41,7 +41,7 @@ pub(super) async fn factorial_gpu(input: GpuTensorHandle) -> BuiltinResult<Value
 async fn evaluate_floating(input: GpuTensorHandle) -> BuiltinResult<Value> {
     resident_real_unary::validate_input(&input)
         .map_err(|reason| factorial_error(FactorialError::InvalidInput, reason.detail()))?;
-    let provider = resident_real_unary::exact_owner(&input).ok_or_else(|| {
+    let provider = resident_real_unary::exact_owner(&input, || {
         factorial_error(FactorialError::Internal, "GPU input has no owning provider")
     })?;
     match provider.unary_factorial(&input).await {

@@ -22,6 +22,43 @@ pub fn quote_exact_native_download(
             "selected finite readback requires the source provider",
         ));
     }
+    quote_geometry(
+        handle,
+        provider.download_numeric_host_workspace_bound(handle),
+        provider.download_numeric_provider_scratch_bound(handle),
+        provider.download_numeric_completion_host_bound(handle),
+    )
+}
+
+pub fn quote_exact_native_readback(
+    readback: &runmat_accelerate_api::NumericReadback<'_>,
+) -> Result<ExactNativeDownloadQuote, RuntimeError> {
+    let failure = |source| {
+        crate::runtime_error::with_provider_execution_source(
+            invalid("numeric readback authorization or bound failed"),
+            runmat_accelerate_api::ProviderExecutionError::from(source),
+        )
+    };
+    quote_geometry(
+        readback.source(),
+        readback
+            .download_numeric_host_workspace_bound()
+            .map_err(failure)?,
+        readback
+            .download_numeric_provider_scratch_bound()
+            .map_err(failure)?,
+        readback
+            .download_numeric_completion_host_bound()
+            .map_err(failure)?,
+    )
+}
+
+fn quote_geometry(
+    handle: &GpuTensorHandle,
+    workspace_bound: ResourceByteBound,
+    scratch_bound: ResourceByteBound,
+    callback_bound: ResourceByteBound,
+) -> Result<ExactNativeDownloadQuote, RuntimeError> {
     let storage = handle
         .descriptor()
         .storage
@@ -68,9 +105,7 @@ pub fn quote_exact_native_download(
         .ok_or_else(|| invalid("selected host shape extent overflows"))?;
     let payload_bytes = checked_numeric_download_host_payload_bytes(handle)
         .ok_or_else(|| invalid("selected host payload extent overflows"))?;
-    let ResourceByteBound::Known(host_workspace) =
-        provider.download_numeric_host_workspace_bound(handle)
-    else {
+    let ResourceByteBound::Known(host_workspace) = workspace_bound else {
         return Err(invalid(
             "selected provider has no finite native download bound",
         ));
@@ -83,15 +118,10 @@ pub fn quote_exact_native_download(
             "selected provider host workspace omits returned backing",
         ));
     }
-    if !matches!(
-        provider.download_numeric_provider_scratch_bound(handle),
-        ResourceByteBound::Known(_)
-    ) {
+    if !matches!(scratch_bound, ResourceByteBound::Known(_)) {
         return Err(invalid("selected provider has no finite staging bound"));
     }
-    let ResourceByteBound::Known(callback_bytes) =
-        provider.download_numeric_completion_host_bound(handle)
-    else {
+    let ResourceByteBound::Known(callback_bytes) = callback_bound else {
         return Err(invalid("selected provider has no finite callback bound"));
     };
     let count = shape

@@ -58,6 +58,13 @@ where
         }
         None => false,
     };
+    if let Value::GpuTensor(source) = &value {
+        crate::builtins::common::gpu_helpers::require_resident_compute_owner(source, || {
+            crate::build_runtime_error("real unary input has no exact compute owner")
+                .with_builtin(entry.identity.name)
+                .build()
+        })?;
+    }
     if let Some(route) = crate::builtins::math::host_route::canonical(
         runtime,
         crate::context::VmFusionHostInstruction::ElementwiseCall,

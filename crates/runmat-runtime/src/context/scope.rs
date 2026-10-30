@@ -74,6 +74,10 @@ pub(super) fn execution_provider_authorization(
             | ExecutionProviderAdmission::DeviceControl(provider) => {
                 policy.permits_provider(*provider)
             }
+            ExecutionProviderAdmission::NumericReadback { provider, handle } => {
+                provider.device_id() == handle.device_id()
+                    && handle.allocation_lease().validate_live().is_ok()
+            }
             ExecutionProviderAdmission::DeviceAccess(_)
             | ExecutionProviderAdmission::CanonicalWgpuSubmit(_) => {
                 policy.enabled && policy.provider != super::RuntimeProviderPreference::InProcess
@@ -150,7 +154,8 @@ pub(super) fn execution_provider_authorization(
             Authorization::Unrestricted
         }
         ExecutionProviderAdmission::Provider(provider)
-        | ExecutionProviderAdmission::DeviceControl(provider) => {
+        | ExecutionProviderAdmission::DeviceControl(provider)
+        | ExecutionProviderAdmission::NumericReadback { provider, .. } => {
             let mut authorization = context
                 .as_ref()
                 .and_then(RuntimeContext::execution_assignment)

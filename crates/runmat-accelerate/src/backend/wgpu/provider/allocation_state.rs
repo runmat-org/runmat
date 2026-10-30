@@ -26,6 +26,7 @@ mod managed_admission;
 mod numeric_download_stage;
 pub(super) use numeric_download_stage::{
     mapped_stage_host_bytes, numeric_download_stage_host_bytes, NumericDownloadStageHandle,
+    NumericStageBuffer,
 };
 #[path = "allocation_state/owner.rs"]
 mod owner;

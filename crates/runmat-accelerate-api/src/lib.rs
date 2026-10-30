@@ -13,8 +13,12 @@ use std::sync::Arc;
 
 mod cancellation;
 mod numeric_download_stage;
+mod numeric_readback;
 mod platform;
 pub use numeric_download_stage::{NumericDownloadStageLease, PreparedNumericDownloadStage};
+pub use numeric_readback::{
+    authorize_numeric_readback, numeric_readback_for_handle, NumericReadback, NumericReadbackFuture,
+};
 mod device_control;
 mod provider_registry;
 pub use device_control::{
@@ -97,6 +101,8 @@ pub mod wgpu_ieee_words;
 pub use wgpu_access::{
     CanonicalWgpuEmissionAuthority, WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission,
     WgpuEmissionMode, WgpuScopeErrorKind, WgpuScopeErrors, WgpuScopeReceipt,
+    WgpuNumericReadbackSource, WgpuNumericReadbackBuffer, WgpuNumericReadbackSubmission,
+    WgpuNumericReadbackTimestampResources,
 };
 #[cfg(feature = "wgpu")]
 pub use wgpu_buffer_owner::WgpuBufferOwner;
@@ -157,6 +163,11 @@ pub enum ExecutionProviderAuthorization {
 /// grants provider authorization.
 pub enum ExecutionProviderAdmission<'a> {
     Provider(&'a dyn AccelProvider),
+    /// Exact-source egress, not permission to create or compute device values.
+    NumericReadback {
+        provider: &'a dyn AccelProvider,
+        handle: &'a GpuTensorHandle,
+    },
     DeviceControl(&'a dyn AccelProvider),
     #[cfg(feature = "wgpu")]
     DeviceAccess(&'a WgpuDeviceAccess),
@@ -2240,6 +2251,40 @@ pub trait AccelProvider: AcceleratorThreadBound {
             numeric.validate()?;
             Ok(numeric)
         })
+    }
+
+    /// Explicit exact-source egress. The capability authorizes only its own
+    /// registered facade; providers with a distinct physical transfer gate
+    /// override this rather than retrying ordinary compute on denial.
+    fn download_numeric_readback<'a>(
+        &'a self,
+        readback: &'a NumericReadback<'_>,
+    ) -> AccelNumericDownloadFuture<'a> {
+        if let Err(error) = readback.authorize_provider(self) {
+            return Box::pin(async move { Err(error) });
+        }
+        self.download_numeric(readback.source())
+    }
+
+    fn prepare_numeric_readback_stage(
+        &self,
+        readback: &NumericReadback<'_>,
+        query: &ProviderFeasibilityQuery,
+        completion_claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> anyhow::Result<PreparedNumericDownloadStage> {
+        readback.authorize_provider(self)?;
+        self.prepare_numeric_download_stage(readback.source(), query, completion_claim)
+    }
+
+    fn download_numeric_readback_admitted_stage<'a>(
+        &'a self,
+        readback: &'a NumericReadback<'_>,
+        stage: PreparedNumericDownloadStage,
+    ) -> AccelNumericDownloadFuture<'a> {
+        if let Err(error) = readback.authorize_provider(self) {
+            return Box::pin(async move { Err(error) });
+        }
+        self.download_numeric_admitted_stage(readback.source(), stage)
     }
 
     /// Selected finite readback transfers the caller's retained callback

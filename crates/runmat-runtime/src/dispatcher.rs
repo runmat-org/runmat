@@ -172,7 +172,25 @@ pub(crate) async fn gather_if_needed_in_context_async(
         return managed_gather::borrowed(value, runtime.expect("managed gather context")).await;
     }
     try_visit_gathered_gpu_handles(value, &mut |_| {})?;
-    gather_if_needed_async_impl(value).await
+    let future = gather_if_needed_async_impl(value);
+    if let Some(runtime) = runtime {
+        poll_gather_in_context(runtime, future).await
+    } else {
+        future.await
+    }
+}
+
+/// Stack-pinned poll scope: no second erased future/metadata allocation.
+async fn poll_gather_in_context<F: std::future::Future>(
+    runtime: &crate::context::RuntimeContext,
+    future: F,
+) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(|cx| {
+        let _scope = runtime.enter();
+        future.as_mut().poll(cx)
+    })
+    .await
 }
 
 /// Preserve the admitted argument owner when no transfer is necessary. A
@@ -202,50 +220,20 @@ fn gather_if_needed_async_impl<'a>(
     Box::pin(async move {
         match value {
             Value::GpuTensor(handle) => {
-                let provider =
-                    crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-                        .ok_or_else(|| {
-                            build_runtime_error("gather: no acceleration provider registered")
+                let readback = runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(
+                    |source| {
+                        crate::runtime_error::with_provider_execution_source(
+                            build_runtime_error("gather: exact source readback is not authorized")
                                 .with_identifier("RunMat:gather:ProviderUnavailable")
                                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                                .build()
-                        })?;
-                let expected_element =
-                    crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(
-                        handle,
-                    )
-                    .map_err(|error| {
-                        build_runtime_error(format!("gather: {error}"))
-                            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
-                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                            .build()
-                    })?;
-                let host = provider.download_numeric(handle).await.map_err(|err| {
-                    crate::runtime_error::with_provider_execution_source(
-                        build_runtime_error(format!("gather: {err}"))
-                            .with_identifier("RunMat:gather:DownloadFailed")
-                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                            .build(),
-                        err.into(),
-                    )
-                })?;
-                let expected_storage = runmat_accelerate_api::handle_storage(handle);
-                if host.shape != handle.shape()
-                    || host.storage != expected_storage
-                    || host.data.element_type() != expected_element
-                {
-                    return Err(provider_payload_mismatch(
-                        handle,
-                        &host.shape,
-                        format!(
-                            "{:?} {:?}, expected {:?} {:?}",
-                            host.data.element_type(),
-                            host.storage,
-                            expected_element,
-                            expected_storage
-                        ),
-                    ));
-                }
+                                .build(),
+                            source.into(),
+                        )
+                    },
+                )?;
+                let host = crate::builtins::common::gpu_helpers::download_numeric_readback_preserving_residency_async(
+                    &readback, None,
+                ).await?;
                 crate::builtins::common::gpu_helpers::value_from_numeric_download(
                     host,
                     runmat_accelerate_api::handle_is_logical(handle),
@@ -408,21 +396,6 @@ impl std::fmt::Display for ProviderDownloadPayloadMismatch {
 }
 
 impl std::error::Error for ProviderDownloadPayloadMismatch {}
-
-fn provider_payload_mismatch(
-    handle: &GpuTensorHandle,
-    actual_shape: &[usize],
-    detail: String,
-) -> RuntimeError {
-    build_runtime_error(format!(
-        "gather: provider payload mismatch ({detail}; shape {actual_shape:?}, expected {:?})",
-        handle.shape()
-    ))
-    .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
-    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-    .with_source(ProviderDownloadPayloadMismatch)
-    .build()
-}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
@@ -2360,7 +2333,7 @@ mod tests {
     #[test]
     fn malformed_download_carries_provider_payload_provenance() {
         let handle = gpu_fixture(vec![1, 1]);
-        let error = super::provider_payload_mismatch(
+        let error = crate::builtins::common::gpu_helpers::provider_payload_mismatch(
             &handle,
             &[2, 1],
             "download shape differs from handle".into(),

@@ -97,7 +97,12 @@ Unchanged default values are never materialized by `edit`.
 
 Acceleration restrictions are immutable per-invocation context, including nested
 calls, asynchronous polls and parallel children; they do not replace the global
-provider. `enabled=false` / `provider=inprocess` prevent device execution.
+provider. `enabled=false` / `provider=inprocess` prevent new device computation.
+Existing GPU values still support explicit gather through a source-bound numeric
+readback capability: exact owner, live allocation and assigned device remain
+mandatory, and transfer-only copy/map access grants no compute permission.
+Retirement continues through the allocation's captured owner, independently of
+the current compute preference.
 `auto_offload.enabled=false` suppresses automatic uploads/fusion, but does not
 forbid explicitly requested `gpuArray` operations on an admitted device.
 `allow_inprocess_fallback=false` forbids automatic GPU-to-host retry and optional

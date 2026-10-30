@@ -91,12 +91,19 @@ fn gather_in_place<'a>(
                         "resident gather has no active allocation owner",
                     )
                 })?;
-                let provider = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
-                    crate::build_runtime_error("gather: no acceleration provider registered")
-                        .with_identifier("RunMat:gather:ProviderUnavailable")
-                        .build()
-                })?;
-                let quote = gpu_helpers::quote_exact_native_download(provider, handle)?;
+                let readback = runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(
+                    |source| {
+                        crate::runtime_error::with_provider_execution_source(
+                            crate::build_runtime_error(
+                                "gather: exact source readback is not authorized",
+                            )
+                            .with_identifier("RunMat:gather:ProviderUnavailable")
+                            .build(),
+                            source.into(),
+                        )
+                    },
+                )?;
+                let quote = gpu_helpers::quote_exact_native_readback(&readback)?;
                 let receipt = HostAllocationReceipt::admit(
                     Some(&context),
                     quote.single_source_plan().map_err(|source| {
@@ -124,8 +131,9 @@ fn gather_in_place<'a>(
                         HostAllocationError::MissingManagedOwner,
                     )
                 })?;
-                let download =
-                    gpu_helpers::download_exact_native(&context, provider, handle, &receipt, quote);
+                let download = gpu_helpers::download_exact_native_readback(
+                    &context, &readback, &receipt, quote,
+                );
                 let gathered = match budget.as_deref() {
                     Some(budget) => budget
                         .await_cancellable(download)

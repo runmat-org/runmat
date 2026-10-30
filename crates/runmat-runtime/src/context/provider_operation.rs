@@ -325,7 +325,7 @@ fn select_exact_provider_or_host_operation_with_output_contract(
             let ProviderObservationSupport::Observed(mut receipt) =
                 provider.begin_operation_observation(upload.query)
             else {
-                return declined_provider_route(runtime);
+                return declined_provider_route(Some(runtime));
             };
             receipt
                 .require_provider_execution(provider.device_id(), upload.query.operation.clone());
@@ -349,7 +349,7 @@ fn select_exact_provider_or_host_operation_with_output_contract(
     let ProviderObservationSupport::Observed(mut receipt) =
         provider.begin_operation_observation(query)
     else {
-        return declined_provider_route(runtime);
+        return declined_provider_route(Some(runtime));
     };
     receipt.require_provider_execution(provider.device_id(), query.operation.clone());
     if request.conditional_host_fallback.is_some() {

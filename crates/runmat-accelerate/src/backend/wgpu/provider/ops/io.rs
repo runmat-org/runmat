@@ -33,6 +33,9 @@ impl NumericReadbackStaging {
     }
 }
 impl super::core::ReadbackResourceOwner for NumericReadbackStaging {
+    fn readback_buffer(&self) -> Option<&runmat_accelerate_api::WgpuNumericReadbackBuffer> {
+        self.owner().readback_buffer()
+    }
     fn validate_scope(&self) -> Result<()> {
         self.owner().validate_scope()
     }
@@ -802,7 +805,7 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         claim: Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
     ) -> Result<HostNumericTensorOwned> {
-        self.download_numeric_exec_with_claim_and_stage(handle, claim, None)
+        self.download_numeric_exec_with_claim_and_stage(handle, claim, None, None)
             .await
     }
 
@@ -811,7 +814,15 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         claim: Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
         mut stage: Option<runmat_accelerate_api::PreparedNumericDownloadStage>,
+        readback: Option<&runmat_accelerate_api::NumericReadback<'_>>,
     ) -> Result<HostNumericTensorOwned> {
+        if let Some(readback) = readback {
+            readback.authorize_provider(self)?;
+            ensure!(
+                readback.source().view_identity() == handle.view_identity(),
+                "numeric readback source changed"
+            );
+        }
         if let Some(stage) = &stage {
             if !stage.matches_source(handle)
                 || !stage
@@ -830,6 +841,21 @@ impl WgpuProvider {
             }
         }
         let entry = self.get_entry_raw(handle)?;
+        if readback.is_some() {
+            ensure!(
+                entry.element_type == handle.physical().element_type()
+                    && entry.storage == handle.physical().storage()
+                    && u64::try_from(entry.len).ok() == Some(handle.physical().element_capacity())
+                    && handle.view().checked_element_count().ok() == u64::try_from(entry.len).ok()
+                    && numeric_download_extents_match(
+                        entry.allocated_bytes,
+                        entry.buffer.size(),
+                        handle.physical().payload_bytes(),
+                        handle.physical().requested_bytes()
+                    ),
+                "numeric readback physical source record changed"
+            );
+        }
         if stage.is_some() && claim.is_none() {
             return Err(anyhow!("numeric staging lacks admitted completion control"));
         }
@@ -843,20 +869,22 @@ impl WgpuProvider {
                         .ok_or_else(|| anyhow!("numeric staging callback already issued"))
                 })
                 .transpose()?;
-            let staging = self.with_emission(|emission, pending| -> Result<_> {
+            let staging = if readback.is_some() {
+                // Match the allocation record before minting fixed physical
+                // authority. No device/encoder callback is admitted here.
+                let source = runmat_accelerate_api::WgpuNumericReadbackSource::new(
+                    &self.emission_authority,
+                    self,
+                    handle,
+                    &entry.buffer,
+                )?;
                 let staging = match stage.take() {
                     Some(stage) => NumericReadbackStaging::Selected(stage),
                     None => NumericReadbackStaging::Ordinary(
                         AllocationState::own_numeric_download_stage(
                             &self.allocations,
-                            Some(runmat_accelerate_api::WgpuBufferOwner::new(
-                                emission.device().create_buffer(&wgpu::BufferDescriptor {
-                                    label: Some("runmat-numeric-download-staging"),
-                                    size: entry.allocated_bytes,
-                                    usage: wgpu::BufferUsages::MAP_READ
-                                        | wgpu::BufferUsages::COPY_DST,
-                                    mapped_at_creation: false,
-                                }),
+                            Some(super::allocation_state::NumericStageBuffer::Readback(
+                                source.create_stage(entry.allocated_bytes)?,
                             )),
                             entry.allocated_bytes,
                             1,
@@ -866,22 +894,55 @@ impl WgpuProvider {
                         )?,
                     ),
                 };
-                let mut encoder = pending.profiled_encoder(
-                    emission,
-                    &wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-numeric-download-encoder"),
-                    },
-                );
-                encoder.copy_buffer_to_buffer(
-                    entry.buffer.as_ref(),
-                    0,
-                    std::borrow::Borrow::<wgpu::Buffer>::borrow(&staging),
-                    0,
-                    entry.allocated_bytes,
-                );
-                self.submit(emission, pending, encoder)?;
-                Ok(staging)
-            })??;
+                let buffer = staging.owner().readback_buffer().ok_or_else(|| {
+                    anyhow!("numeric readback stage lacks exact source authority")
+                })?;
+                self.submit_numeric_readback(&source, buffer)?;
+                staging
+            } else {
+                self.with_emission(|emission, pending| -> Result<_> {
+                    let staging = match stage.take() {
+                        Some(stage) => NumericReadbackStaging::Selected(stage),
+                        None => NumericReadbackStaging::Ordinary(
+                            AllocationState::own_numeric_download_stage(
+                                &self.allocations,
+                                Some(
+                                    runmat_accelerate_api::WgpuBufferOwner::new(
+                                        emission.device().create_buffer(&wgpu::BufferDescriptor {
+                                            label: Some("runmat-numeric-download-staging"),
+                                            size: entry.allocated_bytes,
+                                            usage: wgpu::BufferUsages::MAP_READ
+                                                | wgpu::BufferUsages::COPY_DST,
+                                            mapped_at_creation: false,
+                                        }),
+                                    )
+                                    .into(),
+                                ),
+                                entry.allocated_bytes,
+                                1,
+                                claim.clone(),
+                                None,
+                                None,
+                            )?,
+                        ),
+                    };
+                    let mut encoder = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-numeric-download-encoder"),
+                        },
+                    );
+                    encoder.copy_buffer_to_buffer(
+                        entry.buffer.as_ref(),
+                        0,
+                        std::borrow::Borrow::<wgpu::Buffer>::borrow(&staging),
+                        0,
+                        entry.allocated_bytes,
+                    );
+                    self.submit(emission, pending, encoder)?;
+                    Ok(staging)
+                })??
+            };
             match claim {
                 Some(claim) => {
                     if let Some(callback_stage) = callback_stage {
@@ -1183,6 +1244,67 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn exact_readback_survives_compute_denial_without_granting_emission() {
+        use runmat_accelerate_api::{ExecutionProviderAdmission, ExecutionProviderAuthorization};
+        thread_local! { static POLICY: std::cell::Cell<u8> = const { std::cell::Cell::new(0) }; }
+        fn authorize(request: ExecutionProviderAdmission<'_>) -> ExecutionProviderAuthorization {
+            POLICY.with(|policy| match (policy.get(), request) {
+                (0, _) => ExecutionProviderAuthorization::Unrestricted,
+                (1, ExecutionProviderAdmission::NumericReadback { .. }) => {
+                    ExecutionProviderAuthorization::Allowed
+                }
+                _ => ExecutionProviderAuthorization::Denied,
+            })
+        }
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                POLICY.with(|policy| policy.set(0));
+            }
+        }
+        runmat_accelerate_api::register_execution_provider_authorizer(authorize);
+        let _reset = Reset;
+        let provider = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("actual WGPU adapter required for exact readback gate test");
+        // The singleton is static and uniquely owns its registered device ID.
+        unsafe { runmat_accelerate_api::register_device_provider(provider) };
+        let input = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F32 => {
+                HostNumericDataOwned::F32(vec![1.0, -2.0])
+            }
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                HostNumericDataOwned::F64(vec![1.0, -2.0])
+            }
+        };
+        let source = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: input.as_view(),
+                shape: &[2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        POLICY.with(|policy| policy.set(1));
+        assert!(provider.access.with_shared(|_| ()).is_err());
+        let readback = runmat_accelerate_api::numeric_readback_for_handle(&source).unwrap();
+        let host = futures::executor::block_on(readback.download_numeric()).unwrap();
+        assert_eq!(host.shape, [2]);
+        match host.data {
+            HostNumericDataOwned::F32(values) => assert_eq!(values, [1.0, -2.0]),
+            HostNumericDataOwned::F64(values) => assert_eq!(values, [1.0, -2.0]),
+            other => panic!("unexpected exact readback class {other:?}"),
+        }
+        assert!(provider.access.with_shared(|_| ()).is_err());
+        POLICY.with(|policy| policy.set(2));
+        assert!(futures::executor::block_on(readback.download_numeric()).is_err());
+        drop(readback);
+        POLICY.with(|policy| policy.set(0));
+        source.release().unwrap();
+    }
 
     #[test]
     fn numeric_upload_encoding_uses_exact_borrowed_words() {

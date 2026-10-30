@@ -460,7 +460,10 @@ where
     return (native_otel::context_for(data), started);
     #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
     return (browser_otel::context_for(data), started);
-    #[allow(unreachable_code)]
+    #[cfg(not(any(
+        all(feature = "otlp", not(target_arch = "wasm32")),
+        all(feature = "browser-otlp", target_arch = "wasm32")
+    )))]
     (OtelContext::new(), started)
 }
 

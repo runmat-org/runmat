@@ -19,6 +19,8 @@ mod errors;
 mod gate;
 mod provenance;
 mod scopes;
+mod numeric_readback;
+pub use numeric_readback::{WgpuNumericReadbackSource, WgpuNumericReadbackBuffer, WgpuNumericReadbackSubmission, WgpuNumericReadbackTimestampResources};
 pub use errors::{WgpuScopeErrorKind, WgpuScopeErrors};
 #[cfg(test)]
 mod tests;

@@ -30,15 +30,13 @@ fn admits(value: &Value, identity: BuiltinCatalogIdentity) -> BuiltinResult<bool
             NumericDType::F32 | NumericDType::F64
         ),
         Value::GpuTensor(handle) => {
-            if gpu_helpers::exact_provider_for_handle(handle).is_none()
-                || !gpu_helpers::expected_handle_numeric_element_type(handle).is_ok_and(|element| {
-                    gpu_helpers::numeric_descriptor_matches(
-                        handle,
-                        element,
-                        runmat_accelerate_api::handle_storage(handle),
-                    )
-                })
-            {
+            if !gpu_helpers::expected_handle_numeric_element_type(handle).is_ok_and(|element| {
+                gpu_helpers::numeric_descriptor_matches(
+                    handle,
+                    element,
+                    runmat_accelerate_api::handle_storage(handle),
+                )
+            }) {
                 return Err(build_runtime_error(format!(
                     "{}: malformed or unowned GPU input",
                     identity.name
@@ -47,6 +45,12 @@ fn admits(value: &Value, identity: BuiltinCatalogIdentity) -> BuiltinResult<bool
                 .with_identifier(format!("RunMat:{}:Internal", identity.name))
                 .build());
             }
+            gpu_helpers::require_resident_compute_owner(handle, || {
+                build_runtime_error(format!("{}: malformed or unowned GPU input", identity.name))
+                    .with_builtin(identity.name)
+                    .with_identifier(format!("RunMat:{}:Internal", identity.name))
+                    .build()
+            })?;
             runmat_accelerate_api::handle_integer_type(handle).is_none()
                 && !runmat_accelerate_api::handle_is_logical(handle)
                 && runmat_accelerate_api::handle_storage(handle)

@@ -149,7 +149,7 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         ));
     }
 
-    let provider = resident_real_unary::exact_owner(&handle).ok_or_else(|| {
+    let provider = resident_real_unary::exact_owner(&handle, || {
         error_with_detail(
             &GAMMALN_ERROR_INTERNAL,
             "GPU input has no registered owning provider",

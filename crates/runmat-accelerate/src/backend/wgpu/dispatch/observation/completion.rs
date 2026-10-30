@@ -11,7 +11,7 @@ use runmat_accelerate_api::WgpuDeviceAccess;
 use runmat_execution::profiling::{CommandPhysicalSubmission, PhysicalSubmissionTerminal};
 
 use super::completion_signal::{self, Receiver};
-use super::compute_pass::{DecodedTimestamps, TimestampReadback};
+use super::compute_pass::{DecodedTimestamps, ObservationBuffer, TimestampReadback};
 use super::probe_ticket::ProbeFenceTicket;
 use super::submitted_retention::SubmittedAllocationRetention;
 use super::InlineSlots;
@@ -44,24 +44,19 @@ impl Drop for SourceTransferRetirement {
 
 pub(super) fn map_timing(readback: &TimestampReadback) -> Receiver<bool> {
     let (send, result) = completion_signal::channel();
-    readback
-        .staging
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, move |status| {
-            // The callback never enters runtime or WGPU cleanup authority.
-            send.send(status.is_ok());
-        });
+    readback.staging.map_async(move |status| {
+        // The callback never enters runtime or WGPU cleanup authority.
+        send.send(status.is_ok());
+    });
     result
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn map_direct_fence(fence: &runmat_accelerate_api::WgpuBufferOwner) -> Receiver<bool> {
+pub(super) fn map_direct_fence(fence: &ObservationBuffer) -> Receiver<bool> {
     let (send, result) = completion_signal::channel();
-    fence
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, move |status| {
-            send.send(status.is_ok());
-        });
+    fence.map_async(move |status| {
+        send.send(status.is_ok());
+    });
     result
 }
 
@@ -70,7 +65,7 @@ pub(super) struct DirectCompletion {
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) unretired_submission: Option<wgpu::SubmissionIndex>,
     pub(super) readback: Option<TimestampReadback>,
-    pub(super) fence: Option<runmat_accelerate_api::WgpuBufferOwner>,
+    pub(super) fence: Option<ObservationBuffer>,
     #[cfg(target_arch = "wasm32")]
     pub(super) _fence_permit: Option<runmat_accelerate_api::observation::WgpuQueryPermit>,
     #[cfg(target_arch = "wasm32")]
@@ -191,7 +186,7 @@ pub(super) struct FenceCompletion {
     pub(super) access: WgpuDeviceAccess,
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) unretired_submission: Option<wgpu::SubmissionIndex>,
-    pub(super) fence: Option<runmat_accelerate_api::WgpuBufferOwner>,
+    pub(super) fence: Option<ObservationBuffer>,
     pub(super) recorder: ProviderOperationRecorder,
     pub(super) result: Receiver<Option<ProviderCompletedSubmission>>,
     pub(super) measurement: WgpuSubmissionMeasurement,

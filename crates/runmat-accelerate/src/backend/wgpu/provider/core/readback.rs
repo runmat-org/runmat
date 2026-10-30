@@ -191,6 +191,44 @@ impl Drop for MapCallback {
 }
 
 pub(crate) trait ReadbackResourceOwner: Borrow<wgpu::Buffer> {
+    fn readback_buffer(&self) -> Option<&runmat_accelerate_api::WgpuNumericReadbackBuffer> {
+        None
+    }
+    fn map_async(
+        &self,
+        access: &WgpuDeviceAccess,
+        callback: impl FnOnce(std::result::Result<(), wgpu::BufferAsyncError>)
+            + wgpu::WasmNotSend
+            + 'static,
+    ) -> Result<()> {
+        if let Some(buffer) = self.readback_buffer() {
+            buffer.map_async(callback)?;
+            return Ok(());
+        }
+        access.with_shared(|_| {
+            self.borrow()
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, callback);
+        })?;
+        Ok(())
+    }
+    fn read_mapped<T>(
+        &self,
+        access: &WgpuDeviceAccess,
+        decode: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        if let Some(buffer) = self.readback_buffer() {
+            self.validate_scope()?;
+            let bytes = buffer.mapped_range()?;
+            // Decoding is ordinary host work, outside fixed transfer authority.
+            return decode(&bytes);
+        }
+        access.with_shared(|_| {
+            self.validate_scope()?;
+            let bytes = self.borrow().slice(..).get_mapped_range();
+            decode(&bytes)
+        })?
+    }
     fn cleanup_failed(&self) {}
     fn validate_scope(&self) -> Result<()> {
         Ok(())
@@ -230,6 +268,9 @@ impl Borrow<wgpu::Buffer> for super::super::allocation_state::NumericDownloadSta
     }
 }
 impl ReadbackResourceOwner for super::super::allocation_state::NumericDownloadStageHandle {
+    fn readback_buffer(&self) -> Option<&runmat_accelerate_api::WgpuNumericReadbackBuffer> {
+        super::super::allocation_state::NumericDownloadStageHandle::readback_buffer(self)
+    }
     fn validate_scope(&self) -> Result<()> {
         super::super::allocation_state::NumericDownloadStageHandle::validate_scope(self)
     }
@@ -251,6 +292,22 @@ impl<B: ReadbackResourceOwner> Borrow<wgpu::Buffer> for TrackedReadback<B> {
     }
 }
 impl<B: ReadbackResourceOwner> ReadbackResourceOwner for TrackedReadback<B> {
+    fn map_async(
+        &self,
+        access: &WgpuDeviceAccess,
+        callback: impl FnOnce(std::result::Result<(), wgpu::BufferAsyncError>)
+            + wgpu::WasmNotSend
+            + 'static,
+    ) -> Result<()> {
+        self.buffer.map_async(access, callback)
+    }
+    fn read_mapped<T>(
+        &self,
+        access: &WgpuDeviceAccess,
+        decode: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        self.buffer.read_mapped(access, decode)
+    }
     fn cleanup_failed(&self) {
         self.buffer.cleanup_failed();
     }
@@ -287,7 +344,7 @@ pub(super) fn track<B: ReadbackResourceOwner>(
         Some(
             super::super::allocation_state::AllocationState::own_numeric_download_stage(
                 allocations,
-                Some(owner.clone()),
+                Some(owner.clone().into()),
                 owner.size(),
                 1,
                 claim,
@@ -555,18 +612,12 @@ fn read_with_optional_claim<'a, T: 'a>(
             if let Some(owner) = &callback.numeric_owner {
                 owner.map_pending();
             }
-            staging.access.with_shared(|_| {
-                staging.map_registered = true;
-                staging
-                    .buffer
-                    .as_ref()
-                    .expect("readback owns staging")
-                    .borrow()
-                    .slice(..)
-                    .map_async(wgpu::MapMode::Read, move |result| {
-                        callback.complete(result);
-                    });
-            })?;
+            staging.map_registered = true;
+            staging
+                .buffer
+                .as_ref()
+                .expect("readback owns staging")
+                .map_async(&staging.access, move |result| callback.complete(result))?;
             #[cfg(not(target_arch = "wasm32"))]
             {
                 reservation.complete_queue_tail_owner(completion.clone().progress_callback())?;
@@ -577,23 +628,11 @@ fn read_with_optional_claim<'a, T: 'a>(
                 .wait()
                 .await
                 .map_err(|source| source.context(context.to_owned()))?;
-            let output = staging.access.with_shared(|_| {
-                staging
-                    .buffer
-                    .as_ref()
-                    .expect("readback owns staging")
-                    .validate_scope()?;
-                let data = staging
-                    .buffer
-                    .as_ref()
-                    .expect("readback owns staging")
-                    .borrow()
-                    .slice(..)
-                    .get_mapped_range();
-                let output = decode(&data);
-                drop(data);
-                output
-            })??;
+            let output = staging
+                .buffer
+                .as_ref()
+                .expect("readback owns staging")
+                .read_mapped(&staging.access, decode)?;
             Ok(output)
         }
         .await;

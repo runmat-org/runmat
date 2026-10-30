@@ -31,6 +31,9 @@ pub(crate) struct TimestampCapability {
 }
 
 impl TimestampCapability {
+    pub(super) fn period_ns(self) -> f32 {
+        self.period_ns
+    }
     pub(crate) fn new(period_ns: f32, inside_encoders: bool) -> Option<Self> {
         (period_ns.is_finite() && period_ns > 0.0).then_some(Self {
             period_ns,
@@ -51,10 +54,41 @@ impl TimestampCapability {
     }
 }
 
+pub(crate) enum ObservationBuffer {
+    Ordinary(WgpuBufferOwner),
+    Readback(runmat_accelerate_api::WgpuNumericReadbackBuffer),
+}
+impl std::ops::Deref for ObservationBuffer {
+    type Target = wgpu::Buffer;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Ordinary(buffer) => buffer,
+            Self::Readback(buffer) => std::borrow::Borrow::borrow(buffer),
+        }
+    }
+}
+impl ObservationBuffer {
+    pub(super) fn map_async(
+        &self,
+        callback: impl FnOnce(Result<(), wgpu::BufferAsyncError>) + wgpu::WasmNotSend + 'static,
+    ) {
+        match self {
+            Self::Ordinary(buffer) => buffer.slice(..).map_async(wgpu::MapMode::Read, callback),
+            Self::Readback(buffer) => {
+                // Rejection drops the status-only sender; the shared completion
+                // owner still retires exact submitted work as failed/missing.
+                if buffer.map_async(callback).is_err() {
+                    log::warn!("numeric readback completion map authorization failed");
+                }
+            }
+        }
+    }
+}
+
 pub(crate) struct TimestampReadback {
-    pub(crate) staging: WgpuBufferOwner,
+    pub(crate) staging: ObservationBuffer,
     // Keep the complete device resource ownership until map/progress cleanup.
-    _resolve: WgpuBufferOwner,
+    _resolve: ObservationBuffer,
     _query_set: wgpu::QuerySet,
     _permit: WgpuQueryPermit,
     query_pairs: u32,
@@ -70,6 +104,22 @@ pub(crate) struct DecodedTimestamps {
 }
 
 impl TimestampReadback {
+    pub(super) fn numeric(
+        resources: runmat_accelerate_api::WgpuNumericReadbackTimestampResources,
+        permit: WgpuQueryPermit,
+        timestamp: TimestampCapability,
+    ) -> Self {
+        Self {
+            staging: ObservationBuffer::Readback(resources.staging),
+            _resolve: ObservationBuffer::Readback(resources.resolve),
+            _query_set: resources.query_set,
+            _permit: permit,
+            query_pairs: 0,
+            outer_pair: true,
+            compute_complete: true,
+            period_ns: timestamp.period_ns(),
+        }
+    }
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn poison_query_budget(&self) {
         self._permit.poison_budget();
@@ -171,8 +221,8 @@ pub(crate) struct ProfiledEncoder<'a> {
     command: Option<CommandProfilingReceipt>,
 }
 
-pub(crate) struct EncodedMeasurement {
-    pub(crate) encoder: wgpu::CommandEncoder,
+pub(crate) struct EncodedMeasurement<E = wgpu::CommandEncoder> {
+    pub(crate) encoder: E,
     pub(crate) dispatches: Option<u64>,
     pub(crate) empty_compute_elapsed: Option<Duration>,
     pub(crate) empty_device_elapsed: Option<Duration>,
@@ -395,8 +445,8 @@ impl<'a> ProfiledEncoder<'a> {
                 self.encoder
                     .copy_buffer_to_buffer(&resolve, 0, &staging, 0, bytes);
                 Some(TimestampReadback {
-                    staging,
-                    _resolve: resolve,
+                    staging: ObservationBuffer::Ordinary(staging),
+                    _resolve: ObservationBuffer::Ordinary(resolve),
                     _query_set: query_set,
                     _permit: permit,
                     query_pairs: self.query_pairs,

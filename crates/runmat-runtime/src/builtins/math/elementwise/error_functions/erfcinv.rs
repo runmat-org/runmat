@@ -139,8 +139,9 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         ));
     }
 
-    let provider = real_unary::exact_owner(&handle)
-        .ok_or_else(|| internal_error("GPU provider unavailable for input"))?;
+    let provider = real_unary::exact_owner(&handle, || {
+        internal_error("GPU provider unavailable for input")
+    })?;
     match provider.unary_erfcinv(&handle).await {
         Ok(mut out) if real_unary::output_matches(&out, &handle, provider) => {
             real_unary::preserve_residency_intent(&mut out, &handle)?;

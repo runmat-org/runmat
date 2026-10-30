@@ -134,7 +134,7 @@ async fn erf_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         ));
     }
 
-    let provider = real_unary::exact_owner(&handle).ok_or_else(|| {
+    let provider = real_unary::exact_owner(&handle, || {
         erf_error_with_detail(&ERF_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
     match provider.unary_erf(&handle).await {

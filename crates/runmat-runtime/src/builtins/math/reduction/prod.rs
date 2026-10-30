@@ -128,6 +128,11 @@ async fn prod_builtin(
     if let Some(result) = host::scalar(&value, &parsed) {
         return call.finish_value(Ok(result));
     }
+    if let Value::GpuTensor(handle) = &value {
+        gpu_helpers::require_resident_compute_owner(handle, || {
+            prod_internal_error("resident product input has no exact owning provider")
+        })?;
+    }
     let result = match &value {
         Value::GpuTensor(handle) => provider::execute(handle, &parsed, &call).await,
         _ => {

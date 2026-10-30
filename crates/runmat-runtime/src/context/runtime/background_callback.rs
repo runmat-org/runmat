@@ -92,6 +92,7 @@ impl RuntimeContext {
             self.background_callback_services(requires_source_evaluation, "graphics callback")?;
         // Do not clone a caller's constructor/Value payload merely to clear it.
         let mut selected = RuntimeContext {
+            acceleration_policy: self.acceleration_policy,
             graphics_callback_mutation: None,
             execution: self.execution.clone(),
             // Callbacks run in the session's own environment.
@@ -162,6 +163,7 @@ impl RuntimeContext {
         // Exhaustive decomposition makes a new context field an explicit
         // capture/reconstruction decision, rather than inheriting a drainer.
         let RuntimeContext {
+            acceleration_policy,
             graphics_callback_mutation: _,
             execution,
             environment,
@@ -244,6 +246,7 @@ impl RuntimeContext {
                     services = services.with_graphics_presentation(presentation.clone());
                 }
                 Ok(RuntimeContext {
+                    acceleration_policy,
                     graphics_callback_mutation: None,
                     execution,
                     environment: environment.clone(),

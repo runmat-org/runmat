@@ -105,10 +105,39 @@ impl AccelProvider for Provider {
     }
     fn download_numeric<'a>(
         &'a self,
-        _: &'a GpuTensorHandle,
+        handle: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
         self.ordinary.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Err(anyhow::anyhow!("ordinary download must not run")) })
+        Box::pin(async move {
+            Ok(HostNumericTensorOwned {
+                data: HostNumericDataOwned::F64(vec![17.0; handle.shape().iter().product()]),
+                shape: handle.shape().to_vec(),
+                storage: GpuTensorStorage::Real,
+            })
+        })
+    }
+    fn device_info_struct(&self) -> runmat_accelerate_api::ApiDeviceInfo {
+        runmat_accelerate_api::ApiDeviceInfo {
+            device_id: self.device_id(),
+            name: self.device_info(),
+            vendor: "RunMat".into(),
+            memory_bytes: Some(1 << 20),
+            backend: Some("test".into()),
+        }
+    }
+    fn execution_accelerator_device(
+        &self,
+        epoch: u64,
+    ) -> anyhow::Result<Option<runmat_execution::resource::AcceleratorDevice>> {
+        runmat_accelerate_api::execution_accelerator_device(
+            self,
+            "runmat.test.readback",
+            "1",
+            runmat_accelerate_api::ExecutionProviderContract::GenericComputeV1,
+            &format!("readback-{}", self.device_id()),
+            &format!("readback-{}", self.device_id()),
+            epoch,
+        )
     }
     fn download_numeric_host_workspace_bound(&self, handle: &GpuTensorHandle) -> ResourceByteBound {
         ResourceByteBound::Known(
@@ -168,6 +197,174 @@ fn provider() -> &'static Provider {
         runmat_accelerate_api::register_device_provider(provider);
     }
     provider
+}
+
+#[test]
+fn readback_policy_matrix_preserves_source_assignment_and_denies_new_compute() {
+    use crate::context::{RuntimeAccelerationPolicy, RuntimeProviderPreference};
+    use runmat_execution::identity::{AttemptId, ExecutionScopeId, PoolId, TaskId, WorkerId};
+    for managed in [false, true] {
+        for (enabled, preference) in [
+            (false, RuntimeProviderPreference::Auto),
+            (true, RuntimeProviderPreference::InProcess),
+            (true, RuntimeProviderPreference::Auto),
+        ] {
+            let provider = provider();
+            let allocation = provider
+                .owner
+                .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let ledger = ManagedHostEffectLedger::new(1 << 20);
+            let stop = CancellationSource::new();
+            let runtime = if managed {
+                runtime(&ledger, &stop)
+            } else {
+                RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+            }
+            .with_acceleration_policy(RuntimeAccelerationPolicy {
+                enabled,
+                provider: preference,
+                automatic_offload: false,
+                allow_host_fallback: false,
+                calibrate: false,
+            });
+            for matching_assignment in [true, false] {
+                let attempt_id = AttemptId::derive(&[b"readback-policy"]);
+                let device = provider.execution_accelerator_device(7).unwrap().unwrap();
+                let assignment = runmat_execution::ProgramExecutionAssignment {
+                    scope_id: ExecutionScopeId::derive(&[b"readback"]),
+                    pool_id: PoolId::derive(&[b"readback"]),
+                    task_id: TaskId::derive(&[b"readback"]),
+                    attempt_id,
+                    worker_id: WorkerId::derive(&[b"readback"]),
+                    backend: runmat_execution::PoolBackend::LocalProcesses,
+                    resources: runmat_execution::resource::ResourceAssignment {
+                        accelerator_leases: if matching_assignment {
+                            vec![
+                                runmat_execution::resource::AcceleratorDeviceLease::for_attempt(
+                                    attempt_id, 11, &device,
+                                )
+                                .unwrap(),
+                            ]
+                        } else {
+                            vec![]
+                        },
+                    },
+                };
+                let _assignment = runtime.enter_execution_assignment(Some(assignment));
+                {
+                    let _scope = runtime.enter();
+                    assert_eq!(
+                        gpu_helpers::exact_provider_for_handle(&allocation.handle).is_some(),
+                        matching_assignment
+                            && enabled
+                            && preference == RuntimeProviderPreference::Auto,
+                        "readback capability must never relax compute lookup"
+                    );
+                }
+                let input = Value::GpuTensor(allocation.handle.clone());
+                // Explicit context, no ambient guard: each download poll must
+                // still resolve this exact assignment rather than a default.
+                let output = block_on(super::super::gather_if_needed_in_context_async(
+                    &input,
+                    Some(&runtime),
+                ));
+                assert_eq!(output.is_ok(), matching_assignment);
+                if let Ok(Value::Tensor(tensor)) = &output {
+                    assert_eq!(tensor.materialize_f64(), vec![17.0]);
+                }
+                drop(output);
+                drop(input);
+                assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+            }
+            assert_eq!(
+                provider.ordinary.load(Ordering::SeqCst),
+                usize::from(!managed)
+            );
+            assert_eq!(
+                provider.factories.load(Ordering::SeqCst),
+                usize::from(managed)
+            );
+            allocation.handle.release().unwrap();
+            assert_eq!(allocation.probe.retirements(), 1);
+        }
+    }
+}
+
+#[test]
+fn real_builtin_policy_decline_retries_only_automatic_valid_owner_inputs() {
+    use crate::context::{RuntimeAccelerationPolicy, RuntimeProviderPreference};
+    let provider = provider();
+    for builtin in ["erf", "sum", "sin"] {
+        for (explicit, fallback, registered) in [
+            (false, true, true),
+            (true, true, true),
+            (false, false, true),
+            (false, true, false),
+        ] {
+            let absent_owner = TestAllocationOwner::new();
+            let allocation = if registered {
+                &provider.owner
+            } else {
+                &absent_owner
+            }
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+            let handle = allocation.handle;
+            let handle = if explicit {
+                let explicit_handle = handle
+                    .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                    .unwrap();
+                drop(handle);
+                explicit_handle
+            } else {
+                handle
+            };
+            let input = Value::GpuTensor(handle);
+            let runtime =
+                RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                    .with_acceleration_policy(RuntimeAccelerationPolicy {
+                        enabled: false,
+                        provider: RuntimeProviderPreference::Auto,
+                        automatic_offload: false,
+                        allow_host_fallback: fallback,
+                        calibrate: false,
+                    });
+            let before = provider.ordinary.load(Ordering::SeqCst);
+            let output = block_on(
+                runtime.scope(crate::dispatcher::call_builtin_async_in_context(
+                    &runtime,
+                    builtin,
+                    std::slice::from_ref(&input),
+                )),
+            );
+            assert_eq!(
+                output.is_ok(),
+                !explicit && fallback && registered,
+                "{builtin}"
+            );
+            assert_eq!(
+                provider.ordinary.load(Ordering::SeqCst) - before,
+                usize::from(!explicit && fallback && registered),
+                "{builtin}: no hidden failed-attempt transfer"
+            );
+            if let Err(error) = &output {
+                if registered {
+                    assert!(
+                        error.source.as_deref().is_some_and(|source| {
+                            source.is::<gpu_helpers::ResidentComputePolicyDenied>()
+                        }),
+                        "{builtin}: retain typed policy cause"
+                    );
+                } else {
+                    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                }
+            }
+            drop(output);
+            drop(input);
+            assert_eq!(allocation.probe.retirements(), 1);
+        }
+    }
 }
 
 #[test]

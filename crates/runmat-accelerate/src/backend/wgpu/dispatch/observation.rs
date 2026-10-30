@@ -96,6 +96,17 @@ pub(crate) use probe_ticket::ProbeFenceTicket;
 
 pub(crate) const FENCE_REQUESTED_BYTES: u64 = 8;
 
+/// Physical output rejoins the same accounting/retirement owner regardless of
+/// whether emission was ordinary compute or the closed numeric-readback op.
+struct SubmittedPhysical {
+    submission: wgpu::SubmissionIndex,
+    physical: Option<runmat_execution::profiling::CommandPhysicalSubmission>,
+    readback: Option<compute_pass::TimestampReadback>,
+    fence: Option<compute_pass::ObservationBuffer>,
+    #[cfg(target_arch = "wasm32")]
+    direct_fence: Option<compute_pass::ObservationBuffer>,
+}
+
 struct ProbeSubmitGuard(Option<ProbeFenceTicket>);
 
 impl ProbeSubmitGuard {
@@ -371,12 +382,152 @@ impl PendingSubmissions {
         self.last_fence_requested_bytes
     }
 
+    pub(crate) fn submit_numeric_readback(
+        &mut self,
+        source: &runmat_accelerate_api::WgpuNumericReadbackSource,
+        stage: &runmat_accelerate_api::WgpuNumericReadbackBuffer,
+    ) -> anyhow::Result<wgpu::SubmissionIndex> {
+        source.ensure_device(&self.access)?;
+        use runmat_accelerate_api::observation::WgpuQueryAllocationDisposition;
+        let selected = current_provider_observation();
+        let provider_active = selected.is_some();
+        let command = current_command_profiling();
+        let active = provider_active || command.is_some();
+        let admission = self
+            .prepared_allocation_admission
+            .take()
+            .unwrap_or_else(|| selected.map_or(ProviderAdmission::Absent, prepare));
+        let prepared = matches!(&admission, ProviderAdmission::Prepared(_));
+        let timestamp = (prepared || !provider_active)
+            .then_some(self.timestamp)
+            .flatten();
+        let outer_requested =
+            command.is_some() && timestamp.is_some_and(TimestampCapability::inside_encoders);
+        let permit = outer_requested
+            .then(|| {
+                self.budget
+                    .as_ref()
+                    .and_then(|budget| budget.try_reserve_wgpu_query(MAX_QUERY_REQUESTED_BYTES))
+            })
+            .flatten();
+        #[cfg(not(target_arch = "wasm32"))]
+        let (permit, progress) = if permit.is_some()
+            && !prepared
+            && !self.scoped_retirement
+            && self.prepared_direct_progress.is_none()
+        {
+            let progress = self
+                .progress_port
+                .as_ref()
+                .and_then(|port| port.reserve().ok());
+            (progress.as_ref().and(permit), progress)
+        } else {
+            (permit, None)
+        };
+        let timing = permit.is_some();
+        let metadata = EncodedMeasurement {
+            encoder: (),
+            dispatches: active.then_some(0),
+            empty_compute_elapsed: active.then_some(std::time::Duration::ZERO),
+            empty_device_elapsed: None,
+            readback: None,
+            query_allocation: active.then_some(if timing {
+                WgpuQueryAllocationDisposition::Allocated {
+                    timestamp_slots: compute_pass::MAX_TIMESTAMP_SLOTS_PER_ENCODER,
+                    resolve_requested_bytes: 16,
+                    staging_requested_bytes: 16,
+                    map_callbacks: 1,
+                }
+            } else {
+                WgpuQueryAllocationDisposition::NoComputePass
+            }),
+            admission,
+            command,
+            #[cfg(not(target_arch = "wasm32"))]
+            progress,
+        };
+        self.submit_prepared(metadata, timing, |(), _, fence, direct_fence, command| {
+            let submitted = source.submit(stage, timing, fence, direct_fence, command.as_ref())?;
+            let readback = submitted.timestamps.zip(permit).map(|(resources, permit)| {
+                compute_pass::TimestampReadback::numeric(
+                    resources,
+                    permit,
+                    timestamp.expect("admitted numeric timestamps have capability"),
+                )
+            });
+            Ok(SubmittedPhysical {
+                submission: submitted.submission,
+                physical: submitted.physical,
+                readback,
+                fence: submitted
+                    .fence
+                    .map(compute_pass::ObservationBuffer::Readback),
+                #[cfg(target_arch = "wasm32")]
+                direct_fence: submitted
+                    .direct_fence
+                    .map(compute_pass::ObservationBuffer::Readback),
+            })
+        })
+    }
+
     pub(crate) fn submit(
         &mut self,
         emission: &WgpuEmission<'_>,
         encoder: impl SubmissionEncoder,
     ) -> anyhow::Result<wgpu::SubmissionIndex> {
         emission.ensure_device(&self.access)?;
+        self.submit_prepared(
+            encoder.into_measurement(),
+            false,
+            |mut encoder, readback, fence, direct_fence, command| {
+                let make_fence = |encoder: &mut wgpu::CommandEncoder, label| {
+                    let buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some(label),
+                            size: FENCE_REQUESTED_BYTES,
+                            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    );
+                    encoder.clear_buffer(&buffer, 0, None);
+                    compute_pass::ObservationBuffer::Ordinary(buffer)
+                };
+                let fence =
+                    fence.then(|| make_fence(&mut encoder, "runmat-operation-completion-fence"));
+                #[cfg(target_arch = "wasm32")]
+                let direct_fence = direct_fence
+                    .then(|| make_fence(&mut encoder, "runmat-direct-completion-fence"));
+                #[cfg(not(target_arch = "wasm32"))]
+                let _ = direct_fence;
+                let encoded = encoder.finish();
+                let physical = command.and_then(|owner| owner.begin_physical_submission());
+                let submission = emission.submit_profiled(Some(encoded));
+                Ok(SubmittedPhysical {
+                    submission,
+                    physical,
+                    readback,
+                    fence,
+                    #[cfg(target_arch = "wasm32")]
+                    direct_fence,
+                })
+            },
+        )
+    }
+
+    // Private stack-only emission seam: callers cannot acquire device/encoder
+    // authority here. The numeric caller supplies only the API's fixed copy op.
+    fn submit_prepared<E>(
+        &mut self,
+        encoded: EncodedMeasurement<E>,
+        planned_readback: bool,
+        emit: impl FnOnce(
+            E,
+            Option<compute_pass::TimestampReadback>,
+            bool,
+            bool,
+            Option<runmat_execution::profiling::CommandProfilingReceipt>,
+        ) -> anyhow::Result<SubmittedPhysical>,
+    ) -> anyhow::Result<wgpu::SubmissionIndex> {
         let EncodedMeasurement {
             encoder,
             dispatches,
@@ -388,8 +539,8 @@ impl PendingSubmissions {
             command: captured_command,
             #[cfg(not(target_arch = "wasm32"))]
                 progress: direct_progress,
-        } = encoder.into_measurement();
-        let mut encoder = encoder;
+        } = encoded;
+        let has_readback = readback.is_some() || planned_readback;
         let measurement = WgpuSubmissionMeasurement {
             device_elapsed: empty_device_elapsed,
             compute_elapsed: empty_compute_elapsed,
@@ -460,7 +611,7 @@ impl PendingSubmissions {
         #[cfg(target_arch = "wasm32")]
         let direct_tail_permit = self.prepared_direct_fence.take();
         #[cfg(target_arch = "wasm32")]
-        let direct_fence_permit = if needs_direct_completion && readback.is_none() {
+        let direct_fence_permit = if needs_direct_completion && !has_readback {
             direct_tail_permit
                 .is_none()
                 .then(|| {
@@ -485,7 +636,7 @@ impl PendingSubmissions {
         #[cfg(target_arch = "wasm32")]
         if (submitted_allocation_retention.is_some() || source_transfer_retirement.is_some())
             && observed.is_none()
-            && readback.is_none()
+            && !has_readback
             && direct_fence_permit.is_none()
             && direct_tail_permit.is_none()
         {
@@ -494,43 +645,35 @@ impl PendingSubmissions {
             ));
         }
         #[cfg(target_arch = "wasm32")]
-        let direct_fence = (readback.is_none()
-            && (direct_fence_permit.is_some() || direct_tail_permit.is_some()))
-        .then(|| {
-            let buffer = runmat_accelerate_api::WgpuBufferOwner::new(
-                emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-direct-completion-fence"),
-                    size: FENCE_REQUESTED_BYTES,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }),
-            );
-            encoder.clear_buffer(&buffer, 0, None);
-            buffer
-        });
-        let fence = observed.as_ref().map(|_| {
-            let buffer = runmat_accelerate_api::WgpuBufferOwner::new(
-                emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-operation-completion-fence"),
-                    size: FENCE_REQUESTED_BYTES,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }),
-            );
-            encoder.clear_buffer(&buffer, 0, None);
-            buffer
-        });
-        let resource_ticket = fence
+        let direct_fence_requested =
+            !has_readback && (direct_fence_permit.is_some() || direct_tail_permit.is_some());
+        #[cfg(not(target_arch = "wasm32"))]
+        let direct_fence_requested = false;
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = has_readback;
+        // Issue the exact fixed fence ticket before any physical effect.
+        let resource_ticket = observed
             .as_ref()
-            .and_then(|buffer| {
+            .and_then(|_| {
                 runmat_accelerate_api::observation::current_provider_resource_scope()
-                    .map(|scope| scope.issue_resource_ticket(buffer.size()))
+                    .map(|scope| scope.issue_resource_ticket(FENCE_REQUESTED_BYTES))
             })
             .transpose()?;
+        let SubmittedPhysical {
+            submission,
+            mut physical,
+            readback,
+            fence,
+            #[cfg(target_arch = "wasm32")]
+            direct_fence,
+        } = emit(
+            encoder,
+            readback,
+            observed.is_some(),
+            direct_fence_requested,
+            command,
+        )?;
         self.last_fence_requested_bytes = fence.as_ref().map(|buffer| buffer.size());
-        let encoded = encoder.finish();
-        let mut physical = command.and_then(|owner| owner.begin_physical_submission());
-        let submission = emission.submit_profiled(Some(encoded));
         if !admission_matched {
             // Preserve the observed owner solely for readback/fence retirement.
             // The selected command has an actual emission but no trustworthy
@@ -554,18 +697,16 @@ impl PendingSubmissions {
             let readback_result = readback.as_ref().map(map_timing);
             let (send, result) = completion_signal::channel();
             let token = observed.token;
-            fence
-                .slice(..)
-                .map_async(wgpu::MapMode::Read, move |status| {
-                    // No gate acquisition, unmap, or runtime callback here.
-                    let completed = if status.is_ok() {
-                        Some(token.capture_completion())
-                    } else {
-                        token.fail();
-                        None
-                    };
-                    send.send(completed);
-                });
+            fence.map_async(move |status| {
+                // No gate acquisition, unmap, or runtime callback here.
+                let completed = if status.is_ok() {
+                    Some(token.capture_completion())
+                } else {
+                    token.fail();
+                    None
+                };
+                send.send(completed);
+            });
             self.observations.push(PendingObservation {
                 completion: FenceCompletion {
                     access: self.access.clone(),

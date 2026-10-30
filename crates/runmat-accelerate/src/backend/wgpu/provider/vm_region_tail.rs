@@ -74,7 +74,7 @@ impl WgpuProvider {
             .map_err(ProviderExecutionError::from)?;
             let stage = super::allocation_state::AllocationState::own_numeric_download_stage(
                 &self.allocations,
-                Some(buffer),
+                Some(buffer.into()),
                 crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
                 1,
                 completion_claim.clone(),

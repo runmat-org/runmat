@@ -1394,6 +1394,9 @@ fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> Bu
 }
 
 async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        mean_internal_error("mean: GPU input has no owning provider")
+    })?;
     if args.weights.is_none()
         && (runmat_accelerate_api::handle_integer_type(&handle).is_some()
             || runmat_accelerate_api::handle_is_logical(&handle))

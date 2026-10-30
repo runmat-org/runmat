@@ -17,8 +17,9 @@ pub(crate) mod query_metadata;
 mod residency_cleanup;
 pub(crate) use managed_download::download_value_preserving_residency_in_context;
 pub use managed_download::{
-    adopt_settled_native_download, download_exact_native, quote_exact_native_download,
-    ExactDownloadFailure, ExactDownloadPhase, ExactNativeDownloadQuote,
+    adopt_settled_native_download, download_exact_native, download_exact_native_readback,
+    quote_exact_native_download, quote_exact_native_readback, ExactDownloadFailure,
+    ExactDownloadPhase, ExactNativeDownloadQuote,
 };
 pub(crate) mod complex_transfer;
 pub use complex_transfer::native_complex_upload_workspace;
@@ -51,6 +52,84 @@ pub fn integer_storage_from_owned(data: HostIntegerDataOwned) -> IntegerStorage 
 pub fn exact_provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
     runmat_accelerate_api::provider_for_handle(handle)
         .filter(|provider| provider.device_id() == handle.device_id())
+}
+
+/// A pre-effect resident compute lookup must distinguish execution policy
+/// from a missing, stale or differently assigned physical owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResidentComputeDecline {
+    PolicyDenied,
+    InvalidOwner,
+}
+
+#[derive(Debug)]
+pub struct ResidentComputePolicyDenied {
+    original_source: Option<Box<runmat_async::runtime_error::RuntimeErrorSource>>,
+}
+impl std::fmt::Display for ResidentComputePolicyDenied {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("resident computation denied by invocation acceleration policy")
+    }
+}
+impl std::error::Error for ResidentComputePolicyDenied {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.original_source.as_deref().map(|source| source as _)
+    }
+}
+impl ResidentComputeDecline {
+    /// Preserve the domain diagnostic and its entire original cause chain.
+    /// Only a proven, pre-effect policy decline requests dispatcher migration.
+    pub fn with_domain_error(self, mut error: crate::RuntimeError) -> crate::RuntimeError {
+        error.gpu_gather_retry = match self {
+            Self::PolicyDenied => crate::GpuGatherRetry::Requested,
+            Self::InvalidOwner => crate::GpuGatherRetry::Never,
+        };
+        if self == Self::PolicyDenied {
+            error.source = Some(Box::new(ResidentComputePolicyDenied {
+                original_source: error.source.take(),
+            }));
+        }
+        error
+    }
+}
+
+/// Used only at canonical resident compute ingress, before provider effects.
+/// A readback capability proves that data egress is legal without granting
+/// compute. Inspecting the retained registry never substitutes an ambient owner.
+pub fn resolve_resident_compute_owner(
+    handle: &GpuTensorHandle,
+) -> Result<&'static dyn AccelProvider, ResidentComputeDecline> {
+    runmat_accelerate_api::numeric_readback_for_handle(handle)
+        .map_err(|_| ResidentComputeDecline::InvalidOwner)?;
+    if let Some(provider) = exact_provider_for_handle(handle) {
+        return Ok(provider);
+    }
+    let mut after = None;
+    while let Some((device, provider)) = runmat_accelerate_api::next_registered_provider(after) {
+        if device == handle.device_id() {
+            return Err(
+                if crate::context::current_acceleration_policy()
+                    .is_some_and(|policy| !policy.permits_provider(provider))
+                {
+                    ResidentComputeDecline::PolicyDenied
+                } else {
+                    ResidentComputeDecline::InvalidOwner
+                },
+            );
+        }
+        if device > handle.device_id() {
+            break;
+        }
+        after = Some(device);
+    }
+    Err(ResidentComputeDecline::InvalidOwner)
+}
+
+pub fn require_resident_compute_owner(
+    handle: &GpuTensorHandle,
+    error: impl FnOnce() -> crate::RuntimeError,
+) -> crate::BuiltinResult<&'static dyn AccelProvider> {
+    resolve_resident_compute_owner(handle).map_err(|decline| decline.with_domain_error(error()))
 }
 
 /// Resolve one exact owner for two resident operands.
@@ -587,6 +666,39 @@ async fn download_numeric_preserving_residency_with_admission_async(
             result
         }
     };
+    finish_native_download(handle, expected_element, native)
+}
+
+/// Exact-source data egress without exposing compute/provider authority.
+pub(crate) async fn download_numeric_readback_preserving_residency_async(
+    readback: &runmat_accelerate_api::NumericReadback<'_>,
+    stage: Option<PreparedNumericDownloadStage>,
+) -> crate::BuiltinResult<HostNumericTensorOwned> {
+    let handle = readback.source();
+    let _source_guard = ResidencyRestoreGuard::new(handle);
+    let expected_element = expected_handle_numeric_element_type(handle).map_err(|error| {
+        build_runtime_error(format!("gpu download: {error}"))
+            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+    })?;
+    let native = if let Some(stage) = stage {
+        // Keep funding until the boxed provider future itself is dropped.
+        let frame_funding = stage.completion_claim();
+        let result = readback.download_numeric_admitted_stage(stage).await;
+        drop(frame_funding);
+        result
+    } else {
+        readback.download_numeric().await
+    };
+    finish_native_download(handle, expected_element, native)
+}
+
+fn finish_native_download(
+    handle: &GpuTensorHandle,
+    expected_element: NumericElementType,
+    native: anyhow::Result<HostNumericTensorOwned>,
+) -> crate::BuiltinResult<HostNumericTensorOwned> {
     let host = native.map_err(|error| {
         let fallback = build_runtime_error(format!("gpu download: {error}"))
             .with_identifier("RunMat:gpu:DownloadFailed")
@@ -779,7 +891,7 @@ pub async fn download_floating_projection_async(
     })
 }
 
-fn provider_payload_mismatch(
+pub(crate) fn provider_payload_mismatch(
     handle: &GpuTensorHandle,
     actual_shape: &[usize],
     detail: String,
@@ -790,6 +902,7 @@ fn provider_payload_mismatch(
     ))
     .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .with_source(crate::dispatcher::ProviderDownloadPayloadMismatch)
     .build()
 }
 

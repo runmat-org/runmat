@@ -4448,6 +4448,75 @@ impl AccelProvider for WgpuProvider {
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move { self.download_numeric_exec(h).await })
     }
+    fn download_numeric_readback<'a>(
+        &'a self,
+        readback: &'a runmat_accelerate_api::NumericReadback<'_>,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(self.download_numeric_exec_with_claim_and_stage(
+            readback.source(),
+            None,
+            None,
+            Some(readback),
+        ))
+    }
+    fn prepare_numeric_readback_stage(
+        &self,
+        readback: &runmat_accelerate_api::NumericReadback<'_>,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        completion_claim: std::sync::Arc<
+            dyn runmat_execution::resource::RetainedHostAllocationClaim,
+        >,
+    ) -> anyhow::Result<runmat_accelerate_api::PreparedNumericDownloadStage> {
+        readback.authorize_provider(self)?;
+        let source = readback.source();
+        anyhow::ensure!(
+            self.numeric_download_feasibility_exec(source, query)
+                .is_supported(),
+            "exact numeric readback staging source/query is unavailable"
+        );
+        let runmat_execution::ResourceByteBound::Known(scratch) =
+            self.download_numeric_provider_scratch_bound(source)
+        else {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "numeric readback staging bound",
+            ));
+        };
+        let entry = self.get_entry_raw(source)?;
+        let staging = if entry.len == 0 {
+            None
+        } else {
+            let physical = runmat_accelerate_api::WgpuNumericReadbackSource::new(
+                &self.emission_authority,
+                self,
+                source,
+                &entry.buffer,
+            )?;
+            Some(super::allocation_state::NumericStageBuffer::Readback(
+                physical.create_stage(entry.allocated_bytes)?,
+            ))
+        };
+        AllocationState::prepare_numeric_download_stage(
+            &self.allocations,
+            source,
+            scratch,
+            self.download_numeric_queue_slots(source),
+            staging,
+            completion_claim,
+        )
+    }
+    fn download_numeric_readback_admitted_stage<'a>(
+        &'a self,
+        readback: &'a runmat_accelerate_api::NumericReadback<'_>,
+        stage: runmat_accelerate_api::PreparedNumericDownloadStage,
+    ) -> AccelNumericDownloadFuture<'a> {
+        let claim = stage.completion_claim();
+        Box::pin(self.download_numeric_exec_with_claim_and_stage(
+            readback.source(),
+            Some(claim),
+            Some(stage),
+            Some(readback),
+        ))
+    }
     fn download_numeric_admitted<'a>(
         &'a self,
         h: &'a GpuTensorHandle,
@@ -4455,7 +4524,12 @@ impl AccelProvider for WgpuProvider {
             dyn runmat_execution::resource::RetainedHostAllocationClaim,
         >,
     ) -> AccelNumericDownloadFuture<'a> {
-        Box::pin(self.download_numeric_exec_with_claim_and_stage(h, Some(completion_claim), None))
+        Box::pin(self.download_numeric_exec_with_claim_and_stage(
+            h,
+            Some(completion_claim),
+            None,
+            None,
+        ))
     }
     fn prepare_numeric_download_stage(
         &self,
@@ -4501,7 +4575,7 @@ impl AccelProvider for WgpuProvider {
             source,
             scratch,
             self.download_numeric_queue_slots(source),
-            staging,
+            staging.map(Into::into),
             completion_claim,
         )
     }
@@ -4511,13 +4585,18 @@ impl AccelProvider for WgpuProvider {
         stage: runmat_accelerate_api::PreparedNumericDownloadStage,
     ) -> AccelNumericDownloadFuture<'a> {
         let claim = stage.completion_claim();
-        Box::pin(self.download_numeric_exec_with_claim_and_stage(source, Some(claim), Some(stage)))
+        Box::pin(self.download_numeric_exec_with_claim_and_stage(
+            source,
+            Some(claim),
+            Some(stage),
+            None,
+        ))
     }
     fn download_numeric_completion_host_bound(
         &self,
         handle: &GpuTensorHandle,
     ) -> runmat_execution::ResourceByteBound {
-        let future = self.download_numeric_exec_with_claim_and_stage(handle, None, None);
+        let future = self.download_numeric_exec_with_claim_and_stage(handle, None, None, None);
         let future_bytes = u64::try_from(std::mem::size_of_val(&future)).ok();
         super::core::map_completion_host_upper_bytes()
             .and_then(|callback| callback.checked_add(future_bytes?))

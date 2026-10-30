@@ -17,6 +17,33 @@ use std::{
     },
 };
 
+pub(in super::super) enum NumericStageBuffer {
+    Ordinary(WgpuBufferOwner),
+    Readback(runmat_accelerate_api::WgpuNumericReadbackBuffer),
+}
+impl NumericStageBuffer {
+    fn creation_scope(&self) -> Option<DeviceAllocationScope> {
+        match self {
+            Self::Ordinary(buffer) => buffer.creation_scope(),
+            Self::Readback(buffer) => buffer.creation_scope(),
+        }
+    }
+}
+impl std::ops::Deref for NumericStageBuffer {
+    type Target = wgpu::Buffer;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Ordinary(buffer) => buffer,
+            Self::Readback(buffer) => std::borrow::Borrow::borrow(buffer),
+        }
+    }
+}
+impl From<WgpuBufferOwner> for NumericStageBuffer {
+    fn from(buffer: WgpuBufferOwner) -> Self {
+        Self::Ordinary(buffer)
+    }
+}
+
 #[derive(Default)]
 pub(super) struct LiveNumericDownloadStaging {
     bytes: u64,
@@ -39,7 +66,7 @@ struct StageFact {
 
 struct NumericDownloadStageOwner {
     allocation: OwnerShared<AllocationState>,
-    staging: Option<WgpuBufferOwner>,
+    staging: Option<NumericStageBuffer>,
     bytes: u64,
     queue_slots: u32,
     fact: ExactShared<StageFact>,
@@ -117,6 +144,15 @@ impl NumericDownloadStageHandle {
 
     pub(in super::super) fn staging_buffer(&self) -> Option<&wgpu::Buffer> {
         self.owner.get().staging.as_deref()
+    }
+
+    pub(in super::super) fn readback_buffer(
+        &self,
+    ) -> Option<&runmat_accelerate_api::WgpuNumericReadbackBuffer> {
+        match self.owner.get().staging.as_ref()? {
+            NumericStageBuffer::Readback(buffer) => Some(buffer),
+            NumericStageBuffer::Ordinary(_) => None,
+        }
     }
     pub(in super::super) fn validate_scope(&self) -> Result<()> {
         runmat_accelerate_api::validate_device_allocation_scope(self.owner.get().fact.get().scope)?;
@@ -248,7 +284,7 @@ impl AllocationState {
 
     pub(in super::super) fn own_numeric_download_stage(
         owner: &OwnerShared<Self>,
-        staging: Option<WgpuBufferOwner>,
+        staging: Option<NumericStageBuffer>,
         scratch_bytes: u64,
         queue_slots: u32,
         claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
@@ -257,11 +293,11 @@ impl AllocationState {
     ) -> Result<NumericDownloadStageHandle> {
         let scope = staging.as_ref().map_or_else(
             runmat_accelerate_api::current_device_allocation_scope,
-            WgpuBufferOwner::creation_scope,
+            NumericStageBuffer::creation_scope,
         );
         runmat_accelerate_api::validate_device_allocation_scope(scope)?;
         if let Some(staging) = &staging {
-            staging.validate_creation_scope()?;
+            runmat_accelerate_api::validate_device_allocation_scope(staging.creation_scope())?;
         }
         let fact = ExactShared::try_new(StageFact {
             scope,
@@ -330,7 +366,7 @@ impl AllocationState {
         source: &GpuTensorHandle,
         scratch_bytes: u64,
         queue_slots: u32,
-        staging: Option<WgpuBufferOwner>,
+        staging: Option<NumericStageBuffer>,
         claim: Arc<dyn RetainedHostAllocationClaim>,
     ) -> Result<PreparedNumericDownloadStage> {
         if owner.is_lost() || source.allocation_lease().validate_live().is_err() {

@@ -42,8 +42,11 @@ pub(super) fn validate_input(handle: &GpuTensorHandle) -> Result<(), InvalidResi
     Ok(())
 }
 
-pub(super) fn exact_owner(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
-    gpu_helpers::exact_provider_for_handle(handle)
+pub(super) fn exact_owner(
+    handle: &GpuTensorHandle,
+    error: impl FnOnce() -> crate::RuntimeError,
+) -> crate::BuiltinResult<&'static dyn AccelProvider> {
+    gpu_helpers::require_resident_compute_owner(handle, error)
 }
 
 pub(super) fn output_matches(

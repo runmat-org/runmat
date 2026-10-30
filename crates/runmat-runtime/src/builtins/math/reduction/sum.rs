@@ -556,6 +556,9 @@ fn sum_host_complex_scalar(re: f64, im: f64, parsed: &ParsedArguments) -> Builti
 }
 
 async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        sum_internal_error("sum: resident input has no exact owning provider")
+    })?;
     if matches!(parsed.nan_mode, ReductionNaN::Omit) {
         return omit::sum_gpu_with_omitnan(handle, parsed).await;
     }

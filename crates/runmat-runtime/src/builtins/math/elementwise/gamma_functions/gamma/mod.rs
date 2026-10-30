@@ -107,7 +107,7 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             "expected real single or double gpuArray input",
         ));
     }
-    let provider = resident_real_unary::exact_owner(&handle).ok_or_else(|| {
+    let provider = resident_real_unary::exact_owner(&handle, || {
         gamma_error_with_detail(&GAMMA_ERROR_INTERNAL, "GPU input has no owning provider")
     })?;
     match provider.unary_gamma(&handle).await {

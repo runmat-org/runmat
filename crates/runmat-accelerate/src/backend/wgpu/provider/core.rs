@@ -542,6 +542,28 @@ impl WgpuProvider {
         );
         Ok(submission_id)
     }
+    pub(super) fn submit_numeric_readback(
+        &self,
+        source: &runmat_accelerate_api::WgpuNumericReadbackSource,
+        stage: &runmat_accelerate_api::WgpuNumericReadbackBuffer,
+    ) -> Result<()> {
+        let mut pending = PendingSubmissions::new(self.access.clone()).with_profiling(
+            self.timestamp_capability,
+            self.observation_budget.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            self.observation_progress
+                .clone()
+                .map(|progress| progress as _),
+        );
+        let submission_id = NEXT_SUBMISSION_ID.fetch_add(1, AtomicOrdering::Relaxed);
+        let _span =
+            info_span!("gpu.dispatch", label = "runmat-wgpu-submit", submission_id).entered();
+        let result = pending.submit_numeric_readback(source, stage);
+        pending.commit();
+        #[cfg(target_arch = "wasm32")]
+        self.access.poll(wgpu::Maintain::Poll);
+        result.map(|_| ())
+    }
     pub(super) fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         let entry = self.get_entry_raw(handle)?;
         if let Some(element_type) = entry.integer_type() {

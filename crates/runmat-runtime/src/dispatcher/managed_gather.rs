@@ -138,24 +138,26 @@ fn walk<'a>(
     budget: &'a mut CpuCooperationBudget,
 ) -> Result<crate::execution::rooted_continuation::RuntimeContinuationFuture<'a, ()>, RuntimeError>
 {
-    crate::execution::rooted_continuation::admit_domain_continuation_with(
-        runtime,
-        move || async move {
+    crate::execution::rooted_continuation::admit_domain_continuation_with(runtime, move || {
+        super::poll_gather_in_context(runtime, async move {
             budget
                 .checkpoint(1)
                 .await
                 .map_err(|source| control(runtime, source))?;
             match value {
                 Value::GpuTensor(handle) => {
-                    let provider =
-                        gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
-                            crate::build_runtime_error(
-                                "gather: no acceleration provider registered",
+                    let readback = runmat_accelerate_api::numeric_readback_for_handle(handle)
+                        .map_err(|source| {
+                            crate::runtime_error::with_provider_execution_source(
+                                crate::build_runtime_error(
+                                    "gather: exact source readback is not authorized",
+                                )
+                                .with_identifier("RunMat:gather:ProviderUnavailable")
+                                .build(),
+                                source.into(),
                             )
-                            .with_identifier("RunMat:gather:ProviderUnavailable")
-                            .build()
                         })?;
-                    let quote = gpu_helpers::quote_exact_native_download(provider, handle)?;
+                    let quote = gpu_helpers::quote_exact_native_readback(&readback)?;
                     let receipt = HostAllocationReceipt::admit(
                         Some(runtime),
                         quote
@@ -167,8 +169,8 @@ fn walk<'a>(
                         allocation(Some(runtime), HostAllocationError::MissingManagedOwner)
                     })?;
                     let gathered = budget
-                        .await_cancellable(gpu_helpers::download_exact_native(
-                            runtime, provider, handle, &receipt, quote,
+                        .await_cancellable(gpu_helpers::download_exact_native_readback(
+                            runtime, &readback, &receipt, quote,
                         ))
                         .await
                         .map_err(|source| control(runtime, source))?
@@ -293,8 +295,8 @@ fn walk<'a>(
                 _ => {}
             }
             Ok(())
-        },
-    )
+        })
+    })
 }
 
 async fn gather_closure(

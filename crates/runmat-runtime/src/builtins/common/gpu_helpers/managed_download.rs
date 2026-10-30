@@ -16,8 +16,8 @@ mod quote;
 mod stage;
 
 pub use adoption::adopt_settled_native_download;
-pub use quote::quote_exact_native_download;
-pub use stage::download_exact_native;
+pub use quote::{quote_exact_native_download, quote_exact_native_readback};
+pub use stage::{download_exact_native, download_exact_native_readback};
 
 /// Download through the selected operation's authority. The returned native
 /// carrier owns its backing independently of the temporary stage receipt.
