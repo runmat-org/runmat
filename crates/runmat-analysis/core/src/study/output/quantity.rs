@@ -54,7 +54,13 @@ pub enum ObservationQuantity {
     AcousticParticleVelocity,
     /// Mean active acoustic intensity ½Re(p v*), W/m².
     AcousticIntensity,
+    /// Plane-wave power density crossing an acoustic port face, W/m²: the authored incident
+    /// wave entering through an incident-pressure face, or the outgoing wave leaving through an
+    /// anechoic (radiation) face. Zero away from port faces.
+    AcousticPortIntensity,
     SoundPressureLevel,
+    /// Transmission loss between an incident and a transmitted port, dB.
+    TransmissionLoss,
     FluidPressure,
     FluidVelocity,
     Vorticity,
@@ -85,7 +91,9 @@ impl ObservationQuantity {
             | Self::Balance
             | Self::ConstraintViolation => D::DIMENSIONLESS,
             Self::Velocity | Self::AcousticParticleVelocity | Self::FluidVelocity => D::VELOCITY,
-            Self::AcousticIntensity => D::POWER.divide(D::AREA).expect("static dimension"),
+            Self::AcousticIntensity | Self::AcousticPortIntensity => {
+                D::POWER.divide(D::AREA).expect("static dimension")
+            }
             Self::Acceleration => D::ACCELERATION,
             Self::Stress
             | Self::VonMisesStress
@@ -141,7 +149,7 @@ impl ObservationQuantity {
             Self::MagneticFieldIntensity => D::ELECTRIC_CURRENT
                 .divide(D::LENGTH)
                 .expect("static dimension"),
-            Self::SoundPressureLevel => D::DIMENSIONLESS,
+            Self::SoundPressureLevel | Self::TransmissionLoss => D::DIMENSIONLESS,
             Self::Vorticity | Self::ModalFrequency => D::FREQUENCY,
             Self::MassFlowRate => D::MASS.divide(D::TIME).expect("static dimension"),
             Self::VolumeFlowRate => D::VOLUME.divide(D::TIME).expect("static dimension"),
@@ -249,7 +257,9 @@ impl ObservationQuantity {
             "acoustic_pressure" => Self::AcousticPressure,
             "acoustic_particle_velocity" => Self::AcousticParticleVelocity,
             "acoustic_intensity" => Self::AcousticIntensity,
+            "acoustic_port_intensity" => Self::AcousticPortIntensity,
             "sound_pressure_level" => Self::SoundPressureLevel,
+            "transmission_loss" => Self::TransmissionLoss,
             "fluid_pressure" => Self::FluidPressure,
             "fluid_velocity" => Self::FluidVelocity,
             "vorticity" => Self::Vorticity,

@@ -45,6 +45,7 @@ pub(crate) fn validate_signals_with_inputs(
             PhysicalSignal::TemperatureDifference(value) => validate_signal(value, inputs),
             PhysicalSignal::HeatFlux(value) => validate_signal(value, inputs),
             PhysicalSignal::HeatGenerationDensity(value) => validate_signal(value, inputs),
+            PhysicalSignal::HeatRate(value) => validate_signal(value, inputs),
             PhysicalSignal::ElectricPotential(value) => validate_signal(value, inputs),
             PhysicalSignal::ElectricCurrent(value) => validate_signal(value, inputs),
             PhysicalSignal::ElectricCharge(value) => validate_signal(value, inputs),

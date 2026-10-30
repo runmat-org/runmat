@@ -59,6 +59,14 @@ pub fn fluid_native_field_definition_inventory(
             FieldLocation::Face,
             RecoveredFieldEntityDomain::OrientedFaces,
         ),
+        // Static pressure on each face, Pa: the face value the momentum balance uses
+        // (gradient-reconstructed inside, the authored value on a pressure outlet).
+        (
+            "cfd.face_pressure",
+            ObservationQuantity::FluidPressure,
+            FieldLocation::Face,
+            RecoveredFieldEntityDomain::OrientedFaces,
+        ),
     ]
     .into_iter()
     .map(|(id, quantity, location, domain)| {
@@ -456,6 +464,7 @@ impl FluidSteadySolverResult {
         original: &'s crate::physics::cfd::canonical::CanonicalFluidResult,
     ) -> Vec<Box<dyn Iterator<Item = f64> + 's>> {
         let viscous = &original.residual.face_forces.viscous_traction_n;
+        let pressure = &original.residual.face_forces.pressure_traction_n;
         let vorticity = original.residual.cell_vorticity_per_s.canonical_values();
         let mut sources: Vec<Box<dyn Iterator<Item = f64> + 's>> = vec![
             Box::new(
@@ -487,6 +496,13 @@ impl FluidSteadySolverResult {
                 let tn = t[0] * normal[0] + t[1] * normal[1] + t[2] * normal[2];
                 let sign = if reversed { 1.0 } else { -1.0 };
                 std::array::from_fn::<f64, 3, _>(|k| sign * (t[k] - tn * normal[k]) / area)
+            })),
+            Box::new(layout.faces.iter().map(move |&(face, _)| {
+                // The pressure force on the owner fluid is −p_f S: p_f = −(t·n̂)/A, the same
+                // for either orientation of the face.
+                let (normal, area) = layout.face_frames[face];
+                let t = pressure.canonical_values()[face];
+                -(t[0] * normal[0] + t[1] * normal[1] + t[2] * normal[2]) / area
             })),
         ];
         if let Some(energy) = self.conjugate_heat() {

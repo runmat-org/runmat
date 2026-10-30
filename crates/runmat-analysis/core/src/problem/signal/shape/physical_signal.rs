@@ -29,6 +29,7 @@ impl PhysicalSignal {
             Self::TemperatureDifference(signal) => replace!(signal, TemperatureDifference),
             Self::HeatFlux(signal) => replace!(signal, HeatFlux),
             Self::HeatGenerationDensity(signal) => replace!(signal, HeatGenerationDensity),
+            Self::HeatRate(signal) => replace!(signal, HeatRate),
             Self::ElectricPotential(signal) => replace!(signal, ElectricPotential),
             Self::ElectricCurrent(signal) => replace!(signal, ElectricCurrent),
             Self::ElectricCharge(signal) => replace!(signal, ElectricCharge),

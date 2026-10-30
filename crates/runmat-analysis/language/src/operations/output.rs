@@ -34,6 +34,18 @@ pub fn output_operation_extension() -> OperationCatalogExtension {
             spatial_reduction("resultant"),
             flux(),
             sound_power(),
+            port_operation(
+                "pressure_drop",
+                "Area-weighted mean static pressure over one face region minus that over another, Pa.",
+                ["from", "to"],
+                "fea.output.pressure_drop",
+            ),
+            port_operation(
+                "transmission_loss",
+                "Transmission loss of an acoustic harmonic analysis per frequency, dB: incident wave power through one face region over the outgoing wave power through an anechoic face region.",
+                ["incident", "transmitted"],
+                "fea.output.transmission_loss",
+            ),
             moment(),
             sample(),
             interpolate(),
@@ -67,6 +79,8 @@ pub(crate) enum OutputOperation {
     Moment,
     NormalFlux,
     SoundPower,
+    PressureDrop,
+    TransmissionLoss,
     SpatialSample,
     InterpolatePoint,
     InterpolatePath,
@@ -106,6 +120,8 @@ impl OutputOperation {
             "fea.output.moment" => Some(Self::Moment),
             "fea.output.flux" => Some(Self::NormalFlux),
             "fea.output.sound_power" => Some(Self::SoundPower),
+            "fea.output.pressure_drop" => Some(Self::PressureDrop),
+            "fea.output.transmission_loss" => Some(Self::TransmissionLoss),
             "fea.output.spatial.sample" => Some(Self::SpatialSample),
             "fea.output.interpolate.point" => Some(Self::InterpolatePoint),
             "fea.output.interpolate.path" => Some(Self::InterpolatePath),
@@ -266,6 +282,23 @@ fn sound_power() -> OperationFacts {
         OperationDistribution::DeterministicReduction,
         TopologyApplicability::Region,
         "fea.output.sound_power",
+    )
+}
+
+/// An analysis reduced over two named face regions (ports) into one value per sample.
+fn port_operation(name: &str, summary: &str, ports: [&str; 2], lowering: &str) -> OperationFacts {
+    operation(
+        name,
+        summary,
+        vec![
+            parameter("analysis", OperationTypePattern::Any, OperationParameterArity::Required),
+            parameter(ports[0], region(), OperationParameterArity::Required),
+            parameter(ports[1], region(), OperationParameterArity::Required),
+        ],
+        OperationTypePattern::Any,
+        OperationDistribution::DeterministicReduction,
+        TopologyApplicability::Region,
+        lowering,
     )
 }
 
@@ -585,7 +618,7 @@ mod tests {
     #[test]
     fn output_operations_are_one_shared_public_identity_with_fea_overloads() {
         let extension = output_operation_extension();
-        assert_eq!(extension.operations.len(), 26);
+        assert_eq!(extension.operations.len(), 28);
         for expected in ["recover", "min", "max"] {
             assert!(extension
                 .operations

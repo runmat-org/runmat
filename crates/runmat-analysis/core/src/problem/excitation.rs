@@ -145,6 +145,11 @@ impl ExcitationAction {
             Self::NormalVelocity(_) | Self::InletVelocity(_) | Self::WallMotion(_) => {
                 PhysicalQuantityKind::Velocity
             }
+            Self::HeatGeneration(action)
+                if action.distribution == ExcitationDistribution::PreserveResultant =>
+            {
+                PhysicalQuantityKind::Power
+            }
             Self::HeatGeneration(_) => PhysicalQuantityKind::HeatGenerationDensity,
             Self::HeatFlux(_) => PhysicalQuantityKind::HeatFlux,
             Self::TemperatureField(_) | Self::AmbientTemperature(_) => {

@@ -330,6 +330,67 @@ fn lower_expression(
                     ties: AuthoredExtremaTiePolicy::FirstCanonical,
                 })
             }
+            // Two ports of one analysis. The pressure drop reads the finite-volume face pressure
+            // of a fluid or conjugate analysis; the transmission loss reads the acoustic port
+            // intensity (incident wave on the incident face, outgoing wave on the anechoic face).
+            operation @ (OutputOperation::PressureDrop | OutputOperation::TransmissionLoss) => {
+                let analysis = positional_or_named(arguments, 0, "analysis")?;
+                let CheckedExpressionKind::Reference(path) = &analysis.kind else {
+                    return invalid(declaration, analysis, diagnostics);
+                };
+                let [namespace, step_id] = path.as_slice() else {
+                    return invalid(declaration, analysis, diagnostics);
+                };
+                if namespace != "analysis" {
+                    return invalid(declaration, analysis, diagnostics);
+                }
+                let (names, reduction, quantity, location) = match operation {
+                    OutputOperation::PressureDrop => (
+                        ["from", "to"],
+                        runmat_analysis_core::AuthoredPortReduction::MeanDifference,
+                        runmat_analysis_core::ObservationQuantity::FluidPressure,
+                        FieldLocation::Face,
+                    ),
+                    _ => (
+                        ["incident", "transmitted"],
+                        runmat_analysis_core::AuthoredPortReduction::TransmissionLoss,
+                        runmat_analysis_core::ObservationQuantity::AcousticPortIntensity,
+                        FieldLocation::Element,
+                    ),
+                };
+                let mut regions = Vec::with_capacity(2);
+                for (position, name) in names.into_iter().enumerate() {
+                    let target = positional_or_named(arguments, position + 1, name)?;
+                    let target = super::super::model::region_source(
+                        bound,
+                        declaration,
+                        target,
+                        diagnostics,
+                    )?;
+                    if matches!(target, AuthoredRegionSource::ModelInput(_)) {
+                        lower::error(
+                            declaration,
+                            expression.span,
+                            "study output regions must name an exact geometry region",
+                            diagnostics,
+                        );
+                        return None;
+                    }
+                    regions.push(target);
+                }
+                let second = regions.pop()?;
+                let first = regions.pop()?;
+                Some(AuthoredOutputExpression::PortReduction {
+                    reduction,
+                    source: Box::new(AuthoredOutputExpression::AnalysisField {
+                        step_id: step_id.clone(),
+                        quantity,
+                        location,
+                    }),
+                    first,
+                    second,
+                })
+            }
             OutputOperation::NormalFlux => {
                 let source = positional_or_named(arguments, 0, "field")?;
                 let target = positional_or_named(arguments, 1, "through")?;

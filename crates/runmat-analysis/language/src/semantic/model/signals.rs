@@ -228,6 +228,8 @@ fn signal_kind(
         "heat_generation_density" => (K::HeatGenerationDensity, |value| {
             convert(value, PhysicalSignal::HeatGenerationDensity)
         }),
+        // A total heat rate (W) of a heat-generation region.
+        "heat_rate" => (K::Power, |value| convert(value, PhysicalSignal::HeatRate)),
         "electric_potential" => (K::ElectricPotential, |value| {
             convert(value, PhysicalSignal::ElectricPotential)
         }),

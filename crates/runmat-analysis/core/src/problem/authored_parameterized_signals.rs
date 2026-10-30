@@ -128,6 +128,7 @@ impl AuthoredParameterizedSignal {
             PhysicalQuantityKind::HeatGenerationDensity => {
                 physical(signal, PhysicalSignal::HeatGenerationDensity)
             }
+            PhysicalQuantityKind::Power => physical(signal, PhysicalSignal::HeatRate),
             PhysicalQuantityKind::ElectricPotential => {
                 physical(signal, PhysicalSignal::ElectricPotential)
             }
@@ -197,6 +198,7 @@ fn quantity_input_type(quantity: PhysicalQuantityKind) -> Option<AuthoredInputTy
             | PhysicalQuantityKind::TemperatureDifference
             | PhysicalQuantityKind::HeatFlux
             | PhysicalQuantityKind::HeatGenerationDensity
+            | PhysicalQuantityKind::Power
             | PhysicalQuantityKind::ElectricPotential
             | PhysicalQuantityKind::ElectricCurrent
             | PhysicalQuantityKind::ElectricCharge

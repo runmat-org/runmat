@@ -23,8 +23,8 @@ use super::{
         shape_component_count, OBSERVATION_LIMITS, OBSERVATION_PREFIX,
     },
     distributed_numeric::{
-        discrete_reaction_contribution, interpolate_values, reduction_operation,
-        required_source_indices, select_values, weighted_boundary_contribution,
+        discrete_reaction_contribution, interpolate_values, paired_boundary_contribution,
+        reduction_operation, required_source_indices, select_values, weighted_boundary_contribution,
         weighted_volume_contribution,
     },
     extrema::{
@@ -73,6 +73,15 @@ pub enum ObservationPartitionPayload {
         linear_sum: Vec<f64>,
         square_sum: Vec<f64>,
         measure: f64,
+    },
+    /// Area integrals and areas of a scalar over the two regions of a paired boundary target.
+    /// A partition may hold faces of one region only, so either measure may be zero here; the
+    /// combined measures must both be positive.
+    PairedWeightedReduction {
+        first_sum: f64,
+        first_measure: f64,
+        second_sum: f64,
+        second_measure: f64,
     },
 }
 
@@ -379,6 +388,19 @@ impl ObservationPartitionContribution {
                         .all(|value| value.is_finite())
                     && measure.is_finite()
                     && *measure > 0.0
+            }
+            ObservationPartitionPayload::PairedWeightedReduction {
+                first_sum,
+                first_measure,
+                second_sum,
+                second_measure,
+            } => {
+                [first_sum, first_measure, second_sum, second_measure]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    && *first_measure >= 0.0
+                    && *second_measure >= 0.0
+                    && first_measure + second_measure > 0.0
             }
         };
         if let Some(attribution) = self.event_attribution {
@@ -700,6 +722,17 @@ fn observation_partition_payload(
                     ))?,
             )?
         }
+        ObservationPartitionTarget::BoundaryPair {
+            face_indices,
+            first_count,
+            ..
+        } => paired_boundary_contribution(
+            observation,
+            field,
+            face_indices,
+            *first_count,
+            topology,
+        )?,
         ObservationPartitionTarget::ConstraintGroups { indices, .. } => {
             let values = select_values(field, indices, observation)?;
             ObservationPartitionPayload::WeightedReduction {
@@ -927,6 +960,19 @@ fn validate_contribution_payload(
                 ));
             }
         }
+        (
+            ObservationPartitionTarget::BoundaryPair {
+                face_indices,
+                first_count,
+                ..
+            },
+            ObservationPartitionPayload::PairedWeightedReduction {
+                first_measure,
+                second_measure,
+                ..
+            },
+        ) if (*first_count > 0) == (*first_measure > 0.0)
+            && (*first_count < face_indices.len()) == (*second_measure > 0.0) => {}
         (
             ObservationPartitionTarget::Volume { .. } | ObservationPartitionTarget::Boundary { .. },
             ObservationPartitionPayload::WeightedReduction {

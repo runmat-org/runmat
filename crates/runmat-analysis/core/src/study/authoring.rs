@@ -300,9 +300,33 @@ fn validate_output_regions(
         | AuthoredOutputExpression::SeriesReduction { source, .. } => {
             validate_output_regions(source, geometry, model)
         }
+        AuthoredOutputExpression::PortReduction {
+            source,
+            first,
+            second,
+            ..
+        } => {
+            validate_output_regions(source, geometry, model)?;
+            validate_output_region(first, geometry, model)?;
+            validate_output_region(second, geometry, model)
+        }
         AuthoredOutputExpression::SpatialReduction { source, target, .. }
         | AuthoredOutputExpression::SpatialSelection { source, target } => {
             validate_output_regions(source, geometry, model)?;
+            validate_output_region(target, geometry, model)
+        }
+        AuthoredOutputExpression::AnalysisField { .. }
+        | AuthoredOutputExpression::OutputReference { .. } => Ok(()),
+    }
+}
+
+fn validate_output_region(
+    target: &AuthoredRegionSource,
+    geometry: &GeometryDefinitionRef,
+    model: &AuthoredModel,
+) -> Result<(), AuthoredStudyError> {
+    {
+        {
             match target {
                 AuthoredRegionSource::Geometry(region) => validate_region_owner(region, geometry),
                 AuthoredRegionSource::ModelInput(reference)
@@ -319,8 +343,6 @@ fn validate_output_regions(
                 )),
             }
         }
-        AuthoredOutputExpression::AnalysisField { .. }
-        | AuthoredOutputExpression::OutputReference { .. } => Ok(()),
     }
 }
 

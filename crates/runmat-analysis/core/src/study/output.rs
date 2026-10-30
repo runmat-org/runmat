@@ -87,6 +87,9 @@ impl ObservationSpec {
         if self.complex_representation == ComplexRepresentation::SoundPressureLevel {
             return ObservationResultQuantity::Physical(ObservationQuantity::SoundPressureLevel);
         }
+        if self.spatial_reduction() == SpatialReduction::TransmissionLoss {
+            return ObservationResultQuantity::Physical(ObservationQuantity::TransmissionLoss);
+        }
         let quantity = if self.component == ObservationComponent::VonMises {
             ObservationQuantity::VonMisesStress
         } else {
@@ -115,13 +118,21 @@ impl ObservationSpec {
                 SpatialReduction::EuclideanNorm
                 | SpatialReduction::Minimum
                 | SpatialReduction::Maximum
-                | SpatialReduction::NormalFlux,
+                | SpatialReduction::NormalFlux
+                | SpatialReduction::MeanDifference
+                | SpatialReduction::TransmissionLoss,
             ) => ObservationValueShape::Scalar,
             Some(SpatialReduction::Resultant | SpatialReduction::Moment { .. }) => {
                 ObservationValueShape::Vector3
             }
             _ => projected,
         }
+    }
+
+    pub fn spatial_reduction(&self) -> SpatialReduction {
+        self.reduction
+            .as_ref()
+            .map_or(SpatialReduction::None, |reduction| reduction.spatial)
     }
 
     /// SI base dimension after representation and spatial reduction.
@@ -171,7 +182,10 @@ impl ObservationSpec {
             | SpatialReduction::RootMeanSquare
             | SpatialReduction::EuclideanNorm
             | SpatialReduction::Minimum
-            | SpatialReduction::Maximum => Some(source),
+            | SpatialReduction::Maximum
+            | SpatialReduction::MeanDifference => Some(source),
+            // A level in dB of a power ratio.
+            SpatialReduction::TransmissionLoss => Some(PhysicalDimension::DIMENSIONLESS.into()),
         }?;
         match self.reduction.as_ref().map(|reduction| reduction.series) {
             Some(SeriesReduction::Variance { .. }) => spatial_dimension.power(2),
@@ -244,6 +258,11 @@ impl ObservationValueShape {
 #[serde(rename_all = "snake_case")]
 pub enum ObservationTarget {
     Spatial(ExcitationTarget),
+    /// Two face regions read by one paired reduction, in order (from/to, incident/transmitted).
+    RegionPair {
+        first: crate::RegionTarget,
+        second: crate::RegionTarget,
+    },
     Point { position: Position },
     Path { positions: Vec<Position> },
     Connector { connector_id: String },
@@ -423,6 +442,19 @@ pub enum SpatialReduction {
     },
     /// Flux of a vector field through a face region along its outward normal, ∫ v·n dA.
     NormalFlux,
+    /// Area-weighted mean over the first face region of a `RegionPair` target minus the
+    /// area-weighted mean over the second: the static pressure drop between two ports.
+    MeanDifference,
+    /// 10·log10(∫ first / ∫ second) of a power-density field over the two face regions of a
+    /// `RegionPair` target, in dB: transmission loss from the incident to the transmitted port.
+    TransmissionLoss,
+}
+
+impl SpatialReduction {
+    /// Reductions that read two face regions (a `RegionPair` target) into one scalar.
+    pub const fn is_paired(self) -> bool {
+        matches!(self, Self::MeanDifference | Self::TransmissionLoss)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

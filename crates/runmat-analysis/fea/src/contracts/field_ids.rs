@@ -284,6 +284,7 @@ pub const FEA_FIELD_CFD_VELOCITY: &str = "cfd.velocity";
 pub const FEA_FIELD_CFD_PRESSURE: &str = "cfd.pressure";
 pub const FEA_FIELD_CFD_VORTICITY: &str = "cfd.vorticity";
 pub const FEA_FIELD_CFD_WALL_SHEAR_STRESS: &str = "cfd.wall_shear_stress";
+pub const FEA_FIELD_CFD_FACE_PRESSURE: &str = "cfd.face_pressure";
 pub const FEA_FIELD_CFD_RESIDUAL_MOMENTUM: &str = "cfd.residual_momentum";
 pub const FEA_FIELD_CFD_RESIDUAL_CONTINUITY: &str = "cfd.residual_continuity";
 pub const FEA_FIELD_CFD_REYNOLDS_NUMBER: &str = "cfd.reynolds_number";

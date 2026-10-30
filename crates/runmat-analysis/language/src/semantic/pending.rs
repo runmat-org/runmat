@@ -6,15 +6,12 @@
 pub const GEOMETRY_SELECT_PREDICATE: &str = "geometry.select.predicate";
 pub const INCLUDE_PARAMETERIZED: &str = "language.include.parameterized";
 pub const VECTOR_TRAILING_UNIT: &str = "language.vector.trailing-unit";
-pub const TRANSMISSION_LOSS: &str = "output.transmission_loss";
-pub const PRESSURE_DROP: &str = "output.pressure_drop";
 pub const WALL_SHEAR_STRESS: &str = "output.wall-shear-stress";
 pub const OSCILLATORY_SHEAR_INDEX: &str = "output.oscillatory-shear-index";
 pub const TIME_MEAN: &str = "output.time-mean";
 pub const COEFFICIENT_OF_VARIATION: &str = "output.coefficient-of-variation";
 pub const FLUID_NON_NEWTONIAN: &str = "fluid.non-newtonian";
 pub const FLUID_SPECIES_TRANSPORT: &str = "fluid.species-transport";
-pub const HEAT_GENERATION_TOTAL_POWER: &str = "thermal.heat-generation.total-power";
 pub const CHT_BUOYANCY: &str = "cht.buoyancy";
 pub const LUBRICATION_FAMILY: &str = "lubrication.family";
 pub const SIGNAL_TABULATED_FILE: &str = "signal.tabulated-file";
@@ -37,11 +34,9 @@ pub fn with_pending(message: impl Into<String>, id: Option<&str>) -> String {
     }
 }
 
-/// Planned output operations: `transmission_loss(...)`, `pressure_drop(...)`, ...
+/// Planned output operations: `oscillatory_shear_index(...)`, `wall_shear_stress(...)`, ...
 pub fn operation(name: &str) -> Option<&'static str> {
     Some(match name {
-        "transmission_loss" => TRANSMISSION_LOSS,
-        "pressure_drop" => PRESSURE_DROP,
         "oscillatory_shear_index" => OSCILLATORY_SHEAR_INDEX,
         "coefficient_of_variation" => COEFFICIENT_OF_VARIATION,
         "wall_shear_stress" => WALL_SHEAR_STRESS,
@@ -135,15 +130,12 @@ mod tests {
             super::GEOMETRY_SELECT_PREDICATE,
             super::INCLUDE_PARAMETERIZED,
             super::VECTOR_TRAILING_UNIT,
-            super::TRANSMISSION_LOSS,
-            super::PRESSURE_DROP,
             super::WALL_SHEAR_STRESS,
             super::OSCILLATORY_SHEAR_INDEX,
             super::TIME_MEAN,
             super::COEFFICIENT_OF_VARIATION,
             super::FLUID_NON_NEWTONIAN,
             super::FLUID_SPECIES_TRANSPORT,
-            super::HEAT_GENERATION_TOTAL_POWER,
             super::CHT_BUOYANCY,
             super::LUBRICATION_FAMILY,
             super::SIGNAL_TABULATED_FILE,

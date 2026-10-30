@@ -422,6 +422,11 @@ fn validate_plan_targets(
             ResolvedObservationTarget::Boundary {
                 face_indices,
                 face_identities,
+            }
+            | ResolvedObservationTarget::BoundaryPair {
+                face_indices,
+                face_identities,
+                ..
             } => {
                 let projection =
                     topology

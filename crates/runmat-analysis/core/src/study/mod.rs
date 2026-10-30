@@ -21,9 +21,9 @@ pub use authored_output::{
     authored_output_root, authored_output_types, retain_authored_outputs,
     validate_authored_outputs, AuthoredExtremaTiePolicy, AuthoredFieldDomain,
     AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
-    AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection,
-    AuthoredSeriesDomain, AuthoredSeriesReduction, AuthoredSpatialReduction,
-    AuthoredVectorComponent,
+    AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPortReduction,
+    AuthoredPrincipalSelection, AuthoredSeriesDomain, AuthoredSeriesReduction,
+    AuthoredSpatialReduction, AuthoredVectorComponent,
 };
 pub use authoring::{
     geometry_parameter_input_type, AuthoredGeometryArgument, AuthoredGeometryArgumentValue,
@@ -32,8 +32,7 @@ pub use authoring::{
 };
 pub use compatibility::{
     analysis_identity_status, family_label, is_exposed_analysis_identity, procedure_label,
-    render_analysis_identity_matrix, AnalysisIdentity, AnalysisIdentityStatus,
-    ANALYSIS_IDENTITIES,
+    render_analysis_identity_matrix, AnalysisIdentity, AnalysisIdentityStatus, ANALYSIS_IDENTITIES,
 };
 pub use formulation::{
     BoundaryTransferImplementation, ConstitutiveImplementation, CouplingImplementation,

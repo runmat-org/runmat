@@ -2,6 +2,7 @@ use super::*;
 mod certificate;
 mod closure_diagnostics;
 mod periodic;
+mod transmission_loss;
 use crate::{
     contracts::SolverPreconditioner,
     fixtures::{fixture_model, replace_fixture_excitations, FixtureId},

@@ -31,7 +31,7 @@ fn acoustic_result_publishes_one_cold_topology_bound_complex_state() {
         assert_eq!(payload.frequency, workload.frequency);
         assert_eq!(payload.ordered_node_ids, result.ordered_node_ids());
         assert_eq!(payload.ordered_element_ids, result.ordered_element_ids());
-        assert_eq!(payload.fields.fields().len(), 3);
+        assert_eq!(payload.fields.fields().len(), 4);
         assert_eq!(
             CanonicalSemanticState::from_canonical_bytes(&state.canonical_bytes().unwrap())
                 .unwrap(),

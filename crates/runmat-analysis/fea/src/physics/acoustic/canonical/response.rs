@@ -26,6 +26,14 @@ pub struct CanonicalAcousticResponse {
         runmat_types::physical::kind::AcousticIntensity,
         Vec<[f64; 3]>,
     >,
+    /// Plane-wave power density crossing the element's port faces, W/m², in element order:
+    /// ½|p_inc|²/(ρc) of the authored incident wave on incident-pressure faces, ½|p|²/(ρc) of
+    /// the outgoing wave on anechoic faces, averaged over the element's port-face area; zero
+    /// for elements without port faces.
+    pub element_port_intensity_w_per_m2: runmat_types::physical::Quantity<
+        runmat_types::physical::kind::AcousticIntensity,
+        Vec<f64>,
+    >,
     /// Volume average of (|p|²/(rho c²) + rho |v|²)/4, in element order.
     pub element_mean_energy_density_j_per_m3:
         runmat_types::physical::Quantity<runmat_types::physical::kind::EnergyDensity, Vec<f64>>,
@@ -138,6 +146,7 @@ pub(super) fn solve(
         power_relative_error,
     } = power;
     let recovered = super::recovery::recover(&assembly, &real, &imaginary)?;
+    let port_intensity = port_intensity(&assembly, &real, &imaginary)?;
     if real
         .iter()
         .chain(&imaginary)
@@ -181,6 +190,10 @@ pub(super) fn solve(
             runmat_types::physical::kind::AcousticIntensity,
             _,
         >::new(recovered.intensity),
+        element_port_intensity_w_per_m2: runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::AcousticIntensity,
+            _,
+        >::new(port_intensity),
         element_mean_energy_density_j_per_m3: runmat_types::physical::Quantity::<
             runmat_types::physical::kind::EnergyDensity,
             _,
@@ -193,4 +206,74 @@ pub(super) fn solve(
         source_evidence: assembly.source_evidence,
         certificate,
     })
+}
+
+/// Per-element plane-wave port intensity: the face-quadrature power of the authored incident
+/// wave over incident-pressure faces, and of the outgoing wave over anechoic faces, divided by
+/// the element's port-face area. An element's port faces must all be of one kind, so that a
+/// face-area integral over a port region recovers the exact port power.
+fn port_intensity(
+    assembly: &AcousticAssembly,
+    real: &[f64],
+    imaginary: &[f64],
+) -> Result<Vec<f64>, AcousticHarmonicError> {
+    let elements = assembly.projection.elements.len();
+    let mut power = vec![0.0; elements];
+    let mut area = vec![0.0; elements];
+    let mut incident_owner = vec![None::<bool>; elements];
+    for port in &assembly.port_faces {
+        let [owner] = port.face.adjacent_element_indices.as_slice() else {
+            return Err(AcousticHarmonicError::Boundary(
+                "an acoustic port face needs exactly one owning element".into(),
+            ));
+        };
+        let incident = port.incident.is_some();
+        match incident_owner.get_mut(*owner) {
+            Some(Some(kind)) if *kind != incident => {
+                return Err(AcousticHarmonicError::Boundary(
+                    "an element touches both an incident-pressure face and an anechoic face; refine the mesh between the ports".into(),
+                ))
+            }
+            Some(kind) => *kind = Some(incident),
+            None => {
+                return Err(AcousticHarmonicError::Topology(
+                    "acoustic port face owner is outside the projection".into(),
+                ))
+            }
+        }
+        assembly
+            .projection
+            .visit_boundary_quadrature(&port.face, |point| {
+                let squared = match port.incident {
+                    Some(pressure) => pressure.real.powi(2) + pressure.imaginary.powi(2),
+                    None => {
+                        let mut pressure = [0.0; 2];
+                        for (&node, &shape) in
+                            port.face.node_indices.iter().zip(point.shape_values())
+                        {
+                            pressure[0] += shape * real[node];
+                            pressure[1] += shape * imaginary[node];
+                        }
+                        pressure[0].powi(2) + pressure[1].powi(2)
+                    }
+                };
+                power[*owner] += 0.5 * port.admittance * squared * point.area_weight_m2;
+                area[*owner] += point.area_weight_m2;
+            })
+            .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
+    }
+    power
+        .into_iter()
+        .zip(area)
+        .map(|(power, area)| {
+            let value = if area > 0.0 { power / area } else { 0.0 };
+            if value.is_finite() && value >= 0.0 {
+                Ok(value)
+            } else {
+                Err(AcousticHarmonicError::Operator(
+                    "nonfinite acoustic port intensity".into(),
+                ))
+            }
+        })
+        .collect()
 }

@@ -118,11 +118,12 @@ fn lubrication_constraint_reports_its_pending_id() {
 }
 
 #[test]
-fn total_power_heat_generation_reports_its_pending_id() {
+fn total_power_heat_generation_checks_clean() {
     let body = "include model.base\n    load heater {\n        heat_generation on geometry.part.region.body = 2 W\n    }";
-    assert_pending(
-        &diagnostics("select result", body),
-        "thermal.heat-generation.total-power",
+    let messages = diagnostics("select result", body);
+    assert!(
+        !messages.iter().any(|message| message.contains("heat generation")),
+        "{messages:#?}"
     );
 }
 

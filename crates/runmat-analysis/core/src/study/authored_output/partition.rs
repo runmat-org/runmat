@@ -14,6 +14,7 @@ impl AuthoredOutputExpression {
             Self::Projection { source, .. }
             | Self::Recovery { source, .. }
             | Self::SpatialReduction { source, .. }
+            | Self::PortReduction { source, .. }
             | Self::SpatialSelection { source, .. }
             | Self::Interpolation { source, .. }
             | Self::Sampling { source, .. }

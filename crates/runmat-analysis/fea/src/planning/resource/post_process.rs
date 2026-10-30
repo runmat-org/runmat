@@ -256,7 +256,8 @@ pub fn build_observation_reduction_resource_plan(
             let entities = match &contribution.payload {
                 ObservationPartitionPayload::SelectedValues { entities, .. }
                 | ObservationPartitionPayload::ExtremaCandidates { entities, .. } => entities.len(),
-                ObservationPartitionPayload::WeightedReduction { .. } => 1,
+                ObservationPartitionPayload::WeightedReduction { .. }
+                | ObservationPartitionPayload::PairedWeightedReduction { .. } => 1,
             };
             checked_add(
                 total,
@@ -507,6 +508,7 @@ fn contribution_payload_value_count(
             .ok_or(ResourcePlanningError::Overflow(
                 "observation contribution values",
             ))?,
+        ObservationPartitionPayload::PairedWeightedReduction { .. } => 4,
     };
     count(values, "observation contribution values")
 }
@@ -579,6 +581,20 @@ fn reduction_accumulator_value_count(
                 2,
                 "weighted observation measure accumulator",
             )
+        }
+        ObservationPartitionPayload::PairedWeightedReduction { .. } => {
+            if contributions.iter().any(|contribution| {
+                !matches!(
+                    contribution.payload,
+                    ObservationPartitionPayload::PairedWeightedReduction { .. }
+                )
+            }) {
+                return Err(ResourcePlanningError::Invalid(
+                    "observation reduction payload layouts differ".into(),
+                ));
+            }
+            // Four compensated scalars (two integrals, two measures): sum and correction each.
+            Ok(8)
         }
     }
 }

@@ -32,6 +32,29 @@ impl OutputOperation {
                 }
                 Ok(FeaType::Quantity(crate::PhysicalDimension::POWER.into()))
             }
+            (Self::PressureDrop | Self::TransmissionLoss, _) => {
+                let names = if self == Self::PressureDrop {
+                    ["from", "to"]
+                } else {
+                    ["incident", "transmitted"]
+                };
+                for (position, name) in names.into_iter().enumerate() {
+                    if region_measure(argument_type(arguments, position + 1, name))
+                        != Some(crate::PhysicalDimension::AREA)
+                    {
+                        return Err(if self == Self::PressureDrop {
+                            "pressure_drop reads two face regions (`from`, `to`)"
+                        } else {
+                            "transmission_loss reads two face regions (`incident`, `transmitted`)"
+                        });
+                    }
+                }
+                Ok(FeaType::Quantity(if self == Self::PressureDrop {
+                    crate::PhysicalDimension::PRESSURE.into()
+                } else {
+                    crate::PhysicalDimension::DIMENSIONLESS.into()
+                }))
+            }
             (Self::NormalFlux, Some(FeaType::Field(field))) => {
                 let measure = region_measure(argument_type(arguments, 1, "through"))
                     .ok_or("flux requires a face region")?;

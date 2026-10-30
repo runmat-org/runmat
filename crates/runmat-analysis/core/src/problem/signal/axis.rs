@@ -173,6 +173,7 @@ impl PhysicalSignal {
             Self::TemperatureDifference(signal) => signal.bind_parameter_axis(inputs),
             Self::HeatFlux(signal) => signal.bind_parameter_axis(inputs),
             Self::HeatGenerationDensity(signal) => signal.bind_parameter_axis(inputs),
+            Self::HeatRate(signal) => signal.bind_parameter_axis(inputs),
             Self::ElectricPotential(signal) => signal.bind_parameter_axis(inputs),
             Self::ElectricCurrent(signal) => signal.bind_parameter_axis(inputs),
             Self::ElectricCharge(signal) => signal.bind_parameter_axis(inputs),

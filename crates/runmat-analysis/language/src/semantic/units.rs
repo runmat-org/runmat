@@ -143,7 +143,10 @@ pub(crate) fn describe_fea_type(value_type: &crate::FeaType) -> String {
     match value_type {
         FeaType::Quantity(quantity) => describe_quantity_type(*quantity),
         FeaType::Vector { element, length } => match length {
-            Some(length) => format!("{length}-component vector of {}", describe_fea_type(element)),
+            Some(length) => format!(
+                "{length}-component vector of {}",
+                describe_fea_type(element)
+            ),
             None => format!("vector of {}", describe_fea_type(element)),
         },
         FeaType::Integer => "integer".into(),
@@ -191,20 +194,21 @@ pub(crate) fn unit_mismatch(
     }
     let (description, expected_unit) =
         dimension_requirement(expected).unwrap_or(("a different physical quantity", "SI units"));
-    // A total power (W) on a heat-generation region is planned: thermal.heat-generation.total-power.
-    let pending = (subject == "heat_generation_density"
-        && found.dimension() == PhysicalDimension::POWER)
-        .then_some(super::pending::HEAT_GENERATION_TOTAL_POWER);
     Some((
-        super::pending::with_pending(
-            format!(
-                "{} must be {description}, found {unit}",
-                subject.replace('_', " ")
-            ),
-            pending,
+        format!(
+            "{} must be {description}, found {unit}",
+            subject.replace('_', " ")
         ),
         format!("expected {expected_unit}"),
     ))
+}
+
+/// Whether `value` is a quantity (or quantity vector) of exactly `dimension`.
+pub(crate) fn is_dimension(value: &crate::CheckedExpression, dimension: PhysicalDimension) -> bool {
+    match &value.value_type {
+        crate::FeaType::Quantity(found) => found.dimension() == dimension,
+        _ => false,
+    }
 }
 
 #[cfg(test)]

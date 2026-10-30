@@ -46,6 +46,7 @@ pub fn canonical_tabulated_signal_content_digest(
         PhysicalSignal::TemperatureDifference(value) => canonicalize!(value),
         PhysicalSignal::HeatFlux(value) => canonicalize!(value),
         PhysicalSignal::HeatGenerationDensity(value) => canonicalize!(value),
+        PhysicalSignal::HeatRate(value) => canonicalize!(value),
         PhysicalSignal::ElectricPotential(value) => canonicalize!(value),
         PhysicalSignal::ElectricCurrent(value) => canonicalize!(value),
         PhysicalSignal::ElectricCharge(value) => canonicalize!(value),
@@ -353,6 +354,7 @@ pub fn materialize_signal_for_solver(
         PhysicalSignal::HeatGenerationDensity(signal) => {
             materialize!(HeatGenerationDensity, signal)
         }
+        PhysicalSignal::HeatRate(signal) => materialize!(HeatRate, signal),
         PhysicalSignal::ElectricPotential(signal) => materialize!(ElectricPotential, signal),
         PhysicalSignal::ElectricCurrent(signal) => materialize!(ElectricCurrent, signal),
         PhysicalSignal::ElectricCharge(signal) => materialize!(ElectricCharge, signal),

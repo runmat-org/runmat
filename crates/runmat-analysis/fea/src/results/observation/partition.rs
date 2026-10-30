@@ -93,6 +93,13 @@ pub enum ObservationPartitionTarget {
         face_indices: Vec<usize>,
         face_identities: Vec<StableDigest>,
     },
+    /// A slice of a paired boundary target; its first `first_count` faces belong to the first
+    /// region.
+    BoundaryPair {
+        face_indices: Vec<usize>,
+        face_identities: Vec<StableDigest>,
+        first_count: usize,
+    },
     Connectors {
         indices: Vec<usize>,
         identities: Vec<StableDigest>,
@@ -113,7 +120,9 @@ impl ObservationPartitionTarget {
             Self::Volume {
                 element_indices, ..
             } => element_indices.len(),
-            Self::Boundary { face_indices, .. } => face_indices.len(),
+            Self::Boundary { face_indices, .. } | Self::BoundaryPair { face_indices, .. } => {
+                face_indices.len()
+            }
             Self::Connectors { indices, .. } => indices.len(),
             Self::ConstraintGroups { indices, .. } => indices.len(),
         }
@@ -128,6 +137,9 @@ impl ObservationPartitionTarget {
                 element_identities, ..
             } => element_identities,
             Self::Boundary {
+                face_identities, ..
+            }
+            | Self::BoundaryPair {
                 face_identities, ..
             } => face_identities,
             Self::Connectors { identities, .. } => identities,
@@ -507,6 +519,15 @@ fn partition_target(
             face_indices: face_indices[start..end].to_vec(),
             face_identities: face_identities[start..end].to_vec(),
         },
+        ResolvedObservationTarget::BoundaryPair {
+            face_indices,
+            face_identities,
+            first_count,
+        } => ObservationPartitionTarget::BoundaryPair {
+            face_indices: face_indices[start..end].to_vec(),
+            face_identities: face_identities[start..end].to_vec(),
+            first_count: (*first_count).clamp(start, end) - start,
+        },
         ResolvedObservationTarget::ConstraintGroups {
             indices,
             identities,
@@ -584,6 +605,22 @@ fn partition_target_matches(
         ) => {
             indices.get(start..end) == Some(&part_indices[..])
                 && identities.get(start..end) == Some(&part_identities[..])
+        }
+        (
+            ResolvedObservationTarget::BoundaryPair {
+                face_indices: indices,
+                face_identities: identities,
+                first_count,
+            },
+            ObservationPartitionTarget::BoundaryPair {
+                face_indices: part_indices,
+                face_identities: part_identities,
+                first_count: part_first_count,
+            },
+        ) => {
+            indices.get(start..end) == Some(&part_indices[..])
+                && identities.get(start..end) == Some(&part_identities[..])
+                && (*first_count).clamp(start, end) - start == *part_first_count
         }
         (
             ResolvedObservationTarget::Elements {

@@ -8,6 +8,9 @@ pub(super) fn resolve_reduction_target(
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     let maximum = limits.maximum_selected_entities;
+    if let ObservationTarget::RegionPair { first, second } = &spec.target {
+        return resolve_pair_target(spec, first, second, field_domain, topology, maximum);
+    }
     if field_domain == RecoveredFieldEntityDomain::ConstraintGroups {
         if spec.source_location != FieldLocation::Constraint
             || !matches!(
@@ -166,5 +169,78 @@ fn volume_target(
     Ok(ResolvedObservationTarget::Volume {
         element_indices,
         element_identities,
+    })
+}
+
+/// Two disjoint face regions read by one paired reduction. Nodal fields are read at face
+/// quadrature points, element and cell fields in each face's owner, and finite-volume face
+/// fields at the oriented mesh face of each boundary face.
+fn resolve_pair_target(
+    spec: &ObservationSpec,
+    first: &runmat_analysis_core::RegionTarget,
+    second: &runmat_analysis_core::RegionTarget,
+    field_domain: RecoveredFieldEntityDomain,
+    topology: &ObservationTopology,
+    maximum: usize,
+) -> Result<ResolvedObservationTarget, ObservationError> {
+    let readable = match (materialized_field_location(spec), field_domain) {
+        (FieldLocation::Node, RecoveredFieldEntityDomain::Nodes) => true,
+        (FieldLocation::Element | FieldLocation::Cell, RecoveredFieldEntityDomain::VolumeElements) => true,
+        (FieldLocation::Face, RecoveredFieldEntityDomain::OrientedFaces) => {
+            topology.finite_volume.is_some()
+        }
+        _ => false,
+    };
+    if !readable {
+        return Err(target_error(
+            spec,
+            "a paired boundary reduction reads a nodal, element, cell, or finite-volume face field",
+        ));
+    }
+    let projection = solid_projection(topology, spec)?;
+    let mut selected = Vec::with_capacity(2);
+    for region in [first, second] {
+        if region.entity_dimension != EntityDimension::Face
+            || region.expected_topology != ExpectedTopology::BoundaryFace
+        {
+            return Err(target_error(spec, "a paired reduction reads two boundary face regions"));
+        }
+        let faces = matching_faces(region, projection);
+        enforce_cardinality(region.cardinality, faces.clone().count(), spec)?;
+        let faces = selected_indices(faces, maximum)?;
+        if faces.is_empty() {
+            return Err(target_error(
+                spec,
+                format!("face region `{}` selects no boundary faces", region.region_id),
+            ));
+        }
+        selected.push(faces);
+    }
+    let second_faces = selected.pop().expect("two regions");
+    let first_faces = selected.pop().expect("two regions");
+    if first_faces
+        .iter()
+        .any(|index| second_faces.binary_search(index).is_ok())
+    {
+        return Err(target_error(
+            spec,
+            "the two regions of a paired reduction share boundary faces",
+        ));
+    }
+    let first_count = first_faces.len();
+    let face_indices = selected_indices(
+        first_faces.iter().chain(&second_faces).copied(),
+        maximum,
+    )?;
+    let mut face_identities = reserved(face_indices.len())?;
+    face_identities.extend(
+        face_indices
+            .iter()
+            .map(|&index| projection.boundary_faces[index].stable_identity),
+    );
+    Ok(ResolvedObservationTarget::BoundaryPair {
+        face_indices,
+        face_identities,
+        first_count,
     })
 }

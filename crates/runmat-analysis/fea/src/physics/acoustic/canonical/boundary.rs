@@ -115,7 +115,13 @@ impl AcousticAssembly {
                     BoundaryOperator::AcousticRadiation
                         | BoundaryOperator::AcousticSphericalRadiation { .. }
                 ) {
-                    self.radiation_admittance(&face)?
+                    let admittance = self.radiation_admittance(&face)?;
+                    self.port_faces.push(super::assembly::AcousticPortFace {
+                        face: face.clone(),
+                        admittance,
+                        incident: None,
+                    });
+                    admittance
                 } else {
                     admittance
                 };
