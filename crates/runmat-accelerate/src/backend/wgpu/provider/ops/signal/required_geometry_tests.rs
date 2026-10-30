@@ -191,7 +191,7 @@ async fn exercise() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-#[ignore = "requires actual WGPU adapter; a foreign allocation must preserve its owner error"]
+#[ignore = "requires actual F32 WGPU adapter; RUNMAT_WGPU_FORCE_PRECISION=f32; a foreign allocation must preserve its owner error"]
 fn direct_hilbert_foreign_owner_preserves_acquisition_cause() {
     use runmat_accelerate_api::allocation::AllocationAcquisitionError;
     use runmat_accelerate_api::test_support::TestAllocationOwner;
@@ -220,7 +220,7 @@ fn direct_hilbert_foreign_owner_preserves_acquisition_cause() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-#[ignore = "requires actual WGPU adapter; foreign envelope input must retain owner cause"]
+#[ignore = "requires actual F32 WGPU adapter; RUNMAT_WGPU_FORCE_PRECISION=f32; foreign envelope input must retain owner cause"]
 fn direct_envelope_foreign_owner_preserves_acquisition_cause() {
     use runmat_accelerate_api::allocation::AllocationAcquisitionError;
     use runmat_accelerate_api::test_support::TestAllocationOwner;

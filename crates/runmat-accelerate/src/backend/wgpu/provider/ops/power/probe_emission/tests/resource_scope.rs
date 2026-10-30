@@ -93,7 +93,7 @@ async fn actual_probe_scope(provider: &'static WgpuProvider) {
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
 #[cfg_attr(
     not(target_arch = "wasm32"),
-    ignore = "requires actual WGPU adapter and observation progress"
+    ignore = "requires actual F32 WGPU adapter and observation progress; RUNMAT_WGPU_FORCE_PRECISION=f32"
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
 async fn actual_flag_probe_has_four_scoped_resource_phases_and_completion() {

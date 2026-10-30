@@ -23,7 +23,7 @@ fn weak_buffer(buffer: &WgpuBufferOwner) -> WeakBuffer {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-#[ignore = "requires an actual WGPU adapter; run explicitly in the device qualification gate"]
+#[ignore = "requires an actual F32 WGPU adapter; RUNMAT_WGPU_FORCE_PRECISION=f32"]
 fn nan_map_postallocation_unsupported_is_terminal_and_drops_unpublished_buffer() {
     let provider = crate::backend::wgpu::provider::register_wgpu_provider(
         crate::backend::wgpu::provider::WgpuProviderOptions::default(),

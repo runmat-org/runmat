@@ -44,7 +44,9 @@ fn real_linalg_fallback_preserves_physical_source_class() {
             let error = provider
                 .qr_factor_device(&source, 2, 2, "unsupported-double-owner", true)
                 .unwrap_err();
-            assert!(runmat_accelerate_api::is_unsupported_provider_operation(&error));
+            assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+                &error
+            ));
             assert_eq!(provider.telemetry_snapshot(), before);
             assert_eq!(provider.allocations.record_count().unwrap(), allocations);
         }
@@ -244,7 +246,7 @@ fn host_factor_hooks_preserve_native_class_and_complex_eigen_spectrum() {
 }
 
 #[test]
-#[ignore = "requires provisioned WGPU adapter; run with --ignored"]
+#[ignore = "requires provisioned F32 WGPU adapter; RUNMAT_WGPU_FORCE_PRECISION=f32"]
 fn published_qr_and_cholesky_outputs_survive_next_factorization() {
     let provider = provider();
     let first = upload(&provider, &[2.0, 0.0, 0.0, 3.0]);

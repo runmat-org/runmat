@@ -2,7 +2,7 @@ use super::*;
 use runmat_accelerate_api::{HostNumericDataOwned, HostNumericDataView, HostNumericTensorView};
 
 #[test]
-#[ignore = "requires actual WGPU device; execute explicitly for lazy-view permutation"]
+#[ignore = "requires actual F32 WGPU device; RUNMAT_WGPU_FORCE_PRECISION=f32; includes F32-only repmat and flip routes"]
 fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatch() {
     let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
     // A buffer can retain a native class without this provider owning a

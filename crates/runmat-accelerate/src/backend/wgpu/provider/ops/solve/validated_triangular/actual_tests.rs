@@ -359,7 +359,10 @@ async fn cold_warm_and_invalid(provider: &'static WgpuProvider) {
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-#[cfg_attr(not(target_arch = "wasm32"), ignore = "requires actual WGPU adapter")]
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    ignore = "requires actual F32 WGPU adapter; RUNMAT_WGPU_FORCE_PRECISION=f32"
+)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
 async fn actual_triangular_validated_cold_warm_and_invalid_scope() {
     cold_warm_and_invalid(owner_with_scalar(None).await).await;

@@ -33,7 +33,7 @@ fn single_input(
 }
 
 #[test]
-#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+#[ignore = "requires an actual F32 WGPU adapter; RUNMAT_WGPU_FORCE_PRECISION=f32"]
 fn actual_conditional_imfilter_upload_has_physical_empty_floor_and_fence() {
     use runmat_accelerate_api::{
         ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
@@ -77,7 +77,7 @@ fn actual_conditional_imfilter_upload_has_physical_empty_floor_and_fence() {
 }
 
 #[test]
-#[ignore = "requires an actual WGPU adapter; execute in native image-filter qualification"]
+#[ignore = "requires an actual F32 WGPU adapter; RUNMAT_WGPU_FORCE_PRECISION=f32"]
 fn actual_class_preserving_upload_evidence_covers_integer_logical_and_empty() {
     use runmat_accelerate_api::{
         ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,

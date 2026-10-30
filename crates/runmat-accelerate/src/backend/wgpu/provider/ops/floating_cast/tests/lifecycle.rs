@@ -121,7 +121,7 @@ async fn alias_and_logical_copy_without_compute_geometry() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::test]
-#[ignore = "requires actual native WGPU adapter; run explicitly in cast qualification"]
+#[ignore = "requires actual native F32 WGPU adapter; RUNMAT_WGPU_FORCE_PRECISION=f32"]
 async fn native_non_dispatch_casts_ignore_disabled_geometry() {
     alias_and_logical_copy_without_compute_geometry().await;
 }

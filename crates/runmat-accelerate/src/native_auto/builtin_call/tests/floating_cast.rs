@@ -79,20 +79,6 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let _compatibility = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let data = [1.25_f32, -0.0, 16_777_216.0, 3.5];
-    let input = provider
-        .upload_numeric(&HostNumericTensorView {
-            data: HostNumericDataView::F32(&data),
-            shape: &[1, 2, 2],
-            storage: GpuTensorStorage::Real,
-        })
-        .unwrap();
-    let prototype = provider
-        .upload_numeric(&HostNumericTensorView {
-            data: HostNumericDataView::F32(&[0.0]),
-            shape: &[1, 1],
-            storage: GpuTensorStorage::Real,
-        })
-        .unwrap();
     for device_like in [false, true] {
         let probe = Rc::new(Probe::default());
         probe.provider.set(true);
@@ -104,43 +90,59 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
                 .with_acceleration(Rc::new(Adapter(provider, 2))),
         );
         context.set_runmat_extensions_enabled(true);
-        // Host-like must download the resident result; device-like must upload
-        // the host result. Neither is the form1 no-adaptation physical route.
-        let args = [
-            if device_like {
-                Value::Tensor(Tensor::from_f32(data.to_vec(), vec![1, 2, 2]).unwrap())
-            } else {
-                Value::GpuTensor(input.clone())
-            },
-            Value::from("like"),
-            if device_like {
-                Value::GpuTensor(prototype.clone())
-            } else {
-                Value::Num(0.0)
-            },
-        ];
-        let result = futures::executor::block_on(context.scope(async {
-            runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "single", &args)
-                .await
-        }))
-        .unwrap();
-        let actual = match result.value() {
-            Value::Tensor(value) if !device_like => {
-                assert_eq!(value.shape(), [1, 2, 2]);
-                value.as_f32_slice().unwrap().to_vec()
+        let actual = futures::executor::block_on(context.scope(async {
+            // Allocate and read back under the same invocation authority as
+            // execution. Standalone allocations are not session imports.
+            let input = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&data),
+                    shape: &[1, 2, 2],
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            let prototype = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&[0.0]),
+                    shape: &[1, 1],
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            // Host-like downloads; device-like uploads. Neither is the form1
+            // no-adaptation physical route or a completed plain-cast sample.
+            let args = [
+                if device_like {
+                    Value::Tensor(Tensor::from_f32(data.to_vec(), vec![1, 2, 2]).unwrap())
+                } else {
+                    Value::GpuTensor(input)
+                },
+                Value::from("like"),
+                if device_like {
+                    Value::GpuTensor(prototype)
+                } else {
+                    Value::Num(0.0)
+                },
+            ];
+            let result = runmat_runtime::dispatcher::call_builtin_async_in_context(
+                &context, "single", &args,
+            )
+            .await
+            .unwrap();
+            match result.value() {
+                Value::Tensor(value) if !device_like => {
+                    assert_eq!(value.shape(), [1, 2, 2]);
+                    value.as_f32_slice().unwrap().to_vec()
+                }
+                Value::GpuTensor(value) if device_like => {
+                    let downloaded = provider.download_numeric(value).await.unwrap();
+                    assert_eq!(downloaded.shape, vec![1, 2, 2]);
+                    let HostNumericDataOwned::F32(data) = downloaded.data else {
+                        panic!("Single result")
+                    };
+                    data
+                }
+                other => panic!("wrong template residency: {other:?}"),
             }
-            Value::GpuTensor(value) if device_like => {
-                let downloaded =
-                    futures::executor::block_on(provider.download_numeric(value)).unwrap();
-                assert_eq!(downloaded.shape, vec![1, 2, 2]);
-                let HostNumericDataOwned::F32(data) = downloaded.data else {
-                    panic!("Single result")
-                };
-                data
-            }
-            other => panic!("wrong template residency: {other:?}"),
-        };
-        drop(result);
+        }));
         assert_eq!(
             actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
             data.map(f32::to_bits)
@@ -154,8 +156,6 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
             "adaptation is not a completed plain-cast sample"
         );
     }
-    drop(input);
-    drop(prototype);
 }
 
 #[test]
