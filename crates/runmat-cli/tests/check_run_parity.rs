@@ -225,3 +225,26 @@ fn only_names_authored_in_the_cad_file_resolve() {
     assert!(!text.contains("left_body\\\""), "{text}");
     assert!(text.contains("left_support"), "lists the authored face names: {text}");
 }
+
+/// A structural modal study whose assigned material has no mass_density is refused by check
+/// and run with the same static admission code, before meshing.
+#[test]
+fn modal_study_without_mass_density_is_refused_by_check_and_run_alike() {
+    let source = example("cantilever-modal.fea").replace("    mass_density = 7850 kg/m^3\n", "");
+    assert!(!source.contains("mass_density"));
+    assert_check_and_run_agree(&source, "fea.admission.material_mass_density", None);
+}
+
+#[test]
+fn mode_located_field_output_is_refused_with_its_pending_id() {
+    let source = example("cantilever-modal.fea").replace(
+        "output shapes = analysis.modes.field.node.displacement",
+        "output shapes = analysis.modes.field.mode.modal_frequency",
+    );
+    let temp = TempDir::new().unwrap();
+    let project = project_with(&temp, "study.fea", &source);
+    let checked = runmat(&temp, &project, &["check", "study.fea", "--json"]);
+    assert!(!checked.status.success(), "{checked:?}");
+    let text = serde_json::to_string(&json(&checked)["diagnostics"]).unwrap();
+    assert!(text.contains("pending:output.mode-location"), "{text}");
+}

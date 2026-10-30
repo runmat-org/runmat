@@ -93,7 +93,7 @@ fn admit_resolved(
         else {
             continue;
         };
-        let found = match admit_study(&realized) {
+        let found = match admit_study(&realized, &resolved.material_catalog) {
             Ok(_) => admit_accelerator_policy(
                 &realized.sequence.steps,
                 resolved.execution_policy.as_ref(),

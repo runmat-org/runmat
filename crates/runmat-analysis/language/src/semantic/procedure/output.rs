@@ -68,6 +68,21 @@ fn lower_expression(
             {
                 let (quantity, _) = field_reference_type(quantity_name)?;
                 let location = field_location(location_name)?;
+                if location == runmat_analysis_core::FieldLocation::Mode {
+                    // No procedure publishes mode-located fields; every run would reject it.
+                    super::lower::error(
+                        declaration,
+                        expression.span,
+                        crate::semantic::pending::with_pending(
+                            format!(
+                                "no procedure publishes mode-located fields (`field.mode.{quantity_name}`) yet"
+                            ),
+                            Some(crate::semantic::pending::OUTPUT_MODE_LOCATION),
+                        ),
+                        diagnostics,
+                    );
+                    return None;
+                }
                 Some(AuthoredOutputExpression::AnalysisField {
                     step_id: step_id.clone(),
                     quantity,

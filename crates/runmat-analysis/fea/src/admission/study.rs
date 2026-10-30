@@ -4,7 +4,10 @@
 //! geometry, a mesh or a solve. Kernels keep their canonical-input checks as a backstop and
 //! report the same rule text from [`StaticRule`].
 
+use std::collections::BTreeMap;
+
 use runmat_analysis_core::{
+    AuthoredMaterialRef, AuthoredMaterialSource, MaterialModel,
     analysis_identity_status, family_label, procedure_label, AnalysisIdentityStatus,
     AnalysisProcedure, AnalysisSequence, AuthoredConstraintKind, AuthoredInitialConditionKind,
     AuthoredPairingPolicy, AuthoredPeriodicTransform, CoupledPhysicsFamily, ElectromagneticDomain,
@@ -115,6 +118,7 @@ pub const ELECTROMAGNETIC_INITIAL_CONDITION: StaticRule = StaticRule {
     pending: None,
     message: "electromagnetic static and harmonic analyses take no initial conditions",
 };
+pub const MATERIAL_MASS_DENSITY_CODE: &str = "fea.admission.material_mass_density";
 pub const OBSERVATION_CODE: &str = "fea.admission.observation";
 pub const ACCELERATOR_REQUIRED_CODE: &str = "fea.admission.accelerator_required";
 
@@ -134,10 +138,14 @@ pub enum AdmittedFamily {
 /// Every static rule for one realized study, in order: family x procedure and procedure graph,
 /// then the selected family's constraint, initial-condition and observation admission, then
 /// strict accelerator placement. Returns the family the run prepares, or every issue found.
-pub fn admit_study(realized: &RealizedStudy) -> Result<AdmittedFamily, Vec<AdmissionIssue>> {
+pub fn admit_study(
+    realized: &RealizedStudy,
+    materials: &BTreeMap<AuthoredMaterialRef, MaterialModel>,
+) -> Result<AdmittedFamily, Vec<AdmissionIssue>> {
     let family = select_family(&realized.sequence, realized.model.electromagnetic.as_ref())
         .map_err(|issue| vec![issue])?;
     let mut issues = Vec::new();
+    admit_materials(realized, materials, &mut issues);
     admit_constraints(realized, family, &mut issues);
     admit_initial_conditions(realized, family, &mut issues);
     admit_observations(realized, family, &mut issues);
@@ -274,6 +282,58 @@ fn admit_initial_conditions(
     };
     if let Some(rule) = rule {
         issues.push(rule.issue());
+    }
+}
+
+/// Structural procedures with inertia (modal, transient, harmonic, spectrum and random
+/// response) assemble a mass matrix, so every assigned material must carry `mass_density`.
+fn needs_mass(step: &runmat_analysis_core::ProcedureStep) -> bool {
+    step.family == PhysicsFamily::Structural
+        && matches!(
+            step.procedure,
+            AnalysisProcedure::ModalExtraction
+                | AnalysisProcedure::PrestressedModalExtraction
+                | AnalysisProcedure::TransientResponse
+                | AnalysisProcedure::HarmonicResponse
+                | AnalysisProcedure::PrestressedHarmonicResponse
+                | AnalysisProcedure::ModalResponseSpectrum
+                | AnalysisProcedure::RandomResponse
+        )
+}
+
+fn admit_materials(
+    realized: &RealizedStudy,
+    materials: &BTreeMap<AuthoredMaterialRef, MaterialModel>,
+    issues: &mut Vec<AdmissionIssue>,
+) {
+    let Some(step) = realized.sequence.steps.iter().find(|step| needs_mass(step)) else {
+        return;
+    };
+    let assigned = std::iter::once(&realized.model)
+        .chain(&realized.included_models)
+        .flat_map(|model| &model.material_assignments)
+        .filter_map(|assignment| match &assignment.material {
+            AuthoredMaterialSource::Declaration(reference) => Some(reference),
+            AuthoredMaterialSource::ModelInput(_) => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for reference in assigned {
+        let Some(material) = materials.get(reference) else {
+            continue;
+        };
+        if material.mass_density_kg_per_m3.is_none() {
+            issues.push(AdmissionIssue {
+                code: MATERIAL_MASS_DENSITY_CODE,
+                pending: None,
+                message: format!(
+                    "analysis `{}` ({} {}) assembles mass, but material `{}` declares no mass_density",
+                    step.step_id.as_str(),
+                    family_label(step.family),
+                    procedure_label(step.procedure),
+                    reference.material_id
+                ),
+            });
+        }
     }
 }
 

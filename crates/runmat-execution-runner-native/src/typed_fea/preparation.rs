@@ -79,7 +79,7 @@ pub async fn prepare_study_with_role(
             admission::AdmittedFamily::Electrical
         }
         // The same static admission `runmat check` reports, before any geometry or mesh work.
-        _ => admission::admit_study(&realized).map_err(|issues| {
+        _ => admission::admit_study(&realized, &resolved.material_catalog).map_err(|issues| {
             issues
                 .iter()
                 .map(ToString::to_string)

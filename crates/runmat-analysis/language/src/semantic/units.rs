@@ -111,6 +111,26 @@ pub(crate) fn dimension_requirement(
         .map(|(_, description, unit)| (description, unit))
 }
 
+/// A quantity type as an author reads it: the semantic kind when known (`temperature difference`),
+/// else the dimension's description (`power per volume`), with its SI unit when the dimension
+/// has one (`temperature difference (K)`). Never a Rust debug rendering.
+pub(crate) fn describe_quantity_type(quantity: runmat_types::physical::DynamicDimension) -> String {
+    use runmat_types::physical::QuantitySpec;
+    let requirement = dimension_requirement(quantity.physical_dimension());
+    let kind = quantity.semantic_kind().and_then(|kind| {
+        serde_json::to_value(kind)
+            .ok()
+            .and_then(|value| value.as_str().map(|name| name.replace('_', " ")))
+    });
+    let name = kind
+        .or_else(|| requirement.map(|(description, _)| description.to_string()))
+        .unwrap_or_else(|| "physical quantity".to_string());
+    match requirement {
+        Some((_, unit)) => format!("{name} ({unit})"),
+        None => name,
+    }
+}
+
 /// When `value` is a quantity whose authored unit measures something other than `expected`,
 /// returns the message (`<subject> must be <what>, found <unit>`) and the caret label
 /// (`expected <SI unit>`) for a diagnostic located at the value.

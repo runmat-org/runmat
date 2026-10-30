@@ -116,3 +116,33 @@ fn total_power_heat_generation_reports_its_pending_id() {
         "thermal.heat-generation.total-power",
     );
 }
+
+#[test]
+fn siemens_unit_reports_its_pending_id() {
+    let body = "include model.base\n    input sigma : real = 5.8e7 S/m";
+    assert_pending(&diagnostics("select result", body), "language.unit.siemens");
+}
+
+#[test]
+fn bare_plastic_law_identifier_reports_its_pending_id() {
+    let extra = "material soft {\n    mass_density = 7850 kg/m^3\n    elastic { youngs_modulus = 200 GPa; poisson_ratio = 0.3 }\n    plastic { law = j2_isotropic_linear_hardening; yield_stress = 250 MPa; isotropic_hardening_modulus = 1 GPa }\n}";
+    assert_pending(
+        &diagnostics_with("select result", "include model.base", extra),
+        "language.plastic-law-identifier",
+    );
+}
+
+/// An input whose value has the wrong quantity names both quantities as the author writes them.
+#[test]
+fn input_value_type_mismatch_names_quantities_not_rust_types() {
+    let body = "input rise : temperature_difference = 20 degC\n    include model.base";
+    let messages = diagnostics("select result", body);
+    let message = messages
+        .iter()
+        .find(|message| message.contains("input value") || message.contains("input `rise`"))
+        .unwrap_or_else(|| panic!("{messages:#?}"));
+    assert!(message.contains("temperature difference"), "{message}");
+    for leaked in ["DynamicDimension", "PhysicalDimension", "Quantity("] {
+        assert!(!message.contains(leaked), "{message}");
+    }
+}

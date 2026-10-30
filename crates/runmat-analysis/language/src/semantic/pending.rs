@@ -19,6 +19,9 @@ pub const CHT_BUOYANCY: &str = "cht.buoyancy";
 pub const LUBRICATION_FAMILY: &str = "lubrication.family";
 pub const SIGNAL_TABULATED_FILE: &str = "signal.tabulated-file";
 pub const SIGNAL_HARMONIC_NONCONSTANT_VALUE: &str = "signal.harmonic-nonconstant-value";
+pub const UNIT_SIEMENS: &str = "language.unit.siemens";
+pub const PLASTIC_LAW_IDENTIFIER: &str = "language.plastic-law-identifier";
+pub const OUTPUT_MODE_LOCATION: &str = "output.mode-location";
 
 /// ` [pending:<id>]`, appended to a diagnostic message.
 pub fn marker(id: &str) -> String {
@@ -78,12 +81,16 @@ pub fn constraint(kind: &str) -> Option<&'static str> {
     }
 }
 
-/// Planned units: `rpm` (journal speed).
-/// Planned units: `rpm` (journal speed) and fractional exponents (power-law consistency,
+/// Planned units: siemens (`S`, conductivity in `S/m`), `rpm` (journal speed) and fractional exponents (power-law consistency,
 /// `Pa*s^0.45`).
 pub fn unit(symbol: &str) -> Option<&'static str> {
     let symbol = symbol.trim();
-    if symbol == "rpm" {
+    let siemens = symbol
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|part| matches!(part, "S" | "mS" | "uS" | "kS" | "MS"));
+    if siemens {
+        Some(UNIT_SIEMENS)
+    } else if symbol == "rpm" {
         Some(LUBRICATION_FAMILY)
     } else if symbol.contains("^0.") || symbol.contains("^.") {
         Some(FLUID_NON_NEWTONIAN)
@@ -141,6 +148,9 @@ mod tests {
             super::LUBRICATION_FAMILY,
             super::SIGNAL_TABULATED_FILE,
             super::SIGNAL_HARMONIC_NONCONSTANT_VALUE,
+            super::UNIT_SIEMENS,
+            super::PLASTIC_LAW_IDENTIFIER,
+            super::OUTPUT_MODE_LOCATION,
         ];
         let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../docs/simulation/pending-features.json");
