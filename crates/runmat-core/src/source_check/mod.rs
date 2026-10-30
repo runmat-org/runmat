@@ -4,7 +4,7 @@ mod host;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
-pub use host::check_source;
+pub use host::{check_source, check_source_with_runtime_settings};
 use runmat_config::runtime::{ConfigurationPolicy, LanguageCompatMode};
 use runmat_static_analysis::{
     frontend::{AnalysisDomains, ResolutionEvidence},

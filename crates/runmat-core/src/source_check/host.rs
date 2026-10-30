@@ -1,5 +1,5 @@
 use super::*;
-use runmat_config::runtime::{HostConfigDocument, HostRuntimeSettings};
+use runmat_config::runtime::{HostConfigDocument, HostRuntimeSettings, ResolvedRuntimeConfig};
 use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, Span};
 use runmat_package::{DiscoveredSourceSymbols, FrozenProject};
 use runmat_static_analysis::project::{
@@ -13,7 +13,23 @@ use std::{
 /// Capture the original provider/path once. Select it locally during each poll;
 /// no process provider mutation or filesystem lock crosses suspension. Selected
 /// invocation authority may not be masked by a different snapshot/provider.
-pub async fn check_source(mut request: SourceCheckRequest) -> Result<SourceCheckReport, String> {
+pub async fn check_source(request: SourceCheckRequest) -> Result<SourceCheckReport, String> {
+    check_source_with_runtime_settings(request, |settings| settings.resolve().map_err(display))
+        .await
+}
+
+/// Check captured source using the embedding host's canonical settings owner.
+/// Core captures and validates the selected project document before calling
+/// `resolve`. A native host can add its OS-user/environment/explicit layers
+/// without substituting source inputs or relabelling resolved project settings
+/// as the user layer. The default browser/SDK checker uses `settings.resolve()`.
+pub async fn check_source_with_runtime_settings<F>(
+    mut request: SourceCheckRequest,
+    resolve: F,
+) -> Result<SourceCheckReport, String>
+where
+    F: FnOnce(HostRuntimeSettings) -> Result<ResolvedRuntimeConfig, String>,
+{
     let inputs = request.input_manifest.take();
     let mut paths = vec![request.target.path()];
     paths.extend(request.search_paths.iter().map(PathBuf::as_path));
@@ -24,17 +40,21 @@ pub async fn check_source(mut request: SourceCheckRequest) -> Result<SourceCheck
     scope
         .run(async {
             let provider = runmat_filesystem::current_provider();
-            check_captured(request, path, provider).await
+            check_captured(request, path, provider, resolve).await
         })
         .await
         .map_err(display)?
 }
 
-async fn check_captured(
+async fn check_captured<F>(
     request: SourceCheckRequest,
     path: PathBuf,
     provider: Arc<dyn runmat_filesystem::FsProvider>,
-) -> Result<SourceCheckReport, String> {
+    resolve: F,
+) -> Result<SourceCheckReport, String>
+where
+    F: FnOnce(HostRuntimeSettings) -> Result<ResolvedRuntimeConfig, String>,
+{
     let project = runmat_package::discover_frozen_project_from_async(&path, Default::default())
         .await
         .map_err(display)?;
@@ -65,7 +85,7 @@ async fn check_captured(
         project: project_document,
         policy: request.policy,
     };
-    let config = settings.resolve().map_err(display)?.config;
+    let config = resolve(settings)?.config;
     let compat = match config.language.compat {
         LanguageCompatMode::RunMat => crate::CompatMode::RunMat,
         LanguageCompatMode::Matlab => crate::CompatMode::Matlab,
