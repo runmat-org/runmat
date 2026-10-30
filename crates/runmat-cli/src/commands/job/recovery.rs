@@ -466,19 +466,18 @@ impl RecoveryRecipientFile {
 
 fn load_key(path: &Path) -> Result<LoadedRecoveryKey> {
     require_private_file(path)?;
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
     #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt as _;
-        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-    let file = options.open(path).context("open private recovery key")?;
+    let file = runmat_filesystem::NativeFsProvider
+        .open_owner_private_file(path)
+        .context("open private recovery key")?;
+    #[cfg(not(windows))]
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .open(path)
+        .context("open private recovery key")?;
     if !file.metadata()?.is_file() {
         bail!("recovery key must be a regular file");
     }
-    #[cfg(windows)]
-    windows::verify_file(&file)?;
     let encoded = Zeroizing::new(read_file_bounded(file, MAX_ENVELOPE_BYTES)?);
     let mut document: RecoveryKeyFile =
         serde_json::from_slice(encoded.as_slice()).context("recovery key file is malformed")?;

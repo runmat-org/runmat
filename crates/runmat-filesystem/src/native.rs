@@ -19,6 +19,8 @@ use url::Url;
 mod atomic_create;
 mod atomic_replace;
 mod private_directory;
+#[cfg(windows)]
+mod private_windows;
 #[path = "native/staged.rs"]
 pub(crate) mod staged;
 #[path = "native/mapped.rs"]
@@ -28,6 +30,42 @@ mod mapped;
 pub struct NativeFsProvider;
 
 impl NativeFsProvider {
+    /// Windows owner/SYSTEM file protection applied atomically at CREATE_NEW.
+    /// This does not authenticate ownership of the containing namespace.
+    #[cfg(windows)]
+    pub fn create_owner_private_file_new(&self, path: &Path) -> io::Result<std::fs::File> {
+        private_windows::create_file_new(path)
+    }
+
+    /// Open without following a final reparse point and validate the exact
+    /// owner/SYSTEM handle before the caller may read secret bytes.
+    #[cfg(windows)]
+    pub fn open_owner_private_file(&self, path: &Path) -> io::Result<std::fs::File> {
+        private_windows::open_file(path)
+    }
+
+    /// Validate an already-opened Windows secret file; no Administrators grant
+    /// is permitted unless that SID is the actual file owner.
+    #[cfg(windows)]
+    pub fn verify_owner_private_file(&self, file: &std::fs::File) -> io::Result<()> {
+        private_windows::verify_file(file)
+    }
+
+    /// Create only missing Windows state directories privately. Existing
+    /// ancestors are never assigned new ACLs/ownership. Retain the returned
+    /// leaf handle during credential publication; it denies delete sharing.
+    /// Directory policy includes Administrators for existing service handoff.
+    #[cfg(windows)]
+    pub fn create_owner_private_directory(&self, path: &Path) -> io::Result<std::fs::File> {
+        private_windows::directory::open(path, private_windows::directory::Mode::CreateMissing)
+    }
+
+    /// Validate a Windows state-directory leaf without creating it. Refuse
+    /// observed reparses; not a hostile-ancestor namespace guarantee.
+    #[cfg(windows)]
+    pub fn open_owner_private_directory(&self, path: &Path) -> io::Result<std::fs::File> {
+        private_windows::directory::open(path, private_windows::directory::Mode::Existing)
+    }
     /// Read exactly the admitted regular-file inventory, rejecting growth.
     pub fn read_bounded_sync(&self, path: &Path, maximum_bytes: u64) -> io::Result<Vec<u8>> {
         crate::workspace_access::file::read(path, maximum_bytes)

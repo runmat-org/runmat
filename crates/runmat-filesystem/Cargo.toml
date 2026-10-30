@@ -35,6 +35,9 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = ["XmlHttpRequest", "XmlHttpRequestResponseType"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem"] }
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 

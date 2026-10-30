@@ -23,6 +23,7 @@ runmat-execution = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-process-host = { workspace = true }
+runmat-filesystem = { workspace = true }
 runmat-server-client = { workspace = true }
 runmat-core = { workspace = true, default-features = false }
 

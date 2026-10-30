@@ -31,17 +31,32 @@ impl CredentialStore {
     }
 
     pub fn load(&self) -> AgentResult<NodeCredential> {
+        #[cfg(not(windows))]
         if !self.path.exists() {
             return Err(AgentError::NotEnrolled);
         }
+        #[cfg(windows)]
+        let _directory = runmat_filesystem::NativeFsProvider
+            .open_owner_private_directory(
+                self.path
+                    .parent()
+                    .ok_or_else(|| AgentError::UnsafeCredential("missing parent".into()))?,
+            )
+            .map_err(load_error)?;
+        #[cfg(not(windows))]
         verify_private_file(&self.path)?;
-        let bytes = std::fs::read(&self.path).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                AgentError::NotEnrolled
-            } else {
-                AgentError::Io(error)
-            }
-        })?;
+        #[cfg(not(windows))]
+        let bytes = std::fs::read(&self.path).map_err(load_error)?;
+        #[cfg(windows)]
+        let bytes = {
+            use std::io::Read as _;
+            let mut file = runmat_filesystem::NativeFsProvider
+                .open_owner_private_file(&self.path)
+                .map_err(load_error)?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            bytes
+        };
         let credential: NodeCredential = serde_json::from_slice(&bytes)?;
         validate(&credential)?;
         Ok(credential)
@@ -53,6 +68,16 @@ impl CredentialStore {
             .path
             .parent()
             .ok_or_else(|| AgentError::UnsafeCredential("missing parent".to_string()))?;
+        #[cfg(windows)]
+        let _directory =
+            runmat_filesystem::NativeFsProvider.create_owner_private_directory(parent)?;
+        #[cfg(windows)]
+        match std::fs::symlink_metadata(&self.path) {
+            Ok(_) => verify_private_file(&self.path)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(AgentError::Io(error)),
+        }
+        #[cfg(not(windows))]
         std::fs::create_dir_all(parent)?;
         #[cfg(unix)]
         {
@@ -65,6 +90,14 @@ impl CredentialStore {
         std::fs::rename(&temporary, &self.path)?;
         sync_directory(parent)?;
         verify_private_file(&self.path)
+    }
+}
+
+fn load_error(error: std::io::Error) -> AgentError {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        AgentError::NotEnrolled
+    } else {
+        AgentError::Io(error)
     }
 }
 
@@ -107,14 +140,19 @@ pub(crate) fn decode_secret(value: &str) -> AgentResult<[u8; 32]> {
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> AgentResult<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
+    #[cfg(windows)]
+    let mut file = runmat_filesystem::NativeFsProvider.create_owner_private_file_new(path)?;
+    #[cfg(not(windows))]
+    let mut file = {
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        options.open(path)?
+    };
     use std::io::Write as _;
     file.write_all(bytes)?;
     file.sync_all()?;
@@ -122,22 +160,30 @@ fn write_private(path: &Path, bytes: &[u8]) -> AgentResult<()> {
 }
 
 fn verify_private_file(path: &Path) -> AgentResult<()> {
-    let metadata = std::fs::metadata(path)?;
-    if !metadata.is_file() {
-        return Err(AgentError::UnsafeCredential(
-            "credential path is not a regular file".to_string(),
-        ));
-    }
-    #[cfg(unix)]
+    #[cfg(windows)]
     {
-        use std::os::unix::fs::PermissionsExt as _;
-        if metadata.permissions().mode() & 0o077 != 0 {
+        runmat_filesystem::NativeFsProvider.open_owner_private_file(path)?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let metadata = std::fs::metadata(path)?;
+        if !metadata.is_file() {
             return Err(AgentError::UnsafeCredential(
-                "credential file must be mode 0600".to_string(),
+                "credential path is not a regular file".to_string(),
             ));
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            if metadata.permissions().mode() & 0o077 != 0 {
+                return Err(AgentError::UnsafeCredential(
+                    "credential file must be mode 0600".to_string(),
+                ));
+            }
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(unix)]

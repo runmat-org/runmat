@@ -46,7 +46,8 @@ impl NodeControlPlane for RotationControl {
 #[tokio::test]
 async fn rotation_replaces_the_secret_and_epoch_in_one_atomic_store_write() {
     let directory = tempfile::tempdir().unwrap();
-    let store = CredentialStore::new(directory.path());
+    let state = directory.path().join("state");
+    let store = CredentialStore::new(&state);
     let identity_secret = [17; 32];
     let signer =
         runmat_execution::security::EndpointIdentitySigner::from_secret(identity_secret).unwrap();
@@ -83,6 +84,18 @@ async fn rotation_replaces_the_secret_and_epoch_in_one_atomic_store_write() {
     assert_eq!(credential.credential, "b".repeat(43));
     assert_eq!(credential.credential_epoch, 2);
     assert_eq!(store.load().unwrap(), credential);
+    #[cfg(windows)]
+    {
+        let _directory = runmat_filesystem::NativeFsProvider
+            .open_owner_private_directory(&state)
+            .unwrap();
+        let file = runmat_filesystem::NativeFsProvider
+            .open_owner_private_file(&state.join("credential.json"))
+            .unwrap();
+        runmat_filesystem::NativeFsProvider
+            .verify_owner_private_file(&file)
+            .unwrap();
+    }
 }
 
 fn inventory() -> NodeInventory {

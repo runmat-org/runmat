@@ -48,7 +48,8 @@ impl NodeControlPlane for EnrollmentControl {
 #[tokio::test]
 async fn enrollment_generates_identity_and_atomically_persists_private_credential() {
     let directory = tempfile::tempdir().unwrap();
-    let store = CredentialStore::new(directory.path());
+    let state = directory.path().join("state");
+    let store = CredentialStore::new(&state);
     let credential = enroll(
         Arc::new(EnrollmentControl),
         &store,
@@ -64,13 +65,25 @@ async fn enrollment_generates_identity_and_atomically_persists_private_credentia
     {
         use std::os::unix::fs::PermissionsExt as _;
         assert_eq!(
-            std::fs::metadata(directory.path().join("credential.json"))
+            std::fs::metadata(state.join("credential.json"))
                 .unwrap()
                 .permissions()
                 .mode()
                 & 0o777,
             0o600
         );
+    }
+    #[cfg(windows)]
+    {
+        let _directory = runmat_filesystem::NativeFsProvider
+            .open_owner_private_directory(&state)
+            .unwrap();
+        let file = runmat_filesystem::NativeFsProvider
+            .open_owner_private_file(&state.join("credential.json"))
+            .unwrap();
+        runmat_filesystem::NativeFsProvider
+            .verify_owner_private_file(&file)
+            .unwrap();
     }
 }
 
