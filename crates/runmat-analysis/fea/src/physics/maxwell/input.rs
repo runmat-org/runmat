@@ -1,7 +1,7 @@
 //! Frozen, mesh/sample-bound physical coefficients and impressed volume current.
 use super::{invalid, topology, ComplexPhasor, ComplexVector3, MaxwellError};
 use crate::results::field::{SampledVolumeFieldTopology, VolumeFieldSamplingRule};
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
@@ -84,14 +84,14 @@ impl MaxwellInput {
     /// and laws. Element law storage order is retained, while assignment is by ID.
     /// This is numerical lineage only, not a native task/publication authorization.
     pub fn identity(&self) -> Result<Digest, MaxwellError> {
-        let bytes = encode_contract(
+        // Streamed: the mesh-sized input is hashed without materializing its encoding.
+        crate::contracts::canonical_digest::canonical_contract_digest(
             b"runmat-maxwell-physical-input/v1\0",
             "maxwell-physical-input",
             self,
-            CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 64),
+            CanonicalLimits::new(0, 0, 65_536, 64),
         )
-        .map_err(invalid)?;
-        Ok(Digest::sha256(bytes))
+        .map_err(invalid)
     }
     pub fn validate_for_mesh(&self, mesh: &SolverMeshArtifact) -> Result<(), MaxwellError> {
         self.ordered_volumes(mesh)?;

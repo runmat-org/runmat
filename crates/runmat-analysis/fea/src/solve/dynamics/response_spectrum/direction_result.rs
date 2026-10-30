@@ -13,7 +13,7 @@ use super::{
 
 const DIRECTION_RESULT_PREFIX: &[u8] = b"runmat-modal-response-spectrum-direction-result\0";
 const DIRECTION_RESULT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 65_536, 24);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 65_536, 24));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -173,13 +173,12 @@ impl ModalResponseSpectrumDirectionResult {
     }
 
     fn derive_identity(&self) -> Result<ModalResponseSpectrumDirectionResultIdentity, FeaRunError> {
-        encode_contract(
+        crate::contracts::canonical_digest::canonical_contract_digest(
             DIRECTION_RESULT_PREFIX,
             "modal-response-spectrum-direction-result-identity",
             &(self.basis, &self.spectrum, &self.contribution),
             DIRECTION_RESULT_LIMITS,
         )
-        .map(Digest::sha256)
         .map(ModalResponseSpectrumDirectionResultIdentity)
         .map_err(|error| FeaRunError::Solve(error.to_string()))
     }

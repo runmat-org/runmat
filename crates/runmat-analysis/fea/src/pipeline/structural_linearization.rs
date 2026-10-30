@@ -1,4 +1,4 @@
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -19,7 +19,7 @@ pub use thermal_source::ThermalLinearizationSource;
 
 const LINEARIZATION_PREFIX: &[u8] = b"runmat-fea-structural-linearization/v3\0";
 const LINEARIZATION_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 64_000_000, 65_536, 32);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(1024 * 1024 * 1024, 64_000_000, 65_536, 32));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -341,7 +341,7 @@ impl StructuralLinearizationArtifact {
     fn derive_identity(
         &self,
     ) -> Result<StructuralLinearizationIdentity, StructuralLinearizationError> {
-        encode_contract(
+        crate::contracts::canonical_digest::canonical_contract_digest(
             LINEARIZATION_PREFIX,
             "analysis.fea.structural-linearization",
             &(
@@ -357,7 +357,6 @@ impl StructuralLinearizationArtifact {
             ),
             LINEARIZATION_LIMITS,
         )
-        .map(Digest::sha256)
         .map(StructuralLinearizationIdentity)
         .map_err(|error| StructuralLinearizationError::Identity(error.to_string()))
     }

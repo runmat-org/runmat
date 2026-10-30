@@ -331,3 +331,50 @@ fn scaled_sum_matches_term_by_term_accumulation_for_every_thread_count() {
         Err(RealSparseMatrixError::NonFiniteValue { .. })
     ));
 }
+
+fn row_matrix(columns: usize) -> RealSparseMatrix {
+    RealSparseMatrix::try_new(
+        SparsePattern::try_new(1, columns as u64, vec![0, columns as u64], (0..columns as u64).collect())
+            .unwrap(),
+        (0..columns).map(|i| i as f64 * 0.5).collect(),
+        OperatorRole::Stiffness,
+        MatrixProperties::GENERAL,
+        Vec::new(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn streamed_values_identity_is_the_digest_of_the_canonical_encoding() {
+    let matrix = row_matrix(1000);
+    let encoded = runmat_canonical_codec::encode_contract(
+        VALUES_IDENTITY_PREFIX,
+        VALUES_IDENTITY_DOMAIN,
+        &(
+            matrix.pattern.identity().unwrap(),
+            &matrix.values,
+            matrix.scalar_domain,
+            matrix.precision,
+            matrix.role,
+            matrix.properties,
+            &matrix.contributions,
+        ),
+        VALUES_IDENTITY_LIMITS,
+    )
+    .unwrap();
+    assert_eq!(matrix.values_identity().unwrap(), Digest::sha256(encoded));
+}
+
+/// About 1.1 GB resident: run explicitly (`--ignored`). A values contract whose encoding
+/// exceeds the former fixed 512 MiB cap has pattern, values and numerical identities.
+#[test]
+#[ignore]
+fn sparse_values_identity_over_512_mib_is_admitted() {
+    let columns = (512 * 1024 * 1024) / 8 + 1;
+    let matrix = row_matrix(columns);
+    assert!(matrix.values.len() * 8 > 512 * 1024 * 1024);
+    let values = matrix.values_identity().unwrap();
+    let numerical = matrix.numerical_identity().unwrap();
+    assert_ne!(values, numerical);
+    assert_ne!(matrix.pattern_identity().unwrap(), values);
+}
