@@ -119,9 +119,16 @@ fn trigonometric_provider_routes_declare_suspension_and_fixed_output_errors() {
         &DEG2RAD_CATALOG_ENTRY,
         &RAD2DEG_CATALOG_ENTRY,
     ] {
+        // sin is reviewed as argument-local numerical suspension (signal generators rely on
+        // it); the rest of the family still declares ordinary suspension.
+        let expected = if entry.identity.name == "sin" {
+            BuiltinAsyncBehavior::MaySuspendLocally
+        } else {
+            BuiltinAsyncBehavior::MaySuspend
+        };
         assert_eq!(
             entry.contract.async_behavior,
-            BuiltinAsyncBehavior::MaySuspend,
+            expected,
             "{}",
             entry.identity.name
         );
