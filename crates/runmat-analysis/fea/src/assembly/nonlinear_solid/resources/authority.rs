@@ -13,7 +13,7 @@ use runmat_canonical_codec::{
 fn encoding_workspace<T: Serialize>(value: &T) -> Result<u64, NonlinearSolidError> {
     Ok(profile_canonical_encoding(
         value,
-        CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
+        crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 4096, 64)),
     )
     .map_err(|e| invalid(&e.to_string()))?
     .resident_workspace_bytes_estimate)

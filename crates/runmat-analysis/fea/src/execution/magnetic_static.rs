@@ -75,18 +75,34 @@ impl MagnetostaticWorkload {
         &self,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<AnalysisRunIdentity> {
+        self.formulation_with_sampling(mesh, None)
+    }
+    /// As [`Self::formulation`], resolving native selections on `sampling` when the caller
+    /// already holds the mesh's validated layout (no second projection is derived).
+    pub(crate) fn formulation_with_sampling(
+        &self,
+        mesh: &SolverMeshArtifact,
+        sampling: Option<&crate::results::field::SampledVolumeFieldTopology>,
+    ) -> AnalysisExecutionResult<AnalysisRunIdentity> {
         self.validate()?;
         // Resolve authored native selections before any numerical assembly/solve.
         // Admission must not defer an invalid quantity or selector until publication.
         if !self.model.sequence.steps[0].observations.is_empty() {
-            let sampling = crate::results::field::SampledVolumeFieldTopology::derive(
-                mesh,
-                crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen,
-            )
-            .map_err(invalid)?;
+            let derived;
+            let sampling = match sampling {
+                Some(sampling) => sampling,
+                None => {
+                    derived = crate::results::field::SampledVolumeFieldTopology::derive(
+                        mesh,
+                        crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen,
+                    )
+                    .map_err(invalid)?;
+                    &derived
+                }
+            };
             crate::results::observation::resolve_sampled_observation_plan(
                 &self.model.sequence.steps[0],
-                &sampling,
+                sampling,
                 mesh,
                 &magnetic_native_field_definition_inventory()?,
                 crate::results::observation::ObservationLimits::for_step(
@@ -102,15 +118,30 @@ impl MagnetostaticWorkload {
         &self,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<MagnetostaticSolverResult> {
-        let formulation = self.formulation(mesh)?;
-        let response = crate::physics::magnetic::solve_canonical_static(
+        let input = crate::physics::magnetic::compile_canonical_input(
             &self.model,
             mesh,
             self.step_id.as_str(),
             self.relative_residual_target,
         )
         .map_err(invalid)?;
-        MagnetostaticSolverResult::new(self, mesh, formulation, response)
+        let sampling = crate::results::field::SampledVolumeFieldTopology::derive_from_projection(
+            mesh,
+            &input.projection,
+            crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen,
+        )
+        .map_err(invalid)?;
+        let formulation = self.formulation_with_sampling(mesh, Some(&sampling))?;
+        let response = crate::physics::magnetic::solve_grounded_volume(
+            &input.projection,
+            &input.grounded_faces,
+            &input.prescribed_potential,
+            &input.volumes,
+            self.relative_residual_target,
+        )
+        .map_err(invalid)?;
+        drop(input);
+        MagnetostaticSolverResult::new(self, mesh, formulation, sampling, response)
     }
 }
 

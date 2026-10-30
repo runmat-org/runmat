@@ -41,9 +41,9 @@ pub(super) fn preparation_from(
             ),
         ];
     }
-    // The fixture solve supplies no spatial-discretization evidence, so its report is
-    // indeterminate. Lifecycle and replay tests publish that labeled result explicitly; a study
-    // with the default policy would stop at the accuracy gate instead.
+    // The receipt answers every mandatory criterion of the fixture's plan (Newton closure and the
+    // achieved tangent-solve residual), so its report is satisfied; an unavailable criterion
+    // would still publish here, labeled indeterminate, under this explicit policy.
     workload.model.sequence.steps[0]
         .accuracy
         .unavailable_evidence = runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;

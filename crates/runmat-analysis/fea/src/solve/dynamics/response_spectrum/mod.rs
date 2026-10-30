@@ -45,7 +45,7 @@ use validation::{contribution_is_valid, vectors_close};
 
 const RESULT_PREFIX: &[u8] = b"runmat-modal-response-spectrum-result\0";
 const RESULT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 65_536, 24);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 65_536, 24));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -321,7 +321,7 @@ impl ModalResponseSpectrumResult {
     }
 
     fn derive_identity(&self) -> Result<ModalResponseSpectrumResultIdentity, FeaRunError> {
-        encode_contract(
+        crate::contracts::canonical_digest::canonical_contract_digest(
             RESULT_PREFIX,
             "modal-response-spectrum-result-identity",
             &(
@@ -334,7 +334,6 @@ impl ModalResponseSpectrumResult {
             ),
             RESULT_LIMITS,
         )
-        .map(Digest::sha256)
         .map(ModalResponseSpectrumResultIdentity)
         .map_err(|error| FeaRunError::Solve(error.to_string()))
     }

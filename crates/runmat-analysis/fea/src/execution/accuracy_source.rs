@@ -214,6 +214,13 @@ impl AccuracySourceReceipt {
                     Some((receipt.receipt().accepted_relative_residual_maximum.max(receipt.receipt().accepted_relative_increment_maximum),
                         "maximum accepted original free-equilibrium relative residual and undamped pending Newton correction normalized by offset-free current/committed displacement; nonlinear closure only, not mesh/load-step accuracy or constitutive qualification"))
                 }
+                Self::NonlinearSolid(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound => {
+                    Some((receipt.receipt().maximum_linear_relative_residual,
+                        "maximum achieved relative residual of every completed tangent (Newton correction) solve in the original trajectory, including cutback trials, in the solved constraint-reduced equation space; inner linear equation satisfaction only, separate from Newton equilibrium closure and not mesh/load-step accuracy"))
+                }
                 Self::FluidSteady(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic

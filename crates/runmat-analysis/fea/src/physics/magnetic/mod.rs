@@ -6,6 +6,7 @@ mod boundary;
 mod input;
 mod plan;
 pub use plan::MagneticSystemPlan;
+pub(crate) use plan::DerivedMagneticSystem;
 pub(crate) mod resources;
 mod response;
 #[cfg(test)]
@@ -14,7 +15,7 @@ pub(crate) mod test_support;
 mod tests;
 
 use crate::topology::AnalysisProjection;
-pub(crate) use input::compile_canonical_input;
+pub(crate) use input::{compile_canonical_input, CompiledMagneticInput};
 pub(crate) fn validate_projection_envelope(
     projection: &AnalysisProjection,
     grounded_faces: &[StableDigest],
@@ -143,6 +144,31 @@ pub fn solve_grounded_volume_with_plan(
             volumes,
             prescribed_potential,
             plan,
+        )?,
+        residual_target,
+    )
+}
+
+/// Execute on a system derived in this process from `projection` (see
+/// [`MagneticSystemPlan::derive_with_spaces`]); the topology is not derived again.
+pub(crate) fn solve_grounded_volume_derived(
+    projection: &AnalysisProjection,
+    volumes: &[MagneticVolumeData],
+    prescribed_potential: &[PrescribedVectorPotential],
+    residual_target: f64,
+    derived: DerivedMagneticSystem,
+) -> Result<MagnetostaticResponse, MagnetostaticError> {
+    if !residual_target.is_finite() || residual_target <= 0.0 || residual_target >= 1.0 {
+        return Err(MagnetostaticError::InvalidInput(
+            "relative residual target".into(),
+        ));
+    }
+    response::solve(
+        assembly::MagneticAssembly::assemble_derived(
+            projection,
+            volumes,
+            prescribed_potential,
+            derived,
         )?,
         residual_target,
     )

@@ -9,7 +9,7 @@ use runmat_canonical_codec::decode_contract;
 use serde::{Deserialize, Serialize};
 
 pub const NONLINEAR_SOLID_RECEIPT_MAX_ENCODED_BYTES: u64 = 64 * 1024;
-const PREFIX: &[u8] = b"runmat-nonlinear-solid-receipt/v2\0";
+const PREFIX: &[u8] = b"runmat-nonlinear-solid-receipt/v3\0";
 const RECEIPT_LIMITS: CanonicalLimits = CanonicalLimits::new(
     NONLINEAR_SOLID_RECEIPT_MAX_ENCODED_BYTES as usize,
     4096,
@@ -37,6 +37,9 @@ pub struct NonlinearSolidNumericalReceipt {
     pub relative_increment_tolerance: f64,
     pub relative_residual_tolerance: f64,
     pub linear_relative_tolerance: f64,
+    /// Largest achieved relative residual of any completed tangent solve in the original
+    /// trajectory: the algebraic (inner linear) error, separate from Newton closure.
+    pub maximum_linear_relative_residual: f64,
     pub accumulated_plastic_dissipation_j: f64,
     pub cumulative_work: NonlinearLoadWork,
 }
@@ -102,6 +105,7 @@ impl NonlinearSolidNumericalReceiptArtifact {
             accepted_relative_increment_maximum: block.checkpoint.maximum_relative_increment(),
             relative_increment_tolerance: workload.controls.tolerance,
             linear_relative_tolerance: workload.controls.linear_tolerance,
+            maximum_linear_relative_residual: block.checkpoint.maximum_linear_relative_residual(),
             accumulated_plastic_dissipation_j: block
                 .result
                 .accepted_state
@@ -109,7 +113,7 @@ impl NonlinearSolidNumericalReceiptArtifact {
             cumulative_work: block.checkpoint.work(),
         };
         let artifact = Self {
-            schema_version: 2,
+            schema_version: 3,
             identity: NumericalReceiptIdentity::derive(
                 "nonlinear-solid-numerical-receipt",
                 &(source_workload, block.identity, &receipt),
@@ -139,7 +143,7 @@ impl NonlinearSolidNumericalReceiptArtifact {
     }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let r = &self.receipt;
-        if self.schema_version != 2
+        if self.schema_version != 3
             || self.source_result
                 != crate::execution::SolverResultIdentity::new(
                     self.source_workload,
@@ -159,6 +163,8 @@ impl NonlinearSolidNumericalReceiptArtifact {
             || !r.linear_relative_tolerance.is_finite()
             || r.linear_relative_tolerance <= 0.0
             || r.linear_relative_tolerance >= 1.0
+            || !r.maximum_linear_relative_residual.is_finite()
+            || r.maximum_linear_relative_residual < 0.0
             || !r.accepted_relative_residual_maximum.is_finite()
             || r.accepted_relative_residual_maximum < 0.0
             || r.accepted_relative_residual_maximum > r.relative_residual_tolerance

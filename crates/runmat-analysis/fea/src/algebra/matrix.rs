@@ -267,7 +267,8 @@ impl RealSparseMatrix {
     }
     /// Stable revision identity for values and typed numerical metadata on this pattern.
     pub fn values_identity(&self) -> Result<Digest, CanonicalCodecError> {
-        runmat_canonical_codec::encode_contract(
+        // Streamed: a mesh-sized operator is hashed without materializing its encoding.
+        crate::contracts::canonical_digest::canonical_contract_digest(
             VALUES_IDENTITY_PREFIX,
             VALUES_IDENTITY_DOMAIN,
             &(
@@ -281,7 +282,6 @@ impl RealSparseMatrix {
             ),
             VALUES_IDENTITY_LIMITS,
         )
-        .map(Digest::sha256)
     }
     /// Stable identity for the executable numerical matrix, excluding contribution provenance.
     ///
@@ -289,7 +289,8 @@ impl RealSparseMatrix {
     /// coefficients but distinct load provenance. Changes to topology, coefficients, scalar
     /// representation, role, or declared properties still invalidate the identity.
     pub fn numerical_identity(&self) -> Result<Digest, CanonicalCodecError> {
-        runmat_canonical_codec::encode_contract(
+        // Streamed: a mesh-sized operator is hashed without materializing its encoding.
+        crate::contracts::canonical_digest::canonical_contract_digest(
             NUMERICAL_IDENTITY_PREFIX,
             NUMERICAL_IDENTITY_DOMAIN,
             &(
@@ -302,7 +303,6 @@ impl RealSparseMatrix {
             ),
             VALUES_IDENTITY_LIMITS,
         )
-        .map(Digest::sha256)
     }
     pub fn rows(&self) -> usize {
         self.pattern.rows()

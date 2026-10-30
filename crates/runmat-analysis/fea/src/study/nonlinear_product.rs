@@ -70,6 +70,18 @@ pub fn plan_nonlinear_solid_study_product(
                 controls.tolerance = controls.tolerance.min(target);
             }
         }
+        // The receipt certifies achieved tangent-solve residuals against this target: solve to it.
+        if criterion.contribution == ErrorContributionKind::Algebraic
+            && criterion.target == AccuracyTarget::GlobalEquilibrium
+            && criterion.evidence == RequiredAccuracyEvidence::ResidualBound
+        {
+            if let AccuracyTolerance::Relative(target) = criterion.tolerance {
+                if !target.is_finite() || target <= 0.0 || target >= 1.0 {
+                    return Err(NonlinearSolidStudyPlanningError::InvalidTarget);
+                }
+                controls.linear_tolerance = controls.linear_tolerance.min(target);
+            }
+        }
     }
     let workload = NonlinearSolidWorkload {
         controls,

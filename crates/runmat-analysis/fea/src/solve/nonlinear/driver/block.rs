@@ -157,7 +157,7 @@ pub(crate) fn run_nonlinear_load_block(
     let mut prefix_work = super::super::solid::SolidAttemptWork::default();
     let mut cursor = match input {
         NonlinearLoadBlockStart::Fresh => NonlinearLoadContinuation {
-            schema_version: 3,
+            schema_version: 4,
             controller_scope: scope,
             content_digest: Digest::sha256([]),
             original_start: start,
@@ -175,6 +175,7 @@ pub(crate) fn run_nonlinear_load_block(
             work: NonlinearLoadWork::default(),
             maximum_relative_residual: 0.0,
             maximum_relative_increment: 0.0,
+            maximum_linear_relative_residual: 0.0,
         },
         NonlinearLoadBlockStart::Continue {
             continuation,
@@ -193,6 +194,9 @@ pub(crate) fn run_nonlinear_load_block(
         }
     };
     cursor.work.linear_solves = add(cursor.work.linear_solves, prefix_work.linear_solves)?;
+    cursor.maximum_linear_relative_residual = cursor
+        .maximum_linear_relative_residual
+        .max(prefix_work.maximum_linear_relative_residual);
     // Fresh evaluates zero state above; Continue additionally revalidates its physical
     // prefix. Output initialization always uses original accepted point history.
     cursor.work.controller_evaluations = add(cursor.work.controller_evaluations, 2)?;
@@ -260,6 +264,9 @@ pub(crate) fn run_nonlinear_load_block(
         cursor.maximum_relative_increment = cursor
             .maximum_relative_increment
             .max(increment.relative_increment);
+        cursor.maximum_linear_relative_residual = cursor
+            .maximum_linear_relative_residual
+            .max(increment.attempted_work.maximum_linear_relative_residual);
         output::append_increment(&mut result, &increment, coupling.map(|c| c.operator))?;
         cursor.accepted_state = increment.state;
         if cursor.accepted_state.load_factor().to_bits() == target.to_bits() {
@@ -272,6 +279,9 @@ pub(crate) fn run_nonlinear_load_block(
         .validate_accepted_record(&cursor.accepted_state, &mut terminal_work)
         .map_err(map_error)?;
     cursor.work.linear_solves = add(cursor.work.linear_solves, terminal_work.linear_solves)?;
+    cursor.maximum_linear_relative_residual = cursor
+        .maximum_linear_relative_residual
+        .max(terminal_work.maximum_linear_relative_residual);
     cursor.work.controller_evaluations = add(cursor.work.controller_evaluations, 1)?;
     cursor
         .work
