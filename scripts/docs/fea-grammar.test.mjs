@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { REGISTRIES, registryNames } from "./registry-coverage.mjs";
-import { feaGrammar, tokenizeLine, vocabulary } from "./fea-grammar.mjs";
+import { readFileSync } from "node:fs";
+import { COMMITTED_GRAMMAR, feaGrammar, grammarText, tokenizeLine, vocabulary } from "./fea-grammar.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -39,4 +40,8 @@ test("reference paths color their compiler segments and leave declared names pla
     assert.equal(scope("displacement"), "constant.language.fea");
     assert.equal(scope("max"), "support.function.fea");
     assert.equal(scope("beam"), null);
+});
+
+test("the committed grammar the Rust hosts embed matches the compiler tables", () => {
+    assert.equal(readFileSync(join(repository, COMMITTED_GRAMMAR), "utf8"), grammarText(repository), `regenerate with: node scripts/docs/fea-grammar.mjs --write`);
 });

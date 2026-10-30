@@ -9,6 +9,7 @@
 //   types, units        the registries in registry-coverage.mjs and ledger.mjs (SURFACES)
 //
 //   node scripts/docs/fea-grammar.mjs [--out <file>]   # write the grammar JSON (default: stdout)
+//   node scripts/docs/fea-grammar.mjs --write          # refresh the committed copy the Rust hosts embed
 //
 // The docs export writes it to fea/fea.tmLanguage.json in the docs artifact; the website loads it
 // from there. `lintFeaHighlighting` checks every ```fea block in the docs tokenizes with no known
@@ -77,6 +78,12 @@ export function feaGrammar(source) {
             { name: "keyword.operator.fea", match: "[=:;]" },
         ],
         repository: {},
+        // The same word classes as plain lists, for hosts that classify lexer tokens instead of
+        // running TextMate regexes (runmat-lsp semantic tokens, Desktop). Ignored by TextMate.
+        vocabulary: {
+            scopes: SCOPE_ORDER.filter(scope => byScope.has(scope)).map(scope => ({ scope, words: [...byScope.get(scope)].sort() })),
+            units: { scope: "support.type.unit.fea", words: [...units].sort() },
+        },
     };
 }
 
@@ -142,10 +149,18 @@ export function knownWords(source) {
     return new Set(vocabulary(source).flatMap(group => group.names));
 }
 
+/** The committed copy the Rust hosts embed (runmat-fea-syntax `FEA_TEXTMATE_GRAMMAR`). */
+export const COMMITTED_GRAMMAR = "crates/runmat-fea-syntax/grammar/fea.tmLanguage.json";
+
+export function grammarText(source) {
+    return JSON.stringify(feaGrammar(source), null, 2) + "\n";
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const source = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-    const text = JSON.stringify(feaGrammar(source), null, 2) + "\n";
+    const text = grammarText(source);
     const out = process.argv.indexOf("--out");
-    if (out > 0) writeFileSync(process.argv[out + 1], text);
+    if (process.argv.includes("--write")) writeFileSync(join(source, COMMITTED_GRAMMAR), text);
+    else if (out > 0) writeFileSync(process.argv[out + 1], text);
     else process.stdout.write(text);
 }
