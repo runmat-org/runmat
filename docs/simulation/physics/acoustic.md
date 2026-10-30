@@ -155,4 +155,4 @@ $$
 
 See [acoustic constraints](../constraints/acoustic), [acoustic loads](../loads/acoustic),
 [fluid–structure interaction](./fluid-structure-interaction), [outputs](../language/outputs-fields-and-observations),
-and [current status](../status).
+and [current status](../validation/status.md).

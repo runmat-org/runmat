@@ -9,7 +9,7 @@ A finite-element result depends on the mesh. A convergence study solves the same
 
 This guide refines the cantilever from the [linear static guide](./linear-static.md) and decides when its mesh is fine enough.
 
-## 1. The engineering question
+## Is the cantilever mesh fine enough?
 
 For the cantilever, is the mesh fine enough that:
 
@@ -18,15 +18,15 @@ For the cantilever, is the mesh fine enough that:
 
 <!-- fea:example:cantilever-static:setup -->
 
-## The physics you already know
+## How it's modeled: discretization error and singular points
 
 Each element approximates the displacement with a simple polynomial: linear in a Tet4, quadratic in a Tet10. Over a smooth field, smaller elements follow the true shape more closely, the way more segments approximate a curve better, and the answer settles toward one value. Quadratic elements settle much faster per node, because a quadratic displacement already carries the linear variation of bending strain through a beam's depth.
 
 The exception is a singular point. Linear elasticity predicts unbounded stress at a sharp re-entrant corner or where a perfectly rigid support meets a free surface. A smaller element there samples closer to that point and reports a larger value, so the peak keeps moving. The real part has a fillet radius or a support with some give, and its stress is finite; the singularity belongs to the idealized model.
 
-## 2. Model it
+## Model
 
-The model is the [linear static cantilever](./linear-static.md#2-model-it) unchanged: a 1 m beam with a 100 mm × 100 mm section, fixed at x = 0, with a 1,000 N downward traction resultant on the x = 1 m face. Only the mesh changes between runs, so any change in a result comes from the mesh alone.
+The model is the [linear static cantilever](./linear-static.md#model-the-beam) unchanged: a 1 m beam with a 100 mm × 100 mm section, fixed at x = 0, with a 1,000 N downward traction resultant on the x = 1 m face. Only the mesh changes between runs, so any change in a result comes from the mesh alone.
 
 Add outputs for the quantities being compared, so each run reports them directly:
 
@@ -35,7 +35,7 @@ output top_stress = interpolate(analysis.static.field.node.von_mises_stress, at 
 output support_reaction = resultant(analysis.static.field.node.reaction_force, over = geometry.beam.region.fixed_end)
 ```
 
-## 3. Mesh it
+## Mesh sequence
 
 Step the target size down from 150 mm to 25 mm on quadratic tetrahedra (Tet10), and run a separate pair on linear tetrahedra (Tet4):
 
@@ -53,7 +53,7 @@ mesh beam on geometry.beam {
 
 A target size is a request for an edge length, not an element count. Surface curvature, feature size and quality limits decide the final mesh, so compare node counts, not requests. On this beam, 75 mm gives almost the same mesh as 150 mm (2,758 nodes against 2,727). Halve the size between steps; a step that barely changes the node count tells you little.
 
-## 4. Run it
+## Run
 
 Run each file, or declare the target size as a study input and run them as a [sweep](../language/inputs-sweeps-and-cases.md):
 
@@ -65,7 +65,7 @@ The `--json` output carries the node count and each output value, so a script ca
 
 <!-- fea:example:cantilever-static:edit -->
 
-## 5. Read the results
+## Results
 
 | Tet10 target size | Nodes | Tip deflection | Change vs 25 mm | Top-surface stress at x = 100 mm | Change vs 25 mm | Largest element stress |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -92,7 +92,7 @@ Read the table column by column:
 
 Linear tetrahedra have constant strain in each element, so they cannot bend; a coarse Tet4 mesh locks and is far too stiff. The coarsest Tet10 mesh is within 0.4 % of the finest. For bending-dominated parts, change the element order before spending nodes on a finer Tet4 mesh.
 
-## 6. Decide whether to refine
+## Deciding when to stop
 
 - **Tip deflection** changes by 0.32 % from 150 mm to 25 mm, inside the 1 % criterion. The 150 mm mesh is fine enough for deflection.
 - **Stress at x = 100 mm** changes by 0.38 %, inside the 2 % criterion. The 150 mm mesh is fine enough for this stress.
@@ -100,7 +100,7 @@ Linear tetrahedra have constant strain in each element, so they cannot bend; a c
 
 The general practice: pick the quantity the decision rests on, refine until it changes by less than a tolerance well inside the design margin, and confirm that the quantity is not at a singular point. Spend refinement where it changes the answer: a [`refine` block](../meshing.md) near a fillet or a hole is cheaper than a finer mesh everywhere.
 
-## 7. Try a change
+## Try a change
 
 - **Refine only near the support** with a `refine` block on the fixed face. The deflection and the stress at x = 100 mm should not change; the largest element stress at the edge will.
 - **Run Tet4 at 25 mm** and compare its deflection and node count with the Tet10 runs: Tet4 needs many more nodes for the same accuracy in bending.

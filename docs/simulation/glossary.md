@@ -75,4 +75,4 @@ Each term is used in the docs exactly as defined here. Terms written in `code` a
 
 **CPU reference path.** The CPU execution provider, reported as `cpu_reference`. A study that asks for a GPU runs here when the GPU path can't run it, and reports a fallback diagnostic. `accelerators = required` makes such a study fail instead.
 
-**Not yet in the current release.** A marker on a feature the docs describe but the current release does not include yet. Each marker names an id listed on the [release status](./release-status.md) page.
+**Not yet in the current release.** A marker on a feature the docs describe but the current release does not include yet. Each marker names an id listed on the [release status](./validation/status.md) page.

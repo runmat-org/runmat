@@ -174,4 +174,4 @@ Resolve the skin depth $\delta=\sqrt{2/(\omega\mu\sigma)}$ with several elements
 
 See [electromagnetic constraints](../constraints/electromagnetic),
 [electromagnetic loads](../loads/electromagnetic), [electrothermal analysis](./electrothermal),
-[typed units](../language/types-units-and-expressions), and [current status](../status).
+[typed units](../language/types-units-and-expressions), and [current status](../validation/status.md).

@@ -9,7 +9,7 @@ A modal analysis finds the natural frequencies of a supported structure and the 
 
 This guide takes one part from the question to a design decision.
 
-## 1. The engineering question
+## Keeping a tuning fork clear of a 0–250 Hz band
 
 A steel tuning fork is clamped at the bottom of its stem and mounted on equipment that vibrates anywhere from 0 to 250 Hz.
 
@@ -18,7 +18,7 @@ A steel tuning fork is clamped at the bottom of its stem and mounted on equipmen
 
 <!-- fea:example:tuning-fork-modal:setup -->
 
-## The physics you already know
+## How it's modeled: free vibration of a cantilever
 
 A mass on a spring vibrates at $f = \frac{1}{2\pi}\sqrt{k/m}$: stiffer means higher, heavier means lower. A uniform cantilever, such as one tine, has a first bending frequency of
 
@@ -36,7 +36,7 @@ $$
 
 Each solution is a mode: one natural frequency and its shape. This is the spring–mass equation with matrices in place of numbers. The [structural physics reference](../physics/structural.md) covers the eigen solver and the mass matrix.
 
-## 2. Model it
+## Model the fork
 
 ### Geometry
 
@@ -80,7 +80,7 @@ model supported_fork {
 }
 ```
 
-## 3. Mesh it
+## Mesh
 
 Use quadratic tetrahedra (Tet10): mode shapes are bending shapes, and linear tetrahedra are too stiff in bending, which pushes frequencies up. The 30 mm target size is larger than the fork's features, so the 6 mm tines and the 0.1 mm surface deviation set the actual element size; the mesh has 11,144 nodes.
 
@@ -94,7 +94,7 @@ mesh fork on geometry.fork {
 }
 ```
 
-## 4. Run it
+## Run
 
 The analysis requests the number of modes and keeps the modal basis for later response steps.
 
@@ -121,7 +121,7 @@ runmat run tuning-fork-modal.fea
 
 `run` meshes the fork, extracts the requested modes and publishes the frequencies and mode shapes. Read them in `.m` code with `fea.results(runId, "ModeIndices", [1 2])`; see [get started](../get-started.md#read-results-in-m-code).
 
-## 5. Read the results
+## Results
 
 ### Mode 1
 
@@ -149,11 +149,11 @@ Three habits help when reading modes:
 
 The first mode is 46 % above the top of the band, well clear. If the band reached 330 Hz, the margin would fall to 11 %, and a stiffer stem or a shorter tine would be the design response.
 
-## 6. Decide whether to refine
+## Refining the mesh
 
 A frequency is mesh-dependent like any result, and a coarse mesh is too stiff, so frequencies fall slightly as the mesh is refined. Before relying on a margin, rerun with a smaller `target_size` and confirm that the first frequency changes by much less than the margin. A 46 % margin tolerates a lot; an 11 % margin deserves a refinement run and a closer look at the support stiffness. The [mesh refinement guide](./mesh-refinement.md) walks through a refinement sequence.
 
-## 7. Try a change
+## Try a change
 
 - **Use aluminum** (E = 68.9 GPa, ρ = 2,700 kg/m³). The ratio E/ρ is almost the same as steel's, so the frequencies barely change: frequency scales with $\sqrt{E/\rho}$ when only the material changes.
 - **Request more modes** (`modes = 10`) to see the next bending and twisting patterns and how far above the band they lie.
@@ -171,4 +171,4 @@ A retained modal basis feeds the modal-superposition procedures: harmonic respon
 
 - [Linear static analysis](./linear-static.md): deflection, stress and reactions under load.
 - [Structural physics reference](../physics/structural.md): the eigenproblem, mass matrix and solver.
-- [Modal validation](../validation/modal.md): how frequencies and mode bases are checked.
+- [Modal validation](../validation/structural.md): how frequencies and mode bases are checked.

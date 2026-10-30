@@ -1,6 +1,6 @@
-//! Planned constructs that `runmat check` rejects with their pending id. The ids are the keys of
-//! docs/simulation/pending-features.json and the release-status page, so a diagnostic, the docs
-//! and the RunMat agent name a planned feature the same way. Diagnostics append
+//! Planned constructs that `runmat check` rejects with their pending id. The ids are pending rows
+//! of the capability ledger (docs/simulation/ledger.json), which owns their status, so a
+//! diagnostic, the docs and the RunMat agent name a planned feature the same way. Diagnostics append
 //! [`marker`] to the rule's own message.
 
 pub const GEOMETRY_SELECT_PREDICATE: &str = "geometry.select.predicate";
@@ -122,8 +122,9 @@ pub fn material_member(name: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    /// The ids this crate reports; each must be a key of docs/simulation/pending-features.json
-    /// (`language.keyword-names` is reported by the parser in runmat-fea-syntax).
+    /// The ids this crate reports; each must be a pending row of docs/simulation/ledger.json
+    /// (`language.keyword-names` is reported by the parser in runmat-fea-syntax). The docs lint
+    /// checks the same for every crate.
     #[test]
     fn reported_ids_are_the_registry_keys() {
         let ids = [
@@ -144,15 +145,17 @@ mod tests {
             super::PLASTIC_LAW_IDENTIFIER,
             super::OUTPUT_MODE_LOCATION,
         ];
-        let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../docs/simulation/pending-features.json");
-        // The registry lands with the docs rails; until then only the id shape is checked.
-        let text = std::fs::read_to_string(registry).unwrap_or_default();
+        let ledger = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../docs/simulation/ledger.json");
+        let ledger: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(ledger).expect("ledger.json"))
+                .expect("ledger.json is JSON");
+        let rows = ledger["capabilities"].as_array().expect("ledger capabilities");
         for id in ids {
             assert!(id.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '-' || c == '_'));
-            if !text.is_empty() {
-                assert!(text.contains(&format!("\"{id}\"")), "{id} missing from pending-features.json");
-            }
+            let row = rows.iter().find(|row| row["id"] == id);
+            assert!(row.is_some(), "{id} is not a ledger capability");
+            assert_eq!(row.unwrap()["status"], "pending", "{id} is not pending in the ledger");
         }
     }
 }

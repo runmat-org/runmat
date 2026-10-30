@@ -4,7 +4,7 @@ use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
 /// A study that uses a planned construct fails `check` with that construct's pending id, the
-/// same key docs/simulation/pending-features.json and the release-status page carry.
+/// same key the capability ledger (docs/simulation/ledger.json) and the Status page carry.
 const BASE: &str = r#"
 geometry part {
     construct {

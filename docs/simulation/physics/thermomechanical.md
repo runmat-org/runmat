@@ -822,4 +822,4 @@ $\Delta L/L=\alpha\Delta T$ and the fully restrained one-dimensional limit
 $\sigma\approx-E\alpha\Delta T$ where those assumptions apply.
 
 See [heat transfer](./thermal), [structural analysis](./structural),
-[structural constraints](../constraints/structural), and [current status](../status).
+[structural constraints](../constraints/structural), and [current status](../validation/status.md).

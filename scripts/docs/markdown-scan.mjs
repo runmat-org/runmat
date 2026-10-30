@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 /** Every Markdown file under `root`, as paths relative to `root`, sorted. `examples/` holds study packages, not pages. */
-export function markdownFiles(root, { skip = ["examples", ".artifacts"] } = {}) {
+export function markdownFiles(root, { skip = ["examples", ".artifacts", "cases"] } = {}) {
     const files = [];
     (function walk(dir) {
         for (const name of readdirSync(dir).sort()) {

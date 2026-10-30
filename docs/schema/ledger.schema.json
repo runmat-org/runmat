@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RunMat simulation capability ledger",
+  "description": "The one source of truth for what the RunMat simulation system can do in the current release, what is planned, the requirements each capability answers to, how it is verified and which docs describe it. Generated from it: the compiler's ANALYSIS_IDENTITIES (crates/runmat-analysis/core/build.rs), the qualification register (crates/runmat-analysis/qualification/build.rs), the docs' 'not yet in the current release' flags, Validation → Status and the per-family Validation pages (scripts/docs/generate-pages.mjs).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "about", "capabilities", "cases", "claims", "requirements"],
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*(?:\\.[a-z0-9]+(?:[-_][a-z0-9]+)*)+$"
+    },
+    "area": {
+      "enum": ["structural", "thermal", "electromagnetic", "acoustic", "fluid", "thermomechanical", "electrothermal", "conjugate-heat-transfer", "fluid-structure-interaction", "language", "geometry", "meshing", "execution", "results", "tooling"]
+    },
+    "release": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "docPath": { "type": "string", "pattern": "^[a-z0-9][a-z0-9/_.-]*\\.md$", "description": "Path under docs/simulation." },
+    "strings": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "envelopeBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formulations", "meshes", "executions"],
+      "description": "The ordered cross product formulations × meshes × executions.",
+      "properties": {
+        "formulations": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "meshes": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "executions": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    }
+  },
+  "properties": {
+    "schema_version": { "const": 1 },
+    "release": { "$ref": "#/definitions/release", "description": "The release this ledger describes; matches website/lib/release.ts CURRENT_RELEASE." },
+    "about": { "type": "string" },
+    "capabilities": {
+      "type": "array",
+      "description": "One row per capability: a family × procedure, a load or constraint, an output, a language feature, an execution or tooling feature. Rows with `identity` generate ANALYSIS_IDENTITIES in ledger order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "kind", "area", "status", "requirements", "verification", "docs"],
+        "properties": {
+          "id": { "$ref": "#/definitions/id", "description": "Stable dotted key. For a pending row it is the pending id that docs flags, `runmat check` diagnostics and the agent share." },
+          "title": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["procedure", "language", "load", "constraint", "interface", "material", "output", "meshing", "execution", "builtin", "geometry", "tooling"] },
+          "area": { "$ref": "#/definitions/area" },
+          "identity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["family", "procedure", "solution_space"],
+            "properties": {
+              "family": { "enum": ["structural", "thermal", "electromagnetic", "acoustic", "fluid", "thermomechanical", "electrothermal", "conjugate_heat_transfer", "fluid_structure_interaction"] },
+              "procedure": { "enum": ["static", "modal", "prestressed_modal", "buckling", "transient", "harmonic", "prestressed_harmonic", "response_spectrum", "random_response", "nonlinear", "adaptive"] },
+              "solution_space": { "enum": ["direct", "modal_reduced"] }
+            }
+          },
+          "status": { "enum": ["release", "pending"], "description": "release: in the current release. pending: documented at full strength, not yet in the release; docs flag it with [not yet in the current release](pending:<id>)." },
+          "landed_in": { "$ref": "#/definitions/release", "description": "For a formerly pending row: the release that shipped it." },
+          "acceptance": { "type": "string", "minLength": 1, "description": "Pending rows: what must be true to set status release." },
+          "owner": { "type": "string", "minLength": 1, "description": "Engineering lane that owns delivery." },
+          "decision": { "enum": ["owner"], "description": "The owner has not yet confirmed the feature belongs in the final system." },
+          "doc_less": { "type": "string", "minLength": 1, "description": "Reason a pending row is flagged by no doc page." },
+          "enforcement": { "type": "string", "minLength": 1, "description": "How the release rejects a pending construct, when it is not a check diagnostic (e.g. run-time only)." },
+          "gaps": { "$ref": "#/definitions/strings", "description": "Engineering-queue and audit ids." },
+          "witness": { "$ref": "#/definitions/strings", "description": "Commands or tests that prove the capability once it lands." },
+          "requirements": { "type": "array", "items": { "type": "string", "pattern": "^FEA-[A-Z0-9-]+$" }, "description": "Requirement ids from `requirements` that this capability answers to; their tests come from the `// witness:` tags." },
+          "verification": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }, "description": "Ids of `cases` that verify this capability." },
+          "docs": { "type": "array", "items": { "$ref": "#/definitions/docPath" }, "description": "Docs pages that describe the capability. For a pending row: exactly the pages that flag it." }
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "description": "Verification cases shown on the per-family Validation pages: a reference problem with its write-up (validation/cases/<id>.md), the example receipts it quotes and the tests and benchmarks behind it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "area", "title", "narrative", "references", "receipts", "tests"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "area": { "$ref": "#/definitions/area", "description": "The Validation page that shows the case." },
+          "title": { "type": "string", "minLength": 1 },
+          "narrative": { "$ref": "#/definitions/docPath", "description": "The case write-up, under validation/cases/, with links relative to validation/." },
+          "references": { "$ref": "#/definitions/strings", "description": "Closed-form, manufactured or published references." },
+          "receipts": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+#[a-z0-9-]+$" }, "description": "examples/catalog.json receipts the case quotes." },
+          "tests": { "$ref": "#/definitions/strings", "description": "Test functions (package::path) that hold the case in CI." },
+          "benchmarks": { "$ref": "#/definitions/strings" }
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "description": "Scope claims from the website plans, claim register (SIM-*), requirements register (REG-*) and FEA plans, each mapped to requirement obligations or an explicit exclusion. Read by crates/runmat-analysis/qualification (scope).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "source", "capability", "maps"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1 },
+          "capability": { "type": "string", "minLength": 1 },
+          "maps": { "type": "string", "minLength": 1, "description": "`REQ/obligation|REQ/*|excluded:<reason>|external:<owner>:<reason>`, separated by |." }
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "description": "The requirement register: acceptance obligations and the execution envelopes each must hold in. Tests declare the obligations they support with `// witness:` tags.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "stages", "acceptance", "owners", "obligations", "dependencies"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^FEA-[A-Z0-9-]+$" },
+          "title": { "type": "string", "minLength": 1 },
+          "stages": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+          "acceptance": { "type": "string", "minLength": 1 },
+          "owners": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "dependencies": { "type": "array", "items": { "type": "string" } },
+          "obligations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "criterion", "evidence_kind", "envelopes"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "criterion": { "type": "string", "minLength": 1 },
+                "evidence_kind": { "type": "string" },
+                "envelopes": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/envelopeBlock" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

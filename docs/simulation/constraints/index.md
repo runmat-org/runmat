@@ -72,7 +72,7 @@ targets, and relations are coherent. It does not prove that the requested formul
 execution, recovery, and publication path.
 
 Each family guide states the relevant limitation next to its examples. The authoritative summary is
-[FEA capability status](../status). Validation claims require the evidence described in
+[FEA capability status](../validation/status.md). Validation claims require the evidence described in
 [verification and validation](../validation), including formulation-specific references and
 fail-closed negative cases.
 

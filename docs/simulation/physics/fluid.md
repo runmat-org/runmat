@@ -194,4 +194,4 @@ residual does not establish spatial accuracy.
 
 See [fluid constraints](../constraints/fluid), [fluid loads](../loads/fluid),
 [conjugate heat transfer](./conjugate-heat-transfer),
-[fluid–structure interaction](./fluid-structure-interaction), and [current status](../status).
+[fluid–structure interaction](./fluid-structure-interaction), and [current status](../validation/status.md).

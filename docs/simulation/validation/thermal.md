@@ -1,10 +1,25 @@
-## Temperature, heat transport and conservation
+---
+description: How RunMat checks its heat transfer results: reference cases with their errors and receipts, and the tests behind each requirement, generated from the capability ledger.
+keywords: [heat transfer validation, verification, reference cases, convergence, FEA accuracy]
+doc_type: validation
+generated: node scripts/docs/generate-pages.mjs
+---
+# Heat transfer validation
 
-Steady thermal verification checks temperature and heat transport together. An independent conduction reference establishes the expected gradient and flux; balance checks account for applied heat, boundary transfer and internal sources. Refinement compares physical quantities across meshes and element orders, including interfaces and spatially varying conductivity where those lie within the assessed scope.
+<!-- Generated from docs/simulation/ledger.json by scripts/docs/generate-pages.mjs; do not edit by hand. -->
 
-A temperature field alone cannot establish conservation. A nearly uniform temperature may conceal an incorrect source or boundary sign, while a small algebraic residual establishes only that the assembled equations were solved closely. The field requirements cover temperature, gradient and heat flux with their physical units and original mesh association.
+Each case below compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. Values link to their run receipts. The [validation methodology](./methodology.md) explains how to read them, and [Status](./status.md) lists what the release runs.
 
-## Radiation and thermal stress studies
+## Capabilities
+
+| Capability | In this release | Cases |
+| --- | --- | --- |
+| Thermal static | yes | [Radiating bar](#radiating-bar) |
+| Thermal transient | yes | — |
+
+## Reference cases
+
+### Radiating bar
 
 [radiating-bar.fea](../examples/radiating-bar.fea): a 1 m steel bar ($k$ = 45 W/m/K) takes
 1000 W/m² on one end and radiates from the other ($\varepsilon$ = 0.8, 300 K surroundings). The
@@ -14,19 +29,23 @@ hotter. RunMat gives 416.6790 K and 438.9013 K; the closed form gives 416.6790 K
 check runs as a test on Tet4 and Tet10 meshes
 (`radiating_bar_matches_the_gray_surface_closed_form_and_balances_power`).
 
-[thermal-stress-static.fea](../examples/thermal-stress-static.fea): the same bar clamped at both ends
-and held at 373.15 K (80 K above its reference) has the axial stress $E\alpha\Delta T$ = 192 MPa away
-from the clamps. The volume-mean von Mises stress is 195.9 MPa; the clamps also restrain lateral
-expansion, which raises the stress near the ends.
+- References: Gray-surface radiation q = εσ(T⁴ − T∞⁴) with conduction qL/k.
+- Held in CI by: `radiating_bar_matches_the_gray_surface_closed_form_and_balances_power`.
 
-## Execution and durable results
+## Test evidence by requirement
 
-Workflow verification follows an authored thermal study through admission, native execution, output publication and cold reopening. It checks that original temperature and element fields retain their descriptors and provenance. Browser playback of a saved scene is an inspection path; it does not repeat or independently validate the thermal solve.
+Each requirement lists acceptance obligations, and each obligation must hold in stated envelopes: formulation, element order and execution provider. Tests declare the obligation and envelope they support at the test; the counts are envelope cells from the latest evidence run. PASS covers the obligation fully, PARTIAL passes with a narrower boundary than the criterion, and OPEN has no supporting test yet.
 
-## Criteria and assessment records
-
-<!-- fea:verification -->
-
-Read each record with its tested identity, geometry, mesh, boundary conditions and limits. The linked checks support their declared obligations; they do not extend an assessment to an untested model.
-
-Start with the [steady heat-transfer guide](/docs/simulation/guides/steady-heat-transfer), and use [validation methodology](/docs/simulation/validation) for the shared approach to evidence and qualification.
+| Requirement | Title | Obligations | PASS | PARTIAL | FAIL | OPEN |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| FEA-THERMAL-DOMAIN-001 | Independent thermal domain and regional heat-equation assembly | 3 | 0 | 5 | 0 | 7 |
+| FEA-THERMAL-INPUT-001 | Exact thermal boundaries and shared excitation realization | 3 | 0 | 4 | 0 | 8 |
+| FEA-THERMAL-SOLVE-001 | Distinct steady and transient solves with nonlinear closure | 3 | 0 | 4 | 0 | 4 |
+| FEA-THERMAL-FIELDS-001 | Physical thermal recovery and energy accounting | 3 | 0 | 4 | 0 | 8 |
+| FEA-THERMAL-ACCURACY-001 | Independent thermal references and refinement qualification | 4 | 0 | 2 | 1 | 11 |
+| FEA-THERMAL-EXECUTION-001 | Governed thermal studies, persistence and execution evidence | 4 | 0 | 4 | 0 | 84 |
+| FEA-PUBLIC-STUDIES-001 | Published studies run from the public command | 9 | 0 | 0 | 1 | 68 |
+| FEA-SCALE-PARALLEL-001 | Every family saturates the machine through one thread plan | 6 | 0 | 2 | 0 | 114 |
+| FEA-SCALE-DISTRIBUTED-001 | Remote and cooperative execution for every family | 5 | 0 | 0 | 0 | 118 |
+| FEA-SCALE-SIZE-001 | Millions of degrees of freedom at stated time and memory | 5 | 0 | 0 | 0 | 94 |
+| FEA-THERMAL-PUBLIC-001 | Thermal studies the pages run | 5 | 0 | 3 | 0 | 21 |

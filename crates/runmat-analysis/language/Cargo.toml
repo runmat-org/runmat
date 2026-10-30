@@ -27,3 +27,6 @@ runmat-geometry-fixtures = { workspace = true }
 
 [features]
 tool-schema = ["dep:schemars", "runmat-types/tool-schema"]
+
+[build-dependencies]
+serde_json = { workspace = true }

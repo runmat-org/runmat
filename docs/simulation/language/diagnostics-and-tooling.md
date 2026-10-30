@@ -185,5 +185,5 @@ model corrected {
 }
 ```
 
-Warnings do not convert unsupported execution into support. The [current status](../status) page
+Warnings do not convert unsupported execution into support. The [current status](../validation/status.md) page
 separates language coverage, executable procedure coverage, and validation evidence.

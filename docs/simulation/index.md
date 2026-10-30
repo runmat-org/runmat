@@ -79,10 +79,9 @@ study cantilever_static {
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
     output tip_deflection = max(magnitude(analysis.static.field.node.displacement), over = geometry.beam.region.loaded_end)
-    assessment tip_deflection_matches_beam_theory {
+    assessment deflection_limit {
         value = output.tip_deflection
-        minimum = 0.19 mm
-        maximum = 0.21 mm
+        maximum = 0.5 mm
         evidence = authored_samples
     }
 }
@@ -126,4 +125,4 @@ Nothing is meshed or solved until the whole study checks clean. Every result is 
 | See the equations each family solves | [Physics reference](./physics/index.md) |
 | Run sweeps, on GPUs or on a cluster | [Running studies](./solves.md) |
 | See how results are checked against references | [Validation](./validation/methodology.md) |
-| See what is in this release | [Release status](./release-status.md) |
+| See what is in this release | [Release status](./validation/status.md) |

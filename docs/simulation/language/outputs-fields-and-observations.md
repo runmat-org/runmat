@@ -95,10 +95,9 @@ The checker verifies that the sampling domain belongs to the field (time for a t
 ## Assess an output
 
 ```fea source=cantilever-static.fea
-    assessment tip_deflection_matches_beam_theory {
+    assessment deflection_limit {
         value = output.tip_deflection
-        minimum = 0.19 mm
-        maximum = 0.21 mm
+        maximum = 0.5 mm
         evidence = authored_samples
     }
 ```

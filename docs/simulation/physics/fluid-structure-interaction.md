@@ -110,4 +110,4 @@ are outside the envelope.
 
 See [fluid flow](./fluid), [structural analysis](./structural),
 [fluid constraints](../constraints/fluid), [structural constraints](../constraints/structural),
-[interfaces](../constraints/interfaces), and [current status](../status).
+[interfaces](../constraints/interfaces), and [current status](../validation/status.md).

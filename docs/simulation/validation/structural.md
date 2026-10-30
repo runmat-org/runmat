@@ -1,8 +1,37 @@
-## Structural mechanics coverage
+---
+description: How RunMat checks its structural mechanics results: reference cases with their errors and receipts, and the tests behind each requirement, generated from the capability ledger.
+keywords: [structural mechanics validation, verification, reference cases, convergence, FEA accuracy]
+doc_type: validation
+generated: node scripts/docs/generate-pages.mjs
+---
+# Structural mechanics validation
 
-Structural validation checks the connection between material response, element formulation, physical predictions, and the complete saved-result workflow. The criteria below state the required scope for each check.
+<!-- Generated from docs/simulation/ledger.json by scripts/docs/generate-pages.mjs; do not edit by hand. -->
 
-## Cantilever bending against beam theory
+Each case below compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. Values link to their run receipts. The [validation methodology](./methodology.md) explains how to read them, and [Status](./status.md) lists what the release runs.
+
+## Capabilities
+
+| Capability | In this release | Cases |
+| --- | --- | --- |
+| Structural static | yes | [Cantilever bending against beam theory](#cantilever-bending-against-beam-theory) |
+| Structural modal | yes | — |
+| Structural prestressed modal | yes | — |
+| Structural buckling | yes | — |
+| Structural transient | yes | — |
+| Structural harmonic | yes | — |
+| Structural prestressed harmonic | yes | — |
+| Structural nonlinear | yes | — |
+| Structural transient (modal superposition) | yes | — |
+| Structural harmonic (modal superposition) | yes | — |
+| Structural prestressed harmonic (modal superposition) | yes | — |
+| Structural response spectrum (modal superposition) | yes | — |
+| Structural random response (modal superposition) | yes | — |
+| Nonlinear structural steps inside procedure graphs (preload → nonlinear → modal; thermal prefix → nonlinear) | [not yet in the current release](pending:structural.nonlinear.sequence) | — |
+
+## Reference cases
+
+### Cantilever bending against beam theory
 
 The cantilever in the [linear static](../guides/linear-static.md) and [mesh refinement](../guides/mesh-refinement.md) guides is a closed-form check of the solid elements in bending. A 1 m steel beam (E = 200 GPa, ν = 0.3) with a 100 mm × 100 mm section is fully fixed at x = 0 and carries a 1,000 N downward traction resultant on the x = 1 m face.
 
@@ -32,18 +61,31 @@ The cantilever in the [linear static](../guides/linear-static.md) and [mesh refi
 
 Each value links to its run receipt: CLI build, commit, mesh, date and result id.
 
-## Element formulation and integration
+- References: Euler–Bernoulli beam theory: tip deflection FL³/3EI, bending stress Mc/I; Timoshenko beam theory: shear deflection FL/κGA.
 
-Checks cover strain and stress recovery, stiffness, and load integration for supported solid element orders. Read the individual criteria for material laws, topology, and implementation boundaries.
+## Test evidence by requirement
 
-## Physical references and mesh convergence
+Each requirement lists acceptance obligations, and each obligation must hold in stated envelopes: formulation, element order and execution provider. Tests declare the obligation and envelope they support at the test; the counts are envelope cells from the latest evidence run. PASS covers the obligation fully, PARTIAL passes with a narrower boundary than the criterion, and OPEN has no supporting test yet.
 
-Reference problems and refinement examine displacement, stress, support reactions, and balance. Accuracy is assessed for the tested model and comparison quantities, including locations away from idealized support singularities.
-
-## Execution and durable results
-
-Workflow checks cover the authored study, admission, execution, original fields, and preservation after reopening. Their evidence is separate from a physical convergence assessment.
-
-## Criteria and assessment records
-
-<!-- fea:verification -->
+| Requirement | Title | Obligations | PASS | PARTIAL | FAIL | OPEN |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| FEA-STRUCTURAL-SOLID-001 | Physical linear solid operators, loads and assigned-material recovery | 4 | 0 | 7 | 0 | 49 |
+| FEA-STRUCTURAL-BEAM-001 | Physical three-dimensional beams and explicit mixed-model coupling | 2 | 0 | 2 | 0 | 26 |
+| FEA-STRUCTURAL-SHELL-001 | Physical membrane and bending shells | 2 | 0 | 1 | 0 | 27 |
+| FEA-STRUCTURAL-REFERENCE-001 | Linear structural independent references and physical balances | 2 | 0 | 3 | 0 | 25 |
+| FEA-STRUCTURAL-CONSTRAINT-001 | Complete typed structural constraints and constitutive connectors | 6 | 0 | 8 | 0 | 76 |
+| FEA-STRUCTURAL-EXECUTION-001 | Governed linear structures and execution equivalence | 7 | 0 | 2 | 0 | 96 |
+| FEA-PUBLIC-STUDIES-001 | Published studies run from the public command | 9 | 0 | 0 | 1 | 68 |
+| FEA-SCALE-PARALLEL-001 | Every family saturates the machine through one thread plan | 6 | 0 | 2 | 0 | 114 |
+| FEA-SCALE-DISTRIBUTED-001 | Remote and cooperative execution for every family | 5 | 0 | 0 | 0 | 118 |
+| FEA-SCALE-SIZE-001 | Millions of degrees of freedom at stated time and memory | 5 | 0 | 0 | 0 | 94 |
+| FEA-STRUCTURAL-PUBLIC-001 | Structural capabilities the page claims | 10 | 0 | 0 | 0 | 100 |
+| FEA-DYNAMICS-MODAL-001 | Physical modal extraction, eigenspaces and reusable participation state | 4 | 0 | 3 | 0 | 53 |
+| FEA-COUPLING-CHAIN-001 | Chained thermal-structural studies | 2 | 0 | 0 | 0 | 24 |
+| FEA-DYNAMICS-PRESTRESS-001 | Validated prestressed base states and stability perturbation | 4 | 0 | 3 | 0 | 109 |
+| FEA-DYNAMICS-RESPONSE-001 | Distinct second-order direct and modal dynamic procedures | 5 | 0 | 8 | 0 | 67 |
+| FEA-DYNAMICS-GOVERNANCE-001 | Governed dynamic procedures, checkpoints and distributed evidence | 9 | 0 | 2 | 0 | 133 |
+| FEA-NONLINEAR-STATE-001 | Complete original accepted nonlinear history through cold continuation | 6 | 0 | 22 | 0 | 2 |
+| FEA-NONLINEAR-OPERATOR-001 | State-dependent nonlinear mechanics and supported plastic laws | 4 | 0 | 5 | 1 | 34 |
+| FEA-CONTACT-OPERATOR-001 | Authored surface contact, search, friction and coupled inequality equilibrium | 8 | 0 | 11 | 0 | 69 |
+| FEA-NONLINEAR-GOVERNANCE-001 | Converged nonlinear states, supported laws and independent qualification | 5 | 0 | 2 | 0 | 48 |

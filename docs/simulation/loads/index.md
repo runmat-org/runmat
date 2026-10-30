@@ -80,7 +80,7 @@ authored and checked, but their complete geometry-to-publication `.fea` executio
 admitted. `runmat check` therefore answers “is this a valid typed study definition?”; it does
 not admit a physics family for execution.
 
-The family pages mark that boundary where it matters. See [FEA capability status](../status) for the
+The family pages mark that boundary where it matters. See [FEA capability status](../validation/status.md) for the
 current execution envelope and [verification and validation](../validation) for the evidence needed
 before a family is promoted. Do not replace a rejected nonstructural procedure with a structural
 load that happens to share the same unit.

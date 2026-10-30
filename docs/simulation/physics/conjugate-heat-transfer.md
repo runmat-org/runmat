@@ -113,4 +113,4 @@ closure. Laminar flow only: turbulent coolant is not modelled.
 
 See [heat transfer](./thermal), [fluid flow](./fluid),
 [interfaces](../constraints/interfaces), [thermal loads](../loads/thermal), and
-[current status](../status).
+[current status](../validation/status.md).

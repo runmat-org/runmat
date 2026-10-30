@@ -31,7 +31,7 @@ The declarations are peers. A study refers to a model by name; the model is not 
 
 ## A complete study
 
-This study fixes one end of a steel cantilever, applies a 100 kPa downward traction to the other end, and solves a linear static step on quadratic tetrahedra (Tet10). It publishes the displacement and von Mises stress fields and the peak tip deflection, and it checks that deflection against the 0.19–0.21 mm band around the 0.20 mm that Euler–Bernoulli beam theory predicts.
+This study fixes one end of a steel cantilever, applies a 100 kPa downward traction to the other end, and solves a linear static step on quadratic tetrahedra (Tet10). It publishes the displacement and von Mises stress fields and the peak tip deflection, and it checks that deflection against a 0.5 mm design limit (L/2,000).
 
 ```fea source=cantilever-static.fea
 geometry beam {
@@ -77,10 +77,9 @@ study cantilever_static {
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
     output tip_deflection = max(magnitude(analysis.static.field.node.displacement), over = geometry.beam.region.loaded_end)
-    assessment tip_deflection_matches_beam_theory {
+    assessment deflection_limit {
         value = output.tip_deflection
-        minimum = 0.19 mm
-        maximum = 0.21 mm
+        maximum = 0.5 mm
         evidence = authored_samples
     }
 }
@@ -94,7 +93,7 @@ Read it top to bottom:
 - **`model`** assigns the material to the body, fixes one end face, applies the traction to the other, and groups the load in a load case.
 - **`study`** binds the geometry, mesh and model, runs one `structural static` step named `static`, and publishes results by path, `analysis.<step>.field.<location>.<quantity>`. The `assessment` turns the tip deflection into a pass or fail verdict.
 
-The file is the canonical example [`cantilever-static.fea`](../examples/cantilever-static.fea). The [linear static guide](../guides/linear-static.md) runs it and compares the deflection and stress with beam theory. A two-body version, with two material assignments and two supports, is [`structural-static.fea`](../examples/structural-static.fea).
+The file is the canonical example [`cantilever-static.fea`](../examples/cantilever-static.fea). The [linear static guide](../guides/linear-static.md) walks through modeling, running and reading it. A two-body version, with two material assignments and two supports, is [`structural-static.fea`](../examples/structural-static.fea).
 
 ## Check, plan and run
 
@@ -145,4 +144,4 @@ Reference:
 - [Declarations](./reference/declarations.md): every declaration and member, with types, units and defaults.
 - [Procedures](./reference/procedures.md): every analysis step, by physics family.
 - [Grammar](./reference/grammar.md): the syntax in EBNF.
-- [Glossary](../glossary.md) and [release status](../release-status.md).
+- [Glossary](../glossary.md) and [release status](../validation/status.md).

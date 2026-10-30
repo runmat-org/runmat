@@ -9,7 +9,7 @@ A linear static analysis finds how far a part deflects, how stressed it is and w
 
 This guide takes one part from the question to a design decision.
 
-## 1. The engineering question
+## Checking a steel cantilever against a deflection limit
 
 A 1 m steel cantilever with a 100 mm × 100 mm square section carries a 1,000 N downward load at its free end.
 
@@ -19,7 +19,7 @@ A 1 m steel cantilever with a 100 mm × 100 mm square section carries a 1,000 N 
 
 <!-- fea:example:cantilever-static:setup -->
 
-## The physics you already know
+## How it's modeled: beam bending
 
 This is the beam from a first course in mechanics of materials. Beam theory gives the tip deflection and the bending stress directly:
 
@@ -37,7 +37,7 @@ $$
 
 where $\mathbf K$ is the stiffness of the meshed part, $\mathbf f$ the applied loads and $\mathbf u$ the displacement of every node. Stress follows from how the displacement varies inside each element. Nothing in this system assumes a slender beam, so the same steps work for a bracket, a housing or a casting, where no textbook formula exists. The [structural physics reference](../physics/structural.md) derives it in full.
 
-## 2. Model it
+## Model the beam
 
 A model is a set of choices: what shape to analyze, what it is made of, how it is held and how it is loaded. Each choice below is one block of the study file.
 
@@ -77,7 +77,7 @@ material steel {
 
 Supports and loads are where a model most often departs from the real part, so choose them deliberately.
 
-- **Support.** `structural.fixed` holds every displacement on the end face at zero: a perfectly rigid wall. A real bolted or welded joint is a little flexible, so a fully fixed face makes the part slightly too stiff near the support and creates an artificial stress peak along its edge (see step 5).
+- **Support.** `structural.fixed` holds every displacement on the end face at zero: a perfectly rigid wall. A real bolted or welded joint is a little flexible, so a fully fixed face makes the part slightly too stiff near the support and creates an artificial stress peak along its edge (see [Results](#read-stress-where-it-means-something)).
 - **Load.** The 1,000 N end load is applied as a traction, a force per area, spread over the 0.01 m² end face: 1,000 N / 0.01 m² = 100 kPa. A load spread over a face is closer to how a real load arrives than a force at a single node, which would produce an unbounded local stress.
 
 ```fea source=cantilever-static.fea
@@ -93,12 +93,12 @@ model loaded_beam {
 }
 ```
 
-## 3. Mesh it
+## Mesh
 
 Choose the element type first, then the size.
 
 - **Element order.** Use quadratic tetrahedra (Tet10) for parts that bend. A quadratic element represents the linear change of bending strain through the depth, so a few elements through the section are enough. A linear tetrahedron (Tet4) has constant strain, cannot bend inside one element, and makes a bending part far too stiff unless the mesh is very fine.
-- **Size.** Start coarse. A 150 mm target size on this 1 m beam gives about 2,700 nodes and solves in seconds. Step 6 decides whether that is fine enough.
+- **Size.** Start coarse. A 150 mm target size on this 1 m beam gives about 2,700 nodes and solves in seconds. [Refining the mesh](#refining-the-mesh) decides whether that is fine enough.
 
 ```fea source=cantilever-static.fea
 mesh beam on geometry.beam {
@@ -112,7 +112,7 @@ mesh beam on geometry.beam {
 
 `maximum_deviation` limits how far the mesh surface may depart from the CAD surface. It matters on curved parts and has no effect on this flat-sided beam.
 
-## 4. Run it
+## Run
 
 The study block ties the pieces together and names the results to publish: the displacement field, the element stress field and a tip-deflection output.
 
@@ -125,10 +125,9 @@ study cantilever_static {
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
     output tip_deflection = max(magnitude(analysis.static.field.node.displacement), over = geometry.beam.region.loaded_end)
-    assessment tip_deflection_matches_beam_theory {
+    assessment deflection_limit {
         value = output.tip_deflection
-        minimum = 0.19 mm
-        maximum = 0.21 mm
+        maximum = 0.5 mm
         evidence = authored_samples
     }
 }
@@ -147,7 +146,7 @@ runmat run cantilever-static.fea
 
 `check` catches unit mistakes, broken references and missing CAD names in a few seconds, before any meshing. `run` imports the STEP file, meshes, solves, and publishes the fields and outputs. `runmat plan` prints the work a run will do, and `--json` gives structured output for scripts. See [check, plan and run](../language/index.md#check-plan-and-run).
 
-## 5. Read the results
+## Results
 
 Read the results in this order: reactions, then the deformed shape, then stress.
 
@@ -183,17 +182,17 @@ When the real stress at a joint matters, model the joint instead: the fillet, th
 
 Both criteria pass with a wide margin. The beam is governed by stiffness long before strength, which is typical of steel parts sized to a deflection limit.
 
-## 6. Decide whether to refine
+## Refining the mesh
 
 A finite-element answer depends on the mesh, so ask whether a finer mesh would change the quantity the decision rests on. Run the study again at a smaller `target_size` and compare. Here, refining from 150 mm to 50 mm changes the tip deflection by about 0.2 % and the stress at x = 100 mm by about 0.4 %, far less than the margins above, so the 150 mm mesh is fine enough for this decision. The peak at the clamped edge does not settle, as expected at a singularity.
 
 A practical rule: refine until the quantity of interest changes by less than 1 to 2 % between meshes, and compare quantities that converge: displacements, reactions, and stresses away from sharp corners and idealized supports. The [mesh refinement guide](./mesh-refinement.md) walks through a full sequence.
 
-## 7. Try a change
+## Try a change
 
 - **Double the load** to 200 kPa. The analysis is linear, so deflection, stress and reaction all double: one run covers every load level by scaling.
 - **Use aluminum** (`youngs_modulus = 68.9 GPa`). The deflection grows by the stiffness ratio, 200 / 68.9 ≈ 2.9 times, to about 0.58 mm, which fails the limit. The stress barely changes, because the moment at each section is set by the load alone.
-- **Switch to linear tetrahedra** (`order = linear`) and compare the tip deflection. It falls well short of the Tet10 value (Tet4 at a 50 mm target size gives [0.1625 mm](receipt:cantilever-static#tip-deflection-tet4-50)): the too-stiff behavior described in step 3.
+- **Switch to linear tetrahedra** (`order = linear`) and compare the tip deflection. It falls well short of the Tet10 value (Tet4 at a 50 mm target size gives [0.1625 mm](receipt:cantilever-static#tip-deflection-tet4-50)): the too-stiff behavior described under [Mesh](#mesh).
 - **Put the criteria in the study.** Outputs and assessments report a pass or fail verdict with every run, so a change that breaks a limit shows up at once:
 
 ```fea fragment

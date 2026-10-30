@@ -4,11 +4,13 @@
 //   node scripts/docs/docs-lint.mjs --json     # machine-readable report
 //
 // Rules (METHOD §3.1 item 8, §4.3 E-DOC-3/E-DOC-5, §5):
-// - every `pending:<id>` link and ```fea pending=<id> fence names a registry entry;
+// - every `pending:<id>` link and ```fea pending=<id> fence names a pending ledger row (docs/simulation/ledger.json);
+// - the ledger is consistent with itself, the code's pending ids and tables, and the docs (ledger.mjs);
 // - an entry with `landed_in` set fails while any doc still flags it (the error names file:line to delete);
 // - every open entry is flagged by at least one doc, or carries `doc_less` with a reason;
 // - a ```fea source=<file> block is a verbatim excerpt of docs/simulation/examples/<file>;
 // - front matter, where present, matches docs/schema/doc-front-matter.schema.json;
+// - every ```fea block colors every compiler word with the generated grammar (fea-grammar.mjs);
 // - every name in the compiler's closed registries (units, types, field locations and quantities, output
 //   operations, material members) appears on its owner reference page (E-DOC-6, registry-coverage.mjs);
 // - relative links resolve to a file in docs/simulation and, with `#anchor`, to a heading in it;
@@ -19,21 +21,13 @@ import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fencedBlocks, headings, links, markdownFiles, parseFrontMatter, readText } from "./markdown-scan.mjs";
 import { REGISTRIES, registryCoverage } from "./registry-coverage.mjs";
+import { GENERATED_PAGES, loadLedger, lintLedger } from "./ledger.mjs";
+import { feaGrammar, knownWords, uncoloredKnownWords } from "./fea-grammar.mjs";
 
 const readJson = path => JSON.parse(readText(path));
 
-export function loadRegistry(source) {
-    const registry = readJson(join(source, "docs/simulation/pending-features.json"));
-    const ajv = new Ajv({ allErrors: true });
-    const check = ajv.compile(readJson(join(source, "docs/schema/pending-features.schema.json")));
-    if (!check(registry)) throw new Error(`pending-features.json: ${ajv.errorsText(check.errors)}`);
-    const byId = new Map();
-    for (const feature of registry.features) {
-        if (byId.has(feature.id)) throw new Error(`pending-features.json: duplicate id ${feature.id}`);
-        byId.set(feature.id, feature);
-    }
-    return { registry, byId };
-}
+/** The ledger as the pending-flag registry: { ledger, byId } over capabilities. */
+export const loadRegistry = loadLedger;
 
 /** Every pending reference in the tree: { file, line, id, form: "link" | "fence" }. */
 export function pendingReferences(root, files) {
@@ -100,17 +94,19 @@ export function lintDocs(source) {
     const error = (file, line, rule, message) => errors.push({ file: `docs/simulation/${file}`, line, rule, message });
 
     // Registry and flags.
-    const { byId } = loadRegistry(source);
-    const references = pendingReferences(root, files);
+    const loaded = loadLedger(source);
+    const { byId } = loaded;
+    const references = pendingReferences(root, files).map(reference => ({ ...reference, generated: GENERATED_PAGES.includes(reference.file) || reference.file.startsWith("generated/") }));
     for (const reference of references) {
         const feature = byId.get(reference.id);
-        if (!feature) error(reference.file, reference.line, "pending-unknown", `unknown pending id \`${reference.id}\`; add it to docs/simulation/pending-features.json or fix the id`);
-        else if (feature.landed_in) error(reference.file, reference.line, "pending-landed", `\`${reference.id}\` landed in ${feature.landed_in}; delete this flag`);
+        if (!feature) error(reference.file, reference.line, "pending-unknown", `unknown pending id \`${reference.id}\`; add it to docs/simulation/ledger.json or fix the id`);
+        else if (feature.status !== "pending") error(reference.file, reference.line, "pending-landed", `\`${reference.id}\` is in the release${feature.landed_in ? ` (landed in ${feature.landed_in})` : ""}; delete this flag`);
     }
     for (const feature of byId.values()) {
-        if (feature.landed_in || feature.doc_less) continue;
-        if (!references.some(reference => reference.id === feature.id)) errors.push({ file: "docs/simulation/pending-features.json", line: 0, rule: "pending-unreferenced", message: `open entry \`${feature.id}\` is flagged by no doc; flag it where the docs describe it, or set doc_less with a reason` });
+        if (feature.status !== "pending" || feature.doc_less) continue;
+        if (!references.some(reference => reference.id === feature.id && !reference.generated)) errors.push({ file: "docs/simulation/ledger.json", line: 0, rule: "pending-unreferenced", message: `pending row \`${feature.id}\` is flagged by no doc; flag it where the docs describe it, or set doc_less with a reason` });
     }
+    lintLedger(source, loaded, references, item => errors.push(item));
 
     // Front matter.
     const ajv = new Ajv({ allErrors: true });
@@ -138,6 +134,19 @@ export function lintDocs(source) {
             if (!existsSync(path)) error(file, block.line, "source-slice", `source=${block.attributes.source} is not a file in docs/simulation/examples`);
             else if (!readText(path).includes(block.code.trim())) error(file, block.line, "source-slice", `this block is no longer an exact excerpt of examples/${block.attributes.source}; copy it from the file again`);
         }
+    }
+
+    // Highlighting: every ```fea block colors every word the compiler knows (the grammar is
+    // generated from the compiler's tables; skipped for fixture trees without sources).
+    if (existsSync(join(source, "crates/runmat-fea-syntax/src/lexical/token.rs"))) {
+        const grammar = feaGrammar(source);
+        const known = knownWords(source);
+        for (const [file, { text }] of parsed)
+            for (const block of fencedBlocks(text)) {
+                if (block.language !== "fea") continue;
+                for (const problem of uncoloredKnownWords(grammar, known, block.code))
+                    error(file, block.line + problem.line, "fea-highlight", `\`${problem.word}\` is a compiler word but this block leaves it uncolored; fix scripts/docs/fea-grammar.mjs`);
+            }
     }
 
     // Links.
