@@ -1,6 +1,5 @@
 //! Task-state leaf protection, not an authenticated/hostile-parent namespace.
 use super::*;
-use std::os::windows::{fs::MetadataExt as _, io::FromRawHandle as _};
 use std::path::Component;
 use windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS;
 use windows_sys::Win32::Storage::FileSystem::{
