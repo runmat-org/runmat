@@ -605,6 +605,54 @@
       "owner": "q-check-parity",
       "landed_in": null,
       "doc_less": "Website physics-page claim (q-site-examples-2, 2026-10-29); the repo doc that owns it gets the inline flag when it is trued up."
+    },
+    {
+      "id": "language.unit.siemens",
+      "title": "The siemens (`S`, `mS`, `kS`) as a unit symbol, so conductivity is written `S/m`",
+      "area": "language",
+      "kind": "language",
+      "acceptance": "`runmat-types` accepts `S` as electrical conductance; `conductivity = 5.8e7 S/m` checks and equals `5.8e7 A/V/m`.",
+      "witness": [
+        "q-docs-2 claims, runmat-qdocs1-60daf3650d (runmat-build-mac:~/runs/q-docs-2/out/check-probe-siemens.fea.log): error[fea.semantic.invalid_unit]: unknown unit `S`",
+        "runmat check claims/probe-siemens.fea"
+      ],
+      "gaps": [
+        "DOC-Q2-1"
+      ],
+      "owner": "q-check-parity",
+      "landed_in": null
+    },
+    {
+      "id": "language.plastic-law-identifier",
+      "title": "Plastic law written as an identifier (`law = j2_isotropic_linear_hardening`), like fluid and porous laws",
+      "area": "language",
+      "kind": "language",
+      "acceptance": "`plastic { law = j2_isotropic_linear_hardening }` checks; one form for every material `law` member.",
+      "witness": [
+        "q-docs-2 claims, runmat-qdocs1-60daf3650d (runmat-build-mac:~/runs/q-docs-2/out/check-fail-bare-plastic-law.fea.log): material plastic law must be the explicit string",
+        "runmat check claims/fail-bare-plastic-law.fea"
+      ],
+      "gaps": [
+        "DOC-Q2-2"
+      ],
+      "owner": "q-check-parity",
+      "landed_in": null
+    },
+    {
+      "id": "output.mode-location",
+      "title": "Study outputs at the `mode` location, such as `analysis.modes.field.mode.modal_frequency`",
+      "area": "results",
+      "kind": "output",
+      "acceptance": "`output frequencies = analysis.modes.field.mode.modal_frequency` checks and runs on tuning-fork-modal and publishes one value per mode.",
+      "witness": [
+        "q-docs-2 claims, runmat-qdocs1-60daf3650d (runmat-build-mac:~/runs/q-docs-2/out/run-r-tuning-fork.log): unsupported observation contract: this evaluator accepts only nodal, element, integration-point, connector, and constraint-group fields",
+        "runmat run receipts/r-tuning-fork.fea"
+      ],
+      "gaps": [
+        "DOC-Q2-3"
+      ],
+      "owner": "q-structural-linear",
+      "landed_in": null
     }
   ]
 }

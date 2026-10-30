@@ -272,6 +272,22 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Ships when: Declared input, let and output names may be keywords; `input load : force = 1.5 kN` checks clean and resolves as `input.load`.
 - Described in: [Grammar reference](./language/reference/grammar.md), [Types, units and expressions](./language/types-units-and-expressions.md).
 
+### language.plastic-law-identifier
+
+**Plastic law written as an identifier (`law = j2_isotropic_linear_hardening`), like fluid and porous laws.**
+
+- Kind: language.
+- Ships when: `plastic { law = j2_isotropic_linear_hardening }` checks; one form for every material `law` member.
+- Described in: [Declaration reference](./language/reference/declarations.md).
+
+### language.unit.siemens
+
+**The siemens (`S`, `mS`, `kS`) as a unit symbol, so conductivity is written `S/m`.**
+
+- Kind: language.
+- Ships when: `runmat-types` accepts `S` as electrical conductance; `conductivity = 5.8e7 S/m` checks and equals `5.8e7 A/V/m`.
+- Described in: [Types, units and expressions](./language/types-units-and-expressions.md).
+
 ### language.vector.trailing-unit
 
 **Vectors with one trailing unit in orientation and frame members (`origin = [0, 0, 0] m`).**
@@ -312,6 +328,14 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: output.
 - Ships when: `coefficient_of_variation` is a cataloged output operation; the static-mixer study runs.
+
+### output.mode-location
+
+**Study outputs at the `mode` location, such as `analysis.modes.field.mode.modal_frequency`.**
+
+- Kind: output.
+- Ships when: `output frequencies = analysis.modes.field.mode.modal_frequency` checks and runs on tuning-fork-modal and publishes one value per mode.
+- Described in: [Outputs, fields and observations](./language/outputs-fields-and-observations.md).
 
 ### output.time-mean
 

@@ -1,63 +1,100 @@
-## Structural studies in RunMat
+---
+description: Worked linear static analysis in RunMat. Check a steel cantilever's tip deflection against a span limit and its bending stress against an allowable, read reactions, and run the study from the CLI.
+keywords: [linear static analysis, structural FEA, cantilever, tip deflection, von Mises stress, support reaction, Tet10, stress singularity, deflection limit, allowable stress]
+doc_type: guide
+family: [structural]
+examples: [cantilever-static]
+---
+A linear static analysis finds how far a part deflects, how stressed it is and what its supports carry under a steady load. Use it to check a deflection against a stiffness limit, a stress against an allowable, or a reaction against a fastener or foundation rating. It applies while strains stay small, the material stays elastic and contact does not open or close; inertia, plasticity, large rotation and changing contact belong to the [transient, nonlinear and contact procedures](../language/reference/procedures.md).
 
-Use linear static analysis to answer questions such as **how far a part deflects**, **where stress concentrates**, and **what forces its supports carry** under a steady load.
+## The question
 
-A RunMat study connects geometry, material, mesh, supports, and loads in one readable `.fea` file. The native solver publishes results that you can inspect on the mesh, save, and reopen. Start from imported exact geometry or construct the geometry in the study itself.
+A 1 m steel cantilever with a 100 mm × 100 mm square section carries a 1,000 N downward load at its free end.
 
-| You define | RunMat computes |
-| --- | --- |
-| Elastic material properties and solid geometry | Displacement and strain |
-| Prescribed displacements and fixed supports | Stress and support reactions |
-| Surface traction or volume loads | The structure's equilibrium response |
-| Linear or quadratic tetrahedral elements | Fields on the resulting solver mesh |
-
-This procedure models small-strain elastic behavior. Inertia, plasticity, changing contact, and large displacement belong to their corresponding dynamic or nonlinear procedures.
-
-## Explore a steel cantilever
-
-**How much does a steel beam bend under a downward end load, and where is stress highest?**
-
-The beam is **1 m long**, with a **100 mm × 100 mm** square cross-section. Its end at **x = 0** is fixed. A downward traction of **100 kPa** acts over the free end at **x = 1 m**—a total load of **1,000 N** in the negative z direction. Steel has Young's modulus **200 GPa** and Poisson's ratio **0.3**.
+- Does the tip deflect less than **L/2,000 = 0.5 mm**?
+- Does the bending stress near the support stay below an allowable of **167 MPa** (250 MPa yield with a factor of safety of 1.5)?
+- What force must the support carry?
 
 <!-- fea:example:cantilever-static:setup -->
 
-### Inspect the model
+| Input | Value | Where |
+| --- | --- | --- |
+| Length × section | 1 m × 100 mm × 100 mm | `cantilever.step`, millimeters |
+| Support | all displacement fixed | the x = 0 face, "Fixed end" |
+| Load | 100 kPa traction in −z, a 1,000 N resultant | the x = 1 m face, "Loaded end" |
+| Steel | E = 200 GPa, ν = 0.3, ρ = 7,850 kg/m³ | the body, "Beam" |
+| Mesh | quadratic tetrahedra (Tet10), 150 mm target size, 1 mm surface deviation | |
+
+## Inspect the model
 
 <!-- fea:example:cantilever-static:geometry -->
 
-Rotate the solver mesh to inspect the beam. The fixed end is the x = 0 face; the opposite face carries the load shown in the schematic. This example uses **quadratic tetrahedra** with a requested target size of **150 mm**.
+The fixed end is the x = 0 face and the loaded end the x = 1 m face; both names come from the STEP file. The mesh is coarse along the beam because Tet10 elements represent the linear variation of bending stress through the depth exactly, so a few elements through the section capture bending well.
 
-### See the deformation
+## Results
+
+### Tip deflection
 
 <!-- fea:example:cantilever-static:displacement -->
 
-Color shows **displacement magnitude in meters**. The fixed end stays in place and the free end moves downward. The displayed shape exaggerates the deformation to make it visible; the scale beneath the figure applies to the shape, while the legend reports physical displacement.
+Color shows displacement magnitude in meters on the deformed shape; the shape is exaggerated, and the scale under the figure applies to the shape only. The free end moves down by **[0.2000 mm](receipt:cantilever-static#tip-deflection)**, the study's `tip_deflection` output: the largest displacement magnitude over the loaded face.
 
-### Find the stressed region
+### Bending stress near the support
 
 <!-- fea:example:cantilever-static:stress -->
 
-Color shows **element von Mises stress in pascals**, projected from the quadratic elements’ integration points. Each surface triangle displays its owning element’s value; this is an element field, without visual smoothing. Look near the fixed end, where the support resists bending. Von Mises stress is a scalar summary of the stress components; the study also retains the underlying structural result fields.
+Color shows the element von Mises stress in pascals: each element's own value, without smoothing between elements. The stress rises toward the support, where the bending moment is largest, and peaks on the top and bottom surfaces.
 
-All three views come from the same saved solve. You can rotate and zoom immediately after the viewer loads; exploring these results does not run an analysis on your machine.
+Read the stress one section depth from the support, at x = 100 mm on the top surface: the nodal von Mises stress there is **[5.43 MPa](receipt:cantilever-static#top-von-mises)**. Don't read it at the clamped edge itself. A fully fixed face meeting a free surface is a stress singularity: the theoretical stress there is unbounded, so the largest element value near that edge does not settle as the mesh is refined ([5.39 MPa](receipt:cantilever-static#peak-element-von-mises), [5.27 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-50) and [5.76 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-25) at 150, 50 and 25 mm), while the value at x = 100 mm settles ([5.43 MPa](receipt:cantilever-static#top-von-mises), [5.41 MPa](receipt:cantilever-static#top-von-mises-tet10-50), [5.41 MPa](receipt:cantilever-static#top-von-mises-tet10-25)). The [mesh refinement guide](./mesh-refinement.md) shows this sequence.
 
-## Build and modify this study in RunMat
+### Support reaction
 
-The complete example opens in RunMat Desktop with its source, exact STEP geometry, and saved results. These excerpts are taken directly from that source. The end-face aliases identify the included STEP model; select the corresponding support and load faces when using your own part.
+The reaction at the fixed face sums to **[1,000 N](receipt:cantilever-static#support-reaction)** in +z, equal and opposite to the applied 1,000 N. A reaction that does not balance the applied load points to a load applied to the wrong region or a support that does not restrain what was intended.
+
+## Check against the criteria
+
+| Criterion | Limit | Result | Margin |
+| --- | --- | --- | --- |
+| Tip deflection | 0.5 mm (L/2,000) | [0.2000 mm](receipt:cantilever-static#tip-deflection) | 40 % of the limit |
+| Von Mises stress, top surface at x = 100 mm | 167 MPa | [5.43 MPa](receipt:cantilever-static#top-von-mises) | 3.3 % of the allowable |
+| Support reaction | balances 1,000 N | [1,000 N](receipt:cantilever-static#support-reaction) | balanced |
+
+Both criteria pass: the beam is stiffness-governed long before it is strength-governed. As a check on the model, Euler–Bernoulli beam theory gives a tip deflection of $FL^3/3EI = 0.2000$ mm and a top-surface stress of $M c / I = 5.40$ MPa at x = 100 mm, where $M = F(L - x)$.
+
+## Build and modify the study
+
+The complete example opens in RunMat Desktop with its source, the STEP file and the saved results. The [`.fea` language overview](../language/index.md#a-complete-study) walks through this file line by line.
 
 <!-- fea:example:cantilever-static:edit -->
 
-### Try a change
+To state the criteria in the study itself, add outputs and assessments to the `study` block. Each run then reports a pass or fail verdict for each, computed from the authored output values (`evidence = authored_samples`):
 
-- **Double the traction** from 100 kPa to 200 kPa. For the same mesh and linear model, displacement and stress should double.
-- **Change Young's modulus** to see how stiffness changes deformation.
-- **Refine the mesh** and compare free-end displacement and stress away from the support corners.
+```fea fragment
+output top_stress = interpolate(analysis.static.field.node.von_mises_stress, at = [100 mm, 50 mm, 100 mm])
+output support_reaction = resultant(analysis.static.field.node.reaction_force, over = geometry.beam.region.fixed_end)
 
-Each change produces a new solve. The embedded figures continue to show the original example.
+assessment deflection_limit {
+    value = output.tip_deflection
+    maximum = 0.5 mm
+    evidence = authored_samples
+}
+assessment stress_allowable {
+    value = output.top_stress
+    maximum = 167 MPa
+    evidence = authored_samples
+}
+```
 
-### Run from the command line
+## Try a change
 
-From the downloaded project directory:
+- **Double the traction** to 200 kPa. The analysis is linear, so deflection, stress and reaction all double.
+- **Use aluminum** (`youngs_modulus = 68.9 GPa`). Deflection grows by the stiffness ratio, 200 / 68.9 ≈ 2.9 times; stress is essentially unchanged, because the beam is statically determinate and the moment at each section is set by the load alone.
+- **Refine the mesh** to `target_size = 50 mm` and compare the tip deflection and the stress at x = 100 mm. The deflection changes by +0.2 % and the stress by −0.4 %; the peak at the clamped edge does not settle.
+- **Switch to linear tetrahedra** (`order = linear`, Tet4). Linear tetrahedra are too stiff in bending: at the same size the tip deflection falls well short of beam theory ([0.1625 mm](receipt:cantilever-static#tip-deflection-tet4-50) at 50 mm, 19 % short). Use Tet10 for bending-dominated parts.
+
+## Run from the command line
+
+From the downloaded example folder:
 
 ```sh
 runmat check cantilever-static.fea
@@ -65,31 +102,20 @@ runmat plan cantilever-static.fea
 runmat run cantilever-static.fea
 ```
 
-**Check** validates the source. **Plan** describes the geometry, meshing, analysis, and output work. **Run** executes the study and publishes its results. Geometry construction, meshing, and solving run in a native Desktop or CLI installation.
+`check` verifies units, references and the CAD region names in a few seconds. `plan` prints the geometry, mesh, analysis and output work. `run` imports the STEP file, meshes, solves, and publishes the fields, the outputs and the assessment verdict. Add `--json` for structured output. See [check, plan and run](../language/index.md#check-plan-and-run).
 
-## How RunMat computes the response
+## How RunMat computes this
 
-The solver finds displacements that balance the applied forces with the material's elastic response and the prescribed supports. Small strain comes from the displacement gradient; elastic stiffness relates strain to stress:
+RunMat solves the small-strain elasticity equations in weak form: find the displacement $\mathbf u$ such that
 
 $$
-\boldsymbol\varepsilon = \tfrac12(\nabla\mathbf u + \nabla\mathbf u^{\mathsf T}),\qquad
-\boldsymbol\sigma = \mathsf C : \boldsymbol\varepsilon,\qquad
-\mathsf K\mathbf u = \mathbf f.
+\int_\Omega \boldsymbol\varepsilon(\mathbf v) : \mathsf C : \boldsymbol\varepsilon(\mathbf u)\, d\Omega = \int_{\Gamma_N} \mathbf v \cdot \mathbf t\, d\Gamma \quad \text{for all admissible } \mathbf v,
 $$
 
-**Displacement** answers how much the part moves. **Stress** describes its internal loading. **Support reactions** describe the forces needed to hold the constrained regions in place. Check that the reactions balance the applied load when interpreting a study.
+with $\boldsymbol\varepsilon = \tfrac12(\nabla\mathbf u + \nabla\mathbf u^{\mathsf T})$ and $\mathbf t$ the applied traction. Each Tet10 element contributes a stiffness matrix $\mathbf K^e = \int_{\Omega_e} \mathbf B^{\mathsf T}\mathbf D\,\mathbf B\, d\Omega$ evaluated by Gauss quadrature, and the element matrices are assembled into the global system $\mathbf K\mathbf u = \mathbf f$. The fixed face is applied by eliminating its degrees of freedom, and the symmetric positive-definite system is solved with a sparse Cholesky factorization. Stress is computed in each element from the displacement gradient; the nodal von Mises stress averages the stress tensors of the elements that share a node and takes von Mises from the averaged tensor. Reactions are the internal forces at the constrained degrees of freedom.
 
-For this beam, compare the displacement near the free end as you refine the mesh. Stress at an idealized clamp can be sensitive to the boundary condition and local mesh size; inspect the distribution and compare locations away from sharp support corners as well.
+The full derivation, element formulation and solver options are in the [structural physics reference](../physics/structural.md).
 
-<details>
-<summary>Material, mesh, and display details</summary>
+## Validation
 
-The source declares density **7,850 kg/m³**. This traction-only static case uses no mass-dependent load. The requested mesh deviation is **1 mm**. Geometry and displacement use meters; stress uses pascals. The undeformed outline in the displacement view helps distinguish the original shape from the exaggerated deformation.
-
-</details>
-
-## Supported scope and next steps
-
-This example uses RunMat's **linear-static formulation** for small-strain elastic solids. Its saved result demonstrates the complete workflow. For your own model, check material and boundary assignments, load balance, and convergence of the quantities that matter.
-
-Read [Structural validation](/docs/simulation/validation/structural) for the formulation checks, physical references, acceptance criteria, and available assessment records behind this capability.
+The structural formulation is checked against closed-form beam, plate and bar solutions with mesh sequences and stated tolerances; see [structural validation](../validation/structural.md).

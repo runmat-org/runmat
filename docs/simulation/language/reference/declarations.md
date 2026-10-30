@@ -120,6 +120,7 @@ material steel {
         specific_heat = 460 J/kg/K
         expansion_coefficient = 12e-6 K^-1
         reference_temperature = 293.15 K
+        modulus_temperature_coefficient = 0 K^-1
     }
     rayleigh_damping {
         mass_coefficient = 0.2 Hz
@@ -136,10 +137,10 @@ A material is a name plus capability blocks. Each block is optional; a study's p
 | `mass_density` | density | Mass per unit volume. |
 | `elastic` | `youngs_modulus` (pressure), `poisson_ratio` (number) | Isotropic linear elasticity. |
 | `orthotropic_lamina` | `longitudinal_modulus`, `transverse_modulus`, `in_plane_shear_modulus`, `transverse_shear_modulus_13`, `transverse_shear_modulus_23` (pressure); `major_poisson_ratio` (number) | A unidirectional ply for composite layups. |
-| `plastic` | `law = j2_isotropic_linear_hardening`, `yield_stress` (pressure), `isotropic_hardening_modulus` (pressure) | Von Mises (J2) plasticity with linear isotropic hardening, for `structural nonlinear` steps. |
+| `plastic` | `law = j2_isotropic_linear_hardening` [not yet in the current release](pending:language.plastic-law-identifier), `yield_stress` (pressure), `isotropic_hardening_modulus` (pressure) | Von Mises (J2) plasticity with linear isotropic hardening, for `structural nonlinear` steps. |
 | `rayleigh_damping` | `mass_coefficient` (1/time, written in Hz), `stiffness_coefficient` (time) | $\mathbf C_d = \alpha \mathbf M + \beta \mathbf K$. |
 | `thermal` | `conductivity` (W/m/K), `specific_heat` (J/kg/K), `expansion_coefficient` (1/temperature), `reference_temperature` (temperature), `modulus_temperature_coefficient` (1/temperature) | Heat conduction and storage, thermal strain from the reference temperature, and a linear temperature dependence of the elastic modulus. |
-| `electrical` | `conductivity` (S/m), `relative_permittivity` (number), `relative_permeability` (number), `resistive_heating_coefficient` (1/temperature), `reference_temperature` (temperature) | Conduction, permittivity and permeability for electromagnetic families; a linear temperature dependence of resistivity for electrothermal coupling. |
+| `electrical` | `conductivity` (electrical conductivity, written `A/V/m`), `relative_permittivity` (number), `relative_permeability` (number), `resistive_heating_coefficient` (1/temperature), `reference_temperature` (temperature) | Conduction, permittivity and permeability for electromagnetic families; a linear temperature dependence of resistivity for electrothermal coupling. |
 | `acoustic` | `speed_of_sound` (velocity), `damping_ratio` (number) | An acoustic medium; density is `mass_density`. |
 | `fluid` | `law` plus the law's members | Incompressible flow: `incompressible_newtonian` (`dynamic_viscosity`), and the generalized-Newtonian laws `power_law`, `carreau`, `carreau_yasuda`, `cross`, `bingham`, `herschel_bulkley` and `casson`. |
 | `porous` | `law = darcy` or `darcy_forchheimer`, `permeability` (area), `porosity` (number), `inertial_coefficient` (number, Darcy–Forchheimer) | Flow through a porous region. |

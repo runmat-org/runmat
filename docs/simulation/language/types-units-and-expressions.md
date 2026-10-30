@@ -64,7 +64,7 @@ Derived units are written as expressions:
 | Heat transfer coefficient | `W/m^2/K` |
 | Heat flux | `W/m^2` |
 | Dynamic viscosity | `Pa*s` |
-| Electrical conductivity | `A/V/m` (siemens per meter) |
+| Electrical conductivity | `A/V/m`; `S/m` [not yet in the current release](pending:language.unit.siemens) |
 | Current density | `A/m^2` |
 | Electric field | `V/m`, `kV/mm` |
 | Thermal expansion coefficient | `K^-1` |

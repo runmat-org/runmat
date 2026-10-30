@@ -1,74 +1,100 @@
-## Refine the quantities that matter
+---
+description: Worked mesh convergence study in RunMat. Refine a steel cantilever from 150 mm to 25 mm Tet10, check that tip deflection and stress away from the support converge, and see why the peak at a clamped edge does not.
+keywords: [mesh refinement, mesh convergence, mesh independence, Tet10, Tet4, stress singularity, element order, target size, convergence study]
+doc_type: guide
+family: [structural]
+examples: [cantilever-static]
+---
+A finite-element result depends on the mesh. A mesh convergence study solves the same model on finer meshes and checks that the quantity the decision rests on stops changing. Converged quantities are typically displacements, reactions, and stresses away from corners and supports. A stress at a sharp re-entrant corner or at the edge of a fully fixed face is a singularity: it grows without bound as the mesh is refined, so it never converges and is not a design value.
 
-Mesh refinement helps you decide whether a computed quantity is stable enough for its intended use. In RunMat, repeat the same physical study with a changed mesh, then compare displacement, stress, reactions or another quantity at the same physical location. Keep the geometry, material, loads, supports and solver policy fixed while isolating the effect of discretization.
+## The question
 
-A small solver residual means the discrete equations were solved closely. Refinement asks a different question: how much does the answer change when those equations are built from a different mesh? Choose the quantity first, then design the comparison.
+For the cantilever in the [linear static guide](./linear-static.md), is the mesh fine enough that:
 
-## Compare three meshes of the same cantilever
+- the tip deflection changes by less than **1 %** on further refinement, and
+- the von Mises stress on the top surface at x = 100 mm changes by less than **2 %**?
 
-These projects use the cantilever from the linear-static guide: a 1 m steel beam with a 100 mm square cross-section, a fixed x = 0 face, and a 100 kPa downward traction on the free end. All three use quadratic tetrahedra and the same material and loading. Only the requested target size changes: **300 mm**, **175 mm**, and **150 mm**.
+<!-- fea:example:cantilever-static:setup -->
 
-A requested size is not an element count. Surface constraints, feature dimensions and meshing quality can make actual element sizes smaller, so inspect the resulting mesh rather than comparing the request alone.
+The beam is 1 m long with a 100 mm × 100 mm section, fixed at x = 0, with a 1,000 N downward traction resultant on the x = 1 m face. Only the mesh changes between runs: the target size steps from 150 mm to 25 mm, on quadratic tetrahedra (Tet10). A separate pair of runs uses linear tetrahedra (Tet4).
 
-### Coarse request: 300 mm
-
-<!-- fea:example:cantilever-coarse:geometry -->
-
-### Medium request: 175 mm
-
-<!-- fea:example:cantilever-medium:geometry -->
-
-### Fine request: 150 mm
+## Inspect the starting mesh
 
 <!-- fea:example:cantilever-static:geometry -->
 
-Rotate the meshes to see where resolution has actually changed. The saved projects contain their own original solver meshes and results; the browser does not regenerate them.
+The 150 mm request gives 2,727 nodes. A target size is a request for an edge length, not an element count. Surface curvature, feature size and quality limits decide the final mesh, so compare node counts, not requests. At this beam's size, 75 mm gives almost the same mesh as 150 mm (2,758 nodes).
 
-## Compare displacement and stress separately
+## Results
 
-For bending, a useful global quantity is free-end displacement. A useful local quantity is stress near the fixed end. They can stabilize at different rates: displacement reflects the overall deformation, while stress depends on spatial derivatives and local support behavior.
+| Tet10 target size | Nodes | Tip deflection | Change vs 25 mm | Top-surface stress at x = 100 mm | Change vs 25 mm | Largest element stress |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 150 mm | 2,727 | [0.20003 mm](receipt:cantilever-static#tip-deflection) | −0.32 % | [5.433 MPa](receipt:cantilever-static#top-von-mises) | +0.38 % | [5.39 MPa](receipt:cantilever-static#peak-element-von-mises) |
+| 75 mm | 2,758 | [0.20030 mm](receipt:cantilever-static#tip-deflection-tet10-75) | −0.19 % | [5.422 MPa](receipt:cantilever-static#top-von-mises-tet10-75) | +0.18 % | [5.45 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-75) |
+| 50 mm | 4,679 | [0.20047 mm](receipt:cantilever-static#tip-deflection-tet10-50) | −0.10 % | [5.413 MPa](receipt:cantilever-static#top-von-mises-tet10-50) | +0.01 % | [5.27 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-50) |
+| 25 mm | 32,075 | [0.20068 mm](receipt:cantilever-static#tip-deflection-tet10-25) | — | [5.412 MPa](receipt:cantilever-static#top-von-mises-tet10-25) | — | [5.76 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-25) |
 
-The saved runs shown here give the following values:
-
-| Requested size | Nodes | Elements | Maximum displacement | Maximum element von Mises stress |
-| --- | ---: | ---: | ---: | ---: |
-| 300 mm | 748 | 273 | 0.199405 mm | 4.8639 MPa |
-| 175 mm | 774 | 295 | 0.199356 mm | 5.1441 MPa |
-| 150 mm | 786 | 305 | 0.199370 mm | 5.1440 MPa |
-
-Using the finer result as the denominator, displacement changes by **0.025%** and then **0.007%**; the stress peak changes by **5.446%** and then **0.003%**. These small displacement changes support checking that global quantity further. The stress peak's larger first change and very small second change still need additional refinement or a local reference before treating the peak as stable. This sequence supplies observed changes, not an error bound.
-
+The support reaction is [1,000 N](receipt:cantilever-static#support-reaction) on every mesh: equilibrium holds exactly at any resolution, so reactions are the first quantity to check and the last to worry about.
 
 <!-- fea:example:cantilever-static:displacement -->
 
-The color legend reports physical displacement in meters. The deformation is enlarged for visibility, with the scale stated under the figure. Read the numerical values when comparing meshes; visually similar exaggerated shapes can hide a meaningful difference.
-
 <!-- fea:example:cantilever-static:stress -->
 
-Stress color is an original element field. Adjacent triangles can belong to elements with different projected stresses; no visual smoothing has been applied. The largest element value is not automatically a mesh-independent design stress. Sharp corners and idealized supports can make a local peak especially sensitive to refinement.
+### Element order
 
-## Repeat the comparison in RunMat
+| Tet4 target size | Nodes | Tip deflection | Short of the Tet10 25 mm value |
+| --- | ---: | ---: | ---: |
+| 150 mm | 431 | [0.1007 mm](receipt:cantilever-static#tip-deflection-tet4-150) | 50 % |
+| 50 mm | 729 | [0.1625 mm](receipt:cantilever-static#tip-deflection-tet4-50) | 19 % |
 
-Open the projects below to inspect all three studies and their saved results. The source excerpts show exactly which target size each project requests.
+Linear tetrahedra have constant strain in each element, so they cannot bend; a coarse Tet4 mesh locks and is far too stiff. Quadratic tetrahedra represent the linear variation of bending strain through the depth, and the coarsest Tet10 mesh is already within 0.4 % of the finest.
 
-### Coarse project
+## Check against the criteria
 
-<!-- fea:example:cantilever-coarse:edit -->
+- **Tip deflection** changes by 0.32 % from 150 mm to 25 mm, inside the 1 % criterion at every level. The 150 mm mesh is fine enough for deflection.
+- **Stress at x = 100 mm** changes by 0.38 %, inside the 2 % criterion. The 150 mm mesh is fine enough for this stress.
+- **The largest element stress** moves up and down (5.39, 5.45, 5.27, 5.76 MPa) without settling. It sits at the fixed edge, where a fully fixed face meets a free surface; the exact solution there is singular. Each element reports its average, and the average over an ever-smaller element near the singular edge keeps changing. Read stress one section depth or more from such an edge, or model the real support stiffness.
 
-### Medium project
+The converged tip deflection, 0.2007 mm, is 0.34 % above Euler–Bernoulli beam theory's 0.2000 mm. Euler–Bernoulli theory neglects shear deformation, which adds a little deflection in this 10:1 beam.
 
-<!-- fea:example:cantilever-medium:edit -->
+## Run the sequence
 
-### Fine project
+Copy the cantilever study, change only `target_size` (or `order`), and add outputs for the quantities being compared:
+
+```fea fragment
+mesh beam on geometry.beam {
+    tetrahedra {
+        order = quadratic
+        target_size = 50 mm
+        maximum_deviation = 0.001 m
+    }
+}
+```
+
+```fea fragment
+output top_stress = interpolate(analysis.static.field.node.von_mises_stress, at = [100 mm, 50 mm, 100 mm])
+output support_reaction = resultant(analysis.static.field.node.reaction_force, over = geometry.beam.region.fixed_end)
+```
+
+Run each file, or declare the target size as a study input and run them as a [sweep](../language/inputs-sweeps-and-cases.md):
+
+```sh
+runmat run cantilever-50mm.fea --json
+```
+
+The `--json` output carries the node count and each output value, so a script can tabulate the sequence.
 
 <!-- fea:example:cantilever-static:edit -->
 
-Choose a result quantity and location, run a sequence of meshes, and record the actual element/node inventory and the value from each solve. Use at least enough levels to see a trend. Compare relative changes against a tolerance chosen for that quantity and its engineering purpose; do not select a tolerance merely because the last two answers satisfy it.
+## Try a change
 
-## Plan refinement around the model
+- **Refine only near the support** with a `refine` block on the fixed face. The deflection and the stress at x = 100 mm should not change; the largest element stress at the edge will.
+- **Run Tet4 at 25 mm** and compare its deflection and node count with the Tet10 runs: Tet4 needs many more nodes for the same accuracy in bending.
+- **Move the stress sample to x = 20 mm.** Close to the singular edge, the sampled stress changes more between meshes.
 
-For a new part, concentrate refinement where the physics changes quickly: a bending support, a small loaded face, a material interface, or a thermal gradient. Element order matters as well as size. Compare size refinement within one order first; use an order comparison as a separate experiment. Quadratic elements can represent bending more effectively than a coarse linear-tetrahedral mesh, but choosing a higher order does not establish convergence by itself.
+## How RunMat computes this
 
-Each new mesh is a new solve. Displaying a denser surface or smoothing a contour does not refine the equilibrium problem. Changing a support, a traction area or a material assignment at the same time also changes the physics, so keep those comparisons separate from a mesh study.
+Each run meshes the CAD to the requested size, assembles and solves the same weak form as the [linear static guide](./linear-static.md#how-runmat-computes-this), and recovers stress from each element's displacement gradient. The nodal value at x = 100 mm is interpolated from nodal stresses, each the average of the stress tensors of the elements around that node. The element value is each element's own average. On a smooth field both converge; at a singularity the nodal and element values diverge. See the [structural physics reference](../physics/structural.md) for the element formulation and recovery.
 
-Use [structural validation](/docs/simulation/validation/structural) to inspect the reference and convergence requirements behind the formulation. This guide demonstrates a controlled comparison across meshes; it is not an automatic adaptation loop or a declaration that every plotted quantity has converged.
+## Validation
+
+[Structural validation](../validation/structural.md) lists the mesh sequences, references and acceptance criteria used to qualify the structural formulation.

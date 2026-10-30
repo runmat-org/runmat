@@ -160,6 +160,8 @@ material aluminum {
         conductivity = 167 W/m/K
         specific_heat = 896 J/kg/K
         expansion_coefficient = 23.6e-6 K^-1
+        reference_temperature = 20 degC
+        modulus_temperature_coefficient = 0 K^-1
     }
 }
 ```

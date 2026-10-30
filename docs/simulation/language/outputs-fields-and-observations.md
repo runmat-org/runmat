@@ -28,7 +28,7 @@ A field reference has four parts, `analysis.<step>.field.<location>.<quantity>`:
 | `face`, `edge` | Mesh faces and edges, such as tractions on a boundary. |
 | `interface` | Contact and coupled interfaces. |
 | `connector`, `constraint`, `reference_point` | Connector forces, constraint reactions and reference-point results. |
-| `mode` | One value per mode: frequencies, participation. |
+| `mode` | One value per mode: frequencies, participation. As a study `output` [not yet in the current release](pending:output.mode-location). |
 | `global` | One value for the whole step: residuals, balances. |
 
 **Quantities, by family:**
