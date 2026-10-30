@@ -314,10 +314,10 @@ fn input_members(
             input_member_error(path, statement.span, "invalid input member", diagnostics);
             continue;
         };
-        let slot = match name {
-            "default" => &mut members.default,
-            "minimum" => &mut members.minimum,
-            "maximum" => &mut members.maximum,
+        let slot = match (name, crate::FeaContextualWord::from_source(name)) {
+            ("default", _) => &mut members.default,
+            (_, Some(crate::FeaContextualWord::Minimum)) => &mut members.minimum,
+            (_, Some(crate::FeaContextualWord::Maximum)) => &mut members.maximum,
             _ => {
                 input_member_error(path, statement.span, "unknown input member", diagnostics);
                 continue;

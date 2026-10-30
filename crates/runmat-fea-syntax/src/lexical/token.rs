@@ -2,108 +2,37 @@ use super::FeaTriviaKind;
 use runmat_types::Span;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum FeaKeyword {
-    Import,
-    From,
-    Over,
-    Geometry,
-    Mesh,
-    Material,
-    Model,
-    Study,
-    Sweep,
-    Execution,
-    Function,
-    Region,
-    Input,
-    Let,
-    Construct,
-    Feature,
-    Derive,
-    Generated,
-    Assign,
-    To,
-    Constraint,
-    Load,
-    LoadCase,
-    Analysis,
-    Output,
-    Retain,
-    Include,
-    On,
-    Select,
-    Expect,
-    Result,
-    Case,
-    Cases,
-    Axis,
-    Transition,
-    Initial,
-    Interface,
-    Connector,
-    Section,
-    Layup,
-    Orientation,
-    Signal,
-    Table,
-    Excitation,
-    ResponseSpectrum,
-    RandomExcitation,
+// One lexical declaration owns the enum, recognition, spelling and inventory.
+// Contextual authoring names remain identifiers and belong to the language owner.
+macro_rules! fea_keywords {
+    ($($variant:ident => $source:literal),+ $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        pub enum FeaKeyword { $($variant),+ }
+        impl FeaKeyword {
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+            pub const fn as_source(self) -> &'static str {
+                match self { $(Self::$variant => $source),+ }
+            }
+            pub fn from_source(value: &str) -> Option<Self> {
+                match value { $($source => Some(Self::$variant),)+ _ => None }
+            }
+        }
+    };
 }
 
-impl FeaKeyword {
-    pub fn from_source(value: &str) -> Option<Self> {
-        Some(match value {
-            "import" => Self::Import,
-            "from" => Self::From,
-            "over" => Self::Over,
-            "geometry" => Self::Geometry,
-            "mesh" => Self::Mesh,
-            "material" => Self::Material,
-            "model" => Self::Model,
-            "study" => Self::Study,
-            "sweep" => Self::Sweep,
-            "execution" => Self::Execution,
-            "function" => Self::Function,
-            "region" => Self::Region,
-            "input" => Self::Input,
-            "let" => Self::Let,
-            "construct" => Self::Construct,
-            "feature" => Self::Feature,
-            "derive" => Self::Derive,
-            "generated" => Self::Generated,
-            "assign" => Self::Assign,
-            "to" => Self::To,
-            "constraint" => Self::Constraint,
-            "load" => Self::Load,
-            "load_case" => Self::LoadCase,
-            "analysis" => Self::Analysis,
-            "output" => Self::Output,
-            "retain" => Self::Retain,
-            "include" => Self::Include,
-            "on" => Self::On,
-            "select" => Self::Select,
-            "expect" => Self::Expect,
-            "result" => Self::Result,
-            "case" => Self::Case,
-            "cases" => Self::Cases,
-            "axis" => Self::Axis,
-            "transition" => Self::Transition,
-            "initial" => Self::Initial,
-            "interface" => Self::Interface,
-            "connector" => Self::Connector,
-            "section" => Self::Section,
-            "layup" => Self::Layup,
-            "orientation" => Self::Orientation,
-            "signal" => Self::Signal,
-            "table" => Self::Table,
-            "excitation" => Self::Excitation,
-            "response_spectrum" => Self::ResponseSpectrum,
-            "random_excitation" => Self::RandomExcitation,
-            _ => return None,
-        })
-    }
+fea_keywords! {
+    Import => "import", From => "from", Over => "over", Geometry => "geometry",
+    Mesh => "mesh", Material => "material", Model => "model", Study => "study",
+    Sweep => "sweep", Execution => "execution", Function => "function", Region => "region",
+    Input => "input", Let => "let", Construct => "construct", Feature => "feature",
+    Derive => "derive", Generated => "generated", Assign => "assign", To => "to",
+    Constraint => "constraint", Load => "load", LoadCase => "load_case", Analysis => "analysis",
+    Output => "output", Retain => "retain", Include => "include", On => "on",
+    Select => "select", Expect => "expect", Result => "result", Case => "case",
+    Cases => "cases", Axis => "axis", Transition => "transition", Initial => "initial",
+    Interface => "interface", Connector => "connector", Section => "section", Layup => "layup",
+    Orientation => "orientation", Signal => "signal", Table => "table", Excitation => "excitation",
+    ResponseSpectrum => "response_spectrum", RandomExcitation => "random_excitation",
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -395,7 +395,10 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                     let parts = text.split_whitespace().collect::<Vec<_>>();
                     let statements =
                         check_block(catalog, path, source, body, scope, outputs, diagnostics);
-                    if parts.len() == 2 && parts[0] == "assessment" {
+                    if parts.len() == 2
+                        && crate::FeaContextualWord::from_source(parts[0])
+                            == Some(crate::FeaContextualWord::Assessment)
+                    {
                         CheckedFeaStatementKind::AssessmentDefinition {
                             name: parts[1].to_string(),
                             statements,

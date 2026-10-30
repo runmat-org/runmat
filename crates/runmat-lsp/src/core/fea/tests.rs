@@ -23,9 +23,45 @@ fn check_with_overlays(
 
 #[test]
 fn keyword_inventory_matches_the_lexer() {
-    for keyword in KEYWORDS {
-        assert!(FeaKeyword::from_source(keyword).is_some(), "{keyword}");
+    use runmat_analysis_language::FeaContextualWord;
+    use runmat_lexer::fea::{tokenize_fea, FeaTokenKind};
+    let mut names = std::collections::BTreeSet::new();
+    for &keyword in FeaKeyword::ALL {
+        let source = keyword.as_source();
+        assert!(names.insert(source));
+        assert_eq!(FeaKeyword::from_source(source), Some(keyword), "{source}");
+        assert_eq!(
+            tokenize_fea(source)
+                .significant_tokens()
+                .next()
+                .unwrap()
+                .kind,
+            FeaTokenKind::Keyword(keyword)
+        );
     }
+    for &word in FeaContextualWord::ALL {
+        let source = word.as_source();
+        assert!(names.insert(source));
+        assert_eq!(FeaContextualWord::from_source(source), Some(word));
+        assert_eq!(
+            FeaKeyword::from_source(source),
+            None,
+            "contextual {source} must not be reserved"
+        );
+        assert_eq!(
+            tokenize_fea(source)
+                .significant_tokens()
+                .next()
+                .unwrap()
+                .kind,
+            FeaTokenKind::Identifier
+        );
+    }
+    assert_eq!(
+        names.len(),
+        52,
+        "preserve the complete existing completion inventory"
+    );
 }
 
 // witness: FEA-AUTHORING-COMPILER-002/lsp_services @
@@ -93,10 +129,19 @@ study static {
         analysis.diagnostics(source)
     );
     assert_eq!(analysis.document_symbols(source).len(), 5);
-    assert!(analysis
-        .completion_items()
+    let completions = analysis.completion_items();
+    assert!(completions
         .iter()
         .any(|item| item.label == "material.steel"));
+    for word in runmat_analysis_language::FeaContextualWord::ALL {
+        assert_eq!(
+            completions
+                .iter()
+                .filter(|item| item.label == word.as_source())
+                .count(),
+            1
+        );
+    }
     let workspace_symbols = analysis.workspace_symbols(Some("steel"));
     assert_eq!(workspace_symbols.len(), 1);
     assert_eq!(workspace_symbols[0].name, "material.steel");
@@ -173,17 +218,20 @@ study static {
     assert!(target_size_hover.value.contains("| Dimension | length |"));
     assert!(target_size_hover.value.contains("| Canonical SI | `m` |"));
 
-    let formulation_offset = source.find("formulation =").unwrap() + 2;
-    let formulation_hover = analysis
-        .hover(source, &offset_to_position(source, formulation_offset))
+    let order_offset = source.find("order =").unwrap() + 2;
+    let order_hover = analysis
+        .hover(source, &offset_to_position(source, order_offset))
         .unwrap();
-    let HoverContents::Markup(formulation_hover) = formulation_hover.contents else {
+    let HoverContents::Markup(order_hover) = order_hover.contents else {
         panic!("expected markdown hover");
     };
-    assert!(formulation_hover.value.contains("formulation: enum"));
-    assert!(formulation_hover
-        .value
-        .contains("canonical authoring contract"));
+    assert!(order_hover.value.contains("order: enum"));
+    for contract in ["linear", "quadratic", "Tet4", "Tet10"] {
+        assert!(
+            order_hover.value.contains(contract),
+            "missing order contract {contract}"
+        );
+    }
 
     let linear_offset = source.find("linear").unwrap() + 2;
     let linear_hover = analysis

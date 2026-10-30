@@ -600,7 +600,11 @@ mod tests {
                 &'a self,
                 handle: &'a GpuTensorHandle,
             ) -> AccelNumericDownloadFuture<'a> {
-                self.integer_downloads.fetch_add(1, Ordering::SeqCst);
+                // Count native integer input/control reads, not the test's
+                // separate floating-point output verification downloads.
+                if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                    self.integer_downloads.fetch_add(1, Ordering::SeqCst);
+                }
                 self.inner.download_numeric(handle)
             }
         }

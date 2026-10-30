@@ -1260,12 +1260,22 @@ mod tests {
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ))
         .with_acceleration_policy(RuntimeAccelerationPolicy {
-            enabled: false,
+            enabled: true,
             provider: RuntimeProviderPreference::Auto,
             automatic_offload: false,
             allow_host_fallback: false,
             calibrate: false,
         });
+        // A policy transition is not a new session or device epoch. Retain
+        // the exact context state that owns the source allocation.
+        let readback_runtime =
+            runtime
+                .clone()
+                .with_acceleration_policy(RuntimeAccelerationPolicy {
+                    enabled: false,
+                    ..runtime.acceleration_policy().unwrap()
+                });
+        assert_eq!(runtime.local_identity(), readback_runtime.local_identity());
         let provider = crate::backend::wgpu::provider::register_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
@@ -1280,6 +1290,7 @@ mod tests {
                 HostNumericDataOwned::F64(vec![1.0, -2.0])
             }
         };
+        let creation_scope = runtime.enter();
         let source = provider
             .upload_numeric(&HostNumericTensorView {
                 data: input.as_view(),
@@ -1289,7 +1300,8 @@ mod tests {
                 storage: GpuTensorStorage::ComplexInterleaved,
             })
             .unwrap();
-        let scope = runtime.enter();
+        drop(creation_scope);
+        let scope = readback_runtime.enter();
         assert!(provider.access.with_shared(|_| ()).is_err());
         let readback = runmat_accelerate_api::numeric_readback_for_handle(&source).unwrap();
         let host = futures::executor::block_on(readback.download_numeric()).unwrap();
@@ -1302,7 +1314,7 @@ mod tests {
         }
         assert!(provider.access.with_shared(|_| ()).is_err());
         use runmat_execution::identity::{AttemptId, ExecutionScopeId, PoolId, TaskId, WorkerId};
-        let assignment = runtime.enter_execution_assignment(Some(
+        let assignment = readback_runtime.enter_execution_assignment(Some(
             runmat_execution::ProgramExecutionAssignment {
                 scope_id: ExecutionScopeId::derive(&[b"readback-denied-scope"]),
                 pool_id: PoolId::derive(&[b"readback-denied-pool"]),
@@ -1319,6 +1331,7 @@ mod tests {
         drop(readback);
         drop(assignment);
         drop(scope);
+        let _retirement_scope = runtime.enter();
         source.release().unwrap();
     }
 

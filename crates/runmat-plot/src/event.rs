@@ -5038,10 +5038,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             single_bits
         );
-        assert!(
-            serde_json::from_str::<SceneNumericStorage>(r#"{"dtype":"f64","values":[null]}"#)
-                .is_err()
-        );
+        // Canonical bit tags stay strict. Legacy null-gap admission has its
+        // own test; null is not a malformed tag under that import contract.
+        assert!(serde_json::from_str::<SceneNumericStorage>(
+            r#"{"dtype":"f64","values":[{"f64_bits":"not-bits"}]}"#
+        )
+        .is_err());
 
         let mut legacy_figure = Figure::new()
             .with_title("Legacy title")

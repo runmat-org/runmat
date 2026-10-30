@@ -209,14 +209,24 @@ impl FeaDocumentAnalysis {
     }
 
     pub fn completion_items(&self) -> Vec<CompletionItem> {
-        let mut items = KEYWORDS
+        use runmat_analysis_language::{FeaAuthoringWordRole, FeaContextualWord};
+        let mut items = runmat_lexer::fea::FeaKeyword::ALL
             .iter()
             .map(|keyword| CompletionItem {
-                label: (*keyword).to_string(),
+                label: keyword.as_source().to_string(),
                 kind: Some(CompletionItemKind::KEYWORD),
                 ..CompletionItem::default()
             })
             .collect::<Vec<_>>();
+        items.extend(FeaContextualWord::ALL.iter().map(|word| CompletionItem {
+            label: word.as_source().to_string(),
+            kind: Some(match word.role() {
+                FeaAuthoringWordRole::Block => CompletionItemKind::KEYWORD,
+                FeaAuthoringWordRole::Property => CompletionItemKind::PROPERTY,
+                FeaAuthoringWordRole::EnumValue => CompletionItemKind::ENUM_MEMBER,
+            }),
+            ..CompletionItem::default()
+        }));
         if let Some(symbols) = self.program.bound.symbols.get(&self.root) {
             items.extend(symbols.keys().map(|symbol| CompletionItem {
                 label: format!("{}.{}", symbol_kind_name(symbol.kind), symbol.name),

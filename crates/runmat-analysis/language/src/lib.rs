@@ -4,6 +4,7 @@
 //! into canonical analysis contracts. It never owns numerical execution,
 //! runtime values, filesystem implementations, or scheduler policy.
 
+pub mod authoring;
 pub mod binding;
 pub mod compiler;
 pub mod diagnostic;
@@ -13,6 +14,7 @@ pub mod reference;
 pub mod semantic;
 pub mod source;
 
+pub use authoring::{FeaAuthoringWordRole, FeaContextualWord};
 pub use binding::*;
 pub use compiler::*;
 pub use diagnostic::*;

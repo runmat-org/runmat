@@ -1,11 +1,10 @@
 use super::{lower, values};
 use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatementKind,
-    FeaDiagnostic, FeaType,
+    FeaContextualWord, FeaDiagnostic, FeaType,
 };
 use runmat_analysis_core::{
-    AssessmentEvidenceRequirement, AssessmentFunctionReference, AssessmentQuantity, AssessmentRule,
-    AuthoredAssessment,
+    AssessmentFunctionReference, AssessmentQuantity, AssessmentRule, AuthoredAssessment,
 };
 use std::collections::BTreeMap;
 
@@ -21,7 +20,11 @@ pub(super) fn lower_assessments(
                 (name, statements)
             }
             CheckedFeaStatementKind::Block { header, .. }
-                if header.split_whitespace().next() == Some("assessment") =>
+                if header
+                    .split_whitespace()
+                    .next()
+                    .and_then(FeaContextualWord::from_source)
+                    == Some(FeaContextualWord::Assessment) =>
             {
                 lower::error(
                     declaration,
@@ -39,15 +42,15 @@ pub(super) fn lower_assessments(
             match &field.kind {
                 CheckedFeaStatementKind::Assignment { target, value, .. }
                     if target.len() == 1
-                        && matches!(
-                            target[0].as_str(),
-                            "value"
-                                | "minimum"
-                                | "maximum"
-                                | "evidence"
-                                | "function"
-                                | "parameters"
-                        ) =>
+                        && (matches!(target[0].as_str(), "value" | "function" | "parameters")
+                            || matches!(
+                                FeaContextualWord::from_source(&target[0]),
+                                Some(
+                                    FeaContextualWord::Minimum
+                                        | FeaContextualWord::Maximum
+                                        | FeaContextualWord::Evidence
+                                )
+                            )) =>
                 {
                     if fields.insert(target[0].as_str(), value).is_some() {
                         lower::error(
@@ -83,10 +86,16 @@ pub(super) fn lower_assessments(
             AssessmentQuantity::try_from_descriptor(dimension, values::canonical_scalar(value)?)
                 .ok()
         };
-        let minimum = fields.get("minimum").and_then(bound);
-        let maximum = fields.get("maximum").and_then(bound);
+        let minimum = fields
+            .get(FeaContextualWord::Minimum.as_source())
+            .and_then(bound);
+        let maximum = fields
+            .get(FeaContextualWord::Maximum.as_source())
+            .and_then(bound);
         let rule = if let Some(function) = fields.get("function") {
-            if fields.contains_key("minimum") || fields.contains_key("maximum") {
+            if fields.contains_key(FeaContextualWord::Minimum.as_source())
+                || fields.contains_key(FeaContextualWord::Maximum.as_source())
+            {
                 lower::error(
                     declaration,
                     statement.span,
@@ -114,24 +123,28 @@ pub(super) fn lower_assessments(
         } else {
             match (minimum, maximum) {
                 (Some(minimum), Some(maximum)) => Some(AssessmentRule::Range { minimum, maximum }),
-                (Some(bound), None) if !fields.contains_key("maximum") => {
+                (Some(bound), None)
+                    if !fields.contains_key(FeaContextualWord::Maximum.as_source()) =>
+                {
                     Some(AssessmentRule::Minimum { bound })
                 }
-                (None, Some(bound)) if !fields.contains_key("minimum") => {
+                (None, Some(bound))
+                    if !fields.contains_key(FeaContextualWord::Minimum.as_source()) =>
+                {
                     Some(AssessmentRule::Maximum { bound })
                 }
                 _ => None,
             }
         };
-        let evidence = fields.get("evidence").and_then(|value| match &value.kind {
-            CheckedExpressionKind::Enum(name) if name == "authored_samples" => {
-                Some(AssessmentEvidenceRequirement::AuthoredSamples)
-            }
-            CheckedExpressionKind::Enum(name) if name == "certified_bound" => {
-                Some(AssessmentEvidenceRequirement::CertifiedBound)
-            }
-            _ => None,
-        });
+        let evidence = fields
+            .get(FeaContextualWord::Evidence.as_source())
+            .and_then(|value| match &value.kind {
+                CheckedExpressionKind::Enum(name) => match FeaContextualWord::from_source(name) {
+                    Some(FeaContextualWord::EvidenceValue(requirement)) => Some(requirement),
+                    _ => None,
+                },
+                _ => None,
+            });
         match (output,rule,evidence) {
             (Some(output_id),Some(rule),Some(evidence)) if diagnostics.len() == initial_errors => result.push(AuthoredAssessment { assessment_id: name.clone(), output_id, rule, evidence }),
             _ => lower::error(declaration, statement.span, "assessment requires a declared output, finite dimensioned bounds, and explicit evidence = authored_samples or certified_bound", diagnostics),

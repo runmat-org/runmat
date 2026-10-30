@@ -42,26 +42,39 @@ fn check(source: &str) -> CheckedFeaProgram {
 }
 #[test]
 fn threshold_is_typed_and_retained() {
-    let checked = check(BASE);
-    assert!(
-        !checked
-            .diagnostics
-            .iter()
-            .any(|d| d.severity == FeaDiagnosticSeverity::Error),
-        "{:?}",
-        checked.diagnostics
-    );
-    let study = checked.studies.values().next().unwrap();
-    assert_eq!(study.assessments.len(), 1);
-    assert_eq!(
-        study.assessments[0]
-            .rule
-            .bounds()
-            .1
-            .unwrap()
-            .canonical_value(),
-        0.001
-    );
+    use runmat_analysis_core::AssessmentEvidenceRequirement;
+    for bound in [FeaContextualWord::Minimum, FeaContextualWord::Maximum] {
+        for evidence in [
+            AssessmentEvidenceRequirement::AuthoredSamples,
+            AssessmentEvidenceRequirement::CertifiedBound,
+        ] {
+            let source = BASE
+                .replace("maximum = 1 mm", &format!("{} = 1 mm", bound.as_source()))
+                .replace(
+                    "authored_samples",
+                    FeaContextualWord::EvidenceValue(evidence).as_source(),
+                );
+            let checked = check(&source);
+            assert!(
+                !checked
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.severity == FeaDiagnosticSeverity::Error),
+                "{:?}",
+                checked.diagnostics
+            );
+            let study = checked.studies.values().next().unwrap();
+            assert_eq!(study.assessments.len(), 1);
+            assert_eq!(study.assessments[0].evidence, evidence);
+            let (minimum, maximum) = study.assessments[0].rule.bounds();
+            let retained = match bound {
+                FeaContextualWord::Minimum => minimum,
+                FeaContextualWord::Maximum => maximum,
+                _ => unreachable!("the matrix contains only assessment bound properties"),
+            };
+            assert_eq!(retained.unwrap().canonical_value(), 0.001);
+        }
+    }
 }
 #[test]
 fn wrong_units_and_duplicate_settings_are_rejected() {
