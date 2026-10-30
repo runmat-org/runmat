@@ -11,6 +11,16 @@ use crate::{
 
 use super::{domain, linear, medium, recovery};
 
+/// Nodal sound pressure levels of peak pressure phasor magnitudes: the shared RMS definition
+/// of the distributed observations, so both result paths publish one level.
+pub(crate) fn nodal_sound_pressure_levels_db(pressure_magnitude_pa: &[f64]) -> Vec<f64> {
+    pressure_magnitude_pa
+        .iter()
+        .copied()
+        .map(runmat_analysis_core::sound_pressure_level_db)
+        .collect()
+}
+
 /// Executes the graph-domain acoustic proxy.
 ///
 /// Keeping this function in the acoustic physics domain prevents runtime adapters from owning
@@ -60,10 +70,7 @@ pub fn solve_reduced_harmonic(
         .zip(&pressure_imag)
         .map(|(real, imaginary)| imaginary.atan2(*real))
         .collect::<Vec<_>>();
-    let sound_pressure_level_db = pressure_magnitude
-        .iter()
-        .map(|pressure| 20.0 * (pressure.max(2.0e-5) / 2.0e-5).log10())
-        .collect::<Vec<_>>();
+    let sound_pressure_level_db = nodal_sound_pressure_levels_db(&pressure_magnitude);
     let particle_velocity = recovery::particle_velocity(
         &pressure_real,
         topology,

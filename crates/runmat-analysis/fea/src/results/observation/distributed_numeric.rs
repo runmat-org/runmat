@@ -318,10 +318,7 @@ fn project_observation_value(
                 ComplexRepresentation::SoundPressureLevel => value
                     .chunks_exact(2)
                     .map(|pair| {
-                        20.0 * (pair[0].hypot(pair[1])
-                            / (std::f64::consts::SQRT_2
-                                * runmat_analysis_core::SOUND_PRESSURE_LEVEL_REFERENCE_PA))
-                            .log10()
+                        runmat_analysis_core::sound_pressure_level_db(pair[0].hypot(pair[1]))
                     })
                     .collect(),
                 ComplexRepresentation::Complex => value.to_vec(),

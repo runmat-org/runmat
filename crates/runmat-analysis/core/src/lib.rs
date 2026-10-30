@@ -240,7 +240,7 @@ pub use study::output::{
     ObservationThreshold, ObservationValueShape, PartialAccessPolicy, RecoveryPolicy,
     ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesObservationEvent, SeriesReduction,
     SeriesWeighting, SignConvention, SolverObservationEvent, SpatialReduction,
-    SOUND_PRESSURE_LEVEL_REFERENCE_PA,
+    sound_pressure_level_db, SOUND_PRESSURE_LEVEL_REFERENCE_PA,
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,

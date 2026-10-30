@@ -19,6 +19,7 @@ pub use canonical::{
     CanonicalAcousticTransient, TransientRetention,
 };
 
+pub(crate) use reduced::nodal_sound_pressure_levels_db;
 pub use reduced::solve_reduced_harmonic;
 
 /// Returns whether the authored model contains a materialized nonzero pressure source that the

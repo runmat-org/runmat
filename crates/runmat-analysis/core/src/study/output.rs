@@ -327,6 +327,16 @@ pub enum ComplexRepresentation {
 /// Reference pressure of `ComplexRepresentation::SoundPressureLevel` (air, 20 uPa).
 pub const SOUND_PRESSURE_LEVEL_REFERENCE_PA: f64 = 20.0e-6;
 
+/// Sound pressure level in dB re 20 uPa of a peak pressure phasor magnitude `|p|`, referred to
+/// the RMS pressure `|p| / sqrt(2)`: `20 log10(|p| / (sqrt(2) * 20 uPa))`. This is the one
+/// definition every acoustic result path uses. It is not clamped: levels below the reference
+/// are negative, and zero pressure has no finite level (`-inf`).
+pub fn sound_pressure_level_db(peak_pressure_magnitude_pa: f64) -> f64 {
+    20.0 * (peak_pressure_magnitude_pa.abs()
+        / (std::f64::consts::SQRT_2 * SOUND_PRESSURE_LEVEL_REFERENCE_PA))
+        .log10()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SamplingPolicy {
