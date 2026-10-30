@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(unix)]
 use std::fs;
 use std::sync::{Arc, Barrier};
 

@@ -22,6 +22,8 @@ mod service;
 mod store;
 #[cfg(all(test, unix))]
 mod tests;
+#[cfg(test)]
+mod test_support;
 
 pub use client::LocalSupervisorClient;
 pub use config::LocalSupervisorConfig;

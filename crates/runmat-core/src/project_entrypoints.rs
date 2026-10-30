@@ -132,6 +132,7 @@ mod tests {
                 let mut session = crate::RunMatSession::with_options(false, false).unwrap();
                 session
                     .install_project_handoff(project.handoff.clone())
+                    .await
                     .unwrap();
                 let source = project.capture_source(target).await.unwrap();
                 let unit = session.compile_executable_unit(source, None).await.unwrap();
