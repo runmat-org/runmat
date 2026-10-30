@@ -26,6 +26,9 @@ use crate::telemetry::AccelTelemetry;
 mod timestamp_features;
 #[path = "init/adapter.rs"]
 mod adapter;
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+#[path = "init/windows_shader_compiler.rs"]
+mod windows_shader_compiler;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_required_features(precision: NumericPrecision) -> wgpu::Features {
@@ -160,11 +163,8 @@ impl WgpuProvider {
             // for provider-owned buffers to remain WGPU-resident through draw.
             // Advanced users can still opt into another backend explicitly.
             instance_desc.backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::DX12);
-            instance_desc.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::from_env()
-                .unwrap_or(wgpu::Dx12Compiler::DynamicDxc {
-                    dxil_path: "dxil.dll".into(),
-                    dxc_path: "dxcompiler.dll".into(),
-                });
+            instance_desc.backend_options.dx12.shader_compiler =
+                windows_shader_compiler::resolve()?;
         }
         #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
         {

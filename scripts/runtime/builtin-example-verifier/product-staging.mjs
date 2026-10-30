@@ -36,6 +36,26 @@ export function stageNativeProduct(fields) {
             staged.set(key, identity);
         }
     }
+    // Platform redistributables retain their publisher notices separately
+    // from the canonical notice payload embedded by the Rust runtime.
+    for (const directory of fields.dependencyNoticeDirectories ?? []) {
+        const root = resolve(directory);
+        const stat = lstatSync(root);
+        if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Native dependency notice directory is not real: ${directory}`);
+        const noticeRoot = join(destination, "THIRD_PARTY_NOTICES.d");
+        mkdirSync(noticeRoot, { recursive: true });
+        for (const entry of readdirSync(root, { withFileTypes: true })) {
+            if (!entry.isFile() || entry.isSymbolicLink()) throw new Error(`Native dependency notice must be a regular file: ${entry.name}`);
+            validateLeafName(entry.name, "native dependency notice name");
+            const source = join(root, entry.name);
+            const identity = sha256(readFileSync(source));
+            const key = `third_party_notices.d/${entry.name.toLowerCase()}`;
+            const prior = staged.get(key);
+            if (prior && prior !== identity) throw new Error(`Conflicting native dependency notice bytes for ${entry.name}`);
+            if (!prior) copyFileSync(source, join(noticeRoot, entry.name));
+            staged.set(key, identity);
+        }
+    }
     stageThirdPartyNotices(destination);
     return { destination, executableName, fileCount: staged.size + 1 };
 }

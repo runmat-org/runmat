@@ -320,6 +320,14 @@ jobs:
             --locked --release --target "${{ matrix.platform.target }}" \
             --bin runmat --features "$features"
 
+      - name: Prepare pinned Windows shader compiler
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
+        shell: pwsh
+        run: |
+          ./scripts/distribution/prepare-windows-dxc-runtime.ps1 `
+            -Target "${{ matrix.platform.target }}" `
+            -Destination "target/windows-dxc/${{ matrix.platform.target }}"
+
       - name: Build release CLI with embedded AOT runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -371,12 +379,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $root = "artifacts/release-product/${{ matrix.platform.release_for }}"
           $sourceRevision = (& git rev-parse HEAD).Trim()
+          $dxc = & ./scripts/distribution/prepare-windows-dxc-runtime.ps1 `
+            -Target "${{ matrix.platform.target }}" `
+            -Destination "target/windows-dxc/${{ matrix.platform.target }}"
           $arguments = @(
             "scripts/runtime/stage-builtin-example-product.mjs",
             "--binary", "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}",
             "--destination", "$root/product",
             "--executable-name", "${{ matrix.platform.bin }}"
           )
+          $arguments += @("--dependency-dir", $dxc.BinDir, "--dependency-notice-dir", $dxc.NoticeDir)
           $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $env:VCPKG_DEFAULT_TRIPLET + "\bin")
           if (Test-Path $vcpkgBin) { $arguments += @("--dependency-dir", $vcpkgBin) }
           $zmqBin = Join-Path $env:ZMQ_PATH "bin"
@@ -447,14 +459,19 @@ jobs:
           Push-Location $outDir
           try {
             $members = @("${{ matrix.platform.bin }}", "THIRD_PARTY_NOTICES.txt") + @(Get-ChildItem -File -Filter *.dll | ForEach-Object { $_.Name })
+            if (Test-Path -LiteralPath 'THIRD_PARTY_NOTICES.d') { $members += 'THIRD_PARTY_NOTICES.d' }
             & 7z a $archivePath @members
             if ($LASTEXITCODE -ne 0) { throw "Release archive creation failed" }
           } finally { Pop-Location }
           $noticeDir = Join-Path $env:RUNNER_TEMP ("runmat-release-notices-" + [guid]::NewGuid().ToString())
-          & 7z x $archivePath THIRD_PARTY_NOTICES.txt "-o$noticeDir"
+          & 7z x $archivePath THIRD_PARTY_NOTICES.txt "THIRD_PARTY_NOTICES.d/*" "-o$noticeDir"
           if ($LASTEXITCODE -ne 0) { throw "Release archive notice extraction failed" }
           & node scripts/distribution/third-party-notices.cjs verify $noticeDir
           if ($LASTEXITCODE -ne 0) { throw "Release archive notice verification failed" }
+          foreach ($notice in (Get-ChildItem -LiteralPath (Join-Path $outDir 'THIRD_PARTY_NOTICES.d') -File)) {
+            $archived = Join-Path $noticeDir ("THIRD_PARTY_NOTICES.d/" + $notice.Name)
+            if ((Get-FileHash -LiteralPath $notice.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $archived -Algorithm SHA256).Hash) { throw "Redistributable notice changed in release archive: $($notice.Name)" }
+          }
 
       - name: Package as archive (Unix)
         if: runner.os != 'Windows'

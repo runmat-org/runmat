@@ -314,15 +314,21 @@ test("native product staging preserves the executable and closes Windows depende
         const binary = join(directory, "runmat.exe");
         const first = join(directory, "first");
         const second = join(directory, "second");
+        const notices = join(directory, "notices");
         writeFileSync(binary, "binary");
         mkdirSync(first);
         mkdirSync(second);
+        mkdirSync(notices);
+        writeFileSync(join(notices, "component-LICENSE.txt"), "publisher license bytes\n");
         writeFileSync(join(first, "runtime.dll"), "same");
         writeFileSync(join(second, "RUNTIME.DLL"), "different");
-        const staged = stageNativeProduct({ binary, destination: join(directory, "product"), dependencyDirectories: [first] });
-        assert.equal(staged.fileCount, 3);
+        const staged = stageNativeProduct({ binary, destination: join(directory, "product"), dependencyDirectories: [first], dependencyNoticeDirectories: [notices, notices] });
+        assert.equal(staged.fileCount, 4);
         assert.equal(readFileSync(join(staged.destination, "runtime.dll"), "utf8"), "same");
         assert.deepEqual(readFileSync(join(staged.destination, NOTICE_FILE_NAME)), thirdPartyNoticeBytes());
+        assert.equal(readFileSync(join(staged.destination, "THIRD_PARTY_NOTICES.d", "component-LICENSE.txt"), "utf8"), "publisher license bytes\n");
+        writeFileSync(join(second, "component-LICENSE.txt"), "conflicting notice");
+        assert.throws(() => stageNativeProduct({ binary, destination: join(directory, "notice-conflict"), dependencyNoticeDirectories: [notices, second] }), /Conflicting native dependency notice bytes/);
         assert.throws(() => stageNativeProduct({ binary, destination: join(directory, "conflict"), dependencyDirectories: [first, second] }), /Conflicting native dependency bytes/);
     } finally {
         rmSync(directory, { recursive: true, force: true });
