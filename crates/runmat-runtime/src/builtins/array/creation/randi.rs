@@ -677,7 +677,8 @@ async fn parse_bounds(value: Value) -> crate::BuiltinResult<Bounds> {
             "randi: bounds must be numeric scalars or vectors",
         )),
         Value::String(s) => Err(builtin_error(format!(
-            "randi: unexpected option '{s}' in first argument"
+            "randi: unexpected option '{}' in first argument",
+            s.display()
         ))),
         Value::StringArray(_) => Err(builtin_error(
             "randi: unexpected string array in first argument",

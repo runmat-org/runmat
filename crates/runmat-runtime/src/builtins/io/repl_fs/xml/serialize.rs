@@ -8,7 +8,7 @@ pub(super) async fn serialize_xml_value(
 ) -> BuiltinResult<String> {
     cooperation.completed(1).await?;
     match value {
-        Value::String(text) => {
+        Value::String(runmat_value::StringElement::Text(text)) => {
             cooperation.completed(text.len()).await?;
             Ok(text.as_str().to_owned())
         }
@@ -25,7 +25,7 @@ pub(super) async fn serialize_xml_value(
                 )
             })?;
             let prefix = match object.properties().get("Text") {
-                Some(Value::String(source)) => {
+                Some(Value::String(runmat_value::StringElement::Text(source))) => {
                     super::parser::document_declaration_prefix(source, cooperation).await?
                 }
                 _ => None,

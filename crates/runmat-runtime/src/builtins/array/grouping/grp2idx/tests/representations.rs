@@ -19,7 +19,11 @@ async fn text_groups_use_first_appearance() {
 #[tokio::test]
 async fn empty_text_is_a_level_while_missing_string_is_not() {
     let input = Value::StringArray(
-        StringArray::new(vec!["".into(), "<missing>".into(), "".into()], vec![3, 1]).unwrap(),
+        StringArray::from_elements_unbounded(
+            vec!["".into(), runmat_value::StringElement::Missing, "".into()],
+            vec![3, 1],
+        )
+        .unwrap(),
     );
     let values = outputs(execute::apply(input).await.unwrap());
     let Value::Tensor(g) = &values[0] else {

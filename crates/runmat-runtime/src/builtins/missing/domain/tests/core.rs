@@ -3,6 +3,42 @@ use super::*;
 use runmat_value::ComplexTensor;
 
 #[test]
+fn typed_missing_and_literal_marker_remain_distinct_through_missing_operations() {
+    use runmat_value::StringElement;
+    let values = vec![
+        StringElement::Missing,
+        StringElement::text("<missing>"),
+        StringElement::text("<MISSING>"),
+        StringElement::text(""),
+        StringElement::text("present"),
+    ];
+    let input = StringArray::from_elements_unbounded(values.clone(), vec![5, 1]).unwrap();
+    let Value::LogicalArray(mask) = ismissing_value(&Value::StringArray(input.clone())).unwrap()
+    else {
+        panic!("expected missing mask");
+    };
+    assert_eq!(mask.data, vec![1, 0, 0, 0, 0]);
+    for value in &values {
+        assert_eq!(
+            ismissing_value(&Value::String(value.clone())).unwrap(),
+            Value::Bool(value.is_missing())
+        );
+    }
+    let indicators = super::super::standardize::indicator_set(&Value::from("present")).unwrap();
+    let Value::StringArray(output) = super::super::standardize::standardize_missing_value(
+        None,
+        Value::StringArray(input),
+        &indicators,
+    )
+    .unwrap() else {
+        panic!("expected standardized strings");
+    };
+    assert!(output.data()[0].is_missing());
+    assert_eq!(&output.data()[1..4], &values[1..4]);
+    assert!(output.data()[4].is_missing());
+}
+
+#[test]
 fn ismissing_preserves_typed_struct_array_shape_and_schema() {
     let element = |value| {
         let mut structure = runmat_value::UnboundedStructValueBuilder::new();
@@ -12,7 +48,8 @@ fn ismissing_preserves_typed_struct_array_shape_and_schema() {
     let array = StructArray::new(
         vec![
             element(Value::StringArray(
-                StringArray::new(vec![MISSING_TEXT.into()], vec![1, 1]).unwrap(),
+                StringArray::from_elements_unbounded(vec![MISSING_TEXT.into()], vec![1, 1])
+                    .unwrap(),
             )),
             element(Value::String("present".into())),
         ],
@@ -203,7 +240,9 @@ fn ismissing_detects_numeric_and_string_values() {
     .unwrap();
     assert!(matches!(result, Value::LogicalArray(mask) if mask.data == vec![0, 1, 0]));
 
-    let strings = StringArray::new(vec!["a".into(), MISSING_TEXT.into()], vec![1, 2]).unwrap();
+    let strings =
+        StringArray::from_elements_unbounded(vec!["a".into(), MISSING_TEXT.into()], vec![1, 2])
+            .unwrap();
     let result = block_on(ismissing_builtin(Value::StringArray(strings))).unwrap();
     assert!(matches!(result, Value::LogicalArray(mask) if mask.data == vec![0, 1]));
 }

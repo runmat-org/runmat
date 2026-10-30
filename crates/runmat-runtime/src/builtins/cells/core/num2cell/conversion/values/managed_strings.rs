@@ -3,7 +3,7 @@
 
 use runmat_value::{
     CellArray, ExactArrayInitializationError, ExactArrayStorage, ExactHostAllocationPermit,
-    OutputListStorage, OwnedExactArrayValues, SharedShape, StringArray, Utf8Text, Value,
+    OutputListStorage, OwnedExactArrayValues, SharedShape, StringArray, StringElement, Value,
 };
 
 use crate::context::host_allocation::{
@@ -20,8 +20,8 @@ use super::super::super::{
 mod quote;
 
 enum Source {
-    Unique(OwnedExactArrayValues<Utf8Text>),
-    Shared(ExactArrayStorage<Utf8Text>),
+    Unique(OwnedExactArrayValues<StringElement>),
+    Shared(ExactArrayStorage<StringElement>),
 }
 
 fn admission(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
@@ -47,7 +47,7 @@ impl Source {
         permit: &dyn ExactHostAllocationPermit,
         runtime: &RuntimeContext,
         receipt: &HostAllocationReceipt,
-    ) -> BuiltinResult<Utf8Text> {
+    ) -> BuiltinResult<StringElement> {
         match self {
             Self::Unique(values) => {
                 let text = values
@@ -125,7 +125,7 @@ pub(in crate::builtins::cells::core::num2cell) fn convert(
                         let source_index = plan.source_index(output, 0)?;
                         return source
                             .take(source_index, permit, runtime, &receipt)
-                            .map(Value::String);
+                            .map(|text| Value::String(text.into()));
                     }
                     let group_shape =
                         SharedShape::new_admitted_from_slice(plan.slice_shape(), permit)

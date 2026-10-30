@@ -6,7 +6,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "Applies MATLAB-style implicit expansion when either argument is non-scalar.",
         "Returns a numeric row vector when both inputs are scalar text (character vectors or string scalars) and `'ForceCellOutput'` is `false`. If either input is a cell array or the broadcasted result contains multiple elements, the output is a cell array with the broadcasted shape, and each cell contains a row vector of double indices.",
         "Pattern matches are case-sensitive and may overlap. For example, `strfind(\"aaaa\",\"aa\")` yields `[1 2 3]`.",
-        "An empty pattern returns an empty index vector. Missing strings (`<missing>`) never match any pattern.",
+        "An empty pattern returns an empty index vector. Typed missing strings (displayed as `<missing>`) never match any pattern.",
         "Specify `'ForceCellOutput', true` or double 1 to always obtain a cell array, even for scalar inputs.",
         "Typed integer `ForceCellOutput` values are available in RunMat mode behind a compatibility gate; MATLAB-compatible mode retains logical and double zero/one.",
     ] },
@@ -59,7 +59,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
     BuiltinExample {
         id: "example-6", title: "Handle empty patterns and missing strings",
-        program: "idxEmpty = strfind(\"abc\", \"\");\nidxMissing = strfind(\"<missing>\", \"abc\")", display_output: Some("idxEmpty = [];\nidxMissing = []"),
+        program: "idxEmpty = strfind(\"abc\", \"\");\nidxMissing = strfind(string(missing), \"abc\")", display_output: Some("idxEmpty = [];\nidxMissing = []"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

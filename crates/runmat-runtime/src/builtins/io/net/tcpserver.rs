@@ -669,7 +669,7 @@ pub(crate) mod tests {
         let result = run_tcpserver(Value::from("127.0.0.1"), Value::Num(0.0), Vec::new())
             .expect("tcpserver");
         let address = match struct_field(&result, "ServerAddress") {
-            Value::String(s) => s.clone(),
+            Value::String(runmat_value::StringElement::Text(s)) => s.clone(),
             other => panic!("expected ServerAddress string, got {other:?}"),
         };
         let port = match struct_field(&result, "ServerPort") {
@@ -717,7 +717,7 @@ pub(crate) mod tests {
         .expect("tcpserver");
 
         let name = match struct_field(&result, "Name") {
-            Value::String(s) => s.clone(),
+            Value::String(runmat_value::StringElement::Text(s)) => s.clone(),
             other => panic!("expected Name string, got {other:?}"),
         };
         assert_eq!(name, "CustomListener");
@@ -739,7 +739,7 @@ pub(crate) mod tests {
         .expect("tcpserver");
 
         let order = match struct_field(&result, "ByteOrder") {
-            Value::String(s) => s.clone(),
+            Value::String(runmat_value::StringElement::Text(s)) => s.clone(),
             other => panic!("expected ByteOrder string, got {other:?}"),
         };
         assert_eq!(order, "big-endian");

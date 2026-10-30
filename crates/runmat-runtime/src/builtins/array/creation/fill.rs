@@ -163,11 +163,20 @@ impl FillScalar {
                 }
                 Ok(FillScalar::Real(f64::from(ca.data()[0].raw())))
             }
-            Value::StringArray(sa) if sa.data().len() == 1 && sa.data()[0].len() == 1 => {
-                let ch = sa.data()[0].chars().next().unwrap();
+            Value::StringArray(sa)
+                if sa.data().len() == 1
+                    && sa.data()[0].as_str().is_some_and(|text| text.len() == 1)
+                    && !sa.data()[0].is_missing() =>
+            {
+                let ch = sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .chars()
+                    .next()
+                    .unwrap();
                 Ok(FillScalar::Real(ch as u32 as f64))
             }
-            Value::String(s) if s.len() == 1 => {
+            Value::String(runmat_value::StringElement::Text(s)) if s.len() == 1 => {
                 let ch = s.chars().next().unwrap();
                 Ok(FillScalar::Real(ch as u32 as f64))
             }

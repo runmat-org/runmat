@@ -21,7 +21,6 @@ use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, B
 
 const HTML_TREE_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("htmlTree");
-const MISSING: &str = "<missing>";
 
 fn html_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(fn_name);
@@ -355,7 +354,10 @@ fn html_tree_value(
     let list = text_items(value, "htmlTree")?;
     let mut objects = Vec::with_capacity(list.items.len());
     for item in list.items {
-        let html = item.as_ref().map(|text| text.as_str()).unwrap_or(MISSING);
+        let html = item
+            .as_ref()
+            .map(|text| text.as_str())
+            .ok_or_else(|| html_error("htmlTree", "htmlTree: HTML input must not be missing"))?;
         objects.push(parse_html_tree(html)?.into_value(runtime, None)?);
     }
     if objects.len() == 1 {
@@ -391,9 +393,9 @@ pub(in crate::builtins::strings::text_analytics) fn extract_html_text_value(
                 match item {
                     Some(html) => {
                         let tree = parse_html_tree(&html)?;
-                        texts.push(tree.extract_text(method));
+                        texts.push(runmat_value::StringElement::text(tree.extract_text(method)));
                     }
-                    None => texts.push(MISSING.to_string()),
+                    None => texts.push(runmat_value::StringElement::Missing),
                 }
             }
             string_output(texts, shape, "extractHTMLText")
@@ -406,8 +408,18 @@ fn extract_html_text_from_cell(cell: CellArray, method: ExtractionMethod) -> Bui
     let mut texts = Vec::with_capacity(cell.data().len());
     for value in cell.data() {
         match value {
+            Value::String(text) if text.is_missing() => {
+                texts.push(runmat_value::StringElement::Missing);
+            }
+            Value::StringArray(array)
+                if array.data().len() == 1 && array.data()[0].is_missing() =>
+            {
+                texts.push(runmat_value::StringElement::Missing);
+            }
             Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
-                texts.push(extract_from_object(object, method)?);
+                texts.push(runmat_value::StringElement::text(extract_from_object(
+                    object, method,
+                )?));
             }
             Value::Object(object) => {
                 return Err(html_error(
@@ -421,7 +433,7 @@ fn extract_html_text_from_cell(cell: CellArray, method: ExtractionMethod) -> Bui
             other => {
                 let html = scalar_text(other, "extractHTMLText")?;
                 let tree = parse_html_tree(&html)?;
-                texts.push(tree.extract_text(method));
+                texts.push(runmat_value::StringElement::text(tree.extract_text(method)));
             }
         }
     }
@@ -432,11 +444,15 @@ fn is_html_tree_value(value: &Value) -> bool {
     matches!(value, Value::Object(object) if object.is_class(HTML_TREE_CLASS))
 }
 
-fn string_output(data: Vec<String>, shape: Vec<usize>, fn_name: &str) -> BuiltinResult<Value> {
+fn string_output(
+    data: Vec<runmat_value::StringElement>,
+    shape: Vec<usize>,
+    fn_name: &str,
+) -> BuiltinResult<Value> {
     if data.len() == 1 {
         Ok(Value::string(data.into_iter().next().unwrap_or_default()))
     } else {
-        StringArray::new(data, shape)
+        StringArray::from_elements_unbounded(data, shape)
             .map(Value::StringArray)
             .map_err(|err| html_error(fn_name, err))
     }
@@ -545,21 +561,27 @@ fn get_attribute_value(value: Value, attr: &str) -> BuiltinResult<Value> {
     }
 }
 
-fn attribute_from_object(object: &ObjectInstance, attr: &str) -> BuiltinResult<String> {
+fn attribute_from_object(
+    object: &ObjectInstance,
+    attr: &str,
+) -> BuiltinResult<runmat_value::StringElement> {
     let node = node_from_object(object, "getAttribute")?;
     match node {
         HtmlNode::Element(element) => Ok(element
             .attrs
             .get(attr)
             .cloned()
-            .unwrap_or_else(|| MISSING.to_string())),
-        HtmlNode::Text(_) => Ok(MISSING.to_string()),
+            .map(runmat_value::StringElement::text)
+            .unwrap_or(runmat_value::StringElement::Missing)),
+        HtmlNode::Text(_) => Ok(runmat_value::StringElement::Missing),
     }
 }
 
 fn node_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<HtmlNode> {
     match object.properties().get("RawHTML") {
-        Some(Value::String(html)) => parse_html_tree(html),
+        Some(Value::String(html)) => parse_html_tree(html.as_str().ok_or_else(|| {
+            html_error(fn_name, format!("{fn_name}: RawHTML must not be missing"))
+        })?),
         Some(Value::CharArray(_)) | Some(Value::StringArray(_)) => {
             let html = scalar_text(
                 object
@@ -1714,7 +1736,11 @@ impl HtmlNode {
                 )
             }
         };
-        let parent = Value::string(parent_name.unwrap_or(MISSING).to_string());
+        let parent = Value::String(
+            parent_name
+                .map(runmat_value::StringElement::text)
+                .unwrap_or(runmat_value::StringElement::Missing),
+        );
         let fields = [
             ("Name", name),
             ("RawHTML", raw_html),
@@ -1958,7 +1984,7 @@ mod tests {
 
     fn string_value(value: Value) -> String {
         match value {
-            Value::String(text) => text.to_string(),
+            Value::String(text) => text.as_str().expect("nonmissing test text").to_owned(),
             other => panic!("expected string, got {other:?}"),
         }
     }
@@ -2244,7 +2270,13 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(hrefs.shape, vec![2, 1]);
-        assert_eq!(hrefs.data(), vec!["/home", MISSING]);
+        assert_eq!(
+            hrefs.data(),
+            &[
+                runmat_value::StringElement::text("/home"),
+                runmat_value::StringElement::Missing
+            ]
+        );
 
         let lead = futures::executor::block_on(find_element_builtin(
             None,
@@ -2349,19 +2381,30 @@ mod tests {
         let tree = futures::executor::block_on(html_tree_builtin(
             None,
             crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
-                "<a href='/home'>Home</a>".to_string().into(),
+                "<a href='/home' data-literal='<missing>'>Home</a>"
+                    .to_string()
+                    .into(),
             )]),
         ))
         .expect("tree");
         let out = futures::executor::block_on(get_attribute_builtin(
             None,
             crate::builtins::common::test_support::builtin_arguments(vec![
-                tree,
+                tree.clone(),
                 Value::String("title".to_string().into()),
             ]),
         ))
         .expect("attribute");
-        assert_eq!(string_value(out), MISSING);
+        assert_eq!(out, Value::String(runmat_value::StringElement::Missing));
+        let literal = futures::executor::block_on(get_attribute_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tree,
+                Value::string("data-literal"),
+            ]),
+        ))
+        .expect("literal attribute");
+        assert_eq!(literal, Value::String("<missing>".into()));
     }
 
     #[test]

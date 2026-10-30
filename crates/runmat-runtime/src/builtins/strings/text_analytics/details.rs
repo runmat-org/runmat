@@ -387,7 +387,8 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                     .as_ref()
                     .and_then(|types| types.get(doc_idx))
                     .and_then(|types| types.get(token_idx))
-                    .cloned()
+                    .and_then(|value| value.as_str())
+                    .map(str::to_owned)
                     .unwrap_or_else(|| {
                         document_token_type_with_options(token, &document_options)
                             .as_str()
@@ -401,7 +402,8 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                         .as_ref()
                         .and_then(|lemmas| lemmas.get(doc_idx))
                         .and_then(|lemmas| lemmas.get(token_idx))
-                        .cloned()
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
                         .unwrap_or_else(|| token.clone()),
                 );
             }
@@ -411,7 +413,8 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                         .as_ref()
                         .and_then(|pos| pos.get(doc_idx))
                         .and_then(|pos| pos.get(token_idx))
-                        .cloned()
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
                         .unwrap_or_else(|| "other".to_string()),
                 );
             }
@@ -421,7 +424,8 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                         .as_ref()
                         .and_then(|entities| entities.get(doc_idx))
                         .and_then(|entities| entities.get(token_idx))
-                        .map(|text| (*text).to_owned())
+                        .and_then(|text| *text)
+                        .map(str::to_owned)
                         .unwrap_or_else(|| "non-entity".to_string()),
                 );
             }
@@ -441,7 +445,8 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                         .as_ref()
                         .and_then(|dependencies| dependencies.get(doc_idx))
                         .and_then(|dependencies| dependencies.get(token_idx))
-                        .cloned()
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
                         .unwrap_or_else(|| "dep".to_string()),
                 );
             }
@@ -528,7 +533,7 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
 fn has_default_token_details(object: &ObjectInstance) -> bool {
     !matches!(
         object.properties().get("TokenizeMethod"),
-        Some(Value::String(value)) if value.eq_ignore_ascii_case("none")
+        Some(Value::String(value)) if value.as_str().is_some_and(|value| value.eq_ignore_ascii_case("none"))
     )
 }
 
@@ -560,7 +565,7 @@ fn type_details_cell(
 
 fn type_details_cell_preserving_known(
     documents: &[Vec<String>],
-    stored: Option<&[Vec<String>]>,
+    stored: Option<&[Vec<runmat_value::StringElement>]>,
     options: &crate::builtins::strings::text_analytics::documents::DocumentOptions,
 ) -> BuiltinResult<Value> {
     let values = documents
@@ -574,8 +579,9 @@ fn type_details_cell_preserving_known(
                     stored
                         .and_then(|types| types.get(doc_idx))
                         .and_then(|types| types.get(token_idx))
+                        .and_then(|value| value.as_str())
                         .filter(|stored_type| is_known_type_detail(stored_type))
-                        .cloned()
+                        .map(str::to_owned)
                         .unwrap_or_else(|| {
                             document_token_type_with_options(token, options)
                                 .as_str()
@@ -596,9 +602,7 @@ fn type_details_cell_preserving_known(
 
 fn is_known_type_detail(value: &str) -> bool {
     let normalized = value.trim().to_ascii_lowercase();
-    !normalized.is_empty()
-        && normalized != "unknown"
-        && !crate::builtins::strings::common::is_missing_string(value)
+    !normalized.is_empty() && normalized != "unknown"
 }
 
 fn sentence_numbers_cell(
@@ -823,7 +827,10 @@ fn parse_sentence_starters(value: &Value) -> BuiltinResult<HashSet<String>> {
 fn words_or_categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
     if matches!(value, Value::Object(_)) {
         if let Ok(labels) = categorical_labels(value) {
-            return Ok(labels);
+            return Ok(labels
+                .into_iter()
+                .filter_map(|label| label.into_text().map(|text| text.as_str().to_owned()))
+                .collect());
         }
     }
     words_from_word_vector(value, "addSentenceDetails")
@@ -1019,7 +1026,7 @@ fn validate_head_detail_shapes(
 fn type_details_from_object(
     object: &ObjectInstance,
     fn_name: &str,
-) -> BuiltinResult<Option<Vec<Vec<String>>>> {
+) -> BuiltinResult<Option<Vec<Vec<runmat_value::StringElement>>>> {
     let Some(value) = object.properties().get(TYPE_DETAILS_PROPERTY) else {
         return Ok(None);
     };
@@ -1037,13 +1044,7 @@ fn type_details_from_object(
                 format!("{fn_name}: tokenizedDocument object has invalid TypeDetails entry"),
             ));
         };
-        out.push(
-            array
-                .data()
-                .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
-        );
+        out.push(array.data().iter().cloned().collect());
     }
     Ok(Some(out))
 }
@@ -1139,7 +1140,11 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
+            Value::StringArray(array) => array
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("nonmissing test text").to_owned())
+                .collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }

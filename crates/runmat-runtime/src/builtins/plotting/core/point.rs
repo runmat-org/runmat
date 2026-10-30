@@ -155,7 +155,7 @@ impl PointColorArg {
             return Ok(Self::Default);
         }
         match &value {
-            Value::CharArray(_) | Value::String(_) => {
+            Value::CharArray(_) | Value::String(runmat_value::StringElement::Text(_)) => {
                 let color = parse_color_value(opts, &value)?;
                 Ok(Self::Uniform(color))
             }
@@ -215,16 +215,18 @@ fn is_color_positional_candidate(value: &Value, builtin: &str) -> crate::Builtin
             | Value::Num(_)
             | Value::Int(_)
             | Value::Bool(_) => true,
-            Value::CharArray(_) | Value::String(_) => value_as_string(value)
-                .map_err(|source| {
-                    crate::builtins::plotting::plotting_error_with_source(
-                        builtin,
-                        source.to_string(),
-                        source,
-                    )
-                })?
-                .map(|text| is_color_literal(&text))
-                .unwrap_or(false),
+            Value::CharArray(_) | Value::String(runmat_value::StringElement::Text(_)) => {
+                value_as_string(value)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .map(|text| is_color_literal(&text))
+                    .unwrap_or(false)
+            }
             _ => false,
         }
     })
@@ -272,7 +274,7 @@ fn value_is_empty(value: &Value) -> bool {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::GpuTensor(handle) => total_len(handle.shape()) == 0,
         Value::CharArray(chars) => chars.data().is_empty(),
-        Value::String(s) => s.trim().is_empty(),
+        Value::String(runmat_value::StringElement::Text(s)) => s.trim().is_empty(),
         _ => false,
     }
 }

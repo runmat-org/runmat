@@ -3,7 +3,7 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Text and boundary semantics", paragraphs: &[
         "insertAfter(str,patOrPos,newText) inserts newText after every matching text or pattern marker, or after a one-based numeric position. A scalar marker/replacement applies to each element; nonscalar controls must match the text-element shape.",
-        "The current implementation supports scalar or same-size boundary/replacement arrays, first-class pattern objects as scalar markers, and host text. An absent marker or out-of-range numeric position raises a boundary error. Missing string text uses the current sentinel representation; literal '<missing>' cannot be distinguished from a missing value.",
+        "The current implementation supports scalar or same-size boundary/replacement arrays, first-class pattern objects as scalar markers, and host text. An absent marker or out-of-range numeric position raises a boundary error. Typed missing subject elements propagate unchanged; missing boundary or replacement controls are rejected. Literal `<missing>` text remains ordinary text.",
         "MATLAB-compatible text inputs are string arrays, character vectors, and cell arrays of character vectors. RunMat mode additionally admits row-wise character matrices and cells containing string scalars or nested cells, subject to each identity's extension gate.",
         "Text and pattern markers and real numeric positions are distinct boundary forms. All eight fixed-width integer classes are accepted as exact structural position controls; nonintegral, zero, and unsupported controls raise errors.",
     ] },

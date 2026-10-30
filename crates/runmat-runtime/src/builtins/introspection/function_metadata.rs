@@ -30,9 +30,15 @@ fn metadata_struct(
     file: runmat_value::Utf8Text,
 ) -> Value {
     let mut info = runmat_value::UnboundedStructValueBuilder::new();
-    info.insert("function", Value::String(function));
+    info.insert(
+        "function",
+        Value::String(runmat_value::StringElement::Text(function)),
+    );
     info.insert("type", Value::string(kind.as_str().to_string()));
-    info.insert("file", Value::String(file));
+    info.insert(
+        "file",
+        Value::String(runmat_value::StringElement::Text(file)),
+    );
     Value::Struct(info.finish())
 }
 

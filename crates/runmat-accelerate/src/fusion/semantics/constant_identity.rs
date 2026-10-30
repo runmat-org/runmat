@@ -7,7 +7,8 @@
 use anyhow::{anyhow, Result};
 use runmat_execution::Digest;
 use runmat_value::{
-    ComplexTensor, IntValue, NumericDType, NumericScalar, SparseTensor, Tensor, Utf8Text, Value,
+    ComplexTensor, IntValue, NumericDType, NumericScalar, SparseTensor, StringElement, Tensor,
+    Value,
 };
 use serde::{ser::SerializeSeq, Serialize, Serializer};
 
@@ -63,13 +64,13 @@ impl Serialize for SparseScalars<'_> {
     }
 }
 
-struct StringScalars<'a>(&'a [Utf8Text]);
+struct StringScalars<'a>(&'a [StringElement]);
 
 impl Serialize for StringScalars<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
         for value in self.0 {
-            sequence.serialize_element(value.as_str())?;
+            sequence.serialize_element(value)?;
         }
         sequence.end()
     }
@@ -98,7 +99,7 @@ enum ConstantPayload<'a> {
     Int(&'a IntValue),
     Complex(u64, u64),
     Bool(bool),
-    String(&'a str),
+    String(&'a StringElement),
     StringArray {
         shape: &'a [usize],
         data: StringScalars<'a>,

@@ -478,12 +478,16 @@ fn is_table_object(object: &ObjectInstance) -> bool {
 
 fn text_documents(value: &Value) -> BuiltinResult<Vec<Vec<String>>> {
     match value {
-        Value::String(text) => Ok(vec![tokenize_text(text)]),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(vec![tokenize_text(text)]),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|text| tokenize_text(text))
-            .collect()),
+            .map(|text| {
+                text.as_str().map(tokenize_text).ok_or_else(|| {
+                    wordcloud_error("wordcloud: documents must contain nonmissing text")
+                })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?),
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
                 String::new()
@@ -614,7 +618,7 @@ fn bag_of_words_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData> 
 fn bag_of_ngrams_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData> {
     let counts = tensor_property(object, "Counts", "bagOfNgrams")?;
     let labels = if let Some(Value::StringArray(array)) = object.properties().get("Ngrams") {
-        ngram_labels(array)
+        ngram_labels(array)?
     } else {
         object
             .properties()
@@ -625,19 +629,24 @@ fn bag_of_ngrams_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData>
     counts_by_columns(labels, counts)
 }
 
-fn ngram_labels(array: &StringArray) -> Vec<String> {
+fn ngram_labels(array: &StringArray) -> BuiltinResult<Vec<String>> {
     let mut labels = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let mut parts = Vec::new();
         for col in 0..array.cols {
-            let text = array.data()[row + col * array.rows].trim();
+            let text = array.data()[row + col * array.rows]
+                .as_str()
+                .ok_or_else(|| {
+                    wordcloud_error("wordcloud: ngram labels must contain nonmissing text")
+                })?
+                .trim();
             if !text.is_empty() {
                 parts.push(text.to_string());
             }
         }
         labels.push(parts.join(" "));
     }
-    labels
+    Ok(labels)
 }
 
 /// Projects dense count/color tensors into their historical matrix geometry.
@@ -1266,12 +1275,18 @@ fn validate_sizes(sizes: &[f64]) -> BuiltinResult<()> {
 
 fn words_from_word_vector(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| wordcloud_error("wordcloud: words must contain nonmissing text"))
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?),
         Value::CharArray(array) if array.rows <= 1 => Ok(vec![if array.rows == 0 {
             String::new()
         } else {

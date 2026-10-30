@@ -1,44 +1,100 @@
-//! Restore a closed flat inventory before exposing any executable unit.
-use super::ExecutableUnit;
-use runmat_execution::{ExecutableDependencyProduct, ExecutableUnitEnvelope};
-use runmat_types::FunctionId;
+//! Restore a closed original-product DAG before exposing executable authority.
+use super::{decode, ExecutableUnit, Kind};
+use runmat_execution::{ExecutableUnitEnvelope, FunctionBindingOrigin};
+use runmat_vm::FunctionRegistry;
 use std::{collections::HashMap, rc::Rc};
 
-pub(super) fn restore(
-    root: ExecutableUnit,
-    products: &[ExecutableDependencyProduct],
-) -> Result<ExecutableUnit, String> {
-    let mut pending = products
+pub(super) type OriginalOwners = HashMap<FunctionBindingOrigin, Rc<ExecutableUnit>>;
+
+/// A parsed compiler inventory is not VM execution evidence. Inherited bodies
+/// must first match already admitted original products; only the current body
+/// slice is then passed to the unchanged VM admission boundary.
+struct PendingProduct {
+    envelope: ExecutableUnitEnvelope,
+    registry: FunctionRegistry,
+    foreign: Vec<FunctionBindingOrigin>,
+}
+
+impl PendingProduct {
+    fn new(envelope: ExecutableUnitEnvelope) -> Result<Self, String> {
+        let registry: FunctionRegistry = decode(&envelope, Kind::FunctionRegistry)?;
+        let program = envelope
+            .manifest
+            .identity
+            .program
+            .identity_digest()
+            .map_err(|error| error.to_string())?;
+        let mut foreign = registry
+            .functions
+            .values()
+            .map(|body| {
+                body.binding_origin
+                    .ok_or("compiler function projection lacks its original binding origin")
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|origin| origin.program != program)
+            .collect::<Vec<_>>();
+        if let Some(section) = envelope
+            .manifest
+            .optional_sections
+            .iter()
+            .find(|section| section.name == runmat_execution::executable::STATIC_IMPORT_SECTION)
+        {
+            foreign.extend(
+                runmat_execution::executable::decode_static_imports(section)
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .map(|import| import.target),
+            );
+        }
+        Ok(Self {
+            envelope,
+            registry,
+            foreign,
+        })
+    }
+
+    fn admit(self, owners: &OriginalOwners) -> Result<ExecutableUnit, String> {
+        ExecutableUnit::decode_local_product(&self.envelope, self.registry, owners)
+    }
+}
+
+pub(super) fn restore(envelope: &ExecutableUnitEnvelope) -> Result<ExecutableUnit, String> {
+    let mut pending = envelope
+        .dependency_products
         .iter()
         .map(|product| {
             product.validate().map_err(|e| e.to_string())?;
-            let envelope =
+            PendingProduct::new(
                 ExecutableUnitEnvelope::new(product.manifest.clone(), product.payloads.clone())
-                    .map_err(|e| e.to_string())?;
-            ExecutableUnit::decode_local_product(&envelope)
+                    .map_err(|e| e.to_string())?,
+            )
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let mut owners: HashMap<FunctionId, Rc<ExecutableUnit>> = HashMap::new();
+    let mut owners = OriginalOwners::new();
     while !pending.is_empty() {
         let ready = pending
             .iter()
-            .position(|unit| {
-                unit.foreign_functions()
-                    .is_ok_and(|ids| ids.iter().all(|id| owners.contains_key(id)))
+            .position(|product| {
+                product
+                    .foreign
+                    .iter()
+                    .all(|origin| owners.contains_key(origin))
             })
             .ok_or("dependency inventory is incomplete or cyclic")?;
-        let unit = Rc::new(pending.remove(ready).bind_original_dependencies(&owners)?);
-        for analysis in &unit.analysis().functions {
-            let Some(runmat_types::CallableIdentity::BoundFunction(function)) =
-                &analysis.callable.identity
-            else {
+        let unit = Rc::new(pending.remove(ready).admit(&owners)?);
+        for body in unit.functions().functions.values() {
+            if !unit.owns_callable(body.function) {
                 continue;
-            };
-            if unit.owns_callable(*function) && owners.insert(*function, Rc::clone(&unit)).is_some()
-            {
+            }
+            let origin = body
+                .binding_origin
+                .ok_or("original compiler body has no binding origin")?;
+            if owners.insert(origin, Rc::clone(&unit)).is_some() {
                 return Err("dependency inventory has ambiguous original owners".into());
             }
         }
     }
-    root.bind_original_dependencies(&owners)
+    PendingProduct::new(envelope.clone())?.admit(&owners)
 }

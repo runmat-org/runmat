@@ -59,6 +59,7 @@ enum Array<'a> {
     Bindings(&'a [GraphBinding]),
     Dynamic(&'a [DurableDynamicProperty]),
     Texts(&'a [String]),
+    Strings(&'a [StringElement]),
     Exceptions(&'a [ExceptionValue]),
     Frames(&'a [ExceptionCallFrame]),
 }
@@ -74,6 +75,7 @@ impl<'a> Array<'a> {
             Self::Bindings(v) => v.len(),
             Self::Dynamic(v) => v.len(),
             Self::Texts(v) => v.len(),
+            Self::Strings(v) => v.len(),
             Self::Exceptions(v) => v.len(),
             Self::Frames(v) => v.len(),
         }
@@ -89,6 +91,7 @@ impl<'a> Array<'a> {
             Self::Bindings(v) => Task::Binding(&v[index]),
             Self::Dynamic(v) => Task::Dynamic(&v[index]),
             Self::Texts(v) => Task::Text(&v[index]),
+            Self::Strings(v) => Task::OptionalText(v[index].as_str()),
             Self::Exceptions(v) => Task::Exception(&v[index]),
             Self::Frames(v) => Task::CallFrame(&v[index]),
         }

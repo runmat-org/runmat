@@ -76,8 +76,13 @@ fn canonicalize_listener_callback(callback: Value) -> Result<Value, RuntimeError
 
 fn listener_callback_is_dispatchable(callback: &Value) -> bool {
     match callback {
-        Value::String(text) => !text.trim().is_empty(),
-        Value::StringArray(array) => array.data().len() == 1 && !array.data()[0].trim().is_empty(),
+        Value::String(text) => text.as_str().is_some_and(|text| !text.trim().is_empty()),
+        Value::StringArray(array) => {
+            array.data().len() == 1
+                && array.data()[0]
+                    .as_str()
+                    .is_some_and(|text| !text.trim().is_empty())
+        }
         Value::CharArray(chars) if chars.rows == 1 => chars
             .data()
             .iter()

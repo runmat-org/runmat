@@ -886,6 +886,29 @@ export class RunMatExecutionError extends Error {
 
 export type WorkspaceResidency = "cpu" | "gpu" | "unknown";
 
+/** A language string element. Every string is literal text; only null is missing. */
+export type StringElement = string | null;
+
+/** String projections returned in MaterializedVariable.valueJson. */
+export interface StringValueJson {
+  kind: "string";
+  value: StringElement;
+  shape: [1, 1];
+}
+
+/** Exact browser admission revision; older sentinel-based runtimes are incompatible. */
+export const STRING_ELEMENT_WIRE_SCHEMA_VERSION = 1 as const;
+
+export interface StringArrayValueJson {
+  kind: "string-array";
+  shape: number[];
+  rows: number;
+  cols: number;
+  preview: StringElement[];
+  length: number;
+  truncated: boolean;
+}
+
 export interface WorkspaceSnapshot {
   full: boolean;
   version: number;
@@ -1494,6 +1517,7 @@ interface RunMatNativeModule {
       | Promise<WasmInitInput>
   ) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
+  stringElementWireSchemaVersion?: () => number;
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
@@ -1630,16 +1654,27 @@ interface RunMatNativeModule {
 let loadPromise: Promise<RunMatNativeModule> | null = null;
 let nativeModuleOverride: RunMatNativeModule | RunMatNativeSession | null = null;
 
+function admitStringElementWire(native: RunMatNativeModule): RunMatNativeModule {
+  const actual = typeof native.stringElementWireSchemaVersion === "function"
+    ? native.stringElementWireSchemaVersion()
+    : undefined;
+  if (actual !== STRING_ELEMENT_WIRE_SCHEMA_VERSION) {
+    throw new Error(`Incompatible RunMat string wire schema ${String(actual)}; expected ${STRING_ELEMENT_WIRE_SCHEMA_VERSION}. Rebuild the browser runtime assets with typed missing-string support.`);
+  }
+  return native;
+}
+
 async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativeModule> {
   installWebGpuCompatibilityShims();
   if (nativeModuleOverride) {
     if (isNativeSession(nativeModuleOverride)) {
       return {
         default: async () => {},
+        stringElementWireSchemaVersion: () => STRING_ELEMENT_WIRE_SCHEMA_VERSION,
         initRunMat: async () => nativeModuleOverride
       } as RunMatNativeModule;
     }
-    return nativeModuleOverride;
+    return admitStringElementWire(nativeModuleOverride);
   }
   if (!loadPromise) {
     loadPromise = (async () => {
@@ -1653,7 +1688,7 @@ async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativ
           wasmModule === undefined ? undefined : { module_or_path: wasmModule }
         );
       }
-      return native;
+      return admitStringElementWire(native);
     })();
   }
   return loadPromise;

@@ -52,12 +52,16 @@ pub(in super::super) fn borrow_elements(value: &Value) -> Result<BorrowedElement
             index: 0,
             page_len: array.rows.checked_mul(array.cols).unwrap_or(0),
         }),
-        Value::String(text) => Ok(BorrowedElements::String(text.chars())),
-        Value::StringArray(array) => Ok(BorrowedElements::Strings {
-            array,
-            index: 0,
-            chars: None,
-        }),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(BorrowedElements::String(text.chars()))
+        }
+        Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => {
+            Ok(BorrowedElements::Strings {
+                array,
+                index: 0,
+                chars: None,
+            })
+        }
         Value::GpuTensor(_) => Err("fwrite: expected host tensor data after gathering".to_string()),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err("fwrite: complex values are not supported yet".to_string())
@@ -122,7 +126,11 @@ impl<'a> Iterator for BorrowedElements<'a> {
                     *chars = None;
                 }
                 let owner: &'a runmat_value::StringArray = array;
-                let text: &'a str = owner.data().get(*index)?.as_str();
+                let text: &'a str = owner
+                    .data()
+                    .get(*index)?
+                    .as_str()
+                    .expect("checked nonmissing string data");
                 let separate = *index > 0;
                 *index += 1;
                 *chars = Some(text.chars());

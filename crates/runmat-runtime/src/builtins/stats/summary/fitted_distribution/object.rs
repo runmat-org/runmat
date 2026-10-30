@@ -92,7 +92,9 @@ pub(super) fn string_property(
     name: &str,
 ) -> BuiltinResult<String> {
     match object.properties().get(name) {
-        Some(Value::String(value)) => Ok(value.as_str().to_owned()),
+        Some(Value::String(runmat_value::StringElement::Text(value))) => {
+            Ok(value.as_str().to_owned())
+        }
         Some(Value::CharArray(chars)) if chars.rows == 1 => {
             crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
                 invalid_for(

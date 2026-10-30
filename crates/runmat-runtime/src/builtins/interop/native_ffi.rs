@@ -216,14 +216,14 @@ async fn loadlibrary_builtin(
             0 => Ok(source[0].clone()),
             1 => Ok(header
                 .as_ref()
-                .map(|text| Value::String(text.clone()))
+                .map(|text| Value::String(runmat_value::StringElement::Text(text.clone())))
                 .unwrap_or_else(|| source[1].clone())),
             2 => match alias_index {
                 Some(index) => text_argument(&source[index], "loadlibrary alias", Some(runtime))
-                    .map(Value::String),
-                None => Ok(Value::String(
+                    .map(|text| Value::String(text.into())),
+                None => Ok(Value::String(runmat_value::StringElement::Text(
                     alias.as_ref().expect("prepared alias").clone(),
-                )),
+                ))),
             },
             _ => {
                 if let Some(index) = pending_value.take() {
@@ -232,7 +232,7 @@ async fn loadlibrary_builtin(
                         "loadlibrary preparation value",
                         Some(runtime),
                     )
-                    .map(Value::String);
+                    .map(|text| Value::String(text.into()));
                 }
                 while cursor < source.len() {
                     let index = cursor;
@@ -248,7 +248,7 @@ async fn loadlibrary_builtin(
                         option.canonical_name(),
                         Some(runtime),
                     )
-                    .map(Value::String);
+                    .map(|text| Value::String(text.into()));
                 }
                 Err(invalid_builtin_call(
                     "loadlibrary preparation source ended early",
@@ -432,7 +432,10 @@ async fn setdatatype_builtin(
     text_argument(&arguments[1], "setdatatype pointer type", context.as_ref())?;
     let runtime = transform_runtime(context.as_ref())?;
     let operation = crate::call::argument_text::copy_str("setdatatype", Some(runtime))?;
-    let operation = RootedValue::in_context(Value::String(operation), runtime)?;
+    let operation = RootedValue::in_context(
+        Value::String(runmat_value::StringElement::Text(operation)),
+        runtime,
+    )?;
     let arguments = arguments.try_insert_in_context(1, operation, runtime)?;
     invoke_native(context, NativeFfiOperation::InvokeMember, arguments, 1).await?;
     RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())

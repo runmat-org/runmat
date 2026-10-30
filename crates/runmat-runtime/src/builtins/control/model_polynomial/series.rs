@@ -488,7 +488,15 @@ fn names_value(value: &Value, property: &str, expected: usize) -> BuiltinResult<
         Value::StringArray(strings)
             if strings.shape.len() <= 2 && (strings.rows == 1 || strings.cols == 1) =>
         {
-            strings.data().iter().map(ToString::to_string).collect()
+            strings
+                .data()
+                .iter()
+                .map(|text| {
+                    text.as_str().map(str::to_owned).ok_or_else(|| {
+                        invalid(format!("{property} contains a non-text channel name"))
+                    })
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?
         }
         _ => {
             return Err(invalid(format!(

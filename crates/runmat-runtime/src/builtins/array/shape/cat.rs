@@ -30,10 +30,12 @@ pub(crate) mod symbolic;
 
 fn is_like_name(value: &Value) -> bool {
     match value {
-        Value::String(text) => text.eq_ignore_ascii_case("like"),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            array.data()[0].eq_ignore_ascii_case("like")
-        }
+        Value::String(text) => text
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("like")),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("like")),
         Value::CharArray(array) if array.rows == 1 && array.data().len() == 4 => array
             .data()
             .iter()
@@ -919,10 +921,11 @@ fn cat_string_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult
         arrays.push(value_into_string_array(value)?);
     }
     let shapes: Vec<&[usize]> = arrays.iter().map(StringArray::shape).collect();
-    let data_refs: Vec<&[runmat_value::Utf8Text]> = arrays.iter().map(StringArray::data).collect();
+    let data_refs: Vec<&[runmat_value::StringElement]> =
+        arrays.iter().map(StringArray::data).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let array =
-        StringArray::from_texts_unbounded(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let array = StringArray::from_elements_unbounded(data, shape)
+        .map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::StringArray(array))
 }
 
@@ -1345,7 +1348,7 @@ fn value_into_logical(value: Value) -> BuiltinResult<LogicalArray> {
 fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
     match value {
         Value::StringArray(array) => Ok(array),
-        Value::String(text) => StringArray::from_texts_unbounded(vec![text], vec![1, 1])
+        Value::String(text) => StringArray::from_elements_unbounded(vec![text], vec![1, 1])
             .map_err(|e| cat_err(format!("cat: {e}"))),
         Value::CharArray(chars) => {
             let pages = if chars.shape.len() <= 2 {

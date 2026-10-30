@@ -22,10 +22,12 @@ fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Va
 
 fn parse_type_name(value: &Value) -> BuiltinResult<Option<IsaTypeDesignator>> {
     match value {
-        Value::String(s) => Ok(IsaTypeDesignator::parse(s)),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(IsaTypeDesignator::parse(s)),
         Value::StringArray(sa) => {
-            if sa.rows == 1 && sa.cols == 1 && !sa.data().is_empty() {
-                Ok(IsaTypeDesignator::parse(&sa.data()[0]))
+            if sa.rows == 1 && sa.cols == 1 && !sa.data().is_empty() && !sa.data()[0].is_missing() {
+                Ok(IsaTypeDesignator::parse(
+                    sa.data()[0].as_str().expect("checked nonmissing string"),
+                ))
             } else {
                 Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }

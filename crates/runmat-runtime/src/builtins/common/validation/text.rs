@@ -39,8 +39,11 @@ pub fn value_text_scalar_string(value: &Value) -> Option<String> {
         return None;
     }
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(strings) => strings.data().first().map(|text| text.as_str().to_owned()),
+        Value::String(text) => text.as_str().map(str::to_owned),
+        Value::StringArray(strings) => strings
+            .data()
+            .first()
+            .and_then(|text| text.as_str().map(str::to_owned)),
         Value::CharArray(chars) => chars.row_string(),
         _ => None,
     }
@@ -51,8 +54,11 @@ pub fn value_is_nonzero_length_text(value: &Value) -> bool {
         return false;
     }
     match value {
-        Value::String(s) => !s.is_empty(),
-        Value::StringArray(s) => s.data().iter().all(|value| !value.is_empty()),
+        Value::String(s) => s.as_str().is_some_and(|text| !text.is_empty()),
+        Value::StringArray(s) => s
+            .data()
+            .iter()
+            .all(|value| value.as_str().is_some_and(|text| !text.is_empty())),
         Value::CharArray(c) => c.rows == 1 && c.cols > 0,
         Value::Cell(c) => c.data().iter().all(value_is_nonzero_length_text),
         _ => false,
@@ -61,12 +67,27 @@ pub fn value_is_nonzero_length_text(value: &Value) -> bool {
 
 pub(super) fn value_texts(value: &Value) -> Result<Vec<Cow<'_, str>>, RuntimeError> {
     match value {
-        Value::String(s) => Ok(vec![Cow::Borrowed(s.as_str())]),
-        Value::StringArray(s) => Ok(s
+        Value::String(s) => s
+            .as_str()
+            .map(|text| vec![Cow::Borrowed(text)])
+            .ok_or_else(|| {
+                invalid_argument_error(
+                    "argumentValidation",
+                    "missing string is not a text argument",
+                )
+            }),
+        Value::StringArray(s) => s
             .data()
             .iter()
-            .map(|text| Cow::Borrowed(text.as_str()))
-            .collect()),
+            .map(|text| {
+                text.as_str().map(Cow::Borrowed).ok_or_else(|| {
+                    invalid_argument_error(
+                        "argumentValidation",
+                        "missing string is not a text argument",
+                    )
+                })
+            })
+            .collect(),
         Value::CharArray(c) if is_character_row(c) => Ok(vec![Cow::Owned(chars_to_string(c)?)]),
         Value::Cell(c) => {
             let mut out = Vec::with_capacity(c.data().len());

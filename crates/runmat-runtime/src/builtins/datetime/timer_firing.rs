@@ -19,7 +19,7 @@ pub(crate) fn timer_firing_arguments(
                     if object
                         .properties()
                         .get("TimeZone")
-                        .is_some_and(|zone| !matches!(zone, Value::String(text) if text.is_empty()))
+                        .is_some_and(|zone| !matches!(zone, Value::String(text) if text.as_str().is_some_and(str::is_empty)))
                     {
                         return Err(datetime_error(
                             "startat: timezone-bearing datetime requires an explicit instant model",
@@ -109,13 +109,23 @@ fn clamp_startat_month(month: f64) -> f64 {
 
 fn timer_text_serials(value: &Value, reference: NaiveDateTime) -> BuiltinResult<Tensor> {
     let (texts, shape): (Vec<String>, Vec<usize>) = match value {
-        Value::String(text) => (vec![text.as_str().to_owned()], vec![1, 1]),
+        Value::String(text) => (
+            vec![text
+                .as_str()
+                .ok_or_else(|| datetime_error("startat: firing time must not be missing"))?
+                .to_owned()],
+            vec![1, 1],
+        ),
         Value::StringArray(array) => (
             array
                 .data()
                 .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
+                .map(|text| {
+                    text.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| datetime_error("startat: firing time must not be missing"))
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
             array.shape.as_slice().to_vec(),
         ),
         Value::CharArray(array) => (

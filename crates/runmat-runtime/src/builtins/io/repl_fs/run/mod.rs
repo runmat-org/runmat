@@ -45,7 +45,9 @@ fn run_error_with_detail(
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
@@ -55,8 +57,14 @@ fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
             })
             .map(Some)
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
         }
         _ => Ok(None),
     }

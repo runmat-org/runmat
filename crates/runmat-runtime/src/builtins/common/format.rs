@@ -795,11 +795,15 @@ pub(crate) fn complex_to_string(re: f64, im: f64) -> String {
 
 fn value_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) => decode_utf16_code_units(ca.data()).map_err(|error| {
             format_utf16_error("sprintf: character value is not valid UTF-16 text", error)
         }),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::Num(n) => Ok(number_to_string(*n)),
         Value::Int(i) => Ok(int_value_to_decimal(i)),
         Value::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
@@ -812,7 +816,7 @@ fn value_to_string(value: &Value) -> BuiltinResult<String> {
 
 fn value_to_char(value: &Value) -> BuiltinResult<char> {
     match value {
-        Value::String(s) => s.chars().next().ok_or_else(|| {
+        Value::String(runmat_value::StringElement::Text(s)) => s.chars().next().ok_or_else(|| {
             format_error("sprintf: %c conversion requires non-empty character input")
         }),
         Value::CharArray(ca) => {
@@ -915,7 +919,7 @@ fn group_float_mantissa(text: &str) -> String {
 /// is a character row vector or string scalar.
 pub fn extract_format_string(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) => {
             if ca.rows != 1 {
                 return Err(format_error(format!(
@@ -930,7 +934,11 @@ pub fn extract_format_string(value: &Value, context: &str) -> BuiltinResult<Stri
                     ))
                 })
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         _ => Err(format_error(format!(
             "{context}: formatSpec must be a character row vector or string scalar"
         ))),
@@ -1084,8 +1092,8 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             }
         }
         Value::StringArray(array) => match array.into_parts().0.try_into_owned() {
-            Ok(data) => output.extend(data.into_iter().map(Value::String)),
-            Err(data) => output.extend(data.iter().cloned().map(Value::String)),
+            Ok(data) => output.extend(data.into_iter().map(|text| Value::String(text.into()))),
+            Err(data) => output.extend(data.iter().cloned().map(|text| Value::String(text.into()))),
         },
         Value::CharArray(ca) => {
             if ca.rows == 1 {

@@ -68,8 +68,14 @@ fn parse_mode(option: Option<&Value>) -> BuiltinResult<Mode> {
         return Ok(Mode::Complex);
     };
     let text = match option {
-        Value::String(text) => text.as_str().to_owned(),
-        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.as_str().to_owned(),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned()
+        }
         Value::CharArray(chars) if chars.rows <= 1 => {
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 let mut error = invalid(source.to_string());

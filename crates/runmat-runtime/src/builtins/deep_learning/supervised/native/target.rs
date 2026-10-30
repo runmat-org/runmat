@@ -46,11 +46,12 @@ impl<'a> NumericTargetPlan<'a> {
                     .get("Data")
                     .ok_or_else(|| fail(function, "target dlarray is missing Data"))?;
                 let format = match object.properties().get("Format") {
-                    Some(Value::String(text)) => text.as_str(),
+                    Some(Value::String(runmat_value::StringElement::Text(text))) => text.as_str(),
                     _ => return Err(fail(function, "target dlarray Format must be text")),
                 };
                 match object.properties().get("Labels") {
-                    Some(Value::String(labels)) if labels == format => {}
+                    Some(Value::String(runmat_value::StringElement::Text(labels)))
+                        if labels == format => {}
                     _ => return Err(fail(function, "target dlarray Format and Labels conflict")),
                 }
                 (data, Some(format))

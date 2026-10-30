@@ -5,8 +5,8 @@ use std::sync::{
 
 use super::*;
 use crate::{
-    CellArray, CharArray, ExactHostAllocationReservation, SharedShape, StringArray, Utf16CodeUnit,
-    Utf8Text, ValueSequence, ValueSequenceError,
+    CellArray, CharArray, ExactHostAllocationReservation, SharedShape, StringArray, StringElement,
+    Utf16CodeUnit, Utf8Text, ValueSequence, ValueSequenceError,
 };
 
 #[derive(Debug)]
@@ -522,7 +522,7 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
     original.push_str("hello");
     let pointer = original.as_ptr();
     let text_bytes = Utf8Text::requested_bytes_for_capacity(original.capacity()).unwrap();
-    let outer_bytes = ExactArrayStorage::<Utf8Text>::requested_bytes(1).unwrap();
+    let outer_bytes = ExactArrayStorage::<StringElement>::requested_bytes(1).unwrap();
     let shape_bytes = SharedShape::requested_bytes_for_rank(2).unwrap();
     assert_eq!(
         StringArray::requested_bytes_for_new_dimensions(1, 2, [original.capacity()]).unwrap(),
@@ -533,13 +533,15 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
         limit: text_bytes + outer_bytes + shape_bytes,
         live: live.clone(),
     };
-    let text = Utf8Text::new(original).try_admit_exact(&permit).unwrap();
-    assert_eq!(text.as_str().as_ptr(), pointer);
+    let text = StringElement::text(original)
+        .try_admit_exact(&permit)
+        .unwrap();
+    assert_eq!(text.as_str().unwrap().as_ptr(), pointer);
     let ordinary_values = vec![text.clone()];
     let outer_pointer = ordinary_values.as_ptr();
-    let ordinary = StringArray::from_texts_unbounded(ordinary_values, vec![1, 1]).unwrap();
+    let ordinary = StringArray::from_elements_unbounded(ordinary_values, vec![1, 1]).unwrap();
     assert_eq!(ordinary.data().as_ptr(), outer_pointer);
-    assert_eq!(ordinary.data()[0].as_str().as_ptr(), pointer);
+    assert_eq!(ordinary.data()[0].as_str().unwrap().as_ptr(), pointer);
     assert_eq!(ordinary.data, vec!["hello"]);
     assert_eq!(ordinary.data, ["hello"]);
     assert_ne!(ordinary.data, ["other"]);
@@ -551,8 +553,8 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
     grown.grow_unbounded(vec![2, 1]).unwrap();
     assert_eq!(grown.shape(), [2, 1]);
     assert_eq!((grown.rows, grown.cols), (2, 1));
-    assert_eq!(grown.data()[0].as_str().as_ptr(), pointer);
-    assert_eq!(grown.data()[1].as_str(), "");
+    assert_eq!(grown.data()[0].as_str().unwrap().as_ptr(), pointer);
+    assert_eq!(grown.data()[1].as_str(), Some(""));
     assert_eq!(ordinary.shape(), [1, 1]);
     assert!(grown.grow_unbounded(vec![usize::MAX, 2]).is_err());
     assert_eq!(grown.shape(), [2, 1]);
@@ -567,7 +569,7 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
         .unwrap();
     let shape = SharedShape::new_admitted_from_slice(&[1, 1], &permit).unwrap();
     let array = StringArray::from_admitted(data, shape).unwrap();
-    assert_eq!(array.data()[0].as_str().as_ptr(), pointer);
+    assert_eq!(array.data()[0].as_str().unwrap().as_ptr(), pointer);
     assert_eq!(live.load(Ordering::SeqCst), permit.limit);
     let view = StringArray::from_shared_storage(array.data.clone(), array.shape.clone()).unwrap();
     assert_eq!(view.data().as_ptr(), array.data().as_ptr());
@@ -588,9 +590,9 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
     assert_eq!(live.load(Ordering::SeqCst), 0);
 
     let rank_zero = StringArray::new(vec!["only".to_owned()], vec![]).unwrap();
-    assert_eq!(rank_zero.data()[0].as_str(), "only");
+    assert_eq!(rank_zero.data()[0].as_str(), Some("only"));
     assert!(StringArray::new(Vec::new(), vec![]).is_err());
-    let rank_zero_text = Utf8Text::new("only".to_owned())
+    let rank_zero_text = StringElement::text("only")
         .try_admit_exact(&permit)
         .unwrap();
     let mut rank_zero_text = Some(rank_zero_text);
@@ -601,9 +603,66 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
     let rank_zero_shape = SharedShape::new_admitted_from_slice(&[], &permit).unwrap();
     let rank_zero_exact = StringArray::from_admitted(rank_zero_data, rank_zero_shape).unwrap();
     assert!(rank_zero_exact.shape().is_empty());
-    assert_eq!(rank_zero_exact.data()[0].as_str(), "only");
+    assert_eq!(rank_zero_exact.data()[0].as_str(), Some("only"));
     drop(rank_zero_exact);
     assert_eq!(live.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn missing_string_elements_are_distinct_from_literal_text_and_keep_storage_owners() {
+    for literal in ["<missing>", "<Missing>", "", "λ🙂"] {
+        let element = StringElement::text(literal);
+        assert!(!element.is_missing());
+        assert_eq!(element.as_str(), Some(literal));
+        assert_eq!(String::try_from(&Value::String(element)).unwrap(), literal);
+    }
+    let live = Arc::new(AtomicUsize::new(0));
+    let permit = Permit {
+        limit: 0,
+        live: live.clone(),
+    };
+    let missing = StringElement::Missing.try_admit_exact(&permit).unwrap();
+    assert!(missing.is_missing());
+    assert_eq!(missing.capacity(), 0);
+    assert!(missing.shared_storage_identity().is_none());
+    let mut checkpoints = 0;
+    let copied = missing
+        .try_copy_exact_with(&permit, |_| {
+            checkpoints += 1;
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+    assert_eq!(checkpoints, 1);
+    assert_eq!(copied, StringElement::Missing);
+    assert!(matches!(
+        missing.try_copy_exact_with(&permit, |_| Err("stop")),
+        Err(ExactArrayInitializationError::Element("stop"))
+    ));
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+    assert!(String::try_from(&Value::String(missing.clone())).is_err());
+    let array = StringArray::from_elements_unbounded(
+        vec![missing.clone(), StringElement::text("<missing>")],
+        vec![1, 2],
+    )
+    .unwrap();
+    let alias = array.clone();
+    assert_eq!(array.data().as_ptr(), alias.data().as_ptr());
+    assert!(alias.data()[0].is_missing());
+    assert_eq!(alias.data()[1].as_str(), Some("<missing>"));
+    assert_eq!(
+        format!("{alias}"),
+        "1x2 string array\n  <missing>  \"<missing>\""
+    );
+    let distinct =
+        std::collections::HashSet::from([missing.clone(), StringElement::text("<missing>")]);
+    assert_eq!(distinct.len(), 2);
+    let mut sorted = vec![
+        missing,
+        StringElement::text("<missing>"),
+        StringElement::text(""),
+    ];
+    sorted.sort();
+    assert!(sorted.last().unwrap().is_missing());
 }
 
 #[test]

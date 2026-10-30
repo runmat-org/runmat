@@ -312,7 +312,7 @@ fn part_of_speech_details_cell(
 
 fn part_of_speech_details_cell_preserving_known(
     documents: &[Vec<String>],
-    stored: Option<&[Vec<String>]>,
+    stored: Option<&[Vec<runmat_value::StringElement>]>,
     language: PosLanguage,
     options: &crate::builtins::strings::text_analytics::documents::DocumentOptions,
 ) -> BuiltinResult<Value> {
@@ -327,8 +327,9 @@ fn part_of_speech_details_cell_preserving_known(
                     stored
                         .and_then(|values| values.get(doc_idx))
                         .and_then(|values| values.get(token_idx))
+                        .and_then(|value| value.as_str())
                         .filter(|tag| is_known_part_of_speech(tag))
-                        .cloned()
+                        .map(str::to_owned)
                         .unwrap_or_else(|| {
                             part_of_speech_for_token(token, language, options).to_string()
                         })
@@ -771,15 +772,13 @@ fn split_pos_token(token: &str) -> Option<Vec<String>> {
 
 fn is_known_part_of_speech(value: &str) -> bool {
     let trimmed = value.trim();
-    !trimmed.is_empty()
-        && trimmed != "unknown"
-        && !crate::builtins::strings::common::is_missing_string(trimmed)
+    !trimmed.is_empty() && trimmed != "unknown"
 }
 
 pub(in crate::builtins::strings::text_analytics) fn part_of_speech_details_from_object(
     object: &ObjectInstance,
     fn_name: &str,
-) -> BuiltinResult<Option<Vec<Vec<String>>>> {
+) -> BuiltinResult<Option<Vec<Vec<runmat_value::StringElement>>>> {
     let Some(value) = object.properties().get(POS_DETAILS_PROPERTY) else {
         return Ok(None);
     };
@@ -813,13 +812,7 @@ pub(in crate::builtins::strings::text_analytics) fn part_of_speech_details_from_
                 ),
             ));
         }
-        out.push(
-            array
-                .data()
-                .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
-        );
+        out.push(array.data().iter().cloned().collect());
     }
     Ok(Some(out))
 }
@@ -881,7 +874,11 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
+            Value::StringArray(array) => array
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("nonmissing test text").to_owned())
+                .collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }

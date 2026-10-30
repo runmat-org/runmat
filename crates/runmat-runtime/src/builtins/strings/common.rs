@@ -49,35 +49,10 @@ pub(crate) fn cell_has_valid_string_scalar(value: &Value) -> bool {
     has_string
 }
 
-/// Canonical display for missing string scalars in MATLAB-compatible output.
-const MISSING_SENTINEL: &str = "<missing>";
-
-/// Return `true` when the provided text represents a missing string scalar.
+/// Missing is a typed absence, never inferred from a string's display text.
 #[inline]
-pub(crate) fn is_missing_string(text: &str) -> bool {
-    text.eq_ignore_ascii_case(MISSING_SENTINEL)
-}
-
-/// Convert text to lowercase while preserving MATLAB's `<missing>` sentinel.
-#[inline]
-#[cfg(test)]
-pub(crate) fn lowercase_preserving_missing(text: String) -> String {
-    if is_missing_string(&text) {
-        MISSING_SENTINEL.to_string()
-    } else {
-        text.to_lowercase()
-    }
-}
-
-/// Convert text to uppercase while preserving MATLAB's `<missing>` sentinel.
-#[inline]
-#[cfg(test)]
-pub(crate) fn uppercase_preserving_missing(text: String) -> String {
-    if is_missing_string(&text) {
-        MISSING_SENTINEL.to_string()
-    } else {
-        text.to_uppercase()
-    }
+pub(crate) fn is_missing_string(text: &runmat_value::StringElement) -> bool {
+    text.is_missing()
 }
 
 /// Collect a row from a [`CharArray`] into a `String`.
@@ -157,32 +132,97 @@ pub(crate) fn contains_resident_text_input(value: &Value) -> bool {
 pub(crate) mod tests {
     use super::*;
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn detects_missing_strings_case_insensitively() {
-        assert!(is_missing_string("<missing>"));
-        assert!(is_missing_string("<Missing>"));
-        assert!(!is_missing_string("<missing value>"));
+    fn missing_discriminant_does_not_reserve_literal_text() {
+        assert!(is_missing_string(&runmat_value::StringElement::Missing));
+        for text in ["<missing>", "<Missing>", "<MISSING>", ""] {
+            assert!(!is_missing_string(&runmat_value::StringElement::text(text)));
+        }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn lowercase_preserves_missing() {
-        assert_eq!(
-            lowercase_preserving_missing("<missing>".to_string()),
-            "<missing>"
-        );
-        assert_eq!(lowercase_preserving_missing("RunMat".to_string()), "runmat");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn uppercase_preserves_missing() {
-        assert_eq!(
-            uppercase_preserving_missing("<missing>".to_string()),
-            "<missing>"
-        );
-        assert_eq!(uppercase_preserving_missing("RunMat".to_string()), "RUNMAT");
+    fn typed_missing_subject_and_literal_text_operation_matrix() {
+        use runmat_value::StringElement;
+        let run = |name: &str, arguments: Vec<Value>| {
+            futures::executor::block_on(crate::call_builtin_async(name, &arguments))
+                .unwrap()
+                .value()
+                .clone()
+        };
+        for source in [
+            StringElement::text("<missing>"),
+            StringElement::text("<Missing>"),
+            StringElement::text(""),
+            StringElement::Missing,
+        ] {
+            for (name, expected) in [
+                ("lower", source.as_str().map(str::to_lowercase)),
+                ("upper", source.as_str().map(str::to_uppercase)),
+                ("strtrim", source.as_str().map(str::to_owned)),
+                ("append", source.as_str().map(str::to_owned)),
+            ] {
+                assert_eq!(
+                    run(name, vec![Value::String(source.clone())]),
+                    Value::String(
+                        expected
+                            .map(StringElement::text)
+                            .unwrap_or(StringElement::Missing)
+                    ),
+                    "{name}({source:?})"
+                );
+            }
+            let expected = source
+                .as_str()
+                .map(|text| text.replace("missing", "present"));
+            for name in ["erase", "replace", "strrep"] {
+                let mut arguments = vec![Value::String(source.clone()), Value::string("missing")];
+                let replacement = if name == "erase" { "" } else { "present" };
+                if name != "erase" {
+                    arguments.push(Value::string(replacement));
+                }
+                let expected = if name == "erase" {
+                    source.as_str().map(|text| text.replace("missing", ""))
+                } else {
+                    expected.clone()
+                };
+                assert_eq!(
+                    run(name, arguments),
+                    Value::String(
+                        expected
+                            .map(StringElement::text)
+                            .unwrap_or(StringElement::Missing)
+                    ),
+                    "{name}({source:?})"
+                );
+            }
+            let length = run("strlength", vec![Value::String(source.clone())]);
+            let Value::Num(length) = length else {
+                panic!("scalar length")
+            };
+            match source.as_str() {
+                Some(text) => assert_eq!(length, text.chars().count() as f64),
+                None => assert!(length.is_nan()),
+            }
+            let converted = run("convertStringsToChars", vec![Value::String(source.clone())]);
+            let expected_chars = match source.as_str() {
+                Some(text) if !text.is_empty() => CharArray::new_row(text),
+                _ => CharArray::from_code_units(Vec::new(), 0, 0).unwrap(),
+            };
+            assert_eq!(converted, Value::CharArray(expected_chars));
+            assert_eq!(
+                run(
+                    "strcmp",
+                    vec![Value::String(source.clone()), Value::String(source.clone())]
+                ),
+                Value::Bool(!source.is_missing())
+            );
+        }
+        for source in [Value::Num(f64::NAN), Value::Complex(1.0, f64::NAN)] {
+            let Value::StringArray(output) = run("string", vec![source]) else {
+                panic!("string conversion")
+            };
+            assert_eq!(output.data(), &[StringElement::Missing]);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -835,7 +835,7 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
 pub(crate) async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
     match e {
         Value::MException(me) => Err(runtime_error::error_from_exception(me)),
-        Value::String(s) => Err(build_runtime_error(s.as_str()).build()),
+        Value::String(s) => Err(build_runtime_error(s.display().to_string()).build()),
         other => Err(build_runtime_error(format!("RunMat:error: {other:?}")).build()),
     }
 }
@@ -887,20 +887,25 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(
     }
 
     Ok(match callback {
-        Value::String(text) => resolve_text_handle(&text).unwrap_or_else(|| {
-            crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String(
-                text.clone(),
-            ))
-            .unwrap_or(Value::String(text))
-        }),
+        Value::String(text) => text
+            .as_str()
+            .and_then(resolve_text_handle)
+            .unwrap_or_else(|| {
+                crate::builtins::introspection::function_handle_text::dispatch_str2func(
+                    Value::String(text.clone()),
+                )
+                .unwrap_or(Value::String(text))
+            }),
         Value::StringArray(array) if array.data().len() == 1 => {
             let text = &array.data()[0];
-            resolve_text_handle(text).unwrap_or_else(|| {
-                crate::builtins::introspection::function_handle_text::dispatch_str2func(
-                    Value::StringArray(array.clone()),
-                )
-                .unwrap_or(Value::StringArray(array))
-            })
+            text.as_str()
+                .and_then(resolve_text_handle)
+                .unwrap_or_else(|| {
+                    crate::builtins::introspection::function_handle_text::dispatch_str2func(
+                        Value::StringArray(array.clone()),
+                    )
+                    .unwrap_or(Value::StringArray(array))
+                })
         }
         Value::CharArray(chars) if chars.rows == 1 => {
             let text = chars.try_row_string().map_err(|source| {

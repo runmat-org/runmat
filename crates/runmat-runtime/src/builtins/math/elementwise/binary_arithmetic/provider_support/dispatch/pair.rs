@@ -31,6 +31,38 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
     let Some(provider) = common_owner(left, right) else {
         return Ok(None);
     };
+    if float_handle_supported(left)
+        && float_handle_supported(right)
+        && runmat_accelerate_api::handle_precision(left)
+            != runmat_accelerate_api::handle_precision(right)
+    {
+        use runmat_types::OperatorKind;
+        let operator = match operation {
+            ArithmeticProviderOperation::Add => OperatorKind::Add,
+            ArithmeticProviderOperation::Subtract => OperatorKind::Subtract,
+            ArithmeticProviderOperation::Multiply => OperatorKind::ElementwiseMultiply,
+        };
+        let Some(admission) =
+            super::super::FloatingPairAdmission::admit(identity, operator, left, right, provider)
+        else {
+            return Ok(None);
+        };
+        let output = operation
+            .apply(provider, left, right)
+            .await
+            .map_err(|error| provider_error(operation, error))?;
+        return if admission.accepts(&output, left, right, provider) {
+            super::super::resident_output_from_sources(output, [left, right]).map(Some)
+        } else {
+            Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                output,
+                provider_contract_error(
+                    operation,
+                    "provider returned invalid mixed floating metadata",
+                ),
+            ))
+        };
+    }
     let Some(route) = operation.pair_route(left, right) else {
         return Ok(None);
     };

@@ -44,10 +44,10 @@ pub(super) fn strings(
             if group.len() == 1 {
                 return group
                     .pop()
-                    .map(Value::String)
+                    .map(|text| Value::String(text.into()))
                     .ok_or_else(|| error::internal("string group is empty"));
             }
-            StringArray::from_texts_unbounded(group, plan.slice_shape.clone())
+            StringArray::from_elements_unbounded(group, plan.slice_shape.clone())
                 .map(Value::StringArray)
                 .map_err(error::internal)
         })

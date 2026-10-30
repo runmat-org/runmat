@@ -12,7 +12,7 @@ const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "String array containing the canonical missing sentinel.",
+    description: "String array containing typed missing elements.",
 }];
 pub const MISSING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[

@@ -94,7 +94,7 @@ pub(super) fn mechanical_damping_from_value(
     }
     validate_damping_object(object)
         .map_err(|message| builtin_error(builtin, &ERROR_INPUT, message))?;
-    let Value::String(kind) = object
+    let Value::String(runmat_value::StringElement::Text(kind)) = object
         .properties()
         .get(KIND)
         .expect("validated damping kind")
@@ -183,7 +183,9 @@ pub(super) fn ensure_damping_class_registered() {
 
 fn validate_damping_object(object: &ObjectInstance) -> Result<(), String> {
     crate::builtins::fea::object_projection::validate(object)?;
-    let Some(Value::String(kind)) = object.properties().get(KIND) else {
+    let Some(Value::String(runmat_value::StringElement::Text(kind))) =
+        object.properties().get(KIND)
+    else {
         return Err("fea.MechanicalDamping requires a string `kind`".into());
     };
     match kind.as_str() {

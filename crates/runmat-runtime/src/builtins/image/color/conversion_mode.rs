@@ -13,7 +13,9 @@ pub(crate) fn decode(
     value: &Value,
 ) -> Result<Option<ImageIndexMode>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(text) => ImageIndexMode::from_option_text(text),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            ImageIndexMode::from_option_text(text)
+        }
         Value::CharArray(chars) => {
             let text: String = runmat_value::decode_utf16_code_units(chars.data())?;
             ImageIndexMode::from_option_text(&text)

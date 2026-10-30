@@ -114,7 +114,7 @@ macro_rules! axis_frame_builtin {
             require_orthogonal_axes($name, &frame)?;
             ensure_frame_classes_registered();
             let fields = [
-                ("frame_id", Value::String(id)),
+                ("frame_id", Value::String(runmat_value::StringElement::Text(id))),
                 ("origin", origin),
                 ($primary, primary_axis),
                 ($secondary, secondary_axis),
@@ -210,7 +210,9 @@ pub(crate) fn coordinate_frame_from_value(
         ));
     };
     let string = |name: &str| match object.properties().get(name) {
-        Some(Value::String(value)) if !value.is_empty() => Ok(value.to_string()),
+        Some(Value::String(runmat_value::StringElement::Text(value))) if !value.is_empty() => {
+            Ok(value.to_string())
+        }
         _ => Err(builtin_error(
             builtin,
             &ERROR_INPUT,

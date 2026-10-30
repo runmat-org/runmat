@@ -74,6 +74,14 @@ impl SelectedExecutableCode {
         self.program
     }
 
+    pub fn content_digest(&self) -> SelectedUnitContentDigest {
+        self.content_digest
+    }
+
+    pub fn body_digest(&self, origin: FunctionBindingOrigin) -> Option<SelectedBodySemanticDigest> {
+        self.body_semantic_digests.get(&origin).copied()
+    }
+
     pub fn static_imports(&self) -> &[ExecutableStaticImport] {
         &self.static_imports
     }

@@ -12,11 +12,13 @@ pub(super) fn text_list(value: &Value) -> BuiltinResult<Vec<String>> {
         return Ok(vec![text]);
     }
     match value {
-        Value::StringArray(values) => Ok(values
-            .data()
-            .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+        Value::StringArray(values) if values.data().iter().all(|text| !text.is_missing()) => {
+            Ok(values
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("checked nonmissing string").to_owned())
+                .collect())
+        }
         Value::Cell(values) => values.data().iter().map(scalar_text).collect(),
         _ => Err(invalid(
             "import options: expected a text scalar, string array, or cellstr",

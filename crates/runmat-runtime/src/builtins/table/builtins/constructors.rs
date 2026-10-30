@@ -403,7 +403,7 @@ pub(crate) async fn parquet_datastore_builtin(
         let value = args[idx + 1].clone();
         if name.eq_ignore_ascii_case("ReadSize") {
             read_size = match &value {
-                Value::String(text)
+                Value::String(runmat_value::StringElement::Text(text))
                     if text.eq_ignore_ascii_case("file")
                         || text.eq_ignore_ascii_case("rowgroup") =>
                 {

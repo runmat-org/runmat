@@ -120,13 +120,15 @@ impl Projection<'_> {
             for value in &controls {
                 match value {
                     Value::Tensor(tensor) => shape_dimensions += tensor.shape().len() as u64,
-                    Value::String(value) => string_bytes += value.len() as u64,
+                    Value::String(value) => {
+                        string_bytes += value.as_str().map_or(0, str::len) as u64
+                    }
                     Value::StringArray(value) => {
                         shape_dimensions += value.shape.len() as u64;
                         string_bytes += value
                             .data()
                             .iter()
-                            .map(|text| text.len() as u64)
+                            .map(|text| text.as_str().map_or(0, str::len) as u64)
                             .sum::<u64>();
                     }
                     Value::CharArray(value) => {

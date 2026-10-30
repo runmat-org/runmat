@@ -15,8 +15,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_types::IntegerClass;
 use runmat_value::{
-    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, Tensor,
-    Utf8Text, Value,
+    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, StringElement,
+    Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -165,7 +165,7 @@ impl ScoreTransform {
 enum ClassLabel {
     Numeric(f64),
     Integer(IntValue),
-    Text(Utf8Text),
+    Text(StringElement),
     Logical(bool),
 }
 

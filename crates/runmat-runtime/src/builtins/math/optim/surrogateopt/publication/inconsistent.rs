@@ -25,7 +25,7 @@ pub(in super::super) async fn publish(
         fields.insert("elapsedtime", Value::Num(0.0));
         fields.insert(
             "message",
-            Value::String(crate::call::argument_text::copy_str(
+            Value::string(crate::call::argument_text::copy_str(
                 "The lower and upper bounds are inconsistent.",
                 c.runtime(),
             )?),

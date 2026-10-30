@@ -19,7 +19,7 @@ use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericDType, NumericStorage,
-    StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
+    StringArray, StringElement, Tensor, Utf16CodeUnit, Value,
 };
 
 use super::float_order::{ComplexSequence, SetFloat};
@@ -285,19 +285,19 @@ fn ismember_host(
             ismember_string(astring, bstring, opts.rows)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
-            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
@@ -801,16 +801,18 @@ fn ismember_string_elements(
     a: StringArray,
     b: StringArray,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let mut map: HashMap<&str, usize> = HashMap::new();
+    let mut map: HashMap<&StringElement, usize> = HashMap::new();
     for (idx, value) in b.data().iter().enumerate() {
-        map.entry(value.as_str()).or_insert(idx + 1);
+        if !value.is_missing() {
+            map.entry(value).or_insert(idx + 1);
+        }
     }
 
     let mut mask_data = Vec::<u8>::with_capacity(a.data().len());
     let mut loc_data = Vec::<f64>::with_capacity(a.data().len());
 
     for value in a.data() {
-        if let Some(&pos) = map.get(value.as_str()) {
+        if let Some(&pos) = map.get(value) {
             mask_data.push(1);
             loc_data.push(pos as f64);
         } else {
@@ -849,6 +851,9 @@ fn ismember_string_rows(
         for c in 0..cols {
             let idx = r + c * rows_b;
             row_values.push(&b.data()[idx]);
+        }
+        if row_values.iter().any(|text| text.is_missing()) {
+            continue;
         }
         let key = RowStringKey(row_values);
         map.entry(key).or_insert(r + 1);
@@ -918,7 +923,7 @@ impl RowCharKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey<'a>(Vec<&'a Utf8Text>);
+struct RowStringKey<'a>(Vec<&'a StringElement>);
 
 #[derive(Debug, Clone)]
 pub struct IsMemberEvaluation {

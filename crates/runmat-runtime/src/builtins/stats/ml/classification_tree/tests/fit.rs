@@ -64,7 +64,7 @@ fn fitctree_and_predict_read_typed_integer_storage_exactly() {
 }
 
 #[test]
-fn integer_grouping_labels_round_trip_all_classes() {
+fn grouping_labels_round_trip_all_classes_and_text_carriers() {
     let storages = [
         IntegerStorage::I8(vec![-1, 1]),
         IntegerStorage::I16(vec![-1, 1]),
@@ -86,6 +86,52 @@ fn integer_grouping_labels_round_trip_all_classes() {
             panic!("expected integer tensor");
         };
         assert_eq!(round_trip.integer_storage(), Some(&expected));
+    }
+    use runmat_value::StringElement;
+    let elements = vec![
+        StringElement::Missing,
+        StringElement::text("<missing>"),
+        StringElement::text("<MISSING>"),
+        StringElement::text(""),
+        StringElement::text("present"),
+    ];
+    let strings = || {
+        Value::StringArray(
+            StringArray::from_elements_unbounded(elements.clone(), vec![5, 1]).unwrap(),
+        )
+    };
+    let scalar_cells = Value::Cell(
+        runmat_value::CellArray::new(elements.iter().cloned().map(Value::String).collect(), 5, 1)
+            .unwrap(),
+    );
+    let array_cells = Value::Cell(
+        runmat_value::CellArray::new(
+            elements
+                .iter()
+                .cloned()
+                .map(|element| {
+                    Value::StringArray(
+                        StringArray::from_elements_unbounded(vec![element], vec![1, 1]).unwrap(),
+                    )
+                })
+                .collect(),
+            5,
+            1,
+        )
+        .unwrap(),
+    );
+    for input in [strings(), scalar_cells, array_cells] {
+        let labels = labels_from_value(input, "Y").unwrap();
+        assert!(is_missing_label(&labels.labels[0]));
+        assert!(labels.labels[1..]
+            .iter()
+            .all(|label| !is_missing_label(label)));
+        assert_eq!(unique_labels(&labels.labels, labels.kind).len(), 4);
+        let Value::StringArray(round_trip) = labels_value(&labels.labels, labels.kind).unwrap()
+        else {
+            panic!("expected string labels");
+        };
+        assert_eq!(round_trip.data(), elements.as_slice());
     }
 }
 

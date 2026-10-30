@@ -24,7 +24,7 @@ use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericStorage, StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
+    NumericStorage, StringArray, StringElement, Tensor, Utf16CodeUnit, Value,
 };
 
 use super::{
@@ -342,19 +342,19 @@ fn intersect_host(
             intersect_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
-            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
@@ -949,27 +949,29 @@ fn intersect_string_elements(
     b: StringArray,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
-    let mut b_map: HashMap<&str, usize> = HashMap::new();
+    let mut b_map: HashMap<&StringElement, usize> = HashMap::new();
     for (idx, value) in b.data().iter().enumerate() {
-        b_map.entry(value.as_str()).or_insert(idx);
+        if !value.is_missing() {
+            b_map.entry(value).or_insert(idx);
+        }
     }
 
-    let mut seen: HashSet<&str> = HashSet::new();
+    let mut seen: HashSet<&StringElement> = HashSet::new();
     let mut entries = Vec::<StringIntersectEntry>::new();
     let mut order_counter = 0usize;
 
     for (idx, value) in a.data().iter().enumerate() {
-        if seen.contains(value.as_str()) {
+        if seen.contains(value) {
             continue;
         }
-        if let Some(&b_idx) = b_map.get(value.as_str()) {
+        if let Some(&b_idx) = b_map.get(value) {
             entries.push(StringIntersectEntry {
                 value,
                 a_index: idx,
                 b_index: b_idx,
                 order_rank: order_counter,
             });
-            seen.insert(value.as_str());
+            seen.insert(value);
             order_counter += 1;
         }
     }
@@ -1000,6 +1002,9 @@ fn intersect_string_rows(
         for c in 0..cols {
             let idx = r + c * rows_b;
             row_values.push(&b.data()[idx]);
+        }
+        if row_values.iter().any(|text| text.is_missing()) {
+            continue;
         }
         let key = RowStringKey::from_slice(&row_values);
         b_map.entry(key).or_insert(r);
@@ -1140,7 +1145,7 @@ struct CharRowIntersectEntry {
 
 #[derive(Debug)]
 struct StringIntersectEntry<'a> {
-    value: &'a Utf8Text,
+    value: &'a StringElement,
     a_index: usize,
     b_index: usize,
     order_rank: usize,
@@ -1148,7 +1153,7 @@ struct StringIntersectEntry<'a> {
 
 #[derive(Debug)]
 struct StringRowIntersectEntry<'a> {
-    row_data: Vec<&'a Utf8Text>,
+    row_data: Vec<&'a StringElement>,
     a_row: usize,
     b_row: usize,
     order_rank: usize,
@@ -1524,7 +1529,7 @@ fn assemble_string_intersect(
         ib.push((entry.b_index + 1) as f64);
     }
 
-    let value_array = StringArray::from_texts_unbounded(values, vec![order.len(), 1])
+    let value_array = StringArray::from_elements_unbounded(values, vec![order.len(), 1])
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
@@ -1556,7 +1561,7 @@ fn assemble_string_row_intersect(
     }
 
     let rows_out = order.len();
-    let mut values = vec![Utf8Text::default(); rows_out * cols];
+    let mut values = vec![StringElement::default(); rows_out * cols];
     let mut ia = Vec::with_capacity(rows_out);
     let mut ib = Vec::with_capacity(rows_out);
 
@@ -1570,7 +1575,7 @@ fn assemble_string_row_intersect(
         ib.push((entry.b_row + 1) as f64);
     }
 
-    let value_array = StringArray::from_texts_unbounded(values, vec![rows_out, cols])
+    let value_array = StringArray::from_elements_unbounded(values, vec![rows_out, cols])
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![rows_out, 1])
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
@@ -1608,10 +1613,10 @@ impl RowCharKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey<'a>(Vec<&'a Utf8Text>);
+struct RowStringKey<'a>(Vec<&'a StringElement>);
 
 impl<'a> RowStringKey<'a> {
-    fn from_slice(values: &[&'a Utf8Text]) -> Self {
+    fn from_slice(values: &[&'a StringElement]) -> Self {
         RowStringKey(values.to_vec())
     }
 }
@@ -1700,7 +1705,7 @@ fn compare_char_rows(a: &[Utf16CodeUnit], b: &[Utf16CodeUnit]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[&Utf8Text], b: &[&Utf8Text]) -> Ordering {
+fn compare_string_rows(a: &[&StringElement], b: &[&StringElement]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {

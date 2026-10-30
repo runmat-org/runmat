@@ -209,12 +209,12 @@ fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
 #[async_recursion::async_recursion(?Send)]
 async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(vec![s.as_str().to_owned()]),
         Value::CharArray(ca) => char_array_rows_as_strings(ca),
-        Value::StringArray(sa) => Ok(sa
+        Value::StringArray(sa) if sa.data().iter().all(|text| !text.is_missing()) => Ok(sa
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
+            .map(|text| text.as_str().expect("checked nonmissing string").to_owned())
             .collect()),
         Value::Cell(ca) => {
             let mut names = Vec::with_capacity(ca.data().len());
@@ -238,16 +238,20 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(s) => Ok(Some(s.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(Some(s.as_str().to_owned())),
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 load_error_with(&LOAD_ERROR_INVALID_ARGUMENT, "load: malformed UTF-16 text")
             })
             .map(Some)
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Ok(Some(sa.data()[0].as_str().to_owned()))
-        }
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(Some(
+            sa.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned(),
+        )),
         _ => Ok(None),
     }
 }

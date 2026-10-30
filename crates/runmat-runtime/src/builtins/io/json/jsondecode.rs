@@ -101,10 +101,13 @@ fn extract_text(value: Value) -> BuiltinResult<String> {
                 jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE)
             })
         }
-        Value::String(s) => Ok(s.into_string_unbounded()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.into_string_unbounded()),
         Value::StringArray(sa) => {
-            if sa.data().len() == 1 {
-                Ok(sa.data()[0].as_str().to_owned())
+            if sa.data().len() == 1 && !sa.data()[0].is_missing() {
+                Ok(sa.data()[0]
+                    .as_str()
+                    .expect("checked nonmissing string")
+                    .to_owned())
             } else {
                 Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE))
             }

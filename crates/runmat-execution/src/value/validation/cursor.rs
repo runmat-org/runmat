@@ -3,8 +3,8 @@
 use super::super::{
     CallableOwner, CharacterEncoding, DurableDecompositionPayload, DurableNumericFactor,
     DurableObjectArray, DurablePlainObject, DurableStructArray, ElementType, ExceptionFrameSource,
-    ExceptionValue, InlineValue, RegisteredField, SparseValue, StructField, ValueLimitBudget,
-    ValueLimits, ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
+    ExceptionValue, InlineValue, RegisteredField, SparseValue, StringElement, StructField,
+    ValueLimitBudget, ValueLimits, ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
 };
 use crate::{schema::VALUE_PAYLOAD_SCHEMA_VERSION, ContractError};
 use std::{collections::HashSet, num::NonZeroUsize};
@@ -74,7 +74,7 @@ impl<'a> Fields<'a> {
 
 enum AfterShape<'a> {
     Char(&'a [u16]),
-    Strings(&'a [String]),
+    Strings(&'a [StringElement]),
     Dense(ElementType, &'a [u8]),
     Cell(&'a [ValuePayload], u16),
     StructArray(&'a DurableStructArray, u16),
@@ -85,7 +85,7 @@ enum Task<'a> {
     Payload(&'a ValuePayload, u16),
     Inline(&'a InlineValue, u16),
     Many(&'a [ValuePayload], usize, u16),
-    Texts(&'a [String], usize),
+    Texts(&'a [StringElement], usize),
     Chars(&'a [u16], usize),
     Shape(&'a [u64], usize, u64, AfterShape<'a>),
     SparseOffsets(&'a SparseValue, usize),
@@ -235,7 +235,9 @@ impl<'a> ValuePayloadValidationCursor<'a> {
             }
             Task::Texts(v, i) => {
                 if let Some(x) = v.get(i) {
-                    self.budget.add_text(x)?;
+                    if let Some(text) = x.as_str() {
+                        self.budget.add_text(text)?;
+                    }
                     self.tasks.push(Task::Texts(v, i + 1));
                 }
                 Ok(())
@@ -311,7 +313,11 @@ impl<'a> ValuePayloadValidationCursor<'a> {
                 self.budget.add_bytes(8)?
             }
             InlineValue::ComplexF64Bits { .. } => self.budget.add_bytes(16)?,
-            InlineValue::String(x) => self.budget.add_text(x)?,
+            InlineValue::String(x) => {
+                if let Some(text) = x.as_str() {
+                    self.budget.add_text(text)?;
+                }
+            }
             InlineValue::Char {
                 encoding: CharacterEncoding::Utf16CodeUnitsV1,
                 shape,

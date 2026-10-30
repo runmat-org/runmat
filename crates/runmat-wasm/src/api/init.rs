@@ -21,6 +21,12 @@ use crate::runtime::logging::{init_logging_once, set_log_filter_override};
 use crate::runtime::package_cache::JsPackageCacheBackend;
 use crate::wire::errors::{init_error, init_error_with_details, js_value_to_string, InitErrorCode};
 
+/// Exact SDK admission marker for string/null typed string projections.
+#[wasm_bindgen(js_name = stringElementWireSchemaVersion)]
+pub fn string_element_wire_schema_version() -> u16 {
+    runmat_execution::schema::STRING_ELEMENT_WIRE_SCHEMA_VERSION
+}
+
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     let mut parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {

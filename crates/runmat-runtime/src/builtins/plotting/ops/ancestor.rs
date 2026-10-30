@@ -218,7 +218,11 @@ impl TypeSelector {
             }
             Value::StringArray(strings) => {
                 for item in strings.data() {
-                    push_normalized_name(item, &mut names)?;
+                    push_normalized_name(
+                        item.as_str()
+                            .ok_or_else(|| invalid_argument("type names must be strings"))?,
+                        &mut names,
+                    )?;
                 }
             }
             _ => push_type_name(value, &mut names)?,
@@ -240,7 +244,11 @@ fn push_type_name(value: &Value, names: &mut Vec<TypeName>) -> crate::BuiltinRes
     match value {
         Value::StringArray(strings) => {
             for item in strings.data() {
-                push_normalized_name(item, names)?;
+                push_normalized_name(
+                    item.as_str()
+                        .ok_or_else(|| invalid_argument("type names must be strings"))?,
+                    names,
+                )?;
             }
             Ok(())
         }

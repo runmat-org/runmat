@@ -1,6 +1,7 @@
 use runmat_builtins::RelationalOperator;
 use runmat_value::{
-    CharArray, ComplexTensor, ExactArrayStorage, LogicalArray, StringArray, Tensor, Utf8Text, Value,
+    CharArray, ComplexTensor, ExactArrayStorage, LogicalArray, StringArray, StringElement, Tensor,
+    Value,
 };
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
@@ -11,7 +12,7 @@ use super::errors::{runtime_error, ComparisonError};
 pub(super) enum Operand {
     Numeric(Buffer<f64>),
     Complex(Buffer<(f64, f64)>),
-    Text(Buffer<Utf8Text>),
+    Text(Buffer<StringElement>),
 }
 
 pub(super) struct Buffer<T> {
@@ -85,7 +86,7 @@ impl Buffer<(f64, f64)> {
     }
 }
 
-impl Buffer<Utf8Text> {
+impl Buffer<StringElement> {
     fn from_strings(value: StringArray) -> Self {
         let (data, shape, _, _) = value.into_parts();
         Self {
@@ -134,7 +135,11 @@ pub(super) fn compare(
         }
         (Operand::Text(lhs), Operand::Text(rhs)) => {
             broadcast_compare(&lhs, &rhs, operator, |lhs, rhs| {
-                apply_ordering(operator, lhs.cmp(rhs))
+                if lhs.is_missing() || rhs.is_missing() {
+                    operator == RelationalOperator::NotEqual
+                } else {
+                    apply_ordering(operator, lhs.cmp(rhs))
+                }
             })?
         }
         _ => return Err(runtime_error(operator, ComparisonError::InvalidInput)),

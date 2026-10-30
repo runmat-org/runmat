@@ -68,9 +68,9 @@ fn callable_name(callable: &Value) -> Option<std::borrow::Cow<'_, str>> {
         Value::Closure(closure) if closure.binding.is_none() => {
             Cow::Borrowed(closure.function_name.as_str())
         }
-        Value::String(text) => Cow::Borrowed(text.as_str()),
+        Value::String(text) => Cow::Borrowed(text.as_str()?),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Cow::Borrowed(array.data().first()?.as_str())
+            Cow::Borrowed(array.data().first()?.as_str()?)
         }
         Value::CharArray(array) if array.rows == 1 => {
             // Only a speculative catalog hint; actual call admission reports

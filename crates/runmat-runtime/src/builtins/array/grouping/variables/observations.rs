@@ -115,10 +115,10 @@ fn atom_at(value: &Value, row: usize) -> VariableResult<KeyAtom> {
         Value::StringArray(value) => value
             .data()
             .get(row)
-            .map(|value| KeyAtom::from_text(value).unwrap_or(KeyAtom::Missing))
+            .map(|value| KeyAtom::from_string(value).unwrap_or(KeyAtom::Missing))
             .ok_or_else(|| "string grouping row is out of bounds".into()),
         Value::String(value) if row == 0 => {
-            Ok(KeyAtom::from_text(value).unwrap_or(KeyAtom::Missing))
+            Ok(KeyAtom::from_string(value).unwrap_or(KeyAtom::Missing))
         }
         Value::Cell(value) => value
             .data()

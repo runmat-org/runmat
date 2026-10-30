@@ -128,8 +128,10 @@ fn is_tolerance_argument(value: &Value) -> bool {
 
 fn is_flag_alias_argument(value: &Value) -> bool {
     let text = match value {
-        Value::String(value) => Some(value.as_str()),
-        Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].as_str()),
+        Value::String(value) => value.as_str(),
+        Value::StringArray(value) if value.data().len() == 1 && !value.data()[0].is_missing() => {
+            value.data()[0].as_str()
+        }
         _ => None,
     };
     text.is_some_and(|value| value.trim().eq_ignore_ascii_case("symmetric"))
@@ -303,8 +305,10 @@ fn parse_optional_args(
 
 fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<SymmetryMode>> {
     let text = match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::String(s) => s.as_str().map(str::to_owned),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            sa.data()[0].as_str().map(str::to_owned)
+        }
         Value::CharArray(ca) if ca.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
                 let mut error = issymmetric_error_with_detail(

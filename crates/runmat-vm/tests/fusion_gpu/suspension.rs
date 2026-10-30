@@ -181,7 +181,7 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         let _lock = accel_test_lock();
         ensure_provider_registered();
         let provider = registered_provider().unwrap();
-        let bytecode = compile_semantic("M = 2; S = [1;2]; drift = 0.1; scale = 0.2; for t = 1:3; Z = randn(M,1); S = S .* exp(drift + scale .* Z); end");
+        let bytecode = compile_semantic("M = 2; S = [1;2]; drift = 0.1; scale = 0.2; drift = gather(drift); for t = 1:3; Z = randn(M,1); S = S .* exp(drift + scale .* Z); end");
         assert!(bytecode
             .instructions
             .iter()
@@ -274,8 +274,8 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         assert_eq!(probe.polls.get(), 1);
         assert_eq!(
             provider.buffers.lock().unwrap().len(),
-            baseline.len() + usize::from(!resident),
-            "state upload must precede pending drift download"
+            baseline.len(),
+            "explicit control readback must finish before any state upload"
         );
         assert_published_buffers(&runtime, provider);
         if cancel {

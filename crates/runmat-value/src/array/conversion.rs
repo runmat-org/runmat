@@ -67,7 +67,13 @@ impl From<&str> for Value {
 
 impl From<Utf8Text> for Value {
     fn from(text: Utf8Text) -> Self {
-        Value::String(text)
+        Value::String(StringElement::Text(text))
+    }
+}
+
+impl From<StringElement> for Value {
+    fn from(element: StringElement) -> Self {
+        Value::String(element)
     }
 }
 
@@ -118,10 +124,16 @@ impl TryFrom<&Value> for String {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::String(s) => Ok(s.as_str().to_owned()),
+            Value::String(s) => s
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "cannot convert missing string to text".to_owned()),
             Value::StringArray(sa) => {
                 if sa.data.len() == 1 {
-                    Ok(sa.data[0].as_str().to_owned())
+                    sa.data[0]
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "cannot convert missing string to text".to_owned())
                 } else {
                     Err("cannot convert string array to scalar string".to_string())
                 }

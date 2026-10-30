@@ -171,7 +171,7 @@ pub(super) fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
 
 async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(vec![s.as_str().to_owned()]),
         Value::CharArray(ca) => {
             let rows = char_array_rows_as_strings(ca)?;
             if rows.is_empty() && ca.rows > 0 {
@@ -182,10 +182,10 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
             }
             Ok(rows)
         }
-        Value::StringArray(sa) => {
+        Value::StringArray(sa) if sa.data().iter().all(|text| !text.is_missing()) => {
             let mut names = Vec::with_capacity(sa.data().len());
             for s in sa.data() {
-                names.push(s.as_str().to_owned());
+                names.push(s.as_str().expect("checked nonmissing string").to_owned());
             }
             Ok(names)
         }
@@ -219,16 +219,20 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(s) => Ok(Some(s.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(Some(s.as_str().to_owned())),
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 save_error_with(&SAVE_ERROR_INVALID_ARGUMENT, "save: malformed UTF-16 text")
             })
             .map(Some)
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Ok(Some(sa.data()[0].as_str().to_owned()))
-        }
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(Some(
+            sa.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned(),
+        )),
         _ => Ok(None),
     }
 }

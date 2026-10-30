@@ -2,7 +2,7 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Behavior",
-        paragraphs: &["`issorted(A)` examines the first non-singleton dimension and returns a logical scalar.", "`issorted(A, dim)` selects the dimension explicitly (1-based).", "Direction flags include `'ascend'`, `'descend'`, `'monotonic'`, `'strictascend'`, `'strictdescend'`, and `'strictmonotonic'`.", "Name-value options mirror MATLAB:", "`'MissingPlacement'` accepts `'auto'`, `'first'`, or `'last'`.", "`'ComparisonMethod'` accepts `'auto'`, `'real'`, or `'abs'` for numeric and complex data.", "`issorted(A,'rows', ...)` verifies lexicographic ordering of rows.", "Logical and character arrays are promoted to double precision for comparison; string arrays are compared lexicographically, recognising the literal `<missing>` token as a missing element.", "Empty arrays, scalars, and singleton dimensions are always reported as sorted."],
+        paragraphs: &["`issorted(A)` examines the first non-singleton dimension and returns a logical scalar.", "`issorted(A, dim)` selects the dimension explicitly (1-based).", "Direction flags include `'ascend'`, `'descend'`, `'monotonic'`, `'strictascend'`, `'strictdescend'`, and `'strictmonotonic'`.", "Name-value options mirror MATLAB:", "`'MissingPlacement'` accepts `'auto'`, `'first'`, or `'last'`.", "`'ComparisonMethod'` accepts `'auto'`, `'real'`, or `'abs'` for numeric and complex data.", "`issorted(A,'rows', ...)` verifies lexicographic ordering of rows.", "Logical and character arrays are promoted to double precision for comparison; string arrays are compared lexicographically, applying missing-placement rules only to typed missing elements.", "Empty arrays, scalars, and singleton dimensions are always reported as sorted."],
     },
     BuiltinDocumentationSection {
         heading: "Types, placement and limitations",
@@ -210,7 +210,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "How are string arrays treated?",
-        answer: "Strings are compared lexicographically using Unicode code-point order. The literal `<missing>` is treated as a missing value so `'MissingPlacement'` rules apply.",
+        answer: "Strings are compared lexicographically using Unicode code-point order. `MissingPlacement` rules apply to typed missing values. Literal `<missing>` text participates in ordinary lexicographic comparison.",
     },
     BuiltinDocumentationFaq {
         question: "What about empty arrays or dimensions of length 0?",

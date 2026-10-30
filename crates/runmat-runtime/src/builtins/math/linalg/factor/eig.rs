@@ -656,8 +656,10 @@ fn option_text(
     value: &Value,
 ) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
     match value {
-        Value::String(text) => Ok(Some(text.clone())),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(Some(array.data()[0].clone())),
+        Value::String(text) => Ok(text.text_ref().cloned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].text_ref().cloned())
+        }
         Value::StringArray(_) => Err(eig_invalid_argument(
             "eig: option arguments must be character vectors or string scalars",
         )),

@@ -123,10 +123,9 @@ pub(super) async fn fully_connected_layer_builtin(
     }) {
         let dimension = options.pop_front().expect("validated argument prefix");
         let source = options.into_function_arguments();
-        let operation = Value::String(crate::call::argument_text::copy_str(
-            "OperationDimension",
-            runtime.as_ref(),
-        )?);
+        let operation = Value::String(
+            crate::call::argument_text::copy_str("OperationDimension", runtime.as_ref())?.into(),
+        );
         options = crate::execution::RootedValues::transform_arguments(
             &source,
             source.len() + 2,

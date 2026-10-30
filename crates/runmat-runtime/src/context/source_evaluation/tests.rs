@@ -357,7 +357,7 @@ fn assignin_arguments_keep_borrowed_names_and_decode_character_rows_without_heap
     let mut scratch = [0u8; MATLAB_NAME_LENGTH_MAX];
     let borrowed = assignin_args::name(&name, &mut scratch).unwrap();
     assert_eq!(borrowed, "shared_name");
-    let Value::String(original) = &name else {
+    let Value::String(runmat_value::StringElement::Text(original)) = &name else {
         unreachable!("constructed a string scalar")
     };
     assert_eq!(borrowed.as_ptr(), original.as_ptr());

@@ -70,11 +70,13 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
             for item in cell.data().iter() {
-                labels.push(ClassLabel::Text(
-                    predict_scalar_text(item)?.ok_or_else(|| {
+                labels.push(ClassLabel::Text(match item {
+                    Value::String(text) => text.clone(),
+                    Value::StringArray(array) if array.data().len() == 1 => array.data()[0].clone(),
+                    _ => predict_scalar_text(item)?.ok_or_else(|| {
                         predict_invalid(format!("predict: {name} cell entries must be text"))
                     })?.into(),
-                ));
+                }));
             }
             Ok(LabelVector {
                 labels,
@@ -184,6 +186,7 @@ pub(super) fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
 
 pub(super) fn is_missing_label(label: &ClassLabel) -> bool {
     matches!(label, ClassLabel::Numeric(value) if value.is_nan())
+        || matches!(label, ClassLabel::Text(value) if value.is_missing())
 }
 
 fn integer_class(storage: &IntegerStorage) -> IntegerClass {
@@ -329,11 +332,11 @@ pub(super) fn predicted_labels_value(
                 .iter()
                 .map(|idx| match labels.get(*idx) {
                     Some(ClassLabel::Text(value)) => value.clone(),
-                    _ => Utf8Text::default(),
+                    _ => StringElement::default(),
                 })
                 .collect::<Vec<_>>();
             Ok(Value::StringArray(
-                StringArray::from_texts_unbounded(data, vec![indices.len(), 1])
+                StringArray::from_elements_unbounded(data, vec![indices.len(), 1])
                     .map_err(predict_internal)?,
             ))
         }
@@ -356,9 +359,13 @@ pub(super) fn predicted_labels_value(
 pub(super) fn class_kind_property(object: &ObjectInstance) -> BuiltinResult<LabelKind> {
     match object.properties().get("__RunMatTreeClassKind") {
         Some(Value::String(text)) if text == "numeric" => Ok(LabelKind::Numeric),
-        Some(Value::String(text)) if integer_class_from_name(text).is_some() => Ok(
-            LabelKind::Integer(integer_class_from_name(text).expect("checked above")),
-        ),
+        Some(Value::String(runmat_value::StringElement::Text(text)))
+            if integer_class_from_name(text).is_some() =>
+        {
+            Ok(LabelKind::Integer(
+                integer_class_from_name(text).expect("checked above"),
+            ))
+        }
         Some(Value::String(text)) if text == "text" => Ok(LabelKind::Text),
         Some(Value::String(text)) if text == "logical" => Ok(LabelKind::Logical),
         _ => Err(predict_invalid(

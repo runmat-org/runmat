@@ -12,8 +12,12 @@ pub(super) fn value(
     shape: &[usize],
 ) -> BuiltinResult<crate::execution::RootedValue> {
     let (identifier, message) = identifier_and_message(raw_error);
-    let identifier = Value::String(crate::call::argument_text::copy_str(identifier, context)?);
-    let message = Value::String(crate::call::argument_text::copy_str(message, context)?);
+    let identifier = Value::String(runmat_value::StringElement::Text(
+        crate::call::argument_text::copy_str(identifier, context)?,
+    ));
+    let message = Value::String(runmat_value::StringElement::Text(
+        crate::call::argument_text::copy_str(message, context)?,
+    ));
     let indices = dims_to_row_tensor(&linear_indices(linear_index, shape))
         .map_err(|reason| error::internal(format!("cellfun: {reason}")))?;
     let fields = [

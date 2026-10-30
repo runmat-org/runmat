@@ -18,6 +18,7 @@ pub mod symbolic;
 mod trace;
 mod transient;
 mod utf8_text;
+mod string_element;
 mod value;
 
 pub use aggregate::{
@@ -115,6 +116,7 @@ pub use shared_value_generation::{
     CallableGenerationInput, CallableGenerationPrepareError, CallableGenerationQuote,
     SharedValueGeneration,
 };
+pub use string_element::{StringElement, StringElementAdmissionError, StringElementDisplay};
 pub use symbolic::{SymbolicExpr, SymbolicFunction, SymbolicList};
 pub use trace::ValueTraceWorkspace;
 pub use transient::{validate_no_transient_sequence, TransientValueError};

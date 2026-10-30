@@ -327,7 +327,7 @@ fn value_is_native_integer(value: &Value) -> bool {
 
 fn option_name(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(value) => Some(value.to_string()),
+        Value::String(value) => value.as_str().map(str::to_owned),
         Value::CharArray(value) if value.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(value.data()).map_err(|error| {
                 table_error_with_source(
@@ -337,7 +337,9 @@ fn option_name(value: &Value) -> BuiltinResult<Option<String>> {
                 )
             })?,
         ),
-        Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].to_string()),
+        Value::StringArray(value) if value.data().len() == 1 => {
+            value.data()[0].as_str().map(str::to_owned)
+        }
         _ => None,
     })
 }
@@ -464,15 +466,17 @@ async fn groupsummary_with_numeric_bins(
     let internal = assignments
         .into_iter()
         .map(|bin| {
-            bin.map(|index| format!("{index:08}|{}", labels[index]))
-                .unwrap_or_else(|| "<missing>".to_string())
+            bin.map(|index| {
+                runmat_value::StringElement::text(format!("{index:08}|{}", labels[index]))
+            })
+            .unwrap_or(runmat_value::StringElement::Missing)
         })
         .collect::<Vec<_>>();
     let mut replaced = Vec::with_capacity(names.len());
     for name in &names {
         if name == &selected[0] {
             replaced.push(Value::StringArray(
-                StringArray::new(internal.clone(), vec![internal.len(), 1])
+                StringArray::from_elements_unbounded(internal.clone(), vec![internal.len(), 1])
                     .map_err(invalid_variable)?,
             ));
         } else {
@@ -496,7 +500,9 @@ fn groupsummary_is_numeric_bins(value: &Value) -> BuiltinResult<bool> {
         Value::Cell(cell) if cell.data().len() == 1 => {
             groupsummary_is_numeric_bins(&cell.data()[0])?
         }
-        Value::String(text) => text.eq_ignore_ascii_case("none"),
+        Value::String(text) => text
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("none")),
         Value::CharArray(chars) if chars.rows == 1 => {
             option_name(value)?.is_some_and(|text| text.eq_ignore_ascii_case("none"))
         }
@@ -894,22 +900,30 @@ fn groupsummary_finalize_bins(
         .data()
         .iter()
         .enumerate()
-        .map(|(row, label)| (label.as_str(), row))
+        .map(|(row, label)| (label.clone(), row))
         .collect::<BTreeMap<_, _>>();
     let mut desired = labels
         .iter()
         .enumerate()
-        .map(|(index, label)| (format!("{index:08}|{label}"), label.clone()))
-        .filter(|(internal, _)| include_empty || existing.contains_key(internal.as_str()))
+        .map(|(index, label)| {
+            (
+                runmat_value::StringElement::text(format!("{index:08}|{label}")),
+                runmat_value::StringElement::text(label.clone()),
+            )
+        })
+        .filter(|(internal, _)| include_empty || existing.contains_key(internal))
         .collect::<Vec<_>>();
-    if existing.contains_key("<missing>") {
-        desired.push(("<missing>".to_string(), "<missing>".to_string()));
+    if existing.contains_key(&runmat_value::StringElement::Missing) {
+        desired.push((
+            runmat_value::StringElement::Missing,
+            runmat_value::StringElement::Missing,
+        ));
     }
     let mut output = Vec::with_capacity(names.len());
     for name in &names {
         if name == group_name {
             output.push(Value::StringArray(
-                StringArray::new(
+                StringArray::from_elements_unbounded(
                     desired.iter().map(|(_, label)| label.clone()).collect(),
                     vec![desired.len(), 1],
                 )
@@ -929,7 +943,7 @@ fn groupsummary_finalize_bins(
         if tensor.integer_storage().is_some()
             && desired
                 .iter()
-                .any(|(internal, _)| !existing.contains_key(internal.as_str()))
+                .any(|(internal, _)| !existing.contains_key(internal))
         {
             return Err(invalid_argument(
                 "groupsummary: empty binned groups for integer-class min/max are not implemented because the public fill class is unresolved",
@@ -938,7 +952,7 @@ fn groupsummary_finalize_bins(
         if tensor.integer_storage().is_some() {
             let rows = desired
                 .iter()
-                .filter_map(|(internal, _)| existing.get(internal.as_str()).copied())
+                .filter_map(|(internal, _)| existing.get(internal).copied())
                 .collect::<Vec<_>>();
             output.push(select_rows(value, &rows)?);
         } else {
@@ -946,7 +960,7 @@ fn groupsummary_finalize_bins(
                 .iter()
                 .map(|(internal, _)| {
                     existing
-                        .get(internal.as_str())
+                        .get(internal)
                         .map(|row| tensor.materialize_f64()[*row])
                         .unwrap_or_else(|| if name == "GroupCount" { 0.0 } else { f64::NAN })
                 })

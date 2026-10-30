@@ -24,7 +24,9 @@ fn text_column(value: &Value, col: usize) -> Vec<String> {
     };
     let mut out = Vec::new();
     for row in 0..cell.rows {
-        let Value::String(text) = cell.get(row, 0).expect("text cell") else {
+        let Value::String(runmat_value::StringElement::Text(text)) =
+            cell.get(row, 0).expect("text cell")
+        else {
             panic!("expected string");
         };
         out.push(text.to_string());

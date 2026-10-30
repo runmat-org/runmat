@@ -99,8 +99,11 @@ async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
     let patterns = PatternList::from_value(&pattern)?;
 
     match text {
-        Value::String(s) if is_missing_string(s.as_str()) => Ok(Value::String(s)),
-        Value::String(s) => Ok(Value::string(erase_string_scalar(s.as_str(), &patterns))),
+        Value::String(s) if s.is_missing() => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::string(erase_string_scalar(
+            s.as_str().expect("nonmissing subject"),
+            &patterns,
+        ))),
         Value::StringArray(sa) => erase_string_array(sa, &patterns),
         Value::CharArray(ca) => erase_char_array(ca, &patterns),
         Value::Cell(cell) => erase_cell_array(cell, &patterns),
@@ -146,13 +149,18 @@ impl<'a> PatternList<'a> {
                 })?,
             )],
             Value::String(text) => vec![PatternEntry::Literal(std::borrow::Cow::Borrowed(
-                text.as_str(),
+                text.as_str()
+                    .ok_or_else(|| erase_error(&ERASE_ERROR_PATTERN_TYPE))?,
             ))],
             Value::StringArray(array) => array
                 .data()
                 .iter()
-                .map(|text| PatternEntry::Literal(std::borrow::Cow::Borrowed(text.as_str())))
-                .collect(),
+                .map(|text| {
+                    text.as_str()
+                        .map(|text| PatternEntry::Literal(std::borrow::Cow::Borrowed(text)))
+                        .ok_or_else(|| erase_error(&ERASE_ERROR_PATTERN_TYPE))
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
             Value::CharArray(array) => {
                 if array.rows == 0 {
                     Vec::new()
@@ -177,12 +185,17 @@ impl<'a> PatternList<'a> {
                 let mut list = Vec::with_capacity(cell.data().len());
                 for handle in cell.data() {
                     match &handle {
-                        Value::String(text) => list.push(PatternEntry::Literal(
-                            std::borrow::Cow::Borrowed(text.as_str()),
-                        )),
+                        Value::String(text) => {
+                            list.push(PatternEntry::Literal(std::borrow::Cow::Borrowed(
+                                text.as_str()
+                                    .ok_or_else(|| erase_error(&ERASE_ERROR_PATTERN_TYPE))?,
+                            )))
+                        }
                         Value::StringArray(sa) if sa.data().len() == 1 => {
                             list.push(PatternEntry::Literal(std::borrow::Cow::Borrowed(
-                                sa.data()[0].as_str(),
+                                sa.data()[0]
+                                    .as_str()
+                                    .ok_or_else(|| erase_error(&ERASE_ERROR_PATTERN_TYPE))?,
                             )));
                         }
                         Value::CharArray(ca) if ca.rows == 0 => {
@@ -235,17 +248,13 @@ impl<'a> PatternList<'a> {
 }
 
 fn erase_string_scalar(text: &str, patterns: &PatternList<'_>) -> String {
-    if is_missing_string(text) {
-        text.to_owned()
-    } else {
-        patterns.apply(text)
-    }
+    patterns.apply(text)
 }
 
 fn erase_string_array(array: StringArray, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
     let (data, shape, _, _) = array.into_parts();
     let mut erased = Vec::with_capacity(data.len());
-    let input: Vec<runmat_value::Utf8Text> = match data.try_into_owned() {
+    let input: Vec<runmat_value::StringElement> = match data.try_into_owned() {
         Ok(values) => values.into_iter().collect(),
         Err(shared) => shared.iter().cloned().collect(),
     };
@@ -253,7 +262,9 @@ fn erase_string_array(array: StringArray, patterns: &PatternList<'_>) -> Builtin
         if is_missing_string(&entry) {
             erased.push(entry);
         } else {
-            erased.push(runmat_value::Utf8Text::new(patterns.apply(&entry)));
+            erased.push(runmat_value::StringElement::text(
+                patterns.apply(entry.as_str().expect("nonmissing subject")),
+            ));
         }
     }
     StringArray::from_shared_storage(
@@ -317,11 +328,13 @@ fn erase_cell_array(cell: CellArray, patterns: &PatternList<'_>) -> BuiltinResul
 
 fn erase_cell_element(value: &Value, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::string(erase_string_scalar(text.as_str(), patterns))),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(Value::string(erase_string_scalar(
-            sa.data()[0].as_str(),
-            patterns,
-        ))),
+        Value::String(text) => Ok(Value::String(match text.as_str() {
+            Some(text) => runmat_value::StringElement::text(erase_string_scalar(text, patterns)),
+            None => runmat_value::StringElement::Missing,
+        })),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            erase_cell_element(&Value::String(sa.data()[0].clone()), patterns)
+        }
         Value::CharArray(ca) if ca.rows == 0 => Ok(Value::CharArray(ca.clone())),
         Value::CharArray(ca) if ca.rows == 1 => {
             let slice = char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
@@ -575,11 +588,11 @@ pub(crate) mod tests {
     #[test]
     fn erase_preserves_missing_string() {
         let result = erase_builtin(
-            Value::String("<missing>".into()),
+            Value::String(runmat_value::StringElement::Missing),
             Value::String("missing".into()),
         )
         .expect("erase");
-        assert_eq!(result, Value::String("<missing>".into()));
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

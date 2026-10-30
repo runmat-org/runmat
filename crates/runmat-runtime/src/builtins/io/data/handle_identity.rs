@@ -90,7 +90,7 @@ fn hash_value(
     match value {
         Value::String(text) => {
             tag(hash, ValueTag::Text);
-            text_bytes(hash, budget, text)?;
+            string_element(hash, budget, text)?;
         }
         Value::CharArray(chars) => {
             tag(hash, ValueTag::Character);
@@ -147,7 +147,7 @@ fn hash_value(
             shape(hash, budget, &array.shape)?;
             for text in array.data() {
                 budget.node()?;
-                text_bytes(hash, budget, text)?;
+                string_element(hash, budget, text)?;
             }
         }
         Value::Cell(cell) => {
@@ -176,6 +176,23 @@ fn tag(hash: &mut Sha256, value: ValueTag) {
 
 fn length(hash: &mut Sha256, value: usize) {
     hash.update((value as u64).to_le_bytes());
+}
+
+fn string_element(
+    hash: &mut Sha256,
+    budget: &mut HashBudget,
+    value: &runmat_value::StringElement,
+) -> Option<()> {
+    match value.as_str() {
+        Some(text) => {
+            hash.update([1]);
+            text_bytes(hash, budget, text)
+        }
+        None => {
+            hash.update([0]);
+            Some(())
+        }
+    }
 }
 
 fn text_bytes(hash: &mut Sha256, budget: &mut HashBudget, value: &str) -> Option<()> {

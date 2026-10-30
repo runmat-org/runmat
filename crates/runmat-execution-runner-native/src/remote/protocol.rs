@@ -351,7 +351,7 @@ mod tests {
         assert!(matches!(
             value,
             Some(ValuePayload::Inline(value))
-                if matches!(value.as_ref(), InlineValue::String(text) if text == PRIVATE_VALUE)
+                if matches!(value.as_ref(), InlineValue::String(text) if text.as_str() == Some(PRIVATE_VALUE))
         ));
     }
 }

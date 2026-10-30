@@ -39,6 +39,51 @@ fn runtime(bytes: u64) -> (RuntimeContext, ManagedHostEffectLedger, Cancellation
     (context, ledger, cancellation)
 }
 
+#[test]
+fn typed_string_decode_retains_only_final_slots_and_present_text_owners() {
+    let source = [
+        "<missing>".into(),
+        runmat_execution::value::StringElement(None),
+        "".into(),
+        "雪".into(),
+    ];
+    let (context, ledger, _) = runtime(1 << 20);
+    let control = ControlOwner::new(Some(&context)).unwrap();
+    let mut task =
+        TextValueTask::string_array(&[1, 4], &source, control.path("$").unwrap(), Some(&context))
+            .unwrap();
+    let value = loop {
+        let (work, value) = task.advance(1).unwrap();
+        assert!(work <= 1);
+        if let Some(value) = value {
+            break value;
+        }
+    };
+    drop(task);
+    drop(control);
+    let Value::StringArray(array) = value else {
+        panic!("string array");
+    };
+    assert_eq!(array.data()[0].as_str(), Some("<missing>"));
+    assert!(array.data()[1].is_missing());
+    assert!(!array.data()[1].has_retained_claim());
+    assert_eq!(array.data()[2].as_str(), Some(""));
+    assert_eq!(array.data()[3].as_str(), Some("雪"));
+    assert!(array.data_owner().is_exact());
+    assert!(array.data()[0].has_retained_claim());
+    let retained = ledger.snapshot().live_reserved_bytes;
+    let alias = array.clone();
+    drop(array);
+    assert!(retained > 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
+    drop(alias);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    let (denied, ledger, _) = runtime(1);
+    let control = ControlOwner::new(Some(&denied));
+    assert!(control.is_err());
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
 fn task<'a>(
     shape: &'a [u64],
     units: &'a [u16],

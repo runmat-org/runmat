@@ -209,7 +209,7 @@ fn ratio_value(ratio: [f64; 3]) -> Value {
 
 fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => {
             Some(runmat_value::decode_utf16_code_units(chars.data())?)
         }

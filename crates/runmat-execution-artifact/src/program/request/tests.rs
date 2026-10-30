@@ -798,12 +798,12 @@ fn spmd_response_preserves_unassigned_outputs_as_protocol_state() {
 fn canonical_request_digest_is_exact_without_a_small_envelope_limit() {
     let mut large = request();
     large.arguments.push(ValuePayload::Inline(Box::new(
-        runmat_execution::value::InlineValue::String("x".repeat(300_000)),
+        runmat_execution::value::InlineValue::String("x".repeat(300_000).into()),
     )));
     let digest = large.canonical_digest().unwrap();
     let mut changed = large;
     changed.arguments[0] = ValuePayload::Inline(Box::new(
-        runmat_execution::value::InlineValue::String(format!("{}y", "x".repeat(299_999))),
+        runmat_execution::value::InlineValue::String(format!("{}y", "x".repeat(299_999)).into()),
     ));
     assert_ne!(digest, changed.canonical_digest().unwrap());
 }
@@ -812,7 +812,7 @@ fn canonical_request_digest_is_exact_without_a_small_envelope_limit() {
 fn borrowed_request_preserves_original_payload_wire_identity_and_cold_decode() {
     let mut owned = request();
     owned.arguments.push(ValuePayload::Inline(Box::new(
-        runmat_execution::value::InlineValue::String("λ\\\"\n".repeat(25_000)),
+        runmat_execution::value::InlineValue::String("λ\\\"\n".repeat(25_000).into()),
     )));
     let borrowed = owned.as_borrowed();
     assert!(std::ptr::eq(borrowed.recipe, &owned.recipe));

@@ -118,7 +118,7 @@ fn label_count(value: &Value) -> BuiltinResult<usize> {
     }
 }
 fn text(value: &str) -> Option<KeyAtom> {
-    if value.is_empty() || crate::builtins::strings::common::is_missing_string(value) {
+    if value.is_empty() {
         None
     } else {
         Some(KeyAtom::Text(value.to_owned()))
@@ -126,8 +126,8 @@ fn text(value: &str) -> Option<KeyAtom> {
 }
 fn label_at(value: &Value, index: usize) -> BuiltinResult<Option<KeyAtom>> {
     Ok(match value {
-        Value::String(value) => text(value),
-        Value::StringArray(value) => text(&value.data()[index]),
+        Value::String(value) => value.as_str().and_then(text),
+        Value::StringArray(value) => value.data()[index].as_str().and_then(text),
         Value::CharArray(value) => {
             let codes = (0..value.cols)
                 .map(|column| value.data()[index * value.cols + column])

@@ -1952,7 +1952,7 @@ roots = ["."]
         let actual = outcome_named_upsert_value(&outcome, name)
             .and_then(|value| {
                 if let runmat_value::Value::String(text) = value {
-                    Some(text.as_str())
+                    text.as_str()
                 } else {
                     None
                 }
@@ -10987,7 +10987,7 @@ fn dynamic_workspace_eval_preserves_source_context_in_path_source() {
         let actual = outcome_named_upsert_value(&outcome, name)
             .and_then(|value| {
                 if let runmat_value::Value::String(text) = value {
-                    Some(text.as_str())
+                    text.as_str()
                 } else {
                     None
                 }
@@ -11531,7 +11531,7 @@ fn addpath_makes_function_callable_in_same_execution() {
     ));
     let located = outcome_named_upsert_value(&outcome, "located")
         .and_then(|value| match value {
-            runmat_value::Value::String(value) => Some(value.to_string()),
+            runmat_value::Value::String(value) => value.as_str().map(str::to_owned),
             runmat_value::Value::CharArray(value) => value.row_string(),
             _ => None,
         })
@@ -11912,7 +11912,7 @@ fn run_preserves_script_source_context() {
     let actual = outcome_named_upsert_value(&outcome, "run_full")
         .and_then(|value| {
             if let runmat_value::Value::String(text) = value {
-                Some(text.as_str())
+                text.as_str()
             } else {
                 None
             }

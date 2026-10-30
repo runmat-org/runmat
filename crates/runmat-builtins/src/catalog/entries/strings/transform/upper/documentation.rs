@@ -31,7 +31,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Does upper change non-alphabetic characters?", answer: "No. Digits, punctuation, whitespace and symbols remain untouched; alphabetic code points with uppercase mappings change." },
         BuiltinDocumentationFaq { question: "What happens to character-array dimensions?", answer: "Rows stay rectangular. An uppercase mapping may expand a character, in which case the output gains columns and shorter rows are padded with spaces." },
         BuiltinDocumentationFaq { question: "Can numeric arrays be passed to upper?", answer: "No. Numeric, logical and struct inputs raise a type error. Convert them to strings or character arrays explicitly first." },
-        BuiltinDocumentationFaq { question: "How are missing strings handled?", answer: "The current string storage uses a sentinel for missing values. upper leaves that sentinel unchanged; it cannot yet distinguish it from an identical literal spelling." },
+        BuiltinDocumentationFaq { question: "How are missing strings handled?", answer: "Typed missing string elements remain missing. Literal `<missing>` text is ordinary text and follows the same case mapping as other text." },
         BuiltinDocumentationFaq { question: "Does upper execute on the GPU?", answer: "No. There is no resident-text representation or provider string kernel. Numeric GPU handles reject without implicit gathering; gather code points and convert them to text explicitly first." },
     ],
     links: &[
@@ -57,6 +57,6 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "text containers and errors", location: "builtins::strings::transform::upper::tests" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "static facts", location: "crates/runmat-builtins/src/catalog/entries/strings/transform/upper/inference.rs" },
-    ], notes: &["Character-array mappings outside MATLAB's documented Latin-1 support remain unverified; RunMat currently uses Unicode case mapping. Missing strings and the literal sentinel spelling share a storage representation. Cells containing string scalars require RunMat compatibility mode."], },
+    ], notes: &["Character-array mappings outside MATLAB's documented Latin-1 support remain unverified; RunMat currently uses Unicode case mapping. Typed missing strings are distinct from literal text. Cells containing string scalars require RunMat compatibility mode."], },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };

@@ -20,7 +20,7 @@ fn as_string(value: Value) -> String {
         Value::CharArray(ca) => {
             runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture")
         }
-        Value::String(s) => s.to_string(),
+        Value::String(s) => s.as_str().expect("nonmissing encoded JSON text").to_owned(),
         other => panic!("expected char array, got {:?}", other),
     }
 }
@@ -31,3 +31,24 @@ fn error_message(err: crate::RuntimeError) -> String {
 
 mod basic;
 mod extended;
+
+#[test]
+fn json_string_projection_distinguishes_typed_missing_from_literal_spellings() {
+    let value = Value::StringArray(
+        StringArray::from_elements_unbounded(
+            vec![
+                "<missing>".into(),
+                "<MISSING>".into(),
+                "".into(),
+                runmat_value::StringElement::Missing,
+            ],
+            vec![1, 4],
+        )
+        .unwrap(),
+    );
+    let json = as_string(block_on(jsonencode_builtin(None, value, vec![])).unwrap());
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+        serde_json::json!(["<missing>", "<MISSING>", "", null])
+    );
+}

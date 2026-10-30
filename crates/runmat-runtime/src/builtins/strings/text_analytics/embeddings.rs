@@ -902,8 +902,8 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
         Some(Value::StringArray(array)) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect(),
+            .map(|text| required_word_text(text, fn_name).map(str::to_owned))
+            .collect::<BuiltinResult<Vec<_>>>()?,
         other => {
             return Err(embedding_error(
                 fn_name,
@@ -2195,8 +2195,8 @@ fn dense_doc2sequence_limit_error(fn_name: &str) -> crate::RuntimeError {
 
 fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
-        Value::StringArray(array) => Ok(array.data().iter().map(|text| text.as_str().to_owned()).collect()),
+        Value::String(text) => Ok(vec![required_word_text(text, fn_name)?.to_owned()]),
+        Value::StringArray(array) => Ok(array.data().iter().map(|text| required_word_text(text, fn_name).map(str::to_owned)).collect::<BuiltinResult<Vec<_>>>()?),
         Value::CharArray(array) if array.rows <= 1 => Ok(vec![char_row_to_string(array, 0, fn_name)?]),
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
@@ -2210,15 +2210,15 @@ fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> 
             .data()
             .iter()
             .map(|item| match item {
-                Value::String(text) => Ok(text.as_str().to_owned()),
-                Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].as_str().to_owned()),
+                Value::String(text) => Ok(required_word_text(text, fn_name)?.to_owned()),
+                Value::StringArray(array) if array.data().len() == 1 => Ok(required_word_text(&array.data()[0], fn_name)?.to_owned()),
                 Value::CharArray(array) if array.rows <= 1 => char_row_to_string(array, 0, fn_name),
                 other => Err(embedding_error(
                     fn_name,
                     format!("{fn_name}: cell word inputs must contain scalar text, got {other:?}"),
                 )),
             })
-            .collect(),
+            .collect::<BuiltinResult<Vec<_>>>(),
         other => Err(embedding_error(
             fn_name,
             format!("{fn_name}: expected string, character vector, or cell array of words, got {other:?}"),
@@ -3778,4 +3778,13 @@ mod tests {
             assert!(parse_positive_integer(&value, "test").is_err());
         }
     }
+}
+
+fn required_word_text<'a>(
+    text: &'a runmat_value::StringElement,
+    fn_name: &str,
+) -> BuiltinResult<&'a str> {
+    text.as_str().ok_or_else(|| {
+        embedding_error(fn_name, format!("{fn_name}: word text must not be missing"))
+    })
 }

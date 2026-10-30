@@ -240,13 +240,17 @@ pub(super) fn parse_request(
 
 fn extract_name_list(value: &Value, owner: WorkspaceQueryOwner) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         Value::CharArray(array) => char_array_rows_as_strings(array, owner),
-        Value::StringArray(array) => Ok(array
-            .data()
-            .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+        Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => {
+            Ok(array
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("checked nonmissing string").to_owned())
+                .collect())
+        }
         Value::Cell(array) => array
             .data()
             .iter()
@@ -265,12 +269,20 @@ fn value_to_string_scalar(
     error: QueryError,
 ) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
         Value::CharArray(array) if array.rows == 1 => {
             Ok(char_array_rows_as_strings(array, owner)?.into_iter().next())
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
         }
         Value::CharArray(_) => Err(owner.reject(error)),
         _ => Ok(None),

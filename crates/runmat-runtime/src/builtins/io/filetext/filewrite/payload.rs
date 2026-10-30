@@ -23,8 +23,10 @@ pub(super) fn prepare_payload(data: &Value, encoding: FileEncoding) -> BuiltinRe
 fn extract_payload(data: &Value) -> BuiltinResult<Payload> {
     match data {
         Value::CharArray(ca) => Ok(Payload::Text(char_array_to_text(ca)?)),
-        Value::String(s) => Ok(Payload::Text(s.as_str().to_owned())),
-        Value::StringArray(sa) => Ok(Payload::Text(string_array_to_text(sa))),
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Ok(Payload::Text(s.as_str().to_owned()))
+        }
+        Value::StringArray(sa) => Ok(Payload::Text(string_array_to_text(sa)?)),
         Value::Num(n) => {
             let byte = float_to_byte(*n)?;
             Ok(Payload::Bytes(vec![byte]))
@@ -81,18 +83,23 @@ fn char_array_to_text(ca: &CharArray) -> BuiltinResult<String> {
     })
 }
 
-fn string_array_to_text(sa: &StringArray) -> String {
+fn string_array_to_text(sa: &StringArray) -> BuiltinResult<String> {
     if sa.data().is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
     let mut combined = String::new();
     for (idx, entry) in sa.data().iter().enumerate() {
-        combined.push_str(entry);
+        combined.push_str(entry.as_str().ok_or_else(|| {
+            filewrite_error_with_detail(
+                &FILEWRITE_ERROR_INVALID_DATA,
+                "missing string cannot be encoded as plain text",
+            )
+        })?);
         if idx + 1 < sa.data().len() {
             combined.push('\n');
         }
     }
-    combined
+    Ok(combined)
 }
 
 pub(super) fn tensor_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {

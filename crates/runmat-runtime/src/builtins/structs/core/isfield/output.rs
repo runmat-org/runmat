@@ -8,12 +8,14 @@ pub(super) fn evaluate(
     fields: Option<&HashSet<&str>>,
 ) -> crate::BuiltinResult<Value> {
     match query {
-        Query::Scalar(name) => Ok(Value::Bool(contains(fields, &name))),
+        Query::Scalar(name) => Ok(Value::Bool(
+            name.as_str().is_some_and(|name| contains(fields, name)),
+        )),
         Query::Strings(array) => {
             let values = array
                 .data()
                 .iter()
-                .map(|name| u8::from(contains(fields, name)))
+                .map(|name| u8::from(name.as_str().is_some_and(|name| contains(fields, name))))
                 .collect();
             LogicalArray::new(values, array.shape.as_slice().to_vec())
                 .map(Value::LogicalArray)

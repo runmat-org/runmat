@@ -156,7 +156,7 @@ async fn pagetranspose_value(value: Value) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Bool(b)),
-        Value::String(s) => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::String(s.into())),
         other => Err(invalid_input(format!(
             "pagetranspose: unsupported input type {other:?}"
         ))),

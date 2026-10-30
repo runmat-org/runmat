@@ -214,7 +214,12 @@ fn message_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
     Ok({
         match value {
             Value::String(_) | Value::CharArray(_) => text_value(value)?,
-            Value::StringArray(array) => Some(array.data().join("\n")),
+            Value::StringArray(array) => array
+                .data()
+                .iter()
+                .map(|text| text.as_str())
+                .collect::<Option<Vec<_>>>()
+                .map(|texts| texts.join("\n")),
             Value::Cell(cell) => {
                 let mut parts = Vec::with_capacity(cell.data().len());
                 for item in cell.data() {

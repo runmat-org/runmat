@@ -148,7 +148,7 @@ pub(super) async fn ctranspose_builtin(
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Bool(b)),
-        Value::String(s) => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::String(s.into())),
         Value::Struct(s) => Ok(Value::Struct(s)),
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
             let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
@@ -320,7 +320,7 @@ fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
     if rank <= 2 {
         let rows = sa.rows;
         let cols = sa.cols;
-        let mut out = vec![runmat_value::Utf8Text::default(); sa.data().len()];
+        let mut out = vec![runmat_value::StringElement::default(); sa.data().len()];
         for r in 0..rows {
             for c in 0..cols {
                 let src = r + c * rows;
@@ -339,7 +339,7 @@ fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
         } else {
             vec![cols, rows]
         };
-        StringArray::from_texts_unbounded(out, new_shape)
+        StringArray::from_elements_unbounded(out, new_shape)
             .map_err(|e| internal_error(format!("{NAME}: {e}")))
     } else {
         let order = ctranspose_order(rank);

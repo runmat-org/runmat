@@ -15,7 +15,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationSection {
             heading: "Behavior",
-            paragraphs: &["`tree` must be a scalar RunMat `htmlTree` object or a cell array of `htmlTree` objects, such as the output of `findElement`.", "`attr` must be a nonempty string scalar or character vector.", "Attribute names are normalized to lowercase and matched against the parser's lowercase attribute map.", "A scalar `htmlTree` input returns a string scalar.", "A cell array of `htmlTree` objects returns a string array with the same shape unless there is only one cell element.", "If the requested attribute is absent, RunMat returns `<missing>` for that element.", "Full MATLAB missing-string scalar representation for `htmlTree` attributes remains tied to broader missing/object-array compatibility work."],
+            paragraphs: &["`tree` must be a scalar RunMat `htmlTree` object or a cell array of `htmlTree` objects, such as the output of `findElement`.", "`attr` must be a nonempty string scalar or character vector.", "Attribute names are normalized to lowercase and matched against the parser's lowercase attribute map.", "A scalar `htmlTree` input returns a string scalar.", "A cell array of `htmlTree` objects returns a string array with the same shape unless there is only one cell element.", "If the requested attribute is absent, RunMat returns a typed missing string element, displayed as `<missing>`.", "Literal attribute text such as `<missing>` remains present text. Broader MATLAB object-array compatibility remains unqualified."],
         },
         BuiltinDocumentationSection {
             heading: "Execution and residency",
@@ -23,7 +23,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationSection {
             heading: "Implementation boundary",
-            paragraphs: &["Attribute lookup reparses the stored RawHTML through the existing HTML owner. Missing attributes produce the documented <missing> text sentinel, not a dedicated missing-string representation. No provider kernel or complete finite parser/output owner is implemented."],
+            paragraphs: &["Attribute lookup reparses the stored RawHTML through the existing HTML owner. Missing attributes and text nodes produce typed missing strings; present attribute values retain literal text. No provider kernel or complete finite parser/output owner is implemented."],
         },
         BuiltinDocumentationSection {
             heading: "Finite host allocation",
@@ -48,13 +48,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             id: "retained-2",
             title: "Read Attributes From Matches",
             program: "tree = htmlTree(\"<div><a href='/home'>Home</a><a>Docs</a></div>\");\nlinks = findElement(tree, \"a\");\nhrefs = getAttribute(links, \"href\")",
-            display_output: Some("hrefs = [\"/home\"; \"<missing>\"]"),
+            display_output: Some("hrefs = [\"/home\"; <missing>]"),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
-                source: "assert(isequal(hrefs, [\"/home\"; \"<missing>\"]));",
+                source: "assert(isequal(size(hrefs), [2 1])); assert(isequal(hrefs(1), \"/home\")); assert(ismissing(hrefs(2)));",
             },
         },
     ],
@@ -62,7 +62,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "What does RunMat return for a missing attribute?",
-            answer: "RunMat returns the string `<missing>` for that element. A first-class MATLAB missing-string scalar for this object path remains tracked with broader missing/object compatibility work.",
+            answer: "RunMat returns a typed missing string for that element. Use `ismissing` to test absence; literal `<missing>` attribute text remains nonmissing. Broader MATLAB object compatibility remains unqualified.",
         },
         BuiltinDocumentationFaq {
             question: "Does `getAttribute` execute on the GPU?",

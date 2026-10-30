@@ -40,9 +40,15 @@ pub(super) fn keyword(value: &Value) -> Option<Keyword> {
 
 fn text_eq(value: &Value, expected: &str) -> bool {
     match value {
-        Value::String(text) => text.as_str().eq_ignore_ascii_case(expected),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            array.data()[0].as_str().eq_ignore_ascii_case(expected)
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            text.as_str().eq_ignore_ascii_case(expected)
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .eq_ignore_ascii_case(expected)
         }
         Value::CharArray(array) if array.rows == 1 => array
             .data()

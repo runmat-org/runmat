@@ -1,4 +1,4 @@
-use runmat_value::{CellArray, CharArray, StringArray, Utf8Text, Value};
+use runmat_value::{CellArray, CharArray, StringArray, StringElement, Value};
 
 use crate::BuiltinResult;
 
@@ -15,7 +15,11 @@ fn decode_text(units: &[runmat_value::Utf16CodeUnit]) -> BuiltinResult<String> {
 
 pub(super) fn strings(value: StringArray) -> BuiltinResult<GroupingInput> {
     let len = value.data().len();
-    let rows = value.data().iter().map(|value| text_atom(value)).collect();
+    let rows = value
+        .data()
+        .iter()
+        .map(|value| value.as_str().and_then(text_atom))
+        .collect();
     let value = StringArray::from_shared_storage(value.into_parts().0, vec![len, 1].into())
         .map_err(error::invalid)?;
     Ok(GroupingInput::new(
@@ -25,8 +29,8 @@ pub(super) fn strings(value: StringArray) -> BuiltinResult<GroupingInput> {
     ))
 }
 
-pub(super) fn scalar(value: Utf8Text) -> GroupingInput {
-    let rows = vec![text_atom(&value)];
+pub(super) fn scalar(value: StringElement) -> GroupingInput {
+    let rows = vec![value.as_str().and_then(text_atom)];
     GroupingInput::new(Value::String(value), rows, KeyOrder::FirstAppearance)
 }
 

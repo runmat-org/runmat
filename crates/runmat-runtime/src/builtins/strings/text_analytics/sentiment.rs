@@ -574,7 +574,7 @@ fn phrases_from_string_array(array: &StringArray) -> Vec<Vec<String>> {
         return array
             .data()
             .iter()
-            .map(|word| vec![word.as_str().to_owned()])
+            .filter_map(|word| word.as_str().map(|word| vec![word.to_owned()]))
             .collect();
     }
     let mut phrases = Vec::with_capacity(array.rows);
@@ -583,7 +583,9 @@ fn phrases_from_string_array(array: &StringArray) -> Vec<Vec<String>> {
         for col in 0..array.cols {
             let idx = row + col * array.rows;
             if let Some(token) = array.data().get(idx) {
-                phrase.push(token.as_str().to_owned());
+                if let Some(token) = token.as_str() {
+                    phrase.push(token.to_owned());
+                }
             }
         }
         phrases.push(phrase);

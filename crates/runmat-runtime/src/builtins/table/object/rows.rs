@@ -194,7 +194,7 @@ pub(crate) fn select_rows_in_context(
                     })?);
                 }
             }
-            StringArray::from_texts_unbounded(data, vec![rows.len(), cols])
+            StringArray::from_elements_unbounded(data, vec![rows.len(), cols])
                 .map(Value::StringArray)
                 .map_err(invalid_variable)
         }

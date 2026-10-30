@@ -35,7 +35,10 @@ fn tiny_float_identities_survive_default_names_and_public_equality() {
         categorical_labels(&Value::Num(1e-20)).unwrap(),
         vec!["0.00000000000000000001"]
     );
-    assert_eq!(categorical_labels(&Value::Num(f64::NAN)).unwrap(), vec![""]);
+    assert_eq!(
+        categorical_labels(&Value::Num(f64::NAN)).unwrap(),
+        vec![StringElement::Missing]
+    );
 }
 
 #[test]
@@ -120,9 +123,16 @@ fn lookup_keys_preserve_float_class_zero_infinity_and_exact_integers() {
     );
     let single = f32::from_bits(0x3f9e0652);
     let key = categorical_numeric_label(NumericScalar::F32(single));
-    assert_eq!(key.parse::<f32>().unwrap().to_bits(), single.to_bits());
     assert_eq!(
-        default_category_names(&[key], Some(runmat_value::NumericDType::F32)).unwrap(),
+        key.as_str().unwrap().parse::<f32>().unwrap().to_bits(),
+        single.to_bits()
+    );
+    assert_eq!(
+        default_category_names(
+            &[key.as_str().unwrap().to_owned()],
+            Some(runmat_value::NumericDType::F32)
+        )
+        .unwrap(),
         vec![format_five_significant(f64::from(single))]
     );
     let source = Value::Tensor(Tensor::new(vec![-0.0, 0.0], vec![1, 2]).unwrap());
@@ -134,5 +144,52 @@ fn lookup_keys_preserve_float_class_zero_infinity_and_exact_integers() {
     assert!(
         categorical(&[source, Value::Num(1.0)]).is_err(),
         "numeric valueset must retain original storage class"
+    );
+}
+
+#[test]
+fn missing_category_identity_is_distinct_from_literal_and_empty_text() {
+    let source = Value::StringArray(
+        StringArray::from_elements_unbounded(
+            vec![
+                StringElement::Missing,
+                "<missing>".into(),
+                "<Missing>".into(),
+                "".into(),
+            ],
+            vec![1, 4],
+        )
+        .unwrap(),
+    );
+    let Value::Object(default) = categorical(&[source.clone()]).unwrap() else {
+        panic!("categorical")
+    };
+    assert_eq!(
+        categorical_labels(&Value::Object(default)).unwrap(),
+        vec![
+            StringElement::Missing,
+            "<missing>".into(),
+            "<Missing>".into(),
+            StringElement::Missing
+        ]
+    );
+    let valueset = Value::StringArray(
+        StringArray::from_elements_unbounded(vec![StringElement::Missing, "".into()], vec![1, 2])
+            .unwrap(),
+    );
+    let names = Value::StringArray(
+        StringArray::new(vec!["absent".into(), "empty".into()], vec![1, 2]).unwrap(),
+    );
+    let Value::Object(explicit) = categorical(&[source, valueset, names]).unwrap() else {
+        panic!("categorical")
+    };
+    assert_eq!(
+        categorical_labels(&Value::Object(explicit)).unwrap(),
+        vec![
+            "absent".into(),
+            StringElement::Missing,
+            StringElement::Missing,
+            "empty".into()
+        ]
     );
 }

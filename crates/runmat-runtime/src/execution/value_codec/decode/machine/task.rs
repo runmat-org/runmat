@@ -217,9 +217,13 @@ fn decode_task<'a>(
             &path,
         )?,
         InlineValue::String(value) => {
-            let runtime = machine.runtime();
-            let task = TextValueTask::string(value, path, runtime)?;
-            machine.tasks.push(Task::Text(task))?;
+            if let Some(text) = value.as_str() {
+                let runtime = machine.runtime();
+                let task = TextValueTask::string(text, path, runtime)?;
+                machine.tasks.push(Task::Text(task))?;
+            } else {
+                machine.push_value(Value::String(runmat_value::StringElement::Missing), &path)?;
+            }
         }
         InlineValue::Char {
             encoding: runmat_execution::value::CharacterEncoding::Utf16CodeUnitsV1,
@@ -230,7 +234,7 @@ fn decode_task<'a>(
             machine.tasks.push(Task::Text(task))?;
         }
         InlineValue::StringArray { shape, values } => machine.tasks.push(Task::Text(
-            TextValueTask::string_array(shape, values, path)?,
+            TextValueTask::string_array(shape, values, path, machine.runtime())?,
         ))?,
         InlineValue::Dense(value) => {
             let task = DenseTask::new_with_runtime(value, path, machine.runtime())?;

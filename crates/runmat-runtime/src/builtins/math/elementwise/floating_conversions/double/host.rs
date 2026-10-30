@@ -107,8 +107,10 @@ use runmat_value::{
     Value,
 };
 
-pub(super) fn parse_string_double(text: &str) -> f64 {
-    text.trim().parse::<f64>().unwrap_or(f64::NAN)
+pub(super) fn parse_string_double(text: &runmat_value::StringElement) -> f64 {
+    text.as_str()
+        .and_then(|text| text.trim().parse::<f64>().ok())
+        .unwrap_or(f64::NAN)
 }
 
 pub(super) fn double_from_string_array(array: StringArray) -> BuiltinResult<Value> {

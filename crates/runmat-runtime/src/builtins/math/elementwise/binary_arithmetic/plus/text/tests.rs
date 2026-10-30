@@ -21,7 +21,7 @@ fn assert_text(value: Value, expected: &[&str], shape: &[usize]) {
         array
             .data()
             .iter()
-            .map(|text| text.as_str())
+            .map(|text| text.as_str().expect("text result"))
             .collect::<Vec<_>>(),
         expected
     );
@@ -101,15 +101,9 @@ fn append_converts_and_expands_without_losing_class_or_column_major_order() {
             vec![1, 1],
         ),
         (
-            Value::from("v="),
-            Value::Num(f64::NAN),
-            vec!["<missing>"],
-            vec![1, 1],
-        ),
-        (
             texts(&["<missing>"], &[1, 1]),
             Value::from("suffix"),
-            vec!["<missing>"],
+            vec!["<missing>suffix"],
             vec![1, 1],
         ),
         (Value::from("x"), texts(&[], &[0, 2]), vec![], vec![0, 2]),
@@ -164,7 +158,7 @@ fn managed_append_retains_exact_output_claims_and_releases_every_owner() {
         panic!("string array")
     };
     assert!(array.shape.is_admitted());
-    assert!(array.data().iter().all(Utf8Text::has_retained_claim));
+    assert!(array.data().iter().all(StringElement::has_retained_claim));
     let live = ledger.snapshot().live_reserved_bytes;
     assert!(live > 0);
     let clone = result.clone();
@@ -204,4 +198,34 @@ fn managed_append_retains_exact_output_claims_and_releases_every_owner() {
     cancellation.cancel(runmat_execution::CancellationReason::User);
     assert!(block_on(concatenate(Some(&cancelled), &left, &right)).is_err());
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
+fn typed_missing_addition_distinguishes_literal_display_text() {
+    let source = Value::StringArray(
+        StringArray::from_elements_unbounded(
+            vec![
+                StringElement::text("<missing>"),
+                StringElement::text("<Missing>"),
+                StringElement::text(""),
+                StringElement::Missing,
+            ],
+            vec![1, 4],
+        )
+        .unwrap(),
+    );
+    let result = block_on(concatenate(None, &source, &Value::string("!"))).unwrap();
+    let Value::StringArray(result) = result else {
+        panic!("string array result")
+    };
+    assert_eq!(
+        result.data(),
+        &[
+            StringElement::text("<missing>!"),
+            StringElement::text("<Missing>!"),
+            StringElement::text("!"),
+            StringElement::Missing
+        ]
+    );
+    assert!(!result.data()[3].has_retained_claim());
 }

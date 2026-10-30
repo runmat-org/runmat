@@ -135,10 +135,14 @@ pub(super) fn encode_binary_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
             }
             Ok(bytes)
         }
-        Value::String(s) => Ok(s.as_bytes().to_vec()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_bytes().to_vec()),
         Value::StringArray(sa) => {
-            if sa.data().len() == 1 {
-                Ok(sa.data()[0].as_bytes().to_vec())
+            if sa.data().len() == 1 && !sa.data()[0].is_missing() {
+                Ok(sa.data()[0]
+                    .as_str()
+                    .expect("checked nonmissing scalar string")
+                    .as_bytes()
+                    .to_vec())
             } else {
                 Err(webwrite_error(
                     "webwrite: binary payload string arrays must be scalar",

@@ -37,8 +37,19 @@ impl KeyAtom {
     }
 
     pub(crate) fn from_text(value: &str) -> Option<Self> {
-        (!crate::builtins::strings::common::is_missing_string(value))
-            .then(|| Self::Text(value.into()))
+        Some(Self::Text(value.into()))
+    }
+
+    pub(crate) fn from_string(value: &runmat_value::StringElement) -> Option<Self> {
+        value.as_str().map(|text| Self::Text(text.into()))
+    }
+
+    pub(crate) fn string_label(&self) -> runmat_value::StringElement {
+        match self {
+            Self::Missing => runmat_value::StringElement::Missing,
+            Self::Text(text) => runmat_value::StringElement::text(text.clone()),
+            _ => runmat_value::StringElement::text(self.label()),
+        }
     }
 
     pub(crate) fn label(&self) -> String {

@@ -59,10 +59,12 @@ impl Resolved {
 /// remain exact, matching the owned handle selector rather than trimming anew.
 pub(super) fn retained_name(value: &runmat_value::Value) -> Option<&str> {
     match value {
-        runmat_value::Value::String(text) => crate::call::admission::text_target_name(text),
-        runmat_value::Value::StringArray(array) if array.data().len() == 1 => {
-            crate::call::admission::text_target_name(&array.data()[0])
-        }
+        runmat_value::Value::String(text) => text
+            .as_str()
+            .and_then(crate::call::admission::text_target_name),
+        runmat_value::Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .and_then(crate::call::admission::text_target_name),
         runmat_value::Value::FunctionHandle(name)
         | runmat_value::Value::ExternalFunctionHandle(name) => Some(name.name()),
         _ => None,

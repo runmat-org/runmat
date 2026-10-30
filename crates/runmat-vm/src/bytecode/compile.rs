@@ -4058,7 +4058,7 @@ out = weekly.AvgRevenue;\n",
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert!(matches!(&vars[imported.slot.0], Value::StringArray(array)
         if array.shape == [3, 1]
-            && array.data().iter().map(|text| text.as_str()).eq([
+            && array.data().iter().map(|text| text.as_str().expect("nonmissing imported text")).eq([
                 "2024-03-11", "2024-03-12", "2024-03-18"
             ])));
         let Value::Tensor(tensor) = &vars[output.slot.0] else {

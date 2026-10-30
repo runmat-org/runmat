@@ -59,7 +59,15 @@ impl Iterator for Units<'_> {
 fn units(value: &Value) -> Result<Units<'_>, RuntimeError> {
     match value {
         Value::CharArray(value) => Ok(Units::Array { value, index: 0 }),
-        Value::String(value) => Ok(Units::Text(value.encode_utf16())),
+        Value::String(value) => value
+            .as_str()
+            .map(|text| Units::Text(text.encode_utf16()))
+            .ok_or_else(|| {
+                semantic_error(
+                    "AssignmentTypeMismatch",
+                    "missing string cannot be assigned to a character array",
+                )
+            }),
         _ => Err(semantic_error(
             "AssignmentTypeMismatch",
             "character assignment requires character or text data",

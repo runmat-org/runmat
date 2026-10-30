@@ -147,7 +147,7 @@ async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
             crate::builtins::common::validation::value_text_scalar_string(&gathered)
                 .ok_or_else(|| input_error(&INPUT_ERROR_PROMPT_ROW_VECTOR))
         }
-        Value::String(_) => {
+        Value::String(runmat_value::StringElement::Text(_)) => {
             crate::builtins::common::validation::value_text_scalar_string(&gathered)
                 .ok_or_else(|| input_error(&INPUT_ERROR_INVALID_PROMPT_TYPE))
         }

@@ -131,7 +131,7 @@ pub(super) fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
 
 pub(super) fn extract_string(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
                 let mut error = arrayfun_flow(source.to_string());
@@ -139,7 +139,7 @@ pub(super) fn extract_string(value: &Value) -> BuiltinResult<Option<String>> {
                 error
             })?,
         ),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str().map(str::to_owned),
         _ => None,
     })
 }

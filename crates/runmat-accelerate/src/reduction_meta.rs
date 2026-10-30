@@ -118,7 +118,9 @@ pub fn detect_reduction_signature(
 
 pub fn value_is_all_keyword(value: &Value) -> bool {
     match value {
-        Value::String(s) => s.eq_ignore_ascii_case("all"),
+        Value::String(s) => s
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("all")),
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 let whitespace = |unit: &runmat_value::Utf16CodeUnit| {
@@ -140,7 +142,12 @@ pub fn value_is_all_keyword(value: &Value) -> bool {
                 false
             }
         }
-        Value::StringArray(sa) => sa.data().len() == 1 && sa.data()[0].eq_ignore_ascii_case("all"),
+        Value::StringArray(sa) => {
+            sa.data().len() == 1
+                && sa.data()[0]
+                    .as_str()
+                    .is_some_and(|text| text.eq_ignore_ascii_case("all"))
+        }
         _ => false,
     }
 }

@@ -36,7 +36,7 @@ async fn execute(
     let first = super::super::exitflag::read(&args[0], policy, cooperation.runtime())?;
     let value = match operation {
         Operation::Number => Value::Num(f64::from(first.numeric())),
-        Operation::Text => Value::String(crate::call::argument_text::copy_str(
+        Operation::Text => Value::string(crate::call::argument_text::copy_str(
             first.name(),
             cooperation.runtime(),
         )?),

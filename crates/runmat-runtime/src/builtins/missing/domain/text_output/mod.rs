@@ -6,8 +6,8 @@ use crate::context::host_allocation::{
 use crate::context::RuntimeContext;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_value::{
-    ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray, Utf16TextCopyError,
-    Utf8Text,
+    ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray, StringElement,
+    Utf16TextCopyError, Utf8Text,
 };
 
 mod literal;
@@ -59,7 +59,7 @@ pub(super) fn selected_string_array(
     let mut physical = 0usize;
     let mut claims = 0usize;
     if !reuse_data {
-        physical = ExactArrayStorage::<Utf8Text>::requested_bytes(count)
+        physical = ExactArrayStorage::<StringElement>::requested_bytes(count)
             .map_err(|cause| admission_error(runtime, HostAllocationError::Numeric(cause)))?;
         claims += usize::from(count != 0);
     }
@@ -85,7 +85,7 @@ pub(super) fn selected_string_array(
                     .data()
                     .get(source)
                     .ok_or_else(|| invalid("text source index exceeds input".into()))?;
-                if !text.has_retained_claim() {
+                if let Some(text) = text.text_ref().filter(|text| !text.has_retained_claim()) {
                     physical = physical
                         .checked_add(
                             Utf8Text::requested_bytes_for_capacity(text.as_str().len()).map_err(
@@ -219,15 +219,15 @@ pub(super) fn selected_string_array(
 fn selected_text(
     input: &StringArray,
     selection: TextSelection,
-    literal: Option<&Utf8Text>,
+    literal: Option<&StringElement>,
     receipt: &HostAllocationReceipt,
     runtime: &RuntimeContext,
-) -> Result<Utf8Text, HostAllocationError> {
+) -> Result<StringElement, HostAllocationError> {
     match selection {
         TextSelection::Literal => Ok(literal.expect("quoted literal selection").clone()),
         TextSelection::Input(index) => {
             let text = &input.data()[index];
-            if text.has_retained_claim() {
+            if text.is_missing() || text.has_retained_claim() {
                 Ok(text.clone())
             } else {
                 receipt
@@ -247,20 +247,21 @@ fn ordinary(
     invalid: impl Fn(String) -> RuntimeError,
 ) -> BuiltinResult<StringArray> {
     let literal = match literal {
-        TextLiteral::Utf8(text) => text.to_owned(),
-        TextLiteral::Chars(chars) => {
+        TextLiteral::Missing => StringElement::Missing,
+        TextLiteral::Utf8(text) => StringElement::text(text),
+        TextLiteral::Chars(chars) => StringElement::text(
             runmat_value::decode_utf16_code_units(chars).map_err(|source| {
                 let mut error = invalid(source.to_string());
                 error.source = Some(Box::new(source));
                 error
-            })?
-        }
+            })?,
+        ),
     };
     let data = (0..input.data().len())
         .map(|index| match select(&input, index) {
             TextSelection::Input(source) => input.data()[source].clone(),
-            TextSelection::Literal => Utf8Text::from(literal.clone()),
+            TextSelection::Literal => literal.clone(),
         })
         .collect();
-    StringArray::from_texts_unbounded(data, input.shape.as_slice().to_vec()).map_err(invalid)
+    StringArray::from_elements_unbounded(data, input.shape.as_slice().to_vec()).map_err(invalid)
 }

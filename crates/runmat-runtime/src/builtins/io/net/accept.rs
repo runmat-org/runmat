@@ -520,7 +520,7 @@ pub(crate) mod tests {
             other => panic!("expected Connected bool, got {other:?}"),
         }
         match struct_field(&client, "Address") {
-            Value::String(addr) => assert_eq!(addr, "127.0.0.1"),
+            Value::String(runmat_value::StringElement::Text(addr)) => assert_eq!(addr, "127.0.0.1"),
             other => panic!("expected Address string, got {other:?}"),
         }
         match struct_field(&client, "Timeout") {

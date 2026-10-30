@@ -133,7 +133,10 @@ fn broadcasts_scalars_over_string_arrays() {
         panic!("string array")
     };
     assert_eq!(paths.shape, vec![1, 2]);
-    assert!(paths.data()[0].ends_with("a.m"));
+    assert!(paths.data()[0]
+        .as_str()
+        .expect("nonmissing joined path")
+        .ends_with("a.m"));
 }
 
 #[test]

@@ -214,7 +214,7 @@ fn is_option_name(value: &Value) -> BuiltinResult<bool> {
         Value::CharArray(array) if array.rows == 1 => {
             Ok(RuntestsOption::parse(&value_to_string_scalar(value)?).is_some())
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
             Ok(RuntestsOption::parse(&value_to_string_scalar(value)?).is_some())
         }
         _ => Ok(false),
@@ -223,7 +223,7 @@ fn is_option_name(value: &Value) -> BuiltinResult<bool> {
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
         Value::CharArray(array) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data())
                 .map(runmat_value::Utf8Text::from)
@@ -231,7 +231,14 @@ fn value_to_string_scalar(value: &Value) -> BuiltinResult<runmat_value::Utf8Text
                     runtests_error_detail(&RUNTESTS_ERROR_INVALID_INPUT, error.to_string())
                 })
         }
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].text_ref().cloned().ok_or_else(|| {
+                runtests_error_detail(
+                    &RUNTESTS_ERROR_INVALID_INPUT,
+                    "expected a string scalar or character row",
+                )
+            })
+        }
         other => Err(runtests_error_detail(
             &RUNTESTS_ERROR_INVALID_INPUT,
             format!("expected a string scalar or character row, got {other:?}"),
@@ -241,7 +248,7 @@ fn value_to_string_scalar(value: &Value) -> BuiltinResult<runmat_value::Utf8Text
 
 fn value_to_strings(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.to_string()]),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(vec![text.to_string()]),
         Value::CharArray(array) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data())
                 .map(|text| vec![text])
@@ -249,7 +256,18 @@ fn value_to_strings(value: &Value) -> BuiltinResult<Vec<String>> {
                     runtests_error_detail(&RUNTESTS_ERROR_INVALID_INPUT, error.to_string())
                 })
         }
-        Value::StringArray(array) => Ok(array.data().iter().map(ToString::to_string).collect()),
+        Value::StringArray(array) => array
+            .data()
+            .iter()
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    runtests_error_detail(
+                        &RUNTESTS_ERROR_INVALID_INPUT,
+                        "expected a string scalar or character row",
+                    )
+                })
+            })
+            .collect(),
         Value::Cell(cell) => cell
             .data()
             .iter()

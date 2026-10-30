@@ -801,7 +801,7 @@ fn run_id_from_object(object: &ObjectInstance) -> Option<String> {
         .properties()
         .get("run_id")
         .and_then(|value| match value {
-            Value::String(run_id) => Some(run_id.to_string()),
+            Value::String(runmat_value::StringElement::Text(run_id)) => Some(run_id.to_string()),
             _ => None,
         })
 }
@@ -1307,7 +1307,10 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
         Value::Num(n) => json_number(builtin, *n),
         Value::Int(i) => Ok(int_value_to_json(i)),
         Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
-        Value::String(s) => Ok(serde_json::Value::String(s.to_string())),
+        Value::String(s) => Ok(s
+            .as_str()
+            .map(|text| serde_json::Value::String(text.to_owned()))
+            .unwrap_or(serde_json::Value::Null)),
         Value::CharArray(chars) if chars.rows == 1 => Ok(serde_json::Value::String(
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 let mut error = builtin_error(builtin, &ERROR_INPUT, source.to_string());
@@ -1319,7 +1322,11 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
             array
                 .data()
                 .iter()
-                .map(|text| serde_json::Value::String(text.to_string()))
+                .map(|text| {
+                    text.as_str()
+                        .map(|text| serde_json::Value::String(text.to_owned()))
+                        .unwrap_or(serde_json::Value::Null)
+                })
                 .collect(),
         )),
         Value::LogicalArray(array) => nested_array_to_json(builtin, &array.shape, |index| {
@@ -1636,7 +1643,11 @@ fn string_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
             .iter()
             .map(|item| scalar_string(item, builtin, &ERROR_INPUT))
             .collect(),
-        Value::StringArray(array) => Ok(array.data().iter().map(ToString::to_string).collect()),
+        Value::StringArray(array) => array
+            .data()
+            .iter()
+            .map(|text| scalar_string(&Value::String(text.clone()), builtin, &ERROR_INPUT))
+            .collect(),
         Value::String(_) | Value::CharArray(_) => {
             Ok(vec![scalar_string(value, builtin, &ERROR_INPUT)?])
         }
@@ -2132,9 +2143,13 @@ fn orient_json_vectors_as_rows(
                 .reshape_in_place(vec![1, columns])
                 .map_err(|message| builtin_error(builtin, error, message))?;
         }
-        Value::StringArray(array) if array.shape().len() == 1 && array.shape()[0] >= 2 => {
+        Value::StringArray(array)
+            if array.shape().len() == 1
+                && array.shape()[0] >= 2
+                && !array.data()[0].is_missing() =>
+        {
             let columns = array.shape()[0];
-            *array = runmat_value::StringArray::from_texts_unbounded(
+            *array = runmat_value::StringArray::from_elements_unbounded(
                 array.data().to_vec(),
                 vec![1, columns],
             )
@@ -2392,7 +2407,9 @@ fn object_json_property<T: DeserializeOwned>(
     property: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<T> {
-    let Some(Value::String(json)) = object.properties().get(property) else {
+    let Some(Value::String(runmat_value::StringElement::Text(json))) =
+        object.properties().get(property)
+    else {
         return Err(builtin_error(
             builtin,
             error,
@@ -2412,8 +2429,13 @@ fn scalar_string(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.to_string()),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
+        Value::String(runmat_value::StringElement::Text(value)) => Ok(value.to_string()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .as_str()
+                .expect("nonmissing scalar text")
+                .to_owned())
+        }
         Value::CharArray(chars) if chars.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
             chars.data(),
         )

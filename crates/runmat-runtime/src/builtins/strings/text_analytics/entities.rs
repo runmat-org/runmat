@@ -269,7 +269,7 @@ async fn add_part_of_speech_details_for_entities(
 
 fn entity_details_for_documents(
     documents: &[Vec<String>],
-    stored: Option<&[Vec<&str>]>,
+    stored: Option<&[Vec<Option<&str>>]>,
     language: EntityLanguage,
     options: &crate::builtins::strings::text_analytics::documents::DocumentOptions,
     discard_known_values: bool,
@@ -286,6 +286,7 @@ fn entity_details_for_documents(
                         if let Some(tag) = stored
                             .and_then(|values| values.get(doc_idx))
                             .and_then(|values| values.get(token_idx))
+                            .and_then(|value| *value)
                             .filter(|tag| is_known_entity(tag))
                         {
                             return (*tag).to_owned();
@@ -510,9 +511,9 @@ fn mark_entity_pos_as_proper_nouns(
     for (doc_idx, entity_doc) in entities.iter().enumerate() {
         if let Some(pos_doc) = pos.get_mut(doc_idx) {
             for (token_idx, entity) in entity_doc.iter().enumerate() {
-                if *entity != "non-entity" {
+                if entity.is_some_and(|entity| entity != "non-entity") {
                     if let Some(pos_tag) = pos_doc.get_mut(token_idx) {
-                        *pos_tag = "proper-noun".to_string();
+                        *pos_tag = "proper-noun".into();
                     }
                 }
             }
@@ -521,7 +522,7 @@ fn mark_entity_pos_as_proper_nouns(
     let values = pos
         .iter()
         .map(|doc| {
-            StringArray::new(doc.clone(), vec![1, doc.len()])
+            StringArray::from_elements_unbounded(doc.clone(), vec![1, doc.len()])
                 .map(Value::StringArray)
                 .map_err(|err| text_analytics_error("addEntityDetails", err))
         })
@@ -541,15 +542,13 @@ fn mark_entity_pos_as_proper_nouns(
 
 fn is_known_entity(value: &str) -> bool {
     let trimmed = value.trim();
-    !trimmed.is_empty()
-        && trimmed != "unknown"
-        && !crate::builtins::strings::common::is_missing_string(trimmed)
+    !trimmed.is_empty() && trimmed != "unknown"
 }
 
 pub(in crate::builtins::strings::text_analytics) fn entity_details_from_object<'a>(
     object: &'a ObjectInstance,
     fn_name: &str,
-) -> BuiltinResult<Option<Vec<Vec<&'a str>>>> {
+) -> BuiltinResult<Option<Vec<Vec<Option<&'a str>>>>> {
     let Some(value) = object.properties().get(ENTITY_DETAILS_PROPERTY) else {
         return Ok(None);
     };
@@ -643,7 +642,11 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
+            Value::StringArray(array) => array
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("nonmissing test text").to_owned())
+                .collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }

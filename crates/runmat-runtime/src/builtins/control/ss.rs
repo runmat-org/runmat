@@ -362,8 +362,13 @@ fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
 
 fn scalar_text(value: &Value, context: &str) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("nonmissing scalar text")
+                .clone())
+        }
         Value::CharArray(array) if array.rows == 1 => {
             Ok(runmat_value::decode_utf16_code_units(array.data())
                 .map_err(|source| {

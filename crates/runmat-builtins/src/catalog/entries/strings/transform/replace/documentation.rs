@@ -4,7 +4,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Behavior",
         paragraphs: &[
-            "String scalars remain strings. Missing string scalars (`<missing>`) propagate unchanged.",
+            "String scalars remain strings. Typed missing string scalars (displayed as `<missing>`) propagate unchanged; literal `<missing>` text remains ordinary text.",
             "String arrays are processed element wise while preserving shape.",
             "Character arrays are handled row by row. Rows expand or shrink as needed and are padded with spaces so the result remains a rectangular char array, just like MATLAB.",
             "Cell arrays must contain string scalars or character vectors. The result is a cell array with the same size and element types mirrored after replacement.",
@@ -126,14 +126,14 @@ const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
         id: "example-8",
         title: "Preserve missing strings during replacement",
-        program: "vals = [\"runmat\", \"<missing>\", \"accelerate\"];\nout = replace(vals, \"runmat\", \"RunMat\")",
+        program: "vals = [\"runmat\", string(missing), \"accelerate\"];\nout = replace(vals, \"runmat\", \"RunMat\")",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(isequal(out,[\"RunMat\",\"<missing>\",\"accelerate\"]));",
+            source: "assert(isequal(out(1),\"RunMat\")); assert(ismissing(out(2))); assert(isequal(out(3),\"accelerate\"));",
         },
     },
 ];
@@ -164,7 +164,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationFaq {
             question: "How are missing strings handled?",
-            answer: "Missing string scalars (`<missing>`) propagate unchanged. Replacements never convert a missing value into a non-missing string.",
+            answer: "Typed missing string scalars propagate unchanged. Replacements never convert a missing value into a non-missing string; literal `<missing>` text remains ordinary text.",
         },
         BuiltinDocumentationFaq {
             question: "Can I replace with an empty string?",

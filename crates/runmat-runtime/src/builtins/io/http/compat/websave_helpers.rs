@@ -147,7 +147,7 @@ pub(super) fn numeric_seconds(value: &Value, label: &str) -> BuiltinResult<f64> 
                 ))
             }
         }
-        Value::String(text) => parse_positive_seconds(text),
+        Value::String(runmat_value::StringElement::Text(text)) => parse_positive_seconds(text),
         Value::CharArray(array) if array.rows == 1 => {
             let text = crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
                 compat_error(

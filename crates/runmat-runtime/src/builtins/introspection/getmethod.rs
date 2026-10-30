@@ -190,7 +190,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
 pub async fn getmethod_builtin(obj: Value, name: Value) -> crate::BuiltinResult<Value> {
     crate::compatibility::ensure_builtin_extension_enabled(&GETMETHOD_EXTENSION, "getmethod")?;
     let name = match name {
-        Value::String(name) => name.as_str().to_owned(),
+        Value::String(runmat_value::StringElement::Text(name)) => name.as_str().to_owned(),
         Value::CharArray(chars) if chars.rows == 1 => {
             super::text::decode_utf16_with_error(chars.data(), || {
                 crate::runtime_descriptor_error_with_detail(
@@ -200,7 +200,13 @@ pub async fn getmethod_builtin(obj: Value, name: Value) -> crate::BuiltinResult<
                 )
             })?
         }
-        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned()
+        }
         other => {
             return Err(crate::runtime_descriptor_error_with_detail(
                 "getmethod",

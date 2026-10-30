@@ -87,7 +87,9 @@ async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
         .await
         .map_err(remap_str2double_flow)?;
     match gathered {
-        Value::String(text) => Ok(Value::Num(parse_numeric_scalar(&text))),
+        Value::String(text) => Ok(Value::Num(
+            text.as_str().map_or(f64::NAN, parse_numeric_scalar),
+        )),
         Value::StringArray(array) => str2double_string_array(array),
         Value::CharArray(array) => str2double_char_array(array),
         Value::Cell(cell) => str2double_cell_array(cell),
@@ -99,7 +101,7 @@ fn str2double_string_array(array: StringArray) -> BuiltinResult<Value> {
     let (data, shape, _, _) = array.into_parts();
     let mut values = Vec::with_capacity(data.len());
     for text in &data {
-        values.push(parse_numeric_scalar(text.as_str()));
+        values.push(text.as_str().map_or(f64::NAN, parse_numeric_scalar));
     }
     let tensor =
         Tensor::new(values, shape).map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;
@@ -129,9 +131,9 @@ fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             let idx = row * cols + col;
             let element: &Value = &data[idx];
             let numeric = match element {
-                Value::String(text) => parse_numeric_scalar(text),
+                Value::String(text) => text.as_str().map_or(f64::NAN, parse_numeric_scalar),
                 Value::StringArray(sa) if sa.data().len() == 1 => {
-                    parse_numeric_scalar(&sa.data()[0])
+                    sa.data()[0].as_str().map_or(f64::NAN, parse_numeric_scalar)
                 }
                 Value::CharArray(char_vec) if char_vec.rows == 1 => {
                     let row_text = decode_chars(char_vec.data())?;

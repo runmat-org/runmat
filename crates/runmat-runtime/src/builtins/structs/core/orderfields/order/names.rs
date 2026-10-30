@@ -14,7 +14,17 @@ pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Option<Vec<String>>> 
             .iter()
             .enumerate()
             .map(|(index, name)| {
-                nonempty(name.to_string(), format!("string element {}", index + 1))
+                nonempty(
+                    name.as_str()
+                        .ok_or_else(|| {
+                            super::super::error::invalid_name(format!(
+                                "string element {}",
+                                index + 1
+                            ))
+                        })?
+                        .to_owned(),
+                    format!("string element {}", index + 1),
+                )
             })
             .collect::<crate::BuiltinResult<Vec<_>>>()
             .map(Some),

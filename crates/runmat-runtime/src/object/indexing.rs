@@ -109,7 +109,7 @@ impl ObjectIndexComponent {
             Self::Value(value) => Ok(value.clone()),
             Self::End => Err(unresolved_end()),
             Self::Colon => crate::call::argument_text::copy_str(OBJECT_SELECTOR_COLON, context)
-                .map(Value::String),
+                .map(|text| Value::String(text.into())),
         }
     }
 }
@@ -153,7 +153,9 @@ pub(crate) fn standard_substruct_fixture_from_parts(
                     "member name must be text",
                 ));
             };
-            ObjectSubscript::member(member.as_str())
+            ObjectSubscript::member(member.as_str().ok_or_else(|| {
+                semantic_error("InvalidObjectIndex", "member name must be nonmissing text")
+            })?)
         }
         OBJECT_PROTOCOL_KIND_PAREN | OBJECT_PROTOCOL_KIND_BRACE => {
             let Value::Cell(cell) = payload else {

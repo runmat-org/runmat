@@ -121,9 +121,9 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
         }
         Value::String(s) => {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
-                Ok(Value::String(s))
+                Ok(Value::String(s.into()))
             } else {
-                StringArray::from_texts_unbounded(vec![s], dims.to_vec())
+                StringArray::from_elements_unbounded(vec![s], dims.to_vec())
                     .map(Value::StringArray)
                     .map_err(|e| reshape_error(format!("reshape: {e}")))
             }

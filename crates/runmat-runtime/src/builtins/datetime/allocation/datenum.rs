@@ -245,8 +245,13 @@ impl<'a> Plan<'a> {
             }
             Source::Text(value) => {
                 let source = match value {
-                    Value::String(text) => text.as_str(),
-                    Value::StringArray(array) => array.data()[index].as_str(),
+                    Value::String(text) => {
+                        crate::builtins::datetime::nonmissing_text(text, "datenum input")?
+                    }
+                    Value::StringArray(array) => crate::builtins::datetime::nonmissing_text(
+                        &array.data()[index],
+                        "datenum input",
+                    )?,
                     Value::CharArray(_) => text.expect("character row has admitted scratch"),
                     _ => unreachable!(),
                 };

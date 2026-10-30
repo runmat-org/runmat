@@ -258,7 +258,7 @@ impl RemoteWorkerChannel for FailingRouteWorker {
                 result: AttemptSuccess::new(
                     &attempt.scheduling,
                     vec![ValuePayload::Inline(Box::new(InlineValue::String(
-                        attempt.scheduling.worker_id.to_string(),
+                        attempt.scheduling.worker_id.to_string().into(),
                     )))],
                     Vec::new(),
                     1,
@@ -406,7 +406,7 @@ impl RemoteWorkerChannel for FakeWorker {
                 result: AttemptSuccess::new(
                     &attempt.scheduling,
                     vec![ValuePayload::Inline(Box::new(InlineValue::String(
-                        attempt.scheduling.worker_id.to_string(),
+                        attempt.scheduling.worker_id.to_string().into(),
                     )))],
                     Vec::new(),
                     1,
@@ -1632,7 +1632,7 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
     assert_eq!(
         success.values().expect("value result").0,
         [ValuePayload::Inline(Box::new(InlineValue::String(
-            replacement_worker.id.to_string(),
+            replacement_worker.id.to_string().into(),
         )))],
         "the retry result must come from the replacement route"
     );

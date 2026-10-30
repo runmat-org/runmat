@@ -36,7 +36,7 @@ pub(crate) fn default_value(
     };
     if let Some(text) = text {
         return crate::call::argument_text::copy_str(text, runtime)
-            .map(Value::String)
+            .map(|text| Value::String(text.into()))
             .map(Some);
     }
     if matches!(

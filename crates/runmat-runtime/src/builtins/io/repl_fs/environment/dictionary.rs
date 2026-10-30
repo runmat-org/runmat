@@ -16,7 +16,7 @@ pub(super) fn from_pairs(
                 runtime,
                 |index| {
                     crate::call::argument_text::copy_str(&pairs[index].0, Some(runtime))
-                        .map(Value::String)
+                        .map(|text| Value::String(text.into()))
                 },
             )?;
             let values = crate::execution::RootedValues::try_initialize_in_context(
@@ -24,7 +24,7 @@ pub(super) fn from_pairs(
                 runtime,
                 |index| {
                     crate::call::argument_text::copy_str(&pairs[index].1, Some(runtime))
-                        .map(Value::String)
+                        .map(|text| Value::String(text.into()))
                 },
             )?;
             (

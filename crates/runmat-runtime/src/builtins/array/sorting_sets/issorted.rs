@@ -398,7 +398,7 @@ fn normalize_host_input(value: Value) -> crate::BuiltinResult<InputArray> {
         Value::StringArray(sa) => Ok(InputArray::String(sa)),
         Value::String(s) => {
             let array =
-                StringArray::from_texts_unbounded(vec![s], vec![1, 1])
+                StringArray::from_elements_unbounded(vec![s], vec![1, 1])
                     .map_err(|e| issorted_internal(format!("issorted: {e}")))?;
             Ok(InputArray::String(array))
         }
@@ -819,7 +819,7 @@ fn check_string_dimension(array: &StringArray, dim: usize, args: &IssortedArgs) 
             slice.clear();
             for k in 0..len_dim {
                 let idx = before_idx + k * before + after_idx * before * len_dim;
-                slice.push(array.data()[idx].as_str());
+                slice.push(&array.data()[idx]);
             }
             if !check_string_slice(&slice, args.direction, args.missing) {
                 return false;
@@ -1060,8 +1060,8 @@ fn compare_string_row_pair(
         let idx_a = a + col * rows;
         let idx_b = b + col * rows;
         let ord = compare_string_scalars(
-            array.data()[idx_a].as_str(),
-            array.data()[idx_b].as_str(),
+            &array.data()[idx_a],
+            &array.data()[idx_b],
             direction,
             missing,
         );
@@ -1131,7 +1131,11 @@ fn check_complex_slice<T: SetFloat>(
     false
 }
 
-fn check_string_slice(slice: &[&str], direction: Direction, missing: MissingPlacement) -> bool {
+fn check_string_slice(
+    slice: &[&runmat_value::StringElement],
+    direction: Direction,
+    missing: MissingPlacement,
+) -> bool {
     if slice.len() <= 1 {
         return true;
     }
@@ -1179,7 +1183,7 @@ fn complex_slice_in_order<T: SetFloat>(
 }
 
 fn string_slice_in_order(
-    slice: &[&str],
+    slice: &[&runmat_value::StringElement],
     order: OrderSpec,
     missing: MissingPlacementResolved,
 ) -> bool {
@@ -1317,8 +1321,8 @@ fn compare_complex_real_first<T: SetFloat>(
 }
 
 fn compare_string_scalars(
-    a: &str,
-    b: &str,
+    a: &runmat_value::StringElement,
+    b: &runmat_value::StringElement,
     direction: SortDirection,
     missing: MissingPlacementResolved,
 ) -> Ordering {
@@ -1349,8 +1353,8 @@ fn complex_abs<T: SetFloat>(value: (T, T)) -> T {
     value.0.hypot(value.1)
 }
 
-fn is_string_missing(value: &str) -> bool {
-    value.eq_ignore_ascii_case("<missing>")
+fn is_string_missing(value: &runmat_value::StringElement) -> bool {
+    value.is_missing()
 }
 
 fn direction_orders(direction: Direction) -> &'static [OrderSpec] {
@@ -1866,8 +1870,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_missingplacement_last() {
-        let array = StringArray::new(
-            vec!["apple".into(), "banana".into(), "<missing>".into()],
+        let array = StringArray::from_elements_unbounded(
+            vec![
+                "apple".into(),
+                "banana".into(),
+                runmat_value::StringElement::Missing,
+            ],
             vec![3, 1],
         )
         .unwrap();
@@ -1880,7 +1888,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_missingplacement_last_violation() {
-        let array = StringArray::new(vec!["<missing>".into(), "apple".into()], vec![2, 1]).unwrap();
+        let array = StringArray::from_elements_unbounded(
+            vec![runmat_value::StringElement::Missing, "apple".into()],
+            vec![2, 1],
+        )
+        .unwrap();
         let args = vec![Value::from("MissingPlacement"), Value::from("last")];
         let result =
             issorted_builtin(Value::StringArray(array), args).expect("issorted string placement");

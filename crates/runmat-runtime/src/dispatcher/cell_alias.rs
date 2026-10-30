@@ -82,9 +82,11 @@ fn quote_values(
             return Err(admission(context, HostAllocationError::Cancelled));
         }
         match child {
-            Value::String(text) if !text.has_retained_claim() && !text.is_empty() => {
+            Value::String(text)
+                if !text.has_retained_claim() && text.as_str().is_some_and(|s| !s.is_empty()) =>
+            {
                 quote.add(
-                    runmat_value::Utf8Text::requested_bytes_for_capacity(text.len())
+                    runmat_value::StringElement::requested_bytes_for_capacity(text.capacity())
                         .map_err(|_| overflow())?,
                     1,
                 )?;
@@ -125,13 +127,15 @@ fn prepare_child(
 ) -> Result<Value, RuntimeError> {
     match child {
         Value::Cell(cell) => prepare_cell(cell, permit, context, receipt, visited).map(Value::Cell),
-        Value::String(text) if !text.has_retained_claim() && !text.is_empty() => text
-            .try_copy_exact_with(permit, |_| {
+        Value::String(text)
+            if !text.has_retained_claim() && text.as_str().is_some_and(|s| !s.is_empty()) =>
+        {
+            text.try_copy_exact_with(permit, |_| {
                 receipt
                     .checkpoint(context)
                     .map_err(|source| admission(context, source))
             })
-            .map(Value::String)
+            .map(|text| Value::String(text.into()))
             .map_err(|error| match error {
                 runmat_value::ExactArrayInitializationError::Allocation(error) => {
                     build_runtime_error(format!("gather: shared Cell text admission: {error}"))
@@ -140,8 +144,9 @@ fn prepare_child(
                         .build()
                 }
                 runmat_value::ExactArrayInitializationError::Element(error) => error,
-            }),
-        Value::String(text) if !text.has_retained_claim() => Ok(Value::string("")),
+            })
+        }
+        Value::String(text) if !text.has_retained_claim() => Ok(Value::String(text.clone())),
         _ if supported_shallow_child(child) => Ok(child.clone()),
         _ => Err(unsupported()),
     }

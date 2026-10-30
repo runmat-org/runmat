@@ -197,6 +197,27 @@ impl ResidentValueAuthority<'_> {
     }
 }
 
+/// Portable string element: JSON strings are literal text and null is missing.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct StringElement(pub Option<String>);
+
+impl StringElement {
+    pub fn as_str(&self) -> Option<&str> {
+        self.0.as_deref()
+    }
+}
+impl From<String> for StringElement {
+    fn from(value: String) -> Self {
+        Self(Some(value))
+    }
+}
+impl From<&str> for StringElement {
+    fn from(value: &str) -> Self {
+        Self(Some(value.to_owned()))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum InlineValue {
@@ -215,7 +236,7 @@ pub enum InlineValue {
         real: u64,
         imaginary: u64,
     },
-    String(String),
+    String(StringElement),
     Char {
         encoding: CharacterEncoding,
         shape: Vec<u64>,
@@ -223,7 +244,7 @@ pub enum InlineValue {
     },
     StringArray {
         shape: Vec<u64>,
-        values: Vec<String>,
+        values: Vec<StringElement>,
     },
     Dense(DenseValue),
     Sparse(SparseValue),

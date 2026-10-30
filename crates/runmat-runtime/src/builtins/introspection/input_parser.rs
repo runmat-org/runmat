@@ -50,9 +50,18 @@ fn text_scalar<'a>(
     builtin: &'static str,
 ) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
-        Value::StringArray(strings) if strings.data().len() == 1 => {
-            Ok(std::borrow::Cow::Borrowed(strings.data()[0].as_str()))
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(std::borrow::Cow::Borrowed(text.as_str()))
+        }
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && !strings.data()[0].is_missing() =>
+        {
+            Ok(std::borrow::Cow::Borrowed(
+                strings.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         Value::CharArray(chars) if chars.rows == 1 => Ok(std::borrow::Cow::Owned(
             super::text::decode_utf16_with_error(chars.data(), || {
@@ -68,8 +77,12 @@ fn text_scalar<'a>(
 
 fn validate_parameter_name(value: &Value) -> BuiltinResult<()> {
     match value {
-        Value::String(_) => Ok(()),
-        Value::StringArray(strings) if strings.data().len() == 1 => Ok(()),
+        Value::String(runmat_value::StringElement::Text(_)) => Ok(()),
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && !strings.data()[0].is_missing() =>
+        {
+            Ok(())
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             super::text::decode_utf16_with_error(chars.data(), || {
                 input_parser_error(PARSE_NAME, &INPUT_PARSER_ERROR_PARAMETER_NAME)
@@ -85,9 +98,15 @@ fn validate_parameter_name(value: &Value) -> BuiltinResult<()> {
 
 fn parameter_name_matches(value: &Value, name: &str) -> bool {
     match value {
-        Value::String(value) => value.as_str() == name,
-        Value::StringArray(strings) if strings.data().len() == 1 => {
-            strings.data()[0].as_str() == name
+        Value::String(runmat_value::StringElement::Text(value)) => value.as_str() == name,
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && !strings.data()[0].is_missing() =>
+        {
+            strings.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                == name
         }
         Value::CharArray(chars) if chars.rows == 1 => {
             runmat_value::decode_utf16_code_units(chars.data()).is_ok_and(|text| text == name)

@@ -55,13 +55,13 @@ fn admit(
     output: &mut Vec<AdmittedToken>,
 ) -> Result<(), DecodeError> {
     match value {
-        Value::String(text) => output.push(AdmittedToken::Text(text.as_str().to_owned())),
-        Value::StringArray(array) => output.extend(
-            array
-                .data()
-                .iter()
-                .map(|text| AdmittedToken::Text(text.as_str().to_owned())),
-        ),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            output.push(AdmittedToken::Text(text.as_str().to_owned()))
+        }
+        Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => output
+            .extend(array.data().iter().map(|text| {
+                AdmittedToken::Text(text.as_str().expect("checked nonmissing string").to_owned())
+            })),
         Value::CharArray(chars)
             if crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {

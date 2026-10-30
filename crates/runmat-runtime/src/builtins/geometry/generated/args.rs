@@ -174,12 +174,17 @@ pub(super) fn transform(
 
 pub(super) fn text(value: &Value, builtin: &'static str, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.to_string()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.to_string()),
         Value::CharArray(chars) if chars.rows == 1 => {
             runmat_value::decode_utf16_code_units(chars.data())
                 .map_err(|_| invalid(builtin, format!("{name} must be valid text")))
         }
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .as_str()
+                .expect("nonmissing scalar text")
+                .to_owned())
+        }
         _ => Err(invalid(builtin, format!("{name} must be scalar text"))),
     }
 }

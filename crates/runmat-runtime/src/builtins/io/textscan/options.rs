@@ -235,10 +235,10 @@ fn string_list(value: &Value, context: &str) -> BuiltinResult<Vec<String>> {
             }
             Ok(out)
         }
-        Value::StringArray(sa) => Ok(sa
+        Value::StringArray(sa) if sa.data().iter().all(|text| !text.is_missing()) => Ok(sa
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
+            .map(|text| text.as_str().expect("checked nonmissing string").to_owned())
             .collect()),
         _ => Ok(vec![string_scalar(value, context)?]),
     }
@@ -265,7 +265,9 @@ fn delimiter_list(value: &Value) -> BuiltinResult<Vec<String>> {
 
 fn parse_comment_style(value: &Value) -> BuiltinResult<CommentStyle> {
     match value {
-        Value::String(s) if s.eq_ignore_ascii_case("none") => Ok(CommentStyle::None),
+        Value::String(runmat_value::StringElement::Text(s)) if s.eq_ignore_ascii_case("none") => {
+            Ok(CommentStyle::None)
+        }
         Value::CharArray(_) => {
             let text = string_scalar(value, "CommentStyle")?;
             if text.eq_ignore_ascii_case("none") {

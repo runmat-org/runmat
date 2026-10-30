@@ -73,7 +73,7 @@ pub enum MxArrayData {
     Interleaved(MxInterleaved),
     Logical(HostLogicalBuffer),
     Char(Vec<u16>),
-    String(Vec<String>),
+    String(Vec<runmat_value::StringElement>),
     Cell(Vec<Option<Box<MxArray>>>),
     Struct {
         fields: Vec<String>,
@@ -207,7 +207,9 @@ impl MxArray {
             ),
             MxArrayData::String(values) => runmat_value::record_host_copy(
                 runmat_value::HostCopyReason::CopyOnWriteMutation,
-                values.iter().map(String::len).sum(),
+                values
+                    .len()
+                    .saturating_mul(std::mem::size_of::<runmat_value::StringElement>()),
             ),
             MxArrayData::Handle(_) => {}
             MxArrayData::Gpu(value) => {
@@ -220,7 +222,9 @@ impl MxArray {
     pub(crate) fn encoded_storage_bytes(&self) -> usize {
         match &self.data {
             MxArrayData::Char(values) => values.len().saturating_mul(std::mem::size_of::<u16>()),
-            MxArrayData::String(values) => values.iter().map(String::len).sum(),
+            MxArrayData::String(values) => values
+                .len()
+                .saturating_mul(std::mem::size_of::<runmat_value::StringElement>()),
             MxArrayData::Cell(values)
             | MxArrayData::Struct { values, .. }
             | MxArrayData::Object { values, .. } => values
@@ -330,7 +334,10 @@ impl MxArray {
         })
     }
 
-    pub fn string(values: Vec<String>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn string(
+        values: Vec<runmat_value::StringElement>,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
         validate_shape(values.len(), &shape)?;
         Ok(Self {
             class_id: MxClassId::Unknown,

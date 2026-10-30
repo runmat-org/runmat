@@ -26,6 +26,7 @@ pub(in crate::builtins::table) fn import_cell_value(
 ) -> Value {
     match cell {
         ImportCell::Empty => Value::string(String::new()),
+        ImportCell::Missing => Value::String(runmat_value::StringElement::Missing),
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             if options.is_missing(token) {
@@ -212,7 +213,7 @@ fn integer_from_import_cell(
 ) -> BuiltinResult<runmat_value::IntValue> {
     let numeric = |value| Ok(target.cast_scalar(value));
     match value {
-        ImportCell::Empty => numeric(f64::NAN),
+        ImportCell::Empty | ImportCell::Missing => numeric(f64::NAN),
         ImportCell::Number(value) | ImportCell::DateTime(value) => numeric(*value),
         ImportCell::Logical(value) => numeric(f64::from(*value)),
         ImportCell::Text(text) => {
@@ -266,7 +267,7 @@ pub(in crate::builtins::table) fn numeric_from_import_cell(
     context: &str,
 ) -> BuiltinResult<f64> {
     match value {
-        ImportCell::Empty => Ok(f64::NAN),
+        ImportCell::Empty | ImportCell::Missing => Ok(f64::NAN),
         ImportCell::Number(value) => Ok(*value),
         ImportCell::Logical(value) => Ok(if *value { 1.0 } else { 0.0 }),
         ImportCell::DateTime(serial) => Ok(*serial),
@@ -343,7 +344,7 @@ pub(in crate::builtins::table) fn logical_from_import_cell(
     options: &ReadTableOptions,
 ) -> BuiltinResult<u8> {
     let flag = match value {
-        ImportCell::Empty => false,
+        ImportCell::Empty | ImportCell::Missing => false,
         ImportCell::Logical(value) => *value,
         ImportCell::Number(value) => *value != 0.0,
         ImportCell::DateTime(serial) => *serial != 0.0,
@@ -377,9 +378,11 @@ pub(in crate::builtins::table) fn import_text_column(
 ) -> BuiltinResult<Value> {
     let strings = import_text_values(values, options);
     match kind {
-        TextImportType::String => StringArray::new(strings.clone(), vec![strings.len(), 1])
-            .map(Value::StringArray)
-            .map_err(|err| invalid_variable(format!("readtable: {err}"))),
+        TextImportType::String => {
+            StringArray::from_elements_unbounded(strings.clone(), vec![strings.len(), 1])
+                .map(Value::StringArray)
+                .map_err(|err| invalid_variable(format!("readtable: {err}")))
+        }
         TextImportType::Char => import_char_column(strings),
     }
 }
@@ -387,28 +390,32 @@ pub(in crate::builtins::table) fn import_text_column(
 pub(in crate::builtins::table) fn import_text_values(
     values: Vec<ImportCell>,
     options: &ReadTableOptions,
-) -> Vec<String> {
+) -> Vec<runmat_value::StringElement> {
     values
         .into_iter()
         .map(|value| {
             if value.is_missing(options) {
-                String::new()
+                runmat_value::StringElement::Missing
             } else {
-                unquote(value.display_text().trim()).to_string()
+                runmat_value::StringElement::text(unquote(value.display_text().trim()).to_string())
             }
         })
         .collect()
 }
 
-pub(in crate::builtins::table) fn import_char_column(strings: Vec<String>) -> BuiltinResult<Value> {
+pub(in crate::builtins::table) fn import_char_column(
+    strings: Vec<runmat_value::StringElement>,
+) -> BuiltinResult<Value> {
     let rows = strings.len();
     let cols = strings
         .iter()
-        .map(|text| text.encode_utf16().count())
+        .map(|text| text.as_str().map_or(0, |text| text.encode_utf16().count()))
         .max()
         .unwrap_or(0);
     let mut data = vec![runmat_value::Utf16CodeUnit::from_raw(b' ' as u16); rows * cols];
     for (row, text) in strings.iter().enumerate() {
+        // Character targets intentionally represent missing strings as empty rows.
+        let Some(text) = text.as_str() else { continue };
         for (col, unit) in text.encode_utf16().enumerate() {
             data[row * cols + col] = runmat_value::Utf16CodeUnit::from_raw(unit);
         }
@@ -426,7 +433,14 @@ pub(in crate::builtins::table) fn import_cellstr_column(
     let rows = strings.len();
     let cells = strings
         .into_iter()
-        .map(|text| Value::CharArray(CharArray::new_row(&text)))
+        .map(|text| {
+            Value::CharArray(match text.as_str() {
+                Some(text) => CharArray::new_row(text),
+                None => {
+                    CharArray::from_code_units(Vec::new(), 0, 0).expect("empty character target")
+                }
+            })
+        })
         .collect::<Vec<_>>();
     CellArray::new(cells, rows, 1)
         .map(Value::Cell)
@@ -440,7 +454,7 @@ pub(in crate::builtins::table) fn import_categorical_column(
     let strings = import_text_values(values, options);
     categorical_from_args(crate::call::FunctionArgumentView::from_slice(&[
         Value::StringArray(
-            StringArray::new(strings.clone(), vec![strings.len(), 1])
+            StringArray::from_elements_unbounded(strings.clone(), vec![strings.len(), 1])
                 .map_err(|err| invalid_variable(format!("readtable: {err}")))?,
         ),
     ]))
@@ -477,7 +491,7 @@ pub(in crate::builtins::table) fn datetime_serial_from_import_cell(
     options: &ReadTableOptions,
 ) -> BuiltinResult<f64> {
     match value {
-        ImportCell::Empty => Ok(f64::NAN),
+        ImportCell::Empty | ImportCell::Missing => Ok(f64::NAN),
         ImportCell::DateTime(serial) => Ok(*serial),
         ImportCell::Number(value) => Ok(*value),
         ImportCell::Text(text) => {
@@ -526,7 +540,7 @@ pub(in crate::builtins::table) fn duration_days_from_import_cell(
     options: &ReadTableOptions,
 ) -> BuiltinResult<f64> {
     match value {
-        ImportCell::Empty => Ok(f64::NAN),
+        ImportCell::Empty | ImportCell::Missing => Ok(f64::NAN),
         ImportCell::Number(value) => Ok(*value),
         ImportCell::Logical(value) => Ok(if *value { 1.0 } else { 0.0 }),
         ImportCell::Text(text) => {
@@ -557,7 +571,7 @@ pub(in crate::builtins::table) fn infer_import_column(
     let mut all_numeric = true;
     for value in &values {
         match value {
-            ImportCell::Empty => numeric.push(f64::NAN),
+            ImportCell::Empty | ImportCell::Missing => numeric.push(f64::NAN),
             ImportCell::Number(value) => numeric.push(*value),
             ImportCell::Text(text) => {
                 let token = unquote(text.trim()).trim();
@@ -586,7 +600,7 @@ pub(in crate::builtins::table) fn infer_import_column(
     let mut all_logical = true;
     for value in &values {
         match value {
-            ImportCell::Empty => logical.push(0),
+            ImportCell::Empty | ImportCell::Missing => logical.push(0),
             ImportCell::Logical(value) => logical.push(i32::from(*value) as u8),
             ImportCell::Text(text) => {
                 let token = unquote(text.trim()).trim();
@@ -616,7 +630,7 @@ pub(in crate::builtins::table) fn infer_import_column(
         let mut all_datetime = true;
         for value in &values {
             match value {
-                ImportCell::Empty => serials.push(f64::NAN),
+                ImportCell::Empty | ImportCell::Missing => serials.push(f64::NAN),
                 ImportCell::DateTime(serial) => serials.push(*serial),
                 ImportCell::Text(text) => {
                     let token = unquote(text.trim()).trim();
@@ -751,6 +765,35 @@ pub(in crate::builtins::table) fn unquote(token: &str) -> &str {
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn text_import_preserves_typed_missing_without_reserving_display_literals() {
+        let source = vec![
+            ImportCell::Missing,
+            ImportCell::Text("<missing>".into()),
+            ImportCell::Text("<Missing>".into()),
+            ImportCell::Empty,
+        ];
+        let Value::StringArray(output) =
+            import_text_column(source, &ReadTableOptions::default(), TextImportType::String)
+                .unwrap()
+        else {
+            panic!("string column")
+        };
+        assert_eq!(
+            output.data(),
+            &[
+                runmat_value::StringElement::Missing,
+                "<missing>".into(),
+                "<Missing>".into(),
+                runmat_value::StringElement::Missing
+            ]
+        );
+        assert_eq!(
+            import_cell_value(ImportCell::Missing, &ReadTableOptions::default()),
+            Value::String(runmat_value::StringElement::Missing)
+        );
+    }
 
     #[test]
     fn import_numeric_column_materializes_unsigned_typed_integer_storage() {

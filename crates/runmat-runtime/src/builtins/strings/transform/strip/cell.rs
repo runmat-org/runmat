@@ -114,7 +114,7 @@ pub(super) async fn strip_cell_array(
     Ok(output)
 }
 
-fn text_child(value: &Value) -> Option<&Utf8Text> {
+fn text_child(value: &Value) -> Option<&StringElement> {
     match value {
         Value::String(text) => Some(text),
         Value::StringArray(array) if array.data().len() == 1 => array.data().first(),
@@ -133,15 +133,12 @@ fn character_child(value: &Value) -> BuiltinResult<Option<&CharArray>> {
 }
 
 fn selected_text<'a>(
-    text: &'a Utf8Text,
+    text: &'a StringElement,
     direction: StripDirection,
     pattern: PatternRef<'_>,
-) -> &'a str {
-    if is_missing_string(text) {
-        text.as_str()
-    } else {
-        strip_slice(text.as_str(), direction, pattern)
-    }
+) -> Option<&'a str> {
+    text.as_str()
+        .map(|text| strip_slice(text, direction, pattern))
 }
 
 fn quote_child(
@@ -153,8 +150,10 @@ fn quote_child(
     runtime: &RuntimeContext,
 ) -> BuiltinResult<()> {
     if let Some(text) = text_child(value) {
-        let selected = selected_text(text, direction, pattern);
-        if selected != text.as_str() || !text.has_retained_claim() {
+        let Some(selected) = selected_text(text, direction, pattern) else {
+            return Ok(());
+        };
+        if Some(selected) != text.as_str() || !text.has_retained_claim() {
             let requested =
                 Utf8Text::requested_bytes_for_capacity(selected.len()).map_err(|cause| {
                     strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
@@ -212,8 +211,10 @@ fn admitted_child(
     runtime: &RuntimeContext,
 ) -> BuiltinResult<Value> {
     if let Some(text) = text_child(value) {
-        let selected = selected_text(text, direction, pattern);
-        if selected == text.as_str() && text.has_retained_claim() {
+        let Some(selected) = selected_text(text, direction, pattern) else {
+            return Ok(Value::String(StringElement::Missing));
+        };
+        if Some(selected) == text.as_str() && text.has_retained_claim() {
             return Ok(Value::String(text.clone()));
         }
         let mut bytes = exact_capacity_vec::<u8>(selected.len()).map_err(|cause| {
@@ -224,7 +225,7 @@ fn admitted_child(
         let text = Utf8Text::new(unsafe { String::from_utf8_unchecked(bytes) });
         return text
             .try_admit_exact(permit)
-            .map(Value::String)
+            .map(|text| Value::String(StringElement::Text(text)))
             .map_err(|failure| {
                 strip_allocation_error(runtime, HostAllocationError::Numeric(failure.source()))
             });
@@ -293,8 +294,11 @@ fn ordinary_child(
     pattern: PatternRef<'_>,
 ) -> BuiltinResult<Value> {
     if let Some(text) = text_child(value) {
-        return Ok(Value::string(
-            selected_text(text, direction, pattern).to_owned(),
+        return Ok(Value::String(
+            match selected_text(text, direction, pattern) {
+                Some(text) => StringElement::text(text.to_owned()),
+                None => StringElement::Missing,
+            },
         ));
     }
     if let Some(array) = character_child(value)? {

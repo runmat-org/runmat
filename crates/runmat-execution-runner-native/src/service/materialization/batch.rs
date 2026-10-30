@@ -293,8 +293,11 @@ impl Drop for CreatedFutures<'_> {
                     CancellationReason::ParentScope,
                 );
             }
-            // These handles were minted only by this private producer. A
-            // cancelled unpublished slot owns no physical task or refetch API.
+            // These handles were minted only by this private producer. An
+            // unpublished terminal slot has no refetch API. Materialization
+            // guards can settle a failed submission as Completed(Err), rather
+            // than Cancelled; cancelling a terminal future preserves that
+            // original failure, so cancellation alone cannot retire its slot.
             let retired = {
                 let mut state = self.service.state.lock().expect("native service poisoned");
                 self.futures
@@ -302,7 +305,10 @@ impl Drop for CreatedFutures<'_> {
                     .filter_map(|future| {
                         let accepted = state.tasks.values().any(|task| task.future_id == future.id);
                         if !accepted
-                            && matches!(state.futures.get(&future.id), Some(FutureState::Cancelled))
+                            && matches!(
+                                state.futures.get(&future.id),
+                                Some(FutureState::Cancelled | FutureState::Completed(_))
+                            )
                         {
                             state.futures.remove(&future.id)
                         } else {

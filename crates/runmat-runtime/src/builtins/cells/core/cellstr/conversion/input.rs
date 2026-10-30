@@ -2,7 +2,7 @@ use runmat_value::{CellArray, CharArray, StringArray, SymbolicArray, SymbolicExp
 
 pub(super) enum Input {
     Character(CharArray),
-    String(String),
+    String(runmat_value::StringElement),
     StringArray(StringArray),
     Cell(CellArray),
     Symbolic(SymbolicExpr),
@@ -13,7 +13,7 @@ pub(super) enum Input {
 pub(super) fn classify(value: Value) -> Input {
     match value {
         Value::CharArray(array) => Input::Character(array),
-        Value::String(text) => Input::String(text.to_string()),
+        Value::String(text) => Input::String(text),
         Value::StringArray(array) => Input::StringArray(array),
         Value::Cell(array) => Input::Cell(array),
         Value::Symbolic(expression) => Input::Symbolic(expression),

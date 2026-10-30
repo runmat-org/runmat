@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+    char_row_to_string_slice, contains_numeric_or_resident_text_input,
 };
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
@@ -76,11 +76,7 @@ enum OperandKind {
     Char,
 }
 
-#[derive(Clone)]
-struct TextElement {
-    text: runmat_value::Utf8Text,
-    missing: bool,
-}
+type TextElement = runmat_value::StringElement;
 
 #[derive(Clone)]
 struct TextOperand {
@@ -101,10 +97,9 @@ impl TextOperand {
         }
     }
 
-    fn from_string_scalar(text: runmat_value::Utf8Text) -> Self {
-        let missing = is_missing_string(&text);
+    fn from_string_scalar(text: runmat_value::StringElement) -> Self {
         Self {
-            data: vec![TextElement { text, missing }],
+            data: vec![text],
             shape: vec![1, 1],
             strides: vec![1, 1],
             kind: OperandKind::String,
@@ -112,18 +107,13 @@ impl TextOperand {
     }
 
     fn from_string_array(array: StringArray) -> Self {
-        let missing_flags: Vec<bool> = array.data().iter().map(|s| is_missing_string(s)).collect();
         let shape = array.shape().to_vec();
         let (owner, _shape, _rows, _cols) = array.into_parts();
         let values: Vec<_> = match owner.try_into_owned() {
             Ok(values) => values.into_iter().collect(),
             Err(data) => data.iter().cloned().collect(),
         };
-        let data = values
-            .into_iter()
-            .zip(missing_flags)
-            .map(|(text, missing)| TextElement { text, missing })
-            .collect();
+        let data = values;
         let strides = compute_strides(&shape);
         Self {
             data,
@@ -142,10 +132,7 @@ impl TextOperand {
                 strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
             })?;
             let trimmed = trim_trailing_spaces(&text);
-            elements.push(TextElement {
-                text: trimmed.into(),
-                missing: false,
-            });
+            elements.push(trimmed.into());
         }
         let shape = vec![rows, 1];
         let strides = compute_strides(&shape);
@@ -201,16 +188,10 @@ fn trim_trailing_spaces(text: &str) -> String {
 
 fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
     match value {
-        Value::String(s) => Ok(TextElement {
-            text: s.clone(),
-            missing: is_missing_string(s),
-        }),
+        Value::String(s) => Ok(s.clone()),
         Value::StringArray(sa) if sa.data().len() == 1 => {
             let text = sa.data()[0].clone();
-            Ok(TextElement {
-                missing: is_missing_string(&text),
-                text,
-            })
+            Ok(text)
         }
         Value::CharArray(ca) if ca.rows <= 1 => {
             let text = if ca.rows == 0 {
@@ -223,10 +204,7 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
                     )
                 })?
             };
-            Ok(TextElement {
-                text: trim_trailing_spaces(&text).into(),
-                missing: false,
-            })
+            Ok(trim_trailing_spaces(&text).into())
         }
         Value::CharArray(_) => Err(strcat_error(&STRCAT_ERROR_INVALID_CELL_ELEMENT)),
         _ => Err(strcat_error(&STRCAT_ERROR_INVALID_CELL_ELEMENT)),
@@ -286,16 +264,16 @@ async fn strcat_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Va
         for operand in &operands {
             let idx = broadcast_index(linear, &output_shape, &operand.shape, &operand.strides);
             let element = &operand.data[idx];
-            if output_kind == OutputKind::String && element.missing {
+            if element.is_missing() {
                 any_missing = true;
                 continue;
             }
-            buffer.push_str(&element.text);
+            buffer.push_str(element.as_str().expect("nonmissing operand"));
         }
-        if matches!(output_kind, OutputKind::String) && any_missing {
-            concatenated.push(String::from("<missing>"));
+        if any_missing {
+            concatenated.push(runmat_value::StringElement::Missing);
         } else {
-            concatenated.push(buffer);
+            concatenated.push(runmat_value::StringElement::text(buffer));
         }
     }
 
@@ -306,9 +284,12 @@ async fn strcat_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Va
     }
 }
 
-fn build_string_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value> {
+fn build_string_output(
+    data: Vec<runmat_value::StringElement>,
+    shape: &[usize],
+) -> BuiltinResult<Value> {
     if data.is_empty() {
-        let array = StringArray::new(data, shape.to_vec()).map_err(|e| {
+        let array = StringArray::from_elements_unbounded(data, shape.to_vec()).map_err(|e| {
             strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
         })?;
         return Ok(Value::StringArray(array));
@@ -316,16 +297,19 @@ fn build_string_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Valu
 
     let is_scalar = shape.is_empty() || shape.iter().all(|&dim| dim == 1);
     if is_scalar {
-        return Ok(Value::string(data[0].clone()));
+        return Ok(Value::String(data[0].clone()));
     }
 
-    let array = StringArray::new(data, shape.to_vec()).map_err(|e| {
+    let array = StringArray::from_elements_unbounded(data, shape.to_vec()).map_err(|e| {
         strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
     })?;
     Ok(Value::StringArray(array))
 }
 
-fn build_cell_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value> {
+fn build_cell_output(
+    data: Vec<runmat_value::StringElement>,
+    shape: &[usize],
+) -> BuiltinResult<Value> {
     if data.is_empty() {
         return make_cell_with_shape(Vec::new(), shape.to_vec()).map_err(|e| {
             strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
@@ -333,8 +317,10 @@ fn build_cell_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value>
     }
     let mut values = Vec::with_capacity(data.len());
     for text in data {
-        let char_array = CharArray::new_row(&text);
-        values.push(Value::CharArray(char_array));
+        values.push(match text.as_str() {
+            Some(text) => Value::CharArray(CharArray::new_row(text)),
+            None => Value::String(runmat_value::StringElement::Missing),
+        });
     }
     CellArray::from_column_major(values, shape.to_vec())
         .map(Value::Cell)
@@ -343,7 +329,7 @@ fn build_cell_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value>
         })
 }
 
-fn build_char_output(data: Vec<String>) -> BuiltinResult<Value> {
+fn build_char_output(data: Vec<runmat_value::StringElement>) -> BuiltinResult<Value> {
     let rows = data.len();
     if rows == 0 {
         let array = CharArray::from_code_units(Vec::new(), 0, 0).map_err(|e| {
@@ -354,12 +340,19 @@ fn build_char_output(data: Vec<String>) -> BuiltinResult<Value> {
 
     let max_cols = data
         .iter()
-        .map(|s| s.encode_utf16().count())
+        .map(|s| {
+            s.as_str()
+                .expect("character output contains only text")
+                .encode_utf16()
+                .count()
+        })
         .max()
         .unwrap_or(0);
     let mut units = Vec::with_capacity(rows * max_cols);
     for text in data {
         let mut row_units = text
+            .as_str()
+            .ok_or_else(|| strcat_error(&STRCAT_ERROR_INVALID_INPUT))?
             .encode_utf16()
             .map(runmat_value::Utf16CodeUnit::from_raw)
             .collect::<Vec<_>>();
@@ -568,11 +561,7 @@ pub(crate) mod tests {
         };
         assert_eq!(mixed.shape(), &[2, 2, 2]);
         assert_eq!(
-            mixed
-                .data()
-                .iter()
-                .map(|text| text.as_str())
-                .collect::<Vec<_>>(),
+            mixed.data().iter().cloned().collect::<Vec<_>>(),
             vec!["a1", "c2", "b3", "d4", "e5", "g6", "f7", "h8"]
         );
         let Value::Cell(cells) = run_strcat(vec![cell, Value::CharArray(CharArray::new_row("!"))])
@@ -646,8 +635,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_missing_strings_propagate() {
-        let array = StringArray::new(
-            vec![String::from("<missing>"), String::from("ready")],
+        let array = StringArray::from_elements_unbounded(
+            vec![runmat_value::StringElement::Missing, "ready".into()],
             vec![1, 2],
         )
         .unwrap();
@@ -658,7 +647,7 @@ pub(crate) mod tests {
         .expect("strcat");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data()[0], "<missing>");
+                assert!(sa.data()[0].is_missing());
                 assert_eq!(sa.data()[1], "job-ready");
             }
             other => panic!("expected string array, got {other:?}"),

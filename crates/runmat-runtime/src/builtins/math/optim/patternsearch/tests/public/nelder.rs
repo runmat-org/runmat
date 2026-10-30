@@ -22,7 +22,7 @@ fn nelder_search_reuses_seed_and_original_counts_options_observers_and_errors() 
                         panic!("actual NM metadata")
                     };
                     let count = numbers(&metadata.fields["funccount"])[0];
-                    let Value::String(state) = &args[2] else {
+                    let Value::String(runmat_value::StringElement::Text(state)) = &args[2] else {
                         panic!("actual phase")
                     };
                     observed.lock().unwrap().push((state.to_string(), count));

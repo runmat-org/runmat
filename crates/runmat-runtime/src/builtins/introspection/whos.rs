@@ -170,7 +170,7 @@ pub(crate) mod tests {
             .fields
             .get(field)
             .and_then(|value| match value {
-                Value::String(s) => Some(s.to_string()),
+                Value::String(runmat_value::StringElement::Text(s)) => Some(s.to_string()),
                 Value::CharArray(ca) if ca.rows == 1 => {
                     ca.row_string().map(|text| text.trim().to_string())
                 }

@@ -9,9 +9,13 @@ pub(super) fn geometry_path_from_value(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(path) => Ok(path.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::String(runmat_value::StringElement::Text(path)) => Ok(path.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => Ok(
             runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
@@ -184,7 +188,9 @@ pub(super) fn object_json_property<T: DeserializeOwned>(
     property: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<T> {
-    let Some(Value::String(json)) = object.properties().get(property) else {
+    let Some(Value::String(runmat_value::StringElement::Text(json))) =
+        object.properties().get(property)
+    else {
         return Err(build_runtime_error(format!(
             "{} is missing required runtime payload property `{property}`",
             object.class_name()

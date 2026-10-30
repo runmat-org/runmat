@@ -497,7 +497,7 @@ pub(crate) fn parse_window_options(
 
 fn string_keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.to_ascii_lowercase()),
         Value::CharArray(chars) => {
             Some(runmat_value::decode_utf16_code_units(chars.data())?.to_ascii_lowercase())
         }
@@ -507,9 +507,16 @@ fn string_keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16De
 
 fn window_keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(text) => Some(text.to_ascii_lowercase()),
-        Value::StringArray(values) if values.data().len() == 1 => {
-            Some(values.data()[0].to_ascii_lowercase())
+        Value::String(runmat_value::StringElement::Text(text)) => Some(text.to_ascii_lowercase()),
+        Value::StringArray(values)
+            if values.data().len() == 1 && !values.data()[0].is_missing() =>
+        {
+            Some(
+                values.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .to_ascii_lowercase(),
+            )
         }
         Value::CharArray(chars) if chars.rows == 1 => {
             Some(runmat_value::decode_utf16_code_units(chars.data())?.to_ascii_lowercase())

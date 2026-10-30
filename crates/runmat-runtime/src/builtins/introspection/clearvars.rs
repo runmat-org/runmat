@@ -124,7 +124,7 @@ fn clearvars_flow(mut error: crate::RuntimeError) -> crate::RuntimeError {
 
 fn collect_clearvars_words(arg: &Value, out: &mut Vec<String>) -> BuiltinResult<()> {
     match arg {
-        Value::String(text) => {
+        Value::String(runmat_value::StringElement::Text(text)) => {
             out.push(text.trim().to_string());
             Ok(())
         }
@@ -143,9 +143,14 @@ fn collect_clearvars_words(arg: &Value, out: &mut Vec<String>) -> BuiltinResult<
             );
             Ok(())
         }
-        Value::StringArray(array) => {
+        Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => {
             for text in array.data() {
-                out.push(text.trim().to_string());
+                out.push(
+                    text.as_str()
+                        .expect("checked nonmissing string")
+                        .trim()
+                        .to_string(),
+                );
             }
             Ok(())
         }

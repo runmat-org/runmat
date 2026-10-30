@@ -22,7 +22,7 @@ pub(super) fn string_columns(
             let data = (0..rows)
                 .map(|row| value.data()[row + column * rows].clone())
                 .collect();
-            let value = StringArray::from_texts_unbounded(data, vec![rows, 1])?;
+            let value = StringArray::from_elements_unbounded(data, vec![rows, 1])?;
             GroupColumn::vector(format!("{name}{}", column + 1), Value::StringArray(value))
         })
         .collect()

@@ -63,7 +63,7 @@ fn text(value: &str, runtime: Option<&RuntimeContext>) -> crate::BuiltinResult<V
                 },
             )
         })?;
-        Ok(Value::String(text))
+        Ok(Value::String(text.into()))
     } else {
         Ok(Value::String(value.into()))
     }

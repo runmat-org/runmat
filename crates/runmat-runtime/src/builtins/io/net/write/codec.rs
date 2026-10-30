@@ -253,9 +253,19 @@ async fn char_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResult<
             )
             .await?
         }
-        Value::String(text) => append_bounded(&mut bytes, text.bytes(), work).await?,
-        Value::StringArray(array) if array.data().len() == 1 => {
-            append_bounded(&mut bytes, array.data()[0].bytes(), work).await?
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            append_bounded(&mut bytes, text.bytes(), work).await?
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            append_bounded(
+                &mut bytes,
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .bytes(),
+                work,
+            )
+            .await?
         }
         Value::StringArray(_) => {
             return Err(write_flow(
@@ -305,7 +315,7 @@ async fn char_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResult<
 async fn string_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResult<Payload> {
     let mut bytes = Vec::new();
     let elements = match data {
-        Value::String(text) => {
+        Value::String(runmat_value::StringElement::Text(text)) => {
             append_bounded(&mut bytes, text.bytes(), work).await?;
             1
         }
@@ -320,8 +330,16 @@ async fn string_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResul
             1
         }
         Value::StringArray(array) if array.data().is_empty() => 0,
-        Value::StringArray(array) if array.data().len() == 1 => {
-            append_bounded(&mut bytes, array.data()[0].bytes(), work).await?;
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            append_bounded(
+                &mut bytes,
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .bytes(),
+                work,
+            )
+            .await?;
             1
         }
         Value::StringArray(_) => {

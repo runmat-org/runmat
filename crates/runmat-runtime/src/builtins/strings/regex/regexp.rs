@@ -199,7 +199,7 @@ enum InputKind {
 
 #[derive(Debug, Clone)]
 struct SubjectCollection {
-    entries: Vec<runmat_value::Utf8Text>,
+    entries: Vec<runmat_value::StringElement>,
     rows: usize,
     cols: usize,
     /// The original shape owner, including every page. Scalar/char inputs use
@@ -266,7 +266,7 @@ fn collect_char_array(
         let text = runmat_value::decode_utf16_code_units(array.data())
             .map_err(|source| decode_error_for(builtin, source))?;
         return Ok(SubjectCollection {
-            entries: vec![runmat_value::Utf8Text::new(text)],
+            entries: vec![runmat_value::StringElement::text(text)],
             rows: 1,
             cols: 1,
             shape: None,
@@ -279,7 +279,7 @@ fn collect_char_array(
         let start = r * array.cols;
         let line = runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
             .map_err(|source| decode_error_for(builtin, source))?;
-        entries.push(runmat_value::Utf8Text::new(line));
+        entries.push(runmat_value::StringElement::text(line));
     }
     Ok(SubjectCollection {
         entries,
@@ -369,11 +369,11 @@ async fn collect_cell_array(
 fn extract_string(
     value: &Value,
     builtin: &'static str,
-) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
+) -> BuiltinResult<Option<runmat_value::StringElement>> {
     Ok(match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(runmat_value::Utf8Text::new(
+        Value::CharArray(ca) if ca.rows == 1 => Some(runmat_value::StringElement::text(
             runmat_value::decode_utf16_code_units(ca.data())
                 .map_err(|source| decode_error_for(builtin, source))?,
         )),
@@ -386,10 +386,8 @@ fn value_to_option_text<'a>(
     builtin: &'static str,
 ) -> BuiltinResult<Option<Cow<'a, str>>> {
     Ok(match value {
-        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Some(Cow::Borrowed(sa.data()[0].as_str()))
-        }
+        Value::String(s) => s.as_str().map(Cow::Borrowed),
+        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str().map(Cow::Borrowed),
         Value::CharArray(ca) if ca.rows == 1 => Some(Cow::Owned(
             runmat_value::decode_utf16_code_units(ca.data())
                 .map_err(|source| decode_error_for(builtin, source))?,
@@ -444,7 +442,10 @@ impl RegexpEvaluation {
                 format!("{builtin}: expected char vector or string pattern, got {pattern:?}"),
             )
         })?;
-        let mut builder = RegexBuilder::new(&pattern_str);
+        let pattern_str = pattern_str.as_str().ok_or_else(|| {
+            runtime_error_for(builtin, format!("{builtin}: pattern must not be missing"))
+        })?;
+        let mut builder = RegexBuilder::new(pattern_str);
         if options.case_insensitive {
             builder.case_insensitive(true);
         }
@@ -468,8 +469,15 @@ impl RegexpEvaluation {
                 .any(|spec| matches!(spec, OutputSpec::Split));
         let mut data = Vec::with_capacity(subjects.entries.len());
         for text in &subjects.entries {
-            let subject_data =
-                evaluate_subject(text, &regex, &named_groups, &options, compute_splits);
+            let subject_data = match text.as_str() {
+                Some(text) => {
+                    evaluate_subject(text, &regex, &named_groups, &options, compute_splits)
+                }
+                None => SubjectMatchData {
+                    matches: Vec::new(),
+                    splits: compute_splits.then(Vec::new),
+                },
+            };
             data.push(subject_data);
         }
         Ok(Self {

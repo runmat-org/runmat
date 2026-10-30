@@ -55,7 +55,9 @@ impl HostCallDomainFacts for ScalarComparisonWorkload {
 
 pub(crate) fn host_string_lengths(a: &Value, b: &Value) -> Option<(usize, usize)> {
     match (a, b) {
-        (Value::String(left), Value::String(right)) => Some((left.len(), right.len())),
+        (Value::String(left), Value::String(right)) => {
+            Some((left.as_str()?.len(), right.as_str()?.len()))
+        }
         _ => None,
     }
 }

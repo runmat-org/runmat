@@ -135,7 +135,7 @@ async fn prepare_with_inputs(
         for (name, value) in &options.fields {
             if name.eq_ignore_ascii_case("Solver") {
                 let text_carrier = match value {
-                    Value::String(_) => true,
+                    Value::String(runmat_value::StringElement::Text(_)) => true,
                     Value::StringArray(value) => value.data().len() == 1,
                     Value::CharArray(value) => value.rows == 1,
                     _ => false,
@@ -856,8 +856,10 @@ pub(crate) fn switch_value(name: &str, field: &str, value: &Value) -> BuiltinRes
             Value::Tensor(value) if tensor::is_scalar_tensor(value) => {
                 numeric(tensor::tensor_value_f64(value, 0))
             }
-            Value::String(value) => text(value),
-            Value::StringArray(values) if values.data().len() == 1 => text(&values.data()[0]),
+            Value::String(runmat_value::StringElement::Text(value)) => text(value),
+            Value::StringArray(values) if values.data().len() == 1 => {
+                values.data()[0].as_str().and_then(text)
+            }
             Value::CharArray(chars) if chars.rows == 1 => text(
                 &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                     crate::build_runtime_error(source.to_string())
@@ -880,6 +882,25 @@ pub(crate) fn switch_value(name: &str, field: &str, value: &Value) -> BuiltinRes
 mod tests {
     use super::*;
     use futures::executor::block_on;
+
+    #[test]
+    fn switches_reject_missing_without_conflating_literal_text() {
+        for (element, expected) in [
+            (runmat_value::StringElement::text("on"), Some(true)),
+            (runmat_value::StringElement::text("off"), Some(false)),
+            (runmat_value::StringElement::text("<missing>"), None),
+            (runmat_value::StringElement::Missing, None),
+        ] {
+            let scalar = Value::String(element.clone());
+            let array = Value::StringArray(
+                runmat_value::StringArray::from_elements_unbounded(vec![element], vec![1, 1])
+                    .unwrap(),
+            );
+            for value in [scalar, array] {
+                assert_eq!(switch_value("fsolve", "FunValCheck", &value).ok(), expected);
+            }
+        }
+    }
 
     #[test]
     fn preparation_preserves_public_keys_and_ignores_unconsumed_controls() {

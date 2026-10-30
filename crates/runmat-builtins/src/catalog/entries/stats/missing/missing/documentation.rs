@@ -5,7 +5,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("missing"),
     slug: Some("missing"),
     summary: "Create missing string scalars or arrays.",
-    description: "`missing` creates a 1-by-1 string array containing RunMat's canonical missing sentinel, `<missing>`. The documented MATLAB function takes no input arguments.",
+    description: "`missing` creates a 1-by-1 string array containing a typed missing element, displayed as `<missing>`. The documented MATLAB function takes no input arguments.",
     keywords: &["missing", "string", "missing values"],
     related: &["ismissing", "strings", "fillmissing", "rmmissing"],
     sections: &[

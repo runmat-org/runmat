@@ -94,7 +94,7 @@ pub fn duration_display_text(value: &Value) -> BuiltinResult<Option<String>> {
         return Ok(None);
     };
     if array.data().len() == 1 {
-        return Ok(Some(array.data()[0].as_str().to_owned()));
+        return Ok(Some(array.data()[0].display().to_string()));
     }
 
     let rows = array.rows;
@@ -103,7 +103,7 @@ pub fn duration_display_text(value: &Value) -> BuiltinResult<Option<String>> {
     for col in 0..cols {
         for row in 0..rows {
             let idx = row + col * rows;
-            widths[col] = widths[col].max(array.data()[idx].len());
+            widths[col] = widths[col].max(array.data()[idx].display().to_string().len());
         }
     }
 
@@ -115,8 +115,8 @@ pub fn duration_display_text(value: &Value) -> BuiltinResult<Option<String>> {
                 line.push_str("  ");
             }
             let idx = row + col * rows;
-            let text = &array.data()[idx];
-            line.push_str(text);
+            let text = array.data()[idx].display().to_string();
+            line.push_str(&text);
             let padding = widths[col].saturating_sub(text.len());
             if padding > 0 {
                 line.push_str(&" ".repeat(padding));
@@ -155,16 +155,25 @@ pub fn duration_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
     let Some(array) = duration_string_array(value)? else {
         return Ok(None);
     };
-    let width = array
-        .data()
-        .iter()
-        .map(|text| text.encode_utf16().count())
-        .max()
-        .unwrap_or(0);
+    let width = array.data().iter().try_fold(0usize, |width, text| {
+        duration_nonmissing_text(
+            text,
+            "character conversion",
+            DurationErrorKind::InvalidArgument,
+        )
+        .map(|text| width.max(text.encode_utf16().count()))
+    })?;
     let rows = array.data().len();
     let mut data = vec![runmat_value::Utf16CodeUnit::from_raw(b' ' as u16); rows * width];
     for (row, text) in array.data().iter().enumerate() {
-        for (col, unit) in text.encode_utf16().enumerate() {
+        for (col, unit) in duration_nonmissing_text(
+            text,
+            "character conversion",
+            DurationErrorKind::InvalidArgument,
+        )?
+        .encode_utf16()
+        .enumerate()
+        {
             data[row * width + col] = runmat_value::Utf16CodeUnit::from_raw(unit);
         }
     }

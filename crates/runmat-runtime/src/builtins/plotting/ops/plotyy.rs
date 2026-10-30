@@ -206,7 +206,7 @@ fn outputs(ax: Value, h1: Value, h2: Value) -> BuiltinResult<Value> {
 
 fn selector_from_value(value: &Value) -> BuiltinResult<PlotSelector> {
     let text = match value {
-        Value::String(text) => text.as_str().to_owned(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.as_str().to_owned(),
         Value::CharArray(chars) if chars.rows == 1 => {
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 crate::builtins::plotting::plotting_error_with_source(

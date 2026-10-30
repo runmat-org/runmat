@@ -405,9 +405,14 @@ pub(in crate::builtins::table) fn parse_rowfilter_selector(
                     Vec::new()
                 });
             }
-            Value::String(text) if text.is_empty() => {}
+            Value::String(text) if text.as_str().is_some_and(str::is_empty) => {}
             Value::String(text) => {
-                return evaluate_named_rowfilter(text, selector, object);
+                return evaluate_named_rowfilter(
+                    text.as_str()
+                        .ok_or_else(|| invalid_index("table: row selector must not be missing"))?,
+                    selector,
+                    object,
+                );
             }
             Value::CharArray(chars) if chars.rows == 1 => {
                 let text =
@@ -607,11 +612,11 @@ pub(in crate::builtins::table) fn numeric_cell_order_to_zero(
 pub(in crate::builtins::table) fn value_is_missing_scalar(value: &Value) -> bool {
     match value {
         Value::Num(value) => value.is_nan(),
-        Value::String(text) => text.is_empty() || text == "<missing>",
+        Value::String(text) => text.is_missing(),
         Value::StringArray(array) => array
             .data()
             .first()
-            .map(|text| text.is_empty())
+            .map(|text| text.is_missing())
             .unwrap_or(true),
         Value::CharArray(array) => array.data().iter().all(|ch| ch.is_whitespace()),
         Value::Tensor(tensor) => {

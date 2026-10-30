@@ -14,7 +14,7 @@ pub(super) fn parse_size_args(args: &[Value]) -> BuiltinResult<Vec<usize>> {
                 let n = scalar_usize(&args[0], "missing size")?;
                 return Ok(vec![n, n]);
             }
-            Value::String(s) if s.eq_ignore_ascii_case("like") => {
+            Value::String(s) if s.as_str().is_some_and(|s| s.eq_ignore_ascii_case("like")) => {
                 return Err(invalid_argument(
                     "missing: 'like' requires a prototype value",
                 ));
@@ -83,8 +83,11 @@ pub(super) fn tensor_shape_as_size(tensor: &Tensor) -> BuiltinResult<Vec<usize>>
 
 pub(super) fn missing_string_array(shape: Vec<usize>) -> BuiltinResult<Value> {
     let count = element_count(&shape)?;
-    let array =
-        StringArray::new(vec![MISSING_TEXT.to_string(); count], shape).map_err(internal_error)?;
+    let array = StringArray::from_elements_unbounded(
+        vec![runmat_value::StringElement::Missing; count],
+        shape,
+    )
+    .map_err(internal_error)?;
     Ok(Value::StringArray(array))
 }
 
@@ -107,7 +110,7 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             LogicalArray::new(
                 char_rows(array)?
                     .into_iter()
-                    .map(|text| u8::from(text.trim().is_empty() || is_missing_text(&text)))
+                    .map(|text| u8::from(text.trim().is_empty()))
                     .collect(),
                 vec![array.rows, 1],
             )

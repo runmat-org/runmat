@@ -1,11 +1,12 @@
 //! MATLAB-compatible `extractBetween` builtin with GPU-aware semantics for RunMat.
 
+use runmat_value::StringElement;
 use std::cmp::min;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{
-    cell_contains_string, char_row_to_string_slice, is_missing_string, is_multirow_char_array,
+    cell_contains_string, char_row_to_string_slice, is_multirow_char_array,
 };
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
@@ -375,8 +376,8 @@ async fn parse_boundaries_option(
 
 fn value_to_string(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::String(s) => s.as_str().map(str::to_owned),
+        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str().map(str::to_owned),
         Value::CharArray(ca) if ca.rows <= 1 => {
             if ca.rows == 0 {
                 Some(String::new())
@@ -402,30 +403,33 @@ fn value_to_string(value: &Value) -> BuiltinResult<Option<String>> {
 
 #[derive(Clone)]
 struct ExtractResult {
-    text: String,
+    text: StringElement,
 }
 
 impl ExtractResult {
     fn missing() -> Self {
         Self {
-            text: "<missing>".to_string(),
+            text: StringElement::Missing,
         }
     }
 
     fn text(text: String) -> Self {
-        Self { text }
+        Self {
+            text: StringElement::text(text),
+        }
     }
 }
 
 fn extract_with_text_boundaries(
-    text: &str,
-    start: &str,
-    stop: &str,
+    text: &StringElement,
+    start: &StringElement,
+    stop: &StringElement,
     mode: BoundariesMode,
 ) -> ExtractResult {
-    if is_missing_string(text) || is_missing_string(start) || is_missing_string(stop) {
+    let (Some(text), Some(start), Some(stop)) = (text.as_str(), start.as_str(), stop.as_str())
+    else {
         return ExtractResult::missing();
-    }
+    };
 
     if let Some(start_idx) = text.find(start) {
         let search_start = start_idx + start.len();
@@ -458,14 +462,14 @@ fn extract_with_text_boundaries(
 }
 
 fn extract_with_positions(
-    text: &str,
+    text: &StringElement,
     start: usize,
     stop: usize,
     mode: BoundariesMode,
 ) -> ExtractResult {
-    if is_missing_string(text) {
+    let Some(text) = text.as_str() else {
         return ExtractResult::missing();
-    }
+    };
     if text.is_empty() {
         return ExtractResult::text(String::new());
     }
@@ -533,7 +537,7 @@ enum TextKind {
 
 #[derive(Clone, Debug)]
 struct NormalizedText {
-    data: Vec<String>,
+    data: Vec<StringElement>,
     shape: Vec<usize>,
     kind: TextKind,
 }
@@ -542,16 +546,12 @@ impl NormalizedText {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
-                data: vec![s.as_str().to_owned()],
+                data: vec![s],
                 shape: vec![1, 1],
                 kind: TextKind::StringScalar,
             }),
             Value::StringArray(sa) => Ok(Self {
-                data: sa
-                    .data()
-                    .iter()
-                    .map(|text| text.as_str().to_owned())
-                    .collect(),
+                data: sa.data().iter().cloned().collect(),
                 shape: sa.shape.to_vec(),
                 kind: TextKind::StringArray,
             }),
@@ -559,17 +559,19 @@ impl NormalizedText {
                 let rows = ca.rows.max(1);
                 let mut data = Vec::with_capacity(rows);
                 if ca.rows == 0 {
-                    data.push(String::new());
+                    data.push(StringElement::text(""));
                 } else {
                     for row in 0..ca.rows {
-                        data.push(char_row_to_string_slice(ca.data(), ca.cols, row).map_err(
-                            |e| {
-                                extract_between_error_with_message(
-                                    format!("{BUILTIN_NAME}: {e}"),
-                                    &EXTRACT_BETWEEN_ERROR_INTERNAL,
-                                )
-                            },
-                        )?);
+                        data.push(
+                            char_row_to_string_slice(ca.data(), ca.cols, row)
+                                .map(StringElement::text)
+                                .map_err(|e| {
+                                    extract_between_error_with_message(
+                                        format!("{BUILTIN_NAME}: {e}"),
+                                        &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                                    )
+                                })?,
+                        );
                     }
                 }
                 Ok(Self {
@@ -610,7 +612,7 @@ impl NormalizedText {
         &self.shape
     }
 
-    fn data(&self, idx: usize) -> &str {
+    fn data(&self, idx: usize) -> &StringElement {
         &self.data[idx]
     }
 
@@ -635,26 +637,28 @@ impl NormalizedText {
                         .into_iter()
                         .next()
                         .unwrap_or_else(|| ExtractResult::text(String::new()));
-                    Ok(Value::string(value.text))
+                    Ok(Value::String(value.text))
                 } else {
                     let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
-                    let array = StringArray::new(data, output_shape).map_err(|e| {
-                        extract_between_error_with_message(
-                            format!("{BUILTIN_NAME}: {e}"),
-                            &EXTRACT_BETWEEN_ERROR_INTERNAL,
-                        )
-                    })?;
+                    let array =
+                        StringArray::from_elements_unbounded(data, output_shape).map_err(|e| {
+                            extract_between_error_with_message(
+                                format!("{BUILTIN_NAME}: {e}"),
+                                &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                            )
+                        })?;
                     Ok(Value::StringArray(array))
                 }
             }
             TextKind::StringArray => {
                 let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
-                let array = StringArray::new(data, output_shape).map_err(|e| {
-                    extract_between_error_with_message(
-                        format!("{BUILTIN_NAME}: {e}"),
-                        &EXTRACT_BETWEEN_ERROR_INTERNAL,
-                    )
-                })?;
+                let array =
+                    StringArray::from_elements_unbounded(data, output_shape).map_err(|e| {
+                        extract_between_error_with_message(
+                            format!("{BUILTIN_NAME}: {e}"),
+                            &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                        )
+                    })?;
                 Ok(Value::StringArray(array))
             }
             TextKind::CharArray { rows } => {
@@ -668,7 +672,10 @@ impl NormalizedText {
                         .unwrap_or_else(|| ExtractResult::text(String::new()))
                         .text;
                     return make_cell_with_shape(
-                        vec![Value::CharArray(CharArray::new_row(&text))],
+                        vec![match text.as_str() {
+                            Some(text) => Value::CharArray(CharArray::new_row(text)),
+                            None => Value::String(StringElement::Missing),
+                        }],
                         vec![1, 1],
                     )
                     .map_err(|e| {
@@ -681,13 +688,20 @@ impl NormalizedText {
                 let mut max_width = 0usize;
                 let mut row_strings = Vec::with_capacity(rows);
                 for result in &results {
-                    let width = result.text.encode_utf16().count();
+                    let width = result
+                        .text
+                        .as_str()
+                        .ok_or_else(|| extract_between_error(&EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE))?
+                        .encode_utf16()
+                        .count();
                     max_width = max_width.max(width);
                     row_strings.push(result.text.clone());
                 }
                 let mut flattened = Vec::with_capacity(rows * max_width);
                 for row in row_strings {
                     let mut units = row
+                        .as_str()
+                        .ok_or_else(|| extract_between_error(&EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE))?
                         .encode_utf16()
                         .map(runmat_value::Utf16CodeUnit::from_raw)
                         .collect::<Vec<_>>();
@@ -715,10 +729,12 @@ impl NormalizedText {
                 let mut values = Vec::with_capacity(results.len());
                 for (idx, result) in results.into_iter().enumerate() {
                     match info.element_kinds[idx] {
-                        CellElementKind::String => values.push(Value::string(result.text)),
+                        CellElementKind::String => values.push(Value::String(result.text)),
                         CellElementKind::Char => {
-                            let ca = CharArray::new_row(&result.text);
-                            values.push(Value::CharArray(ca));
+                            values.push(match result.text.as_str() {
+                                Some(text) => Value::CharArray(CharArray::new_row(text)),
+                                None => Value::String(StringElement::Missing),
+                            });
                         }
                     }
                 }
@@ -778,7 +794,7 @@ impl BoundaryArg {
         }
     }
 
-    fn text(&self, idx: usize) -> &str {
+    fn text(&self, idx: usize) -> &StringElement {
         match self {
             BoundaryArg::Text(text) => &text.data[idx],
             BoundaryArg::Position(_) => unreachable!(),
@@ -795,7 +811,7 @@ impl BoundaryArg {
 
 #[derive(Clone, Debug)]
 struct BoundaryText {
-    data: Vec<String>,
+    data: Vec<StringElement>,
     shape: Vec<usize>,
 }
 
@@ -803,27 +819,25 @@ impl BoundaryText {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
-                data: vec![s.as_str().to_owned()],
+                data: vec![s],
                 shape: vec![1, 1],
             }),
             Value::StringArray(sa) => Ok(Self {
-                data: sa
-                    .data()
-                    .iter()
-                    .map(|text| text.as_str().to_owned())
-                    .collect(),
+                data: sa.data().iter().cloned().collect(),
                 shape: sa.shape.to_vec(),
             }),
             Value::CharArray(ca) => {
                 let mut data = Vec::with_capacity(ca.rows);
                 for row in 0..ca.rows {
                     data.push(
-                        char_row_to_string_slice(ca.data(), ca.cols, row).map_err(|e| {
-                            extract_between_error_with_message(
-                                format!("{BUILTIN_NAME}: {e}"),
-                                &EXTRACT_BETWEEN_ERROR_INTERNAL,
-                            )
-                        })?,
+                        char_row_to_string_slice(ca.data(), ca.cols, row)
+                            .map(StringElement::text)
+                            .map_err(|e| {
+                                extract_between_error_with_message(
+                                    format!("{BUILTIN_NAME}: {e}"),
+                                    &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                                )
+                            })?,
                     );
                 }
                 Ok(Self {

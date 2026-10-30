@@ -136,7 +136,7 @@ pub(super) async fn get(
         }
         Property::ObjectiveSense => match &current.sense {
             Senses::Uniform(sense) => RootedValue::in_optional_context(
-                Value::String(Utf8Text::new(sense.name().to_owned())),
+                Value::String(Utf8Text::new(sense.name().to_owned()).into()),
                 cooperation.runtime(),
             ),
             Senses::Named(fields) => {
@@ -144,7 +144,7 @@ pub(super) async fn get(
                     .map_err(|e| policy.storage(e))?;
                 for (_, sense) in fields {
                     roots.push(RootedValue::in_optional_context(
-                        Value::String(Utf8Text::new(sense.name().to_owned())),
+                        Value::String(Utf8Text::new(sense.name().to_owned()).into()),
                         cooperation.runtime(),
                     )?);
                     cooperation.completed(1).await?;

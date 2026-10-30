@@ -1,9 +1,9 @@
-use runmat_value::{CellArray, StringArray, Utf8Text, Value};
+use runmat_value::{CellArray, StringArray, StringElement, Value};
 
 use crate::builtins::structs::field_name;
 
 pub(super) enum Query {
-    Scalar(Utf8Text),
+    Scalar(StringElement),
     Strings(StringArray),
     Collection {
         names: Vec<String>,
@@ -19,7 +19,7 @@ pub(super) fn parse(value: Value) -> crate::BuiltinResult<Query> {
                 array.data(),
                 super::error::field_name_type,
             )
-            .map(|name| Query::Scalar(Utf8Text::new(name)))
+            .map(|name| Query::Scalar(StringElement::text(name)))
         }
         Value::CharArray(_) => Err(super::error::field_name_type()),
         Value::StringArray(array) => Ok(Query::Strings(array)),

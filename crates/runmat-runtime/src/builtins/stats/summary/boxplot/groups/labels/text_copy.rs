@@ -11,63 +11,6 @@ enum TextSource<'a> {
     CharacterRow { array: &'a CharArray, row: usize },
 }
 
-#[derive(Default)]
-struct TextPresence {
-    significant: usize,
-    seen_non_space: bool,
-    gap: bool,
-    angle_missing: bool,
-    angle_undefined: bool,
-    bare_missing: bool,
-}
-
-impl TextPresence {
-    fn new() -> Self {
-        Self {
-            angle_missing: true,
-            angle_undefined: true,
-            bare_missing: true,
-            ..Self::default()
-        }
-    }
-
-    fn observe(&mut self, character: char) {
-        if character.is_whitespace() {
-            self.gap |= self.seen_non_space;
-            return;
-        }
-        if self.gap {
-            self.angle_missing = false;
-            self.angle_undefined = false;
-            self.bare_missing = false;
-        }
-        self.seen_non_space = true;
-        self.angle_missing &= matches_ascii_at("<missing>", self.significant, character, false);
-        self.angle_undefined &= matches_ascii_at("<undefined>", self.significant, character, false);
-        self.bare_missing &= matches_ascii_at("missing", self.significant, character, true);
-        self.significant = self.significant.saturating_add(1);
-        self.gap = false;
-    }
-
-    fn present(&self) -> bool {
-        self.seen_non_space
-            && !(self.angle_missing && self.significant == "<missing>".len())
-            && !(self.angle_undefined && self.significant == "<undefined>".len())
-            && !(self.bare_missing && self.significant == "missing".len())
-    }
-}
-
-fn matches_ascii_at(token: &str, position: usize, character: char, ignore_case: bool) -> bool {
-    token.as_bytes().get(position).is_some_and(|expected| {
-        character.is_ascii()
-            && (if ignore_case {
-                character.to_ascii_lowercase() as u8
-            } else {
-                character as u8
-            }) == *expected
-    })
-}
-
 pub(super) enum TextCopyProgress {
     Work(u64),
     Complete(Option<String>),
@@ -78,27 +21,23 @@ pub(super) struct TextCopy<'a> {
     cursor: usize,
     output: String,
     last_non_space_end: usize,
-    presence: TextPresence,
-    honor_missing: bool,
 }
 
 impl<'a> TextCopy<'a> {
-    pub(super) fn utf8(text: &'a str, honor_missing: bool) -> Self {
-        Self::new(TextSource::Utf8(text), honor_missing)
+    pub(super) fn utf8(text: &'a str) -> Self {
+        Self::new(TextSource::Utf8(text))
     }
 
     pub(super) fn character_row(array: &'a CharArray, row: usize) -> Self {
-        Self::new(TextSource::CharacterRow { array, row }, true)
+        Self::new(TextSource::CharacterRow { array, row })
     }
 
-    fn new(source: TextSource<'a>, honor_missing: bool) -> Self {
+    fn new(source: TextSource<'a>) -> Self {
         Self {
             source,
             cursor: 0,
             output: String::new(),
             last_non_space_end: 0,
-            presence: TextPresence::new(),
-            honor_missing,
         }
     }
 
@@ -111,9 +50,14 @@ impl<'a> TextCopy<'a> {
                     self.output.truncate(self.last_non_space_end);
                 }
                 let text = std::mem::take(&mut self.output);
-                return Ok(TextCopyProgress::Complete(
-                    (!self.honor_missing || self.presence.present()).then_some(text),
-                ));
+                // Typed absence is handled before text copying. Empty strings
+                // and blank character rows are omitted by boxplot's grouping
+                // contract; present spellings never encode missingness.
+                let present = match self.source {
+                    TextSource::Utf8(_) => !text.is_empty(),
+                    TextSource::CharacterRow { .. } => self.last_non_space_end != 0,
+                };
+                return Ok(TextCopyProgress::Complete(present.then_some(text)));
             };
             let bytes = character.len_utf8();
             if self.output.capacity() - self.output.len() < bytes {
@@ -122,7 +66,6 @@ impl<'a> TextCopy<'a> {
                 })?;
             }
             self.output.push(character);
-            self.presence.observe(character);
             if !character.is_whitespace() {
                 self.last_non_space_end = self.output.len();
             }
@@ -203,15 +146,15 @@ mod tests {
     fn incremental_missing_classification_matches_public_text_policy() {
         for (text, present) in [
             ("", false),
-            ("  ", false),
-            ("<missing>", false),
-            ("<undefined>", false),
-            (" MiSsInG  ", false),
+            ("  ", true),
+            ("<missing>", true),
+            ("<undefined>", true),
+            (" MiSsInG  ", true),
             ("missing text", true),
             ("å missing", true),
             ("A", true),
         ] {
-            let mut copy = TextCopy::utf8(text, true);
+            let mut copy = TextCopy::utf8(text);
             let copied = loop {
                 match copy.step().unwrap() {
                     TextCopyProgress::Work(_) => {}
@@ -225,7 +168,7 @@ mod tests {
     #[test]
     fn long_unicode_and_character_rows_copy_in_bounded_steps_without_changing_text() {
         let original = "💠é".repeat(400);
-        let mut copy = TextCopy::utf8(&original, true);
+        let mut copy = TextCopy::utf8(&original);
         let mut turns = 0;
         let result = loop {
             match copy.step().unwrap() {

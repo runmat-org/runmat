@@ -78,7 +78,7 @@ fn ensure_class_registered() {
 
 fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars) => char_array_text(chars, name),
         Value::StringArray(array) => string_array_text(array, name),
         _ => Err(error(
@@ -109,7 +109,12 @@ fn string_array_text(array: &StringArray, name: &str) -> BuiltinResult<String> {
             format!("{name} must be a scalar string"),
         ));
     }
-    Ok(array.data()[0].as_str().to_owned())
+    array.data()[0].as_str().map(str::to_owned).ok_or_else(|| {
+        error(
+            &DATA_TIP_ERROR_INVALID_ARGUMENT,
+            format!("{name} must be a scalar string"),
+        )
+    })
 }
 
 #[runtime_builtin(
@@ -174,7 +179,9 @@ fn vector_shape(shape: &[usize]) -> bool {
 fn validate_value_source(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::String(_) | Value::CharArray(_) => Ok(()),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(())
+        }
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

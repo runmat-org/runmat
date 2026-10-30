@@ -185,6 +185,28 @@ fn division_hook_broadcasts_without_replicating_inputs() {
 fn representation_and_shape_rejections_do_not_claim_hook_support() {
     let provider = InProcessProvider::new();
     let snapshot = snapshot(&provider);
+    // Original mixed representations are admitted in either public operand
+    // order, including native broadcast; publication is Single for all five
+    // operations (the Double intermediate is not an input pre-cast).
+    for &operation in OPERATIONS {
+        for single_index in 0..2 {
+            let mut request = query(operation);
+            request.inputs[0].shape = vec![2, 1];
+            request.inputs[1].shape = vec![1, 3];
+            for input in &mut request.inputs {
+                input.residency = ProviderResidency::Device;
+            }
+            request.inputs[single_index].element_type = ProviderElementType::F32;
+            let mut output = representation(&[2, 3]);
+            output.residency = ProviderResidency::Device;
+            request.outputs = vec![output];
+            assert!(!provider.query_feasibility(&request).is_supported());
+            request.outputs[0].element_type = ProviderElementType::F32;
+            assert!(provider.query_feasibility(&request).is_supported());
+            request.inputs[single_index].layout = ProviderLayout::Opaque;
+            assert!(!provider.query_feasibility(&request).is_supported());
+        }
+    }
     for element_type in [ProviderElementType::U64, ProviderElementType::ComplexF64] {
         let mut request = query(Operation::Add);
         request.inputs[0].element_type = element_type;

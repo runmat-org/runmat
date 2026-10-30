@@ -48,7 +48,10 @@ fn exact(value: &Value) -> LiteralValue {
         Value::Num(value) => LiteralValue::Number(*value),
         Value::Int(value) => integer(value.clone()),
         Value::Bool(value) => LiteralValue::Bool(*value),
-        Value::String(value) => LiteralValue::String(value.as_str().to_owned()),
+        Value::String(value) => value
+            .as_str()
+            .map(|text| LiteralValue::String(text.to_owned()))
+            .unwrap_or(LiteralValue::Unknown),
         Value::Tensor(tensor) if tensor.len() == 1 => tensor
             .numeric_value_at(0)
             .map(scalar)

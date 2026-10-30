@@ -379,7 +379,7 @@ fn sample_string_axis(
     let mut out_shape = shape.clone();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
-    let mut out = vec![runmat_value::Utf8Text::default(); out_len];
+    let mut out = vec![runmat_value::StringElement::default(); out_len];
     let pre: usize = shape[..axis].iter().product();
     let axis_len = shape[axis];
     let post: usize = shape[axis + 1..].iter().product();
@@ -393,7 +393,7 @@ fn sample_string_axis(
         }
     }
     Ok(Value::StringArray(
-        StringArray::from_texts_unbounded(out, out_shape)
+        StringArray::from_elements_unbounded(out, out_shape)
             .map_err(|err| sampling_error(_name, format!("{_name}: {err}")))?,
     ))
 }
@@ -510,7 +510,7 @@ fn sample_value_axis(
             name,
         ),
         Value::String(value) => sample_string_axis(
-            &StringArray::from_texts_unbounded(vec![value], vec![1, 1])
+            &StringArray::from_elements_unbounded(vec![value], vec![1, 1])
                 .map_err(|err| sampling_error(name, format!("{name}: {err}")))?,
             axis,
             indices,
@@ -1405,7 +1405,7 @@ fn is_empty_function(value: &Value) -> bool {
         Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(a) => a.data.is_empty(),
         Value::Cell(c) => c.data().is_empty(),
-        Value::String(s) => s.is_empty(),
+        Value::String(runmat_value::StringElement::Text(s)) => s.is_empty(),
         Value::StringArray(a) => a.data().is_empty(),
         Value::CharArray(a) => a.data().is_empty(),
         _ => false,

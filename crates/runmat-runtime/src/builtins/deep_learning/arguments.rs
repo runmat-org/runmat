@@ -5,7 +5,7 @@ pub(in crate::builtins) fn scalar_text(
     function: &'static str,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.to_string()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.to_string()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
             chars.data(),
         )
@@ -14,7 +14,12 @@ pub(in crate::builtins) fn scalar_text(
             error.source = Some(Box::new(source));
             error
         })?),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .as_str()
+                .expect("nonmissing scalar text")
+                .to_owned())
+        }
         other => Err(deep_learning_error(
             function,
             format!("{function}: expected text scalar, got {other:?}"),

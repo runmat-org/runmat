@@ -75,7 +75,8 @@ pub(super) fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
                 .flatten()
                 .unwrap_or_else(|| value.to_string())],
         },
-        Value::String(text) => match mode {
+        Value::String(runmat_value::StringElement::Missing) => vec!["<missing>".to_owned()],
+        Value::String(runmat_value::StringElement::Text(text)) => match mode {
             RenderMode::TopLevel => split_lines(text),
             RenderMode::Nested => vec![quote_double(text)],
         },

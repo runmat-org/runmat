@@ -116,6 +116,30 @@ impl ExecutableUnit {
             .map_or(&[], |selection| &selection.targets)
     }
 
+    pub(crate) fn original_static_imports(&self) -> &[ExecutableStaticImport] {
+        self.portable_selection
+            .as_ref()
+            .map_or(&[], |selection| selection.imports.as_slice())
+    }
+
+    /// Restore the existing selection from VM-admitted sites without claiming
+    /// that any old runtime definition/source leases survived transport.
+    pub(super) fn with_admitted_portable_selection(
+        mut self,
+        current: HashSet<FunctionId>,
+        imports: Vec<ExecutableStaticImport>,
+    ) -> Result<Self, String> {
+        if current != self.compiled_current_body_ids()? {
+            return Err("admitted selection differs from its original compiled bodies".into());
+        }
+        self.portable_selection = Some(Rc::new(PortableSelection {
+            current,
+            imports,
+            targets: Vec::new(),
+        }));
+        Ok(self)
+    }
+
     pub(crate) fn compiled_current_body_ids(&self) -> Result<HashSet<FunctionId>, String> {
         Ok(self
             .compiled_product_owners()?

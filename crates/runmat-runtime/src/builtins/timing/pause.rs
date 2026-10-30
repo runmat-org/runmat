@@ -185,7 +185,7 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         .await
         .map_err(|e| pause_error_with_message(format!("pause: {e}"), &PAUSE_ERROR_GATHER_FAILED))?;
     match host_value {
-        Value::String(text) => parse_command(&text),
+        Value::String(runmat_value::StringElement::Text(text)) => parse_command(&text),
         Value::CharArray(ca) => {
             if ca.rows == 0 || ca.data().is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
@@ -209,7 +209,12 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
             if sa.data().is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
             } else if sa.data().len() == 1 {
-                parse_command(&sa.data()[0])
+                parse_command(sa.data()[0].as_str().ok_or_else(|| {
+                    pause_error_with_message(
+                        PAUSE_ERROR_INVALID_ARG.message,
+                        &PAUSE_ERROR_INVALID_ARG,
+                    )
+                })?)
             } else {
                 Err(pause_error_with_message(
                     PAUSE_ERROR_INVALID_ARG.message,
@@ -226,7 +231,8 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             parse_tensor(tensor)
         }
-        Value::Complex(_, _)
+        Value::String(runmat_value::StringElement::Missing)
+        | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)

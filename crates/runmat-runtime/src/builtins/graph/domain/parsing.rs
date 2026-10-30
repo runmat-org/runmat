@@ -162,12 +162,18 @@ pub(super) fn parse_node_names(
 
 pub(super) fn parse_string_vector(value: &Value) -> Result<Vec<String>, String> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
-        Value::StringArray(array) if is_vector_shape(&array.shape) => Ok(array
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
+        Value::StringArray(array) if is_vector_shape(&array.shape) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "expected nonmissing text".to_owned())
+            })
+            .collect(),
         Value::CharArray(chars) if chars.rows == 1 => {
             Ok(vec![runmat_value::decode_utf16_code_units(chars.data())
                 .map_err(|source| source.to_string())?])
@@ -203,9 +209,15 @@ pub(super) fn is_vector_shape(shape: &[usize]) -> bool {
 
 pub(super) fn scalar_text(value: &Value) -> Result<Option<String>, String> {
     Ok(match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+        Value::String(runmat_value::StringElement::Text(text)) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            )
         }
         Value::CharArray(chars) if chars.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(chars.data())

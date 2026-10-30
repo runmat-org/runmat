@@ -86,7 +86,10 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
         Value::Int(v) => Ok(vec![ValidationAtom::Integer(v.clone())]),
         Value::Bool(v) => Ok(vec![ValidationAtom::Bool(*v)]),
         Value::Complex(re, im) => Ok(vec![ValidationAtom::ComplexNumber(*re, *im)]),
-        Value::String(s) => Ok(vec![ValidationAtom::Text(s.as_str().to_owned())]),
+        Value::String(s) => Ok(vec![s
+            .as_str()
+            .map(|text| ValidationAtom::Text(text.to_owned()))
+            .unwrap_or(ValidationAtom::MissingString)]),
         Value::CharArray(c) if c.rows == 1 => Ok(vec![ValidationAtom::Text(chars_to_string(c)?)]),
         Value::Tensor(t) => {
             if let Some(storage) = t.integer_storage() {
@@ -133,7 +136,11 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
         Value::StringArray(s) => Ok(s
             .data()
             .iter()
-            .map(|text| ValidationAtom::Text(text.as_str().to_owned()))
+            .map(|text| {
+                text.as_str()
+                    .map(|text| ValidationAtom::Text(text.to_owned()))
+                    .unwrap_or(ValidationAtom::MissingString)
+            })
             .collect()),
         Value::Cell(c) => {
             let mut out = Vec::new();

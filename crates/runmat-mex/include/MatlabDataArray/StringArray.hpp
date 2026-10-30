@@ -14,8 +14,13 @@ namespace detail {
 inline MATLABString readString(const Array &array, std::size_t index) {
     const mxArray *native = ArrayAccess::native(array);
     const std::size_t length = runmatDataArrayStringLength(native, index);
+    // ABI status lengths are not text spellings: MAX is an error, MAX-1 is
+    // typed absence. All UTF-16 payloads, including "<missing>", are text.
     if (length == std::numeric_limits<std::size_t>::max()) {
         throw InvalidArrayTypeException("could not read string array element");
+    }
+    if (length == std::numeric_limits<std::size_t>::max() - 1) {
+        return MATLABString();
     }
     String value(length, u'\0');
     if (runmatDataArrayCopyString(native, index,
@@ -23,19 +28,16 @@ inline MATLABString readString(const Array &array, std::size_t index) {
                                   length) != 0) {
         throw InvalidArrayTypeException("could not read string array element");
     }
-    if (value == u"<missing>") return MATLABString();
     return MATLABString(std::move(value));
 }
 
 inline void writeString(Array &array, std::size_t index,
                         const MATLABString &value) {
-    static const String missing = u"<missing>";
-    const String &stored = value ? *value : missing;
     ArrayAccess::ensureWritable(array);
     if (runmatDataArraySetString(
             ArrayAccess::native(array), index,
-            reinterpret_cast<const unsigned short *>(stored.data()),
-            stored.size()) != 0) {
+            value ? reinterpret_cast<const unsigned short *>(value->data()) : nullptr,
+            value ? value->size() : std::numeric_limits<std::size_t>::max()) != 0) {
         throw InvalidArrayTypeException("could not write string array element");
     }
 }

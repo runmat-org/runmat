@@ -320,8 +320,12 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
             Value::StringArray(strings) => strings
                 .data()
                 .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
+                .map(|text| {
+                    text.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| invalid_argument("-regexp pattern must be text"))
+                })
+                .collect::<crate::BuiltinResult<Vec<_>>>()?,
             _ => vec![text_scalar(value)?
                 .ok_or_else(|| invalid_argument("-regexp pattern must be text"))?],
         };
@@ -510,16 +514,22 @@ fn values_match(property: &str, actual: &Value, expected: &Value) -> crate::Buil
             (Value::Int(left), Value::Int(right)) => left == right,
             (Value::Num(_), Value::Int(_)) | (Value::Int(_), Value::Num(_)) => false,
             (Value::Bool(left), Value::Bool(right)) => left == right,
-            (Value::String(left), Value::String(right)) => left == right,
+            (Value::String(left), Value::String(right)) => {
+                !left.is_missing() && !right.is_missing() && left == right
+            }
             (Value::CharArray(left), Value::CharArray(right)) => left.data() == right.data(),
-            (Value::String(left), Value::CharArray(right)) => left
-                .encode_utf16()
-                .eq(right.data().iter().map(|unit| unit.raw())),
-            (Value::CharArray(left), Value::String(right)) => left
-                .data()
-                .iter()
-                .map(|unit| unit.raw())
-                .eq(right.encode_utf16()),
+            (Value::String(left), Value::CharArray(right)) => left.as_str().is_some_and(|left| {
+                left.encode_utf16()
+                    .eq(right.data().iter().map(|unit| unit.raw()))
+            }),
+            (Value::CharArray(left), Value::String(right)) => {
+                left.data().iter().map(|unit| unit.raw()).eq(right
+                    .as_str()
+                    .map(str::encode_utf16)
+                    .into_iter()
+                    .flatten())
+                    && !right.is_missing()
+            }
             (Value::Tensor(left), Value::Tensor(right)) => {
                 left.shape() == right.shape() && tensor_values_match(left, right)
             }
@@ -602,8 +612,14 @@ fn color_from_bracketed_text(text: &str) -> Option<glam::Vec4> {
 fn on_off_bool(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(value) => Some(*value),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            match array.data()[0].trim().to_ascii_lowercase().as_str() {
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            match array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
                 "on" | "true" => Some(true),
                 "off" | "false" => Some(false),
                 _ => None,
@@ -626,7 +642,7 @@ fn on_off_bool(value: &Value) -> Option<bool> {
 fn value_matches_regex(value: &Value, regexes: &[Regex]) -> crate::BuiltinResult<bool> {
     let matches = |text: &str| regexes.iter().any(|regex| regex.is_match(text));
     Ok(match value {
-        Value::String(text) => matches(text.as_str()),
+        Value::String(runmat_value::StringElement::Text(text)) => matches(text.as_str()),
         Value::CharArray(chars) => matches(
             &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 let mut error = invalid_argument(source.to_string());
@@ -634,7 +650,10 @@ fn value_matches_regex(value: &Value, regexes: &[Regex]) -> crate::BuiltinResult
                 error
             })?,
         ),
-        Value::StringArray(strings) => strings.data().iter().any(|text| matches(text.as_str())),
+        Value::StringArray(strings) => strings
+            .data()
+            .iter()
+            .any(|text| text.as_str().is_some_and(|text| matches(text))),
         Value::Cell(cell) => {
             for child in cell.data() {
                 if value_matches_regex(child, regexes)? {
@@ -649,7 +668,7 @@ fn value_matches_regex(value: &Value, regexes: &[Regex]) -> crate::BuiltinResult
 
 fn single_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Some(text.as_str().to_owned()),
         Value::CharArray(chars) => Some(
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 let mut error = invalid_argument(source.to_string());
@@ -657,8 +676,13 @@ fn single_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
                 error
             })?,
         ),
-        Value::StringArray(strings) if strings.data().len() == 1 => {
-            strings.data().first().map(|text| text.as_str().to_owned())
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && !strings.data()[0].is_missing() =>
+        {
+            strings
+                .data()
+                .first()
+                .and_then(|text| text.as_str().map(str::to_owned))
         }
         _ => None,
     })

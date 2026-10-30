@@ -209,14 +209,16 @@ impl ImageSourceGeometry {
         {
             let mut one = RequestedBytes::default();
             match value {
-                Value::String(text) => one
-                    .add(u64::try_from(text.len()).map_err(|_| PreparationBoundError::Overflow)?)?,
+                Value::String(text) => one.add(
+                    u64::try_from(text.as_str().map_or(0, str::len))
+                        .map_err(|_| PreparationBoundError::Overflow)?,
+                )?,
                 Value::StringArray(array) => {
                     one.vector::<usize>(array.shape.len())?;
-                    one.vector::<String>(array.data().len())?;
+                    one.vector::<runmat_value::StringElement>(array.data().len())?;
                     for text in array.data() {
                         one.add(
-                            u64::try_from(text.len())
+                            u64::try_from(text.as_str().map_or(0, str::len))
                                 .map_err(|_| PreparationBoundError::Overflow)?,
                         )?;
                     }

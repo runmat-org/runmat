@@ -155,11 +155,18 @@ fn parse_text_scalar(
     descriptor: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
         Value::CharArray(chars) if chars.rows == 1 => {
             char_row_to_string(chars, label, descriptor).map(Into::into)
         }
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].text_ref().cloned().ok_or_else(|| {
+                error(
+                    format!("optimizableVariable: {label} must be a text scalar"),
+                    descriptor,
+                )
+            })
+        }
         other => Err(error(
             format!("optimizableVariable: {label} must be a text scalar, got {other:?}"),
             descriptor,

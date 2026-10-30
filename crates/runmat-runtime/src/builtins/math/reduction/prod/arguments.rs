@@ -16,9 +16,16 @@ pub(super) struct ParsedArguments {
 }
 fn control(value: &Value) -> Option<ProductControl> {
     match value {
-        Value::String(text) => ProductControl::from_public_option(text.as_str()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            ProductControl::from_public_option(array.data()[0].as_str())
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            ProductControl::from_public_option(text.as_str())
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            ProductControl::from_public_option(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            )
         }
         Value::CharArray(array)
             if array.rows == 1

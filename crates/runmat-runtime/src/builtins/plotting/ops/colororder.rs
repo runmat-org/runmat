@@ -154,7 +154,16 @@ fn parse_color_order(value: &Value) -> BuiltinResult<Vec<Vec4>> {
             }
             colors_from_tensor(tensor)
         }
-        Value::StringArray(strings) => colors_from_strings(strings.data()),
+        Value::StringArray(strings) => colors_from_strings(
+            &strings
+                .data()
+                .iter()
+                .map(|text| {
+                    text.as_str()
+                        .ok_or_else(|| colororder_err("unsupported color order value"))
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
+        ),
         Value::Cell(cell) => colors_from_cell(cell),
         Value::GpuTensor(_) => Err(colororder_err(
             "color arrays must be host scalars, strings, cell strings, or numeric RGB matrices",

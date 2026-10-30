@@ -1,11 +1,11 @@
-use runmat_value::{IntValue, NumericStorage, StringArray, Tensor, Utf8Text, Value};
+use runmat_value::{IntValue, NumericStorage, StringArray, StringElement, Tensor, Value};
 
 use crate::BuiltinResult;
 
 use super::error;
 
 pub(super) enum Labels {
-    Text(Vec<Utf8Text>),
+    Text(Vec<StringElement>),
     Numeric(NumericStorage),
 }
 
@@ -64,10 +64,10 @@ impl Labels {
                     .iter()
                     .map(|bin| {
                         bin.and_then(|index| labels.get(index - 1).cloned())
-                            .unwrap_or_default()
+                            .unwrap_or(StringElement::Missing)
                     })
                     .collect();
-                StringArray::from_texts_unbounded(data, shape)
+                StringArray::from_elements_unbounded(data, shape)
                     .map(Value::StringArray)
                     .map_err(error::internal)
             }
@@ -110,7 +110,7 @@ fn missing_numeric(labels: &NumericStorage, len: usize) -> NumericStorage {
     }
 }
 
-fn text_values(value: &Value) -> BuiltinResult<Vec<Utf8Text>> {
+fn text_values(value: &Value) -> BuiltinResult<Vec<StringElement>> {
     match value {
         Value::String(value) => Ok(vec![value.clone()]),
         Value::StringArray(value) => Ok(value.data().to_vec()),

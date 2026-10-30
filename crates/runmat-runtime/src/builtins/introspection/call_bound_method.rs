@@ -33,7 +33,7 @@ async fn call_bound_method_retained(
     rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<RootedValue> {
     let scope_class = match scope {
-        Value::String(text) => {
+        Value::String(runmat_value::StringElement::Text(text)) => {
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 None

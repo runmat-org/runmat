@@ -395,7 +395,7 @@ fn generator_argument(
             }
         },
         Value::Num(value) if value.is_finite() => GeneratorArgument::Real(*value),
-        Value::String(value) => GeneratorArgument::Text(value.to_string()),
+        Value::String(runmat_value::StringElement::Text(value)) => GeneratorArgument::Text(value.to_string()),
         Value::CharArray(value) if value.rows == 1 => {
             GeneratorArgument::Text(runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
                 let mut error = builtin_error(builtin, &ERROR_INPUT, source.to_string());

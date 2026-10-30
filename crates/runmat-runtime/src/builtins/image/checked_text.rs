@@ -4,9 +4,15 @@ use runmat_value::Value;
 
 pub(super) fn scalar_text(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+        Value::String(runmat_value::StringElement::Text(text)) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            )
         }
         Value::CharArray(array) if array.rows == 1 => {
             Some(runmat_value::decode_utf16_code_units(array.data())?)

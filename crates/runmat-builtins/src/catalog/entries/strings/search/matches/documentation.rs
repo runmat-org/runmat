@@ -20,7 +20,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Current implementation frontier",
         paragraphs: &[
             "Character arrays with non-singleton dimensions beyond two, including those inside cells and delimiter controls, reject before row extraction. String and cell array geometry follows the per-entry behavior described here.",
-            "The current binding accepts exactly text and one scalar text/pattern object. IgnoreCase and pattern-array overloads are not implemented. Matching is whole-text and case-sensitive; character rows each contribute one logical result. The missing sentinel produces false. Managed text allocation and independent MATLAB parity remain incomplete.",
+            "The current binding accepts exactly text and one scalar text/pattern object. IgnoreCase and pattern-array overloads are not implemented. Matching is whole-text and case-sensitive; character rows each contribute one logical result. Typed missing string subjects produce false; literal `<missing>` text is ordinary text. Managed text allocation and independent MATLAB parity remain incomplete.",
         ],
     },
     BuiltinDocumentationSection {

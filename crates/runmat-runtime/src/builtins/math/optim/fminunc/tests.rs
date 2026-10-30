@@ -226,7 +226,7 @@ fn fminunc_uses_objective_gradient_and_returns_six_outputs() {
                 matches!(output.fields.get("firstorderopt"), Some(Value::Num(v)) if *v < 1.0e-8)
             );
             assert!(
-                matches!(output.fields.get("algorithm"), Some(Value::String(text)) if text.contains("bfgs"))
+                matches!(output.fields.get("algorithm"), Some(Value::String(runmat_value::StringElement::Text(text))) if text.contains("bfgs"))
             );
         }
         other => panic!("unexpected output struct {other:?}"),

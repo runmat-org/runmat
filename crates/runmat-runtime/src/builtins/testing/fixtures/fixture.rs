@@ -239,7 +239,9 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
 fn handle_text_property(handle: &HandleRef, name: &str) -> BuiltinResult<String> {
     runmat_gc::gc_with_value(&handle.target, |target| match target {
         Value::Object(object) => object.properties().get(name).and_then(|value| match value {
-            Value::String(value) => Some(value.as_str().to_owned()),
+            Value::String(runmat_value::StringElement::Text(value)) => {
+                Some(value.as_str().to_owned())
+            }
             _ => None,
         }),
         _ => None,
@@ -299,7 +301,9 @@ fn set_handle_property(
 
 fn scalar_text(builtin: &'static str, value: Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.into_string_unbounded()),
+        Value::String(runmat_value::StringElement::Text(value)) => {
+            Ok(value.into_string_unbounded())
+        }
         Value::CharArray(chars) if chars.rows <= 1 => {
             crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
                 testing_error(builtin, format!("{builtin}: text is not valid UTF-16"))

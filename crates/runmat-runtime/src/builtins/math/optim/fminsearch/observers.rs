@@ -64,7 +64,7 @@ impl<'a> Observers<'a> {
         };
         let x = output_callback::vector(&point.x, self.shape, self.scalar, cooperation).await?;
         let procedure = crate::call::argument_text::copy_str(procedure.name(), runtime.as_ref())
-            .map(Value::String)?;
+            .map(|text| Value::String(text.into()))?;
         let fields = [
             ("iteration", Value::Num(iteration as f64)),
             ("funccount", Value::Num(calls as f64)),
@@ -76,7 +76,7 @@ impl<'a> Observers<'a> {
             fields.iter().map(|(name, value)| (*name, value)),
         )?;
         let state = crate::call::argument_text::copy_str(state.name(), runtime.as_ref())
-            .map(Value::String)?;
+            .map(|text| Value::String(text.into()))?;
         let groups = [
             ObserverGroup {
                 value: self.output,

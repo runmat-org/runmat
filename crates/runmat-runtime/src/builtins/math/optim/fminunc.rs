@@ -494,8 +494,16 @@ fn bool_value(field: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             bool_from_number(field, tensor::tensor_value_f64(tensor, 0))
         }
-        Value::String(s) => bool_from_text(field, s),
-        Value::StringArray(sa) if sa.data().len() == 1 => bool_from_text(field, &sa.data()[0]),
+        Value::String(runmat_value::StringElement::Text(s)) => bool_from_text(field, s),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            let text = sa.data()[0].as_str().ok_or_else(|| {
+                fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    format!("option {field} must be nonmissing text"),
+                )
+            })?;
+            bool_from_text(field, text)
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             let text = runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
                 fminunc_error_with_detail(

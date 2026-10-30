@@ -35,6 +35,29 @@ impl ExecutableUnit {
             .envelope(self, current, primary, interop)
     }
 
+    /// Static imports are owned by this exact executable slice, not copied
+    /// wholesale from an imported compiler product's optional contracts.
+    pub(crate) fn portable_primary_source_envelope_with_static_imports(
+        &self,
+        current: &std::collections::HashSet<runmat_hir::FunctionId>,
+        primary: Option<runmat_types::ProgramSourceId>,
+        interop: runmat_types::InteropManifest,
+        imports: Vec<runmat_execution::executable::ExecutableStaticImport>,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        let mut envelope = self.portable_primary_source_envelope(current, primary, interop)?;
+        if !imports.is_empty() {
+            envelope.manifest.optional_sections.push(
+                runmat_execution::executable::static_import_section(imports)
+                    .map_err(|error| error.to_string())?,
+            );
+            envelope
+                .manifest
+                .optional_sections
+                .sort_by(|left, right| left.name.cmp(&right.name));
+        }
+        Ok(envelope)
+    }
+
     /// Build the complete physical-path-free executable product for package,
     /// test, browser, remote, native-codegen, and cache consumers.
     pub fn portable_envelope(&self) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
@@ -213,7 +236,7 @@ impl ExecutableUnit {
         // projections and carries their original products in its dependency
         // inventory. Selected Graph products use explicit body/import slices.
         let included = self.functions().functions.keys().copied().collect();
-        self.portable_local_envelope_with_entrypoint_mode(
+        let mut envelope = self.portable_local_envelope_with_entrypoint_mode(
             runmat_types::InteropManifest::empty(),
             Some(&included),
             true,
@@ -225,7 +248,24 @@ impl ExecutableUnit {
                 }
                 None => super::portable_entrypoint::script_entrypoint(unit),
             },
-        )
+        )?;
+        // This complete compiler product deliberately includes inherited
+        // projections. Its executable sites still belong only to this
+        // product's script/current bodies, and keep the compiler's exact
+        // selected imports even though body selection was explicit above.
+        if !self.original_static_imports().is_empty() {
+            envelope.manifest.optional_sections.push(
+                runmat_execution::executable::static_import_section(
+                    self.original_static_imports().to_vec(),
+                )
+                .map_err(|error| error.to_string())?,
+            );
+            envelope
+                .manifest
+                .optional_sections
+                .sort_by(|left, right| left.name.cmp(&right.name));
+        }
+        Ok(envelope)
     }
 
     fn portable_envelope_with_entrypoint(
@@ -432,13 +472,22 @@ impl ExecutableUnit {
         }
         // A restored product also keeps its original parallel and
         // optional-section contracts rather than re-deriving them.
-        let (parallel, optional_sections) = match self.imported_contract.as_deref() {
+        let (parallel, mut optional_sections) = match self.imported_contract.as_deref() {
             Some(imported) => (
                 imported.parallel.clone(),
-                imported.optional_sections.clone(),
+                imported
+                    .optional_sections
+                    .iter()
+                    .filter(|section| {
+                        section.name != runmat_execution::executable::STATIC_IMPORT_SECTION
+                    })
+                    .cloned()
+                    .chain(optional_sections)
+                    .collect(),
             ),
             None => (parallel, optional_sections),
         };
+        optional_sections.sort_by(|left, right| left.name.cmp(&right.name));
         let manifest = runmat_execution::ExecutableUnitManifest {
             dependencies: Vec::new(),
             schema_version: runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION,

@@ -41,7 +41,7 @@ impl<'a> SelectedGraphJsonCursor<'a> {
                 ])?;
                 self.push(Task::Raw(b"{\"type\":\"complex_f64_bits\",\"value\":"))
             }
-            InlineValue::String(value) => self.tagged("string", Task::Text(value)),
+            InlineValue::String(value) => self.tagged("string", Task::OptionalText(value.as_str())),
             InlineValue::Char {
                 encoding,
                 shape,
@@ -59,7 +59,7 @@ impl<'a> SelectedGraphJsonCursor<'a> {
                 self.push(Task::Raw(b"}"))?;
                 self.object([
                     ("shape", Task::Array(Array::U64(shape))),
-                    ("values", Task::Array(Array::Texts(values))),
+                    ("values", Task::Array(Array::Strings(values))),
                 ])?;
                 self.push(Task::Raw(b"{\"type\":\"string_array\",\"value\":"))
             }

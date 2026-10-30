@@ -1,4 +1,3 @@
-use super::metadata::MISSING_TEXT;
 use super::standardize::numeric_tensor;
 use super::{internal_error, invalid_argument, CharArray, IntValue, Tensor, Value};
 use crate::builtins::common::tensor as tensor_utils;
@@ -205,9 +204,9 @@ pub(super) fn numeric_size_to_usize(n: f64, context: &str) -> BuiltinResult<usiz
 
 pub(super) fn scalar_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => text.as_str().map(str::to_owned),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            array.data()[0].as_str().map(str::to_owned)
         }
         Value::CharArray(array) if array.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
@@ -236,6 +235,6 @@ pub(super) fn char_rows(array: &CharArray) -> BuiltinResult<Vec<String>> {
     Ok(out)
 }
 
-pub(super) fn is_missing_text(text: &str) -> bool {
-    text.eq_ignore_ascii_case(MISSING_TEXT)
+pub(super) fn is_missing_text(text: &runmat_value::StringElement) -> bool {
+    text.is_missing()
 }

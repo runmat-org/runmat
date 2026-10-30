@@ -43,8 +43,15 @@ fn superclasses_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 fn requested_class_name(value: &Value) -> BuiltinResult<runmat_types::ClassIdentity> {
     let source = match value {
-        Value::String(class_name) => class_name.as_str().to_owned(),
-        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str().to_owned(),
+        Value::String(runmat_value::StringElement::Text(class_name)) => {
+            class_name.as_str().to_owned()
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => sa.data()
+            [0]
+        .text_ref()
+        .expect("checked nonmissing scalar string")
+        .as_str()
+        .to_owned(),
         Value::CharArray(ca) if ca.rows <= 1 => {
             super::text::decode_utf16_with_error(ca.data(), || {
                 superclasses_error(&SUPERCLASSES_ERROR_CLASS_INVALID)

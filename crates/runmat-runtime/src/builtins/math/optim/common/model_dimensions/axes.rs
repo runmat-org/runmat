@@ -66,7 +66,9 @@ async fn names(
 ) -> BuiltinResult<Axis> {
     let scalar_shape = [1, 1];
     let (shape, raw) = match value {
-        Value::String(text) if syntax == ConstructorSyntax::Expression => {
+        Value::String(text @ runmat_value::StringElement::Text(_))
+            if syntax == ConstructorSyntax::Expression =>
+        {
             (&scalar_shape[..], Some(std::slice::from_ref(text)))
         }
         Value::Cell(cell) => {
@@ -282,7 +284,7 @@ pub(in crate::builtins::math::optim) async fn property(
         let empty = matches!(value,Value::Cell(value) if value.data().is_empty())
             || matches!(value,Value::Tensor(value) if value.is_empty())
             || matches!(value,Value::CharArray(value) if value.data().is_empty())
-            || matches!(value,Value::String(value) if value.is_empty());
+            || matches!(value,Value::String(runmat_value::StringElement::Text(value)) if value.is_empty());
         if empty {
             result
                 .try_push(None)

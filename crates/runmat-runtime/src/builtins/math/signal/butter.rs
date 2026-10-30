@@ -397,7 +397,7 @@ fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
 
 fn parse_option_token(value: Value) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.into_string_unbounded()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.into_string_unbounded()),
         Value::CharArray(chars) => {
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 let mut error = butter_error(&BUTTER_ERROR_INVALID_OPTION);
@@ -405,8 +405,12 @@ fn parse_option_token(value: Value) -> BuiltinResult<String> {
                 error
             })
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         other => Err(butter_error_with_detail(
             &BUTTER_ERROR_INVALID_OPTION,

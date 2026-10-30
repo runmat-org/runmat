@@ -137,7 +137,7 @@ fn string_columns(value: &StringArray, columns: &[usize]) -> BuiltinResult<Value
             })
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    StringArray::from_texts_unbounded(data, output_shape)
+    StringArray::from_elements_unbounded(data, output_shape)
         .map(Value::StringArray)
         .map_err(error::invalid)
 }

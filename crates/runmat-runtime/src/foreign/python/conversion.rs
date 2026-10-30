@@ -120,7 +120,7 @@ pub(super) fn value_ref_to_python(value: &Value) -> Result<PythonValue, RuntimeE
             imaginary: *imaginary,
         }),
         Value::Int(value) => value_to_python_inner(Value::Int(value.clone())),
-        Value::String(value) => Ok(PythonValue::String(value.as_str().to_owned())),
+        Value::String(value) => string_text(value).map(PythonValue::String),
         Value::CharArray(value) => value
             .try_row_string()
             .map_err(|cause| invalid_conversion(format!("invalid UTF-16 character row: {cause}")))?
@@ -130,8 +130,8 @@ pub(super) fn value_ref_to_python(value: &Value) -> Result<PythonValue, RuntimeE
             value
                 .data()
                 .iter()
-                .map(|value| PythonValue::String(value.as_str().to_owned()))
-                .collect(),
+                .map(|value| string_text(value).map(PythonValue::String))
+                .collect::<Result<_, _>>()?,
         )),
         Value::Tensor(value) => Ok(PythonValue::Array(PythonArray {
             dtype: python_dtype(value.numeric_dtype()),
@@ -219,7 +219,7 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
             IntValue::U32(value) => PythonValue::Unsigned(u64::from(value)),
             IntValue::U64(value) => PythonValue::Unsigned(value),
         }),
-        Value::String(value) => Ok(PythonValue::String(value.into_string_unbounded())),
+        Value::String(value) => string_text(&value).map(PythonValue::String),
         Value::CharArray(value) => value
             .try_row_string()
             .map_err(|cause| invalid_conversion(format!("invalid UTF-16 character row: {cause}")))?
@@ -229,8 +229,8 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
             value
                 .data()
                 .iter()
-                .map(|value| PythonValue::String(value.as_str().to_owned()))
-                .collect(),
+                .map(|value| string_text(value).map(PythonValue::String))
+                .collect::<Result<_, _>>()?,
         )),
         Value::Tensor(value) => {
             let dtype = python_dtype(value.numeric_dtype());
@@ -952,4 +952,11 @@ mod tests {
         let error = value_from_python(PythonValue::Array(nat), None).unwrap_err();
         assert!(error.message().contains("NaT"));
     }
+}
+
+fn string_text(value: &runmat_value::StringElement) -> Result<String, RuntimeError> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| invalid_conversion("missing string requires an explicit foreign conversion"))
 }

@@ -7,10 +7,14 @@ pub(super) enum PartitionLabel {
     Number(u64),
     Integer(i128),
     Logical(bool),
-    Text(runmat_value::Utf8Text),
+    Text(runmat_value::StringElement),
 }
 
 impl PartitionLabel {
+    pub(super) fn text(value: runmat_value::StringElement) -> Option<Self> {
+        (!value.is_missing()).then_some(Self::Text(value))
+    }
+
     pub(super) fn number(value: f64) -> Option<Self> {
         if value.is_nan() {
             None

@@ -221,7 +221,7 @@ impl SelectedImageRegionSet {
                     .shape()
                     .len()
                     .checked_mul(std::mem::size_of::<usize>()),
-                Value::String(text) => Some(text.len()),
+                Value::String(text) => Some(text.as_str().map_or(0, str::len)),
                 Value::StringArray(array) => {
                     let mut bytes = array
                         .shape
@@ -231,13 +231,13 @@ impl SelectedImageRegionSet {
                             array
                                 .data()
                                 .len()
-                                .checked_mul(std::mem::size_of::<String>())
+                                .checked_mul(std::mem::size_of::<runmat_value::StringElement>())
                                 .and_then(|data| shape.checked_add(data))
                         })
                         .ok_or(HostAllocationError::Overflow)?;
                     for text in array.data() {
                         bytes = bytes
-                            .checked_add(text.len())
+                            .checked_add(text.as_str().map_or(0, str::len))
                             .ok_or(HostAllocationError::Overflow)?;
                     }
                     Some(bytes)

@@ -31,7 +31,7 @@ pub(super) const DUMMYVAR: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Grouping variables", paragraphs: &[
             "Numeric vectors use positive integer levels `1:max(group)`. Numeric row and column vectors are one grouping variable; a nonscalar numeric matrix contributes one grouping variable per column. The resulting dummy columns are concatenated.",
-            "Numeric `NaN` rows produce `NaN` across that variable's dummy columns. Empty text and `<missing>` text are also missing labels. Cell-string vectors are ordered by first appearance; categorical inputs use the full category order, including unobserved categories.",
+            "Numeric `NaN` rows produce `NaN` across that variable's dummy columns. Empty text and typed missing strings are also missing labels; literal `<missing>` text is an ordinary label. Cell-string vectors are ordered by first appearance; categorical inputs use the full category order, including unobserved categories.",
             "Cell arrays can supply several grouping variables as a row cell array. String, character-row, logical, and cell-string grouping variables are supported by RunMat.",
         ] },
         BuiltinDocumentationSection { heading: "Typed integers and GPU input", paragraphs: &[
@@ -50,7 +50,7 @@ pub(super) const DUMMYVAR: BuiltinDocumentation = BuiltinDocumentation {
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(D, [1 0; 0 1; 1 0])); assert(strcmp(class(D), 'double'));" },
     }],
     example_exemption: None,
-    faqs: &[BuiltinDocumentationFaq { question: "Does `dummyvar` support missing labels?", answer: "Yes. Numeric `NaN`, empty text, and `<missing>` text are missing labels; missing numeric rows produce `NaN` dummy values." }],
+    faqs: &[BuiltinDocumentationFaq { question: "Does `dummyvar` support missing labels?", answer: "Yes. Numeric `NaN`, empty text, and typed missing strings are missing labels; missing numeric rows produce `NaN` dummy values." }],
     links: &[
         BuiltinDocumentationLink { label: "onehotencode", target: BuiltinDocumentationLinkTarget::Builtin("onehotencode") },
         BuiltinDocumentationLink { label: "onehotdecode", target: BuiltinDocumentationLinkTarget::Builtin("onehotdecode") },

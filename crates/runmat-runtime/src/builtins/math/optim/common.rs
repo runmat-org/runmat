@@ -723,8 +723,12 @@ pub(crate) fn vector_to_value(
 
 pub(crate) fn field_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::CharArray(array) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data()).map_err(|error| {
                 optim_error(
@@ -863,8 +867,12 @@ pub(crate) fn option_string_value(
         return Ok(default.to_string());
     };
     match value {
-        Value::String(s) => Ok(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_ascii_lowercase()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_ascii_lowercase()),
         Value::CharArray(array) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data())
                 .map(|text| text.to_ascii_lowercase())

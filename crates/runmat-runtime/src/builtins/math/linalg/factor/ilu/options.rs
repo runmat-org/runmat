@@ -132,8 +132,14 @@ async fn scalar(value: &Value) -> BuiltinResult<f64> {
 }
 fn text(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(v) => Some(v.as_str().into()),
-        Value::StringArray(v) if v.data().len() == 1 => Some(v.data()[0].as_str().into()),
+        Value::String(runmat_value::StringElement::Text(v)) => Some(v.as_str().into()),
+        Value::StringArray(v) if v.data().len() == 1 && !v.data()[0].is_missing() => Some(
+            v.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .into(),
+        ),
         Value::CharArray(v) if v.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(v.data()).map_err(|source| {
                 let mut error = error(&ILU_ERROR_INVALID_ARGUMENT, Some(&source.to_string()));

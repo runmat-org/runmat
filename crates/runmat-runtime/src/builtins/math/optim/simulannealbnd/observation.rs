@@ -158,7 +158,7 @@ impl Observers {
             return Ok(false);
         }
         let metadata = metadata(state, count, started, c).await?;
-        let flag = Value::String(crate::call::argument_text::copy_str(
+        let flag = Value::string(crate::call::argument_text::copy_str(
             phase.name(),
             c.runtime(),
         )?);

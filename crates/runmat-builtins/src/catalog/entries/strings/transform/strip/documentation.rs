@@ -4,7 +4,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Text and controls", paragraphs: &[
         "strip(text) removes leading and trailing whitespace by default. Direction is case-insensitive: 'left' removes from the beginning, 'right' from the end, and 'both' from both sides. RunMat extension mode also accepts 'leading' and 'trailing' as aliases.",
         "Supply a scalar stripCharacters value to remove a custom character instead of whitespace. RunMat extension mode also accepts multi-character sets and shape-matched string or cell arrays of per-element sets.",
-        "String scalars and arrays preserve their shape and the missing-string sentinel. Character arrays are stripped row by row; the row count stays fixed and shorter rows are space-padded to the longest resulting width. Cell arrays preserve their layout and contain string scalars or character vectors.",
+        "String scalars and arrays preserve their shape and typed missing elements. Character arrays are stripped row by row; the row count stays fixed and shorter rows are space-padded to the longest resulting width. Cell arrays preserve their layout and contain string scalars or character vectors.",
     ] },
     BuiltinDocumentationSection { heading: "Placement and errors", paragraphs: &[
         "strip is a host text operation and is a fusion boundary. Numeric, logical, symbolic, and provider-resident inputs are not interpreted as characters and reject before provider access. A textual control or nested cell cannot make a numeric or resident value into a supported text input.",
@@ -36,7 +36,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Which direction keywords are supported?", answer: "'left', 'right', and 'both' are the standard directions. RunMat extension mode also accepts 'leading' and 'trailing'. Matching is case-insensitive." },
         BuiltinDocumentationFaq { question: "How can I remove characters other than whitespace?", answer: "Pass one strip character in the standard mode, for example strip(text, 'x'). RunMat extension mode also accepts a set such as 'xyz'; every matching character is then removed from the chosen edge." },
         BuiltinDocumentationFaq { question: "Can each element use different strip characters?", answer: "In RunMat extension mode, a string or cell character-set array can match the input shape; each element then uses its corresponding set." },
-        BuiltinDocumentationFaq { question: "What happens to missing strings?", answer: "The missing-string sentinel remains unchanged; the current storage cannot distinguish it from identical literal text." },
+        BuiltinDocumentationFaq { question: "What happens to missing strings?", answer: "Typed missing subject elements remain missing. Literal `<missing>` text is ordinary text; missing direction or character controls are rejected." },
         BuiltinDocumentationFaq { question: "Does strip change character-array shape?", answer: "Only width may change. Rows are stripped independently and padded to the longest resulting row." },
         BuiltinDocumentationFaq { question: "Does strip execute on the GPU?", answer: "No. It operates on host text; provider-resident numeric values are not automatically reinterpreted as text." },
     ],

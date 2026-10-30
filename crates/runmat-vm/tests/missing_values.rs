@@ -29,16 +29,17 @@ fn has_logical(vars: &[Value], expected: &[u8]) -> bool {
 }
 
 #[test]
-fn missing_constructs_and_detects_string_sentinel() {
+fn missing_constructs_and_detects_typed_string_elements() {
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    let vars = execute_source("s = missing(1, 2); tf = ismissing(s); anytf = anymissing(s);")
+    let vars = execute_source("s = missing(1, 2); tf = ismissing(s); anytf = anymissing(s); literals = [\"<missing>\" \"<MISSING>\"]; literal_mask = ismissing(literals);")
         .expect("missing string script");
     assert!(vars.iter().any(|value| matches!(
         value,
         Value::StringArray(array)
-            if array.data() == ["<missing>".to_string(), "<missing>".to_string()]
+            if array.data().len() == 2 && array.data().iter().all(runmat_value::StringElement::is_missing)
     )));
     assert!(has_logical(&vars, &[1, 1]));
+    assert!(has_logical(&vars, &[0, 0]));
     assert!(vars.iter().any(|value| matches!(value, Value::Bool(true))));
 }
 

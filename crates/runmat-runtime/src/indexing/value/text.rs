@@ -20,12 +20,12 @@ use crate::{
 };
 use runmat_value::{
     CharArray, ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray,
-    Utf16TextCopyError, Utf8Text, Value,
+    StringElement, Utf16TextCopyError, Utf8Text, Value,
 };
 
 enum TextSource {
-    Scalar(Utf8Text),
-    Tensor(ExactArrayStorage<Utf8Text>),
+    Scalar(StringElement),
+    Tensor(ExactArrayStorage<StringElement>),
 }
 /// A checked ordinal view. Singleton-axis alignment is the canonical shared
 /// RHS rule, not a second coordinate/stride planner.
@@ -56,7 +56,7 @@ impl StringRhsView {
     pub(in crate::indexing) fn count(&self) -> usize {
         self.layout.count()
     }
-    pub(in crate::indexing) fn value_at(&self, ordinal: usize) -> &Utf8Text {
+    pub(in crate::indexing) fn value_at(&self, ordinal: usize) -> &StringElement {
         let index = self.layout.source_index(ordinal);
         match &self.source {
             TextSource::Scalar(value) => value,
@@ -65,14 +65,26 @@ impl StringRhsView {
     }
 }
 
-fn retain(text: &Utf8Text, context: Option<&RuntimeContext>) -> Result<Utf8Text, RuntimeError> {
-    crate::call::argument_text::convert(&Value::String(text.clone()), context)
+fn retain(
+    text: &StringElement,
+    context: Option<&RuntimeContext>,
+) -> Result<StringElement, RuntimeError> {
+    match text {
+        StringElement::Missing => {
+            Owner::new(context)?.check()?;
+            Ok(StringElement::Missing)
+        }
+        StringElement::Text(text) => {
+            crate::call::argument_text::convert(&Value::String(text.clone().into()), context)
+                .map(StringElement::Text)
+        }
+    }
 }
 fn chars_text(
     chars: &CharArray,
     context: Option<&RuntimeContext>,
     message: &str,
-) -> Result<Utf8Text, RuntimeError> {
+) -> Result<StringElement, RuntimeError> {
     if chars.rows != 1 {
         return Err(semantic_error("InvalidSliceAssignmentRhs", message));
     }
@@ -91,10 +103,10 @@ fn chars_text(
             }
         }
     })?;
-    crate::call::argument_text::copy_chars(chars.data(), context)
+    crate::call::argument_text::copy_chars(chars.data(), context).map(StringElement::Text)
 }
 enum CellText<'a> {
-    Text(&'a Utf8Text),
+    Text(&'a StringElement),
     Characters(&'a CharArray),
 }
 fn cell_text(value: &Value) -> Result<CellText<'_>, RuntimeError> {
@@ -206,7 +218,7 @@ pub fn build_rhs(
 
 pub fn read(
     context: Option<&RuntimeContext>,
-    source: &[Utf8Text],
+    source: &[StringElement],
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
     let owner = Owner::new(context)?;
@@ -219,7 +231,7 @@ pub fn read(
         })
     };
     if let [index] = plan.indices.as_slice() {
-        return retain(at(*index as usize)?, context).map(Value::String);
+        return retain(at(*index as usize)?, context).map(|text| Value::String(text.into()));
     }
     for (ordinal, &index) in plan.indices.iter().enumerate() {
         if ordinal % 4096 == 0 {
@@ -268,7 +280,7 @@ pub fn assign(
         count,
         |index| match value.data().get(index) {
             Some(text) => retain(text, context),
-            None => Ok(Utf8Text::default()),
+            None => Ok(StringElement::default()),
         },
         |data| scatter(context, data, plan, &view),
     )
@@ -277,7 +289,7 @@ pub fn assign(
 
 pub(super) fn assign_scalar(
     context: Option<&RuntimeContext>,
-    value: Utf8Text,
+    value: StringElement,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
@@ -298,7 +310,7 @@ pub(super) fn assign_scalar(
             if index == 0 {
                 retain(&value, context)
             } else {
-                Ok(Utf8Text::default())
+                Ok(StringElement::default())
             }
         },
         |data| scatter(context, data, plan, &view),
@@ -360,7 +372,7 @@ fn validate_plan(
 }
 fn scatter(
     context: Option<&RuntimeContext>,
-    data: &mut [Utf8Text],
+    data: &mut [StringElement],
     plan: &IndexPlan,
     view: &StringRhsView,
 ) -> Result<(), RuntimeError> {
@@ -376,8 +388,8 @@ fn construct(
     context: Option<&RuntimeContext>,
     shape: SharedShape,
     count: usize,
-    mut initialize: impl FnMut(usize) -> Result<Utf8Text, RuntimeError>,
-    finish: impl FnOnce(&mut [Utf8Text]) -> Result<(), RuntimeError>,
+    mut initialize: impl FnMut(usize) -> Result<StringElement, RuntimeError>,
+    finish: impl FnOnce(&mut [StringElement]) -> Result<(), RuntimeError>,
 ) -> Result<StringArray, RuntimeError> {
     let owner = Owner::new(context)?;
     let mut data = initialize_host_array(context, count, |index| {

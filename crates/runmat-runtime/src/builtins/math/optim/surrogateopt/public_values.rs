@@ -20,7 +20,7 @@ pub(super) fn objective(trial: Option<&Trial>, c: &ScalarCooperation) -> Builtin
 pub(super) fn origin(trial: Option<&Trial>, c: &ScalarCooperation) -> BuiltinResult<Value> {
     let Some(trial) = trial else { return empty(c) };
     let text = trial.origin.name();
-    crate::call::argument_text::copy_str(text, c.runtime()).map(Value::String)
+    crate::call::argument_text::copy_str(text, c.runtime()).map(|text| Value::String(text.into()))
 }
 pub(super) fn violation(trial: Option<&Trial>, c: &ScalarCooperation) -> BuiltinResult<Value> {
     match trial {

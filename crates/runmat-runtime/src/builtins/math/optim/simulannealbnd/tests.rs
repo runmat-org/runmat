@@ -255,7 +255,7 @@ fn custom_payload_and_options_first_three_output_observer_change_the_actual_next
                         matches!(field(&args[0], "MaxIterations"), Value::Num(_)),
                         "options is the FIRST argument"
                     );
-                    let Value::String(phase) = &args[2] else {
+                    let Value::String(runmat_value::StringElement::Text(phase)) = &args[2] else {
                         panic!("phase")
                     };
                     seen.lock().unwrap().push(phase.to_string());

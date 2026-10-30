@@ -169,7 +169,8 @@ fn default_value_in_context(
 ) -> Result<Value, RuntimeError> {
     match default {
         FunctionArgDefaultValue::String(text) => {
-            crate::call::argument_text::copy_str(text, runtime).map(Value::String)
+            crate::call::argument_text::copy_str(text, runtime)
+                .map(|text| Value::String(text.into()))
         }
         FunctionArgDefaultValue::EmptyArray => {
             let bytes =

@@ -54,12 +54,12 @@ pub(super) fn preference_names(
         Value::String(_) | Value::CharArray(_) => {
             Ok(PreferenceNames::Scalar(scalar_text(value, builtin, "preference")?))
         }
-        Value::StringArray(array) => {
+        Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => {
             if let Some(text) = preference_scalar_text(value) {
                 Ok(PreferenceNames::Scalar(text))
             } else {
                 Ok(PreferenceNames::Array {
-                    names: array.data().iter().map(|text| text.as_str().to_owned()).collect(),
+                    names: array.data().iter().map(|text| text.as_str().expect("checked nonmissing string").to_owned()).collect(),
                     shape: array.shape.as_slice().to_vec(),
                 })
             }

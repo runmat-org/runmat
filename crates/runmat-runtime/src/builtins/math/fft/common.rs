@@ -1071,7 +1071,7 @@ fn parse_nd_sizes_integers(data: &[IntValue], builtin: &str) -> BuiltinResult<Ve
 
 pub fn parse_symflag(value: &Value, builtin: &str) -> BuiltinResult<Option<bool>> {
     let text: Option<Cow<'_, str>> = match value {
-        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(Cow::Borrowed(s.as_str())),
         Value::CharArray(ca) if ca.rows == 1 => {
             let collected: String =
                 runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
@@ -1081,8 +1081,13 @@ pub fn parse_symflag(value: &Value, builtin: &str) -> BuiltinResult<Option<bool>
                 })?;
             Some(Cow::Owned(collected))
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Some(Cow::Borrowed(sa.data()[0].as_str()))
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            Some(Cow::Borrowed(
+                sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         _ => None,
     };

@@ -254,7 +254,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmpi_missing_strings_compare_false() {
-        let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
+        let strings = StringArray::from_elements_unbounded(
+            vec![runmat_value::StringElement::Missing],
+            vec![1, 1],
+        )
+        .unwrap();
         let result = strcmpi_builtin(
             Value::StringArray(strings.clone()),
             Value::StringArray(strings),

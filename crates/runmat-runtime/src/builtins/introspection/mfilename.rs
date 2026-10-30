@@ -11,9 +11,17 @@ enum MfilenameMode {
 
 fn text_value(value: &Value) -> crate::BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
         }
         Value::CharArray(array) if array.rows == 1 => {
             super::text::decode_utf16_with_error(array.data(), || {

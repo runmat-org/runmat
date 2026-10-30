@@ -8,7 +8,7 @@ use crate::context::RuntimeContext;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_value::{
     exact_capacity_vec, ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray,
-    Utf8Text,
+    StringElement, Utf8Text,
 };
 
 fn admission_error(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
@@ -29,7 +29,7 @@ pub(super) fn string_array(
     let Some(runtime) = runtime else {
         return ordinary();
     };
-    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(words.len())
+    let mut physical = ExactArrayStorage::<StringElement>::requested_bytes(words.len())
         .map_err(|cause| admission_error(runtime, HostAllocationError::Numeric(cause)))?
         .checked_add(
             SharedShape::requested_bytes_for_rank(2)
@@ -82,6 +82,7 @@ pub(super) fn string_array(
                 // SAFETY: the source was valid UTF-8 and is copied unchanged.
                 Utf8Text::new(unsafe { String::from_utf8_unchecked(bytes) })
                     .try_admit_exact(permit)
+                    .map(StringElement::Text)
                     .map_err(|failure| HostAllocationError::Numeric(failure.source()))
             })
         })

@@ -68,9 +68,12 @@ fn host_literal_value(value: &Value) -> bool {
     // cat's trailing name-value parser treats a textual `like` token as a
     // control in some argument positions. Keep those literals on dispatch.
     let like_token = match value {
-        Value::String(text) => text.eq_ignore_ascii_case("like"),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            array.data()[0].eq_ignore_ascii_case("like")
+        Value::String(runmat_value::StringElement::Text(text)) => text.eq_ignore_ascii_case("like"),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .eq_ignore_ascii_case("like")
         }
         Value::CharArray(array) if array.rows == 1 => array
             .data()

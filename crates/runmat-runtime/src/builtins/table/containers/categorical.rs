@@ -1,6 +1,6 @@
 use super::*;
 use crate::builtins::table::display::trim_float;
-use runmat_value::NumericScalar;
+use runmat_value::{NumericScalar, StringElement};
 
 mod labels;
 pub(crate) use self::labels::categorical_label_view;
@@ -39,7 +39,7 @@ pub(crate) fn categorical_from_args(
 
 fn categorical_object_from_plan(
     source: &Value,
-    labels: Vec<String>,
+    labels: Vec<StringElement>,
     category_plan: CategoryPlan,
     ordinal: bool,
     protected: bool,
@@ -113,12 +113,16 @@ fn ordinal_from_inferred_levels(
     let labels = categorical_labels(source)?;
     let mut lookup = labels
         .iter()
-        .filter(|label| !label.is_empty())
-        .cloned()
+        .filter_map(|label| {
+            label
+                .as_str()
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned)
+        })
         .collect::<Vec<_>>();
     sort_categorical_values(&mut lookup, categorical_numeric_dtype(source))?;
     lookup.dedup();
-    let plan = ordinal_category_plan(lookup, category_names)?;
+    let plan = ordinal_category_plan(lookup.into_iter().map(Into::into).collect(), category_names)?;
     categorical_object_from_plan(source, labels, plan, true, true)
 }
 
@@ -136,7 +140,7 @@ fn ordinal_from_explicit_levels(
 }
 
 fn ordinal_category_plan(
-    lookup: Vec<String>,
+    lookup: Vec<StringElement>,
     category_names: Vec<String>,
 ) -> BuiltinResult<CategoryPlan> {
     if lookup.len() != category_names.len() {
@@ -473,18 +477,18 @@ fn categorical_from_code_value(
     Ok(Value::Object(object.finish()))
 }
 
-pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
+pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<StringElement>> {
     match value {
         Value::Num(value) => Ok(vec![categorical_numeric_label(NumericScalar::F64(*value))]),
-        Value::String(text) => Ok(vec![normalize_category_label(text)]),
+        Value::String(text) => Ok(vec![normalize_category_element(text)]),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|value| normalize_category_label(value))
+            .map(normalize_category_element)
             .collect()),
         Value::CharArray(array) => Ok(char_rows(array)?
             .into_iter()
-            .map(|value| normalize_category_label(&value))
+            .map(|value| StringElement::text(normalize_category_label(&value)))
             .collect()),
         Value::Tensor(tensor) => (0..tensor.len())
             .map(|index| {
@@ -497,19 +501,31 @@ pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
-            .map(|flag| if *flag != 0 { "true" } else { "false" }.to_string())
+            .map(|flag| StringElement::text(if *flag != 0 { "true" } else { "false" }))
             .collect()),
         Value::Cell(cell) => cell.iter_column_major().map(cell_scalar_label).collect(),
         Value::Object(object) if object.is_class(CATEGORICAL_CLASS) => {
-            categorical_object_labels(object)
+            categorical_observation_labels(object).map(|labels| {
+                labels
+                    .into_iter()
+                    .map(|label| {
+                        label
+                            .map(StringElement::text)
+                            .unwrap_or(StringElement::Missing)
+                    })
+                    .collect()
+            })
         }
-        other => Ok(vec![other.to_string()]),
+        other => Ok(vec![StringElement::text(other.to_string())]),
     }
 }
 
-pub(in crate::builtins::table) fn cell_scalar_label(value: &Value) -> BuiltinResult<String> {
+pub(in crate::builtins::table) fn cell_scalar_label(value: &Value) -> BuiltinResult<StringElement> {
     match value {
-        Value::String(text) => Ok(normalize_category_label(text)),
+        Value::String(text) => Ok(normalize_category_element(text)),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(normalize_category_element(&array.data()[0]))
+        }
         Value::CharArray(array) if array.rows == 1 => {
             let text = runmat_value::decode_utf16_code_units(array.data()).map_err(|error| {
                 table_error_with_source(
@@ -518,12 +534,12 @@ pub(in crate::builtins::table) fn cell_scalar_label(value: &Value) -> BuiltinRes
                     error,
                 )
             })?;
-            Ok(normalize_category_label(&text))
+            Ok(StringElement::text(normalize_category_label(&text)))
         }
-        Value::Num(value) if value.is_nan() => Ok(String::new()),
-        Value::Num(value) => Ok(format_key_number(*value)),
-        Value::Bool(value) => Ok(if *value { "true" } else { "false" }.to_string()),
-        other => Ok(other.to_string()),
+        Value::Num(value) if value.is_nan() => Ok(StringElement::Missing),
+        Value::Num(value) => Ok(StringElement::text(format_key_number(*value))),
+        Value::Bool(value) => Ok(StringElement::text(if *value { "true" } else { "false" })),
+        other => Ok(StringElement::text(other.to_string())),
     }
 }
 
@@ -591,11 +607,11 @@ fn parse_categorical_args<'a>(
 
 fn categorical_category_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => categorical_labels(value),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => categorical_labels(value)?.into_iter().map(category_name_from_element).collect(),
         Value::Cell(cell) => cell
             .iter_column_major()
             .map(|value| match value {
-                Value::String(_) | Value::CharArray(_) => cell_scalar_label(value),
+                Value::String(_) | Value::CharArray(_) => cell_scalar_label(value).and_then(category_name_from_element),
                 _ => Err(invalid_argument(
                     "categorical: category names must be a string array or cell array of character vectors",
                 )),
@@ -663,14 +679,14 @@ fn categorical_numeric_flag(value: NumericScalar) -> Option<bool> {
 }
 
 struct CategoryPlan {
-    lookup: Vec<String>,
+    lookup: Vec<StringElement>,
     codes: Vec<usize>,
     categories: Vec<String>,
 }
 
 fn categorical_category_plan(
     source: &Value,
-    labels: &[String],
+    labels: &[StringElement],
     valueset: Option<&Value>,
     catnames: Option<Vec<String>>,
 ) -> BuiltinResult<CategoryPlan> {
@@ -696,15 +712,19 @@ fn categorical_category_plan(
         (None, None) => {
             let mut lookup = labels
                 .iter()
-                .filter(|label| !label.is_empty())
-                .cloned()
+                .filter_map(|label| {
+                    label
+                        .as_str()
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_owned)
+                })
                 .collect::<Vec<_>>();
             sort_categorical_values(&mut lookup, source_dtype)?;
             lookup.dedup();
             let categories = default_category_names(&lookup, source_dtype)?;
             let codes = (0..categories.len()).collect();
             Ok(CategoryPlan {
-                lookup,
+                lookup: lookup.into_iter().map(StringElement::text).collect(),
                 codes,
                 categories,
             })
@@ -712,7 +732,16 @@ fn categorical_category_plan(
         (Some(_), None) => {
             let valueset = valueset_labels.expect("valueset labels");
             ensure_unique_valueset(&valueset, false)?;
-            let categories = default_category_names(&valueset, source_dtype)?;
+            let present_valueset = valueset
+                .iter()
+                .map(|label| {
+                    label
+                        .as_str()
+                        .expect("validated nonmissing valueset")
+                        .to_owned()
+                })
+                .collect::<Vec<_>>();
+            let categories = default_category_names(&present_valueset, source_dtype)?;
             let codes = valueset
                 .iter()
                 .enumerate()
@@ -759,10 +788,10 @@ fn categorical_category_plan(
     }
 }
 
-fn ensure_unique_valueset(valueset: &[String], allow_missing: bool) -> BuiltinResult<()> {
+fn ensure_unique_valueset(valueset: &[StringElement], allow_missing: bool) -> BuiltinResult<()> {
     let mut seen = HashSet::new();
     for label in valueset {
-        if label.is_empty() && !allow_missing {
+        if label.as_str().is_none_or(str::is_empty) && !allow_missing {
             return Err(invalid_argument(
                 "categorical: categories cannot be empty or missing",
             ));
@@ -887,31 +916,24 @@ fn format_five_significant(value: f64) -> String {
     trim_float(format!("{value:.decimals$}"))
 }
 
-fn categorical_numeric_label(value: NumericScalar) -> String {
-    match value {
-        NumericScalar::F64(value) => {
-            if value.is_nan() {
-                String::new()
-            } else {
-                // Private identity must round-trip, independently of the
-                // deliberately rounded public default category name.
-                value.to_string()
-            }
-        }
-        NumericScalar::F32(value) => {
-            if value.is_nan() {
-                String::new()
-            } else {
-                value.to_string()
-            }
-        }
+fn categorical_numeric_label(value: NumericScalar) -> StringElement {
+    if matches!(value, NumericScalar::F64(value) if value.is_nan())
+        || matches!(value, NumericScalar::F32(value) if value.is_nan())
+    {
+        return StringElement::Missing;
+    }
+    StringElement::text(match value {
+        // Private identity must round-trip independently of rounded category names.
+        NumericScalar::F64(value) => value.to_string(),
+        NumericScalar::F32(value) => value.to_string(),
         value => value
             .into_int_value()
-            .map(|value| value.decimal_string())
-            .unwrap_or_default(),
-    }
+            .expect("nonfloating numeric category is integer")
+            .decimal_string(),
+    })
 }
 
+#[cfg(test)]
 fn categorical_object_labels(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
     let labels = categorical_label_view(object)?;
     (0..labels.len())
@@ -993,9 +1015,15 @@ pub(crate) fn categorical_levels_for_observations(
 
 pub(crate) fn categorical_categories(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
     match object.properties().get("Categories") {
-        Some(Value::StringArray(array)) => {
-            Ok(array.data().iter().map(ToString::to_string).collect())
-        }
+        Some(Value::StringArray(array)) => array
+            .data()
+            .iter()
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    invalid_variable("categorical: Categories must contain nonmissing strings")
+                })
+            })
+            .collect(),
         _ => Err(invalid_variable("categorical: missing Categories property")),
     }
 }
@@ -1018,7 +1046,21 @@ fn categorical_is_ordinal(object: &ObjectInstance) -> bool {
     matches!(object.properties().get("Ordinal"), Some(Value::Bool(true)))
 }
 
-fn category_label_for_code<S: AsRef<str>>(code: f64, categories: &[S]) -> Option<&str> {
+trait CategoryText {
+    fn category_text(&self) -> Option<&str>;
+}
+impl CategoryText for String {
+    fn category_text(&self) -> Option<&str> {
+        Some(self.as_str())
+    }
+}
+impl CategoryText for runmat_value::StringElement {
+    fn category_text(&self) -> Option<&str> {
+        self.as_str()
+    }
+}
+
+fn category_label_for_code<S: CategoryText>(code: f64, categories: &[S]) -> Option<&str> {
     if !code.is_finite() || code < 1.0 {
         return None;
     }
@@ -1026,20 +1068,22 @@ fn category_label_for_code<S: AsRef<str>>(code: f64, categories: &[S]) -> Option
     if (idx as f64 - code).abs() > f64::EPSILON {
         return None;
     }
-    categories.get(idx - 1).map(AsRef::as_ref)
+    categories
+        .get(idx - 1)
+        .and_then(CategoryText::category_text)
 }
 
-fn category_label_for_integer_code<'a, S: AsRef<str>>(
+fn category_label_for_integer_code<'a, S: CategoryText>(
     code: &runmat_value::IntValue,
     categories: &'a [S],
 ) -> Option<&'a str> {
     code.try_to_usize()
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| categories.get(index))
-        .map(AsRef::as_ref)
+        .and_then(CategoryText::category_text)
 }
 
-fn category_label_ref_for_numeric_code<S: AsRef<str>>(
+fn category_label_ref_for_numeric_code<S: CategoryText>(
     code: NumericScalar,
     categories: &[S],
 ) -> Option<&str> {
@@ -1290,4 +1334,20 @@ mod tests {
         .unwrap();
         assert_eq!(copy, original);
     }
+}
+
+fn normalize_category_element(value: &StringElement) -> StringElement {
+    match value.as_str() {
+        Some(text) if text.trim() == text => value.clone(),
+        Some(value) => StringElement::text(normalize_category_label(value)),
+        None => StringElement::Missing,
+    }
+}
+
+fn category_name_from_element(value: StringElement) -> BuiltinResult<String> {
+    value
+        .into_text()
+        .map(|text| text.as_str().to_owned())
+        .filter(|text| !text.is_empty())
+        .ok_or_else(|| invalid_argument("categorical: category names cannot be empty or missing"))
 }

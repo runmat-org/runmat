@@ -25,7 +25,7 @@ use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
-    NumericStorage, StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
+    NumericStorage, StringArray, StringElement, Tensor, Utf16CodeUnit, Value,
 };
 
 use super::{
@@ -421,7 +421,7 @@ fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<Uniqu
         Value::CharArray(array) => unique_char_array(array, opts),
         Value::StringArray(array) => unique_string_array(array, opts),
         Value::String(s) => {
-            let array = StringArray::from_texts_unbounded(vec![s], vec![1, 1]).map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+            let array = StringArray::from_elements_unbounded(vec![s], vec![1, 1]).map_err(|e| unique_internal_error(format!("unique: {e}")))?;
             unique_string_array(array, opts)
         }
         other => Err(unique_error_with(
@@ -1368,11 +1368,15 @@ fn unique_string_elements(
     }
 
     let mut entries = Vec::<StringElementEntry>::new();
-    let mut map: HashMap<&str, usize> = HashMap::new();
+    let mut map: HashMap<&StringElement, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
     for (idx, value) in array.data().iter().enumerate() {
-        match map.get(value.as_str()) {
+        match if value.is_missing() {
+            None
+        } else {
+            map.get(value)
+        } {
             Some(&entry_idx) => {
                 entries[entry_idx].last = idx;
                 element_entry_index.push(entry_idx);
@@ -1384,7 +1388,9 @@ fn unique_string_elements(
                     first: idx,
                     last: idx,
                 });
-                map.insert(value.as_str(), entry_idx);
+                if !value.is_missing() {
+                    map.insert(value, entry_idx);
+                }
                 element_entry_index.push(entry_idx);
             }
         }
@@ -1418,9 +1424,11 @@ fn unique_string_elements(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array =
-        StringArray::from_texts_unbounded(values, unique_element_values_shape(&shape, order.len()))
-            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let value_array = StringArray::from_elements_unbounded(
+        values,
+        unique_element_values_shape(&shape, order.len()),
+    )
+    .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ic_tensor =
@@ -1467,7 +1475,11 @@ fn unique_string_rows(
             row_values.push(&array.data()[idx]);
         }
         let key = RowStringKey(row_values.clone());
-        match map.get(&key) {
+        match if row_values.iter().any(|text| text.is_missing()) {
+            None
+        } else {
+            map.get(&key)
+        } {
             Some(&entry_idx) => {
                 entries[entry_idx].last = r;
                 row_entry_index.push(entry_idx);
@@ -1496,7 +1508,7 @@ fn unique_string_rows(
     }
 
     let unique_rows_count = order.len();
-    let mut values = vec![Utf8Text::default(); unique_rows_count * cols];
+    let mut values = vec![StringElement::default(); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
         for (col, value) in row.iter().enumerate().take(cols) {
@@ -1521,7 +1533,7 @@ fn unique_string_rows(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array = StringArray::from_texts_unbounded(values, vec![unique_rows_count, cols])
+    let value_array = StringArray::from_elements_unbounded(values, vec![unique_rows_count, cols])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows_count, 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1626,17 +1638,17 @@ struct CharRowEntry {
 
 #[derive(Debug, Clone)]
 struct StringElementEntry<'a> {
-    value: &'a Utf8Text,
+    value: &'a StringElement,
     first: usize,
     last: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey<'a>(Vec<&'a Utf8Text>);
+struct RowStringKey<'a>(Vec<&'a StringElement>);
 
 #[derive(Debug, Clone)]
 struct StringRowEntry<'a> {
-    row_data: Vec<&'a Utf8Text>,
+    row_data: Vec<&'a StringElement>,
     first: usize,
     last: usize,
 }
@@ -1706,7 +1718,7 @@ fn compare_char_rows(a: &[Utf16CodeUnit], b: &[Utf16CodeUnit]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[&Utf8Text], b: &[&Utf8Text]) -> Ordering {
+fn compare_string_rows(a: &[&StringElement], b: &[&StringElement]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -1805,6 +1817,97 @@ impl UniqueEvaluation {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn typed_missing_set_operation_matrix_preserves_occurrences_and_literal_text() {
+        let input = StringArray::from_elements_unbounded(
+            vec![
+                StringElement::Missing,
+                "<missing>".into(),
+                StringElement::Missing,
+                "<missing>".into(),
+                "".into(),
+            ],
+            vec![5, 1],
+        )
+        .unwrap();
+        for shape in [vec![5, 1], vec![1, 5]] {
+            let array = StringArray::from_elements_unbounded(input.data().to_vec(), shape).unwrap();
+            let (value, _, _) = evaluate_sync(Value::StringArray(array), &[Value::from("stable")])
+                .unwrap()
+                .into_triple();
+            let Value::StringArray(value) = value else {
+                panic!("expected strings");
+            };
+            assert_eq!(
+                value.data(),
+                &[
+                    StringElement::Missing,
+                    "<missing>".into(),
+                    StringElement::Missing,
+                    "".into()
+                ]
+            );
+        }
+        use crate::builtins::array::sorting_sets::{intersect, ismember, setdiff, setxor, union};
+        let strings = |value: Value| match value {
+            Value::StringArray(array) => array,
+            other => panic!("expected strings, got {other:?}"),
+        };
+        for rows in [false, true] {
+            let args = if rows {
+                vec![Value::from("rows")]
+            } else {
+                vec![]
+            };
+            let a = Value::StringArray(input.clone());
+            let b = a.clone();
+            let (mask, _) =
+                futures::executor::block_on(ismember::evaluate(a.clone(), b.clone(), &args))
+                    .unwrap()
+                    .into_pair();
+            let Value::LogicalArray(mask) = mask else {
+                panic!("expected membership mask");
+            };
+            assert_eq!(mask.data, vec![0, 1, 0, 1, 1]);
+            let common = strings(
+                futures::executor::block_on(intersect::evaluate(a.clone(), b.clone(), &args))
+                    .unwrap()
+                    .into_values_value(),
+            );
+            assert_eq!(common.data().len(), 2);
+            assert!(common.data().iter().all(|value| !value.is_missing()));
+            for (value, missing_count) in [
+                (
+                    futures::executor::block_on(union::evaluate(a.clone(), b.clone(), &args))
+                        .unwrap()
+                        .into_values_value(),
+                    4,
+                ),
+                (
+                    futures::executor::block_on(setdiff::evaluate(a.clone(), b.clone(), &args))
+                        .unwrap()
+                        .into_values_value(),
+                    2,
+                ),
+                (
+                    futures::executor::block_on(setxor::evaluate(a, b, &args))
+                        .unwrap()
+                        .into_values_value(),
+                    4,
+                ),
+            ] {
+                assert_eq!(
+                    strings(value)
+                        .data()
+                        .iter()
+                        .filter(|value| value.is_missing())
+                        .count(),
+                    missing_count
+                );
+            }
+        }
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{LiteralValue, ResolveContext, Type};
     use runmat_value::{

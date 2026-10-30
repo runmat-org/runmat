@@ -169,13 +169,17 @@ fn encode(
             shape: shape(&value.shape, path)?,
             little_endian_data: value.data.to_vec(),
         }),
-        Value::String(value) => InlineValue::String(value.as_str().to_owned()),
+        Value::String(value) => InlineValue::String(runmat_execution::value::StringElement(
+            value.as_str().map(str::to_owned),
+        )),
         Value::StringArray(value) => InlineValue::StringArray {
             shape: shape(&value.shape, path)?,
             values: value
                 .data()
                 .iter()
-                .map(|text| text.as_str().to_owned())
+                .map(|text| {
+                    runmat_execution::value::StringElement(text.as_str().map(str::to_owned))
+                })
                 .collect(),
         },
         Value::CharArray(value) => InlineValue::Char {

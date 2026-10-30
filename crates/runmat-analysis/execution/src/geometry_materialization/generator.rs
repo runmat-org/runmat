@@ -267,7 +267,7 @@ fn encode_argument(
             vec![values.len() as u64, 1],
         ),
         GeometryAuthoringValue::Text(value) => {
-            ValuePayload::Inline(Box::new(InlineValue::String(value.clone())))
+            ValuePayload::Inline(Box::new(InlineValue::String(value.clone().into())))
         }
         GeometryAuthoringValue::Boolean(value) => {
             ValuePayload::Inline(Box::new(InlineValue::Logical(*value)))

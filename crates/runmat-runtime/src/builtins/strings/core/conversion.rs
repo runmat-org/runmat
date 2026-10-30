@@ -24,11 +24,12 @@ pub(crate) fn convert_variadic(
     }
 }
 
-pub(crate) fn string_scalar_to_chars(text: &str) -> CharArray {
-    if text.is_empty() || crate::builtins::strings::common::is_missing_string(text) {
+pub(crate) fn string_scalar_to_chars(text: &runmat_value::StringElement) -> CharArray {
+    // convertStringsToChars represents a missing string as an empty character array.
+    if text.as_str().is_none_or(str::is_empty) {
         CharArray::from_code_units(Vec::new(), 0, 0).expect("valid empty character array")
     } else {
-        CharArray::new_row(text)
+        CharArray::new_row(text.as_str().expect("nonempty text branch"))
     }
 }
 
@@ -42,7 +43,7 @@ pub(crate) fn string_to_chars(value: Value, name: &'static str) -> BuiltinResult
             let values = array
                 .data()
                 .iter()
-                .map(|text| Value::CharArray(string_scalar_to_chars(text.as_str())))
+                .map(|text| Value::CharArray(string_scalar_to_chars(text)))
                 .collect();
             crate::make_cell_with_shape(values, array.shape().to_vec()).map_err(|message| {
                 crate::build_runtime_error(message)

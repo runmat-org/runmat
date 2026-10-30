@@ -64,7 +64,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
         Value::String(s) => json!({
             "kind": "string",
             "value": s.as_str(),
-            "shape": vec![1, s.chars().count()],
+            "shape": vec![1, 1],
         }),
         Value::StringArray(sa) => {
             let preview = sa

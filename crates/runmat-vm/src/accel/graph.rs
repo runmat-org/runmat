@@ -872,7 +872,7 @@ impl<'a> GraphBuilder<'a> {
         match info.constant.as_ref() {
             Some(Value::Tensor(t)) => t.is_empty(),
             Some(Value::LogicalArray(l)) => l.data.is_empty(),
-            Some(Value::String(s)) => s.is_empty(),
+            Some(Value::String(_)) => false,
             Some(Value::StringArray(sa)) => sa.data().is_empty(),
             Some(Value::CharArray(ca)) => ca.data().is_empty(),
             Some(Value::Cell(cell)) => cell.data().is_empty(),
@@ -903,7 +903,10 @@ impl<'a> GraphBuilder<'a> {
         while i + 1 < inputs.len() {
             let s = &self.values[inputs[i] as usize].constant;
             if let Some(Value::String(text)) = s {
-                if text.eq_ignore_ascii_case("like") {
+                if text
+                    .as_str()
+                    .is_some_and(|text| text.eq_ignore_ascii_case("like"))
+                {
                     let proto = &self.values[inputs[i + 1] as usize];
                     if let Type::Tensor { shape: Some(dims) } = &proto.ty {
                         return Some(Type::Tensor {

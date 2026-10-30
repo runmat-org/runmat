@@ -176,7 +176,7 @@ fn gpu_array_value_shape(value: &Value) -> Vec<usize> {
         Value::LogicalArray(array) => array.shape.to_vec(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
         Value::CharArray(array) => array.shape().to_vec(),
-        Value::String(text) => vec![1, text.chars().count()],
+        Value::String(runmat_value::StringElement::Text(text)) => vec![1, text.chars().count()],
         _ => vec![1, 1],
     }
 }
@@ -957,7 +957,7 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
         }),
         Value::CharArray(ca) => char_array_to_tensor(&ca),
-        Value::String(text) => {
+        Value::String(runmat_value::StringElement::Text(text)) => {
             let ca = CharArray::new_row(&text);
             char_array_to_tensor(&ca)
         }

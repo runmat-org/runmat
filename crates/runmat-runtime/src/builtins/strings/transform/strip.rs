@@ -6,7 +6,9 @@ use runmat_builtins::{
     STRIP_ERROR_INTERNAL, STRIP_ERROR_INVALID_INPUT, STRIP_ERROR_SIZE_MISMATCH,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Utf16CodeUnit, Utf8Text, Value};
+use runmat_value::{
+    CellArray, CharArray, StringArray, StringElement, Utf16CodeUnit, Utf8Text, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -133,9 +135,11 @@ impl PatternSpec<'_> {
         match self {
             PatternSpec::Default => PatternRef::Default,
             PatternSpec::Scalar(pattern) => *pattern,
-            PatternSpec::PerElementStrings(array) => {
-                PatternRef::CustomText(array.data()[idx].as_str())
-            }
+            PatternSpec::PerElementStrings(array) => PatternRef::CustomText(
+                array.data()[idx]
+                    .as_str()
+                    .expect("pattern elements validated before selection"),
+            ),
             PatternSpec::PerElementChars(array) => {
                 let start = idx * array.cols;
                 PatternRef::CustomChars(&array.data()[start..start + array.cols])
@@ -173,11 +177,11 @@ async fn strip_builtin(
 
 async fn strip_string(
     runtime: Option<&RuntimeContext>,
-    text: Utf8Text,
+    text: StringElement,
     args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
-        return Ok(Value::string(text));
+        return Ok(Value::String(text));
     }
     let expectation = PatternExpectation::scalar();
     let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
@@ -201,13 +205,7 @@ async fn strip_string_array(
     let result = transform_string_array_borrowed_indexed(
         runtime,
         array,
-        |index, text| {
-            if is_missing_string(text) {
-                text
-            } else {
-                strip_slice(text, direction, pattern_spec.pattern_for_index(index))
-            }
-        },
+        |index, text| strip_slice(text, direction, pattern_spec.pattern_for_index(index)),
         strip_allocation_error,
         |detail| {
             strip_error_with_message(format!("{BUILTIN_NAME}: {detail}"), &STRIP_ERROR_INTERNAL)
@@ -280,9 +278,9 @@ fn enforce_pattern_extension(pattern: &PatternSpec<'_>) -> BuiltinResult<()> {
 
 fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<StripDirection>> {
     let token = match value {
-        Value::String(text) => direction_token(text.as_str()),
+        Value::String(text) => text.as_str().and_then(direction_token),
         Value::StringArray(array) if array.data().len() == 1 => {
-            direction_token(array.data()[0].as_str())
+            array.data()[0].as_str().and_then(direction_token)
         }
         Value::CharArray(array)
             if array.rows <= 1 && array.shape.len() <= 2 && array.validate_layout().is_ok() =>
@@ -358,11 +356,21 @@ async fn parse_pattern<'a>(
 ) -> BuiltinResult<PatternSpec<'a>> {
     let expected_len = expectation.len();
     match value {
-        Value::String(text) => Ok(PatternSpec::Scalar(PatternRef::CustomText(text.as_str()))),
+        Value::String(text) => Ok(PatternSpec::Scalar(PatternRef::CustomText(
+            text.as_str()
+                .ok_or_else(|| strip_error(&STRIP_ERROR_CHARACTERS))?,
+        ))),
         Value::StringArray(sa) => {
+            if sa.data().iter().any(StringElement::is_missing) {
+                return Err(strip_error(&STRIP_ERROR_CHARACTERS));
+            }
             if sa.data().len() <= 1 {
                 if let Some(first) = sa.data().first() {
-                    Ok(PatternSpec::Scalar(PatternRef::CustomText(first.as_str())))
+                    Ok(PatternSpec::Scalar(PatternRef::CustomText(
+                        first
+                            .as_str()
+                            .ok_or_else(|| strip_error(&STRIP_ERROR_CHARACTERS))?,
+                    )))
                 } else {
                     Ok(PatternSpec::Scalar(PatternRef::CustomChars(&[])))
                 }
@@ -429,9 +437,9 @@ async fn parse_pattern_cell<'a>(
 
 fn pattern_ref_from_value(value: &Value) -> Option<PatternRef<'_>> {
     match value {
-        Value::String(text) => Some(PatternRef::CustomText(text.as_str())),
+        Value::String(text) => text.as_str().map(PatternRef::CustomText),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(PatternRef::CustomText(array.data()[0].as_str()))
+            array.data()[0].as_str().map(PatternRef::CustomText)
         }
         Value::CharArray(array)
             if array.rows <= 1
@@ -648,13 +656,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_array_preserves_missing() {
-        let strings =
-            StringArray::new(vec!["   data   ".into(), "<missing>".into()], vec![2, 1]).unwrap();
+        let strings = StringArray::from_elements_unbounded(
+            vec!["   data   ".into(), runmat_value::StringElement::Missing],
+            vec![2, 1],
+        )
+        .unwrap();
         let result = run_strip(Value::StringArray(strings), Vec::new()).expect("strip");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.data()[0], "data");
-                assert_eq!(sa.data()[1], "<missing>");
+                assert!(sa.data()[1].is_missing());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -760,8 +771,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_preserves_missing_string() {
-        let result = run_strip(Value::String("<missing>".into()), Vec::new()).expect("strip");
-        assert_eq!(result, Value::String("<missing>".into()));
+        let result = run_strip(
+            Value::String(runmat_value::StringElement::Missing),
+            Vec::new(),
+        )
+        .expect("strip");
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

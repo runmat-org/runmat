@@ -60,16 +60,20 @@ fn internal(message: impl Into<String>) -> RuntimeError {
 
 fn scalar_text(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
     Ok(match value {
-        Value::String(text) => Some(std::borrow::Cow::Borrowed(text.as_str())),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Some(std::borrow::Cow::Borrowed(text.as_str()))
+        }
         Value::CharArray(chars) if chars.rows == 1 => Some(std::borrow::Cow::Owned(
             crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
                 invalid("mnrfit: text value is not valid UTF-16")
             })?,
         )),
-        Value::StringArray(array) if array.data().len() == 1 => array
-            .data()
-            .first()
-            .map(|text| std::borrow::Cow::Borrowed(text.as_str())),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array
+                .data()
+                .first()
+                .and_then(|text| text.as_str().map(std::borrow::Cow::Borrowed))
+        }
         _ => None,
     })
 }

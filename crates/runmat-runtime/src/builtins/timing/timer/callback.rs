@@ -77,7 +77,7 @@ async fn run_callback_with_error(
         return Ok(());
     }
     match callback {
-        Value::String(text) if !text.trim().is_empty() => {
+        Value::String(runmat_value::StringElement::Text(text)) if !text.trim().is_empty() => {
             text_callback_request(runtime, handle, slot, &text)?
                 .evaluate(runtime.clone())
                 .await?;
@@ -188,7 +188,7 @@ fn timer_event(
 
 pub(super) fn callback_is_empty(value: &Value) -> bool {
     match value {
-        Value::String(text) => text.trim().is_empty(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.trim().is_empty(),
         Value::CharArray(chars) => chars.data().iter().all(|unit| unit.is_whitespace()),
         Value::Cell(cell) => cell.data().is_empty(),
         _ => false,

@@ -281,7 +281,7 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
         ("next", ["c", "d"]),
         ("nearest", ["a", "b"]),
     ] {
-        let input = StringArray::new(
+        let input = StringArray::from_elements_unbounded(
             vec![
                 "a".into(),
                 "b".into(),
@@ -339,7 +339,7 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
         .with_service_ports(
             RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
         );
-    let input = StringArray::new(
+    let input = StringArray::from_elements_unbounded(
         vec![
             "a".into(),
             "b".into(),
@@ -364,7 +364,7 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
         output
             .data()
             .iter()
-            .map(|value| value.as_str())
+            .map(|value| value.as_str().expect("filled text"))
             .collect::<Vec<_>>(),
         ["a", "b", "a", "b", "c", "d"]
     );
@@ -382,7 +382,7 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
         panic!("expected standardized array")
     };
     assert_eq!(unique.data().as_ptr(), unique_outer);
-    assert_eq!(unique.data()[0].as_str(), MISSING_TEXT);
+    assert!(unique.data()[0].is_missing());
     let alias = unique.clone();
     let shared_outer = unique.data().as_ptr();
     let indicator = super::super::standardize::indicator_set(&Value::from("b")).unwrap();
@@ -395,8 +395,8 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
         panic!("expected shared replacement")
     };
     assert_ne!(replaced.data().as_ptr(), shared_outer);
-    assert_eq!(alias.data()[1].as_str(), "b");
-    assert_eq!(replaced.data()[1].as_str(), MISSING_TEXT);
+    assert_eq!(alias.data()[1].as_str(), Some("b"));
+    assert!(replaced.data()[1].is_missing());
     drop(replaced);
     drop(alias);
     drop(mask);

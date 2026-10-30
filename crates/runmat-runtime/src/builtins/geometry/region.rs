@@ -49,8 +49,13 @@ pub async fn geometry_region_binding(args: crate::call::BuiltinArguments) -> Bui
         )));
     };
     let selector = match selector {
-        Value::String(text) => text.to_string(),
-        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].to_string(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.to_string(),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .to_string()
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             runmat_value::decode_utf16_code_units(chars.data())
                 .map_err(|_| input_error("selector must be valid text"))?
@@ -110,7 +115,7 @@ pub(crate) fn region_ref_from_value(
     }
     validate_region_object(object).map_err(|message| region_error(builtin, message))?;
     let string = |name: &str| match object.properties().get(name) {
-        Some(Value::String(value)) => Ok(value.clone()),
+        Some(Value::String(runmat_value::StringElement::Text(value))) => Ok(value.clone()),
         _ => Err(region_error(
             builtin,
             format!("{GEOMETRY_REGION_CLASS}.{name} must be a string"),
@@ -126,7 +131,7 @@ pub(crate) fn region_ref_from_value(
         }
     };
     let tag = match object.properties().get("tag") {
-        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::String(runmat_value::StringElement::Text(value))) => Some(value.clone()),
         None => None,
         _ => {
             return Err(region_error(
@@ -258,8 +263,8 @@ pub(crate) fn ensure_region_class_registered() {
 fn validate_region_object(object: &ObjectInstance) -> Result<(), String> {
     for name in ["geometry_id", "region_id", "name"] {
         match object.properties().get(name) {
-            Some(Value::String(value)) if !value.is_empty() => {}
-            Some(Value::String(_)) => {
+            Some(Value::String(runmat_value::StringElement::Text(value))) if !value.is_empty() => {}
+            Some(Value::String(runmat_value::StringElement::Text(_))) => {
                 return Err(format!("{GEOMETRY_REGION_CLASS}.{name} must not be empty"))
             }
             _ => return Err(format!("{GEOMETRY_REGION_CLASS}.{name} must be a string")),
@@ -274,7 +279,8 @@ fn validate_region_object(object: &ObjectInstance) -> Result<(), String> {
         ));
     }
     if let Some(tag) = object.properties().get("tag") {
-        if !matches!(tag, Value::String(value) if !value.is_empty()) {
+        if !matches!(tag, Value::String(runmat_value::StringElement::Text(value)) if !value.is_empty())
+        {
             return Err(format!(
                 "{GEOMETRY_REGION_CLASS}.tag must be a non-empty string when present"
             ));

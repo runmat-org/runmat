@@ -356,7 +356,7 @@ pub(crate) fn permute_string_array(
 ) -> crate::BuiltinResult<StringArray> {
     let (data, shape, _, _) = sa.into_parts();
     let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
-    StringArray::from_texts_unbounded(out, new_shape)
+    StringArray::from_elements_unbounded(out, new_shape)
         .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
 }
 

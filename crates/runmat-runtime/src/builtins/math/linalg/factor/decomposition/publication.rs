@@ -59,7 +59,7 @@ pub(super) fn publish(
             })?;
         r.checkpoint(runtime)
             .map_err(|e| native::allocation(e, runtime))?;
-        Ok(Value::String(text))
+        Ok(Value::String(text.into()))
     };
     let (m, n) = matrix_dims(&spec.matrix);
     let (m, n) = if spec.is_conjugate_transposed {

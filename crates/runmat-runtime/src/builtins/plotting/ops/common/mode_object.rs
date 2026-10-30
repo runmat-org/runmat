@@ -87,7 +87,8 @@ pub(crate) fn prepare_fields(
         let value = match &field.value {
             FieldValue::Text(value) => Value::String(
                 Utf8Text::try_copy_str_exact_with(value, &permit, |_| receipt.checkpoint(runtime))
-                    .map_err(|source| initialization(runtime, source))?,
+                    .map_err(|source| initialization(runtime, source))?
+                    .into(),
             ),
             FieldValue::EmptyF64Tensor(shape) => Value::Tensor(
                 ExactHostTensorAllocation::new(NumericDType::F64, shape, &permit)

@@ -301,7 +301,8 @@ fn wire_arguments(
         values.len(),
         runtime,
         |index| {
-            crate::call::argument_text::copy_str(values[index], Some(runtime)).map(Value::String)
+            crate::call::argument_text::copy_str(values[index], Some(runtime))
+                .map(|text| Value::String(text.into()))
         },
     )?;
     Ok(values.into())

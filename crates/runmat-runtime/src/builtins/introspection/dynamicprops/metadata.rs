@@ -77,7 +77,9 @@ pub(super) fn metadata_text(
     field: &str,
 ) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(_) => crate::call::argument_text::convert(value, runtime),
+        Value::String(runmat_value::StringElement::Text(_)) => {
+            crate::call::argument_text::convert(value, runtime)
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             crate::call::argument_text::convert(value, runtime)
         }

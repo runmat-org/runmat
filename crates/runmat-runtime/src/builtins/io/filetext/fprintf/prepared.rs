@@ -47,7 +47,7 @@ pub(super) async fn prepare(
                 .await??;
                 let text = coerce_to_format_string(&host)?;
                 staged.put(index, host)?;
-                if let Some(Value::String(text)) = text {
+                if let Some(Value::String(runmat_value::StringElement::Text(text))) = text {
                     break (index, text);
                 }
                 start = index + 1;
@@ -129,7 +129,9 @@ fn next_format(
         if matches!(value, Value::GpuTensor(_)) {
             return Ok(Some(FormatPlan::Resident { index }));
         }
-        if let Some(Value::String(text)) = coerce_to_format_string(value)? {
+        if let Some(Value::String(runmat_value::StringElement::Text(text))) =
+            coerce_to_format_string(value)?
+        {
             return Ok(Some(FormatPlan::Host { index, text }));
         }
     }

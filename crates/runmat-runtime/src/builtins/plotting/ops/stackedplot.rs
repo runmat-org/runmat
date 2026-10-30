@@ -1034,12 +1034,16 @@ fn tensor_column_source(tensor: &Tensor, col: usize) -> BuiltinResult<(Vec<f64>,
 
 fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(vec![s.as_str().to_owned()]),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| stacked_err("variable selector must be text"))
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(vec![runmat_value::decode_utf16_code_units(array.data())

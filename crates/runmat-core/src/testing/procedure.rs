@@ -31,7 +31,7 @@ pub(super) fn invocation_for(
         };
         let name =
             runmat_runtime::call::argument_text::copy_str(&procedure.display_name, Some(runtime))?;
-        let fields = [("Name", Value::String(name))];
+        let fields = [("Name", Value::String(name.into()))];
         let test_case = runmat_runtime::testing::object_from_fields_in_context(
             runtime,
             class_name

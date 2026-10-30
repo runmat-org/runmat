@@ -450,9 +450,9 @@ fn validate_precision(value: i64) -> BuiltinResult<()> {
 
 fn value_to_text(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
     Ok(match value {
-        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::String(s) => s.as_str().map(std::borrow::Cow::Borrowed),
         Value::StringArray(sa) if sa.data().len() == 1 => {
-            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
+            sa.data()[0].as_str().map(std::borrow::Cow::Borrowed)
         }
         Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
             runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {

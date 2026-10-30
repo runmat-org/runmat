@@ -59,11 +59,15 @@ pub(super) fn numeric_scalar_property(object: &ObjectInstance, name: &str) -> Bu
 
 pub(super) fn string_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<String>> {
     match object.properties().get(name) {
-        Some(Value::StringArray(array)) => Ok(array
+        Some(Value::StringArray(array)) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    predict_invalid("predict: model text metadata must be nonmissing")
+                })
+            })
+            .collect(),
         Some(Value::Cell(cell)) => cell
             .data()
             .iter()
@@ -248,25 +252,35 @@ pub(super) fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
 
 pub(super) fn scalar_text(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
     Ok(match value {
-        Value::String(text) => Some(std::borrow::Cow::Borrowed(text.as_str())),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Some(std::borrow::Cow::Borrowed(text.as_str()))
+        }
         Value::CharArray(chars) => Some(std::borrow::Cow::Owned(chars_to_string(chars)?)),
-        Value::StringArray(array) if array.data().len() == 1 => array
-            .data()
-            .first()
-            .map(|text| std::borrow::Cow::Borrowed(text.as_str())),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array
+                .data()
+                .first()
+                .and_then(|text| text.as_str().map(std::borrow::Cow::Borrowed))
+        }
         _ => None,
     })
 }
 
 pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         Value::CharArray(chars) => Ok(vec![chars_to_string(chars)?]),
-        Value::StringArray(array) => Ok(array
+        Value::StringArray(array) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| fitlm_invalid("fitlm: text entries must be nonmissing"))
+            })
+            .collect(),
         Value::Cell(cell) => cell
             .data()
             .iter()

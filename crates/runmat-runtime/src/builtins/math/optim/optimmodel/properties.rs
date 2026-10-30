@@ -47,7 +47,7 @@ pub(super) async fn names_value(
                 .map_err(|source| policy.storage(source))?;
         if let Some(axis) = axis {
             for label in axis {
-                values.push(Value::String(label.clone()));
+                values.push(Value::string(label.clone()));
                 cooperation.completed(1).await?;
             }
         }

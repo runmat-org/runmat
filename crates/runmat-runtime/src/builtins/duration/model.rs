@@ -175,10 +175,18 @@ pub(super) fn broadcast_duration_days(
 
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::String(text) => {
+            Ok(
+                duration_nonmissing_text(text, context, DurationErrorKind::InvalidArgument)?
+                    .to_owned(),
+            )
         }
+        Value::StringArray(array) if array.data().len() == 1 => Ok(duration_nonmissing_text(
+            &array.data()[0],
+            context,
+            DurationErrorKind::InvalidArgument,
+        )?
+        .to_owned()),
         Value::CharArray(array) if array.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
             array.data(),
         )
@@ -251,9 +259,12 @@ pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Ten
 
 pub(super) fn format_for_object(obj: &ObjectInstance) -> BuiltinResult<String> {
     Ok(match obj.properties().get(FORMAT_FIELD) {
-        Some(Value::String(text)) => text.as_str().to_owned(),
+        Some(Value::String(text)) => {
+            duration_nonmissing_text(text, "Format", DurationErrorKind::InvalidFormat)?.to_owned()
+        }
         Some(Value::StringArray(array)) if array.data().len() == 1 => {
-            array.data()[0].as_str().to_owned()
+            duration_nonmissing_text(&array.data()[0], "Format", DurationErrorKind::InvalidFormat)?
+                .to_owned()
         }
         Some(Value::CharArray(array)) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
@@ -513,4 +524,13 @@ pub(super) async fn gather_retained_args(
         .map_err(|err| duration_error_from(DurationErrorKind::InvalidArgument, "duration: ", err))
     })
     .await
+}
+
+pub(super) fn duration_nonmissing_text<'a>(
+    text: &'a runmat_value::StringElement,
+    context: &str,
+    kind: DurationErrorKind,
+) -> BuiltinResult<&'a str> {
+    text.as_str()
+        .ok_or_else(|| duration_error(kind, format!("duration: {context} must not be missing")))
 }

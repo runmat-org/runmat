@@ -71,7 +71,7 @@ mod tests {
 
     fn validate_test_object(object: &ObjectInstance) -> Result<(), String> {
         match object.properties().get("id") {
-            Some(Value::String(id)) if !id.is_empty() => Ok(()),
+            Some(Value::String(runmat_value::StringElement::Text(id))) if !id.is_empty() => Ok(()),
             Some(_) => Err("portable test object's `id` must be a string".into()),
             None => Err("portable test object is missing `id`".into()),
         }
@@ -395,7 +395,23 @@ mod tests {
         );
         structure.insert(
             "strings",
-            Value::StringArray(StringArray::new(vec!["α".into(), "β".into()], vec![1, 2]).unwrap()),
+            Value::StringArray(
+                StringArray::from_elements_unbounded(
+                    vec![
+                        "α".into(),
+                        "<missing>".into(),
+                        "<MISSING>".into(),
+                        runmat_value::StringElement::Missing,
+                        "".into(),
+                    ],
+                    vec![1, 5],
+                )
+                .unwrap(),
+            ),
+        );
+        structure.insert(
+            "missing_scalar",
+            Value::String(runmat_value::StringElement::Missing),
         );
         structure.insert(
             "chars",

@@ -74,12 +74,20 @@ pub(super) fn parse_line_style_text(text: &str) -> BuiltinResult<LineStyle> {
 
 pub(super) fn style_text_entries(value: &Value, option_name: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
-        Value::StringArray(array) => Ok(array
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
+        Value::StringArray(array) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    invalid(format!(
+                        "scatterhist: {option_name} must be nonmissing text"
+                    ))
+                })
+            })
+            .collect(),
         Value::CharArray(chars) if chars.rows > 1 => (0..chars.rows)
             .map(|row| -> BuiltinResult<String> {
                 let start = row * chars.cols;
@@ -139,7 +147,12 @@ pub(super) fn parse_color_cycle(value: &Value) -> BuiltinResult<Vec<Vec4>> {
         Value::StringArray(array) => array
             .data()
             .iter()
-            .map(|entry| parse_color_text(entry))
+            .map(|entry| {
+                entry
+                    .as_str()
+                    .ok_or_else(|| invalid("scatterhist: Color must be nonmissing text"))
+                    .and_then(parse_color_text)
+            })
             .collect(),
         Value::Cell(cell) => cell.data().iter().map(parse_color_text_or_value).collect(),
         _ => {
@@ -170,9 +183,9 @@ pub(super) fn parse_color_cycle(value: &Value) -> BuiltinResult<Vec<Vec4>> {
 
 pub(super) fn scalar_text(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => text.as_str().map(str::to_owned),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            array.data()[0].as_str().map(str::to_owned)
         }
         Value::CharArray(chars) if chars.rows == 1 => Some(
             crate::builtins::stats::decode_utf16_with_error(chars.data(), || {

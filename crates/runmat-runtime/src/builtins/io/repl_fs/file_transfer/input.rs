@@ -22,7 +22,7 @@ pub(super) fn text(
     builtin: &'static str,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
@@ -31,8 +31,12 @@ pub(super) fn text(
                 descriptor_error(error, builtin)
             })
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         _ => Err(descriptor_error(error, builtin)),
     }

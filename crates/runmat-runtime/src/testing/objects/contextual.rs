@@ -6,7 +6,7 @@ use crate::context::host_allocation::{
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueLease, RootedValues};
 use crate::{BuiltinResult, RuntimeError};
-use runmat_value::{ExactArrayInitializationError, ExactArrayStorage, SharedShape, Utf8Text};
+use runmat_value::{ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringElement};
 
 pub fn object_from_fields_in_context<'a>(
     runtime: &RuntimeContext,
@@ -126,7 +126,8 @@ pub fn object_array_or_scalar_in_context(
 }
 
 fn text(runtime: &RuntimeContext, source: &str) -> BuiltinResult<Value> {
-    crate::call::argument_text::copy_str(source, Some(runtime)).map(Value::String)
+    crate::call::argument_text::copy_str(source, Some(runtime))
+        .map(|text| Value::String(text.into()))
 }
 
 fn string_row(runtime: &RuntimeContext, source: &[String]) -> BuiltinResult<Value> {
@@ -138,7 +139,7 @@ fn string_row(runtime: &RuntimeContext, source: &[String]) -> BuiltinResult<Valu
             cause,
         )
     };
-    let bytes = ExactArrayStorage::<Utf8Text>::requested_bytes(source.len())
+    let bytes = ExactArrayStorage::<StringElement>::requested_bytes(source.len())
         .and_then(|bytes| {
             SharedShape::requested_bytes_for_rank(2).and_then(|shape| {
                 bytes
@@ -162,6 +163,7 @@ fn string_row(runtime: &RuntimeContext, source: &[String]) -> BuiltinResult<Valu
         let data = ExactArrayStorage::try_initialize(source.len(), &permit, |index| {
             receipt.checkpoint(runtime).map_err(allocation)?;
             crate::call::argument_text::copy_str(&source[index], Some(runtime))
+                .map(StringElement::Text)
         })
         .map_err(|cause| match cause {
             ExactArrayInitializationError::Allocation(cause) => {

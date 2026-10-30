@@ -62,7 +62,7 @@ enum LabelKind {
 #[derive(Clone, Debug, PartialEq)]
 enum ClassLabel {
     Numeric(NumericScalar),
-    Text(runmat_value::Utf8Text),
+    Text(runmat_value::StringElement),
     Logical(bool),
 }
 

@@ -17,7 +17,8 @@ use crate::{
     MxArray, MxBoundaryInterface, MxClassId,
 };
 
-pub const MEX_HOST_ABI_VERSION: u32 = 9;
+/// V10 replaces display-spelling inference with typed missing-string status.
+pub const MEX_HOST_ABI_VERSION: u32 = 10;
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod retirement_tests;
@@ -855,7 +856,7 @@ unsafe extern "C" fn create_string_array(
         state.fail("string array dimensions exceed platform limits");
         return std::ptr::null_mut();
     };
-    match MxArray::string(vec!["<missing>".to_string(); count], shape) {
+    match MxArray::string(vec![runmat_value::StringElement::Missing; count], shape) {
         Ok(value) => state.mx.allocate(value),
         Err(error) => {
             state.fail(error);
@@ -884,7 +885,9 @@ unsafe extern "C" fn string_length(
         state.fail("string array index is out of range");
         return usize::MAX;
     };
-    value.encode_utf16().count()
+    value
+        .as_str()
+        .map_or(usize::MAX - 1, |text| text.encode_utf16().count())
 }
 
 unsafe extern "C" fn copy_string(
@@ -909,7 +912,11 @@ unsafe extern "C" fn copy_string(
         state.fail("string array index is out of range");
         return 1;
     };
-    let encoded = value.encode_utf16().collect::<Vec<_>>();
+    let Some(text) = value.as_str() else {
+        state.fail("cannot copy a missing Data API string as UTF-16");
+        return 1;
+    };
+    let encoded = text.encode_utf16().collect::<Vec<_>>();
     if encoded.len() != output_length || (output.is_null() && output_length != 0) {
         state.fail("Data API string output buffer has the wrong length");
         return 1;
@@ -935,7 +942,8 @@ unsafe extern "C" fn set_string(
     let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
-    let units = if input_length == 0 {
+    let missing = input.is_null() && input_length == usize::MAX;
+    let units = if missing || input_length == 0 {
         &[][..]
     } else if input.is_null() {
         state.fail("Data API string input pointer is null");
@@ -967,7 +975,11 @@ unsafe extern "C" fn set_string(
         state.fail("string array index is out of range");
         return 1;
     };
-    *slot = text;
+    *slot = if missing {
+        runmat_value::StringElement::Missing
+    } else {
+        text.into()
+    };
     0
 }
 
@@ -1906,6 +1918,16 @@ unsafe extern "C" fn has_error(host: *mut c_void) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_string_host_revision_matches_compiled_support_header() {
+        let header = include_str!("../../include/runmat_mex_host.h");
+        assert!(header.contains(&format!(
+            "#define RUNMAT_MEX_HOST_ABI_VERSION {}u",
+            MEX_HOST_ABI_VERSION
+        )));
+        assert_eq!(MEX_HOST_ABI_VERSION, 10);
+    }
 
     #[cfg(not(target_family = "wasm"))]
     #[test]

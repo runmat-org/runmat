@@ -388,12 +388,18 @@ fn validate_finite_data(
 
 fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| textscatter_error(builtin, "labels must be text"))
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?),
         Value::CharArray(chars) if chars.rows == 1 => decode_utf16_code_units(chars.data())
             .map(|text| vec![text])
             .map_err(|error| {

@@ -512,8 +512,16 @@ pub(super) fn logical_value(field: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             logical_from_number(field, tensor::tensor_value_f64(tensor, 0))
         }
-        Value::String(s) => logical_from_text(field, s),
-        Value::StringArray(sa) if sa.data().len() == 1 => logical_from_text(field, &sa.data()[0]),
+        Value::String(runmat_value::StringElement::Text(s)) => logical_from_text(field, s),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            let text = sa.data()[0].as_str().ok_or_else(|| {
+                optimoptions_error_with(
+                    &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                    format!("optimoptions: option {field} must be nonmissing text"),
+                )
+            })?;
+            logical_from_text(field, text)
+        }
         Value::CharArray(array) if array.rows == 1 => {
             let text = runmat_value::decode_utf16_code_units(array.data()).map_err(|error| {
                 optimoptions_error_with(

@@ -1,4 +1,6 @@
-use crate::{ExactArrayStorage, ExactHostNumericAllocationError, SharedShape, Utf8Text};
+use crate::{
+    ExactArrayStorage, ExactHostNumericAllocationError, SharedShape, StringElement, Utf8Text,
+};
 
 use super::shape_rows_cols;
 
@@ -15,7 +17,7 @@ fn string_element_count(shape: &[usize]) -> Option<usize> {
 /// UTF-8 payload have independent physical owners under finite admission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StringArray {
-    pub(crate) data: ExactArrayStorage<Utf8Text>,
+    pub(crate) data: ExactArrayStorage<StringElement>,
     pub shape: SharedShape,
     pub rows: usize,
     pub cols: usize,
@@ -38,15 +40,28 @@ impl StringArray {
     pub fn new(data: Vec<String>, shape: Vec<usize>) -> Result<Self, String> {
         Self::validate_length(data.len(), &shape)?;
         Ok(Self::from_unbounded_parts(
-            data.into_iter().map(Utf8Text::new).collect(),
+            data.into_iter().map(StringElement::from).collect(),
             shape,
         ))
     }
 
-    /// Ordinary construction from existing text owners. Both the outer Vec
-    /// and every text payload move unchanged; admitted children keep their
-    /// original claims. This does not admit the new collection or shape.
+    /// Ordinary construction from existing text owners. Text byte payloads
+    /// move unchanged into present elements; admitted children keep their
+    /// claims. The typed element collection and shape are not admitted here.
     pub fn from_texts_unbounded(data: Vec<Utf8Text>, shape: Vec<usize>) -> Result<Self, String> {
+        Self::validate_length(data.len(), &shape)?;
+        Ok(Self::from_unbounded_parts(
+            data.into_iter().map(StringElement::Text).collect(),
+            shape,
+        ))
+    }
+
+    /// Move typed elements and their existing text owners without flattening
+    /// missingness or copying byte payloads.
+    pub fn from_elements_unbounded(
+        data: Vec<StringElement>,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
         Self::validate_length(data.len(), &shape)?;
         Ok(Self::from_unbounded_parts(data, shape))
     }
@@ -63,14 +78,14 @@ impl StringArray {
         Ok(())
     }
 
-    fn from_unbounded_parts(data: Vec<Utf8Text>, shape: Vec<usize>) -> Self {
+    fn from_unbounded_parts(data: Vec<StringElement>, shape: Vec<usize>) -> Self {
         Self::from_validated_storage(
             ExactArrayStorage::shared_unbounded(data),
             SharedShape::new_unmanaged(shape),
         )
     }
 
-    fn from_validated_storage(data: ExactArrayStorage<Utf8Text>, shape: SharedShape) -> Self {
+    fn from_validated_storage(data: ExactArrayStorage<StringElement>, shape: SharedShape) -> Self {
         let (rows, cols) = shape_rows_cols(&shape);
         let data = if data.is_shallow_clone() {
             data
@@ -98,7 +113,7 @@ impl StringArray {
     /// children or allocating. This does not certify finite admission; callers
     /// publishing newly admitted outputs use `from_admitted` instead.
     pub fn from_shared_storage(
-        data: ExactArrayStorage<Utf8Text>,
+        data: ExactArrayStorage<StringElement>,
         shape: SharedShape,
     ) -> Result<Self, String> {
         Self::validate_length(data.len(), &shape)?;
@@ -108,7 +123,7 @@ impl StringArray {
     /// Publish the original collection and child byte allocations without
     /// copying or re-quoting; all three owner layers must already be admitted.
     pub fn from_admitted(
-        data: ExactArrayStorage<Utf8Text>,
+        data: ExactArrayStorage<StringElement>,
         shape: SharedShape,
     ) -> Result<Self, String> {
         if !data.is_exact() || !shape.is_admitted() {
@@ -136,7 +151,7 @@ impl StringArray {
         rank: usize,
         new_text_capacities: impl IntoIterator<Item = usize>,
     ) -> Result<usize, ExactHostNumericAllocationError> {
-        let mut bytes = ExactArrayStorage::<Utf8Text>::requested_bytes(element_count)?
+        let mut bytes = ExactArrayStorage::<StringElement>::requested_bytes(element_count)?
             .checked_add(SharedShape::requested_bytes_for_rank(rank)?)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
         for capacity in new_text_capacities {
@@ -151,13 +166,13 @@ impl StringArray {
         Self::new(data, vec![rows, cols])
     }
 
-    pub fn data(&self) -> &[Utf8Text] {
+    pub fn data(&self) -> &[StringElement] {
         self.data.as_slice()
     }
-    pub fn data_owner(&self) -> &ExactArrayStorage<Utf8Text> {
+    pub fn data_owner(&self) -> &ExactArrayStorage<StringElement> {
         &self.data
     }
-    pub fn into_parts(self) -> (ExactArrayStorage<Utf8Text>, SharedShape, usize, usize) {
+    pub fn into_parts(self) -> (ExactArrayStorage<StringElement>, SharedShape, usize, usize) {
         (self.data, self.shape, self.rows, self.cols)
     }
     pub fn make_data_unique_unbounded(&mut self) -> Result<(), crate::ExactArrayMutationError> {
@@ -181,7 +196,7 @@ impl StringArray {
         let shape = SharedShape::new_unmanaged(shape);
         while self.data.len() < count {
             self.data
-                .try_push_unbounded(Utf8Text::default())
+                .try_push_unbounded(StringElement::default())
                 .map_err(|_| "StringArray growth requires unique ordinary storage".to_string())?;
         }
         let replacement = Self::from_validated_storage(std::mem::take(&mut self.data), shape);
@@ -195,7 +210,7 @@ impl StringArray {
 
     /// Same-cardinality mutation is safe only when the collection is unique.
     /// New strings still require independent byte admission on finite routes.
-    pub fn try_data_mut_unique(&mut self) -> Option<&mut [Utf8Text]> {
+    pub fn try_data_mut_unique(&mut self) -> Option<&mut [StringElement]> {
         self.data.try_as_mut_slice_unique()
     }
 

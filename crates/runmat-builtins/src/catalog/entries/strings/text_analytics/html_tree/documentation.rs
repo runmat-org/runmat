@@ -36,7 +36,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
                 "The returned object stores `Name`, `Children`, `Parent`, `Attributes`, `RawHTML`, and `Text` properties.",
                 "`Name` is the uppercase root element name when an element is present.",
                 "`Children` is a column cell array of child `htmlTree` objects because RunMat does not yet have a first-class MATLAB object-array representation for this class.",
-                "`Parent` is `<missing>` at the root. Child objects store the parent element name rather than a cyclic object reference.",
+                "`Parent` is a typed missing string, displayed as `<missing>`, at the root. Child objects store the parent element name rather than a cyclic object reference.",
                 "The parser accepts common well-formed and fragment HTML, skips comments and declarations, decodes common HTML entities, and preserves enough structure for text extraction, `findElement`, and `getAttribute`.",
                 "`findElement` and `getAttribute` support common selector and attribute workflows over RunMat `htmlTree` objects, including CSS tag/id/class selectors, attribute operator selectors, descendant/child/sibling combinators, selector groups, `:empty`, `:first-child`, `:first-of-type`, and simple `:not(...)` pseudo-class forms.",
                 "Full Text Analytics DOM parity remains incomplete: exact browser-grade malformed-HTML restructuring, cyclic parent object identity, MATLAB object-array identity semantics, and selector forms outside the documented RunMat subset remain tracked by the broader Text Analytics compatibility issue.",

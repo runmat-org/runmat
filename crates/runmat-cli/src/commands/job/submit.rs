@@ -205,7 +205,7 @@ pub async fn submit(
         context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: args
             .into_iter()
-            .map(|value| ValuePayload::Inline(Box::new(InlineValue::String(value))))
+            .map(|value| ValuePayload::Inline(Box::new(InlineValue::String(value.into()))))
             .collect(),
         objects: Vec::new(),
     };

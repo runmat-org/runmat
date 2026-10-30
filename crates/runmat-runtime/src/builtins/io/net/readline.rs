@@ -183,7 +183,9 @@ pub(crate) mod tests {
 
         let line = run_readline(&host, client.clone(), Vec::new()).expect("readline");
         match line {
-            Value::String(text) => assert_eq!(text, "hello world"),
+            Value::String(runmat_value::StringElement::Text(text)) => {
+                assert_eq!(text, "hello world")
+            }
             other => panic!("expected string result, got {other:?}"),
         }
 
@@ -206,7 +208,7 @@ pub(crate) mod tests {
 
         let line = run_readline(&host, client.clone(), Vec::new()).expect("readline");
         match line {
-            Value::String(text) => assert_eq!(text, "status OK"),
+            Value::String(runmat_value::StringElement::Text(text)) => assert_eq!(text, "status OK"),
             other => panic!("expected string result, got {other:?}"),
         }
 
@@ -276,7 +278,9 @@ pub(crate) mod tests {
 
         let second = run_readline(&host, client.clone(), Vec::new()).expect("readline");
         match second {
-            Value::String(text) => assert_eq!(text, "partial payload"),
+            Value::String(runmat_value::StringElement::Text(text)) => {
+                assert_eq!(text, "partial payload")
+            }
             other => panic!("expected buffered payload after newline, got {other:?}"),
         }
 
@@ -300,7 +304,9 @@ pub(crate) mod tests {
 
         let value = run_readline(&host, client.clone(), Vec::new()).expect("readline");
         match value {
-            Value::String(text) => assert_eq!(text, "incomplete line"),
+            Value::String(runmat_value::StringElement::Text(text)) => {
+                assert_eq!(text, "incomplete line")
+            }
             other => panic!("expected partial string, got {other:?}"),
         }
 

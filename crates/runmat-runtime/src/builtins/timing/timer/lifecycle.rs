@@ -101,7 +101,9 @@ pub(super) fn duration_property(seconds: f64, name: &str) -> BuiltinResult<Durat
 
 fn nonempty_text_callback(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
     Ok(match value {
-        Value::String(text) if !text.trim().is_empty() => Some(std::borrow::Cow::Borrowed(text)),
+        Value::String(runmat_value::StringElement::Text(text)) if !text.trim().is_empty() => {
+            Some(std::borrow::Cow::Borrowed(text))
+        }
         Value::CharArray(chars) if chars.data().iter().any(|ch| !ch.is_whitespace()) => {
             Some(std::borrow::Cow::Owned(
                 crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {

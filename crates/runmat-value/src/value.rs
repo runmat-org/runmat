@@ -10,8 +10,8 @@ pub enum Value {
     Bool(bool),
     // Logical array (N-D of booleans). Scalars use Bool.
     LogicalArray(LogicalArray),
-    /// Immutable scalar UTF-8 backing; an admitted output retains its claim.
-    String(Utf8Text),
+    /// Scalar string element, with explicit missingness and an immutable text owner.
+    String(StringElement),
     // String array (R2016b+): N-D array of string scalars
     StringArray(StringArray),
     // Char array (single-quoted): N-D character array with 2-D row/column caches
@@ -88,13 +88,13 @@ impl Value {
         )
     }
 
-    pub fn string(text: impl Into<Utf8Text>) -> Self {
-        Self::String(text.into())
+    pub fn string(element: impl Into<StringElement>) -> Self {
+        Self::String(element.into())
     }
 
     pub fn string_text(&self) -> Option<&str> {
         match self {
-            Self::String(text) => Some(text.as_str()),
+            Self::String(text) => text.as_str(),
             _ => None,
         }
     }

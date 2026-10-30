@@ -144,8 +144,14 @@ fn is_resident_nonfloating_extension_value(value: &Value) -> bool {
 
 fn parse_mode(value: Value) -> BuiltinResult<DbMode> {
     match value {
-        Value::String(text) => parse_mode_string(&text),
-        Value::StringArray(array) if array.data().len() == 1 => parse_mode_string(&array.data()[0]),
+        Value::String(runmat_value::StringElement::Text(text)) => parse_mode_string(&text),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            parse_mode_string(
+                &array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string"),
+            )
+        }
         Value::StringArray(_) => Err(db_error_with_detail(
             &DB_ERROR_INVALID_MODE,
             "mode must be a scalar string",

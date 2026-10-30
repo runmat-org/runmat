@@ -9,11 +9,15 @@ pub(super) fn make_error_struct(
     let fields = [
         (
             "identifier",
-            Value::String(crate::call::argument_text::copy_str(identifier, context)?),
+            Value::String(runmat_value::StringElement::Text(
+                crate::call::argument_text::copy_str(identifier, context)?,
+            )),
         ),
         (
             "message",
-            Value::String(crate::call::argument_text::copy_str(message, context)?),
+            Value::String(runmat_value::StringElement::Text(
+                crate::call::argument_text::copy_str(message, context)?,
+            )),
         ),
         ("index", Value::Num((linear_index + 1) as f64)),
     ];

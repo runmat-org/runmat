@@ -237,8 +237,15 @@ fn parse_labels(value: Value, value_len: usize) -> crate::BuiltinResult<PieLabel
         Value::StringArray(arr) => Ok(PieLabelsArg::Explicit(
             arr.data()
                 .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
+                .map(|text| {
+                    text.as_str().map(str::to_owned).ok_or_else(|| {
+                        pie_error_with_detail(
+                            &PIE_ERROR_INVALID_ARGUMENT,
+                            "pie: labels must be text",
+                        )
+                    })
+                })
+                .collect::<crate::BuiltinResult<Vec<_>>>()?,
         )),
         Value::Cell(cell) => {
             let mut labels = Vec::new();

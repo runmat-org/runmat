@@ -121,7 +121,7 @@ async fn open_path(
 
 fn open_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars)
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
@@ -133,8 +133,12 @@ fn open_name(value: &Value) -> BuiltinResult<String> {
                 )
             })
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         _ => Err(open_error(&OPEN_ERROR_NAME, OPEN_ERROR_NAME.message)),
     }

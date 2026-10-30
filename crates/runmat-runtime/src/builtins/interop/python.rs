@@ -120,8 +120,12 @@ fn pyargs_builtin(
             return Err(invalid_call("pyargs names must be text"));
         }
         let empty = match name {
-            Value::String(text) => text.is_empty(),
-            Value::StringArray(array) => array.data()[0].is_empty(),
+            Value::String(runmat_value::StringElement::Text(text)) => text.is_empty(),
+            Value::StringArray(array) => array.data()[0]
+                .as_str()
+                .ok_or_else(|| invalid_call("pyargs names must be text"))?
+                .is_empty(),
+            Value::String(_) => return Err(invalid_call("pyargs names must be text")),
             Value::CharArray(array) => array.data().is_empty(),
             _ => unreachable!("validated text scalar"),
         };
@@ -142,7 +146,7 @@ fn pyargs_builtin(
                             .expect("validated pyargs name position"),
                         Some(runtime),
                     )
-                    .map(Value::String)
+                    .map(|text| Value::String(text.into()))
                 },
             )?;
             let names =
@@ -158,7 +162,7 @@ fn pyargs_builtin(
             let names = arguments
                 .iter()
                 .step_by(2)
-                .map(|name| pyargs_name(name, None).map(Value::String))
+                .map(|name| pyargs_name(name, None).map(|text| Value::String(text.into())))
                 .collect::<Result<Vec<_>, _>>()?;
             (
                 RootedValue::new(Value::Cell(

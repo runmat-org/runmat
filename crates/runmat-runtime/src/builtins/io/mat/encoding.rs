@@ -74,13 +74,26 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn utf16_char_geometry_matches_emitted_code_units() {
+    fn utf16_char_geometry_and_typed_missing_admission_are_explicit() {
         let array = block_on(convert_value(Value::String("A😀".into()))).expect("encode text");
         assert_eq!(array.dims, vec![1, 3]);
         let MatData::Char { data } = array.data else {
             panic!("text must become MAT char data");
         };
         assert_eq!(data, vec![0x0041, 0xd83d, 0xde00]);
+        for text in ["<missing>", "<MISSING>", ""] {
+            assert!(block_on(convert_value(Value::String(text.into()))).is_ok());
+        }
+        assert!(block_on(convert_value(Value::String(
+            runmat_value::StringElement::Missing
+        )))
+        .is_err());
+        let array = StringArray::from_elements_unbounded(
+            vec!["literal".into(), runmat_value::StringElement::Missing],
+            vec![1, 2],
+        )
+        .unwrap();
+        assert!(block_on(convert_value(Value::StringArray(array))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

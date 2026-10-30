@@ -11,7 +11,7 @@ impl PageOperation {
             Value::FunctionHandle(func) => Cow::Borrowed(func.name()),
             Value::ExternalFunctionHandle(func) => Cow::Borrowed(func.name()),
             Value::BoundFunctionHandle(handle) => Cow::Borrowed(handle.name.as_str()),
-            Value::String(s) => Cow::Borrowed(s.as_str()),
+            Value::String(runmat_value::StringElement::Text(s)) => Cow::Borrowed(s.as_str()),
             Value::StringArray(sa) => {
                 if sa.data().len() != 1 {
                     return Err(pagefun_error_with_detail(
@@ -19,7 +19,12 @@ impl PageOperation {
                         "function string array must contain exactly one element",
                     ));
                 }
-                Cow::Borrowed(sa.data()[0].as_str())
+                Cow::Borrowed(sa.data()[0].as_str().ok_or_else(|| {
+                    pagefun_error_with_detail(
+                        &PAGEFUN_ERROR_INVALID_CALLABLE,
+                        "function string array must contain exactly one nonmissing element",
+                    )
+                })?)
             }
             Value::CharArray(chars) => {
                 if chars.rows != 1 {

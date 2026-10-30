@@ -6,7 +6,7 @@ fn retained_timetable_partitions_preserve_pair_order_and_original_payload_owners
     let pointer = text.as_str().as_ptr();
     let input: crate::call::BuiltinArguments = crate::execution::RootedValues::new(vec![
         Value::from("Delimiter"),
-        Value::String(text),
+        Value::String(runmat_value::StringElement::Text(text)),
         Value::from("RowTimes"),
         Value::Num(1.),
         Value::from("Encoding"),
@@ -27,7 +27,10 @@ fn retained_timetable_partitions_preserve_pair_order_and_original_payload_owners
     let Value::String(actual) = &table[1] else {
         panic!("retained text")
     };
-    assert_eq!(actual.as_str().as_ptr(), pointer);
+    assert_eq!(
+        actual.as_str().expect("retained nonmissing text").as_ptr(),
+        pointer
+    );
 
     let source: crate::call::BuiltinArguments = crate::execution::RootedValues::new(vec![
         Value::Num(3.),

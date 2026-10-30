@@ -7,7 +7,7 @@ use crate::context::RuntimeContext;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_value::{
     exact_capacity_vec, ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray,
-    Utf8Text,
+    StringElement, Utf8Text,
 };
 
 const CHECKPOINT_CHUNK: usize = 4096;
@@ -40,16 +40,19 @@ pub(crate) fn transform_string_array_borrowed_indexed(
             .data()
             .iter()
             .enumerate()
-            .map(|(index, text)| select(index, text.as_str()).to_owned())
+            .map(|(index, text)| match text.as_str() {
+                Some(text) => StringElement::text(select(index, text).to_owned()),
+                None => StringElement::Missing,
+            })
             .collect();
-        StringArray::new(values, input.shape().to_vec()).map_err(&invalid)
+        StringArray::from_elements_unbounded(values, input.shape().to_vec()).map_err(&invalid)
     };
     let Some(runtime) = runtime else {
         return ordinary();
     };
 
     let reuse_shape = input.shape.is_admitted();
-    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(input.data().len())
+    let mut physical = ExactArrayStorage::<StringElement>::requested_bytes(input.data().len())
         .map_err(|cause| admission_error(runtime, HostAllocationError::Numeric(cause)))?;
     if !reuse_shape {
         physical = physical
@@ -65,8 +68,11 @@ pub(crate) fn transform_string_array_borrowed_indexed(
         if index % CHECKPOINT_CHUNK == 0 && runtime.is_cancelled() {
             return Err(admission_error(runtime, HostAllocationError::Cancelled));
         }
-        let selected = select(index, text.as_str());
-        if selected == text.as_str() && text.has_retained_claim() {
+        let Some(source) = text.as_str() else {
+            continue;
+        };
+        let selected = select(index, source);
+        if selected == source && text.has_retained_claim() {
             continue;
         }
         physical = physical
@@ -110,8 +116,11 @@ pub(crate) fn transform_string_array_borrowed_indexed(
                     receipt.checkpoint(runtime)?;
                 }
                 let text = &input.data()[index];
-                let selected = select(index, text.as_str());
-                if selected == text.as_str() && text.has_retained_claim() {
+                let Some(source) = text.as_str() else {
+                    return Ok(StringElement::Missing);
+                };
+                let selected = select(index, source);
+                if selected == source && text.has_retained_claim() {
                     return Ok(text.clone());
                 }
                 let mut bytes = exact_capacity_vec::<u8>(selected.len())
@@ -122,6 +131,7 @@ pub(crate) fn transform_string_array_borrowed_indexed(
                 let fresh = Utf8Text::new(unsafe { String::from_utf8_unchecked(bytes) });
                 fresh
                     .try_admit_exact(permit)
+                    .map(StringElement::Text)
                     .map_err(|failure| HostAllocationError::Numeric(failure.source()))
             })
         })
@@ -144,20 +154,23 @@ pub(crate) fn transform_string_array_borrowed_indexed(
 
 pub(crate) fn transform_scalar_borrowed(
     runtime: Option<&RuntimeContext>,
-    input: Utf8Text,
+    input: StringElement,
     select: impl for<'a> Fn(&'a str) -> &'a str,
     admission_error: impl Fn(&RuntimeContext, HostAllocationError) -> RuntimeError,
-) -> BuiltinResult<Utf8Text> {
+) -> BuiltinResult<StringElement> {
     if let Some(runtime) = runtime {
         if runtime.is_cancelled() {
             return Err(admission_error(runtime, HostAllocationError::Cancelled));
         }
     }
-    let selected = select(input.as_str());
-    if selected == input.as_str() && input.has_retained_claim() {
+    let Some(source) = input.as_str() else {
+        return Ok(StringElement::Missing);
+    };
+    let selected = select(source);
+    if selected == source && input.has_retained_claim() {
         return Ok(input);
     }
-    let ordinary = || Ok(Utf8Text::new(select(input.as_str()).to_owned()));
+    let ordinary = || Ok(StringElement::text(select(source).to_owned()));
     let Some(runtime) = runtime else {
         return ordinary();
     };
@@ -191,7 +204,7 @@ pub(crate) fn transform_scalar_borrowed(
     receipt
         .checkpoint(runtime)
         .map_err(|cause| admission_error(runtime, cause))?;
-    Ok(output)
+    Ok(StringElement::Text(output))
 }
 
 #[cfg(test)]
@@ -226,9 +239,15 @@ mod tests {
 
     #[test]
     fn borrowed_substrings_hold_exact_claims_until_last_alias_and_refuse_before_output() {
-        let source = StringArray::new(
-            vec!["  text  ".to_owned(), "<missing>".to_owned()],
-            vec![1, 2],
+        let source = StringArray::from_elements_unbounded(
+            vec![
+                StringElement::text("  text  "),
+                StringElement::text("<missing>"),
+                StringElement::text("<Missing>"),
+                StringElement::text(""),
+                StringElement::Missing,
+            ],
+            vec![1, 5],
         )
         .unwrap();
         let map_error = |_: &RuntimeContext, cause: HostAllocationError| {
@@ -264,8 +283,12 @@ mod tests {
             invalid,
         )
         .unwrap();
-        assert_eq!(output.data()[0].as_str(), "text");
-        assert_eq!(output.data()[1].as_str(), "<missing>");
+        assert_eq!(output.data()[0].as_str(), Some("text"));
+        assert_eq!(output.data()[1].as_str(), Some("<missing>"));
+        assert_eq!(output.data()[2].as_str(), Some("<Missing>"));
+        assert_eq!(output.data()[3].as_str(), Some(""));
+        assert!(output.data()[4].is_missing());
+        assert!(!output.data()[4].has_retained_claim());
         let retained = ledger.snapshot().live_reserved_bytes;
         assert!(retained > 0);
         let alias = output.clone();
@@ -283,7 +306,7 @@ mod tests {
         )
         .unwrap();
         assert!(rank_zero.shape().is_empty());
-        assert_eq!(rank_zero.data()[0].as_str(), "one");
+        assert_eq!(rank_zero.data()[0].as_str(), Some("one"));
         drop(rank_zero);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }

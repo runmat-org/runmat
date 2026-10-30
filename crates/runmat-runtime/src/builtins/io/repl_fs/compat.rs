@@ -38,9 +38,13 @@ pub(super) fn map_control_flow(name: &str, err: RuntimeError) -> RuntimeError {
 
 pub(super) fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         Value::CharArray(array)
             if crate::builtins::common::validation::value_is_text_scalar(value) =>
@@ -186,7 +190,9 @@ fn truthy(value: &Value) -> BuiltinResult<bool> {
         Value::Bool(v) => *v,
         Value::Num(v) => *v != 0.0,
         Value::Int(v) => !v.is_zero(),
-        Value::String(s) => !s.is_empty() && s != "0" && !s.eq_ignore_ascii_case("false"),
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            !s.is_empty() && s != "0" && !s.eq_ignore_ascii_case("false")
+        }
         Value::CharArray(ca) => {
             let s = char_row_to_string(ca)?;
             !s.is_empty() && s != "0" && !s.eq_ignore_ascii_case("false")

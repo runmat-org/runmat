@@ -459,9 +459,13 @@ fn is_empty_value(value: &Value) -> bool {
 
 fn text_scalar(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         Value::CharArray(chars) if chars.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
             chars.data(),

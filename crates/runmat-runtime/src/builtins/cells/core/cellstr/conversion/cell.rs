@@ -15,9 +15,16 @@ pub(super) fn convert(array: CellArray) -> crate::BuiltinResult<Value> {
 fn character(value: &Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::CharArray(array) if is_vector(array) => Ok(Value::CharArray(array.clone())),
-        Value::String(text) => Ok(Value::CharArray(CharArray::new_row(text))),
+        Value::String(text) => Ok(Value::CharArray(CharArray::new_row(
+            text.as_str()
+                .ok_or_else(super::super::error::invalid_contents)?,
+        ))),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Value::CharArray(CharArray::new_row(&array.data()[0])))
+            Ok(Value::CharArray(CharArray::new_row(
+                array.data()[0]
+                    .as_str()
+                    .ok_or_else(super::super::error::invalid_contents)?,
+            )))
         }
         _ => Err(super::super::error::invalid_contents()),
     }

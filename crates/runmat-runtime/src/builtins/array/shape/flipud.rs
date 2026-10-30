@@ -78,7 +78,7 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::CharArray(chars) => Ok(flip_char_array_with("flipud", chars, &UD_DIM)
             .map(Value::CharArray)
             .map_err(remap_flipud_error)?),
-        Value::String(scalar) => Ok(Value::String(scalar)),
+        Value::String(scalar) => Ok(Value::String(scalar.into())),
         Value::Cell(cell) => flip_cell_array_rows(cell).map_err(remap_flipud_error),
         Value::Struct(structure) => Ok(Value::Struct(structure)),
         Value::StructArray(array) => {

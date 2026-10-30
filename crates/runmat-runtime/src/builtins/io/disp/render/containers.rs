@@ -45,6 +45,13 @@ pub(super) fn format_char_array(array: &CharArray, mode: RenderMode) -> Vec<Stri
     lines
 }
 
+fn render_string_element(value: &runmat_value::StringElement) -> String {
+    match value.as_str() {
+        Some(text) => quote_double(text),
+        None => "<missing>".to_owned(),
+    }
+}
+
 pub(super) fn format_string_array(array: &StringArray, mode: RenderMode) -> Vec<String> {
     let shape = canonical_dims(&array.shape);
     let total = array.data().len();
@@ -53,7 +60,7 @@ pub(super) fn format_string_array(array: &StringArray, mode: RenderMode) -> Vec<
             return vec![format!("{} string array", dims_to_string(&shape))];
         }
         if total == 1 {
-            return vec![quote_double(&array.data()[0])];
+            return vec![render_string_element(&array.data()[0])];
         }
         return vec![format!("[{} string]", dims_to_string(&shape))];
     }
@@ -68,7 +75,7 @@ pub(super) fn format_string_array(array: &StringArray, mode: RenderMode) -> Vec<
     }
     format_table(rows, cols, 0, 1, Align::Left, |r, c| {
         let idx = r + c * rows;
-        quote_double(&array.data()[idx])
+        render_string_element(&array.data()[idx])
     })
 }
 
@@ -186,7 +193,7 @@ pub(super) fn summarize_for_cell(value: &Value) -> String {
                 )
             }
         }
-        Value::String(text) => quote_double(text),
+        Value::String(text) => render_string_element(text),
         Value::CharArray(array) => {
             if array.rows == 0 || array.cols == 0 {
                 "''".to_string()
@@ -200,7 +207,7 @@ pub(super) fn summarize_for_cell(value: &Value) -> String {
             if array.data().is_empty() {
                 format!("{} string", dims_to_string(&canonical_dims(&array.shape)))
             } else if array.data().len() == 1 {
-                quote_double(&array.data()[0])
+                render_string_element(&array.data()[0])
             } else {
                 format!("[{} string]", dims_to_string(&canonical_dims(&array.shape)))
             }

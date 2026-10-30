@@ -546,7 +546,7 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
             .access
             .with_shared(|emission| {
                 let mut encoder = with_command_profiling(Some(command_a.receipt()), || {
-                    if scope_case == 3 || matched_provider {
+                    if (scope_case == 3 && !matched_direct) || matched_provider {
                         with_provider_observation(Some(provider_a.recorder()), || {
                             pending.profiled_encoder(emission, &Default::default())
                         })
@@ -558,9 +558,12 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
                 // without requiring unreliable encoder-wide timestamps.
                 // No numerical dispatch is needed for this retirement test.
                 drop(encoder.begin_compute_pass(&Default::default()));
-                assert!(budget
-                    .try_reserve_wgpu_query(MAX_QUERY_REQUESTED_BYTES)
-                    .is_none());
+                assert!(
+                    budget
+                        .try_reserve_wgpu_query(MAX_QUERY_REQUESTED_BYTES)
+                        .is_none(),
+                    "variant {variant}: query admission must retain its exact quota before submit"
+                );
                 match variant {
                     8 | 10 => with_command_profiling(Some(command_a.receipt()), || {
                         with_provider_observation(Some(provider_a.recorder()), || {

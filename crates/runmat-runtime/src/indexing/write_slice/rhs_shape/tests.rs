@@ -106,7 +106,7 @@ fn numeric_logical_complex_and_string_views_share_singleton_alignment() {
     assert_eq!(view.count(), 2);
     assert_eq!(
         (view.value_at(0).as_str(), view.value_at(1).as_str()),
-        ("first", "second")
+        (Some("first"), Some("second"))
     );
     let cells = Value::Cell(
         CellArray::new(
@@ -123,7 +123,7 @@ fn numeric_logical_complex_and_string_views_share_singleton_alignment() {
     assert_eq!(view.count(), 2);
     assert_eq!(
         (view.value_at(0).as_str(), view.value_at(1).as_str()),
-        ("first", "second")
+        (Some("first"), Some("second"))
     );
 }
 

@@ -247,19 +247,15 @@ pub(in crate::builtins::table) fn updated_variable_metadata_names(
         let existing = props.fields.get(field).cloned();
         let values = match existing {
             Some(Value::StringArray(array)) => {
-                let mut values = array
-                    .data()
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>();
-                values.resize(names.len(), String::new());
+                let mut values = array.data().iter().cloned().collect::<Vec<_>>();
+                values.resize(names.len(), runmat_value::StringElement::text(""));
                 values.truncate(names.len());
                 values
             }
-            _ => vec![String::new(); names.len()],
+            _ => vec![runmat_value::StringElement::text(""); names.len()],
         };
         *output = Value::StringArray(
-            StringArray::new(values, vec![1, names.len()])
+            StringArray::from_elements_unbounded(values, vec![1, names.len()])
                 .map_err(|err| invalid_variable(format!("table: {err}")))?,
         );
     }

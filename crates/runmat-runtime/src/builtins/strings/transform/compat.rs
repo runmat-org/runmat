@@ -24,13 +24,14 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, ExactArrayStorage, IntValue, NumericScalar, StringArray, Utf8Text, Value,
+    CellArray, CharArray, ExactArrayStorage, IntValue, NumericScalar, StringArray, StringElement,
+    Value,
 };
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
-    scalar_text_input, text_input_admission, TextInput,
+    char_row_to_string_slice, contains_numeric_or_resident_text_input, scalar_text_input,
+    text_input_admission, TextInput,
 };
 use crate::builtins::strings::core::compat::{
     broadcast_flat_index, broadcast_shape, logical_value, pattern_regex, scalar_text, text_items,
@@ -108,13 +109,21 @@ async fn append_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Va
     let mut out = Vec::with_capacity(total);
     for idx in 0..total {
         let mut text = String::new();
+        let mut missing = false;
         for list in &lists {
             let source = broadcast_flat_index(idx, &shape, &list.shape);
             if let Some(part) = &list.items[source] {
                 text.push_str(part);
+            } else {
+                missing = true;
+                break;
             }
         }
-        out.push(text);
+        out.push(if missing {
+            StringElement::Missing
+        } else {
+            StringElement::text(text)
+        });
     }
     append_output(out, shape, output_kind)
 }
@@ -196,7 +205,7 @@ fn append_text_items(
 }
 
 fn append_output(
-    values: Vec<String>,
+    values: Vec<StringElement>,
     shape: Vec<usize>,
     kind: AppendOutputKind,
 ) -> BuiltinResult<Value> {
@@ -205,13 +214,19 @@ fn append_output(
         AppendOutputKind::Cell => {
             let values = values
                 .into_iter()
-                .map(|text| char_rows(vec![text], "append"))
+                .map(|text| match text.as_str() {
+                    Some(text) => char_rows(vec![text.to_owned()], "append"),
+                    None => Ok(Value::String(StringElement::Missing)),
+                })
                 .collect::<BuiltinResult<Vec<_>>>()?;
             make_cell_with_shape(values, shape).map_err(|error| transform_error("append", error))
         }
         AppendOutputKind::Char => {
             let text = values.into_iter().next().unwrap_or_default();
-            char_rows(vec![text], "append")
+            match text.as_str() {
+                Some(text) => char_rows(vec![text.to_owned()], "append"),
+                None => Ok(Value::String(StringElement::Missing)),
+            }
         }
     }
 }
@@ -323,9 +338,9 @@ async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
         .await
         .map_err(map_flow("splitlines"))?;
     match text {
-        Value::String(text) => strings_from_lines(&text),
+        Value::String(text) => split_element_lines(&text),
         Value::StringArray(array) if array.data().len() == 1 => {
-            strings_from_lines(array.data()[0].as_str())
+            split_element_lines(&array.data()[0])
         }
         Value::CharArray(array) if array.rows <= 1 => {
             let text = char_row_to_string_slice(array.data(), array.cols, 0)
@@ -337,7 +352,10 @@ async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
             let values = list
                 .items
                 .into_iter()
-                .map(|text| strings_from_lines(text.as_deref().unwrap_or("")))
+                .map(|text| match text {
+                    Some(text) => strings_from_lines(&text),
+                    None => Ok(Value::String(StringElement::Missing)),
+                })
                 .collect::<BuiltinResult<Vec<_>>>()?;
             make_cell_with_shape(values, list.shape).map_err(|e| transform_error("splitlines", e))
         }
@@ -795,15 +813,15 @@ impl TextList {
     fn from_value(value: &Value, fn_name: &str) -> BuiltinResult<Self> {
         match value {
             Value::String(text) => Ok(Self {
-                data: vec![text.as_str().to_owned()],
+                data: vec![required_transform_text(text, fn_name)?.to_owned()],
                 shape: vec![1, 1],
             }),
             Value::StringArray(array) => Ok(Self {
                 data: array
                     .data()
                     .iter()
-                    .map(|text| text.as_str().to_owned())
-                    .collect(),
+                    .map(|text| required_transform_text(text, fn_name).map(str::to_owned))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
                 shape: array.shape().to_vec(),
             }),
             Value::CharArray(array) => {
@@ -893,15 +911,20 @@ impl BoundaryList {
                 })
             }
             Value::String(text) => Ok(Self {
-                data: vec![Boundary::Text(text.as_str().to_owned())],
+                data: vec![Boundary::Text(
+                    required_transform_text(text, fn_name)?.to_owned(),
+                )],
                 shape: vec![1, 1],
             }),
             Value::StringArray(array) => Ok(Self {
                 data: array
                     .data()
                     .iter()
-                    .map(|text| Boundary::Text(text.as_str().to_owned()))
-                    .collect(),
+                    .map(|text| {
+                        required_transform_text(text, fn_name)
+                            .map(|text| Boundary::Text(text.to_owned()))
+                    })
+                    .collect::<BuiltinResult<Vec<_>>>()?,
                 shape: array.shape().to_vec(),
             }),
             Value::CharArray(array) => {
@@ -1107,17 +1130,16 @@ fn map_string_array(
     mut map: impl FnMut(usize, &str) -> BuiltinResult<String>,
 ) -> BuiltinResult<Value> {
     let (data, shape, _, _) = array.into_parts();
-    let input: Vec<Utf8Text> = match data.try_into_owned() {
+    let input: Vec<StringElement> = match data.try_into_owned() {
         Ok(values) => values.into_iter().collect(),
         Err(shared) => shared.iter().cloned().collect(),
     };
     let mut output = Vec::with_capacity(input.len());
     for (index, text) in input.into_iter().enumerate() {
-        if is_missing_string(text.as_str()) {
-            output.push(text);
-        } else {
-            output.push(Utf8Text::new(map(index, text.as_str())?));
-        }
+        output.push(match text.as_str() {
+            Some(source) => StringElement::text(map(index, source)?),
+            None => StringElement::Missing,
+        });
     }
     StringArray::from_shared_storage(ExactArrayStorage::shared_unbounded(output), shape)
         .map(Value::StringArray)
@@ -1132,10 +1154,13 @@ fn map_text_with_boundaries(
 ) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => {
-            if is_missing_string(&text) {
+            if text.is_missing() {
                 Ok(Value::String(text))
             } else {
-                Ok(Value::string(map(&text, boundaries.at(0))?))
+                Ok(Value::string(map(
+                    text.as_str().expect("nonmissing subject"),
+                    boundaries.at(0),
+                )?))
             }
         }
         Value::StringArray(array) => map_string_array(array, fn_name, |index, text| {
@@ -1222,11 +1247,17 @@ fn map_text_with_insertions(
 ) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => {
-            if is_missing_string(&text) {
+            if text.is_missing() {
                 Ok(Value::String(text))
             } else {
-                insert_one(&text, boundaries.at(0), replacements.at(0), after, fn_name)
-                    .map(Value::string)
+                insert_one(
+                    text.as_str().expect("nonmissing subject"),
+                    boundaries.at(0),
+                    replacements.at(0),
+                    after,
+                    fn_name,
+                )
+                .map(Value::string)
             }
         }
         Value::StringArray(array) => map_string_array(array, fn_name, |index, text| {
@@ -1287,11 +1318,16 @@ fn map_text_with_replacements(
 ) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => {
-            if is_missing_string(&text) {
+            if text.is_missing() {
                 Ok(Value::String(text))
             } else {
-                replace_between_one(&text, starts.at(0), stops.at(0), replacements.at(0))
-                    .map(Value::string)
+                replace_between_one(
+                    text.as_str().expect("nonmissing subject"),
+                    starts.at(0),
+                    stops.at(0),
+                    replacements.at(0),
+                )
+                .map(Value::string)
             }
         }
         Value::StringArray(array) => map_string_array(array, "replaceBetween", |index, text| {
@@ -1353,12 +1389,13 @@ fn map_text_cell_replacement(
             replace_between_one(&text, start, stop, replacement)
                 .map(|text| Value::CharArray(CharArray::new_row(&text)))
         }
-        Value::String(text) => {
-            replace_between_one(text, start, stop, replacement).map(Value::string)
-        }
+        Value::String(text) => map_element_value(text, |text| {
+            replace_between_one(text, start, stop, replacement)
+        }),
         Value::StringArray(array) if array.data().len() == 1 => {
-            replace_between_one(array.data()[0].as_str(), start, stop, replacement)
-                .map(Value::string)
+            map_element_value(&array.data()[0], |text| {
+                replace_between_one(text, start, stop, replacement)
+            })
         }
         Value::Cell(cell) => {
             let values = cell
@@ -1409,17 +1446,14 @@ fn map_text_cell_insertion(
             insert_one(&text, boundary, replacement, after, fn_name)
                 .map(|text| Value::CharArray(CharArray::new_row(&text)))
         }
-        Value::String(text) => {
-            insert_one(text, boundary, replacement, after, fn_name).map(Value::string)
+        Value::String(text) => map_element_value(text, |text| {
+            insert_one(text, boundary, replacement, after, fn_name)
+        }),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            map_element_value(&array.data()[0], |text| {
+                insert_one(text, boundary, replacement, after, fn_name)
+            })
         }
-        Value::StringArray(array) if array.data().len() == 1 => insert_one(
-            array.data()[0].as_str(),
-            boundary,
-            replacement,
-            after,
-            fn_name,
-        )
-        .map(Value::string),
         Value::Cell(cell) => {
             let values = cell
                 .data()
@@ -1443,9 +1477,9 @@ fn map_text_cell_element(
     map: impl Fn(&str, &Boundary) -> BuiltinResult<String> + Copy,
 ) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => map(text, boundary).map(Value::string),
+        Value::String(text) => map_element_value(text, |text| map(text, boundary)),
         Value::StringArray(array) if array.data().len() == 1 => {
-            map(array.data()[0].as_str(), boundary).map(Value::string)
+            map_element_value(&array.data()[0], |text| map(text, boundary))
         }
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
@@ -1533,10 +1567,12 @@ fn map_text_preserve(
 ) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => {
-            if is_missing_string(&text) {
+            if text.is_missing() {
                 Ok(Value::String(text))
             } else {
-                Ok(Value::string(map(&text)))
+                Ok(Value::string(map(text
+                    .as_str()
+                    .expect("nonmissing subject"))))
             }
         }
         Value::StringArray(array) => map_string_array(array, fn_name, |_, text| Ok(map(text))),
@@ -1600,14 +1636,14 @@ fn char_rows(rows: Vec<String>, fn_name: &str) -> BuiltinResult<Value> {
 }
 
 fn string_array_or_scalar(
-    values: Vec<String>,
+    values: Vec<StringElement>,
     shape: Vec<usize>,
     fn_name: &str,
 ) -> BuiltinResult<Value> {
     if values.len() == 1 {
         Ok(Value::string(values.into_iter().next().unwrap()))
     } else {
-        StringArray::new(values, shape)
+        StringArray::from_elements_unbounded(values, shape)
             .map(Value::StringArray)
             .map_err(|e| transform_error(fn_name, e))
     }
@@ -1642,3 +1678,29 @@ fn justify(text: &str, side: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+fn required_transform_text<'a>(text: &'a StringElement, fn_name: &str) -> BuiltinResult<&'a str> {
+    text.as_str().ok_or_else(|| {
+        transform_error(
+            fn_name,
+            format!("{fn_name}: text argument must not be missing"),
+        )
+    })
+}
+
+fn map_element_value(
+    text: &StringElement,
+    map: impl FnOnce(&str) -> BuiltinResult<String>,
+) -> BuiltinResult<Value> {
+    match text.as_str() {
+        Some(text) => map(text).map(Value::string),
+        None => Ok(Value::String(StringElement::Missing)),
+    }
+}
+
+fn split_element_lines(text: &StringElement) -> BuiltinResult<Value> {
+    match text.as_str() {
+        Some(text) => strings_from_lines(text),
+        None => Ok(Value::String(StringElement::Missing)),
+    }
+}

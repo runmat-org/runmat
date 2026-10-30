@@ -208,7 +208,7 @@ fn repelem_host_value(
             Ok(complex_tensor_into_value(out))
         }
         Value::String(s) => {
-            let array = StringArray::from_texts_unbounded(vec![s], vec![1, 1])
+            let array = StringArray::from_elements_unbounded(vec![s], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
             let out = repelem_string_array(&array, factors, single_arg)?;
             Ok(Value::StringArray(out))
@@ -488,7 +488,7 @@ fn repelem_string_array(
     single_arg: bool,
 ) -> crate::BuiltinResult<StringArray> {
     let (data, shape) = repelem_column_major(sa.data(), &sa.shape, factors, single_arg)?;
-    StringArray::from_texts_unbounded(data, shape)
+    StringArray::from_elements_unbounded(data, shape)
         .map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
 

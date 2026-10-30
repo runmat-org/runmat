@@ -40,7 +40,7 @@ pub fn test_case_object_in_context(
     } else {
         TEST_CASE_CLASS
     };
-    let fields = [("Name", Value::String(name))];
+    let fields = [("Name", Value::String(name.into()))];
     crate::execution::object::construct_object_from_borrowed_fields(
         runtime,
         class.display_name(),

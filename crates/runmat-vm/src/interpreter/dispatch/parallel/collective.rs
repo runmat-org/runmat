@@ -461,7 +461,13 @@ fn receive_source(
     context: &runmat_execution::SpmdTaskContext,
 ) -> Result<Option<runmat_types::LabRank>, RuntimeError> {
     match value {
-        Value::String(value) if value.eq_ignore_ascii_case("any") => Ok(None),
+        Value::String(value)
+            if value
+                .as_str()
+                .is_some_and(|text| text.eq_ignore_ascii_case("any")) =>
+        {
+            Ok(None)
+        }
         Value::CharArray(value)
             if value
                 .row_string()

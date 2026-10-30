@@ -19,7 +19,9 @@ impl XlsTable {
             Value::StringArray(strings) => {
                 Self::from_string_array(strings, cooperation, selected).await
             }
-            Value::String(text) => Ok(Self::single(CellValue::Text(text.into_string_unbounded()))),
+            Value::String(runmat_value::StringElement::Text(text)) => {
+                Ok(Self::single(CellValue::Text(text.into_string_unbounded())))
+            }
             Value::CharArray(chars) => Self::from_char_array(chars, cooperation, selected).await,
             Value::Num(value) => Ok(Self::single(CellValue::Number(value))),
             Value::Int(value) => Ok(Self::single(CellValue::Integer(value))),
@@ -216,6 +218,12 @@ impl XlsTable {
         cooperation: &mut TabularCooperation<'_>,
         selected: &TabularFsPath,
     ) -> BuiltinResult<Self> {
+        if strings.data().iter().any(|text| text.is_missing()) {
+            return Err(xlswrite_error_with(
+                &XLSWRITE_ERROR_DATA,
+                "xlswrite: typed missing strings cannot be represented as worksheet text",
+            ));
+        }
         ensure_shape_2d(&strings.shape, "string array")?;
         let rows = strings.rows();
         let cols = strings.cols();
@@ -230,7 +238,8 @@ impl XlsTable {
         for (index, text) in strings.data().iter().enumerate() {
             let row = index % rows;
             let col = index / rows;
-            cells[row * cols + col] = CellValue::Text(text.as_str().to_owned());
+            cells[row * cols + col] =
+                CellValue::Text(text.as_str().expect("checked nonmissing string").to_owned());
             work += 1;
             if work == 1024 {
                 checkpoint_input(cooperation, selected, work).await?;
@@ -316,7 +325,9 @@ async fn cell_value_from_scalar(
         Value::Num(n) => Ok(CellValue::Number(*n)),
         Value::Int(i) => Ok(CellValue::Integer(i.clone())),
         Value::Bool(b) => Ok(CellValue::Boolean(*b)),
-        Value::String(s) => Ok(CellValue::Text(s.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Ok(CellValue::Text(s.as_str().to_owned()))
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             let text = crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
                 xlswrite_error_with(
@@ -336,7 +347,12 @@ async fn cell_value_from_scalar(
             Ok(CellValue::Text(text))
         }
         Value::StringArray(strings) if strings.data().is_empty() => Ok(CellValue::Empty),
-        Value::StringArray(strings) => Ok(CellValue::Text(strings.data()[0].as_str().to_owned())),
+        Value::StringArray(strings) if !strings.data()[0].is_missing() => Ok(CellValue::Text(
+            strings.data()[0]
+                .as_str()
+                .expect("checked nonmissing string")
+                .to_owned(),
+        )),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             writecell::scalar_tensor_cell_value(tensor)
         }

@@ -258,8 +258,20 @@ fn parse_args(
 
 fn scalar_file_input(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => nonempty_source(value),
-        Value::StringArray(array) if array.data().len() == 1 => nonempty_source(&array.data()[0]),
+        Value::String(value) => nonempty_source(value.as_str().ok_or_else(|| {
+            extract_error(
+                &ERROR_INVALID_INPUT,
+                "extractFileText: filename must not be missing",
+            )
+        })?),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            nonempty_source(array.data()[0].as_str().ok_or_else(|| {
+                extract_error(
+                    &ERROR_INVALID_INPUT,
+                    "extractFileText: filename must not be missing",
+                )
+            })?)
+        }
         Value::CharArray(array) if array.rows <= 1 => {
             let source = if array.rows == 0 {
                 String::new()
@@ -618,7 +630,7 @@ mod tests {
 
     fn string_value(value: Value) -> String {
         match value {
-            Value::String(text) => text.to_string(),
+            Value::String(text) => text.as_str().expect("nonmissing test text").to_owned(),
             other => panic!("expected string, got {other:?}"),
         }
     }

@@ -288,7 +288,7 @@ pub(super) fn remove_missing_string_array(
         options,
         |text| is_missing_text(text),
         |data, shape| {
-            StringArray::from_texts_unbounded(data, shape)
+            StringArray::from_elements_unbounded(data, shape)
                 .map(Value::StringArray)
                 .map_err(internal_error)
         },

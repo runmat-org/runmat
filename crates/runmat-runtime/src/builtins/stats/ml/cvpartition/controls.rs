@@ -133,9 +133,11 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
                 "cvpartition: {label} must be logical scalar"
             ))),
         },
-        Value::String(text) => parse_stratify_boolean_alias(text).ok_or_else(|| {
-            invalid_argument(format!("cvpartition: {label} must be logical scalar"))
-        }),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            parse_stratify_boolean_alias(text).ok_or_else(|| {
+                invalid_argument(format!("cvpartition: {label} must be logical scalar"))
+            })
+        }
         Value::CharArray(chars) if chars.rows <= 1 => {
             let text = runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
                 invalid_argument(format!("cvpartition: {label} contains {error}"))
@@ -152,14 +154,19 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
 
 pub(super) fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(Cow::Borrowed(text.as_str())),
         Value::CharArray(chars) if chars.rows <= 1 => {
             runmat_value::decode_utf16_code_units(chars.data())
                 .map(Cow::Owned)
                 .map_err(|error| invalid_argument(format!("cvpartition: {label} contains {error}")))
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Cow::Borrowed(array.data()[0].as_str()))
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Cow::Borrowed(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         other => Err(invalid_argument(format!(
             "cvpartition: {label} must be a string scalar, got {other:?}"

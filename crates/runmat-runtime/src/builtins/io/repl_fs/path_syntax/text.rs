@@ -24,19 +24,21 @@ impl TextContainer {
         error: &'static runmat_builtins::BuiltinErrorDescriptor,
     ) -> BuiltinResult<Self> {
         match value {
-            Value::String(text) => Ok(Self::scalar(
+            Value::String(runmat_value::StringElement::Text(text)) => Ok(Self::scalar(
                 TextRepresentation::String,
                 text.as_str().to_owned(),
             )),
-            Value::StringArray(array) => Ok(Self {
-                representation: TextRepresentation::StringArray,
-                values: array
-                    .data()
-                    .iter()
-                    .map(|text| text.as_str().to_owned())
-                    .collect(),
-                shape: array.shape.as_slice().to_vec(),
-            }),
+            Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => {
+                Ok(Self {
+                    representation: TextRepresentation::StringArray,
+                    values: array
+                        .data()
+                        .iter()
+                        .map(|text| text.as_str().expect("checked nonmissing string").to_owned())
+                        .collect(),
+                    shape: array.shape.as_slice().to_vec(),
+                })
+            }
             Value::CharArray(array)
                 if array.rows == 1
                     && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>

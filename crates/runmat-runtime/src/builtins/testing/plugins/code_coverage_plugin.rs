@@ -43,7 +43,9 @@ fn code_coverage_plugin_for_folder(
             }
         }
         match &args[index] {
-            Value::String(folder) if !folder.trim().is_empty() => {
+            Value::String(runmat_value::StringElement::Text(folder))
+                if !folder.trim().is_empty() =>
+            {
                 folders.push(folder.as_str().to_owned());
             }
             Value::CharArray(folder) => {
@@ -60,8 +62,17 @@ fn code_coverage_plugin_for_folder(
                     array
                         .data()
                         .iter()
+                        .map(|folder| {
+                            folder.as_str().ok_or_else(|| {
+                                plugin_error(
+                                    "CodeCoveragePlugin.forFolder folders must be non-empty text",
+                                )
+                            })
+                        })
+                        .collect::<BuiltinResult<Vec<_>>>()?
+                        .into_iter()
                         .filter(|folder| !folder.trim().is_empty())
-                        .map(|folder| folder.as_str().to_owned()),
+                        .map(str::to_owned),
                 );
             }
             _ => {
@@ -106,7 +117,7 @@ enum CoverageOption {
 impl CoverageOption {
     fn from_value(value: &Value) -> Option<Self> {
         let name = match value {
-            Value::String(name) => name.as_str(),
+            Value::String(runmat_value::StringElement::Text(name)) => name.as_str(),
             Value::CharArray(chars) => return chars.row_string().as_deref().and_then(Self::parse),
             _ => return None,
         };

@@ -1,18 +1,40 @@
 //! Output metadata and host parameter layout adaptation.
 use super::*;
 
-pub(super) fn dlarray_format(value: &Value) -> String {
-    match value {
-        Value::Object(object) if object.class_name().is(super::DLARRAY_CLASS) => object
-            .properties()
-            .get("Format")
-            .and_then(|value| match value {
-                Value::String(text) => Some(text.to_string()),
-                _ => None,
-            })
-            .unwrap_or_default(),
-        _ => String::new(),
+pub(super) fn dlarray_format(value: &Value, function: &'static str) -> BuiltinResult<String> {
+    let Value::Object(object) = value else {
+        return Ok(String::new());
+    };
+    if !object.class_name().is(super::DLARRAY_CLASS) {
+        return Ok(String::new());
     }
+    let format = match object.properties().get("Format") {
+        None => "",
+        Some(Value::String(runmat_value::StringElement::Text(text))) => text.as_str(),
+        Some(_) => {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: dlarray Format must be text"),
+            ))
+        }
+    };
+    let labels = match object.properties().get("Labels") {
+        None => format,
+        Some(Value::String(runmat_value::StringElement::Text(text))) => text.as_str(),
+        Some(_) => {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: dlarray Labels must be text"),
+            ))
+        }
+    };
+    if labels != format {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: dlarray Format and Labels disagree"),
+        ));
+    }
+    Ok(format.to_owned())
 }
 
 pub(super) fn elu_alpha(layer: &ObjectInstance, function: &'static str) -> BuiltinResult<f64> {
@@ -59,6 +81,54 @@ pub(super) fn transpose_2d(tensor: &Tensor, function: &'static str) -> BuiltinRe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dlarray_text_metadata_defaults_only_when_properties_are_absent() {
+        use runmat_value::StringElement;
+        for format in [
+            None,
+            Some(Value::from("")),
+            Some(Value::from("CB")),
+            Some(Value::from("<missing>")),
+            Some(Value::String(StringElement::Missing)),
+            Some(Value::Bool(false)),
+        ] {
+            for labels in [
+                None,
+                Some(Value::from("")),
+                Some(Value::from("CB")),
+                Some(Value::from("<missing>")),
+                Some(Value::String(StringElement::Missing)),
+                Some(Value::Bool(false)),
+            ] {
+                let mut object = ObjectInstance::new(super::super::DLARRAY_CLASS.to_owned());
+                if let Some(format) = &format {
+                    object.replace_property_unbounded("Format".into(), format.clone());
+                }
+                if let Some(labels) = &labels {
+                    object.replace_property_unbounded("Labels".into(), labels.clone());
+                }
+                let expected_format = match &format {
+                    None => Some(""),
+                    Some(Value::String(text)) => text.as_str(),
+                    _ => None,
+                };
+                let expected_labels = match &labels {
+                    None => expected_format,
+                    Some(Value::String(text)) => text.as_str(),
+                    _ => None,
+                };
+                let result = dlarray_format(&Value::Object(object), "forward");
+                match (expected_format, expected_labels) {
+                    (Some(format), Some(labels)) if format == labels => {
+                        assert_eq!(result.unwrap(), format)
+                    }
+                    _ => assert!(result.is_err()),
+                }
+            }
+        }
+        assert_eq!(dlarray_format(&Value::Num(1.0), "forward").unwrap(), "");
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]

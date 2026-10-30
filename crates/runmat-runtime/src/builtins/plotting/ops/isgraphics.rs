@@ -50,9 +50,15 @@ fn invalid_argument(detail: &str) -> crate::RuntimeError {
 }
 fn graphics_type_name(value: &Value) -> crate::BuiltinResult<selector::GraphicsType> {
     let text = match value {
-        Value::String(value) => value.trim().to_ascii_lowercase(),
-        Value::StringArray(value) if value.data().len() == 1 => {
-            value.data()[0].trim().to_ascii_lowercase()
+        Value::String(runmat_value::StringElement::Text(value)) => {
+            value.trim().to_ascii_lowercase()
+        }
+        Value::StringArray(value) if value.data().len() == 1 && !value.data()[0].is_missing() => {
+            value.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .trim()
+                .to_ascii_lowercase()
         }
         Value::CharArray(value) if value.rows == 1 => {
             runmat_value::decode_utf16_code_units(value.data())

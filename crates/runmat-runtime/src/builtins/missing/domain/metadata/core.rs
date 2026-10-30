@@ -1,6 +1,8 @@
 use runmat_builtins::BuiltinErrorDescriptor;
 
-pub(in crate::builtins::missing::domain) const MISSING_TEXT: &str = "<missing>";
+#[cfg(test)]
+pub(in crate::builtins::missing::domain) const MISSING_TEXT: runmat_value::StringElement =
+    runmat_value::StringElement::Missing;
 
 pub(in crate::builtins::missing::domain) const MISSING_ERROR_INVALID_ARGUMENT:
     BuiltinErrorDescriptor = BuiltinErrorDescriptor {

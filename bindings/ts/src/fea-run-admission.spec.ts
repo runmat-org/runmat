@@ -10,7 +10,7 @@ function admission(): FeaRunAdmission {
 describe("browser FEA admission boundary", () => {
   it("installs the exact asynchronous host adapter on the session", async () => {
     const install = vi.fn();
-    __internals.setNativeModuleOverride({ default: async () => {}, initRunMat: async () => ({ setFeaRunAdmission: install }) } as never);
+    __internals.setNativeModuleOverride({ stringElementWireSchemaVersion: () => 1, default: async () => {}, initRunMat: async () => ({ setFeaRunAdmission: install }) } as never);
     const session = await initRunMat({ enableGpu: false });
     const adapter = admission();
     session.setFeaRunAdmission(adapter);
@@ -20,14 +20,14 @@ describe("browser FEA admission boundary", () => {
   });
 
   it("does not silently ignore admission on an older runtime", async () => {
-    __internals.setNativeModuleOverride({ default: async () => {}, initRunMat: async () => ({}) } as never);
+    __internals.setNativeModuleOverride({ stringElementWireSchemaVersion: () => 1, default: async () => {}, initRunMat: async () => ({}) } as never);
     const session = await initRunMat({ enableGpu: false });
     expect(() => session.setFeaRunAdmission(admission())).toThrow("configure FEA admission");
   });
 
   it("forwards worker authorization and exact parent identity without acquiring another lease", async () => {
     const execute = vi.fn(async () => "numerical-result");
-    __internals.setNativeModuleOverride({ default: async () => {}, executePreparedFeaStudy: execute, feaRunAdmissionSupported: () => true } as never);
+    __internals.setNativeModuleOverride({ stringElementWireSchemaVersion: () => 1, default: async () => {}, executePreparedFeaStudy: execute, feaRunAdmissionSupported: () => true } as never);
     const authorization: FeaRunWorkerAdmission = {
       admission: admission(),
       delegation: {
@@ -43,7 +43,7 @@ describe("browser FEA admission boundary", () => {
 
   it("fails closed without worker admission, including against older numerical assets", async () => {
     const execute = vi.fn(() => "must-not-run");
-    __internals.setNativeModuleOverride({ default: async () => {}, executePreparedFeaStudy: execute } as never);
+    __internals.setNativeModuleOverride({ stringElementWireSchemaVersion: () => 1, default: async () => {}, executePreparedFeaStudy: execute } as never);
     await expect(executePreparedFeaStudy("json", 1024)).rejects.toMatchObject({ identifier: "RM.FEA.SignInRequired" });
     await expect(executePreparedFeaStudy("json", 1024, undefined, { admission: admission() })).rejects.toThrow("FEA admission support");
     expect(execute).not.toHaveBeenCalled();

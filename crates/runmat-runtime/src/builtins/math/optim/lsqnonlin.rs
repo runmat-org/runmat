@@ -408,9 +408,14 @@ fn has_nonempty_problem_field(problem: &StructValue, name: &str) -> bool {
 
 fn string_scalar(label: &str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(value)) => Ok(value.as_str().to_owned()),
         Value::StringArray(values) if values.data().len() == 1 => {
-            Ok(values.data()[0].as_str().to_owned())
+            values.data()[0].as_str().map(str::to_owned).ok_or_else(|| {
+                lsq_error_with_detail(
+                    &LSQNONLIN_ERROR_INVALID_ARGUMENT,
+                    format!("{label} must be nonmissing text"),
+                )
+            })
         }
         Value::CharArray(chars) if chars.rows == 1 => {
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {

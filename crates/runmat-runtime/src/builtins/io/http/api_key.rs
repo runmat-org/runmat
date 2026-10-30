@@ -142,14 +142,22 @@ fn validate_components(
 
 fn text_scalar(value: &Value) -> Result<Option<String>, ApiKeyError> {
     match value {
-        Value::String(value) => Ok(Some(value.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(value)) => {
+            Ok(Some(value.as_str().to_owned()))
+        }
         Value::CharArray(value) if value.rows == 1 => {
             runmat_value::decode_utf16_code_units(value.data())
                 .map(Some)
                 .map_err(ApiKeyError::Encoding)
         }
-        Value::StringArray(value) if value.data().len() == 1 => {
-            Ok(Some(value.data()[0].as_str().to_owned()))
+        Value::StringArray(value) if value.data().len() == 1 && !value.data()[0].is_missing() => {
+            Ok(Some(
+                value.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
         }
         _ => Ok(None),
     }

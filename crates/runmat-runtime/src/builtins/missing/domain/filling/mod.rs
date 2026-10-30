@@ -340,8 +340,13 @@ pub(super) fn fill_missing_string_array(
         .collect();
     match &options.method {
         FillMethod::Constant(fill) => {
-            let fill = scalar_text(fill)?
-                .ok_or_else(|| invalid_argument("fillmissing: string constant must be text"))?;
+            let fill = match fill {
+                Value::String(text) => text.clone(),
+                Value::StringArray(array) if array.data().len() == 1 => array.data()[0].clone(),
+                other => scalar_text(other)?
+                    .map(runmat_value::StringElement::text)
+                    .ok_or_else(|| invalid_argument("fillmissing: string constant must be text"))?,
+            };
             for (idx, text) in data.iter_mut().enumerate() {
                 if mask[idx] != 0 {
                     *text = fill.clone().into();

@@ -239,8 +239,15 @@ fn logical_from_string_array(strings: StringArray) -> BuiltinResult<Value> {
     let bits: Vec<u8> = strings
         .data()
         .iter()
-        .map(|s| if s.is_empty() { 0 } else { 1 })
-        .collect();
+        .map(|s| {
+            s.as_str().map(|s| u8::from(!s.is_empty())).ok_or_else(|| {
+                logical_error_with_message(
+                    "logical: cannot convert missing strings",
+                    &LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE,
+                )
+            })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
     let shape = canonical_shape(&strings.shape, bits.len());
     logical_buffer_to_host(LogicalBuffer { bits, shape })
 }

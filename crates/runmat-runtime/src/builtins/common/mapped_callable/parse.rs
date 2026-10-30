@@ -6,7 +6,7 @@ use super::{CallableParseError, MappedCallable};
 impl MappedCallable {
     pub(crate) fn parse(value: Value) -> Result<Self, CallableParseError> {
         match value {
-            Value::String(text) => Self::parse_text(&text),
+            Value::String(runmat_value::StringElement::Text(text)) => Self::parse_text(&text),
             Value::CharArray(value) if value.rows == 1 => {
                 let text = value.try_row_string().map_err(|source| {
                     CallableParseError::Runtime(crate::runtime_error::semantic_error_with_source(
@@ -18,8 +18,14 @@ impl MappedCallable {
                 Self::parse_text(&text.expect("row character value has text"))
             }
             Value::CharArray(_) => Err(CallableParseError::CharacterNameMustBeRow),
-            Value::StringArray(value) if value.data().len() == 1 => {
-                Self::parse_text(&value.data()[0])
+            Value::StringArray(value)
+                if value.data().len() == 1 && !value.data()[0].is_missing() =>
+            {
+                Self::parse_text(
+                    &value.data()[0]
+                        .text_ref()
+                        .expect("checked nonmissing scalar string"),
+                )
             }
             Value::StringArray(_) => Err(CallableParseError::StringNameMustBeScalar),
             Value::ScopedFunctionHandle(handle) => Ok(Self::Scoped(handle)),

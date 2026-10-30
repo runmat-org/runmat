@@ -9,7 +9,7 @@ pub(super) enum LabelProgress {
 }
 
 enum Source<'a> {
-    Text(&'a str),
+    Text(&'a runmat_value::StringElement),
     Strings(&'a StringArray),
     Logical(&'a LogicalArray),
     Characters(&'a CharArray),
@@ -312,9 +312,9 @@ impl<'a> GroupLabelBuilder<'a> {
 
 fn scalar_text_copy(value: &Value) -> Option<TextCopy<'_>> {
     match value {
-        Value::String(text) => Some(TextCopy::utf8(text, true)),
+        Value::String(text) => text.as_str().map(TextCopy::utf8),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(TextCopy::utf8(&array.data()[0], true))
+            array.data()[0].as_str().map(TextCopy::utf8)
         }
         Value::CharArray(array) if array.rows == 1 => Some(TextCopy::character_row(array, 0)),
         _ => None,
@@ -323,15 +323,15 @@ fn scalar_text_copy(value: &Value) -> Option<TextCopy<'_>> {
 
 fn leaf_text_copy<'a>(source: &Source<'a>, index: usize) -> BuiltinResult<Option<TextCopy<'a>>> {
     match source {
-        Source::Text(text) => Ok(Some(TextCopy::utf8(text, false))),
-        Source::Strings(array) => Ok(Some(TextCopy::utf8(&array.data()[index], true))),
+        Source::Text(text) => Ok(text.as_str().map(TextCopy::utf8)),
+        Source::Strings(array) => Ok(array.data()[index].as_str().map(TextCopy::utf8)),
         Source::Characters(array) => Ok(Some(TextCopy::character_row(array, index))),
         Source::Categorical(object) => {
             let view = crate::builtins::table::categorical_label_view(object).map_err(|err| {
                 invalid_with_source("boxplot: invalid categorical grouping variable", err)
             })?;
             view.observation_label_at(index)
-                .map(|text| text.map(|text| TextCopy::utf8(text, true)))
+                .map(|text| text.map(TextCopy::utf8))
                 .map_err(|err| {
                     invalid_with_source("boxplot: invalid categorical grouping variable", err)
                 })
@@ -371,9 +371,8 @@ fn label_at(source: &Source<'_>, index: usize) -> BuiltinResult<Option<GroupLabe
         Source::OwnedNumeric(tensor) => {
             Ok(tensor.numeric_value_at(index).and_then(numeric_group_label))
         }
-        Source::Text(_)
-        | Source::Strings(_)
-        | Source::Characters(_)
+        Source::Text(_) | Source::Strings(_) => Ok(None),
+        Source::Characters(_)
         | Source::CellScalar(_)
         | Source::CellDiscard(_)
         | Source::CellFactors { .. }

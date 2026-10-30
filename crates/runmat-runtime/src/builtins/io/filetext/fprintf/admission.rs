@@ -216,8 +216,10 @@ fn char_from_int_value(value: &IntValue) -> Option<char> {
 
 pub(super) fn coerce_to_format_string(value: &Value) -> BuiltinResult<Option<Value>> {
     match value {
-        Value::String(s) => Ok(Some(Value::String(s.clone()))),
-        Value::StringArray(sa) if sa.data().len() == 1 => {
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(Some(Value::String(
+            runmat_value::StringElement::Text(s.clone()),
+        ))),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
             Ok(Some(Value::String(sa.data()[0].clone())))
         }
         Value::CharArray(ca) if char_format_row_shape(ca) => {

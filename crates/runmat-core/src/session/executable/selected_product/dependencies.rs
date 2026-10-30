@@ -1,6 +1,7 @@
 //! Reissue a bounded original-product DAG without recursive native stack use.
 use std::collections::{HashMap, HashSet};
 
+use runmat_execution::executable::{ExecutableStaticCaller, ExecutableStaticImportKind};
 use runmat_hir::FunctionId;
 use runmat_runtime::context::RuntimeContext;
 use runmat_vm::FunctionRegistry;
@@ -96,19 +97,76 @@ pub(super) fn original_static_targets(
         return Ok(unit.original_static_targets().to_vec());
     }
     let mut preselected = HashMap::new();
-    for (function, owner) in unit.original_dependencies() {
+    let mut partitioned = HashSet::new();
+    for import in unit.original_static_imports() {
+        let instructions = match import.caller {
+            ExecutableStaticCaller::Script => &unit.bytecode().instructions,
+            ExecutableStaticCaller::Function(origin) => {
+                let caller = unit
+                    .local_function_for_origin(origin)
+                    .map_err(error)?
+                    .ok_or_else(|| {
+                        error("original static caller is absent from its compiler product")
+                    })?;
+                &unit
+                    .functions()
+                    .get(caller)
+                    .ok_or_else(|| error("original static caller body is absent"))?
+                    .instructions
+            }
+        };
+        let pc = usize::try_from(import.site.instruction)
+            .map_err(|_| error("original static site exceeds the host index domain"))?;
+        let instruction = instructions
+            .get(pc)
+            .ok_or_else(|| error("original static site is absent from its caller"))?;
+        let (_, operand, _) = runmat_vm::instruction_reference_sites(instruction, pc)
+            .map_err(error)?
+            .into_iter()
+            .find(|(site, _, _)| *site == import.site)
+            .ok_or_else(|| error("original static reference is absent from its instruction"))?;
+        // The origin selects an original admitted product. The numeric operand
+        // only indexes this already-proved site in the compiler's selector.
+        let mut matching = unit.original_dependencies().values().filter_map(|owner| {
+            match owner.local_function_for_origin(import.target) {
+                Ok(Some(function)) => Some(Ok((owner, function))),
+                Ok(None) => None,
+                Err(cause) => Some(Err(error(cause))),
+            }
+        });
+        let (owner, function) = matching
+            .next()
+            .ok_or_else(|| error("original static target has no exact compiler owner"))??;
+        for candidate in matching {
+            let (candidate, candidate_function) = candidate?;
+            if !std::ptr::eq(owner.as_ref(), candidate.as_ref()) || candidate_function != function {
+                return Err(error(
+                    "original static target has ambiguous compiler owners",
+                ));
+            }
+        }
         let registry = registries
             .get(&(owner.as_ref() as *const ExecutableUnit))
             .ok_or_else(|| error("original dependency was not prepared before its caller"))?;
         let binding = registry
-            .exact_bound_binding(*function)
+            .exact_bound_binding(function)
             .ok_or_else(|| error("original dependency lacks its exact bound graph"))?;
         let view = registry
-            .owned_view(*function, &binding.authority)
+            .owned_view(function, &binding.authority)
             .ok_or_else(|| error("original dependency lacks its owned execution view"))?;
-        preselected.insert(*function, (binding, view));
+        if let Some((previous, _)) = preselected.get(&operand) {
+            if previous != &binding {
+                return Err(error(
+                    "original static operand has conflicting selected origins",
+                ));
+            }
+        } else {
+            preselected.insert(operand, (binding, view));
+        }
+        if import.kind == ExecutableStaticImportKind::PartitionedDefinition {
+            partitioned.insert(operand);
+        }
     }
-    let partitioned = unit.original_dependencies().keys().copied().collect();
     let selected = selected_static_imports_with_preselected(
         unit,
         &FunctionRegistry::default(),
@@ -117,12 +175,7 @@ pub(super) fn original_static_targets(
         &preselected,
     )
     .map_err(error)?;
-    if !unit.original_static_targets().is_empty()
-        && !selected.targets.iter().map(|target| target.import).eq(unit
-            .original_static_targets()
-            .iter()
-            .map(|target| target.import))
-    {
+    if !selected.imports.iter().eq(unit.original_static_imports()) {
         return Err(error(
             "reissued static targets differ from original compiler selection",
         ));

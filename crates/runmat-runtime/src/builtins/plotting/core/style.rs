@@ -809,8 +809,15 @@ fn parse_line_style_order_value(
         Value::StringArray(arr) => arr
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect(),
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    ctx_err(
+                        opts,
+                        "LineStyleOrder must be a string, string array, or cell array of strings",
+                    )
+                })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?,
         Value::Cell(cell) => collect_cell_strings(cell, opts)?,
         _ => {
             if let Some(text) = value_as_string(value).map_err(|source| {
@@ -1041,7 +1048,7 @@ pub(crate) fn parse_handle_visibility(
 pub fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match value {
         Value::CharArray(chars) => Some(runmat_value::decode_utf16_code_units(chars.data())?),
-        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         _ => None,
     })
 }
@@ -1102,7 +1109,7 @@ pub(crate) fn value_as_bool(value: &Value) -> Option<bool> {
                 None
             }
         }
-        Value::String(text) => bool_from_text(text),
+        Value::String(runmat_value::StringElement::Text(text)) => bool_from_text(text),
         _ => None,
     }
 }
@@ -1614,7 +1621,7 @@ fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> crate::RuntimeError {
 /// actual text materialization remains fallible in value_as_string.
 pub(crate) fn value_text_equals_ascii(value: &Value, expected: &str, trim: bool) -> bool {
     match value {
-        Value::String(text) => {
+        Value::String(runmat_value::StringElement::Text(text)) => {
             let text = if trim { text.trim() } else { text.as_str() };
             text.eq_ignore_ascii_case(expected)
         }

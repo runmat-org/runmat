@@ -4,7 +4,7 @@ pub(super) fn guess_request_format(value: &Value) -> RequestFormat {
         Value::Struct(_) => RequestFormat::Form,
         Value::Cell(cell) if cell.cols == 2 => RequestFormat::Form,
         Value::CharArray(ca) if ca.rows == 1 => RequestFormat::Text,
-        Value::String(_) => RequestFormat::Text,
+        Value::String(runmat_value::StringElement::Text(_)) => RequestFormat::Text,
         Value::StringArray(sa) => {
             if sa.data().len() == 1 {
                 RequestFormat::Text

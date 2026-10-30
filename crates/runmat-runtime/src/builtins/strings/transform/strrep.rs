@@ -121,10 +121,20 @@ async fn strrep_builtin(
 
 fn parse_pattern(value: Value) -> BuiltinResult<(runmat_value::Utf8Text, PatternKind)> {
     match value {
-        Value::String(text) => Ok((text, PatternKind::String)),
+        Value::String(text) => Ok((
+            text.into_text()
+                .ok_or_else(|| strrep_error(&STRREP_ERROR_PATTERN_TYPE))?,
+            PatternKind::String,
+        )),
         Value::StringArray(array) => {
             if array.data().len() == 1 {
-                Ok((array.data()[0].clone(), PatternKind::String))
+                Ok((
+                    array.data()[0]
+                        .clone()
+                        .into_text()
+                        .ok_or_else(|| strrep_error(&STRREP_ERROR_PATTERN_TYPE))?,
+                    PatternKind::String,
+                ))
             } else {
                 Err(strrep_error(&STRREP_ERROR_PATTERN_TYPE))
             }
@@ -151,14 +161,17 @@ fn parse_pattern(value: Value) -> BuiltinResult<(runmat_value::Utf8Text, Pattern
 }
 
 fn strrep_string_value(
-    text: runmat_value::Utf8Text,
+    text: runmat_value::StringElement,
     old: &str,
     new: &str,
-) -> runmat_value::Utf8Text {
+) -> runmat_value::StringElement {
     if is_missing_string(&text) {
         text
     } else {
-        text.replace(old, new).into()
+        text.as_str()
+            .expect("nonmissing subject")
+            .replace(old, new)
+            .into()
     }
 }
 
@@ -172,7 +185,7 @@ fn strrep_string_array(array: StringArray, old: &str, new: &str) -> BuiltinResul
         .into_iter()
         .map(|text| strrep_string_value(text, old, new))
         .collect::<Vec<_>>();
-    let rebuilt = StringArray::from_texts_unbounded(replaced, shape.to_vec()).map_err(|e| {
+    let rebuilt = StringArray::from_elements_unbounded(replaced, shape.to_vec()).map_err(|e| {
         strrep_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRREP_ERROR_INTERNAL)
     })?;
     Ok(Value::StringArray(rebuilt))
@@ -258,11 +271,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strrep_string_array_preserves_missing() {
-        let array = StringArray::new(
+        let array = StringArray::from_elements_unbounded(
             vec![
-                String::from("gpu"),
-                String::from("<missing>"),
-                String::from("planner"),
+                runmat_value::StringElement::text("gpu"),
+                runmat_value::StringElement::Missing,
+                runmat_value::StringElement::text("planner"),
             ],
             vec![3, 1],
         )
@@ -279,9 +292,9 @@ pub(crate) mod tests {
                 assert_eq!(
                     sa.data(),
                     vec![
-                        String::from("GPU"),
-                        String::from("<missing>"),
-                        String::from("planner")
+                        runmat_value::StringElement::text("GPU"),
+                        runmat_value::StringElement::Missing,
+                        runmat_value::StringElement::text("planner")
                     ]
                 );
             }

@@ -10,10 +10,35 @@ pub(crate) fn extract_scalar_string(value: &Value) -> Option<String> {
         return None;
     }
     match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         Value::CharArray(ca) => ca.row_string(),
-        Value::StringArray(sa) => Some(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) => sa.data()[0].as_str().map(str::to_owned),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod typed_string_controls {
+    use super::*;
+
+    #[test]
+    fn scalar_text_controls_reject_missing_without_reserving_any_literal_spelling() {
+        for element in [
+            "<missing>".into(),
+            "<MISSING>".into(),
+            "".into(),
+            runmat_value::StringElement::Missing,
+        ] {
+            let expected = element.as_str().map(str::to_owned);
+            assert_eq!(
+                extract_scalar_string(&Value::String(element.clone())),
+                expected
+            );
+            let array =
+                runmat_value::StringArray::from_elements_unbounded(vec![element], vec![1, 1])
+                    .unwrap();
+            assert_eq!(extract_scalar_string(&Value::StringArray(array)), expected);
+        }
     }
 }
 

@@ -57,7 +57,9 @@ pub(super) fn normalize_property_value(name: TimerProperty, value: Value) -> Bui
             TimerVisibility::parse,
             TimerVisibility::spelling,
         ),
-        TimerProperty::Name | TimerProperty::Tag => Ok(Value::String(value_to_string(&value)?)),
+        TimerProperty::Name | TimerProperty::Tag => Ok(Value::String(
+            runmat_value::StringElement::Text(value_to_string(&value)?),
+        )),
         TimerProperty::TimerFcn
         | TimerProperty::StartFcn
         | TimerProperty::StopFcn
@@ -124,7 +126,7 @@ fn parse_choice<T: Copy>(
 
 pub(super) fn value_to_string(value: &Value) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
         Value::CharArray(chars) if chars.rows == 1 => {
             crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
                 timer_error(

@@ -5,7 +5,7 @@ mod output;
 mod tests;
 
 use operand::Operand;
-use runmat_value::{ExactArrayStorage, SharedShape, StringArray, Utf8Text, Value};
+use runmat_value::{ExactArrayStorage, SharedShape, StringArray, StringElement, Utf8Text, Value};
 
 use crate::builtins::common::broadcast::{BroadcastPlan, PreparedBroadcastPlan};
 use crate::context::host_allocation::{
@@ -130,7 +130,7 @@ pub(super) async fn concatenate(
     let mut broadcast =
         PreparedBroadcastPlan::prepare(&metadata, runtime, left.shape(), right.shape(), &shape)
             .map_err(|error| admission(runtime, error))?;
-    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(count)
+    let mut physical = ExactArrayStorage::<StringElement>::requested_bytes(count)
         .map_err(|error| admission(runtime, numeric(error)))?;
     let mut claims = usize::from(count != 0);
     let mut cooperation = runtime.cpu_cooperation();
@@ -179,7 +179,7 @@ pub(super) async fn concatenate(
             .map_err(|error| admission(runtime, error))?;
         let text = output::concatenate(&left.element(a)?, &right.element(b)?, Some(&permit))
             .map_err(text_error)?;
-        let bytes = text.len();
+        let bytes = text.as_str().map_or(0, str::len);
         data.try_push(text)
             .map_err(|_| admission(runtime, HostAllocationError::Overflow))?;
         cooperation
@@ -220,7 +220,7 @@ async fn ordinary(
         if let Some(cooperation) = cooperation.as_mut() {
             cooperation
                 .checkpoint(
-                    u64::try_from(text.len())
+                    u64::try_from(text.as_str().map_or(0, str::len))
                         .unwrap_or(u64::MAX)
                         .saturating_add(1),
                 )

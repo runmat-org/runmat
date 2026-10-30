@@ -3,7 +3,7 @@ use super::*;
 
 fn text_value(outcome: &abi::ExecutionOutcome, name: &str) -> String {
     match outcome_named_upsert_value(outcome, name).expect("named output") {
-        runmat_value::Value::String(text) => text.to_string(),
+        runmat_value::Value::String(text) => text.as_str().expect("nonmissing text").to_owned(),
         runmat_value::Value::CharArray(chars) => chars.row_string().expect("row text"),
         other => panic!("{name} was not text: {other:?}"),
     }

@@ -16,8 +16,7 @@ impl ExecutableUnit {
     /// schema and component consistency; it does not recompile or attest source semantics.
     pub fn from_portable_envelope(envelope: &ExecutableUnitEnvelope) -> Result<Self, String> {
         envelope.validate().map_err(|error| error.to_string())?;
-        let unit = Self::decode_local_product(envelope)?;
-        let unit = dependencies::restore(unit, &envelope.dependency_products)?;
+        let unit = dependencies::restore(envelope)?;
         let restored = match envelope.manifest.identity.entrypoint_kind {
             ExecutableEntrypointKind::Function => {
                 unit.portable_envelope_for_selection(Some(imported_function(&unit, envelope)?))?
@@ -33,21 +32,75 @@ impl ExecutableUnit {
         Ok(unit)
     }
 
-    fn decode_local_product(envelope: &ExecutableUnitEnvelope) -> Result<Self, String> {
+    fn decode_local_product(
+        envelope: &ExecutableUnitEnvelope,
+        mut compiler_registry: runmat_vm::FunctionRegistry,
+        owners: &dependencies::OriginalOwners,
+    ) -> Result<Self, String> {
         envelope
             .manifest
-            .validate_for(&runmat_execution::ExecutableSectionSupport::default())
+            .validate_for(
+                &runmat_execution::ExecutableSectionSupport::known([
+                    runmat_execution::executable::KnownExecutableSection::StaticImports,
+                ])
+                .map_err(|error| error.to_string())?,
+            )
             .map_err(|error| error.to_string())?;
         require_environment(envelope)?;
-        // Use the same admission boundary as worker execution, including its
-        // MIR-derived nonwire contracts. Move the accepted registry rather
-        // than issuing evidence from copied flags or decoding it a second time.
-        let canonical = envelope
+        let compiler_bytecode: runmat_vm::Bytecode = decode(envelope, Kind::Bytecode)?;
+        let (source, source_map) = sources::decode(envelope, &compiler_bytecode)?;
+        let program = envelope
+            .manifest
+            .identity
+            .program
+            .identity_digest()
+            .map_err(|error| error.to_string())?;
+        let mut originals = std::collections::HashMap::new();
+        let mut original_owners = std::collections::HashMap::new();
+        for (id, projection) in &compiler_registry.functions {
+            let origin = projection
+                .binding_origin
+                .ok_or("compiler function projection lacks its original binding origin")?;
+            if *id != projection.function || origin.function != projection.portable_function {
+                return Err(
+                    "compiler function projection has inconsistent original coordinates".into(),
+                );
+            }
+            if origin.program == program {
+                continue;
+            }
+            let owner = owners
+                .get(&origin)
+                .ok_or("foreign function projection has no admitted original product")?;
+            let original =
+                super::dependencies::original_projection(&source_map, owner, projection)?;
+            originals.insert(*id, original);
+            original_owners.insert(*id, std::rc::Rc::clone(owner));
+        }
+        let mut executable_registry = compiler_registry.clone();
+        for id in originals.keys() {
+            executable_registry.remove(*id);
+        }
+        // Foreign projections are compiler inventory, not executable bodies
+        // of this program. Each was checked above against its original admitted
+        // owner (including its instructions). Admit every current instruction
+        // and import site through the ordinary strict worker boundary.
+        let executable = current_product(envelope, &executable_registry)?;
+        let canonical = executable
             .canonical_bytes()
             .map_err(|error| error.to_string())?;
         let admitted =
             runmat_vm::admit_executable_unit(&canonical).map_err(|error| error.to_string())?;
+        let imports = admitted.static_imports().to_vec();
+        let current = admitted.registry().functions.keys().copied().collect();
         let (mut bytecode, registry, layout) = admitted.into_compiler_components();
+        // Only admitted current bodies and independently validated original
+        // bodies enter the compiler registry. Never execute deserialized
+        // projection flags as if they were MIR-issued evidence.
+        originals.extend(registry.into_functions());
+        let names = std::mem::take(&mut compiler_registry.names);
+        let mut registry = runmat_vm::FunctionRegistry::new(originals);
+        registry.names = names;
         drop(canonical);
         let mir: runmat_mir::MirAssembly = decode(envelope, Kind::Mir)?;
         let analysis: runmat_mir::analysis::AnalysisStore = decode(envelope, Kind::Analysis)?;
@@ -55,7 +108,6 @@ impl ExecutableUnit {
             .revision
             .validate_current()
             .map_err(|error| error.to_string())?;
-        let (source, source_map) = sources::decode(envelope, &bytecode)?;
         let revision = ExecutableRevision::derive(
             &source,
             Some(envelope.manifest.identity.program.clone()),
@@ -72,7 +124,33 @@ impl ExecutableUnit {
         bytecode.bound_functions = registry.functions.clone();
         bytecode.function_registry = registry;
         bytecode.layout = Some(layout);
-        let mut unit = Self::new(source, revision, source_map, mir, analysis, bytecode)?;
+        let mut unit = Self::new(source, revision, source_map, mir, analysis, bytecode)?
+            .bind_original_dependencies(&original_owners)?;
+        // A selected product can omit an inherited projection altogether.
+        // Its admitted site still selects an exact original product by origin,
+        // never by the numeric operand that happens to occupy that site.
+        for import in &imports {
+            let owner = owners
+                .get(&import.target)
+                .ok_or("static import has no admitted original compiler product")?;
+            let function = owner
+                .local_function_for_origin(import.target)?
+                .ok_or("static import target is absent from its original compiler product")?;
+            let code = original_code(owner)?;
+            if code.content_digest() != import.target_content
+                || code.body_digest(import.target) != Some(import.target_body)
+            {
+                return Err("static import differs from its original admitted content/body".into());
+            }
+            if let Some(previous) = unit.original_dependencies.insert(function, owner.clone()) {
+                if !std::rc::Rc::ptr_eq(&previous, owner) {
+                    return Err(
+                        "static imports have conflicting original compiler coordinates".into(),
+                    );
+                }
+            }
+        }
+        let mut unit = unit.with_admitted_portable_selection(current, imports)?;
         unit.reset_direct_code_cache();
         unit.imported_contract = Some(std::rc::Rc::new(super::unit::ImportedPortableContract {
             interop: envelope.manifest.interop.clone(),
@@ -94,6 +172,61 @@ impl ExecutableUnit {
         }
         Ok(unit)
     }
+}
+
+fn original_code(
+    unit: &ExecutableUnit,
+) -> Result<std::rc::Rc<runmat_vm::SelectedExecutableCode>, String> {
+    let interop = unit
+        .imported_contract
+        .as_ref()
+        .ok_or("original dependency has no admitted compiler contract")?
+        .interop
+        .clone();
+    unit.admit_direct_code(interop.clone(), || {
+        let envelope = unit.portable_primary_source_envelope_with_static_imports(
+            &unit.compiled_current_body_ids()?,
+            unit.source_map()
+                .entries()
+                .first()
+                .map(|entry| entry.source_id),
+            interop,
+            unit.original_static_imports().to_vec(),
+        )?;
+        envelope
+            .canonical_bytes()
+            .map(std::sync::Arc::<[u8]>::from)
+            .map_err(|error| error.to_string())
+    })
+}
+
+/// Produce the existing worker view of one complete compiler product. The
+/// caller has already validated every excluded projection against an admitted
+/// original owner; all executable references remain in this strict VM view.
+fn current_product(
+    envelope: &ExecutableUnitEnvelope,
+    registry: &runmat_vm::FunctionRegistry,
+) -> Result<ExecutableUnitEnvelope, String> {
+    let mut manifest = envelope.manifest.clone();
+    manifest.dependencies.clear();
+    let mut payloads = envelope.payloads.clone();
+    let payload = payloads
+        .iter_mut()
+        .find(|payload| payload.kind == Kind::FunctionRegistry)
+        .ok_or("portable product lacks its function registry")?;
+    payload.bytes = super::portable::canonical_json(registry)?;
+    let descriptor = manifest
+        .components
+        .iter_mut()
+        .find(|descriptor| descriptor.kind == Kind::FunctionRegistry)
+        .ok_or("portable product lacks its registry descriptor")?;
+    *descriptor = runmat_execution::ExecutableComponentDescriptor::from_payload(
+        Kind::FunctionRegistry,
+        descriptor.schema_version,
+        &payload.bytes,
+    )
+    .map_err(|error| error.to_string())?;
+    ExecutableUnitEnvelope::new(manifest, payloads).map_err(|error| error.to_string())
 }
 
 /// The manifest carries an original portable ordinal, not a compiler/session

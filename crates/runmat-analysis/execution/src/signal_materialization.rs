@@ -388,7 +388,7 @@ fn encode_argument(
         GeneratorArgument::SignedInteger(value) => InlineValue::I64(*value),
         GeneratorArgument::UnsignedInteger(value) => InlineValue::U64(*value),
         GeneratorArgument::Real(value) => InlineValue::F64Bits(value.to_bits()),
-        GeneratorArgument::Text(value) => InlineValue::String(value.clone()),
+        GeneratorArgument::Text(value) => InlineValue::String(value.clone().into()),
         GeneratorArgument::RealVector(values) => InlineValue::Dense(DenseValue {
             element_type: ElementType::F64,
             shape: vec![

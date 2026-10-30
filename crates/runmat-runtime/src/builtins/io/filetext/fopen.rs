@@ -419,15 +419,22 @@ fn scalar_string<'a>(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Ok(std::borrow::Cow::Borrowed(s.as_str()))
+        }
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 fopen_error_with_detail(error, err_detail)
             })
             .map(std::borrow::Cow::Owned)
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Ok(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            Ok(std::borrow::Cow::Borrowed(
+                sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         _ => Err(fopen_error_with_detail(error, err_detail)),
     }

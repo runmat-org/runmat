@@ -168,11 +168,10 @@ pub(super) enum Element<'a> {
 }
 
 impl<'a> Element<'a> {
-    fn text(text: &'a str) -> Self {
-        if crate::builtins::strings::common::is_missing_string(text) {
-            Self::Missing
-        } else {
-            Self::Text(text)
+    fn text(text: Option<&'a str>) -> Self {
+        match text {
+            Some(text) => Self::Text(text),
+            None => Self::Missing,
         }
     }
 
@@ -218,7 +217,7 @@ impl<'a> Element<'a> {
             Self::Numeric(value) => write_numeric_text(output, *value)?,
             Self::Complex(real, imaginary) => write_complex_text(output, *real, *imaginary)?,
             Self::Logical(value) => output.write_str(if *value { "true" } else { "false" })?,
-            Self::Missing => output.write_str("<missing>")?,
+            Self::Missing => return Err(TextError::Format(std::fmt::Error)),
         }
         Ok(())
     }

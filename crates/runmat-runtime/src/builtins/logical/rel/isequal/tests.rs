@@ -1,4 +1,76 @@
 use super::*;
+
+#[test]
+fn string_missing_equality_is_operation_owned_for_scalars_arrays_and_nested_values() {
+    use runmat_builtins::RelationalOperator;
+    use runmat_value::StringElement;
+    let assert_relational_missing = |a: &Value, b: &Value| {
+        for operator in [
+            RelationalOperator::Equal,
+            RelationalOperator::NotEqual,
+            RelationalOperator::LessThan,
+            RelationalOperator::LessThanOrEqual,
+            RelationalOperator::GreaterThan,
+            RelationalOperator::GreaterThanOrEqual,
+        ] {
+            assert_eq!(
+                crate::builtins::logical::rel::comparison::evaluate_host(
+                    a.clone(),
+                    b.clone(),
+                    operator
+                )
+                .unwrap(),
+                Value::Bool(operator == RelationalOperator::NotEqual),
+            );
+        }
+    };
+    let carriers = |element: StringElement| {
+        vec![
+            Value::String(element.clone()),
+            Value::StringArray(
+                StringArray::from_elements_unbounded(vec![element], vec![1, 1]).unwrap(),
+            ),
+        ]
+    };
+    for a in carriers(StringElement::Missing) {
+        for b in carriers(StringElement::Missing) {
+            assert_relational_missing(&a, &b);
+            assert_eq!(
+                run_isequal(vec![a.clone(), b.clone()]).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(
+                run_isequaln(vec![a.clone(), b.clone()]).unwrap(),
+                Value::Bool(true)
+            );
+            let a = Value::Cell(CellArray::new(vec![a.clone()], 1, 1).unwrap());
+            let b = Value::Cell(CellArray::new(vec![b], 1, 1).unwrap());
+            assert_eq!(
+                run_isequal(vec![a.clone(), b.clone()]).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(run_isequaln(vec![a, b]).unwrap(), Value::Bool(true));
+        }
+        for literal in ["<missing>", "<MISSING>", "", "text"] {
+            for b in carriers(literal.into()) {
+                assert_relational_missing(&a, &b);
+                assert_eq!(
+                    run_isequal(vec![a.clone(), b.clone()]).unwrap(),
+                    Value::Bool(false)
+                );
+                assert_eq!(
+                    run_isequaln(vec![a.clone(), b.clone()]).unwrap(),
+                    Value::Bool(false)
+                );
+                assert_eq!(
+                    run_isequal(vec![b.clone(), b.clone()]).unwrap(),
+                    Value::Bool(true)
+                );
+                assert_eq!(run_isequaln(vec![b.clone(), b]).unwrap(), Value::Bool(true));
+            }
+        }
+    }
+}
 use crate::builtins::common::gpu_helpers;
 use futures::executor::block_on;
 use runmat_value::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage};

@@ -46,7 +46,9 @@ fn looks_like_option_value(value: &Value) -> bool {
 
 fn option_name(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
         Value::CharArray(array) if array.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
                 delete_error_with(
@@ -56,8 +58,14 @@ fn option_name(value: &Value) -> BuiltinResult<Option<String>> {
             })
             .map(Some)
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
         }
         _ => Ok(None),
     }
@@ -74,7 +82,7 @@ pub(super) fn exact_zero_one(value: &Value) -> BuiltinResult<bool> {
 
 pub(super) fn collect_targets(value: &Value, targets: &mut Vec<String>) -> BuiltinResult<()> {
     match value {
-        Value::String(text) => push_nonempty_target(text, targets),
+        Value::String(runmat_value::StringElement::Text(text)) => push_nonempty_target(text, targets),
         Value::CharArray(array) => collect_char_array_targets(array, targets),
         Value::StringArray(array) => collect_string_array_targets(array, targets),
         Value::Cell(cell) => collect_cell_targets(cell, targets),
@@ -117,13 +125,19 @@ fn collect_string_array_targets(
     targets: &mut Vec<String>,
 ) -> BuiltinResult<()> {
     for text in array.data() {
+        let text = text.as_str().ok_or_else(|| {
+            delete_error_with(
+                &DELETE_ERROR_EMPTY_FILENAME,
+                "delete: missing string is not a filename",
+            )
+        })?;
         if text.is_empty() {
             return Err(delete_error_with(
                 &DELETE_ERROR_EMPTY_FILENAME,
                 DELETE_ERROR_EMPTY_FILENAME.message,
             ));
         }
-        targets.push(text.as_str().to_owned());
+        targets.push(text.to_owned());
     }
     Ok(())
 }

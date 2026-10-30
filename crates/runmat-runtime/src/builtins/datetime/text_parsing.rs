@@ -150,6 +150,7 @@ pub(super) fn parse_text_input_with_runtime(
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>, String)> {
     match value {
         Value::String(text) => {
+            let text = nonmissing_text(text, "date/time input")?;
             if let Some(relative) = relative_datetime(text.trim(), runtime)? {
                 let has_time = text.trim().eq_ignore_ascii_case("now");
                 return Ok((
@@ -181,6 +182,7 @@ pub(super) fn parse_text_input_with_runtime(
             let mut serials = Vec::with_capacity(array.data().len());
             let mut has_time = false;
             for text in array.data() {
+                let text = nonmissing_text(text, "date/time input")?;
                 let parsed = relative_datetime(text.trim(), runtime)?
                     .map(|value| (value, text.trim().eq_ignore_ascii_case("now")))
                     .or(parse_calendar_text(text, input_format, runtime)?);
@@ -425,15 +427,18 @@ pub(super) fn parse_legacy_component_text(
     label: &str,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
     let (texts, shape): (Vec<Cow<'_, str>>, Vec<usize>) = match &value {
-        Value::String(text) => (vec![Cow::Borrowed(text.as_str())], vec![1, 1]),
+        Value::String(text) => (
+            vec![Cow::Borrowed(nonmissing_text(text, "legacy date input")?)],
+            vec![1, 1],
+        ),
         Value::StringArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data().len());
             (
                 array
                     .data()
                     .iter()
-                    .map(|text| Cow::Borrowed(text.as_str()))
-                    .collect(),
+                    .map(|text| nonmissing_text(text, "legacy date input").map(Cow::Borrowed))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
                 shape,
             )
         }
@@ -518,15 +523,18 @@ pub(super) fn parse_legacy_day_text(
     input_format: Option<&str>,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
     let (texts, shape): (Vec<Cow<'_, str>>, Vec<usize>) = match &value {
-        Value::String(text) => (vec![Cow::Borrowed(text.as_str())], vec![1, 1]),
+        Value::String(text) => (
+            vec![Cow::Borrowed(nonmissing_text(text, "legacy date input")?)],
+            vec![1, 1],
+        ),
         Value::StringArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data().len());
             (
                 array
                     .data()
                     .iter()
-                    .map(|text| Cow::Borrowed(text.as_str()))
-                    .collect(),
+                    .map(|text| nonmissing_text(text, "legacy date input").map(Cow::Borrowed))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
                 shape,
             )
         }

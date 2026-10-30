@@ -70,9 +70,13 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
             for item in cell.data().iter() {
-                labels.push(ClassLabel::Text(predict_scalar_text(item)?.ok_or_else(|| {
-                    predict_invalid(format!("predict: {name} cell entries must be text"))
-                })?.into()));
+                labels.push(ClassLabel::Text(match item {
+                    Value::String(text) => text.clone(),
+                    Value::StringArray(array) if array.data().len() == 1 => array.data()[0].clone(),
+                    _ => predict_scalar_text(item)?.ok_or_else(|| {
+                        predict_invalid(format!("predict: {name} cell entries must be text"))
+                    })?.into(),
+                }));
             }
             Ok(LabelVector {
                 labels,
@@ -191,6 +195,7 @@ pub(super) fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
 
 pub(super) fn is_missing_label(label: &ClassLabel) -> bool {
     matches!(label, ClassLabel::Numeric(value) if value.is_nan())
+        || matches!(label, ClassLabel::Text(value) if value.is_missing())
 }
 
 fn integer_class(storage: &IntegerStorage) -> IntegerClass {
@@ -337,12 +342,12 @@ pub(super) fn predicted_labels_value(
             ))
         }
         LabelKind::Text => Ok(Value::StringArray(
-            StringArray::from_texts_unbounded(
+            StringArray::from_elements_unbounded(
                 indices
                     .iter()
                     .map(|idx| match labels.get(*idx) {
                         Some(ClassLabel::Text(value)) => value.clone(),
-                        _ => Utf8Text::default(),
+                        _ => StringElement::default(),
                     })
                     .collect(),
                 shape,
@@ -376,8 +381,14 @@ pub(super) fn score_transform(spec: &FitSpec) -> ScoreTransform {
 
 pub(super) fn score_transform_property(object: &ObjectInstance) -> BuiltinResult<ScoreTransform> {
     match object.properties().get("ScoreTransform") {
-        Some(Value::String(text)) if text.eq_ignore_ascii_case("none") => Ok(ScoreTransform::None),
-        Some(Value::String(text)) if text.eq_ignore_ascii_case("logit") => {
+        Some(Value::String(runmat_value::StringElement::Text(text)))
+            if text.eq_ignore_ascii_case("none") =>
+        {
+            Ok(ScoreTransform::None)
+        }
+        Some(Value::String(runmat_value::StringElement::Text(text)))
+            if text.eq_ignore_ascii_case("logit") =>
+        {
             Ok(ScoreTransform::Logit)
         }
         _ => Err(predict_invalid(
@@ -391,12 +402,18 @@ pub(super) fn string_array_property(
     name: &str,
 ) -> BuiltinResult<Vec<String>> {
     match object.properties().get(name) {
-        Some(Value::StringArray(array)) => Ok(array
+        Some(Value::StringArray(array)) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
-        Some(Value::String(text)) => Ok(vec![text.as_str().to_owned()]),
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    predict_invalid("predict: model text metadata must be nonmissing")
+                })
+            })
+            .collect(),
+        Some(Value::String(runmat_value::StringElement::Text(text))) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         _ => Err(predict_invalid(format!("predict: model is missing {name}"))),
     }
 }

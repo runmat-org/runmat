@@ -2295,7 +2295,7 @@ fn display_script_surface_uses_variable_header() {
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_display_probe.m");
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_value::Value::String(s)
+        runmat_value::Value::String(runmat_value::StringElement::Text(s))
             if s.contains("alpha =")
                 && s.contains("1       2")
                 && s.contains("3       4")
@@ -3697,7 +3697,7 @@ fn function_handle_anon_round_trip() {
         .any(|v| matches!(v, runmat_value::Value::FunctionHandle(_))));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_value::Value::String(s) if s.starts_with("@anon"))));
+        .any(|v| matches!(v, runmat_value::Value::String(runmat_value::StringElement::Text(s)) if s.starts_with("@anon"))));
 }
 
 #[test]

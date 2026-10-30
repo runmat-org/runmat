@@ -911,7 +911,7 @@ impl RuntimeContext {
         let callbacks = self.state.plot_callbacks.borrow();
         let root = callbacks.get(&slot)?;
         match &root.value {
-            runmat_value::Value::String(text) => Some(text.as_str().to_owned()),
+            runmat_value::Value::String(text) => text.as_str().map(str::to_owned),
             // Optional diagnostic source is not executable authority.
             runmat_value::Value::CharArray(chars) => chars.try_row_string().unwrap_or_default(),
             _ => None,

@@ -11,9 +11,18 @@ pub(super) enum Text<'a> {
 impl<'a> Text<'a> {
     pub fn of(value: &'a Value) -> Option<Self> {
         match value {
-            Value::String(value) => Some(Self::Utf8(value.as_str())),
-            Value::StringArray(value) if value.data().len() == 1 => {
-                Some(Self::Utf8(value.data()[0].as_str()))
+            Value::String(runmat_value::StringElement::Text(value)) => {
+                Some(Self::Utf8(value.as_str()))
+            }
+            Value::StringArray(value)
+                if value.data().len() == 1 && !value.data()[0].is_missing() =>
+            {
+                Some(Self::Utf8(
+                    value.data()[0]
+                        .text_ref()
+                        .expect("checked nonmissing scalar string")
+                        .as_str(),
+                ))
             }
             Value::CharArray(value)
                 if value.rows == 1 && value.shape().iter().skip(2).all(|&n| n == 1) =>

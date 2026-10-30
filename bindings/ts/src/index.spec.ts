@@ -234,6 +234,19 @@ describe("initRunMat wiring", () => {
     vi.restoreAllMocks();
   });
 
+  it("rejects absent, stale, or future string-wire schemas before creating a session", async () => {
+    for (const version of [undefined, 0, 2]) {
+      const initialize = vi.fn();
+      __internals.setNativeModuleOverride({
+        default: async () => {},
+        initRunMat: initialize,
+        ...(version === undefined ? {} : { stringElementWireSchemaVersion: () => version }),
+      } as NativeModule);
+      await expect(initRunMat({ enableGpu: false })).rejects.toThrow("Incompatible RunMat string wire schema");
+      expect(initialize).not.toHaveBeenCalled();
+    }
+  });
+
   it("returns plain geometry preview objects from flattened WASM maps", async () => {
     const payload = new Map<string, unknown>([
       ["geometrySceneHandle", 17], ["sceneKind", "mesh"],
@@ -242,7 +255,7 @@ describe("initRunMat wiring", () => {
     ]);
     const previewGeometry = vi.fn(async () => payload);
     __internals.setNativeModuleOverride({
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () => createMockNativeSession({ previewGeometry: previewGeometry as NativeSession["previewGeometry"] }),
     } as NativeModule);
     const session = await initRunMat({ enableGpu: false });
@@ -263,7 +276,7 @@ describe("initRunMat wiring", () => {
     };
     const checkFeaSource = vi.fn(async () => checkResult);
     __internals.setNativeModuleOverride({
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () => createMockNativeSession({ checkFeaSource }),
     } as NativeModule);
 
@@ -301,7 +314,7 @@ describe("initRunMat wiring", () => {
     const setLanguageCompat = vi.fn();
     const setErrorNamespace = vi.fn();
     __internals.setNativeModuleOverride({
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () => createMockNativeSession({
         setLanguageCompat,
         setErrorNamespace,
@@ -320,7 +333,7 @@ describe("initRunMat wiring", () => {
     const options: any[] = [];
     const fsProvider = createFsProviderStub();
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async (opts: any) => {
         options.push(opts);
         return createMockNativeSession();
@@ -336,7 +349,7 @@ describe("initRunMat wiring", () => {
   it("passes explicit settings and telemetry policy through to native init", async () => {
     const captured: any[] = [];
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -361,7 +374,7 @@ describe("initRunMat wiring", () => {
       cancel: vi.fn()
     };
     __internals.setNativeModuleOverride({
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async (options: any) => {
         captured.push(options);
         return createMockNativeSession();
@@ -379,7 +392,7 @@ describe("initRunMat wiring", () => {
       request
     }));
     __internals.setNativeModuleOverride({
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () => createMockNativeSession(),
       executeProgramArtifact: execute
     } as NativeModule);
@@ -396,7 +409,7 @@ describe("initRunMat wiring", () => {
       telemetryClientId: () => "cid-native"
     });
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return nativeSession;
@@ -417,7 +430,7 @@ describe("initRunMat wiring", () => {
   it("passes scatter/surface overrides to native init", async () => {
     const captured: any[] = [];
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -439,7 +452,7 @@ describe("initRunMat wiring", () => {
   it("passes log level preference to native init", async () => {
     const captured: any[] = [];
     const native: NativeModule = {
-      default: async () => { },
+      stringElementWireSchemaVersion: () => 1, default: async () => { },
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -459,7 +472,7 @@ describe("initRunMat wiring", () => {
   it("disables GPU when navigator.gpu is unavailable", async () => {
     const captured: any[] = [];
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -494,7 +507,7 @@ describe("initRunMat wiring", () => {
       .mockResolvedValue(autoProvider);
     const captured: any[] = [];
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -515,7 +528,7 @@ describe("initRunMat wiring", () => {
       order.push("createPlotSurface");
     });
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       createPlotSurface: createSurfaceSpy,
       initRunMat: async () => {
         order.push("initRunMat");
@@ -533,7 +546,7 @@ describe("initRunMat wiring", () => {
 
   it("surfaces structured errors from createPlotSurface", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       createPlotSurface: async () => {
         const err = new Error("canvas failed") as Error & { code?: string };
         err.code = "PlotCanvas";
@@ -551,7 +564,7 @@ describe("initRunMat wiring", () => {
   it("disposes the session and blocks further calls", async () => {
     const disposeSpy = vi.fn();
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           dispose: disposeSpy
@@ -570,7 +583,7 @@ describe("initRunMat wiring", () => {
 
   it("exposes memory usage stats from the native session", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           memoryUsage: () => ({ bytes: 1024, pages: 16 })
@@ -591,7 +604,7 @@ describe("renderFigureImage", () => {
 
   it("returns bytes from the native binding", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       renderFigureImage: vi.fn(async (handle: number | null, width: number, height: number) => {
         expect(handle).toBeNull();
         expect(width).toBe(0);
@@ -608,7 +621,7 @@ describe("renderFigureImage", () => {
 
   it("forwards options and surfaces figure errors", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       renderFigureImage: vi.fn(async () => {
         throw { code: "InvalidHandle", handle: 77 };
       })
@@ -624,7 +637,7 @@ describe("renderFigureImage", () => {
 
   it("throws when cameraState is requested but unsupported", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       renderFigureImage: vi.fn(async () => new Uint8Array([1]))
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
@@ -637,7 +650,7 @@ describe("renderFigureImage", () => {
 
   it("only uses textmark export when a textmark was explicitly requested", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       renderFigureImage: vi.fn(async () => new Uint8Array([1, 2, 3])),
       renderFigureImageWithTextmark: vi.fn(async () => new Uint8Array([9, 9, 9]))
     } as NativeModule;
@@ -663,7 +676,7 @@ describe("figure scene bindings", () => {
   it("exports figure scenes from async native bindings as Uint8Array", async () => {
     const spy = vi.fn(async () => new Uint8Array([7, 8, 9]));
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       exportFigureScene: spy
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
@@ -677,7 +690,7 @@ describe("figure scene bindings", () => {
     const scene = new Uint8Array([1, 2, 3]);
     const spy = vi.fn(() => 42);
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       importFigureScene: spy
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
@@ -689,7 +702,7 @@ describe("figure scene bindings", () => {
   it("imports figure scenes by artifact path", async () => {
     const spy = vi.fn(() => 77);
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       importFigureSceneFromPath: spy,
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
@@ -700,7 +713,7 @@ describe("figure scene bindings", () => {
 
   it("rejects with a coerced figure error when figure scene import throws", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       importFigureScene: vi.fn(() => {
         throw { code: "ReplayDecodeFailed" };
       })
@@ -714,7 +727,7 @@ describe("figure scene bindings", () => {
 
   it("returns null when figure scene bindings are unavailable", async () => {
     const native: NativeModule = {
-      default: async () => {}
+      stringElementWireSchemaVersion: () => 1, default: async () => {}
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
@@ -732,7 +745,7 @@ describe("workspace replay bindings", () => {
   it("forwards workspace export mode to native module", async () => {
     const spy = vi.fn(async () => new Uint8Array([4, 5, 6]));
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       exportWorkspaceState: spy
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
@@ -745,7 +758,7 @@ describe("workspace replay bindings", () => {
   it("imports workspace state and reports failures", async () => {
     const state = new Uint8Array([9]);
     const okNative: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       importWorkspaceState: vi.fn(() => true)
     } as NativeModule;
     __internals.setNativeModuleOverride(okNative);
@@ -753,7 +766,7 @@ describe("workspace replay bindings", () => {
     await expect(importWorkspaceState(state)).resolves.toBe(true);
 
     const failingNative: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       importWorkspaceState: vi.fn(() => {
         throw new Error("bad state");
       })
@@ -767,7 +780,7 @@ describe("workspace replay bindings", () => {
     const exportSpy = vi.fn(async () => new Uint8Array([2, 2]));
     const importSpy = vi.fn(() => true);
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           exportWorkspaceState: exportSpy,
@@ -824,7 +837,7 @@ describe("ExecuteResult passthroughs", () => {
 
   it("preserves clear-screen stdout control entries from the native session", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           executeRequest: () => ({
@@ -844,7 +857,7 @@ describe("ExecuteResult passthroughs", () => {
 
   it("retains structured companion source identity on compile errors", async () => {
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           executeRequest: () => {
@@ -988,7 +1001,7 @@ describe("materializeVariable wiring", () => {
       valueJson: 1
     }));
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           materializeVariable: spy
@@ -1018,7 +1031,7 @@ describe("materializeVariable wiring", () => {
       valueJson: []
     }));
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           materializeVariable: spy
@@ -1041,7 +1054,7 @@ describe("setFusionPlanEnabled", () => {
   it("delegates to the native session", async () => {
     const spy = vi.fn();
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           setFusionPlanEnabled: spy
@@ -1064,7 +1077,7 @@ describe("browser project handoff and lock codecs", () => {
     const lock = { schema_version: 1 };
     const handoff = { schema_version: 1, project: { graph: "fixed" } };
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () => createMockNativeSession(),
       decodePackageLock: vi.fn(() => lock),
       encodePackageLock: vi.fn(() => "schema_version = 1\n"),
@@ -1082,7 +1095,7 @@ describe("browser project handoff and lock codecs", () => {
     const clear = vi.fn();
     const revision = { graph: "sha256:graph", sources: "sha256:sources" };
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () =>
         createMockNativeSession({
           installProjectHandoff: install,
@@ -1122,7 +1135,7 @@ describe("canonical config authority", () => {
       removedKeys: ["artifact_root"],
     };
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () => createMockNativeSession(),
       resolveRunmatConfig: vi.fn(() => resolved),
       patchRunmatConfig: vi.fn(() => "patched"),
@@ -1177,7 +1190,7 @@ describe("resetPlotState", () => {
   it("delegates to the native module", async () => {
     const spy = vi.fn();
     const native: NativeModule = {
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: async () => createMockNativeSession(),
       resetPlotState: spy
     } as NativeModule;

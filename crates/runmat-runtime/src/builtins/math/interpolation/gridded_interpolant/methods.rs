@@ -100,7 +100,7 @@ pub(super) fn parse_extrap_method(keyword: MethodKeyword) -> BuiltinResult<Extra
 
 pub(super) fn text_from_value(value: &Value) -> crate::BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 let mut error = invalid(source.to_string());

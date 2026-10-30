@@ -35,6 +35,16 @@ pub struct Utf8TextAdmissionError {
     text: Utf8Text,
     source: ExactHostNumericAllocationError,
 }
+impl fmt::Display for Utf8TextAdmissionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+impl std::error::Error for Utf8TextAdmissionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
 impl Utf8TextAdmissionError {
     pub fn source(&self) -> ExactHostNumericAllocationError {
         self.source

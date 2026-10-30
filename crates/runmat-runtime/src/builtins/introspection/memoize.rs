@@ -734,7 +734,7 @@ fn memoized_member(handle: &HandleRef, payload: Value) -> BuiltinResult<Value> {
 
 fn member_name(value: Value) -> BuiltinResult<String> {
     match value {
-        Value::String(name) => Ok(name.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(name)) => Ok(name.as_str().to_owned()),
         Value::CharArray(chars) => super::text::decode_utf16_with_error(chars.data(), || {
             memoize_error(
                 &MEMOIZE_ERROR_INVALID_INDEX,

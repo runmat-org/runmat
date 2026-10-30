@@ -53,7 +53,7 @@ impl ObjectSubscript {
                 })?
             }
             ObjectIndexSelector::Member(name) => {
-                return RootedValue::in_context(Value::String(name.clone()), runtime);
+                return RootedValue::in_context(Value::String(name.clone().into()), runtime);
             }
         };
         let count = slots.len();
@@ -74,7 +74,7 @@ impl ObjectSubscript {
                     .map(ObjectIndexComponent::protocol_value)
                     .collect::<Result<Vec<_>, _>>()?,
             ),
-            ObjectIndexSelector::Member(name) => Ok(Value::String(name.clone())),
+            ObjectIndexSelector::Member(name) => Ok(Value::String(name.clone().into())),
         }
     }
 }
@@ -112,7 +112,7 @@ impl ObjectSubscriptPath {
                         standard_subscript_type(step.kind),
                         Some(runtime),
                     )
-                    .map(Value::String)
+                    .map(|text| Value::String(text.into()))
                 } else {
                     step.selector_value_in_context(runtime)
                         .map(|value| value.with_owned(|value| value))
@@ -183,7 +183,10 @@ fn index_values(value: &Value) -> Result<ObjectIndexSelector, RuntimeError> {
 
 fn scalar_text(value: &Value) -> Result<String, RuntimeError> {
     match value {
-        Value::String(value) => Ok(value.as_str().to_owned()),
+        Value::String(value) => value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| invalid("subscript type and member selectors must be scalar text")),
         Value::CharArray(value) if value.rows == 1 => value
             .try_row_string()
             .map_err(|source| {

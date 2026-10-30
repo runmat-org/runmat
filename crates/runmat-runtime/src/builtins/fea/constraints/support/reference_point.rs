@@ -29,7 +29,10 @@ pub async fn reference_point_from_coordinates_builtin(
     position_meters("fea.ReferencePoint.fromCoordinates", &position)?;
     ensure_reference_point_class_registered();
     let fields = [
-        ("reference_point_id", Value::String(id)),
+        (
+            "reference_point_id",
+            Value::String(runmat_value::StringElement::Text(id)),
+        ),
         ("position", position),
     ];
     let object = crate::execution::object::construct_object_from_borrowed_fields(
@@ -65,7 +68,11 @@ pub(crate) fn reference_point_from_value(
         ));
     }
     let id = match object.properties().get("reference_point_id") {
-        Some(Value::String(value)) if !value.trim().is_empty() => value.to_string(),
+        Some(Value::String(runmat_value::StringElement::Text(value)))
+            if !value.trim().is_empty() =>
+        {
+            value.to_string()
+        }
         _ => {
             return Err(builtin_error(
                 builtin,
@@ -120,7 +127,7 @@ fn validate_reference_point_object(object: &ObjectInstance) -> Result<(), String
     crate::builtins::fea::object_projection::validate(object)?;
     let id_valid = matches!(
         object.properties().get("reference_point_id"),
-        Some(Value::String(value)) if !value.trim().is_empty()
+        Some(Value::String(runmat_value::StringElement::Text(value))) if !value.trim().is_empty()
     );
     let position_valid = matches!(
         object.properties().get("position"),

@@ -17,7 +17,7 @@ fn decode_surface_coordinates(
     // Only actual text scalar controls begin the Z-only style tail. Numeric
     // coordinates retain the existing X,Y,Z form and are never stringified.
     let style_tail = args.get(1).is_some_and(|value| match value {
-        Value::String(_) => true,
+        Value::String(runmat_value::StringElement::Text(_)) => true,
         Value::CharArray(chars) => {
             chars.rows == 1 && crate::builtins::common::shape::effective_rank(&chars.shape) == 2
         }
@@ -64,7 +64,7 @@ pub fn parse_image_call_args(
         ));
     }
     let text_tail = args.get(1).is_some_and(|value| match value {
-        Value::String(_) => true,
+        Value::String(runmat_value::StringElement::Text(_)) => true,
         Value::CharArray(chars) => {
             chars.rows == 1 && crate::builtins::common::shape::effective_rank(&chars.shape) == 2
         }

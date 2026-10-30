@@ -284,7 +284,9 @@ fn diagnostic_message(
 ) -> BuiltinResult<Option<String>> {
     match values.first() {
         None => Ok(None),
-        Some(Value::String(message)) => Ok(Some(message.as_str().to_owned())),
+        Some(Value::String(runmat_value::StringElement::Text(message))) => {
+            Ok(Some(message.as_str().to_owned()))
+        }
         Some(Value::CharArray(chars)) if chars.rows <= 1 => {
             crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
                 build_runtime_error("diagnostic message is not valid UTF-16 text")
@@ -301,7 +303,9 @@ fn diagnostic_message(
             ) =>
         {
             Ok(object.property("Message").and_then(|value| match value {
-                Value::String(message) => Some(message.as_str().to_owned()),
+                Value::String(runmat_value::StringElement::Text(message)) => {
+                    Some(message.as_str().to_owned())
+                }
                 _ => None,
             }))
         }

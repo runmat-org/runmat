@@ -541,7 +541,12 @@ fn evalc_output_value(
 
 fn workspace_text_arg(builtin: &str, value: &Value) -> Result<String, RuntimeError> {
     match value {
-        Value::String(text) => Ok(text.to_string()),
+        Value::String(text) => text.as_str().map(str::to_owned).ok_or_else(|| {
+            mex(
+                "DynamicWorkspaceArgumentType",
+                &format!("{builtin}: expected nonmissing text"),
+            )
+        }),
         Value::CharArray(chars) if chars.rows == 1 => chars
             .try_row_string()
             .map_err(|source| {
@@ -557,7 +562,14 @@ fn workspace_text_arg(builtin: &str, value: &Value) -> Result<String, RuntimeErr
                     &format!("{builtin}: expected a character row"),
                 )
             }),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].as_str().map(str::to_owned).ok_or_else(|| {
+                mex(
+                    "DynamicWorkspaceArgumentType",
+                    &format!("{builtin}: expected nonmissing text"),
+                )
+            })
+        }
         other => Err(mex(
             "DynamicWorkspaceArgumentType",
             &format!("{builtin}: expected a string scalar or character row, got {other:?}"),

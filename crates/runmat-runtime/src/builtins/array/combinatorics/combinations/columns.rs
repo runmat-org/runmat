@@ -1,6 +1,6 @@
 use runmat_value::{
-    CellArray, ExactArrayStorage, IntValue, LogicalArray, NumericStorage, StringArray, Tensor,
-    Utf8Text, Value,
+    CellArray, ExactArrayStorage, IntValue, LogicalArray, NumericStorage, StringArray,
+    StringElement, Tensor, Value,
 };
 
 use crate::BuiltinResult;
@@ -10,7 +10,7 @@ use super::{error, plan::Repetition};
 pub(super) enum CombinationColumn {
     Numeric(NumericStorage),
     Logical(Vec<u8>),
-    String(ExactArrayStorage<Utf8Text>),
+    String(ExactArrayStorage<StringElement>),
     Cell(Vec<Value>),
 }
 
@@ -31,7 +31,7 @@ impl CombinationColumn {
                     array
                         .data()
                         .iter()
-                        .map(|value| Utf8Text::new(value.to_string()))
+                        .map(|value| StringElement::text(value.to_string()))
                         .collect(),
                 ))
             }
@@ -57,7 +57,7 @@ impl CombinationColumn {
                     .map(Value::LogicalArray)
                     .map_err(error::internal)
             }
-            Self::String(values) => StringArray::from_texts_unbounded(
+            Self::String(values) => StringArray::from_elements_unbounded(
                 repeat_values(&values, repetition, rows),
                 vec![rows, 1],
             )

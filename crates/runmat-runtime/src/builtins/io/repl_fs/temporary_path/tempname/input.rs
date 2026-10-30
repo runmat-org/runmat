@@ -11,7 +11,7 @@ const IDENTITY: &str = "tempname";
 
 pub(super) fn folder(value: &Value) -> crate::BuiltinResult<PathBuf> {
     let text = match value {
-        Value::String(text) => text.as_str().to_owned(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.as_str().to_owned(),
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
@@ -20,7 +20,13 @@ pub(super) fn folder(value: &Value) -> crate::BuiltinResult<PathBuf> {
                 error::builtin(IDENTITY, &TEMPNAME_ERROR_FOLDER_TYPE)
             })?
         }
-        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned()
+        }
         _ => return Err(error::builtin(IDENTITY, &TEMPNAME_ERROR_FOLDER_TYPE)),
     };
     if text.is_empty() {

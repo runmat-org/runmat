@@ -457,7 +457,9 @@ fn encoded_xmlread_xmlwrite_xmlread_roundtrip_labels_utf8_bytes_truthfully() {
         let Value::Object(original) = &document else {
             panic!("expected decoded XML document");
         };
-        let Some(Value::String(original_text)) = original.property("Text") else {
+        let Some(Value::String(runmat_value::StringElement::Text(original_text))) =
+            original.property("Text")
+        else {
             panic!("expected retained decoded source text");
         };
         assert!(original_text.contains(expected_text));

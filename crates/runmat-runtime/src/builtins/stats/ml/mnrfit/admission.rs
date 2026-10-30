@@ -176,7 +176,7 @@ async fn response_geometry(
             Ok(())
         }
         Value::CharArray(array) if array.rows == rows => Ok(()),
-        Value::String(value) if rows == 1 && !value.is_empty() => Ok(()),
+        Value::String(runmat_value::StringElement::Text(value)) if rows == 1 && !value.is_empty() => Ok(()),
         Value::Num(_) | Value::Bool(_) if rows == 1 => Ok(()),
         Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => Ok(()),
         _ => Err(invalid(

@@ -107,7 +107,7 @@ pub(crate) async fn load_foreign_member_text(
     let arguments = crate::call::BuiltinArguments::from_borrowed(
         &[
             runmat_value::Value::Foreign(reference.clone()),
-            runmat_value::Value::String(member),
+            runmat_value::Value::String(member.into()),
         ],
         Some(&context),
     )?
@@ -138,7 +138,7 @@ pub(crate) async fn store_foreign_member_text(
     let arguments = crate::call::BuiltinArguments::from_borrowed(
         &[
             runmat_value::Value::Foreign(reference.clone()),
-            runmat_value::Value::String(member),
+            runmat_value::Value::String(member.into()),
             value,
         ],
         Some(&context),
@@ -235,7 +235,7 @@ pub(crate) async fn invoke_foreign_method_retained_text(
     let context = selected_foreign_context(runtime)?;
     let arguments = arguments
         .into_supplied_function_arguments(Some(&context))?
-        .prepend_routing_in_context(runmat_value::Value::String(method), &context)?
+        .prepend_routing_in_context(runmat_value::Value::String(method.into()), &context)?
         .prepend_routing_in_context(runmat_value::Value::Foreign(reference.clone()), &context)?;
     invoke_foreign_rooted_in_context(
         Some(&context),

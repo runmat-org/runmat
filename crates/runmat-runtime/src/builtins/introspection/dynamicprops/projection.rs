@@ -109,13 +109,22 @@ pub(super) fn metadata_object(
         [names[0].into(), names[1].into()]
     };
     let fields = [
-        ("Name", Value::String(definition.name.clone())),
+        (
+            "Name",
+            Value::String(runmat_value::StringElement::Text(definition.name.clone())),
+        ),
         (
             "DefiningClass",
             Value::ClassRef(definition.defining_class.clone()),
         ),
-        ("GetAccess", Value::String(get)),
-        ("SetAccess", Value::String(set)),
+        (
+            "GetAccess",
+            Value::String(runmat_value::StringElement::Text(get)),
+        ),
+        (
+            "SetAccess",
+            Value::String(runmat_value::StringElement::Text(set)),
+        ),
         ("Dependent", Value::Bool(definition.dependent)),
         ("Hidden", Value::Bool(definition.hidden)),
         ("Transient", Value::Bool(definition.transient)),
@@ -123,7 +132,12 @@ pub(super) fn metadata_object(
         ("AbortSet", Value::Bool(definition.abort_set)),
         ("SetObservable", Value::Bool(definition.set_observable)),
         ("GetObservable", Value::Bool(definition.get_observable)),
-        ("Description", Value::String(definition.description.clone())),
+        (
+            "Description",
+            Value::String(runmat_value::StringElement::Text(
+                definition.description.clone(),
+            )),
+        ),
         (VALID_FIELD, Value::Bool(true)),
     ];
     let object = crate::execution::object::construct_object_from_borrowed_fields(

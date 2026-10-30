@@ -218,10 +218,12 @@ fn prepare_callable(
     }
 
     match func {
-        Value::String(text) => parse_handle_string(&text).map(|handle| TimeitCallable {
-            handle: canonicalize_text_handle(handle),
-            num_outputs,
-        }),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            parse_handle_string(&text).map(|handle| TimeitCallable {
+                handle: canonicalize_text_handle(handle),
+                num_outputs,
+            })
+        }
         Value::CharArray(arr) => {
             if arr.rows != 1 {
                 Err(timeit_error_with_message(
@@ -244,7 +246,13 @@ fn prepare_callable(
         }
         Value::StringArray(sa) => {
             if sa.data().len() == 1 {
-                parse_handle_string(&sa.data()[0]).map(|handle| TimeitCallable {
+                parse_handle_string(sa.data()[0].as_str().ok_or_else(|| {
+                    timeit_error_with_message(
+                        "timeit: function must be a string scalar",
+                        &TIMEIT_ERROR_HANDLE_KIND,
+                    )
+                })?)
+                .map(|handle| TimeitCallable {
                     handle: canonicalize_text_handle(handle),
                     num_outputs,
                 })

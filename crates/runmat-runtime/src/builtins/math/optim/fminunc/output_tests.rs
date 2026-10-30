@@ -121,7 +121,7 @@ fn output_observer_sees_initial_accepted_and_final_states_and_stops_without_extr
                     let Value::Struct(ref values) = args[1] else {
                         panic!("iteration values")
                     };
-                    let Value::String(ref state) = args[2] else {
+                    let Value::String(runmat_value::StringElement::Text(ref state)) = args[2] else {
                         panic!("state")
                     };
                     let Value::Num(iteration) = values.fields["iteration"] else {

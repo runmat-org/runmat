@@ -232,7 +232,9 @@ fn reports_inconsistent_reversed_bounds() {
                     assert!(matches!(s.fields.get("iterations"), Some(V::Num(0.0))));
                     assert!(matches!(s.fields.get("funcCount"), Some(V::Num(0.0))));
                     match s.fields.get("message") {
-                        Some(V::String(text)) => assert!(text.contains("bounds")),
+                        Some(V::String(runmat_value::StringElement::Text(text))) => {
+                            assert!(text.contains("bounds"))
+                        }
                         other => panic!("unexpected message field {other:?}"),
                     }
                 }
@@ -491,7 +493,9 @@ fn multi_output_four_includes_output_struct() {
                     assert!(matches!(s.fields.get("iterations"), Some(V::Num(_))));
                     assert!(matches!(s.fields.get("funcCount"), Some(V::Num(_))));
                     match s.fields.get("algorithm") {
-                        Some(V::String(text)) => assert!(text.contains("golden")),
+                        Some(V::String(runmat_value::StringElement::Text(text))) => {
+                            assert!(text.contains("golden"))
+                        }
                         other => panic!("unexpected algorithm field {other:?}"),
                     }
                     assert!(s.fields.get("message").is_some());

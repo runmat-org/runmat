@@ -291,8 +291,12 @@ fn parse_options(value: Option<Value>) -> BuiltinResult<Option<StructValue>> {
 
 fn option_string(field: &str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => {
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
                 fminbnd_error_with_detail(

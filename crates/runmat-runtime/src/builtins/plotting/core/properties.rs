@@ -694,7 +694,9 @@ fn root_property_value_from_value(
         Value::Bool(value) => Ok(RootPropertyValue::Bool(*value)),
         Value::Num(value) => Ok(RootPropertyValue::Num(*value)),
         Value::Int(value) => Ok(RootPropertyValue::Num(value.to_f64())),
-        Value::String(value) => Ok(RootPropertyValue::String(value.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(value)) => {
+            Ok(RootPropertyValue::String(value.as_str().to_owned()))
+        }
         Value::CharArray(value) => Ok(RootPropertyValue::String(
             runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
                 crate::builtins::plotting::plotting_error_with_source(
@@ -1025,8 +1027,16 @@ pub(crate) fn property_name_text(value: &Value, builtin: &'static str) -> Builti
         ));
     }
     let text = match value {
-        Value::String(text) => text.as_str().to_owned(),
-        Value::StringArray(strings) => strings.data()[0].as_str().to_owned(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.as_str().to_owned(),
+        Value::StringArray(strings) => strings.data()[0]
+            .as_str()
+            .ok_or_else(|| {
+                plotting_error(
+                    builtin,
+                    format!("{builtin}: property names must be scalar strings or character rows"),
+                )
+            })?
+            .to_owned(),
         Value::CharArray(chars) => {
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 crate::builtins::plotting::plotting_error_with_source(
@@ -7593,8 +7603,8 @@ fn tick_mode_value<T>(ticks: Option<&Vec<T>>) -> Value {
 
 fn tick_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
-        Value::StringArray(strings) => Ok(strings.data().iter().map(|s| s.as_str().to_owned()).collect()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(vec![s.as_str().to_owned()]),
+        Value::StringArray(strings) => strings.data().iter().map(|s| s.as_str().map(str::to_owned).ok_or_else(|| plotting_error(builtin, "tick labels must be text"))).collect(),
         Value::CharArray(chars) => Ok(char_array_rows(chars).map_err(|source|crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?),
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
@@ -7769,9 +7779,16 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
     let mut labels = Vec::new();
     for arg in args {
         match arg {
-            Value::StringArray(arr) => {
-                labels.extend(arr.data().iter().map(|s| s.as_str().to_owned()))
-            }
+            Value::StringArray(arr) => labels.extend(
+                arr.data()
+                    .iter()
+                    .map(|s| {
+                        s.as_str().map(str::to_owned).ok_or_else(|| {
+                            plotting_error(builtin, "legend: labels must be strings or char arrays")
+                        })
+                    })
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+            ),
             Value::Cell(cell) => {
                 for row in 0..cell.rows {
                     for col in 0..cell.cols {
@@ -7871,9 +7888,15 @@ pub(crate) fn label_strings_from_value(
     label_context: &str,
 ) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::StringArray(array) => {
-            Ok(array.data().iter().map(|s| s.as_str().to_owned()).collect())
-        }
+        Value::StringArray(array) => array
+            .data()
+            .iter()
+            .map(|s| {
+                s.as_str().map(str::to_owned).ok_or_else(|| {
+                    plotting_error(builtin, format!("{label_context} must contain text"))
+                })
+            })
+            .collect(),
         Value::Cell(cell) => cell
             .data()
             .iter()
@@ -7904,7 +7927,9 @@ pub(crate) fn label_strings_from_value(
                     )
                 })?])
         }
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         Value::Tensor(tensor) => Ok((0..tensor.len())
             .map(|index| {
                 format_numeric_label(
@@ -7966,7 +7991,7 @@ fn heatmap_on_off_value(value: &Value) -> Option<bool> {
                 None
             }
         }
-        Value::String(text) => heatmap_on_off_text(text),
+        Value::String(runmat_value::StringElement::Text(text)) => heatmap_on_off_text(text),
         Value::Num(value) => numeric_on_off(*value),
         Value::Int(value) => numeric_on_off(value.to_f64()),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor

@@ -122,7 +122,10 @@ fn encode_inline(
             .and_then(|encoder| encoder.u64(*imaginary))
             .map(|_| ())
             .map_err(encoding),
-        InlineValue::String(value) => scalar(encoder, 12, |encoder| encoder.str(value).map(|_| ())),
+        InlineValue::String(value) => scalar(encoder, 12, |encoder| match value.as_str() {
+            Some(text) => encoder.str(text).map(|_| ()),
+            None => encoder.null().map(|_| ()),
+        }),
         InlineValue::Char {
             encoding: character_encoding,
             shape,
@@ -152,7 +155,10 @@ fn encode_inline(
             encode_u64_array(encoder, shape)?;
             encoder.array(values.len() as u64).map_err(encoding)?;
             for value in values {
-                encoder.str(value).map_err(encoding)?;
+                match value.as_str() {
+                    Some(text) => encoder.str(text).map_err(encoding)?,
+                    None => encoder.null().map_err(encoding)?,
+                };
             }
             Ok(())
         }

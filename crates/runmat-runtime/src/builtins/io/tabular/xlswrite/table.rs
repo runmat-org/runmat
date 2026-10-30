@@ -110,7 +110,10 @@ async fn checkpoint_input(
 
 fn admit_cell_value(value: &Value) -> BuiltinResult<()> {
     match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(()),
+        Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_)
+        | Value::String(runmat_value::StringElement::Text(_)) => Ok(()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(()),
         Value::StringArray(strings) if strings.data().len() <= 1 => Ok(()),
         Value::Tensor(tensor)

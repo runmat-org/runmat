@@ -45,7 +45,11 @@ fn width_option(
 ) -> BuiltinResult<Option<usize>> {
     match layer.properties().get(property) {
         None => Ok(channels),
-        Some(Value::String(value)) if value.eq_ignore_ascii_case("auto") => Ok(channels),
+        Some(Value::String(runmat_value::StringElement::Text(value)))
+            if value.eq_ignore_ascii_case("auto") =>
+        {
+            Ok(channels)
+        }
         Some(value) => {
             let declared = positive_usize(value, function, property)?;
             if channels.is_some_and(|known| known != declared) {

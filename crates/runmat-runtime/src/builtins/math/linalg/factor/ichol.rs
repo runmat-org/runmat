@@ -182,9 +182,15 @@ async fn numeric_scalar(value: &Value) -> BuiltinResult<f64> {
 
 fn text(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(value) => Some(value.as_str().to_owned()),
-        Value::StringArray(value) if value.data().len() == 1 => {
-            Some(value.data()[0].as_str().to_owned())
+        Value::String(runmat_value::StringElement::Text(value)) => Some(value.as_str().to_owned()),
+        Value::StringArray(value) if value.data().len() == 1 && !value.data()[0].is_missing() => {
+            Some(
+                value.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            )
         }
         Value::CharArray(value) if value.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {

@@ -124,7 +124,7 @@ pub(super) async fn repmat_builtin(
             Ok(Value::ComplexTensor(tiled))
         }
         Value::String(s) => {
-            let array = StringArray::from_texts_unbounded(vec![s], vec![1, 1])
+            let array = StringArray::from_elements_unbounded(vec![s], vec![1, 1])
                 .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
             let tiled = repmat_string_array(&array, &raw_reps)?;
             Ok(Value::StringArray(tiled))
@@ -409,7 +409,7 @@ fn repmat_numeric_storage(
 
 fn repmat_string_array(sa: &StringArray, reps: &[usize]) -> crate::BuiltinResult<StringArray> {
     let (data, shape) = repmat_column_major(sa.data(), &sa.shape, reps, "repmat")?;
-    StringArray::from_texts_unbounded(data, shape)
+    StringArray::from_elements_unbounded(data, shape)
         .map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
 

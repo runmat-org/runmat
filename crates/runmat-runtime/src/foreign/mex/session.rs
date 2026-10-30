@@ -1879,7 +1879,7 @@ mod tests {
         let Some(Value::String(text)) = arguments.first() else {
             panic!("missing MEX returned original string argument");
         };
-        assert_eq!(text.as_ptr(), payload);
+        assert_eq!(text.as_str().expect("ordinary text").as_ptr(), payload);
     }
 
     #[test]

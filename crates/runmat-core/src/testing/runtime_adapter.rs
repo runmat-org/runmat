@@ -512,9 +512,11 @@ fn coverage_plugin_selection(value: &Value) -> Option<MatlabCoverageSelection> {
         return None;
     }
     let folders = match object.properties().get("Folders") {
-        Some(Value::StringArray(folders)) => {
-            folders.data().iter().map(ToString::to_string).collect()
-        }
+        Some(Value::StringArray(folders)) => folders
+            .data()
+            .iter()
+            .map(|text| text.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()?,
         _ => Vec::new(),
     };
     let including_subfolders = matches!(
@@ -641,7 +643,8 @@ fn projected_text(
     runtime: &runmat_runtime::context::RuntimeContext,
     source: &str,
 ) -> runmat_runtime::BuiltinResult<Value> {
-    runmat_runtime::call::argument_text::copy_str(source, Some(runtime)).map(Value::String)
+    runmat_runtime::call::argument_text::copy_str(source, Some(runtime))
+        .map(|text| Value::String(text.into()))
 }
 
 #[cfg(test)]

@@ -366,8 +366,12 @@ fn parse_direction_list(value: &Value) -> crate::BuiltinResult<Option<Vec<Direct
             array
                 .data()
                 .iter()
-                .map(|text| Cow::Borrowed(text.as_str()))
-                .collect::<Vec<_>>(),
+                .map(|text| {
+                    text.as_str()
+                        .map(Cow::Borrowed)
+                        .ok_or_else(|| invalid_argument("issortedrows: directions must be strings"))
+                })
+                .collect::<crate::BuiltinResult<Vec<_>>>()?,
         ),
         Value::Cell(cell) => {
             let mut strings = Vec::with_capacity(cell.data().len());

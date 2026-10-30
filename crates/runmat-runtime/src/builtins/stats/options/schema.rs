@@ -262,7 +262,7 @@ fn text_literal(
         runmat_value::ExactArrayInitializationError::Element(source) => allocation(source),
     })?;
     receipt.checkpoint(runtime).map_err(allocation)?;
-    Ok(Value::String(value))
+    Ok(Value::String(value.into()))
 }
 
 fn build_options(

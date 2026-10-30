@@ -733,10 +733,13 @@ mod tests {
     fn stop_words_default_returns_english_column() {
         let out = words(call(Vec::new()).expect("stopWords"));
         assert!(out.data().len() > 100);
-        assert_eq!(out.data().first().map(|text| text.as_str()), Some("a"));
-        assert!(out.data().iter().any(|text| text.as_str() == "and"));
-        assert!(out.data().iter().any(|text| text.as_str() == "the"));
-        assert!(out.data().iter().any(|text| text.as_str() == "you're"));
+        assert_eq!(out.data().first().and_then(|text| text.as_str()), Some("a"));
+        assert!(out.data().iter().any(|text| text.as_str() == Some("and")));
+        assert!(out.data().iter().any(|text| text.as_str() == Some("the")));
+        assert!(out
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("you're")));
     }
 
     #[test]
@@ -748,8 +751,14 @@ mod tests {
             ])
             .expect("German stop words"),
         );
-        assert!(german.data().iter().any(|text| text.as_str() == "und"));
-        assert!(german.data().iter().any(|text| text.as_str() == "über"));
+        assert!(german
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("und")));
+        assert!(german
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("über")));
 
         let japanese = words(
             call(vec![
@@ -758,8 +767,14 @@ mod tests {
             ])
             .expect("Japanese stop words"),
         );
-        assert!(japanese.data().iter().any(|text| text.as_str() == "これ"));
-        assert!(japanese.data().iter().any(|text| text.as_str() == "する"));
+        assert!(japanese
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("これ")));
+        assert!(japanese
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("する")));
 
         let korean = words(
             call(vec![
@@ -768,8 +783,14 @@ mod tests {
             ])
             .expect("Korean stop words"),
         );
-        assert!(korean.data().iter().any(|text| text.as_str() == "그리고"));
-        assert!(korean.data().iter().any(|text| text.as_str() == "합니다"));
+        assert!(korean
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("그리고")));
+        assert!(korean
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("합니다")));
     }
 
     #[test]
@@ -808,7 +829,7 @@ mod tests {
         let output = output::string_array(Some(&context), &["a", "über"])
             .expect("admitted static vocabulary");
         assert_eq!(output.shape(), &[2, 1]);
-        assert_eq!(output.data()[1].as_str(), "über");
+        assert_eq!(output.data()[1].as_str(), Some("über"));
         let retained = ledger.snapshot().live_reserved_bytes;
         assert!(retained > 0);
         let alias = output.clone();

@@ -66,13 +66,9 @@ fn contextual_case_stream_matches_rust_string_mapping_and_exact_byte_quote() {
                 Ok(())
             })
             .unwrap();
-            let expected = if is_missing_string(sample) {
-                sample.to_owned()
-            } else {
-                match mode {
-                    TextCase::Lower => sample.to_lowercase(),
-                    TextCase::Upper => sample.to_uppercase(),
-                }
+            let expected = match mode {
+                TextCase::Lower => sample.to_lowercase(),
+                TextCase::Upper => sample.to_uppercase(),
             };
             assert_eq!(actual, expected, "case mapping for {sample:?}");
             assert_eq!(
@@ -114,9 +110,9 @@ fn managed_case_output_retains_original_bytes_and_refunds_or_refuses_before_outp
         transform_string_array_case(Some(&context), source, TextCase::Lower, map_error, invalid)
             .unwrap();
     assert_eq!(output.shape(), &[1, 3]);
-    assert_eq!(output.data()[0].as_str(), "ας");
-    assert_eq!(output.data()[1].as_str(), "i\u{307}σß");
-    assert_eq!(output.data()[2].as_str(), "<missing>");
+    assert_eq!(output.data()[0].as_str(), Some("ας"));
+    assert_eq!(output.data()[1].as_str(), Some("i\u{307}σß"));
+    assert_eq!(output.data()[2].as_str(), Some("<missing>"));
     let retained = ledger.snapshot().live_reserved_bytes;
     assert!(retained > 0);
     let alias = output.clone();
@@ -242,21 +238,67 @@ fn managed_case_output_retains_original_bytes_and_refunds_or_refuses_before_outp
     )
     .unwrap();
     assert!(rank_zero.shape().is_empty());
-    assert_eq!(rank_zero.data()[0].as_str(), "ας");
+    assert_eq!(rank_zero.data()[0].as_str(), Some("ας"));
     drop(rank_zero);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 
     let scalar = transform_scalar_case(
         Some(&context),
-        Utf8Text::new("ΑΣ".to_owned()),
+        StringElement::Text(Utf8Text::new("ΑΣ".to_owned())),
         TextCase::Lower,
         map_error,
     )
     .unwrap();
-    assert_eq!(scalar.as_str(), "ας");
+    assert_eq!(scalar.as_str(), Some("ας"));
     let alias = scalar.clone();
     drop(scalar);
     assert!(ledger.snapshot().live_reserved_bytes > 0);
     drop(alias);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
+fn typed_missing_and_literal_case_matrix_preserves_exact_owners() {
+    let source = [
+        StringElement::text("<missing>"),
+        StringElement::text("<Missing>"),
+        StringElement::text(""),
+        StringElement::Missing,
+    ];
+    let error = |_: &RuntimeContext, cause: HostAllocationError| {
+        crate::build_runtime_error(cause.to_string()).build()
+    };
+    let invalid = |detail: String| crate::build_runtime_error(detail).build();
+    for mode in [TextCase::Lower, TextCase::Upper] {
+        let expected = source
+            .iter()
+            .map(|element| match element.as_str() {
+                Some(text) => StringElement::text(match mode {
+                    TextCase::Lower => text.to_lowercase(),
+                    TextCase::Upper => text.to_uppercase(),
+                }),
+                None => StringElement::Missing,
+            })
+            .collect::<Vec<_>>();
+        for managed in [false, true] {
+            let ledger = ManagedHostEffectLedger::new(1 << 20);
+            let context = runtime(&ledger);
+            let output = transform_string_array_case(
+                managed.then_some(&context),
+                StringArray::from_elements_unbounded(source.to_vec(), vec![1, 4]).unwrap(),
+                mode,
+                error,
+                invalid,
+            )
+            .unwrap();
+            assert_eq!(output.data(), expected.as_slice());
+            assert!(!output.data()[3].has_retained_claim());
+            let retained = ledger.snapshot().live_reserved_bytes;
+            let alias = output.clone();
+            drop(output);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
+            drop(alias);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        }
+    }
 }

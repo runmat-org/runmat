@@ -176,13 +176,30 @@ impl ClassInput {
                     ))
                 }
             }
-            Value::String(text) => Ok(Self {
+            Value::String(runmat_value::StringElement::Text(text)) => Ok(Self {
                 values: vec![parse_class_text(&text)?],
                 is_scalar: true,
             }),
             Value::StringArray(array) => {
                 let text_shape = string_array_shape(&array);
-                Self::from_texts(array.data_owner().as_slice(), text_shape, shape, len)
+                Self::from_texts(
+                    &array
+                        .data()
+                        .iter()
+                        .map(|text| {
+                            text.as_str().ok_or_else(|| {
+                                error(
+                                    BLSIMPV,
+                                    "blsimpv: Class must contain nonmissing text",
+                                    &ERROR_INVALID_INPUT,
+                                )
+                            })
+                        })
+                        .collect::<BuiltinResult<Vec<_>>>()?,
+                    text_shape,
+                    shape,
+                    len,
+                )
             }
             Value::CharArray(chars) => {
                 if chars.rows == 1 {
@@ -295,7 +312,7 @@ fn class_from_bool(flag: bool) -> OptionClass {
 
 fn class_from_cell_value(value: &Value) -> BuiltinResult<OptionClass> {
     match value {
-        Value::String(text) => parse_class_text(text),
+        Value::String(runmat_value::StringElement::Text(text)) => parse_class_text(text),
         Value::CharArray(chars) if chars.rows == 1 => parse_class_text(
             &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 let mut error = error(BLSIMPV, source.to_string(), &ERROR_INVALID_ARGUMENT);

@@ -3,7 +3,7 @@
 use super::*;
 
 pub(crate) struct CategoricalLabelView<'a> {
-    categories: &'a [runmat_value::Utf8Text],
+    categories: &'a [runmat_value::StringElement],
     codes: &'a Tensor,
 }
 

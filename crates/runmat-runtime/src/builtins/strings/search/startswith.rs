@@ -435,7 +435,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_missing_strings_false() {
-        let array = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
+        let array = StringArray::from_elements_unbounded(
+            vec![runmat_value::StringElement::Missing],
+            vec![1, 1],
+        )
+        .unwrap();
         let result = run_startswith(
             Value::StringArray(array),
             Value::String("a".into()),
@@ -765,7 +769,7 @@ pub(crate) mod tests {
     fn startswith_missing_pattern_false() {
         let result = run_startswith(
             Value::String("alpha".into()),
-            Value::String("<missing>".into()),
+            Value::String(runmat_value::StringElement::Missing),
             Vec::new(),
         )
         .expect("startsWith");

@@ -26,7 +26,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Current implementation frontier",
         paragraphs: &[
             "Character arrays with non-singleton dimensions beyond two, including those inside cells and delimiter controls, reject before row extraction. String and cell array geometry follows the per-entry behavior described here.",
-            "Target lengths use exact native integer parsing. String and cell shapes are preserved, including N-D cells. Missing strings use the current literal sentinel. General managed text allocation and cross-backend parity remain unqualified.",
+            "Target lengths use exact native integer parsing. String and cell shapes are preserved, including N-D cells. Typed missing strings are distinct from literal text. General managed text allocation and cross-backend parity remain unqualified.",
         ],
     },
 ];
@@ -100,14 +100,14 @@ const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
         id: "example-6",
         title: "Leave Missing Strings Unchanged",
-        program: "values = [\"RunMat\", \"<missing>\", \"GPU\"];\nkept = pad(values, 8)",
+        program: "values = [\"RunMat\", string(missing), \"GPU\"];\nkept = pad(values, 8)",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(isequal(kept,[\"RunMat  \",\"<missing>\",\"GPU     \"]));",
+            source: "assert(isequal(kept(1),\"RunMat  \")); assert(ismissing(kept(2))); assert(isequal(kept(3),\"GPU     \"));",
         },
     },
 ];
@@ -142,7 +142,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationFaq {
             question: "Do missing strings get padded?",
-            answer: "Missing strings (`<missing>`) are passed through untouched so downstream code that checks for missing values continues to work.",
+            answer: "Typed missing strings (displayed as `<missing>`) are passed through untouched so downstream code that checks for missing values continues to work.",
         },
         BuiltinDocumentationFaq {
             question: "How are cell array elements returned?",

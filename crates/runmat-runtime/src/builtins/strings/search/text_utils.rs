@@ -2,10 +2,12 @@
 
 use std::convert::TryFrom;
 
-use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Utf8Text, Value};
+use runmat_value::{
+    CellArray, CharArray, LogicalArray, StringArray, StringElement, Utf8Text, Value,
+};
 
 use crate::builtins::common::tensor;
-use crate::builtins::strings::common::{char_row_to_string, is_missing_string};
+use crate::builtins::strings::common::char_row_to_string;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[derive(Clone)]
@@ -79,7 +81,7 @@ impl TextCollection {
         }
     }
 
-    fn from_string_scalar(text: Utf8Text) -> Self {
+    fn from_string_scalar(text: StringElement) -> Self {
         Self {
             elements: vec![make_text_element(text)],
             shape: vec![1, 1],
@@ -316,11 +318,10 @@ pub(crate) fn logical_result(
     }
 }
 
-fn make_text_element(text: Utf8Text) -> TextElement {
-    if is_missing_string(&text) {
-        TextElement::Missing
-    } else {
-        TextElement::Text(text)
+fn make_text_element(text: StringElement) -> TextElement {
+    match text {
+        StringElement::Missing => TextElement::Missing,
+        StringElement::Text(text) => TextElement::Text(text),
     }
 }
 

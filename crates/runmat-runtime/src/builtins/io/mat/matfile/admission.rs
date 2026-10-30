@@ -96,7 +96,9 @@ pub(super) fn suffix_digest(path: &ObjectSubscriptPath) -> Option<Digest> {
                         ObjectIndexComponent::Value(Value::Bool(logical)) => {
                             Component::Logical(*logical)
                         }
-                        ObjectIndexComponent::Value(Value::String(text)) => {
+                        ObjectIndexComponent::Value(Value::String(
+                            runmat_value::StringElement::Text(text),
+                        )) => {
                             charge_text(&mut text_bytes, text)?;
                             Component::Text(text)
                         }

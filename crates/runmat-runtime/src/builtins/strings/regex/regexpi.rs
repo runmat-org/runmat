@@ -353,7 +353,7 @@ pub(crate) mod tests {
                     .data()
                     .iter()
                     .map(|ptr| match ptr {
-                        Value::String(s) => s.to_string(),
+                        Value::String(s) => s.as_str().expect("nonmissing split part").to_owned(),
                         other => panic!("expected string split part, got {other:?}"),
                     })
                     .collect();

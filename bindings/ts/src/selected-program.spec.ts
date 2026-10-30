@@ -31,14 +31,14 @@ describe("selected program Runtime boundary", () => {
     const inventory = { schema_version: 1, host: {}, accelerators: [] };
     const invocation = { assignment, run: vi.fn(), cancel: vi.fn(), free: vi.fn() };
     const create = vi.fn(() => invocation);
-    __internals.setNativeModuleOverride({ default: vi.fn(), initRunMat: vi.fn(), workerProgramInventory: () => inventory, createWorkerProgramInvocation: create } as never);
+    __internals.setNativeModuleOverride({ stringElementWireSchemaVersion: () => 1, default: vi.fn(), initRunMat: vi.fn(), workerProgramInventory: () => inventory, createWorkerProgramInvocation: create } as never);
     expect(await workerProgramInventory()).toBe(inventory);
     const request = { assignment };
     expect(await createWorkerProgramInvocation(request)).toBe(invocation);
     expect(create).toHaveBeenCalledWith(request);
   });
   it("reports a missing native contract instead of fabricating inventory", async () => {
-    __internals.setNativeModuleOverride({ default: vi.fn(), initRunMat: vi.fn() } as never);
+    __internals.setNativeModuleOverride({ stringElementWireSchemaVersion: () => 1, default: vi.fn(), initRunMat: vi.fn() } as never);
     await expect(workerProgramInventory()).rejects.toThrow("The loaded RunMat module has no qualified worker factory inventory.");
     await expect(createWorkerProgramInvocation({})).rejects.toThrow("The loaded RunMat module does not support controlled worker programs.");
   });

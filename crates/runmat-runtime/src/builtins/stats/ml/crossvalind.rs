@@ -519,7 +519,7 @@ fn classes_from_value(value: &Value, n: usize) -> BuiltinResult<Vec<Option<Parti
         Value::LogicalArray(array) => logical_labels(array)?,
         Value::StringArray(array) => string_array_labels(array)?,
         Value::CharArray(chars) => char_row_labels(chars)?,
-        Value::String(text) => vec![Some(PartitionLabel::Text(text.clone()))],
+        Value::String(text) => vec![PartitionLabel::text(text.clone())],
         Value::Bool(flag) => vec![Some(PartitionLabel::Logical(*flag))],
         other => {
             return Err(invalid_argument(format!(
@@ -564,7 +564,7 @@ fn string_array_labels(array: &StringArray) -> BuiltinResult<Vec<Option<Partitio
     Ok(array
         .data()
         .iter()
-        .map(|text| Some(PartitionLabel::Text(text.clone())))
+        .map(|text| PartitionLabel::text(text.clone()))
         .collect())
 }
 
@@ -647,9 +647,16 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
 
 fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(std::borrow::Cow::Borrowed(array.data()[0].as_str()))
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(std::borrow::Cow::Borrowed(text.as_str()))
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(std::borrow::Cow::Borrowed(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         Value::CharArray(chars) => decode_utf16_code_units(chars.data())
             .map(std::borrow::Cow::Owned)

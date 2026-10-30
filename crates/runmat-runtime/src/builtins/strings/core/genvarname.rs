@@ -98,13 +98,13 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
 fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Value> {
     let mut used = exclusions.into_iter().collect::<HashSet<_>>();
     match value {
-        Value::String(text) => Ok(Value::string(unique_name(&text, &mut used))),
+        Value::String(text) => Ok(Value::string(unique_name(required_name_text(&text)?, &mut used))),
         Value::StringArray(array) => {
 let (data, shape, _, _) = array.into_parts();
             let out = data
                 .iter()
-                .map(|text| unique_name(text.as_str(), &mut used))
-                .collect::<Vec<_>>();
+                .map(|text| required_name_text(text).map(|text| unique_name(text, &mut used)))
+                .collect::<BuiltinResult<Vec<_>>>()?;
             StringArray::new(out, shape.to_vec())
                 .map(Value::StringArray)
                 .map_err(|err| error(&ERROR_INTERNAL, format!("genvarname: {err}")))
@@ -148,12 +148,12 @@ enum TextListContext {
 
 fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(text) => Ok(vec![required_name_text(text)?.to_owned()]),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| required_name_text(text).map(str::to_owned))
+            .collect::<BuiltinResult<Vec<_>>>()?),
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
@@ -177,9 +177,9 @@ fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<Strin
 
 fn text_scalar(value: &Value, context: TextListContext) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(text) => Ok(required_name_text(text)?.to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+            Ok(required_name_text(&array.data()[0])?.to_owned())
         }
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
@@ -455,10 +455,27 @@ mod tests {
         let Value::StringArray(array) = out else {
             panic!("expected string array")
         };
-        assert_eq!(array.data()[0].chars().count(), MATLAB_NAME_LENGTH_MAX);
-        assert_eq!(array.data()[1].chars().count(), MATLAB_NAME_LENGTH_MAX);
+        assert_eq!(
+            array.data()[0]
+                .as_str()
+                .expect("nonmissing generated name")
+                .chars()
+                .count(),
+            MATLAB_NAME_LENGTH_MAX
+        );
+        assert_eq!(
+            array.data()[1]
+                .as_str()
+                .expect("nonmissing generated name")
+                .chars()
+                .count(),
+            MATLAB_NAME_LENGTH_MAX
+        );
         assert_ne!(array.data()[0], array.data()[1]);
-        assert!(array.data()[1].ends_with('1'));
+        assert!(array.data()[1]
+            .as_str()
+            .expect("nonmissing generated name")
+            .ends_with('1'));
     }
 
     #[test]
@@ -524,4 +541,13 @@ mod tests {
         .expect_err("resident exclusion input");
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
     }
+}
+
+fn required_name_text(text: &runmat_value::StringElement) -> BuiltinResult<&str> {
+    text.as_str().ok_or_else(|| {
+        error(
+            &ERROR_INVALID_INPUT,
+            "genvarname: names must not be missing",
+        )
+    })
 }

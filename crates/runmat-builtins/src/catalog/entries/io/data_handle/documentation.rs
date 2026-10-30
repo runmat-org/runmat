@@ -2,6 +2,8 @@
 
 use crate::*;
 
+pub(super) const ATTRIBUTE_VALUE_BOUNDARY: &str = "Each stored attribute value must be a string scalar (including a one-element string array), character row vector, finite scalar double, fixed-width integer scalar, or scalar logical value. Numeric/logical array carriers, nonscalar string arrays, character matrices or pages, cells, and nested structs require explicit encoding and are rejected at JSON serialization. Typed missing strings store as JSON null and decode as missing strings. Empty strings and literal spellings such as `<missing>` remain ordinary text.";
+
 const LINKS: &[BuiltinDocumentationLink] = &[BuiltinDocumentationLink {
     label: "Datasets API",
     target: BuiltinDocumentationLinkTarget::Documentation("/docs/fs/datasets"),

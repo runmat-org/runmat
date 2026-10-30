@@ -118,11 +118,17 @@ pub(super) fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> Bu
         Value::Bool(_) => 1,
         Value::LogicalArray(la) => la.data.len(),
         Value::CharArray(ca) => ca.data().len().saturating_mul(2),
-        Value::String(s) => s.encode_utf16().count().saturating_mul(2),
+        Value::String(runmat_value::StringElement::Missing) => 0,
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            s.encode_utf16().count().saturating_mul(2)
+        }
         Value::StringArray(sa) => sa
             .data()
             .iter()
-            .map(|s| s.encode_utf16().count().saturating_mul(2))
+            .map(|s| {
+                s.as_str()
+                    .map_or(0, |text| text.encode_utf16().count().saturating_mul(2))
+            })
             .fold(0usize, usize::saturating_add),
         Value::Symbolic(expr) => expr.to_string().encode_utf16().count().saturating_mul(2),
         Value::SymbolicArray(array) => array

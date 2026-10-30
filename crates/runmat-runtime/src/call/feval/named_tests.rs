@@ -17,7 +17,8 @@ fn unattempted_name_lookup_is_deferred_even_for_a_known_builtin() {
     let runtime = crate::user_functions::test_support::exact_fixture_runtime();
     let name = runmat_value::Utf8Text::new("logical".to_owned());
     let pointer = name.as_str().as_ptr();
-    let target = crate::execution::RootedValue::in_context(Value::String(name), &runtime).unwrap();
+    let target =
+        crate::execution::RootedValue::in_context(Value::String(name.into()), &runtime).unwrap();
     let selected = crate::call::descriptor::RepeatableCallable::select_rooted(
         Some(&runtime),
         target,
@@ -32,7 +33,7 @@ fn unattempted_name_lookup_is_deferred_even_for_a_known_builtin() {
     let Value::String(name) = value.value() else {
         panic!("same admitted text")
     };
-    assert_eq!(name.as_str().as_ptr(), pointer);
+    assert_eq!(name.as_str().expect("nonmissing text").as_ptr(), pointer);
 }
 
 #[test]

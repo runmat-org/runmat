@@ -755,7 +755,7 @@ pub(crate) mod tests {
             other => panic!("expected Connected bool, got {other:?}"),
         }
         match struct_field(&client, "Address") {
-            Value::String(addr) => assert_eq!(addr, "127.0.0.1"),
+            Value::String(runmat_value::StringElement::Text(addr)) => assert_eq!(addr, "127.0.0.1"),
             other => panic!("expected Address string, got {other:?}"),
         }
 
@@ -798,7 +798,9 @@ pub(crate) mod tests {
         handle.join().expect("join listener thread");
 
         match struct_field(&client, "Name") {
-            Value::String(name) => assert_eq!(name, "CustomClient"),
+            Value::String(runmat_value::StringElement::Text(name)) => {
+                assert_eq!(name, "CustomClient")
+            }
             other => panic!("expected Name string, got {other:?}"),
         }
         match struct_field(&client, "Timeout") {
@@ -806,7 +808,9 @@ pub(crate) mod tests {
             other => panic!("expected Timeout numeric, got {other:?}"),
         }
         match struct_field(&client, "ByteOrder") {
-            Value::String(order) => assert_eq!(order, "big-endian"),
+            Value::String(runmat_value::StringElement::Text(order)) => {
+                assert_eq!(order, "big-endian")
+            }
             other => panic!("expected ByteOrder string, got {other:?}"),
         }
         match struct_field(&client, "InputBufferSize") {

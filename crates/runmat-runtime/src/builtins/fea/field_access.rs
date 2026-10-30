@@ -275,7 +275,9 @@ fn required_nonempty_string_for_builtin<'a>(
     property: &str,
 ) -> BuiltinResult<&'a str> {
     match object.properties().get(property) {
-        Some(Value::String(value)) if !value.is_empty() => Ok(value),
+        Some(Value::String(runmat_value::StringElement::Text(value))) if !value.is_empty() => {
+            Ok(value)
+        }
         _ => Err(builtin_error(
             builtin,
             &ERROR_INPUT,

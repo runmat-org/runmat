@@ -168,10 +168,14 @@ fn known_option(value: &Value) -> Option<SymbolicIntegrationOption> {
         return None;
     }
     match value {
-        Value::String(s) => SymbolicIntegrationOption::from_public_option(s.as_str()),
-        Value::StringArray(a) => {
-            SymbolicIntegrationOption::from_public_option(a.data()[0].as_str())
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            SymbolicIntegrationOption::from_public_option(s.as_str())
         }
+        Value::StringArray(a) => a
+            .data()
+            .first()?
+            .as_str()
+            .and_then(SymbolicIntegrationOption::from_public_option),
         Value::CharArray(a) => SymbolicIntegrationOption::from_public_code_units(
             a.data().iter().map(|unit| unit.raw()),
         ),

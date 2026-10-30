@@ -40,14 +40,15 @@ pub fn value_as_text_lines(
     value: &Value,
 ) -> Result<Option<Vec<String>>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(text) => Some(vec![text.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Some(vec![text.as_str().to_owned()])
+        }
         Value::CharArray(chars) => Some(vec![runmat_value::decode_utf16_code_units(chars.data())?]),
-        Value::StringArray(arr) => Some(
-            arr.data()
-                .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
-        ),
+        Value::StringArray(arr) => arr
+            .data()
+            .iter()
+            .map(|text| text.as_str().map(str::to_owned))
+            .collect(),
         Value::Cell(cell) => {
             let mut lines = Vec::new();
             for row in 0..cell.rows {
@@ -335,9 +336,16 @@ fn collect_label_strings(
     let mut labels = Vec::new();
     for arg in args {
         match arg {
-            Value::StringArray(arr) => {
-                labels.extend(arr.data().iter().map(|text| text.as_str().to_owned()))
-            }
+            Value::StringArray(arr) => labels.extend(
+                arr.data()
+                    .iter()
+                    .map(|text| {
+                        text.as_str().map(str::to_owned).ok_or_else(|| {
+                            plotting_error(builtin, "legend: labels must be strings or char arrays")
+                        })
+                    })
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+            ),
             Value::Cell(cell) => {
                 for row in 0..cell.rows {
                     for col in 0..cell.cols {

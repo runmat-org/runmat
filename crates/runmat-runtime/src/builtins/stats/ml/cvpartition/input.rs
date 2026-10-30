@@ -38,7 +38,7 @@ impl PartitionInput {
             }),
             Value::String(text) => Ok(Self {
                 n: 1,
-                labels: Some(vec![Some(PartitionLabel::Text(text))]),
+                labels: Some(vec![PartitionLabel::text(text)]),
             }),
             Value::StringArray(array) => string_array_labels(array),
             Value::CharArray(chars) => Ok(Self {
@@ -125,12 +125,12 @@ pub(super) fn string_array_labels(array: StringArray) -> BuiltinResult<Partition
     let labels = match data.try_into_owned() {
         Ok(values) => values
             .into_iter()
-            .map(|text| Some(PartitionLabel::Text(text)))
+            .map(|text| PartitionLabel::text(text))
             .collect(),
         Err(values) => values
             .iter()
             .cloned()
-            .map(|text| Some(PartitionLabel::Text(text)))
+            .map(|text| PartitionLabel::text(text))
             .collect(),
     };
     Ok(PartitionInput {

@@ -377,7 +377,7 @@ pub(super) async fn duration_write_step(
                         runtime,
                         &mut object,
                         FORMAT_FIELD,
-                        Value::String(text),
+                        Value::String(text.into()),
                         |message, source| {
                             crate::context::host_allocation::host_allocation_runtime_error(
                                 runtime,

@@ -39,46 +39,11 @@ impl ExecutableUnit {
                     function.0
                 )
             })?;
-            if !owner.owns_callable(function) {
-                return Err("dependency is not the original function owner".into());
-            }
-            let id = function;
-            let mut projection = self
+            let projection = self
                 .functions()
-                .get(id)
-                .ok_or("foreign function projection is absent")?
-                .clone();
-            let mut original = owner
-                .functions()
-                .get(id)
-                .ok_or("original function is absent")?
-                .clone();
-            source_projection::normalize_original(
-                self.source_map(),
-                owner.source_map(),
-                &projection,
-                &mut original,
-            )?;
-            // Coverage sites are scoped to the compiling caller. All executable
-            // instructions, source identities, spans and ABI remain exact.
-            projection.coverage_sites.clear();
-            original.coverage_sites.clear();
-            let projection = serde_json::to_value(&projection).map_err(|e| e.to_string())?;
-            let original = serde_json::to_value(&original).map_err(|e| e.to_string())?;
-            if projection != original {
-                let changed = projection
-                    .as_object()
-                    .ok_or("invalid function projection")?
-                    .iter()
-                    .filter_map(|(field, value)| {
-                        (original.get(field) != Some(value)).then_some(field.as_str())
-                    })
-                    .collect::<Vec<_>>();
-                return Err(format!(
-                    "foreign function {} differs from its original owner in {changed:?}",
-                    function.0
-                ));
-            }
+                .get(function)
+                .ok_or("foreign function projection is absent")?;
+            original_projection(self.source_map(), owner, projection)?;
             self.original_dependencies
                 .insert(function, Rc::clone(owner));
         }
@@ -144,6 +109,56 @@ impl ExecutableUnit {
         }
         Ok(products.into_values().collect())
     }
+}
+
+/// Validate a compiler projection against its exact original admitted body.
+/// The returned body carries the original nonwire compiler evidence, not any
+/// authority reconstructed from the projection's serialized fields.
+pub(super) fn original_projection(
+    selected_map: &crate::ExecutableSourceMap,
+    owner: &ExecutableUnit,
+    projection: &runmat_vm::FunctionBytecode,
+) -> Result<runmat_vm::FunctionBytecode, String> {
+    let origin = projection
+        .binding_origin
+        .ok_or("foreign function projection has no original binding origin")?;
+    let function = owner
+        .local_function_for_origin(origin)?
+        .ok_or("dependency is not the original function owner")?;
+    if function != projection.function {
+        return Err("foreign function differs from its original compiler coordinate".into());
+    }
+    let mut original = owner
+        .functions()
+        .get(function)
+        .ok_or("original function is absent")?
+        .clone();
+    source_projection::normalize_original(
+        selected_map,
+        owner.source_map(),
+        projection,
+        &mut original,
+    )?;
+    // Coverage sites are scoped to the compiling caller. All executable
+    // instructions, source identities, spans and ABI remain exact.
+    original.coverage_sites = projection.coverage_sites.clone();
+    let original_wire = serde_json::to_value(&original).map_err(|e| e.to_string())?;
+    let projected_wire = serde_json::to_value(projection).map_err(|e| e.to_string())?;
+    if projected_wire != original_wire {
+        let changed = projected_wire
+            .as_object()
+            .ok_or("invalid function projection")?
+            .iter()
+            .filter_map(|(field, value)| {
+                (original_wire.get(field) != Some(value)).then_some(field.as_str())
+            })
+            .collect::<Vec<_>>();
+        return Err(format!(
+            "foreign function {} differs from its original owner in {changed:?}",
+            function.0
+        ));
+    }
+    Ok(original)
 }
 
 pub(super) fn owns_callable_parts(

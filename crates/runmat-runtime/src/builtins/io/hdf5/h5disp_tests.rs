@@ -53,7 +53,7 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
         )]),
     ))
     .expect("simple display");
-    let Value::String(simple) = simple else {
+    let Value::String(runmat_value::StringElement::Text(simple)) = simple else {
         panic!("expected display text")
     };
     assert!(simple.contains("Dataset: /café/measurements"));
@@ -76,7 +76,7 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
         ]),
     ))
     .expect("minimal UTF-8 display");
-    let Value::String(minimal) = minimal else {
+    let Value::String(runmat_value::StringElement::Text(minimal)) = minimal else {
         panic!("expected display text")
     };
     assert!(minimal.contains("Group: /café"));
@@ -92,7 +92,9 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
         ]),
     ))
     .expect("root UTF-8 display without explicit location");
-    assert!(matches!(root_encoded, Value::String(text) if text.contains("café")));
+    assert!(
+        matches!(root_encoded, Value::String(runmat_value::StringElement::Text(text)) if text.contains("café"))
+    );
 }
 
 #[test]
@@ -130,7 +132,9 @@ fn dispatcher_statement_h5disp_prints_under_suppressed_expression_without_replay
         1,
     ))
     .expect("captured text");
-    assert!(matches!(value.value(), Value::String(text) if text.contains("Dataset: /A")));
+    assert!(
+        matches!(value.value(), Value::String(runmat_value::StringElement::Text(text)) if text.contains("Dataset: /A"))
+    );
     assert!(
         quiet.finish().expect("captured text").is_empty(),
         "captured display must be silent"

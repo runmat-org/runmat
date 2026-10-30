@@ -283,8 +283,12 @@ fn text_scalar(value: &Value) -> BuiltinResult<String> {
                 )
             })
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         other => Err(statset_error(
             &STATSET_ERROR_INVALID_OPTION,

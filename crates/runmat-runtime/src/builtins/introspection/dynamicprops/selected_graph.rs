@@ -28,7 +28,9 @@ pub(crate) fn checked_metadata_owner(
     if !metadata.class_name().is(DYNAMIC_PROPERTY_CLASS) {
         return Err("dynamic metadata class differs from its handle".into());
     }
-    let Some(Value::String(property)) = metadata.property("Name") else {
+    let Some(Value::String(runmat_value::StringElement::Text(property))) =
+        metadata.property("Name")
+    else {
         return Err("dynamic metadata has no canonical property name".into());
     };
     let Some(Value::HandleObject(receiver)) = metadata.property(TARGET_FIELD) else {

@@ -831,8 +831,8 @@ fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
 
 fn value_as_string(value: &Value) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
     Ok(match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::String(s) => s.text_ref().cloned(),
+        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].text_ref().cloned(),
         Value::CharArray(ca) if ca.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(ca.data())
                 .map_err(|source| {

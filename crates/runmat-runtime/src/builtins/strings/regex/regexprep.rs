@@ -10,7 +10,7 @@ use regex::{Captures, Regex, RegexBuilder};
 use runmat_builtins::REGEXPREP_DESCRIPTOR;
 use runmat_builtins::REGEXPREP_EXPLICIT_GPU_EXTENSION;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StringArray, Utf8Text, Value};
+use runmat_value::{CharArray, StringArray, StringElement, Utf8Text, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
@@ -105,13 +105,17 @@ async fn regexprep_builtin(
 
     let mut results = Vec::with_capacity(subjects.entries.len());
     for (idx, original) in subjects.entries.iter().enumerate() {
-        let mut current = original.as_str().to_owned();
+        let Some(original) = original.as_str() else {
+            results.push(StringElement::Missing);
+            continue;
+        };
+        let mut current = original.to_owned();
         if let Some(sequence) = plan.get(idx) {
             for compiled in sequence {
                 current = compiled.apply(&current, &options);
             }
         }
-        results.push(current);
+        results.push(StringElement::text(current));
     }
 
     reconstruct_output(BUILTIN_NAME, &subjects, results)
@@ -289,7 +293,7 @@ enum InputKind {
 
 #[derive(Debug, Clone)]
 struct SubjectCollection {
-    entries: Vec<Utf8Text>,
+    entries: Vec<StringElement>,
     rows: usize,
     cols: usize,
     kind: InputKind,
@@ -326,7 +330,7 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
     if array.rows == 1 {
         let text = decode_char_array(array.data())?;
         return Ok(SubjectCollection {
-            entries: vec![Utf8Text::new(text)],
+            entries: vec![StringElement::text(text)],
             rows: 1,
             cols: 1,
             kind: InputKind::CharScalar,
@@ -336,7 +340,7 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
     for row in 0..array.rows {
         let start = row * array.cols;
         let line = decode_char_array(&array.data()[start..start + array.cols])?;
-        entries.push(Utf8Text::new(line));
+        entries.push(StringElement::text(line));
     }
     Ok(SubjectCollection {
         entries,
@@ -359,7 +363,7 @@ fn collect_string_array(array: StringArray) -> BuiltinResult<SubjectCollection> 
     })
 }
 
-fn into_text_elements(data: runmat_value::ExactArrayStorage<Utf8Text>) -> Vec<Utf8Text> {
+fn into_text_elements(data: runmat_value::ExactArrayStorage<StringElement>) -> Vec<StringElement> {
     match data.try_into_owned() {
         Ok(values) => values.into_iter().collect(),
         Err(shared) => shared.iter().cloned().collect(),
@@ -407,7 +411,7 @@ impl PatternCollection {
         subjects: &SubjectCollection,
     ) -> BuiltinResult<Self> {
         match value {
-            Value::String(s) => Ok(Self::Scalar(s)),
+            Value::String(s) => Ok(Self::Scalar(s.into_text().ok_or_else(|| runtime_error_for(format!("{builtin}: pattern or replacement must not be missing")))?)),
             Value::CharArray(array) => collect_pattern_char_array(array),
             Value::StringArray(array) => collect_pattern_string_array(array, subjects),
             Value::Cell(cell) => collect_pattern_cell(builtin, cell, subjects).await,
@@ -440,12 +444,16 @@ fn collect_pattern_string_array(
     let cols = array.cols();
     let (data, _shape, _rows, _cols) = array.into_parts();
     if rows == 1 && cols == 1 && !data.is_empty() {
-        return Ok(PatternCollection::Scalar(data[0].clone()));
+        return Ok(PatternCollection::Scalar(required_regex_text(
+            data[0].clone(),
+        )?));
     }
     if rows == subjects.rows && cols == subjects.cols {
-        return Ok(PatternCollection::Elementwise(into_text_elements(data)));
+        return Ok(PatternCollection::Elementwise(into_required_regex_text(
+            data,
+        )?));
     }
-    Ok(PatternCollection::Sequence(into_text_elements(data)))
+    Ok(PatternCollection::Sequence(into_required_regex_text(data)?))
 }
 
 async fn collect_pattern_cell(
@@ -463,7 +471,7 @@ async fn collect_pattern_cell(
                 "{builtin}: pattern cell elements must be character vectors or string scalars, got {value:?}"
             ))
         })?;
-        entries.push(text);
+        entries.push(required_regex_text(text)?);
     }
     if cell.rows == subjects.rows && cell.cols == subjects.cols {
         return Ok(PatternCollection::Elementwise(entries));
@@ -485,7 +493,7 @@ impl ReplacementCollection {
         subjects: &SubjectCollection,
     ) -> BuiltinResult<Self> {
         match value {
-            Value::String(s) => Ok(Self::Scalar(s)),
+            Value::String(s) => Ok(Self::Scalar(s.into_text().ok_or_else(|| runtime_error_for(format!("{builtin}: pattern or replacement must not be missing")))?)),
             Value::CharArray(array) => collect_replacement_char_array(array),
             Value::StringArray(array) => collect_replacement_string_array(array, subjects),
             Value::Cell(cell) => collect_replacement_cell(builtin, cell, subjects).await,
@@ -518,12 +526,18 @@ fn collect_replacement_string_array(
     let cols = array.cols();
     let (data, _shape, _rows, _cols) = array.into_parts();
     if rows == 1 && cols == 1 && !data.is_empty() {
-        return Ok(ReplacementCollection::Scalar(data[0].clone()));
+        return Ok(ReplacementCollection::Scalar(required_regex_text(
+            data[0].clone(),
+        )?));
     }
     if rows == subjects.rows && cols == subjects.cols {
-        return Ok(ReplacementCollection::Elementwise(into_text_elements(data)));
+        return Ok(ReplacementCollection::Elementwise(
+            into_required_regex_text(data)?,
+        ));
     }
-    Ok(ReplacementCollection::Sequence(into_text_elements(data)))
+    Ok(ReplacementCollection::Sequence(into_required_regex_text(
+        data,
+    )?))
 }
 
 async fn collect_replacement_cell(
@@ -541,7 +555,7 @@ async fn collect_replacement_cell(
                 "{builtin}: replacement cell elements must be character vectors or string scalars, got {value:?}"
             ))
         })?;
-        entries.push(text);
+        entries.push(required_regex_text(text)?);
     }
     if cell.rows == subjects.rows && cell.cols == subjects.cols {
         return Ok(ReplacementCollection::Elementwise(entries));
@@ -771,7 +785,7 @@ fn replace_with_policy(
 fn reconstruct_output(
     builtin: &'static str,
     subjects: &SubjectCollection,
-    results: Vec<String>,
+    results: Vec<StringElement>,
 ) -> BuiltinResult<Value> {
     match subjects.kind {
         InputKind::CharScalar => {
@@ -786,7 +800,7 @@ fn reconstruct_output(
             Ok(Value::CharArray(array))
         }
         InputKind::StringArray { rows, cols } => {
-            let array = StringArray::new(results, vec![rows, cols])
+            let array = StringArray::from_elements_unbounded(results, vec![rows, cols])
                 .map_err(|e| runtime_error_for(format!("{builtin}: {e}")))?;
             Ok(Value::StringArray(array))
         }
@@ -801,7 +815,7 @@ fn reconstruct_output(
 fn strings_to_char_array(
     builtin: &'static str,
     rows: usize,
-    strings: &[String],
+    strings: &[StringElement],
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
         return CharArray::from_code_units(Vec::new(), 0, 0)
@@ -810,13 +824,24 @@ fn strings_to_char_array(
     let max_cols = strings
         .iter()
         .take(rows)
-        .map(|s| s.encode_utf16().count())
+        .map(|s| {
+            s.as_str()
+                .expect("character output has textual input")
+                .encode_utf16()
+                .count()
+        })
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(rows * max_cols);
     for idx in 0..rows {
         let text = strings.get(idx).cloned().unwrap_or_default();
         let mut units = text
+            .as_str()
+            .ok_or_else(|| {
+                runtime_error_for(format!(
+                    "{builtin}: missing cannot be converted to character output"
+                ))
+            })?
             .encode_utf16()
             .map(runmat_value::Utf16CodeUnit::from_raw)
             .collect::<Vec<_>>();
@@ -953,19 +978,23 @@ fn decode_char_array(units: &[runmat_value::Utf16CodeUnit]) -> BuiltinResult<Str
         .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn extract_string(value: &Value) -> BuiltinResult<Option<Utf8Text>> {
+fn extract_string(value: &Value) -> BuiltinResult<Option<StringElement>> {
     Ok(match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(Utf8Text::new(decode_char_array(ca.data())?)),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(StringElement::text(decode_char_array(ca.data())?))
+        }
         _ => None,
     })
 }
 
 fn value_to_lower_string(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
+        Value::String(s) => s.as_str().map(str::to_ascii_lowercase),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            sa.data()[0].as_str().map(str::to_ascii_lowercase)
+        }
         Value::CharArray(ca) if ca.rows == 1 => {
             Some(decode_char_array(ca.data())?.to_ascii_lowercase())
         }
@@ -1469,4 +1498,18 @@ pub(crate) mod tests {
             "unexpected error message: {message}"
         );
     }
+}
+
+fn required_regex_text(text: StringElement) -> BuiltinResult<Utf8Text> {
+    text.into_text()
+        .ok_or_else(|| runtime_error_for("regexprep: pattern or replacement must not be missing"))
+}
+
+fn into_required_regex_text(
+    data: runmat_value::ExactArrayStorage<StringElement>,
+) -> BuiltinResult<Vec<Utf8Text>> {
+    into_text_elements(data)
+        .into_iter()
+        .map(required_regex_text)
+        .collect()
 }

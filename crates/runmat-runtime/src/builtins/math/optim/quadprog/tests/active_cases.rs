@@ -125,7 +125,7 @@ pub(super) fn check() {
     assert_eq!(values(&threshold[2]), vec![-3.]);
     assert!((values(&threshold[1])[0] + 4.).abs() < 1e-7);
     assert!(
-        matches!(field(&threshold[3],"message"),Value::String(s) if s.as_str().contains("threshold"))
+        matches!(field(&threshold[3],"message"),Value::String(runmat_value::StringElement::Text(s)) if s.as_str().contains("threshold"))
     );
     let timed = run(arguments([
         Value::Num(2.),

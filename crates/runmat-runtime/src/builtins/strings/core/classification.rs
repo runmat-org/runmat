@@ -32,12 +32,12 @@ fn classify_text_ref(
     pred: impl Fn(char) -> bool + Copy,
 ) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => classify_string(text.as_str(), fn_name, pred),
+        Value::String(text) => classify_string_element(text, fn_name, pred),
         Value::StringArray(array) => {
             let values = array
                 .data()
                 .iter()
-                .map(|text| classify_string(text.as_str(), fn_name, pred))
+                .map(|text| classify_string_element(text, fn_name, pred))
                 .collect::<BuiltinResult<Vec<_>>>()?;
             make_cell_with_shape(values, array.shape().to_vec())
                 .map_err(|e| compat_error(fn_name, e))
@@ -223,5 +223,16 @@ pub(crate) fn char_matches_prop(ch: char, prop: CharacterPropertyCategory) -> bo
                     && !ch.is_whitespace()
                     && !UNICODE_NON_GRAPHIC_RE.is_match(ch.encode_utf8(&mut [0; 4])))
         }
+    }
+}
+
+pub(crate) fn classify_string_element(
+    text: &runmat_value::StringElement,
+    fn_name: &str,
+    pred: impl Fn(char) -> bool + Copy,
+) -> BuiltinResult<Value> {
+    match text.as_str() {
+        Some(text) => classify_string(text, fn_name, pred),
+        None => logical_value(vec![0], vec![1, 1], fn_name),
     }
 }

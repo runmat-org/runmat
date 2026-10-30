@@ -42,7 +42,14 @@ fn string_array(array: &StringArray) -> crate::BuiltinResult<Vec<String>> {
         .enumerate()
         .map(|(index, name)| {
             require_nonempty(
-                name.to_string(),
+                name.as_str()
+                    .ok_or_else(|| {
+                        super::error::field_name_type(Some(&format!(
+                            "string array element {}",
+                            index + 1
+                        )))
+                    })?
+                    .to_owned(),
                 Some(format!("string array element {}", index + 1)),
             )
         })

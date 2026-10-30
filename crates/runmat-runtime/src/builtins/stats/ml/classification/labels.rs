@@ -50,7 +50,11 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
             for item in cell.data() {
-                labels.push(ClassLabel::Text(scalar_text(item, name)?));
+                labels.push(ClassLabel::Text(match item {
+                    Value::String(text) => text.clone(),
+                    Value::StringArray(array) if array.data().len() == 1 => array.data()[0].clone(),
+                    _ => scalar_text(item, name)?.into(),
+                }));
             }
             Ok(LabelVector {
                 labels,
@@ -218,7 +222,7 @@ pub(super) fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
 pub(super) fn is_missing_label(label: &ClassLabel) -> bool {
     match label {
         ClassLabel::Numeric(value) => numeric_label_is_nan(*value),
-        ClassLabel::Text(value) => value.is_empty() || value == "<missing>",
+        ClassLabel::Text(value) => value.is_missing() || value.as_str().is_some_and(str::is_empty),
         ClassLabel::Logical(_) => false,
     }
 }
@@ -273,11 +277,11 @@ pub(super) fn labels_from_indices(
                 .iter()
                 .map(|idx| match labels.get(*idx) {
                     Some(ClassLabel::Text(value)) => value.clone(),
-                    _ => runmat_value::Utf8Text::default(),
+                    _ => runmat_value::StringElement::default(),
                 })
                 .collect::<Vec<_>>();
             Ok(Value::StringArray(
-                StringArray::from_texts_unbounded(data, vec![indices.len(), 1])
+                StringArray::from_elements_unbounded(data, vec![indices.len(), 1])
                     .map_err(|err| internal_error(format!("classify: {err}")))?,
             ))
         }
@@ -285,7 +289,9 @@ pub(super) fn labels_from_indices(
             let rows = indices
                 .iter()
                 .map(|idx| match labels.get(*idx) {
-                    Some(ClassLabel::Text(value)) => value.as_str(),
+                    Some(ClassLabel::Text(value)) => value
+                        .as_str()
+                        .expect("missing labels excluded before character publication"),
                     _ => "",
                 })
                 .collect::<Vec<_>>();
@@ -295,7 +301,11 @@ pub(super) fn labels_from_indices(
             let data = indices
                 .iter()
                 .map(|idx| match labels.get(*idx) {
-                    Some(ClassLabel::Text(value)) => Value::CharArray(CharArray::new_row(value)),
+                    Some(ClassLabel::Text(value)) => Value::CharArray(CharArray::new_row(
+                        value
+                            .as_str()
+                            .expect("missing labels excluded before character publication"),
+                    )),
                     _ => Value::CharArray(CharArray::new_row("")),
                 })
                 .collect::<Vec<_>>();
@@ -350,11 +360,14 @@ pub(super) fn char_array_from_rows(rows: &[impl AsRef<str>]) -> BuiltinResult<Ch
 
 pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
         Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
             .map(Into::into)
             .map_err(|source| invalid_argument(format!("classify: {source}"))),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .text_ref()
+            .cloned()
+            .ok_or_else(|| invalid_argument(format!("classify: {name} must be a string scalar"))),
         other => Err(invalid_argument(format!(
             "classify: {name} must be a string scalar, got {other:?}"
         ))),

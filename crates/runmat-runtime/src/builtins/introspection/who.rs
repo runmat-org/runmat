@@ -98,7 +98,7 @@ pub(crate) mod tests {
                 .data()
                 .iter()
                 .map(|value| match value {
-                    Value::String(s) => s.to_string(),
+                    Value::String(runmat_value::StringElement::Text(s)) => s.to_string(),
                     Value::CharArray(ca) if ca.rows == 1 => {
                         runmat_value::decode_utf16_code_units(ca.data())
                             .expect("valid UTF-16 fixture")
@@ -108,8 +108,12 @@ pub(crate) mod tests {
                     other => panic!("expected string entry, got {other:?}"),
                 })
                 .collect(),
-            Value::String(s) => vec![s.to_string()],
-            Value::StringArray(sa) => sa.data().iter().map(ToString::to_string).collect(),
+            Value::String(runmat_value::StringElement::Text(s)) => vec![s.to_string()],
+            Value::StringArray(sa) => sa
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("nonmissing name").to_owned())
+                .collect(),
             Value::CharArray(ca) => {
                 char_array_rows_as_strings(&ca, WorkspaceQueryOwner::Who).unwrap()
             }

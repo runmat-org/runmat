@@ -81,6 +81,23 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
         2,
         "flat original leaf and middle inventory"
     );
+    let static_section = |manifest: &runmat_execution::ExecutableUnitManifest| {
+        manifest
+            .optional_sections
+            .iter()
+            .position(|section| section.name == runmat_execution::executable::STATIC_IMPORT_SECTION)
+    };
+    assert!(
+        static_section(&envelope.manifest).is_some(),
+        "standalone caller preserves its original selected static imports"
+    );
+    assert!(
+        envelope
+            .dependency_products
+            .iter()
+            .any(|product| { static_section(&product.manifest).is_some() }),
+        "the original middle product preserves its own outbound leaf import"
+    );
     let restored = ExecutableUnit::from_portable_envelope(&envelope).unwrap();
     assert_eq!(
         restored
@@ -88,6 +105,34 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
             .unwrap(),
         envelope
     );
+    for mutation in 0..3 {
+        let mut changed = envelope.clone();
+        let position = static_section(&changed.manifest).unwrap();
+        if mutation == 0 {
+            changed.manifest.optional_sections.remove(position);
+        } else {
+            let mut imports = runmat_execution::executable::decode_static_imports(
+                &changed.manifest.optional_sections[position],
+            )
+            .unwrap();
+            if mutation == 1 {
+                imports[0].target_content = runmat_execution::executable::SelectedUnitContentDigest(
+                    runmat_execution::Digest::sha256(b"substituted original content"),
+                );
+            } else {
+                imports[0].target_body = runmat_execution::executable::SelectedBodySemanticDigest(
+                    runmat_execution::Digest::sha256(b"substituted original body"),
+                );
+            }
+            changed.manifest.optional_sections[position] =
+                runmat_execution::executable::static_import_section(imports).unwrap();
+        }
+        changed.validate().unwrap();
+        assert!(
+            ExecutableUnit::from_portable_envelope(&changed).is_err(),
+            "original dependency inventory does not authorize missing or substituted site seals"
+        );
+    }
     let incomplete = runmat_execution::ExecutableUnitEnvelope::new(
         envelope.manifest.clone(),
         envelope.payloads.clone(),

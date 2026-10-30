@@ -452,11 +452,15 @@ fn fzero_multi_output_four_includes_output_struct() {
                         Some(Value::Num(_))
                     ));
                     match output.fields.get("algorithm") {
-                        Some(Value::String(text)) => assert!(text.contains("bisection")),
+                        Some(Value::String(runmat_value::StringElement::Text(text))) => {
+                            assert!(text.contains("bisection"))
+                        }
                         other => panic!("unexpected algorithm field {other:?}"),
                     }
                     match output.fields.get("message") {
-                        Some(Value::String(text)) => assert!(text.contains("Zero found")),
+                        Some(Value::String(runmat_value::StringElement::Text(text))) => {
+                            assert!(text.contains("Zero found"))
+                        }
                         other => panic!("unexpected message field {other:?}"),
                     }
                 }

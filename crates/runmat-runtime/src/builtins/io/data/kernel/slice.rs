@@ -129,7 +129,7 @@ pub(in crate::builtins::io::data) fn parse_slice_spec(
             }
             Ok(ranges)
         }
-        Value::String(s) if s == ":" => Ok(shape
+        Value::String(runmat_value::StringElement::Text(s)) if s == ":" => Ok(shape
             .iter()
             .map(|extent| DimRange {
                 start: 0,
@@ -150,7 +150,7 @@ pub(in crate::builtins::io::data) fn parse_dim_range(
         return Ok(DimRange { start: 0, end: 0 });
     }
     match value {
-        Value::String(s) if s == ":" => Ok(DimRange {
+        Value::String(runmat_value::StringElement::Text(s)) if s == ":" => Ok(DimRange {
             start: 0,
             end: extent,
         }),

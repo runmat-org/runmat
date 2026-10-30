@@ -450,7 +450,7 @@ fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
 fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), String> {
     validate_fea_object(object)?;
     match object.properties().get("geometry_id") {
-        Some(Value::String(value)) if !value.is_empty() => {}
+        Some(Value::String(runmat_value::StringElement::Text(value))) if !value.is_empty() => {}
         _ => {
             return Err(format!(
                 "{}.geometry_id must be a non-empty string",
@@ -482,7 +482,7 @@ fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), Strin
 fn validate_bound_boundary_object(object: &ObjectInstance) -> Result<(), String> {
     validate_fea_object(object)?;
     match object.properties().get("geometry_id") {
-        Some(Value::String(value)) if !value.is_empty() => {}
+        Some(Value::String(runmat_value::StringElement::Text(value))) if !value.is_empty() => {}
         _ => {
             return Err(format!(
                 "{}.geometry_id must be a non-empty string",
@@ -511,7 +511,7 @@ fn validate_bound_boundary_object(object: &ObjectInstance) -> Result<(), String>
 fn validate_bound_interface_object(object: &ObjectInstance) -> Result<(), String> {
     validate_fea_object(object)?;
     match object.properties().get("geometry_id") {
-        Some(Value::String(value)) if !value.is_empty() => {}
+        Some(Value::String(runmat_value::StringElement::Text(value))) if !value.is_empty() => {}
         _ => {
             return Err(format!(
                 "{}.geometry_id must be a non-empty string",

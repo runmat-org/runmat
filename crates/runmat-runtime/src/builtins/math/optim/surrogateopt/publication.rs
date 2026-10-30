@@ -97,7 +97,7 @@ pub(super) async fn finalize(
         );
         fields.insert(
             "message",
-            Value::String(crate::call::argument_text::copy_str(
+            Value::string(crate::call::argument_text::copy_str(
                 message(stop, status),
                 c.runtime(),
             )?),

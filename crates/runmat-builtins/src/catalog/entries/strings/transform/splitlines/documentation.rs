@@ -20,7 +20,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Current implementation frontier",
         paragraphs: &[
             "Character arrays with non-singleton dimensions beyond two, including those inside cells and delimiter controls, reject before row extraction. String and cell array geometry follows the per-entry behavior described here.",
-            "CRLF and CR normalize to LF. Scalar text returns a string column; nonscalar text returns a cell array whose elements are string columns, preserving text-element geometry. This current container behavior and missing-sentinel treatment are not claimed as independently verified MATLAB parity. Managed text allocation remains incomplete.",
+            "CRLF and CR normalize to LF. Scalar text returns a string column; nonscalar text returns a cell array whose elements are string columns, preserving text-element geometry. Typed missing strings remain missing; literal `<missing>` text is ordinary text. This container behavior and missing-value policy are not claimed as independently verified MATLAB parity. Managed text allocation remains incomplete.",
         ],
     },
     BuiltinDocumentationSection {

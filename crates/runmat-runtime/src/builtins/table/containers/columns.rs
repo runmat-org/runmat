@@ -121,7 +121,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                     data.push(array.data()[row + col * rows].clone());
                 }
                 out.push(Value::StringArray(
-                    StringArray::from_texts_unbounded(data, vec![rows, 1])
+                    StringArray::from_elements_unbounded(data, vec![rows, 1])
                         .map_err(invalid_variable)?,
                 ));
             }

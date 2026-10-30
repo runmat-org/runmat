@@ -204,41 +204,49 @@ fn numeric_range(value: &Value, name: &str) -> BuiltinResult<(f64, f64)> {
 }
 
 fn categorical_range(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
-    let categories =
-        match value {
-            Value::String(text) => vec![text.as_str().to_owned()],
-            Value::StringArray(array) => array
-                .data()
-                .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
-            Value::CharArray(chars) if chars.rows == 1 => {
-                vec![crate::builtins::stats::decode_utf16_with_error(
-                    chars.data(),
-                    || {
-                        bayesopt_error(
-                    format!("bayesopt: categorical Range for '{name}' must be valid UTF-16 text"),
-                    &ERROR_INVALID_ARGUMENT,
-                )
-                    },
-                )?]
+    let categories = match value {
+        Value::String(runmat_value::StringElement::Text(text)) => vec![text.as_str().to_owned()],
+        Value::StringArray(array) => array
+            .data()
+            .iter()
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    bayesopt_error(
+                        format!("bayesopt: categorical Range for '{name}' must be nonmissing text"),
+                        &ERROR_INVALID_ARGUMENT,
+                    )
+                })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?,
+        Value::CharArray(chars) if chars.rows == 1 => {
+            vec![crate::builtins::stats::decode_utf16_with_error(
+                chars.data(),
+                || {
+                    bayesopt_error(
+                        format!(
+                            "bayesopt: categorical Range for '{name}' must be valid UTF-16 text"
+                        ),
+                        &ERROR_INVALID_ARGUMENT,
+                    )
+                },
+            )?]
+        }
+        Value::Cell(cell) => {
+            let mut out = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
+                out.push(value_to_text(value, "Range")?.into_owned());
             }
-            Value::Cell(cell) => {
-                let mut out = Vec::with_capacity(cell.data().len());
-                for value in cell.data() {
-                    out.push(value_to_text(value, "Range")?.into_owned());
-                }
-                out
-            }
-            other => {
-                return Err(bayesopt_error(
-                    format!(
+            out
+        }
+        other => {
+            return Err(bayesopt_error(
+                format!(
                 "bayesopt: categorical Range for '{name}' must contain text values, got {other:?}"
             ),
-                    &ERROR_INVALID_ARGUMENT,
-                ))
-            }
-        };
+                &ERROR_INVALID_ARGUMENT,
+            ))
+        }
+    };
     if categories.is_empty() || categories.iter().any(|text| text.trim().is_empty()) {
         return Err(bayesopt_error(
             format!("bayesopt: categorical Range for '{name}' must contain nonempty text"),

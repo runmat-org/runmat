@@ -26,7 +26,7 @@ pub(super) async fn prepare(
         ScalarOptionFields::from_struct_for_solver(source, runmat_builtins::OptimSolver::Lsqnonlin);
     if let Some(value) = fields.exact(Field::SubproblemAlgorithm) {
         let text = match value {
-            Value::String(_) => true,
+            Value::String(runmat_value::StringElement::Text(_)) => true,
             Value::StringArray(value) => value.data().len() == 1,
             Value::CharArray(value) => value.rows == 1,
             _ => false,

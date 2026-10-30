@@ -45,7 +45,7 @@ pub(super) fn handles_value(handles: &[FigureHandle]) -> Value {
 
 pub(super) fn scalar_string(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
             ca.data(),
         )
@@ -56,7 +56,11 @@ pub(super) fn scalar_string(value: &Value, builtin: &'static str) -> BuiltinResu
                 source,
             )
         })?),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::CharArray(_) => Err(persistence_error(
             &ERROR_INVALID_ARGUMENT,
             builtin,

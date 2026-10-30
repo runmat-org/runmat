@@ -295,7 +295,9 @@ fn string_field(options: &StructValue, field: &str) -> BuiltinResult<Option<Stri
         return Ok(None);
     };
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 weboptions_error_with(
@@ -305,9 +307,13 @@ fn string_field(options: &StructValue, field: &str) -> BuiltinResult<Option<Stri
             })
             .map(Some)
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Ok(Some(sa.data()[0].as_str().to_owned()))
-        }
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(Some(
+            sa.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned(),
+        )),
         _ => Ok(None),
     }
 }
@@ -337,13 +343,17 @@ pub(super) fn expect_string_scalar(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 weboptions_error_with(error, context)
             })
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         _ => Err(weboptions_error_with(error, context)),
     }
 }

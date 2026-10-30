@@ -222,26 +222,32 @@ impl stream::Element<'_> {
                 }
             }
             Self::Numeric(value) => Value::Int(value.into_int_value().expect("integer scalar")),
-            Self::Chars(chars) => Value::String(match permit {
-                Some(permit) => Utf8Text::try_copy_utf16_exact_with(chars, permit, |_| {
-                    if runtime.is_some_and(RuntimeContext::is_cancelled) {
-                        Err(allocation(runtime, HostAllocationError::Cancelled))
-                    } else {
-                        Ok(())
-                    }
+            Self::Chars(chars) => Value::String(
+                (match permit {
+                    Some(permit) => Utf8Text::try_copy_utf16_exact_with(chars, permit, |_| {
+                        if runtime.is_some_and(RuntimeContext::is_cancelled) {
+                            Err(allocation(runtime, HostAllocationError::Cancelled))
+                        } else {
+                            Ok(())
+                        }
+                    })
+                    .map_err(|cause| utf16_error(runtime, cause))?,
+                    None => runmat_value::decode_utf16_code_units(chars)
+                        .map_err(utf16_decode_error)?
+                        .into(),
                 })
-                .map_err(|cause| utf16_error(runtime, cause))?,
-                None => runmat_value::decode_utf16_code_units(chars)
-                    .map_err(utf16_decode_error)?
-                    .into(),
-            }),
-            Self::Literal(text) => Value::String(match permit {
-                Some(permit) => Utf8Text::try_copy_str_exact_with(text, permit, |_| {
-                    Ok::<(), crate::RuntimeError>(())
+                .into(),
+            ),
+            Self::Literal(text) => Value::String(
+                (match permit {
+                    Some(permit) => Utf8Text::try_copy_str_exact_with(text, permit, |_| {
+                        Ok::<(), crate::RuntimeError>(())
+                    })
+                    .map_err(|cause| exact_error(runtime, cause))?,
+                    None => text.into(),
                 })
-                .map_err(|cause| exact_error(runtime, cause))?,
-                None => text.into(),
-            }),
+                .into(),
+            ),
         })
     }
 }

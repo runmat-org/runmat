@@ -74,7 +74,7 @@ pub fn summarize_value(i: usize, v: &Value) -> String {
         Value::Num(n) => format!("in#{i}:Num({n:.6})"),
         Value::Int(n) => format!("in#{i}:Int({n:?})"),
         Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
-        Value::String(s) => format!("in#{i}:String({})", s),
+        Value::String(s) => format!("in#{i}:String({})", s.display()),
         _ => format!("in#{i}:{}", value_kind(v)),
     }
 }

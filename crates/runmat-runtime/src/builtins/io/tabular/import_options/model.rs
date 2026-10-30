@@ -478,7 +478,7 @@ fn string_array_value<'a>(
             .map_err(|error| invalid(format!("import options: {error}")));
     }
     let runtime = runtime.expect("managed output has a selected context");
-    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(count)
+    let mut physical = ExactArrayStorage::<runmat_value::StringElement>::requested_bytes(count)
         .map_err(|source| allocation(runtime, source.into()))?;
     physical = physical
         .checked_add(
@@ -516,14 +516,14 @@ fn string_array_value<'a>(
     let data = ExactArrayStorage::try_initialize(count, &permit, |_| {
         receipt.checkpoint(runtime)?;
         let source = values.next().ok_or(HostAllocationError::StaleAuthority)?;
-        Utf8Text::try_copy_str_exact_with(source, &permit, |_| receipt.checkpoint(runtime)).map_err(
-            |error| match error {
+        Utf8Text::try_copy_str_exact_with(source, &permit, |_| receipt.checkpoint(runtime))
+            .map(runmat_value::StringElement::Text)
+            .map_err(|error| match error {
                 ExactArrayInitializationError::Allocation(source) => {
                     HostAllocationError::Numeric(source)
                 }
                 ExactArrayInitializationError::Element(source) => source,
-            },
-        )
+            })
     })
     .map_err(|error| match error {
         ExactArrayInitializationError::Allocation(source) => {
@@ -572,7 +572,7 @@ fn text_value(runtime: Option<&RuntimeContext>, text: &str) -> BuiltinResult<Val
     receipt
         .checkpoint(runtime)
         .map_err(|source| allocation(runtime, source))?;
-    Ok(Value::String(value))
+    Ok(Value::String(value.into()))
 }
 
 fn admitted_shape(runtime: &RuntimeContext, shape: &[usize]) -> BuiltinResult<SharedShape> {

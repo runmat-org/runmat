@@ -351,8 +351,12 @@ pub(super) fn string_from_value(
     builtin: &'static str,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.to_string()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_string()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.to_string()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => runmat_value::decode_utf16_code_units(ca.data())
             .map_err(|source| map_error(format!("containers.Map: {source}"), builtin)),
         _ => Err(map_error(context, builtin)),
@@ -365,15 +369,27 @@ pub(super) fn char_array_from_value(
 ) -> BuiltinResult<CharArray> {
     match value {
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.clone()),
-        Value::String(s) => {
+        Value::String(runmat_value::StringElement::Text(s)) => {
             let chars: Vec<char> = s.chars().collect();
             CharArray::from_unicode_scalars(chars, 1, s.encode_utf16().count())
                 .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            let chars: Vec<char> = sa.data()[0].chars().collect();
-            CharArray::from_unicode_scalars(chars, 1, sa.data()[0].encode_utf16().count())
-                .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            let chars: Vec<char> = sa.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .chars()
+                .collect();
+            CharArray::from_unicode_scalars(
+                chars,
+                1,
+                sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .encode_utf16()
+                    .count(),
+            )
+            .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))
         }
         _ => Err(map_error(
             "containers.Map: keys must be character vectors",

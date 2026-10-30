@@ -59,14 +59,21 @@ pub(super) fn scalar_text<'a>(
     label: &str,
 ) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(std::borrow::Cow::Borrowed(text.as_str()))
+        }
         Value::CharArray(chars) => Ok(std::borrow::Cow::Owned(
             crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
                 invalid(format!("lassoglm: {label} must be valid UTF-16 text"))
             })?,
         )),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(std::borrow::Cow::Borrowed(array.data()[0].as_str()))
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(std::borrow::Cow::Borrowed(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         other => Err(invalid(format!(
             "lassoglm: {label} must be a string scalar, got {other:?}"
@@ -123,7 +130,7 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
         Value::Bool(flag) => Ok(*flag),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
-        Value::String(text)
+        Value::String(runmat_value::StringElement::Text(text))
             if text.eq_ignore_ascii_case("true")
                 || text.eq_ignore_ascii_case("false")
                 || text.eq_ignore_ascii_case("on")
@@ -258,7 +265,9 @@ pub(super) fn nonnegative_weight_vector(value: &Value, label: &str) -> BuiltinRe
 
 pub(super) fn parse_cv(value: &Value) -> BuiltinResult<CvSpec> {
     match value {
-        Value::String(text) if text.eq_ignore_ascii_case("resubstitution") => {
+        Value::String(runmat_value::StringElement::Text(text))
+            if text.eq_ignore_ascii_case("resubstitution") =>
+        {
             Ok(CvSpec::Resubstitution)
         }
         Value::CharArray(chars) => {
@@ -285,12 +294,12 @@ pub(super) fn parse_cv(value: &Value) -> BuiltinResult<CvSpec> {
 
 pub(super) fn string_list(value: &Value, label: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(vec![text.as_str().to_owned()]),
         Value::CharArray(chars) => Ok(vec![crate::builtins::stats::decode_utf16_with_error(
             chars.data(),
             || invalid(format!("lassoglm: {label} must contain valid UTF-16 text")),
         )?]),
-        Value::StringArray(array) => Ok(array.data().iter().map(|text| text.as_str().to_owned()).collect()),
+        Value::StringArray(array) => array.data().iter().map(|text| text.as_str().map(str::to_owned).ok_or_else(|| invalid(format!("lassoglm: {label} entries must be nonmissing text")))).collect(),
         Value::Cell(cell) => cell
             .data()
             .iter()

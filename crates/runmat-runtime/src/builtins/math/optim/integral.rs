@@ -391,8 +391,15 @@ fn admit_option_headers(
 
 fn option_name(value: &Value) -> BuiltinResult<IntegralOptionName> {
     let text = match value {
-        Value::String(s) => s.as_str(),
-        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str(),
+        Value::String(runmat_value::StringElement::Text(s)) => s.as_str(),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            sa.data()[0].as_str().ok_or_else(|| {
+                integral_error_with_detail(
+                    &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                    "option names must be nonmissing text",
+                )
+            })?
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             return decode_option_name(
                 &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {

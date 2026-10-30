@@ -1,7 +1,7 @@
 //! Count and construct the same UTF-8 stream without conversion temporaries.
 use std::fmt::{self, Write};
 
-use runmat_value::{exact_capacity_vec, ExactHostAllocationPermit, Utf8Text};
+use runmat_value::{exact_capacity_vec, ExactHostAllocationPermit, StringElement, Utf8Text};
 
 use super::{operand::Element, TextError};
 
@@ -37,7 +37,7 @@ fn write_pair(
 ) -> Result<(), TextError> {
     // Missing propagates; it is not literal text to append.
     if left.is_missing() || right.is_missing() {
-        output.write_str("<missing>")?;
+        return Ok(());
     } else {
         left.write(output)?;
         right.write(output)?;
@@ -55,7 +55,10 @@ pub(super) fn concatenate(
     left: &Element<'_>,
     right: &Element<'_>,
     permit: Option<&dyn ExactHostAllocationPermit>,
-) -> Result<Utf8Text, TextError> {
+) -> Result<StringElement, TextError> {
+    if left.is_missing() || right.is_missing() {
+        return Ok(StringElement::Missing);
+    }
     let length = byte_length(left, right)?;
     let bytes = exact_capacity_vec::<u8>(length).map_err(TextError::Allocation)?;
     let mut output = ExactText {
@@ -68,7 +71,8 @@ pub(super) fn concatenate(
     }
     match permit {
         Some(permit) => Utf8Text::try_adopt_string_exact(output.text, permit)
+            .map(StringElement::Text)
             .map_err(|error| TextError::Allocation(*error.source())),
-        None => Ok(Utf8Text::new(output.text)),
+        None => Ok(StringElement::text(output.text)),
     }
 }

@@ -247,7 +247,7 @@ enum MatrixData {
 impl MatrixData {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
-            Value::StringArray(sa) => {
+            Value::StringArray(sa) if sa.data().iter().all(|text| !text.is_missing()) => {
                 ensure_matrix_shape(&sa.shape, "string")?;
                 let (rows, cols) = if sa.shape.is_empty() {
                     (1, 1)
@@ -257,10 +257,10 @@ impl MatrixData {
                 Ok(MatrixData::Text {
                     rows,
                     cols,
-                    data: sa.data().iter().map(|text| text.as_str().to_owned()).collect(),
+                    data: sa.data().iter().map(|text| text.as_str().expect("checked nonmissing string").to_owned()).collect(),
                 })
             }
-            Value::String(s) => Ok(MatrixData::Text {
+            Value::String(runmat_value::StringElement::Text(s)) => Ok(MatrixData::Text {
                 rows: 1,
                 cols: 1,
                 data: vec![s.into_string_unbounded()],
@@ -333,7 +333,7 @@ enum MatrixCell<'a> {
 
 fn preflight_data(value: &Value) -> BuiltinResult<()> {
     match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(runmat_value::StringElement::Text(_)) => Ok(()),
         Value::Tensor(tensor) => ensure_matrix_shape(tensor.shape(), "numeric"),
         Value::LogicalArray(array) => ensure_matrix_shape(&array.shape, "logical"),
         Value::StringArray(array) => ensure_matrix_shape(&array.shape, "string"),

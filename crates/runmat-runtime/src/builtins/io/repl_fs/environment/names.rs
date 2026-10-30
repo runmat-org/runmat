@@ -56,15 +56,19 @@ impl EnvironmentNames {
                 rows: array.rows,
             }),
             Value::CharArray(_) => Ok(Self::CharacterRow(String::new())),
-            Value::String(value) => Ok(Self::StringScalar(value.as_str().to_owned())),
-            Value::StringArray(array) => Ok(Self::Strings {
-                names: array
-                    .data()
-                    .iter()
-                    .map(|text| text.as_str().to_owned())
-                    .collect(),
-                shape: array.shape.as_slice().to_vec(),
-            }),
+            Value::String(runmat_value::StringElement::Text(value)) => {
+                Ok(Self::StringScalar(value.as_str().to_owned()))
+            }
+            Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => {
+                Ok(Self::Strings {
+                    names: array
+                        .data()
+                        .iter()
+                        .map(|text| text.as_str().expect("checked nonmissing string").to_owned())
+                        .collect(),
+                    shape: array.shape.as_slice().to_vec(),
+                })
+            }
             Value::Cell(array) => Self::decode_cells(array),
             _ => Err(NameError::InvalidType),
         }
@@ -82,7 +86,7 @@ impl EnvironmentNames {
                     names.push(character_row(chars, 0)?);
                     kinds.push(CellNameKind::Character);
                 }
-                Value::String(text) => {
+                Value::String(runmat_value::StringElement::Text(text)) => {
                     names.push(text.as_str().to_owned());
                     kinds.push(CellNameKind::String);
                 }

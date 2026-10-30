@@ -453,7 +453,7 @@ impl MaterializedSelectors {
         RootedValues::try_initialize_in_context(self.dims, runtime, |dimension| {
             if self.colon_mask & (1_u32 << dimension) != 0 {
                 return runmat_runtime::call::argument_text::copy_str(":", Some(runtime))
-                    .map(Value::String)
+                    .map(|text| Value::String(text.into()))
                     .map_err(Into::into);
             }
             values.next().cloned().ok_or_else(|| {

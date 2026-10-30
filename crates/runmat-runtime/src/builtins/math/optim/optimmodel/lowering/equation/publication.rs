@@ -22,7 +22,7 @@ pub(in crate::builtins::math::optim::optimmodel) async fn publish(
                     super::super::publication::information::publish(&mut outcome.solver, policy, c)
                         .await?;
                 if outcome.nonroot {
-                    let message = Value::String(crate::call::argument_text::copy_str("The least-squares solver stopped at a nonzero equation residual; no equation solution was found.", c.runtime())?);
+                    let message = Value::string(crate::call::argument_text::copy_str("The least-squares solver stopped at a nonzero equation residual; no equation solution was found.", c.runtime())?);
                     let Value::Struct(fields) = info.value() else {
                         return Err(policy.invalid("equation solver information is not a record"));
                     };
@@ -165,10 +165,13 @@ fn information(
     let Value::Struct(fields) = value.value() else {
         return Err(policy.invalid("equation solver information is not a record"));
     };
-    let solver = Value::String(crate::call::argument_text::copy_str(solver, c.runtime())?);
+    let solver = Value::string(crate::call::argument_text::copy_str(solver, c.runtime())?);
     let derivative = derivative.map(Value::from);
     let criterion = criterion
-        .map(|text| crate::call::argument_text::copy_str(text, c.runtime()).map(Value::String))
+        .map(|text| {
+            crate::call::argument_text::copy_str(text, c.runtime())
+                .map(|text| Value::String(text.into()))
+        })
         .transpose()?;
     let time = Value::Num(
         timing

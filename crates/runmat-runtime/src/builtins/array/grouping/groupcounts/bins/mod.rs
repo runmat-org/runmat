@@ -42,12 +42,13 @@ pub(super) fn apply(
     let rows = assignments
         .into_iter()
         .map(|bin| {
-            bin.map(|index| labels[index].clone())
-                .unwrap_or_else(|| "<missing>".into())
+            bin.map(|index| runmat_value::StringElement::text(labels[index].clone()))
+                .unwrap_or(runmat_value::StringElement::Missing)
         })
         .collect();
     let values = Value::StringArray(
-        StringArray::new(rows, vec![columns[0].rows, 1]).map_err(error::internal)?,
+        StringArray::from_elements_unbounded(rows, vec![columns[0].rows, 1])
+            .map_err(error::internal)?,
     );
     columns[0]
         .replace_value(values)

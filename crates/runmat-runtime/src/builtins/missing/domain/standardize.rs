@@ -4,7 +4,7 @@ use super::*;
 
 pub(super) struct IndicatorSet {
     numeric: Vec<NumericIndicator>,
-    text: Vec<String>,
+    text: Vec<runmat_value::StringElement>,
 }
 
 pub(super) enum NumericIndicator {
@@ -37,11 +37,11 @@ pub(super) fn collect_indicators(value: &Value, set: &mut IndicatorSet) -> Built
     match value {
         Value::Num(n) => set.numeric.push(NumericIndicator::Floating(*n)),
         Value::Int(i) => set.numeric.push(NumericIndicator::Integer(i.clone())),
-        Value::String(s) => set.text.push(s.as_str().to_owned()),
-        Value::StringArray(array) => set
+        Value::String(s) => set.text.push(s.clone()),
+        Value::StringArray(array) => set.text.extend(array.data().iter().cloned()),
+        Value::CharArray(array) => set
             .text
-            .extend(array.data().iter().map(|text| text.as_str().to_owned())),
-        Value::CharArray(array) => set.text.extend(char_rows(array)?),
+            .extend(char_rows(array)?.into_iter().map(Into::into)),
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 for index in 0..storage.len() {
@@ -97,25 +97,21 @@ pub(super) fn standardize_missing_value(
                 .map_err(internal_error)
         }
         Value::String(mut s) => {
-            if indicators
-                .text
-                .iter()
-                .any(|marker| marker.as_str() == s.as_str())
-            {
-                s = MISSING_TEXT.into();
+            if indicators.text.iter().any(|marker| marker == &s) {
+                s = runmat_value::StringElement::Missing;
             }
-            Ok(Value::String(s))
+            Ok(Value::String(s.into()))
         }
         Value::StringArray(array) => {
             let output = selected_string_array(
                 runtime,
                 array,
-                TextLiteral::Utf8(MISSING_TEXT),
+                TextLiteral::Missing,
                 |array, index| {
                     if indicators
                         .text
                         .iter()
-                        .any(|marker| marker.as_str() == array.data()[index].as_str())
+                        .any(|marker| marker == &array.data()[index])
                     {
                         TextSelection::Literal
                     } else {
@@ -131,18 +127,23 @@ pub(super) fn standardize_missing_value(
         }
         Value::CharArray(array) => {
             let rows = char_rows(&array)?;
-            let data: Vec<String> = rows
+            let data: Vec<runmat_value::StringElement> = rows
                 .into_iter()
                 .map(|text| {
-                    if indicators.text.iter().any(|marker| marker == &text) {
-                        MISSING_TEXT.to_string()
+                    if indicators
+                        .text
+                        .iter()
+                        .any(|marker| marker.as_str() == Some(text.as_str()))
+                    {
+                        runmat_value::StringElement::Missing
                     } else {
-                        text
+                        text.into()
                     }
                 })
                 .collect();
             Ok(Value::StringArray(
-                StringArray::new(data, vec![array.rows, 1]).map_err(internal_error)?,
+                StringArray::from_elements_unbounded(data, vec![array.rows, 1])
+                    .map_err(internal_error)?,
             ))
         }
         Value::Object(mut object) if is_tabular_object(&object) => {

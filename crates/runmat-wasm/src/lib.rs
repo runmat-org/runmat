@@ -16,7 +16,7 @@ pub use api::execution_artifact::{
 #[cfg(not(feature = "graphics-replay"))]
 pub use api::execution_program::{execute_program_artifact, execute_worker_program};
 #[cfg(not(feature = "graphics-replay"))]
-pub use api::init::init_runmat;
+pub use api::init::{init_runmat, string_element_wire_schema_version};
 #[cfg(not(feature = "graphics-replay"))]
 pub use api::package::{
     build_git_snapshot, package_cache_acquire_lease, package_cache_gc, package_cache_release_lease,

@@ -4,7 +4,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "Accepts text inputs as string scalars/arrays, character scalars/arrays, or cell arrays of character vectors.",
         "Accepts patterns in the same formats. Either input may be scalar; when sizes differ MATLAB-style implicit expansion applies.",
-        "Missing string scalars (`<missing>`) never match any pattern.",
+        "Typed missing string scalars (displayed as `<missing>`) never match any pattern.",
         "Empty pattern values (`\"\"` or `''`) always match non-missing text elements.",
         "The optional `'IgnoreCase', true|false` name-value pair controls case sensitivity (default is case-sensitive).",
         "Returns a logical scalar when the broadcasted size is one element, otherwise returns a logical array with the broadcasted shape.",
@@ -66,7 +66,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
     BuiltinExample {
         id: "example-7", title: "Handle empty and missing text values",
-        program: "texts = [\"\", \"<missing>\"];\ntf = contains(texts, \"\")", display_output: Some("tf = 1×2 logical array\n   1   0"),
+        program: "texts = [\"\", string(missing)];\ntf = contains(texts, \"\")", display_output: Some("tf = 1×2 logical array\n   1   0"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

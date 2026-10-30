@@ -16,8 +16,10 @@ pub(super) enum AssigninSelector {
 
 pub(super) fn selector(value: &Value) -> Result<AssigninSelector, RuntimeError> {
     let selected = match value {
-        Value::String(text) => classify(text),
-        Value::StringArray(array) if array.data().len() == 1 => classify(&array.data()[0]),
+        Value::String(text) => classify(text.as_str().ok_or_else(argument_type_error)?),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            classify(array.data()[0].as_str().ok_or_else(argument_type_error)?)
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             if char_row_eq_ascii(chars.data(), b"caller") {
                 AssigninSelector::Caller
@@ -37,8 +39,10 @@ pub(super) fn name<'a>(
     character_row: &'a mut [u8; MATLAB_NAME_LENGTH_MAX],
 ) -> Result<&'a str, RuntimeError> {
     let name = match value {
-        Value::String(text) => text.as_str(),
-        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str(),
+        Value::String(text) => text.as_str().ok_or_else(invalid_name_error)?,
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].as_str().ok_or_else(invalid_name_error)?
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             if chars.data().len() > character_row.len() {
                 return Err(invalid_name_error());

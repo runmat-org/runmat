@@ -11,18 +11,20 @@ pub(in crate::builtins::table) fn table_member_get(
     }
     if object.is_class(TIMETABLE_CLASS) {
         let props = table_public_properties(object)?;
-        let time_dimension_name = props
-            .fields
-            .get(DIMENSION_NAMES)
-            .and_then(|value| match value {
-                Value::StringArray(array) => array.data().first().map(ToString::to_string),
-                Value::Cell(cell) => cell
-                    .data()
-                    .first()
-                    .and_then(|value| scalar_text(value, "dimension name").ok()),
-                _ => None,
-            })
-            .unwrap_or_else(|| "Time".to_string());
+        let time_dimension_name = match props.fields.get(DIMENSION_NAMES) {
+            Some(Value::StringArray(array)) => match array.data().first() {
+                Some(text) => text
+                    .as_str()
+                    .ok_or_else(|| invalid_variable("table: dimension name must not be missing"))?
+                    .to_owned(),
+                None => "Time".to_owned(),
+            },
+            Some(Value::Cell(cell)) => match cell.data().first() {
+                Some(value) => scalar_text(value, "dimension name")?,
+                None => "Time".to_owned(),
+            },
+            _ => "Time".to_owned(),
+        };
         if name == ROW_TIMES || name == time_dimension_name {
             if let Some(row_times) = props.fields.get(ROW_TIMES).cloned() {
                 return Ok(row_times);

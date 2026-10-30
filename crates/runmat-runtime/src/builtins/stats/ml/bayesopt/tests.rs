@@ -235,7 +235,10 @@ fn table_string_arg(args: &[Value], name: &str) -> String {
     let Value::StringArray(array) = vars.fields.get(name).unwrap() else {
         panic!("expected string column");
     };
-    array.data()[0].to_string()
+    array.data()[0]
+        .as_str()
+        .expect("fixture requires a present string parameter")
+        .to_owned()
 }
 
 #[test]

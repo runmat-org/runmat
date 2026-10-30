@@ -99,7 +99,7 @@ pub(super) fn single_subscript_count(
     selector_count: usize,
 ) -> crate::BuiltinResult<usize> {
     match subscript {
-        Value::String(value) if value.trim() == ":" => {
+        Value::String(runmat_value::StringElement::Text(value)) if value.trim() == ":" => {
             target_colon_extent(target, dim, selector_count)
         }
         Value::CharArray(chars) => {
@@ -137,7 +137,12 @@ pub(super) fn single_subscript_count(
                 ))
             }
         }
-        Value::StringArray(array) if array.data().len() == 1 && array.data()[0].trim() == ":" => {
+        Value::StringArray(array)
+            if array.data().len() == 1
+                && array.data()[0]
+                    .as_str()
+                    .is_some_and(|text| text.trim() == ":") =>
+        {
             target_colon_extent(target, dim, selector_count)
         }
         Value::Bool(flag) => Ok(usize::from(*flag)),

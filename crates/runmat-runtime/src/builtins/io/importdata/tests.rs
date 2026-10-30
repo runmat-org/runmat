@@ -62,7 +62,9 @@ fn cell_text(value: &Value, row: usize, col: usize) -> String {
     let Value::Cell(cell) = value else {
         panic!("expected cell");
     };
-    let Value::String(text) = cell.get(row, col).expect("cell value") else {
+    let Value::String(runmat_value::StringElement::Text(text)) =
+        cell.get(row, col).expect("cell value")
+    else {
         panic!("expected string cell");
     };
     text.to_string()

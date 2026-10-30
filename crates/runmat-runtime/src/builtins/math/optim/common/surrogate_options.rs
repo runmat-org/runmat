@@ -82,7 +82,7 @@ pub(crate) fn default_value(
     };
     if let Some(name) = name {
         return crate::call::argument_text::copy_str(name, runtime)
-            .map(Value::String)
+            .map(|text| Value::String(text.into()))
             .map(Some);
     }
     if matches!(

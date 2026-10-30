@@ -6,8 +6,7 @@ use runmat_value::{CharArray, StringArray, Value};
 
 use crate::builtins::strings::common::text_input_admission;
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
-    scalar_text_input,
+    char_row_to_string_slice, contains_numeric_or_resident_text_input, scalar_text_input,
 };
 use crate::builtins::strings::text_analytics::documents::{
     tokenized_document_language, transform_tokenized_document, DocumentTokenType,
@@ -201,16 +200,16 @@ fn normalize_words_value(
     match value {
         Value::String(text) => {
             options.validate_standalone()?;
-            Ok(Value::string(normalize_word_or_missing(&text, options)?))
+            Ok(Value::string(normalize_element(&text, options)?))
         }
         Value::StringArray(array) => {
             options.validate_standalone()?;
             let data = array
                 .data()
                 .iter()
-                .map(|text| normalize_word_or_missing(text, options))
+                .map(|text| normalize_element(text, options))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            StringArray::new(data, array.shape().to_vec())
+            StringArray::from_elements_unbounded(data, array.shape().to_vec())
                 .map(Value::StringArray)
                 .map_err(|err| normalize_error(format!("normalizeWords: {err}")))
         }
@@ -276,10 +275,10 @@ fn normalize_tokenized_document(
 
 fn normalize_cell_item(value: &Value, options: NormalizeOptions) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::string(normalize_word_or_missing(text, options)?)),
+        Value::String(text) => Ok(Value::string(normalize_element(text, options)?)),
         Value::StringArray(array) if array.data().len() == 1 => Ok(Value::StringArray(
-            StringArray::new(
-                vec![normalize_word_or_missing(&array.data()[0], options)?],
+            StringArray::from_elements_unbounded(
+                vec![normalize_element(&array.data()[0], options)?],
                 array.shape().to_vec(),
             )
             .map_err(|err| normalize_error(format!("normalizeWords: {err}")))?,
@@ -302,9 +301,6 @@ fn normalize_cell_item(value: &Value, options: NormalizeOptions) -> BuiltinResul
 }
 
 fn normalize_word_or_missing(text: &str, options: NormalizeOptions) -> BuiltinResult<String> {
-    if is_missing_string(text) {
-        return Ok(text.to_string());
-    }
     let trimmed = text.trim();
     if trimmed.split_whitespace().nth(1).is_some() {
         return Err(normalize_error(format!(
@@ -887,5 +883,17 @@ mod tests {
         let err = run(vec![Value::String("two words".to_string().into())])
             .expect_err("expected single word error");
         assert!(err.to_string().contains("single word"));
+    }
+}
+
+fn normalize_element(
+    text: &runmat_value::StringElement,
+    options: NormalizeOptions,
+) -> BuiltinResult<runmat_value::StringElement> {
+    match text.as_str() {
+        Some(text) => {
+            normalize_word_or_missing(text, options).map(runmat_value::StringElement::text)
+        }
+        None => Ok(runmat_value::StringElement::Missing),
     }
 }

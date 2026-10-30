@@ -918,9 +918,18 @@ impl SortArgs {
                         }
                         let raw = &rest[i];
                         let value = match raw {
-                            Value::String(s) => std::borrow::Cow::Borrowed(s.as_str()),
+                            Value::String(runmat_value::StringElement::Text(s)) => {
+                                std::borrow::Cow::Borrowed(s.as_str())
+                            }
                             Value::StringArray(sa) if sa.data().len() == 1 => {
-                                std::borrow::Cow::Borrowed(sa.data()[0].as_str())
+                                std::borrow::Cow::Borrowed(sa.data()[0].as_str().ok_or_else(
+                                    || {
+                                        sort_error(
+                                            &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
+                                            SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING.message,
+                                        )
+                                    },
+                                )?)
                             }
                             Value::CharArray(ca) if ca.rows == 1 => std::borrow::Cow::Owned(
                                 runmat_value::decode_utf16_code_units(ca.data()).map_err(

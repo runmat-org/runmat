@@ -1616,7 +1616,7 @@ fn is_empty_placeholder_value(value: &Value) -> bool {
         Value::StringArray(sa) => sa.data().is_empty(),
         Value::CharArray(ca) => ca.data().is_empty(),
         Value::Cell(cell) => cell.data().is_empty(),
-        Value::String(s) => s.is_empty(),
+        Value::String(_) => false,
         _ => false,
     }
 }

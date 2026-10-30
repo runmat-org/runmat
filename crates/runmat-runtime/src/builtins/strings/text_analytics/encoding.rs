@@ -317,8 +317,8 @@ pub(in crate::builtins::strings::text_analytics) fn word_encoding_from_object(
         Some(Value::StringArray(array)) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect(),
+            .map(|text| required_word_text(text, fn_name).map(str::to_owned))
+            .collect::<BuiltinResult<Vec<_>>>()?,
         other => {
             return Err(encoding_error(
                 fn_name,
@@ -627,11 +627,11 @@ struct WordInput {
 fn word_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<WordInput> {
     match value {
         Value::String(text) => Ok(WordInput {
-            words: vec![text.as_str().to_owned()],
+            words: vec![required_word_text(text, fn_name)?.to_owned()],
             shape: vec![1, 1],
         }),
         Value::StringArray(array) => Ok(WordInput {
-            words: array.data().iter().map(|text| text.as_str().to_owned()).collect(),
+            words: array.data().iter().map(|text| required_word_text(text, fn_name).map(str::to_owned)).collect::<BuiltinResult<Vec<_>>>()?,
             shape: array.shape.to_vec(),
         }),
         Value::CharArray(array) if array.rows <= 1 => Ok(WordInput {
@@ -1359,4 +1359,12 @@ mod tests {
         assert_eq!(mask.shape, vec![1, 2]);
         assert_eq!(mask.data, vec![1, 0]);
     }
+}
+
+fn required_word_text<'a>(
+    text: &'a runmat_value::StringElement,
+    fn_name: &str,
+) -> BuiltinResult<&'a str> {
+    text.as_str()
+        .ok_or_else(|| encoding_error(fn_name, format!("{fn_name}: word text must not be missing")))
 }

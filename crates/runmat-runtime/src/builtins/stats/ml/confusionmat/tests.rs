@@ -391,8 +391,13 @@ fn honors_explicit_order_and_ignores_missing_labels() {
 #[test]
 fn supports_string_and_cell_text_labels() {
     let group = Value::StringArray(
-        StringArray::new(
-            vec!["dog".into(), "cat".into(), "dog".into(), "<missing>".into()],
+        StringArray::from_elements_unbounded(
+            vec![
+                "dog".into(),
+                "cat".into(),
+                "dog".into(),
+                runmat_value::StringElement::Missing,
+            ],
             vec![4, 1],
         )
         .unwrap(),

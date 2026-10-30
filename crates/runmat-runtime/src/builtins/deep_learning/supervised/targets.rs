@@ -128,7 +128,7 @@ pub(super) fn label_strings(
             }
             Ok(Some(labels))
         }
-        Value::String(text) => Ok(Some(vec![text.to_string()])),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(Some(vec![text.to_string()])),
         Value::CharArray(chars) if chars.rows == 1 => {
             Ok(Some(vec![runmat_value::decode_utf16_code_units(
                 chars.data(),
@@ -139,9 +139,12 @@ pub(super) fn label_strings(
                 error
             })?]))
         }
-        Value::StringArray(array) => {
-            Ok(Some(array.data().iter().map(ToString::to_string).collect()))
-        }
+        Value::StringArray(array) => array
+            .data()
+            .iter()
+            .map(|text| scalar_text(&Value::String(text.clone()), function))
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(Some),
         Value::Cell(cell) => cell
             .data()
             .iter()
@@ -170,7 +173,10 @@ pub(super) fn label_strings(
                     )
                 })?;
                 let index = categorical_index(code, categories.data().len(), function)?;
-                labels.push(categories.data()[index].to_string());
+                labels.push(scalar_text(
+                    &Value::String(categories.data()[index].clone()),
+                    function,
+                )?);
             }
             Ok(Some(labels))
         }

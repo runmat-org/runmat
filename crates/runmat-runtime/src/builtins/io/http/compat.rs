@@ -63,7 +63,7 @@ async fn gather_args(
 
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
                 compat_error(
@@ -72,8 +72,12 @@ fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
                 )
             })
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         _ => Err(compat_error(
             name,
@@ -111,14 +115,22 @@ fn url_text_input(
     failure: impl FnOnce() -> RuntimeError,
 ) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
         Value::CharArray(array)
             if array.rows == 1 && array.shape.iter().skip(2).all(|extent| *extent == 1) =>
         {
             crate::builtins::io::utf16::decode_utf16_with_error(array.data(), failure).map(Some)
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
         }
         _ => Ok(None),
     }

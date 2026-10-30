@@ -9,6 +9,7 @@ pub enum ValidationAtom {
     ComplexNumber(f64, f64),
     ComplexInteger(IntValue, IntValue),
     Text(String),
+    MissingString,
     Bool(bool),
 }
 

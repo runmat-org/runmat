@@ -111,7 +111,8 @@ fn selected_openfig(
 ) -> crate::builtin::RuntimeBuiltinFuture {
     assert_eq!(invocation.requested_outputs, Some(1));
     assert!(invocation.context.is_some());
-    let Some(Value::String(path)) = invocation.args.get(0) else {
+    let Some(Value::String(runmat_value::StringElement::Text(path))) = invocation.args.get(0)
+    else {
         panic!("openfig must receive one resolved path");
     };
     assert_eq!(invocation.args.len(), 1);
@@ -333,7 +334,7 @@ fn open_calls_custom_extension_handler() {
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |_function, args, requested_outputs| {
             assert_eq!(requested_outputs, 1);
-            let Value::String(path) = &args[0] else {
+            let Value::String(runmat_value::StringElement::Text(path)) = &args[0] else {
                 panic!("expected handler path argument");
             };
             *seen_for_resolver.lock().unwrap() = path.to_string();
@@ -371,7 +372,7 @@ fn open_resolves_custom_extension_file_on_current_path() {
         .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |_function, args, _requested_outputs| {
-            let Value::String(path) = &args[0] else {
+            let Value::String(runmat_value::StringElement::Text(path)) = &args[0] else {
                 panic!("expected handler path argument");
             };
             assert!(path.ends_with("events.log"));

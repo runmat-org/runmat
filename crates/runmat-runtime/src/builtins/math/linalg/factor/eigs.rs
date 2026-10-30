@@ -1018,8 +1018,10 @@ fn text_value_in_context(
     value: &Value,
 ) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
     match value {
-        Value::String(text) => Ok(Some(text.clone())),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(Some(array.data()[0].clone())),
+        Value::String(text) => Ok(text.text_ref().cloned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].text_ref().cloned())
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             crate::call::argument_text::copy_chars(chars.data(), runtime)
                 .map(Some)

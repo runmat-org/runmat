@@ -1,34 +1,28 @@
-use super::super::metadata::MISSING_TEXT;
 use super::super::numeric::is_missing_text;
 use super::super::text_output::TextSelection;
 use super::lines::FillLines;
 use super::Neighbor;
-use runmat_value::StringArray;
+use runmat_value::{StringArray, StringElement};
 
-pub(super) fn fill_neighbor_text<T>(data: &mut [T], lines: &FillLines, dir: Neighbor)
-where
-    T: Clone + AsRef<str> + From<&'static str>,
-{
+pub(super) fn fill_neighbor_text(data: &mut [StringElement], lines: &FillLines, dir: Neighbor) {
     for line in lines.iter() {
         fill_line_text(data, line.start, line.length, line.stride, dir);
     }
 }
 
-pub(super) fn fill_line_text<T>(
-    data: &mut [T],
+pub(super) fn fill_line_text(
+    data: &mut [StringElement],
     start: usize,
     len: usize,
     step: usize,
     dir: Neighbor,
-) where
-    T: Clone + AsRef<str> + From<&'static str>,
-{
+) {
     match dir {
         Neighbor::Previous => {
-            let mut last: Option<T> = None;
+            let mut last: Option<StringElement> = None;
             for i in 0..len {
                 let idx = start + i * step;
-                if is_missing_text(data[idx].as_ref()) {
+                if is_missing_text(&data[idx]) {
                     if let Some(value) = &last {
                         data[idx] = value.clone();
                     }
@@ -38,10 +32,10 @@ pub(super) fn fill_line_text<T>(
             }
         }
         Neighbor::Next => {
-            let mut next: Option<T> = None;
+            let mut next: Option<StringElement> = None;
             for i in (0..len).rev() {
                 let idx = start + i * step;
-                if is_missing_text(data[idx].as_ref()) {
+                if is_missing_text(&data[idx]) {
                     if let Some(value) = &next {
                         data[idx] = value.clone();
                     }
@@ -53,26 +47,23 @@ pub(super) fn fill_line_text<T>(
     }
 }
 
-pub(super) fn fill_nearest_text<T>(data: &mut [T], lines: &FillLines)
-where
-    T: Clone + AsRef<str> + From<&'static str>,
-{
+pub(super) fn fill_nearest_text(data: &mut [StringElement], lines: &FillLines) {
     for line in lines.iter() {
         fill_nearest_line_text(data, line.start, line.length, line.stride);
     }
 }
 
-pub(super) fn fill_nearest_line_text<T>(data: &mut [T], start: usize, len: usize, step: usize)
-where
-    T: Clone + AsRef<str> + From<&'static str>,
-{
+pub(super) fn fill_nearest_line_text(
+    data: &mut [StringElement],
+    start: usize,
+    len: usize,
+    step: usize,
+) {
     let mut runs = super::runs::MissingRuns::new(len);
-    while let Some(run) =
-        runs.next(|position| is_missing_text(data[start + position * step].as_ref()))
-    {
+    while let Some(run) = runs.next(|position| is_missing_text(&data[start + position * step])) {
         for position in run.start..run.end {
             data[start + position * step] = run.nearest_source(position).map_or_else(
-                || T::from(MISSING_TEXT),
+                || StringElement::Missing,
                 |source| data[start + source * step].clone(),
             );
         }
@@ -102,7 +93,7 @@ pub(super) fn fill_selection_map(
                     if position % 4096 == 0 {
                         checkpoint(index)?;
                     }
-                    if is_missing_text(input.data()[index].as_str()) {
+                    if is_missing_text(&input.data()[index]) {
                         destinations[index] = usize::MAX;
                     }
                 }
@@ -120,7 +111,7 @@ pub(super) fn fill_selection_map(
                     if ordinal % 4096 == 0 {
                         checkpoint(index)?;
                     }
-                    if is_missing_text(input.data()[index].as_str()) {
+                    if is_missing_text(&input.data()[index]) {
                         if let Some(source) = source {
                             destinations[index] = source;
                         }
@@ -136,7 +127,7 @@ pub(super) fn fill_selection_map(
                     if position % 4096 == 0 {
                         checkpoint(index)?;
                     }
-                    if is_missing_text(input.data()[index].as_str()) {
+                    if is_missing_text(&input.data()[index]) {
                         destinations[index] = previous.unwrap_or(usize::MAX);
                     } else {
                         previous = Some(index);
@@ -149,7 +140,7 @@ pub(super) fn fill_selection_map(
                     if ordinal % 4096 == 0 {
                         checkpoint(index)?;
                     }
-                    if is_missing_text(input.data()[index].as_str()) {
+                    if is_missing_text(&input.data()[index]) {
                         if let Some(next_index) = next {
                             let previous_distance = if destinations[index] == usize::MAX {
                                 usize::MAX
@@ -195,16 +186,16 @@ mod tests {
     fn nearest_matches_original_neighbor_oracle_for_all_eight_entry_patterns() {
         for pattern in 0..256u16 {
             for step in [1, 2] {
-                let original: Vec<String> = (0..8)
+                let original: Vec<StringElement> = (0..8)
                     .map(|index| {
                         if pattern & (1 << index) == 0 {
-                            format!("value-{index}")
+                            format!("value-{index}").into()
                         } else {
-                            MISSING_TEXT.to_ascii_uppercase()
+                            StringElement::Missing
                         }
                     })
                     .collect();
-                let mut data = vec!["other-line".to_owned(); 8 * step + 1];
+                let mut data = vec![StringElement::text("other-line"); 8 * step + 1];
                 for (index, value) in original.iter().enumerate() {
                     data[1 + index * step] = value.clone();
                 }
@@ -218,7 +209,7 @@ mod tests {
                             .enumerate()
                             .filter(|(_, value)| !is_missing_text(value))
                             .min_by_key(|(source, _)| (index.abs_diff(*source), *source))
-                            .map_or_else(|| MISSING_TEXT.to_owned(), |(_, value)| value.clone())
+                            .map_or_else(|| StringElement::Missing, |(_, value)| value.clone())
                     };
                     assert_eq!(
                         data[1 + index * step],

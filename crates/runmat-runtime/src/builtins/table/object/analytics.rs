@@ -131,13 +131,11 @@ pub(in crate::builtins::table) fn compare_table_cells(
             let av = array
                 .data()
                 .get(a)
-                .map(|text| text.as_str())
-                .unwrap_or_default();
+                .ok_or_else(|| invalid_index("table: string row out of bounds"))?;
             let bv = array
                 .data()
                 .get(b)
-                .map(|text| text.as_str())
-                .unwrap_or_default();
+                .ok_or_else(|| invalid_index("table: string row out of bounds"))?;
             Ok(av.cmp(bv))
         }
         Value::LogicalArray(array) => {
@@ -151,6 +149,14 @@ pub(in crate::builtins::table) fn compare_table_cells(
                 .unwrap_or(f64::NAN)
                 .partial_cmp(&double_value_at(&tensor, b).unwrap_or(f64::NAN))
                 .unwrap_or(Ordering::Greater))
+        }
+        Value::Cell(cell) => {
+            let left = cell.get(a, 0).map_err(invalid_index)?;
+            let right = cell.get(b, 0).map_err(invalid_index)?;
+            match (&left, &right) {
+                (Value::String(left), Value::String(right)) => Ok(left.cmp(right)),
+                _ => Ok(cell_key_string(value, a)?.cmp(&cell_key_string(value, b)?)),
+            }
         }
         other => Ok(cell_key_string(other, a)?.cmp(&cell_key_string(other, b)?)),
     }
@@ -247,6 +253,19 @@ pub(in crate::builtins::table) fn cell_group_atom(
     row: usize,
 ) -> BuiltinResult<GroupAtom> {
     Ok(match value {
+        Value::String(text) => match text.as_str() {
+            Some(text) => GroupAtom::Text(text.to_owned()),
+            None => GroupAtom::Missing,
+        },
+        Value::Num(value) => number_group_atom(*value),
+        Value::Int(value) => GroupAtom::Integer(value.clone()),
+        Value::Bool(value) => GroupAtom::Logical(*value),
+        Value::Cell(cell) => cell_group_atom(
+            &cell
+                .get(row, 0)
+                .map_err(|source| invalid_index(source.to_string()))?,
+            0,
+        )?,
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 return Ok(storage
@@ -262,8 +281,10 @@ pub(in crate::builtins::table) fn cell_group_atom(
         Value::StringArray(array) => array
             .data()
             .get(row)
-            .map(ToString::to_string)
-            .map(text_group_atom)
+            .map(|text| match text.as_str() {
+                Some(text) => GroupAtom::Text(text.to_owned()),
+                None => GroupAtom::Missing,
+            })
             .unwrap_or(GroupAtom::Missing),
         Value::LogicalArray(array) => array
             .data
@@ -634,7 +655,12 @@ pub(in crate::builtins::table) fn cell_key_string(
         Value::StringArray(array) => array
             .data()
             .get(row)
-            .map(ToString::to_string)
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| invalid_variable("table: a missing string has no textual key"))
+            })
+            .transpose()?
             .unwrap_or_default(),
         Value::LogicalArray(array) => array
             .data

@@ -10,6 +10,9 @@ use std::num::NonZeroUsize;
 #[path = "text_value/character.rs"]
 mod character;
 use character::ManagedCharacter;
+#[path = "text_value/strings.rs"]
+mod strings;
+use strings::Strings;
 
 pub(in crate::execution::value_codec::decode::machine) enum TextValueTask<'a> {
     String {
@@ -34,9 +37,13 @@ pub(in crate::execution::value_codec::decode::machine) enum TextValueTask<'a> {
     },
     StringArray {
         shape: ShapeCopy<'a>,
-        source: &'a [String],
-        values: Vec<String>,
+        source: &'a [runmat_execution::value::StringElement],
+        values: Vec<runmat_value::StringElement>,
         current: Option<TextCopy<'a>>,
+        path: ControlPath<'a>,
+    },
+    ManagedStrings {
+        owner: ControlBox<Strings<'a>>,
         path: ControlPath<'a>,
     },
 }
@@ -114,9 +121,14 @@ impl<'a> TextValueTask<'a> {
 
     pub(super) fn string_array(
         shape: &'a [u64],
-        source: &'a [String],
+        source: &'a [runmat_execution::value::StringElement],
         path: ControlPath<'a>,
+        runtime: Option<&'a RuntimeContext>,
     ) -> Result<Self, ValueCodecError> {
+        if let Some(owner) = Strings::new(shape, source, runtime, &path)? {
+            let owner = path.owner().boxed(owner, &path)?;
+            return Ok(Self::ManagedStrings { owner, path });
+        }
         Ok(Self::StringArray {
             shape: ShapeCopy::new(shape, path.try_clone()?),
             source,
@@ -165,6 +177,7 @@ impl<'a> TextValueTask<'a> {
                 Ok((completed.max(1), Some(Value::string(text))))
             }
             Self::ManagedCharacter { owner, path } => owner.advance(maximum_work, path),
+            Self::ManagedStrings { owner, path } => owner.advance(maximum_work, path),
             Self::Character {
                 shape,
                 source,
@@ -204,15 +217,19 @@ impl<'a> TextValueTask<'a> {
                     let shape = shape.take_finished();
                     let values = std::mem::take(values);
                     let value = Value::StringArray(
-                        StringArray::new(values, shape)
+                        StringArray::from_elements_unbounded(values, shape)
                             .map_err(|error| ValueCodecError::invalid(path, error))?,
                     );
                     return Ok((1, Some(value)));
                 }
-                let copy = current.get_or_insert_with(|| TextCopy::new(&source[values.len()]));
+                let Some(text) = source[values.len()].as_str() else {
+                    values.push(runmat_value::StringElement::Missing);
+                    return Ok((1, None));
+                };
+                let copy = current.get_or_insert_with(|| TextCopy::new(text));
                 let completed = copy.advance(maximum_work);
                 if copy.is_complete() {
-                    values.push(current.take().expect("active text copy").finish());
+                    values.push(current.take().expect("active text copy").finish().into());
                 }
                 Ok((completed, None))
             }
@@ -225,6 +242,7 @@ impl<'a> TextValueTask<'a> {
             | Self::ManagedString { path, .. }
             | Self::Character { path, .. }
             | Self::ManagedCharacter { path, .. }
+            | Self::ManagedStrings { path, .. }
             | Self::StringArray { path, .. } => path,
         }
     }

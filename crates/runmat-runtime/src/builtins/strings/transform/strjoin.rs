@@ -5,7 +5,7 @@ use runmat_builtins::{
     STRJOIN_ERROR_INVALID_DELIMITER, STRJOIN_ERROR_INVALID_INPUT, STRJOIN_ERROR_TOO_MANY_OUTPUTS,
     STRJOIN_ROWWISE_EXTENSION,
 };
-use runmat_value::{CharArray, StringArray, Value};
+use runmat_value::{CharArray, StringArray, StringElement, Value};
 use std::borrow::Cow;
 
 #[runmat_macros::runtime_builtin(
@@ -51,12 +51,12 @@ pub async fn strjoin_builtin(
         }
     }
     let (items, character_output) = match &input {
-        Value::String(text) => (vec![Cow::Borrowed(text.as_str())], false),
+        Value::String(text) => (vec![text.as_str().map(Cow::Borrowed)], false),
         Value::StringArray(array) if vector(&array.shape) => (
             array
                 .data()
                 .iter()
-                .map(|text| Cow::Borrowed(text.as_str()))
+                .map(|text| text.as_str().map(Cow::Borrowed))
                 .collect(),
             false,
         ),
@@ -66,7 +66,7 @@ pub async fn strjoin_builtin(
                 .iter()
                 .map(|item| match item {
                     Value::CharArray(chars) => char_text(chars, &STRJOIN_ERROR_INVALID_INPUT)?
-                        .map(Cow::Owned)
+                        .map(|text| Some(Cow::Owned(text)))
                         .ok_or_else(|| error(&STRJOIN_ERROR_INVALID_INPUT)),
                     _ => Err(error(&STRJOIN_ERROR_INVALID_INPUT)),
                 })
@@ -81,6 +81,9 @@ pub async fn strjoin_builtin(
         if index > 0 {
             joined.push_str(&delimiters[index - 1]);
         }
+        let Some(item) = item else {
+            return Ok(Value::String(StringElement::Missing));
+        };
         joined.push_str(item);
     }
     Ok(if character_output {
@@ -120,9 +123,9 @@ fn text_scalar<'a>(
     descriptor: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<Option<Cow<'a, str>>> {
     Ok(match value {
-        Value::String(text) => Some(Cow::Borrowed(text.as_str())),
+        Value::String(text) => text.as_str().map(Cow::Borrowed),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(Cow::Borrowed(array.data()[0].as_str()))
+            array.data()[0].as_str().map(Cow::Borrowed)
         }
         Value::CharArray(chars) => char_text(chars, descriptor)?.map(Cow::Owned),
         _ => None,
@@ -136,8 +139,12 @@ fn delimiters(value: &Value, count: usize) -> BuiltinResult<Vec<Cow<'_, str>>> {
         Value::StringArray(array) if vector(&array.shape) => array
             .data()
             .iter()
-            .map(|text| Cow::Borrowed(text.as_str()))
-            .collect(),
+            .map(|text| {
+                text.as_str()
+                    .map(Cow::Borrowed)
+                    .ok_or_else(|| error(&STRJOIN_ERROR_INVALID_DELIMITER))
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?,
         Value::Cell(cell) if vector(&cell.shape) => cell
             .data()
             .iter()
@@ -166,7 +173,7 @@ fn decode_error(
 }
 fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
     let array = match value {
-        Value::String(text) => StringArray::from_texts_unbounded(vec![text], vec![1, 1]),
+        Value::String(text) => StringArray::from_elements_unbounded(vec![text], vec![1, 1]),
         Value::StringArray(array) if matrix(&array.shape) => Ok(array),
         Value::CharArray(chars) if matrix(&chars.shape) => {
             let rows = (0..chars.rows)
@@ -189,16 +196,20 @@ fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
     } else {
         let joined = (0..rows)
             .map(|row| {
-                (0..cols)
+                let texts = (0..cols)
                     .map(|col| array.data()[row + col * rows].as_str())
-                    .collect::<Vec<_>>()
-                    .join(delimiter)
+                    .collect::<Option<Vec<_>>>();
+                match texts {
+                    Some(texts) => StringElement::text(texts.join(delimiter)),
+                    None => StringElement::Missing,
+                }
             })
             .collect();
         (joined, vec![rows, 1])
     };
     Ok(Value::StringArray(
-        StringArray::new(joined, shape).map_err(|_| error(&STRJOIN_ERROR_INVALID_INPUT))?,
+        StringArray::from_elements_unbounded(joined, shape)
+            .map_err(|_| error(&STRJOIN_ERROR_INVALID_INPUT))?,
     ))
 }
 

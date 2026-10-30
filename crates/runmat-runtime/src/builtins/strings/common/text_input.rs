@@ -43,9 +43,9 @@ pub(crate) fn scalar_text_input<'a>(
     admission_error: impl Fn(&RuntimeContext, HostAllocationError) -> RuntimeError,
 ) -> Result<Option<TextInput<'a>>, RuntimeError> {
     match value {
-        Value::String(text) => Ok(Some(TextInput::Borrowed(text.as_str()))),
+        Value::String(text) => Ok(text.as_str().map(TextInput::Borrowed)),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(TextInput::Borrowed(array.data()[0].as_str())))
+            Ok(array.data()[0].as_str().map(TextInput::Borrowed))
         }
         Value::CharArray(array) if array.rows == 0 => Ok(Some(TextInput::Borrowed(""))),
         Value::CharArray(array) if array.rows == 1 => {

@@ -85,7 +85,7 @@ fn gpu_info_returns_string() {
     let info = runmat_runtime::call_builtin("gpuInfo", &[]).unwrap();
     match info.value() {
         Value::String(s) => {
-            assert!(s.contains("GPU["));
+            assert!(s.as_str().is_some_and(|text| text.contains("GPU[")));
         }
         other => panic!("expected string from gpuInfo, got {other:?}"),
     }

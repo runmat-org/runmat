@@ -222,10 +222,19 @@ pub(super) fn begin_termination(
             // unreaped leader. Its PID is still pinned by our exit observation.
             // Proceed only to reaping/absence checks, never another signal;
             // surviving members still prevent a retirement certificate.
-            if error.raw_os_error() != Some(libc::ESRCH)
-                && !(unreaped_exit_observed && error.raw_os_error() == Some(libc::EPERM))
-            {
-                return Err(error);
+            match error.raw_os_error() {
+                Some(libc::ESRCH) => {}
+                Some(libc::EPERM) => {
+                    // The child can exit between the caller's state check and
+                    // this signal. Observe that exact child without reaping or
+                    // releasing its PID; no second group signal is issued.
+                    let terminal = unreaped_exit_observed
+                        || super::exit_observation::try_wait_unreaped(process_id)?.is_some();
+                    if !terminal {
+                        return Err(error);
+                    }
+                }
+                _ => return Err(error),
             }
         }
         Ok(())
@@ -452,4 +461,44 @@ fn unix_process_id(process_id: u32) -> std::io::Result<i32> {
                 "process identity is outside the positive native PID range",
             )
         })
+}
+
+#[cfg(all(
+    test,
+    any(target_os = "linux", target_os = "android", target_vendor = "apple")
+))]
+mod tests {
+    #[tokio::test]
+    async fn terminal_leader_can_retire_before_lifecycle_observes_its_exit() {
+        for (script, expected) in [
+            ("exit 0", (Some(0), None)),
+            ("exit 42", (Some(42), None)),
+            ("kill -TERM $$", (None, Some(libc::SIGTERM))),
+        ] {
+            let mut command = crate::HostCommand::new("/bin/sh");
+            command.arguments = vec!["-c".into(), script.into()];
+            let mut child = command.spawn().await.expect("owned child");
+            let id = child.id().expect("owned child identity");
+            // Leave ChildProcess's lifecycle Live while deterministically
+            // waiting for its terminal, still-unreaped OS child record.
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                super::super::exit_observation::wait_unreaped(Some(id)),
+            )
+            .await
+            .expect("child exits")
+            .expect("non-reaping observation");
+            child
+                .terminate_tree()
+                .await
+                .expect("owned group retirement");
+            let exit = child.wait().await.expect("retained original exit");
+            assert_eq!((exit.code, exit.signal), expected);
+            assert_eq!(unsafe { libc::kill(-(id as i32), 0) }, -1);
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::ESRCH)
+            );
+        }
+    }
 }

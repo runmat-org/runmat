@@ -191,7 +191,7 @@ pub(super) fn replace_or_append(entries: &mut Vec<(String, Value)>, field: Strin
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(s) => Ok(Some(s.as_str().to_owned())),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(Some(s.as_str().to_owned())),
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 matfile_error_with(
@@ -201,8 +201,14 @@ fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
             })
             .map(Some)
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
         }
         _ => Ok(None),
     }

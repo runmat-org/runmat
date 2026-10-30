@@ -143,7 +143,7 @@ fn vectorized_active_rows_and_two_argument_observers_leave_parallel_carrier_dorm
             } else {
                 assert_eq!(id, 19103);
                 assert_eq!(args.len(), 2);
-                let Value::String(phase) = &args[1] else {
+                let Value::String(runmat_value::StringElement::Text(phase)) = &args[1] else {
                     panic!("phase")
                 };
                 seen.lock().unwrap().push(phase.to_string());

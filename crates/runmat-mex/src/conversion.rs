@@ -177,25 +177,14 @@ pub(crate) fn value_to_mx_for_interface_in_context(
                 .map_err(MxConversionError::new)
         }
         Value::String(value) if interface == MxBoundaryInterface::CxxData => {
-            record_host_copy(HostCopyReason::CharacterEncoding, value.len());
-            MxArray::string(vec![value.as_str().to_owned()], vec![1, 1])
-                .map_err(MxConversionError::new)
+            MxArray::string(vec![value.clone()], vec![1, 1]).map_err(MxConversionError::new)
         }
-        Value::String(value) => string_to_mx(value),
+        Value::String(value) => string_to_mx(value.as_str().ok_or_else(|| {
+            MxConversionError::new("missing strings cannot cross the C Matrix character boundary")
+        })?),
         Value::StringArray(value) if interface == MxBoundaryInterface::CxxData => {
-            record_host_copy(
-                HostCopyReason::CharacterEncoding,
-                value.data().iter().map(|text| text.len()).sum(),
-            );
-            MxArray::string(
-                value
-                    .data()
-                    .iter()
-                    .map(|text| text.as_str().to_owned())
-                    .collect(),
-                value.shape.to_vec(),
-            )
-            .map_err(MxConversionError::new)
+            MxArray::string(value.data().iter().cloned().collect(), value.shape.to_vec())
+                .map_err(MxConversionError::new)
         }
         Value::CharArray(value) => char_to_mx(value),
         Value::Tensor(value) => {
@@ -297,16 +286,15 @@ pub(crate) fn value_from_mx_in_context(
         }
         MxArrayData::Char(values) => char_from_mx(values, value.shape()),
         MxArrayData::String(values) => {
-            record_host_copy(
-                HostCopyReason::CharacterEncoding,
-                values.iter().map(String::len).sum(),
-            );
             if values.len() == 1 {
-                Ok(Value::string(values[0].clone()))
+                Ok(Value::String(values[0].clone()))
             } else {
-                runmat_value::StringArray::new(values.clone(), value.shape().to_vec())
-                    .map(Value::StringArray)
-                    .map_err(MxConversionError::new)
+                runmat_value::StringArray::from_elements_unbounded(
+                    values.clone(),
+                    value.shape().to_vec(),
+                )
+                .map(Value::StringArray)
+                .map_err(MxConversionError::new)
             }
         }
         MxArrayData::Cell(values) => cell_from_mx(values, value.shape(), context),
@@ -918,6 +906,37 @@ fn value_kind(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_strings_round_trip_cxx_without_reconstructing_display_spelling() {
+        let elements = vec![
+            "<missing>".into(),
+            "<MISSING>".into(),
+            "".into(),
+            runmat_value::StringElement::Missing,
+        ];
+        for mode in [MxApiMode::SeparateComplex, MxApiMode::InterleavedComplex] {
+            let mut values: Vec<Value> = elements.iter().cloned().map(Value::String).collect();
+            values.push(Value::StringArray(
+                runmat_value::StringArray::from_elements_unbounded(elements.clone(), vec![2, 2])
+                    .unwrap(),
+            ));
+            for original in values {
+                let boundary = value_to_mx_for_interface_in_context(
+                    &original,
+                    mode,
+                    MxBoundaryInterface::CxxData,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(value_from_mx(&boundary).unwrap(), original);
+            }
+            assert!(
+                value_to_mx(&Value::String(runmat_value::StringElement::Missing), mode).is_err()
+            );
+            assert!(value_to_mx(&Value::String("<missing>".into()), mode).is_ok());
+        }
+    }
     use runmat_value::{IntValue, IntegerStorage, Utf16CodeUnit};
 
     #[test]

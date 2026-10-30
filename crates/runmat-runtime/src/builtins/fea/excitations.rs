@@ -718,7 +718,7 @@ fn excitation_methods(class_name: &str) -> HashMap<MethodName, RuntimeMethod> {
 
 fn validate_excitation_object(object: &ObjectInstance) -> Result<(), String> {
     crate::builtins::fea::object_projection::validate(object)?;
-    if !matches!(object.properties().get("geometry_id"), Some(Value::String(value)) if !value.is_empty())
+    if !matches!(object.properties().get("geometry_id"), Some(Value::String(runmat_value::StringElement::Text(value))) if !value.is_empty())
     {
         return Err(format!(
             "{}.geometry_id must be a non-empty string",
@@ -745,7 +745,7 @@ fn validate_excitation_object(object: &ObjectInstance) -> Result<(), String> {
 
 fn validate_case_object(object: &ObjectInstance) -> Result<(), String> {
     crate::builtins::fea::object_projection::validate(object)?;
-    if !matches!(object.properties().get("case_id"), Some(Value::String(value)) if !value.is_empty())
+    if !matches!(object.properties().get("case_id"), Some(Value::String(runmat_value::StringElement::Text(value))) if !value.is_empty())
         || !matches!(
             object.properties().get("action_ids"),
             Some(Value::StringArray(_))

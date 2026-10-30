@@ -322,7 +322,7 @@ pub fn datetime_display_text(value: &Value) -> BuiltinResult<Option<String>> {
         return Ok(None);
     };
     if array.data().len() == 1 {
-        return Ok(Some(array.data()[0].as_str().to_owned()));
+        return Ok(Some(array.data()[0].display().to_string()));
     }
 
     let rows = array.rows;
@@ -331,7 +331,7 @@ pub fn datetime_display_text(value: &Value) -> BuiltinResult<Option<String>> {
     for col in 0..cols {
         for row in 0..rows {
             let idx = row + col * rows;
-            widths[col] = widths[col].max(array.data()[idx].chars().count());
+            widths[col] = widths[col].max(array.data()[idx].display().to_string().chars().count());
         }
     }
 
@@ -343,8 +343,8 @@ pub fn datetime_display_text(value: &Value) -> BuiltinResult<Option<String>> {
                 line.push_str("  ");
             }
             let idx = row + col * rows;
-            let text = &array.data()[idx];
-            line.push_str(text);
+            let text = array.data()[idx].display().to_string();
+            line.push_str(&text);
             let padding = widths[col].saturating_sub(text.chars().count());
             if padding > 0 {
                 line.push_str(&" ".repeat(padding));

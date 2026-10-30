@@ -10,7 +10,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     decode_utf16_code_units, CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar,
-    SparseTensor, StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
+    SparseTensor, StringArray, StringElement, Tensor, Utf16CodeUnit, Value,
 };
 
 use crate::builtins::common::format::{complex_to_string, format_variadic};
@@ -234,8 +234,11 @@ fn text_has_format_placeholder(text: &str) -> bool {
 
 fn has_format_placeholders(value: &Value) -> bool {
     match value {
-        Value::String(s) => text_has_format_placeholder(s),
-        Value::StringArray(sa) => sa.data().iter().any(|s| text_has_format_placeholder(s)),
+        Value::String(s) => s.as_str().is_some_and(text_has_format_placeholder),
+        Value::StringArray(sa) => sa
+            .data()
+            .iter()
+            .any(|s| s.as_str().is_some_and(text_has_format_placeholder)),
         Value::CharArray(ca) => {
             for row in 0..ca.rows {
                 let Some(units) = ca.data().get(row * ca.cols..(row + 1) * ca.cols) else {
@@ -266,7 +269,7 @@ fn has_format_placeholders(value: &Value) -> bool {
 }
 
 pub(crate) struct FormatSpecData {
-    pub(crate) specs: runmat_value::ExactArrayStorage<Utf8Text>,
+    pub(crate) specs: runmat_value::ExactArrayStorage<StringElement>,
     pub(crate) shape: Vec<usize>,
 }
 
@@ -275,7 +278,7 @@ struct ArgumentData {
     shape: Vec<usize>,
 }
 
-fn move_string_arguments(data: runmat_value::ExactArrayStorage<Utf8Text>) -> Vec<Value> {
+fn move_string_arguments(data: runmat_value::ExactArrayStorage<StringElement>) -> Vec<Value> {
     match data.try_into_owned() {
         Ok(values) => values.into_iter().map(Value::String).collect(),
         Err(shared) => shared.iter().cloned().map(Value::String).collect(),
@@ -363,7 +366,9 @@ pub(crate) async fn format_from_spec(
     let mut output = Vec::with_capacity(target_len);
     for idx in 0..target_len {
         let spec_idx = if spec_len == 1 { 0 } else { idx };
-        let spec_str = &spec.specs[spec_idx];
+        let spec_str = spec.specs[spec_idx]
+            .as_str()
+            .ok_or_else(|| string_flow("string: formatSpec must not be missing"))?;
         let mut per_call = Vec::with_capacity(arguments.len());
         for arg in &arguments {
             let value =
@@ -710,7 +715,7 @@ async fn convert_to_string_array(
         return Ok(array);
     }
     match value {
-        Value::String(s) => StringArray::from_texts_unbounded(vec![s], vec![1, 1])
+        Value::String(s) => StringArray::from_elements_unbounded(vec![s], vec![1, 1])
             .map_err(|e| string_flow(format!("string: {e}"))),
         Value::StringArray(sa) => Ok(sa),
         Value::CharArray(ca) => char_array_to_string_array(ca, encoding),
@@ -766,16 +771,17 @@ async fn convert_to_string_array(
     }
 }
 
-fn string_scalar<S: Into<String>>(text: S) -> BuiltinResult<StringArray> {
-    StringArray::new(vec![text.into()], vec![1, 1]).map_err(|e| string_flow(format!("string: {e}")))
+fn string_scalar<S: Into<StringElement>>(text: S) -> BuiltinResult<StringArray> {
+    StringArray::from_elements_unbounded(vec![text.into()], vec![1, 1])
+        .map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn value_to_scalar_text(value: &Value) -> BuiltinResult<Option<Utf8Text>> {
+fn value_to_scalar_text(value: &Value) -> BuiltinResult<Option<StringElement>> {
     match value {
         Value::String(s) => Ok(Some(s.clone())),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(Some(sa.data()[0].clone())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            Ok(Some(Utf8Text::new(decoded_char_text(ca.data())?)))
+            Ok(Some(StringElement::text(decoded_char_text(ca.data())?)))
         }
         _ => Ok(None),
     }
@@ -820,7 +826,8 @@ fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
             .ok_or_else(|| string_flow("string: numeric tensor storage is inconsistent"))?;
         strings.push(numeric_scalar_to_string(value));
     }
-    StringArray::new(strings, shape).map_err(|e| string_flow(format!("string: {e}")))
+    StringArray::from_elements_unbounded(strings, shape)
+        .map_err(|e| string_flow(format!("string: {e}")))
 }
 
 fn tensor_into_argument_data(tensor: Tensor) -> BuiltinResult<ArgumentData> {
@@ -848,21 +855,21 @@ fn numeric_scalar_to_value(value: NumericScalar) -> Value {
     }
 }
 
-fn numeric_scalar_to_string(value: NumericScalar) -> String {
+fn numeric_scalar_to_string(value: NumericScalar) -> StringElement {
     use crate::builtins::common::format::scalar_text::{numeric_is_missing, write_numeric_text};
     if numeric_is_missing(value) {
-        return "<missing>".to_owned();
+        return StringElement::Missing;
     }
     let mut output = String::new();
     write_numeric_text(&mut output, value).expect("String formatting is infallible");
-    output
+    StringElement::text(output)
 }
 
-fn complex_scalar_to_string(real: f64, imaginary: f64) -> String {
+fn complex_scalar_to_string(real: f64, imaginary: f64) -> StringElement {
     if real.is_nan() || imaginary.is_nan() {
-        "<missing>".to_owned()
+        StringElement::Missing
     } else {
-        complex_to_string(real, imaginary)
+        StringElement::text(complex_to_string(real, imaginary))
     }
 }
 
@@ -873,22 +880,25 @@ fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<String
         strings.push(complex_tensor_element_to_string(&tensor, idx)?);
     }
     let (storage, shape) = tensor.into_complex_storage_and_shape();
-    let result =
-        StringArray::new(strings, shape.to_vec()).map_err(|e| string_flow(format!("string: {e}")));
+    let result = StringArray::from_elements_unbounded(strings, shape.to_vec())
+        .map_err(|e| string_flow(format!("string: {e}")));
     drop(storage);
     result
 }
 
-fn complex_tensor_element_to_string(tensor: &ComplexTensor, index: usize) -> BuiltinResult<String> {
+fn complex_tensor_element_to_string(
+    tensor: &ComplexTensor,
+    index: usize,
+) -> BuiltinResult<StringElement> {
     use crate::builtins::common::format::scalar_text::numeric_is_missing;
     let (real, imaginary) = tensor
         .numeric_value_at(index)
         .ok_or_else(|| string_flow("string: complex tensor storage is inconsistent"))?;
     Ok(
         if numeric_is_missing(real) || numeric_is_missing(imaginary) {
-            "<missing>".to_owned()
+            StringElement::Missing
         } else {
-            tensor.format_element(index)
+            StringElement::text(tensor.format_element(index))
         },
     )
 }
@@ -918,16 +928,16 @@ async fn cell_array_to_string_array(
             strings.push(cell_element_to_string(&gathered)?);
         }
     }
-    StringArray::new(strings, vec![cell.rows, cell.cols])
+    StringArray::from_elements_unbounded(strings, vec![cell.rows, cell.cols])
         .map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
+fn cell_element_to_string(value: &Value) -> BuiltinResult<StringElement> {
     if let Some(array) = crate::builtins::datetime::datetime_string_array(value)
         .map_err(|err| string_flow(err.message().to_string()))?
     {
         if array.data().len() == 1 {
-            return Ok(array.data()[0].as_str().to_owned());
+            return Ok(array.data()[0].clone());
         }
         return Err(string_flow("string: cell datetime values must be scalar"));
     }
@@ -935,15 +945,15 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         .map_err(|err| string_flow(err.message().to_string()))?
     {
         if array.data().len() == 1 {
-            return Ok(array.data()[0].as_str().to_owned());
+            return Ok(array.data()[0].clone());
         }
         return Err(string_flow("string: cell duration values must be scalar"));
     }
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(s) => Ok(s.clone()),
         Value::StringArray(sa) => {
             if sa.data().len() == 1 {
-                Ok(sa.data()[0].as_str().to_owned())
+                Ok(sa.data()[0].clone())
             } else {
                 Err(string_flow(
                     "string: cell elements must contain string scalars, not string arrays",
@@ -952,7 +962,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                decoded_char_text(ca.data())
+                decoded_char_text(ca.data()).map(StringElement::text)
             } else {
                 Err(string_flow(
                     "string: cell character arrays must be row vectors",
@@ -960,11 +970,11 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
             }
         }
         Value::Num(n) => Ok(numeric_scalar_to_string(NumericScalar::F64(*n))),
-        Value::Int(i) => Ok(int_value_to_string(i)),
-        Value::Bool(b) => Ok(bool_to_string(*b).to_string()),
+        Value::Int(i) => Ok(StringElement::text(int_value_to_string(i))),
+        Value::Bool(b) => Ok(StringElement::text(bool_to_string(*b))),
         Value::LogicalArray(array) => {
             if array.data.len() == 1 {
-                Ok(bool_to_string(array.data[0] != 0).to_string())
+                Ok(StringElement::text(bool_to_string(array.data[0] != 0)))
             } else {
                 Err(string_flow("string: cell logical values must be scalar"))
             }
@@ -972,7 +982,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         Value::Tensor(t) => {
             if tensor::is_scalar_tensor(t) {
                 if let Some(value) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
-                    Ok(int_value_to_string(&value))
+                    Ok(StringElement::text(int_value_to_string(&value)))
                 } else {
                     Ok(numeric_scalar_to_string(t.numeric_value_at(0).ok_or_else(
                         || string_flow("string: scalar tensor storage is inconsistent"),

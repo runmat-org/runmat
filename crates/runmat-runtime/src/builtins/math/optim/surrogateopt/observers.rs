@@ -174,7 +174,7 @@ impl Observers {
             });
         }
         let (point, metadata) = metadata(phase, &notice, c).await?;
-        let state = Value::String(crate::call::argument_text::copy_str(
+        let state = Value::string(crate::call::argument_text::copy_str(
             phase.name(),
             c.runtime(),
         )?);

@@ -200,7 +200,7 @@ fn resident_reverse_traverses_two_networks_and_accumulates_reused_parameters() {
             roles
                 .data()
                 .iter()
-                .map(|value| value.as_str())
+                .map(|value| value.as_str().expect("present parameter role"))
                 .collect::<Vec<_>>(),
             ["Weights", "Bias"]
         );
@@ -428,7 +428,7 @@ fn public_scalar_resident_network_gradient_stays_on_provider() {
             roles
                 .data()
                 .iter()
-                .map(|value| value.as_str())
+                .map(|value| value.as_str().expect("present parameter role"))
                 .collect::<Vec<_>>(),
             ["Weights", "Bias"]
         );

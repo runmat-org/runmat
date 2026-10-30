@@ -95,7 +95,7 @@ fn invalid_uniform_output() -> crate::RuntimeError {
 
 pub(super) fn extract_string(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(value) => Some(value.to_string()),
+        Value::String(runmat_value::StringElement::Text(value)) => Some(value.to_string()),
         Value::CharArray(value) if value.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
                 let mut error = error::invalid(source.to_string());
@@ -103,7 +103,9 @@ pub(super) fn extract_string(value: &Value) -> BuiltinResult<Option<String>> {
                 error
             })?,
         ),
-        Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].to_string()),
+        Value::StringArray(value) if value.data().len() == 1 => {
+            value.data()[0].as_str().map(str::to_owned)
+        }
         _ => None,
     })
 }

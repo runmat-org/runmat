@@ -28,10 +28,10 @@ impl<'a> PreparedControl<'a> {
         match value {
             None => Ok(Self { borrowed: None, _receipt: None, scratch: None, encoded_len: 0 }),
             Some(Value::String(text)) => Ok(Self {
-                borrowed: Some(text.as_str()), _receipt: None, scratch: None, encoded_len: 0,
+                borrowed: Some(crate::builtins::datetime::nonmissing_text(text, work.label).map_err(never_retry)?), _receipt: None, scratch: None, encoded_len: 0,
             }),
             Some(Value::StringArray(array)) if array.data().len() == 1 => Ok(Self {
-                borrowed: Some(array.data()[0].as_str()),
+                borrowed: Some(crate::builtins::datetime::nonmissing_text(&array.data()[0], work.label).map_err(never_retry)?),
                 _receipt: None, scratch: None, encoded_len: 0,
             }),
             Some(Value::CharArray(array)) if array.rows == 1 => {

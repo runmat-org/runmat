@@ -37,14 +37,14 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             })
         }
         Value::String(text) => Ok(LabelVector {
-            labels: vec![Label::Text(text.as_str().to_owned())],
+            labels: vec![text.as_str().map(|text| Label::Text(text.to_owned())).unwrap_or(Label::MissingString)],
             kind: LabelKind::String,
             categories: None,
         }),
         Value::StringArray(array) => {
             ensure_vector_shape(&array.shape, name)?;
             Ok(LabelVector {
-                labels: array.data().iter().map(|text| Label::Text(text.as_str().to_owned())).collect(),
+                labels: array.data().iter().map(|text| text.as_str().map(|text| Label::Text(text.to_owned())).unwrap_or(Label::MissingString)).collect(),
                 kind: LabelKind::String,
                 categories: None,
             })
@@ -62,7 +62,11 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             ensure_vector_shape(&cell.shape, name)?;
             let mut labels = Vec::with_capacity(cell.data().len());
             for item in cell.data().iter() {
-                labels.push(Label::Text(scalar_text(item, name)?));
+                labels.push(match item {
+                    Value::String(text) if text.is_missing() => Label::MissingString,
+                    Value::StringArray(array) if array.data().len() == 1 && array.data()[0].is_missing() => Label::MissingString,
+                    _ => Label::Text(scalar_text(item, name)?),
+                });
             }
             Ok(LabelVector {
                 labels,
@@ -74,7 +78,7 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             ensure_categorical_vector_shape(&object, name)?;
             let labels = crate::builtins::table::categorical_labels(&Value::Object(object.clone()))?
                 .into_iter()
-                .map(Label::Text)
+                .map(|label| label.as_str().map(|text| Label::Text(text.to_owned())).unwrap_or(Label::MissingString))
                 .collect();
             Ok(LabelVector {
                 labels,
@@ -108,8 +112,12 @@ pub(super) fn categorical_categories(
             array
                 .data()
                 .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
+                .map(|text| {
+                    text.as_str().map(str::to_owned).ok_or_else(|| {
+                        invalid("confusionmat: categorical Categories must be nonmissing strings")
+                    })
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
         )),
         Some(_) => Err(invalid(
             "confusionmat: categorical Categories must be strings",
@@ -131,7 +139,7 @@ pub(super) fn ensure_categorical_vector_shape(
 
 pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
@@ -139,9 +147,10 @@ pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
                 invalid(format!("confusionmat: {name} must be valid UTF-16 text"))
             })
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
-        }
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| invalid(format!("confusionmat: {name} must be a string scalar"))),
         other => Err(invalid(format!(
             "confusionmat: {name} must be a string scalar, got {other:?}"
         ))),

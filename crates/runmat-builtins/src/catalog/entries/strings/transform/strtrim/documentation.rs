@@ -32,7 +32,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Does strtrim modify internal whitespace?", answer: "No. Only leading and trailing whitespace is removed; interior spacing remains intact." },
         BuiltinDocumentationFaq { question: "Which characters count as whitespace?", answer: "Ordinary spaces, tabs and line breaks are trimmed. MATLAB-compatible mode preserves significant whitespace U+0085, U+00A0, U+2007 and U+202F; RunMat mode trims those too under its broader Unicode rule." },
         BuiltinDocumentationFaq { question: "How are character arrays resized?", answer: "Each row is trimmed independently. The output keeps its row count and uses the width of the longest trimmed row, padding shorter rows." },
-        BuiltinDocumentationFaq { question: "What happens to missing strings?", answer: "The current string storage uses a sentinel for missing values. strtrim leaves it unchanged but cannot yet distinguish it from an identical literal spelling." },
+        BuiltinDocumentationFaq { question: "What happens to missing strings?", answer: "Typed missing string elements remain missing. Literal text such as `<missing>` is ordinary text and is trimmed without changing its presence." },
         BuiltinDocumentationFaq { question: "Can numeric or logical arrays be passed to strtrim?", answer: "No. Non-text inputs raise a text-input error; integer arrays are not interpreted as character codes." },
         BuiltinDocumentationFaq { question: "How does strtrim differ from strip?", answer: "strtrim always removes whitespace at both ends. strip also supports custom characters and directional trimming." },
         BuiltinDocumentationFaq { question: "What does strtrim do in MATLAB?", answer: "It removes leading and trailing whitespace from a string or character array, preserving interior whitespace." },
@@ -58,6 +58,6 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "text, Unicode and shape semantics", location: "builtins::strings::transform::strtrim::tests" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "static text facts", location: "crates/runmat-builtins/src/catalog/entries/strings/transform/strtrim/inference.rs" },
-    ], notes: &["MATLAB-compatible mode preserves the four documented significant-whitespace code points while RunMat mode retains broader Unicode trimming. Missing values and the literal sentinel spelling share a storage representation. Cells containing string scalars require RunMat compatibility mode."], },
+    ], notes: &["MATLAB-compatible mode preserves the four documented significant-whitespace code points while RunMat mode retains broader Unicode trimming. Typed missing values are distinct from every literal spelling. Cells containing string scalars require RunMat compatibility mode."], },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };

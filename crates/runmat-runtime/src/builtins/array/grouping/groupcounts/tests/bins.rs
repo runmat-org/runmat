@@ -51,6 +51,9 @@ fn included_edge_uses_exact_wide_integer_boundaries() {
         let Value::StringArray(labels) = &outputs[1] else {
             panic!("expected interval labels");
         };
-        assert!(labels.data()[0].contains(&(base + expected_label as u64).to_string()));
+        assert!(labels.data()[0]
+            .as_str()
+            .expect("present interval label")
+            .contains(&(base + expected_label as u64).to_string()));
     }
 }

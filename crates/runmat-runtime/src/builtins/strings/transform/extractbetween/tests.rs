@@ -385,7 +385,11 @@ fn extractBetween_cell_and_structure_identity_does_not_depend_on_contents() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn extractBetween_missing_string_propagates() {
-    let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
+    let strings = StringArray::from_elements_unbounded(
+        vec![runmat_value::StringElement::Missing],
+        vec![1, 1],
+    )
+    .unwrap();
     let result = extract_between_builtin(
         Value::StringArray(strings),
         Value::String("[".into()),
@@ -395,7 +399,13 @@ fn extractBetween_missing_string_propagates() {
     .expect("extractBetween");
     assert_eq!(
         result,
-        Value::StringArray(StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap())
+        Value::StringArray(
+            StringArray::from_elements_unbounded(
+                vec![runmat_value::StringElement::Missing],
+                vec![1, 1]
+            )
+            .unwrap()
+        )
     );
 }
 
@@ -520,12 +530,12 @@ fn extractBetween_option_pair_error() {
 fn extractBetween_missing_boundary_propagates() {
     let result = extract_between_builtin(
         Value::String("Planner<GPU>".into()),
-        Value::String("<missing>".into()),
+        Value::String(runmat_value::StringElement::Missing),
         Value::String(">".into()),
         Vec::new(),
     )
     .expect("extractBetween");
-    assert_eq!(result, Value::String("<missing>".into()));
+    assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

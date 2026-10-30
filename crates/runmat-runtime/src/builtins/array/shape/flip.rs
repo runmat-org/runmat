@@ -85,7 +85,7 @@ async fn flip_builtin(
             let dims = resolve_dims(&spec, &chars.shape);
             Ok(flip_char_array(chars, &dims).map(Value::CharArray)?)
         }
-        Value::String(scalar) => Ok(Value::String(scalar)),
+        Value::String(scalar) => Ok(Value::String(scalar.into())),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Num(n))
                 .map_err(|e| flip_error_for("flip", e))?;
@@ -518,7 +518,7 @@ pub(crate) fn flip_string_array_with(
         return Ok(array);
     }
     let data = flip_generic(array.data(), &array.shape, dims, builtin)?;
-    StringArray::from_texts_unbounded(data, array.shape.to_vec())
+    StringArray::from_elements_unbounded(data, array.shape.to_vec())
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 

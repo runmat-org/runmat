@@ -38,7 +38,7 @@ async fn format_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Va
             set_display_format(FormatMode::Short);
             return Ok(empty_value());
         }
-        (1, Some(Value::String(s))) => std::borrow::Cow::Borrowed(s.as_str()),
+        (1, Some(Value::String(runmat_value::StringElement::Text(s)))) => std::borrow::Cow::Borrowed(s.as_str()),
         (1, Some(value @ Value::CharArray(_))) =>
             std::borrow::Cow::Owned(crate::builtins::common::validation::value_text_scalar_string(value)
                 .ok_or_else(|| format_error_with(&FORMAT_ERROR_ARG_CONFIG, "format: unrecognized argument; expected a format name such as 'short' or 'long'"))?),

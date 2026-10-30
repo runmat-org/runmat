@@ -10,7 +10,7 @@ use crate::RuntimeError;
 pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
     match value {
         Value::Bool(value) => Ok(JavaValue::Boolean(value)),
-        Value::String(value) => Ok(JavaValue::String(value.into_string_unbounded())),
+        Value::String(value) => string_text(&value).map(JavaValue::String),
         Value::Num(value) => Ok(JavaValue::Double(value)),
         Value::Int(value) => match value {
             IntValue::I8(value) => Ok(JavaValue::Byte(value)),
@@ -38,8 +38,8 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
             elements: value
                 .data()
                 .iter()
-                .map(|value| JavaValue::String(value.as_str().to_owned()))
-                .collect(),
+                .map(|value| string_text(value).map(JavaValue::String))
+                .collect::<Result<_, _>>()?,
         }),
         Value::CharArray(value) => value
             .try_row_string()
@@ -69,7 +69,7 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
 pub(super) fn value_ref_to_java(value: &Value) -> Result<JavaValue, RuntimeError> {
     match value {
         Value::Bool(value) => Ok(JavaValue::Boolean(*value)),
-        Value::String(value) => Ok(JavaValue::String(value.as_str().to_owned())),
+        Value::String(value) => string_text(value).map(JavaValue::String),
         Value::Num(value) => Ok(JavaValue::Double(*value)),
         Value::Int(value) => value_to_java(Value::Int(value.clone())),
         Value::Tensor(value) => tensor_ref_to_java(value),
@@ -86,8 +86,8 @@ pub(super) fn value_ref_to_java(value: &Value) -> Result<JavaValue, RuntimeError
             elements: value
                 .data()
                 .iter()
-                .map(|value| JavaValue::String(value.as_str().to_owned()))
-                .collect(),
+                .map(|value| string_text(value).map(JavaValue::String))
+                .collect::<Result<_, _>>()?,
         }),
         Value::CharArray(value) => value
             .try_row_string()
@@ -523,4 +523,11 @@ mod tests {
         );
         assert!(value_to_java(Value::Foreign(reference)).is_err());
     }
+}
+
+fn string_text(value: &runmat_value::StringElement) -> Result<String, RuntimeError> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| invalid_conversion("missing string requires an explicit foreign conversion"))
 }

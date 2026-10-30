@@ -147,7 +147,10 @@ fn string_array_to_cellstr(formatted: StringArray) -> BuiltinResult<Value> {
     let values = formatted
         .data()
         .iter()
-        .map(|text| Value::CharArray(CharArray::new_row(text.as_str())))
+        .map(|text| match text.as_str() {
+            Some(text) => Value::CharArray(CharArray::new_row(text)),
+            None => Value::String(runmat_value::StringElement::Missing),
+        })
         .collect();
     CellArray::new(values, rows, cols)
         .map(Value::Cell)

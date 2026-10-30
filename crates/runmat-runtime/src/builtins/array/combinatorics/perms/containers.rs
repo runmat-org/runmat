@@ -80,9 +80,12 @@ pub(super) fn characters(chars: CharArray) -> BuiltinResult<Value> {
 pub(super) fn strings(array: StringArray) -> BuiltinResult<Value> {
     let elements = shape::vector_len(&array.shape)?;
     let rows = cardinality::output_rows(elements)?;
-    StringArray::from_texts_unbounded(permuted_columns(array.data(), rows)?, vec![rows, elements])
-        .map(Value::StringArray)
-        .map_err(internal)
+    StringArray::from_elements_unbounded(
+        permuted_columns(array.data(), rows)?,
+        vec![rows, elements],
+    )
+    .map(Value::StringArray)
+    .map_err(internal)
 }
 
 pub(super) fn cells(cell: CellArray) -> BuiltinResult<Value> {

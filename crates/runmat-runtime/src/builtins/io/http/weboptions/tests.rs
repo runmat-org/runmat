@@ -112,7 +112,7 @@ fn weboptions_default_struct_matches_expected_fields() {
     };
     assert_eq!(
         options.fields.get("ContentType").and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
+            Value::String(s) => s.as_str(),
             _ => None,
         }),
         Some("auto")
@@ -130,14 +130,14 @@ fn weboptions_default_struct_matches_expected_fields() {
     }
     assert_eq!(
         options.fields.get("RequestMethod").and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
+            Value::String(s) => s.as_str(),
             _ => None,
         }),
         Some("auto")
     );
     assert_eq!(
         options.fields.get("MediaType").and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
+            Value::String(s) => s.as_str(),
             _ => None,
         }),
         Some("auto")
@@ -295,7 +295,7 @@ fn weboptions_updates_existing_struct() {
     };
     assert_eq!(
         opts.fields.get("ContentType").and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
+            Value::String(s) => s.as_str(),
             _ => None,
         }),
         Some("json")

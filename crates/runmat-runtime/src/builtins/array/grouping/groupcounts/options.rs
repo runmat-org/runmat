@@ -115,7 +115,9 @@ impl IncludedEdge {
 
 pub(super) fn scalar_text(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
     Ok(match value {
-        Value::String(value) => Some(std::borrow::Cow::Borrowed(value.as_str())),
+        Value::String(runmat_value::StringElement::Text(value)) => {
+            Some(std::borrow::Cow::Borrowed(value.as_str()))
+        }
         Value::CharArray(value) if value.rows <= 1 => Some(std::borrow::Cow::Owned(
             runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
                 let mut error =

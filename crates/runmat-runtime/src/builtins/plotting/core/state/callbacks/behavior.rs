@@ -15,7 +15,7 @@ pub(crate) fn retain_behavior_in_context(
     builtin: &'static str,
 ) -> BuiltinResult<PlotCallableToken> {
     let empty = match &value {
-        Value::String(text) => text.trim().is_empty(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.trim().is_empty(),
         Value::CharArray(chars) => chars.data().is_empty(),
         Value::Tensor(tensor) => tensor.is_empty(),
         Value::Cell(cell) => cell.data().is_empty(),

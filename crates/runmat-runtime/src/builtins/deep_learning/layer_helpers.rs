@@ -111,7 +111,9 @@ pub(in crate::builtins) fn layer_names(
                     .properties()
                     .get("Name")
                     .and_then(|value| match value {
-                        Value::String(s) if !s.is_empty() => Some(s.to_string()),
+                        Value::String(runmat_value::StringElement::Text(s)) if !s.is_empty() => {
+                            Some(s.to_string())
+                        }
                         _ => None,
                     })
                     .unwrap_or_else(|| format!("layer_{}", idx + 1));

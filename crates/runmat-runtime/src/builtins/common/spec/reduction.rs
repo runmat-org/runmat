@@ -116,8 +116,14 @@ pub(crate) fn reduction_layout<T>(count: usize) -> Option<u64> {
 /// no independent spelling table or new string dispatch is introduced here.
 pub(crate) fn reduction_control<T>(value: &Value, decode: fn(&str) -> Option<T>) -> Option<T> {
     match value {
-        Value::String(text) => decode(text),
-        Value::StringArray(array) if array.data().len() == 1 => decode(&array.data()[0]),
+        Value::String(runmat_value::StringElement::Text(text)) => decode(text),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            decode(
+                &array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string"),
+            )
+        }
         Value::CharArray(array) if array.rows == 1 => {
             let mut bytes = [0u8; 16];
             let units = array.data();

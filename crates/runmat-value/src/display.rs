@@ -233,7 +233,8 @@ impl fmt::Display for Value {
             }
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
             Value::LogicalArray(la) => write!(f, "{la}"),
-            Value::String(s) => write!(f, "'{s}'"),
+            Value::String(StringElement::Text(text)) => write!(f, "'{text}'"),
+            Value::String(StringElement::Missing) => write!(f, "<missing>"),
             Value::StringArray(sa) => write!(f, "{sa}"),
             Value::CharArray(ca) => write!(f, "{ca}"),
             Value::Tensor(m) => write!(f, "{m}"),

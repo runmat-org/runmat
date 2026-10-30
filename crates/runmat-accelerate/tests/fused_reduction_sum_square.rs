@@ -2,13 +2,15 @@
 
 use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{FusionKind, FusionOp};
-use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::FusionExecutionRequest;
 use runmat_accelerate::graph::{FusionCallOrigin, ShapeInfo, ValueId};
 use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_value::Value;
 #[path = "support/fusion_plan.rs"]
 mod fixture;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 
 static TEST_MUTEX: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
     once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
@@ -69,7 +71,7 @@ async fn fused_sum_square_dim0_matches_manual() {
         output,
     );
     plan.group.kind = FusionKind::Reduction;
-    plan.group.shape = ShapeInfo::Tensor(vec![Some(cols)]);
+    plan.group.shape = ShapeInfo::Tensor(vec![Some(1), Some(cols)]);
     plan.kernel.kind = FusionKind::Reduction;
     plan.inputs = vec![vid_x];
     plan.const_values.insert(axis, Value::Num(1.0));
@@ -83,7 +85,14 @@ async fn fused_sum_square_dim0_matches_manual() {
         runtime: None,
     };
 
-    let result = execute_reduction(request, rows, cols, 0).expect("execute fused reduction");
+    // Preserve the canonical default accumulator contract, including its
+    // explicit unsupported-provider refusal; do not substitute native Single.
+    let result = selected_reduction::execute(request, rows, cols, &[1, cols], 0)
+        .await
+        .expect("execute canonical fused reduction");
+    let Some(result) = result else {
+        return;
+    };
     let out_handle = match result {
         Value::GpuTensor(h) => h,
         _ => panic!("expected GPU tensor"),
@@ -91,7 +100,7 @@ async fn fused_sum_square_dim0_matches_manual() {
     let out = AccelProvider::download(provider, &out_handle)
         .await
         .expect("download");
-    assert_eq!(out.shape, vec![cols]);
+    assert_eq!(out.shape, vec![1, cols]);
 
     // Manual per-column sum of squares
     for c in 0..cols {

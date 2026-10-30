@@ -5,7 +5,7 @@
 
 use runmat_execution::Digest;
 
-pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = 1;
+pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = 2;
 
 pub fn linked_runtime_fingerprint() -> Digest {
     Digest::sha256(format!(

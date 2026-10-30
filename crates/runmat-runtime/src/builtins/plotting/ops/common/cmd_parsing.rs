@@ -6,7 +6,7 @@ use crate::BuiltinResult;
 
 pub fn as_lower_str(val: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match val {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.to_ascii_lowercase()),
         Value::CharArray(c)
             if c.rows <= 1 && crate::builtins::common::shape::effective_rank(&c.shape) <= 2 =>
         {
@@ -128,7 +128,7 @@ pub fn parse_hold_mode(value: &Value) -> BuiltinResult<crate::builtins::plotting
                 })?;
             parse_hold_mode_str(text.trim())
         }
-        Value::String(s) => parse_hold_mode_str(s.trim()),
+        Value::String(runmat_value::StringElement::Text(s)) => parse_hold_mode_str(s.trim()),
         Value::Num(0.0) => Ok(HoldMode::Off),
         Value::Num(1.0) => Ok(HoldMode::On),
         Value::Num(_) => Err(plotting_error(

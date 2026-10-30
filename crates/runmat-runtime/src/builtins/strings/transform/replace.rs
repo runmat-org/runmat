@@ -99,8 +99,11 @@ async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<V
     let spec = ReplacementSpec::from_values(&old, &new)?;
 
     match text {
-        Value::String(s) if is_missing_string(s.as_str()) => Ok(Value::String(s)),
-        Value::String(s) => Ok(Value::string(replace_string_scalar(s.as_str(), &spec))),
+        Value::String(s) if s.is_missing() => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::string(replace_string_scalar(
+            s.as_str().expect("nonmissing subject"),
+            &spec,
+        ))),
         Value::StringArray(sa) => replace_string_array(sa, &spec),
         Value::CharArray(ca) => replace_char_array(ca, &spec),
         Value::Cell(cell) => replace_cell_array(cell, &spec),
@@ -109,17 +112,13 @@ async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<V
 }
 
 fn replace_string_scalar(text: &str, spec: &ReplacementSpec<'_>) -> String {
-    if is_missing_string(text) {
-        text.to_owned()
-    } else {
-        spec.apply(text)
-    }
+    spec.apply(text)
 }
 
 fn replace_string_array(array: StringArray, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
     let (data, shape, _, _) = array.into_parts();
     let mut replaced = Vec::with_capacity(data.len());
-    let input: Vec<runmat_value::Utf8Text> = match data.try_into_owned() {
+    let input: Vec<runmat_value::StringElement> = match data.try_into_owned() {
         Ok(values) => values.into_iter().collect(),
         Err(shared) => shared.iter().cloned().collect(),
     };
@@ -127,7 +126,9 @@ fn replace_string_array(array: StringArray, spec: &ReplacementSpec<'_>) -> Built
         if is_missing_string(&entry) {
             replaced.push(entry);
         } else {
-            replaced.push(runmat_value::Utf8Text::new(spec.apply(&entry)));
+            replaced.push(runmat_value::StringElement::text(
+                spec.apply(entry.as_str().expect("nonmissing subject")),
+            ));
         }
     }
     let result = StringArray::from_shared_storage(
@@ -191,11 +192,13 @@ fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec<'_>) -> BuiltinRes
 
 fn replace_cell_element(value: &Value, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::string(replace_string_scalar(text.as_str(), spec))),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(Value::string(replace_string_scalar(
-            sa.data()[0].as_str(),
-            spec,
-        ))),
+        Value::String(text) => Ok(Value::String(match text.as_str() {
+            Some(text) => runmat_value::StringElement::text(replace_string_scalar(text, spec)),
+            None => runmat_value::StringElement::Missing,
+        })),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            replace_cell_element(&Value::String(sa.data()[0].clone()), spec)
+        }
         Value::CharArray(ca) if ca.rows <= 1 => replace_char_array(ca.clone(), spec),
         Value::CharArray(_) => Err(replace_error(&REPLACE_ERROR_CELL_ELEMENT)),
         _ => Err(replace_error(&REPLACE_ERROR_CELL_ELEMENT)),
@@ -224,12 +227,18 @@ fn extract_text_list<'a>(
     type_error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<Vec<std::borrow::Cow<'a, str>>> {
     match value {
-        Value::String(text) => Ok(vec![std::borrow::Cow::Borrowed(text.as_str())]),
+        Value::String(text) => Ok(vec![std::borrow::Cow::Borrowed(
+            text.as_str().ok_or_else(|| replace_error(type_error))?,
+        )]),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|text| std::borrow::Cow::Borrowed(text.as_str()))
-            .collect()),
+            .map(|text| {
+                text.as_str()
+                    .map(std::borrow::Cow::Borrowed)
+                    .ok_or_else(|| replace_error(type_error))
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?),
         Value::CharArray(array) => {
             if array.rows == 0 {
                 Ok(Vec::new())
@@ -252,9 +261,15 @@ fn extract_text_list<'a>(
             let mut entries = Vec::with_capacity(cell.data().len());
             for element in cell.data() {
                 match element {
-                    Value::String(text) => entries.push(std::borrow::Cow::Borrowed(text.as_str())),
+                    Value::String(text) => entries.push(std::borrow::Cow::Borrowed(
+                        text.as_str().ok_or_else(|| replace_error(type_error))?,
+                    )),
                     Value::StringArray(sa) if sa.data().len() == 1 => {
-                        entries.push(std::borrow::Cow::Borrowed(sa.data()[0].as_str()));
+                        entries.push(std::borrow::Cow::Borrowed(
+                            sa.data()[0]
+                                .as_str()
+                                .ok_or_else(|| replace_error(type_error))?,
+                        ));
                     }
                     Value::CharArray(ca) if ca.rows <= 1 => {
                         if ca.rows == 0 {
@@ -546,12 +561,12 @@ pub(crate) mod tests {
     #[test]
     fn replace_preserves_missing_string() {
         let result = replace_builtin(
-            Value::String("<missing>".into()),
+            Value::String(runmat_value::StringElement::Missing),
             Value::String("missing".into()),
             Value::String("value".into()),
         )
         .expect("replace");
-        assert_eq!(result, Value::String("<missing>".into()));
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[test]

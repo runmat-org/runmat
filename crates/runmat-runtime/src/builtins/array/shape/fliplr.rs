@@ -78,7 +78,7 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::CharArray(chars) => Ok(flip_char_array_with("fliplr", chars, &LR_DIM)
             .map(Value::CharArray)
             .map_err(remap_fliplr_error)?),
-        Value::String(scalar) => Ok(Value::String(scalar)),
+        Value::String(scalar) => Ok(Value::String(scalar.into())),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Num(n))
                 .map_err(|e| fliplr_error(e))?;

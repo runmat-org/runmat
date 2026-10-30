@@ -43,9 +43,18 @@ pub(in crate::builtins::math::reduction) fn parse(
             continue;
         }
         let control = match value {
-            Value::String(text) => CumulativeControl::from_public_option(text.as_str()),
-            Value::StringArray(array) if array.data().len() == 1 => {
-                CumulativeControl::from_public_option(array.data()[0].as_str())
+            Value::String(runmat_value::StringElement::Text(text)) => {
+                CumulativeControl::from_public_option(text.as_str())
+            }
+            Value::StringArray(array)
+                if array.data().len() == 1 && !array.data()[0].is_missing() =>
+            {
+                CumulativeControl::from_public_option(
+                    array.data()[0]
+                        .text_ref()
+                        .expect("checked nonmissing scalar string")
+                        .as_str(),
+                )
             }
             Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
                 array.validate_layout()?;

@@ -102,11 +102,47 @@ impl EnvironmentValues {
     }
 }
 
-fn string_value(text: &str) -> EnvironmentValue {
-    if crate::builtins::strings::common::is_missing_string(text) {
-        EnvironmentValue::Remove
-    } else {
-        EnvironmentValue::Set(text.to_string())
+fn string_value(text: &runmat_value::StringElement) -> EnvironmentValue {
+    match text.as_str() {
+        Some(text) => EnvironmentValue::Set(text.to_owned()),
+        None => EnvironmentValue::Remove,
+    }
+}
+
+#[cfg(test)]
+mod typed_missing_policy {
+    use super::*;
+
+    #[test]
+    fn only_typed_missing_requests_environment_removal() {
+        for text in ["<missing>", "<MISSING>", ""] {
+            assert_eq!(
+                EnvironmentValues::decode(&Value::String(text.into()))
+                    .unwrap()
+                    .scalar_value(),
+                Some(EnvironmentValue::Set(text.into()))
+            );
+        }
+        assert_eq!(
+            EnvironmentValues::decode(&Value::String(runmat_value::StringElement::Missing))
+                .unwrap()
+                .scalar_value(),
+            Some(EnvironmentValue::Remove)
+        );
+        let array = runmat_value::StringArray::from_elements_unbounded(
+            vec!["<missing>".into(), runmat_value::StringElement::Missing],
+            vec![1, 2],
+        )
+        .unwrap();
+        assert_eq!(
+            EnvironmentValues::decode(&Value::StringArray(array))
+                .unwrap()
+                .values,
+            vec![
+                EnvironmentValue::Set("<missing>".into()),
+                EnvironmentValue::Remove
+            ]
+        );
     }
 }
 

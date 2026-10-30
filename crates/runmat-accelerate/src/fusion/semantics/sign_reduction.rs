@@ -13,12 +13,16 @@ fn control_materialization(controls: &[&Value]) -> Option<FusionProofStage> {
     for value in controls {
         let (shape, text, chars) = match value {
             Value::Num(_) | Value::Int(_) => (0, 0, 0),
-            Value::String(value) => (0, u64::try_from(value.len()).ok()?, 0),
+            Value::String(value) => (
+                0,
+                u64::try_from(value.as_str().map_or(0, str::len)).ok()?,
+                0,
+            ),
             Value::Tensor(value) => (u64::try_from(value.shape().len()).ok()?, 0, 0),
             Value::StringArray(value) => (
                 u64::try_from(value.shape.len()).ok()?,
                 value.data().iter().try_fold(0_u64, |total, string| {
-                    total.checked_add(u64::try_from(string.len()).ok()?)
+                    total.checked_add(u64::try_from(string.as_str().map_or(0, str::len)).ok()?)
                 })?,
                 0,
             ),

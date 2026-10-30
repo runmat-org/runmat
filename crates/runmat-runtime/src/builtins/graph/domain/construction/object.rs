@@ -267,20 +267,35 @@ pub(super) fn edge_pairs_from_value(
                 .collect();
             let mut out = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                let source = *lookup.get(array.data()[row].as_str()).ok_or_else(|| {
-                    graph_error(
-                        name,
-                        format!("{name}: unknown source node '{}'", array.data()[row]),
-                    )
-                })?;
+                let source = *lookup
+                    .get(array.data()[row].as_str().ok_or_else(|| {
+                        graph_error(
+                            name,
+                            format!("{name}: source node names must be nonmissing"),
+                        )
+                    })?)
+                    .ok_or_else(|| {
+                        graph_error(
+                            name,
+                            format!(
+                                "{name}: unknown source node '{}'",
+                                array.data()[row].display()
+                            ),
+                        )
+                    })?;
                 let target = *lookup
-                    .get(array.data()[row + array.rows].as_str())
+                    .get(array.data()[row + array.rows].as_str().ok_or_else(|| {
+                        graph_error(
+                            name,
+                            format!("{name}: target node names must be nonmissing"),
+                        )
+                    })?)
                     .ok_or_else(|| {
                         graph_error(
                             name,
                             format!(
                                 "{name}: unknown target node '{}'",
-                                array.data()[row + array.rows]
+                                array.data()[row + array.rows].display()
                             ),
                         )
                     })?;

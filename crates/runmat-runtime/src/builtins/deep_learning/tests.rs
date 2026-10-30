@@ -72,7 +72,7 @@ impl FixtureArrayMut for CellArray {
 }
 
 impl FixtureArrayMut for StringArray {
-    type Item = runmat_value::Utf8Text;
+    type Item = runmat_value::StringElement;
 
     fn make_fixture_data_unique(&mut self) {
         self.make_data_unique_unbounded()
@@ -135,7 +135,7 @@ fn layer_name(value: &Value) -> String {
         panic!("expected object");
     };
     match object.properties().get("Name").unwrap() {
-        Value::String(name) => name.to_string(),
+        Value::String(runmat_value::StringElement::Text(name)) => name.to_string(),
         other => panic!("expected string name, got {other:?}"),
     }
 }

@@ -17,8 +17,8 @@ use crate::builtins::common::broadcast as matlab_broadcast;
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
-    scalar_text_input, text_input_admission, TextInput,
+    char_row_to_string_slice, contains_numeric_or_resident_text_input, scalar_text_input,
+    text_input_admission, TextInput,
 };
 use crate::builtins::strings::core::numeric_length::parse_nonnegative_usize;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
@@ -446,10 +446,14 @@ async fn sscanf_builtin(
 
 pub(crate) fn scalar_text(value: &Value, fn_name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
-        }
+        Value::String(text) => text
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| compat_error(fn_name, format!("{fn_name}: text must not be missing"))),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| compat_error(fn_name, format!("{fn_name}: text must not be missing"))),
         Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
         Value::CharArray(array) if array.rows == 1 => decoded_char_row(array, 0, fn_name),
         other => Err(compat_error(
@@ -463,7 +467,9 @@ pub(crate) fn pattern_regex(value: &Value, fn_name: &str) -> BuiltinResult<Strin
     match value {
         Value::Object(object) if object.is_class(runmat_types::standard::PATTERN) => {
             match object.properties().get("Regex") {
-                Some(Value::String(regex)) => Ok(regex.as_str().to_owned()),
+                Some(Value::String(regex)) => regex.as_str().map(str::to_owned).ok_or_else(|| {
+                    compat_error(fn_name, format!("{fn_name}: pattern must not be missing"))
+                }),
                 _ => Err(compat_error(
                     fn_name,
                     format!("{fn_name}: invalid pattern object"),
@@ -486,7 +492,7 @@ pub(crate) fn pattern_object_in_context(
 ) -> BuiltinResult<Value> {
     let fields = [(
         "Regex",
-        Value::String(crate::call::argument_text::copy_str(regex, runtime)?),
+        Value::String(crate::call::argument_text::copy_str(regex, runtime)?.into()),
     )];
     crate::execution::object::construct_object_from_borrowed_fields(
         runtime,
@@ -554,7 +560,13 @@ impl TextList {
             Value::Cell(cell) => {
                 let mut items = Vec::with_capacity(cell.data().len());
                 for value in cell.data() {
-                    items.push(Some(Utf8Text::new(scalar_text(value, fn_name)?)));
+                    items.push(match value {
+                        Value::String(text) => text.clone().into_text(),
+                        Value::StringArray(array) if array.data().len() == 1 => {
+                            array.data()[0].clone().into_text()
+                        }
+                        _ => Some(Utf8Text::new(scalar_text(value, fn_name)?)),
+                    });
                 }
                 Ok(Self {
                     items,
@@ -590,12 +602,8 @@ pub(crate) fn broadcast_flat_index(
     matlab_broadcast::broadcast_index(linear, shape, &extended, &strides)
 }
 
-fn missing_to_none(text: Utf8Text) -> Option<Utf8Text> {
-    if is_missing_string(text.as_str()) {
-        None
-    } else {
-        Some(text)
-    }
+fn missing_to_none(text: runmat_value::StringElement) -> Option<Utf8Text> {
+    text.into_text()
 }
 
 fn map_text_pair_preserve(
@@ -605,7 +613,13 @@ fn map_text_pair_preserve(
 ) -> BuiltinResult<(Value, Value)> {
     match value {
         Value::String(text) => {
-            let (first, second) = map(text.as_str());
+            let Some(text) = text.as_str() else {
+                return Ok((
+                    Value::String(runmat_value::StringElement::Missing),
+                    Value::String(runmat_value::StringElement::Missing),
+                ));
+            };
+            let (first, second) = map(text);
             Ok((Value::string(first), Value::string(second)))
         }
         Value::StringArray(array) => {
@@ -613,14 +627,22 @@ fn map_text_pair_preserve(
             let mut first = Vec::with_capacity(array.data().len());
             let mut second = Vec::with_capacity(array.data().len());
             for text in array.data() {
-                let (a, b) = map(text.as_str());
-                first.push(a);
-                second.push(b);
+                match text.as_str() {
+                    Some(text) => {
+                        let (a, b) = map(text);
+                        first.push(runmat_value::StringElement::text(a));
+                        second.push(runmat_value::StringElement::text(b));
+                    }
+                    None => {
+                        first.push(runmat_value::StringElement::Missing);
+                        second.push(runmat_value::StringElement::Missing);
+                    }
+                }
             }
-            let first = StringArray::new(first, shape.clone())
+            let first = StringArray::from_elements_unbounded(first, shape.clone())
                 .map(Value::StringArray)
                 .map_err(|e| compat_error(fn_name, e))?;
-            let second = StringArray::new(second, shape)
+            let second = StringArray::from_elements_unbounded(second, shape)
                 .map(Value::StringArray)
                 .map_err(|e| compat_error(fn_name, e))?;
             Ok((first, second))
@@ -710,7 +732,10 @@ fn mat2str_value(
                 "false".into()
             }
         }
-        Value::String(text) => format!("\"{}\"", text.replace('"', "\"\"")),
+        Value::String(text) => match text.as_str() {
+            Some(text) => format!("\"{}\"", text.replace('"', "\"\"")),
+            None => "missing".to_owned(),
+        },
         Value::CharArray(array) if array.rows <= 1 => {
             format!(
                 "'{}'",
@@ -869,7 +894,10 @@ fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
         Value::Int(i) => Ok(vec![byte_from_intvalue(i, fn_name)?]),
         Value::Num(n) => Ok(vec![byte_from_f64(*n, fn_name)?]),
         Value::CharArray(array) => Ok(decoded_char_row(array, 0, fn_name)?.into_bytes()),
-        Value::String(text) => Ok(text.as_bytes().to_vec()),
+        Value::String(text) => text
+            .as_str()
+            .map(|text| text.as_bytes().to_vec())
+            .ok_or_else(|| compat_error(fn_name, format!("{fn_name}: text must not be missing"))),
         other => Err(compat_error(
             fn_name,
             format!("{fn_name}: expected bytes or text, got {other:?}"),
@@ -1584,7 +1612,7 @@ mod tests {
         );
         assert_eq!(
             block(strncmpi_builtin(
-                Value::String("<missing>".into()),
+                Value::String(runmat_value::StringElement::Missing),
                 Value::String("x".into()),
                 Value::Num(0.0),
             ))
@@ -2018,7 +2046,10 @@ mod tests {
             .unwrap(),
             Value::CharArray(CharArray::new_row("top-level"))
         );
-        for text in ["", "<missing>"] {
+        for text in [
+            runmat_value::StringElement::text(""),
+            runmat_value::StringElement::Missing,
+        ] {
             assert_eq!(
                 block(convert_strings_to_chars_builtin(
                     Value::String(text.into()),

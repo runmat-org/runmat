@@ -184,7 +184,7 @@ pub fn value_as_f64(value: &Value) -> Option<f64> {
             let text: String = units.map(|u| char::from(u as u8)).collect();
             text.parse::<f64>().ok()
         }
-        Value::String(s) => s.trim().parse::<f64>().ok(),
+        Value::String(runmat_value::StringElement::Text(s)) => s.trim().parse::<f64>().ok(),
         _ => None,
     }
 }

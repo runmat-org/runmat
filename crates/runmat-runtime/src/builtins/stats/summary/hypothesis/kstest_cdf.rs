@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn parse_kstest_cdf(value: &Value) -> BuiltinResult<CdfSpec> {
     match value {
         Value::Tensor(tensor) => parse_kstest_cdf_table(tensor),
-        Value::String(text) if KstestNamedCdf::from_public(text).is_some() => {
+        Value::String(runmat_value::StringElement::Text(text)) if KstestNamedCdf::from_public(text).is_some() => {
             Ok(CdfSpec::StandardNormal)
         }
         Value::CharArray(chars) if chars.rows == 1 => {

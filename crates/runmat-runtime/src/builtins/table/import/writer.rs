@@ -74,7 +74,12 @@ pub(in crate::builtins::table) fn table_delimited_text(
 
 pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> BuiltinResult<String> {
     Ok(match value {
-        Value::String(text) => text.to_string(),
+        Value::String(text) => text
+            .as_str()
+            .ok_or_else(|| {
+                invalid_variable("table: missing string cannot be converted to a text key")
+            })?
+            .to_owned(),
         Value::CharArray(array) if array.rows == 1 => decode_utf16_code_units(array.data())
             .map_err(|error| table_utf16_error("table text value", error))?,
         Value::Num(value) => format_key_number(*value),
@@ -91,7 +96,12 @@ pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> BuiltinResult<S
             .and_then(|storage| storage.value_at(0))
             .map(|value| value.decimal_string())
             .unwrap_or_else(|| format_key_number(tensor::tensor_value_f64(tensor, 0))),
-        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].to_string(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .ok_or_else(|| {
+                invalid_variable("table: missing string cannot be converted to a text key")
+            })?
+            .to_owned(),
         other => other.to_string(),
     })
 }

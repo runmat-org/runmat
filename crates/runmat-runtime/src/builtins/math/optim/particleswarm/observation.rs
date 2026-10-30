@@ -124,7 +124,7 @@ impl Observers {
             fields.iter().map(|(name, value)| (*name, value)),
         )?;
         let phase = crate::call::argument_text::copy_str(phase.name(), runtime.as_ref())
-            .map(Value::String)?;
+            .map(|text| Value::String(text.into()))?;
         let select = |index| -> BuiltinResult<()> {
             #[cfg(feature = "plot-core")]
             {

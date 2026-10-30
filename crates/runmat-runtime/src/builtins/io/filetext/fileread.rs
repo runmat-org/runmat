@@ -150,7 +150,9 @@ fn is_encoding_keyword(value: &Value) -> BuiltinResult<bool> {
 
 fn encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Ok(std::borrow::Cow::Borrowed(s.as_str()))
+        }
         Value::CharArray(ca) if ca.rows == 1 => runmat_value::decode_utf16_code_units(ca.data())
             .map(std::borrow::Cow::Owned)
             .map_err(|source| {
@@ -161,8 +163,10 @@ fn encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
             "encoding name must be a 1-by-N character vector",
         )),
         Value::StringArray(sa) => {
-            if sa.data().len() == 1 {
-                Ok(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
+            if sa.data().len() == 1 && !sa.data()[0].is_missing() {
+                Ok(std::borrow::Cow::Borrowed(
+                    sa.data()[0].as_str().expect("checked nonmissing string"),
+                ))
             } else {
                 Err(fileread_error_with_detail(
                     &FILEREAD_ERROR_INVALID_OPTION,
@@ -179,7 +183,7 @@ fn encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
-        Value::String(s) => normalize_path(s),
+        Value::String(runmat_value::StringElement::Text(s)) => normalize_path(s),
         Value::CharArray(ca) if ca.rows == 1 => runmat_value::decode_utf16_code_units(ca.data())
             .map_err(|source| {
                 fileread_error_with_detail(&FILEREAD_ERROR_INVALID_INPUT, source.to_string())
@@ -190,8 +194,8 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
             "expected a 1-by-N character vector for the file name",
         )),
         Value::StringArray(sa) => {
-            if sa.data().len() == 1 {
-                normalize_path(&sa.data()[0])
+            if sa.data().len() == 1 && !sa.data()[0].is_missing() {
+                normalize_path(sa.data()[0].as_str().expect("checked nonmissing string"))
             } else {
                 Err(fileread_error_with_detail(
                     &FILEREAD_ERROR_INVALID_INPUT,

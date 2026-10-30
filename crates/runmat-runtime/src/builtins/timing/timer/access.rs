@@ -91,7 +91,7 @@ pub(super) fn string_property(
     name: &str,
 ) -> BuiltinResult<runmat_value::Utf8Text> {
     match property(handle, name)? {
-        Value::String(text) => Ok(text),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text),
         Value::CharArray(chars) if chars.rows == 1 => {
             crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
                 timer_error(
@@ -115,7 +115,7 @@ pub(super) fn numeric_property(handle: &HandleRef, name: &str) -> BuiltinResult<
 pub(super) fn running_is_on(object: &ObjectInstance) -> bool {
     matches!(
         object.properties().get("Running"),
-        Some(Value::String(text)) if text.eq_ignore_ascii_case("on")
+        Some(Value::String(runmat_value::StringElement::Text(text))) if text.eq_ignore_ascii_case("on")
     )
 }
 

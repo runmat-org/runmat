@@ -45,7 +45,7 @@ fn borrowed_semantic_ingress_admits_final_slots_before_selected_callback() {
         for mode in 0..4 {
             let text: runmat_value::Utf8Text = "original argument payload".into();
             let pointer = text.as_str().as_ptr();
-            let source = RootedValues::new(vec![Value::String(text)]).unwrap();
+            let source = RootedValues::new(vec![Value::String(text.into())]).unwrap();
             let (runtime, ledger, cancellation) = runtime(if mode == 0 { 0 } else { 1 << 20 });
             let invoked = Rc::new(Cell::new(0));
             let observed = Rc::clone(&invoked);
@@ -58,7 +58,11 @@ fn borrowed_semantic_ingress_admits_final_slots_before_selected_callback() {
                     let Value::String(text) = &arguments.supplied()[0] else {
                         panic!("original string argument");
                     };
-                    assert_eq!(text.as_str().as_ptr(), pointer, "no payload-byte copy");
+                    assert_eq!(
+                        text.as_str().expect("nonmissing text").as_ptr(),
+                        pointer,
+                        "no payload-byte copy"
+                    );
                     crate::user_functions::admit_user_function_with(
                         selected.as_ref(),
                         move || async move {
@@ -110,7 +114,7 @@ fn borrowed_semantic_ingress_admits_final_slots_before_selected_callback() {
             assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
             assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
             assert!(
-                matches!(&source.values()[0], Value::String(text) if text.as_str().as_ptr() == pointer)
+                matches!(&source.values()[0], Value::String(text) if text.as_str().expect("nonmissing text").as_ptr() == pointer)
             );
         }
     });
@@ -124,7 +128,7 @@ fn final_slots_retain_original_payload_and_roots_until_last_fork_retires() {
         let text: runmat_value::Utf8Text = "original bytes".into();
         let pointer = text.as_str().as_ptr();
         let arguments: BuiltinArguments = RootedValues::new(vec![
-            Value::String(text),
+            Value::String(text.into()),
             Value::HandleObject(HandleRef {
                 class_name: "TransformFixture".into(),
                 target: handle,
@@ -143,7 +147,7 @@ fn final_slots_retain_original_payload_and_roots_until_last_fork_retires() {
         let Value::String(text) = &transformed[0] else {
             panic!("retained text")
         };
-        assert_eq!(text.as_str().as_ptr(), pointer);
+        assert_eq!(text.as_str().expect("nonmissing text").as_ptr(), pointer);
         assert_eq!(transformed[1], Value::Num(7.));
         let retained_bytes = ledger.snapshot().live_reserved_bytes;
         assert!(retained_bytes > 0);

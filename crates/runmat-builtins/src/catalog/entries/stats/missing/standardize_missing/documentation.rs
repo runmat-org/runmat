@@ -5,7 +5,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("standardizeMissing"),
     slug: Some("standardizeMissing"),
     summary: "Replace user-specified missing indicators with canonical missing values.",
-    description: "`standardizeMissing(A, indicators)` changes matching floating entries to NaN and matching text to `<missing>`. Supported cell and table values are processed recursively.",
+    description: "`standardizeMissing(A, indicators)` changes matching floating entries to NaN and matching string elements to typed missing values, displayed as `<missing>`. Supported cell and table values are processed recursively.",
     keywords: &["standardizeMissing", "missing", "NaN", "string", "table"],
     related: &["ismissing", "fillmissing"],
     sections: &[

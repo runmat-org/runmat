@@ -10,9 +10,7 @@ use runmat_value::{CellArray, CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
-use crate::builtins::strings::common::{
-    contains_numeric_or_resident_text_input, is_missing_string,
-};
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "strlength";
@@ -55,7 +53,7 @@ async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
         .map_err(remap_strlength_flow)?;
     match gathered {
         Value::StringArray(array) => strlength_string_array(array),
-        Value::String(text) => Ok(Value::Num(string_scalar_length(&text))),
+        Value::String(text) => Ok(Value::Num(string_scalar_length(text.as_str()))),
         Value::CharArray(array) => strlength_char_array(array),
         Value::Cell(cell) => strlength_cell_array(cell),
         _ => Err(strlength_error(&STRLENGTH_ERROR_INVALID_INPUT)),
@@ -97,7 +95,7 @@ fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             let idx = row * cols + col;
             let value: &Value = &data[idx];
             let length = match value {
-                Value::String(text) => string_scalar_length(text),
+                Value::String(text) => string_scalar_length(text.as_str()),
                 Value::StringArray(sa) if sa.data().len() == 1 => {
                     string_scalar_length(sa.data()[0].as_str())
                 }
@@ -115,11 +113,10 @@ fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn string_scalar_length(text: &str) -> f64 {
-    if is_missing_string(text) {
-        f64::NAN
-    } else {
-        text.chars().count() as f64
+fn string_scalar_length(text: Option<&str>) -> f64 {
+    match text {
+        None => f64::NAN,
+        Some(text) => text.chars().count() as f64,
     }
 }
 
@@ -171,7 +168,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_string_array_with_missing() {
-        let array = StringArray::new(vec!["alpha".into(), "<missing>".into()], vec![2, 1]).unwrap();
+        let array = StringArray::from_elements_unbounded(
+            vec!["alpha".into(), runmat_value::StringElement::Missing],
+            vec![2, 1],
+        )
+        .unwrap();
         let result = strlength_builtin(Value::StringArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
@@ -237,7 +238,7 @@ pub(crate) mod tests {
             vec![
                 Value::String("alpha".into()),
                 Value::String("beta".into()),
-                Value::String("<missing>".into()),
+                Value::String(runmat_value::StringElement::Missing),
             ],
             1,
             3,

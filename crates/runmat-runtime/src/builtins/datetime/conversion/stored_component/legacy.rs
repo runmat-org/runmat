@@ -194,8 +194,13 @@ async fn serial_at(
         return Ok(source.at(index));
     };
     let text = match value {
-        Value::String(text) => text.as_str(),
-        Value::StringArray(array) => array.data()[index].as_str(),
+        Value::String(text) => {
+            crate::builtins::datetime::nonmissing_text(text, work.label).map_err(never_retry)?
+        }
+        Value::StringArray(array) => {
+            crate::builtins::datetime::nonmissing_text(&array.data()[index], work.label)
+                .map_err(never_retry)?
+        }
         Value::CharArray(array) => {
             let scratch = row_scratch.expect("nonempty character rows have admitted workspace");
             let row = &array.data()[index * array.cols..(index + 1) * array.cols];

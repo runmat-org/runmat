@@ -49,8 +49,8 @@ pub(super) async fn get(
     cooperation: &mut ScalarCooperation,
 ) -> BuiltinResult<RootedValue> {
     let value = match property {
-        Property::Name => Value::String(view.definition().name_owner().clone()),
-        Property::Type => Value::String(crate::call::argument_text::copy_str(
+        Property::Name => Value::string(view.definition().name_owner().clone()),
+        Property::Type => Value::string(crate::call::argument_text::copy_str(
             view.definition().domain().name(),
             cooperation.runtime(),
         )?),
@@ -62,7 +62,7 @@ pub(super) async fn get(
                 if extent > 0 && axis_name(view, axis, 0).is_some() {
                     names = runmat_value::exact_capacity_vec(extent).map_err(data_error)?;
                     for position in 0..extent {
-                        names.push(Value::String(
+                        names.push(Value::string(
                             axis_name(view, axis, position)
                                 .ok_or_else(|| invalid("invalid reference index-name projection"))?
                                 .clone(),

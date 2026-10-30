@@ -436,8 +436,11 @@ fn string_scalar_from_value(
     context: &str,
 ) -> crate::BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .text_ref()
+            .cloned()
+            .ok_or_else(|| assert_error_with_message(context, &ASSERT_ERROR_INVALID_INPUT)),
         Value::CharArray(char_array) if char_array.rows == 1 => {
             Ok(runmat_value::decode_utf16_code_units(char_array.data())
                 .map_err(|source| {
@@ -457,8 +460,8 @@ fn string_scalar_from_value(
 
 fn string_scalar_opt(value: &Value) -> crate::BuiltinResult<Option<runmat_value::Utf8Text>> {
     Ok(match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data().len() == 1 => Some(array.data()[0].clone()),
+        Value::String(text) => text.text_ref().cloned(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].text_ref().cloned(),
         Value::CharArray(char_array) if char_array.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(char_array.data())
                 .map_err(|source| {

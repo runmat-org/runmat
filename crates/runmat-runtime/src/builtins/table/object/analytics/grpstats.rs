@@ -678,7 +678,10 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|text| text_group_atom(text.to_string()))
+            .map(|text| match text.as_str() {
+                Some(text) => GroupAtom::Text(text.to_owned()),
+                None => GroupAtom::Missing,
+            })
             .collect()),
         Value::CharArray(array) => (0..array.rows)
             .map(|row| -> BuiltinResult<GroupAtom> {
@@ -712,7 +715,10 @@ fn cell_atom(value: &Value) -> BuiltinResult<GroupAtom> {
         Value::Num(value) => number_group_atom(*value),
         Value::Int(value) => GroupAtom::Integer(value.clone()),
         Value::Bool(value) => GroupAtom::Logical(*value),
-        Value::String(value) => text_group_atom(value.to_string()),
+        Value::String(value) => match value.as_str() {
+            Some(text) => GroupAtom::Text(text.to_owned()),
+            None => GroupAtom::Missing,
+        },
         Value::CharArray(array) if array.rows == 1 => text_group_atom(
             runmat_value::decode_utf16_code_units(array.data())
                 .map_err(|error| {

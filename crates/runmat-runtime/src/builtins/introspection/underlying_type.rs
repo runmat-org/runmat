@@ -133,9 +133,22 @@ fn underlying_type_matches_checked(
 
 fn parse_type_name(value: &Value) -> BuiltinResult<Option<runmat_types::ClassIdentity>> {
     match value {
-        Value::String(s) => Ok(runmat_types::ClassIdentity::new(s.trim()).ok()),
-        Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data().is_empty() => {
-            Ok(runmat_types::ClassIdentity::new(sa.data()[0].trim()).ok())
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Ok(runmat_types::ClassIdentity::new(s.trim()).ok())
+        }
+        Value::StringArray(sa)
+            if sa.rows == 1
+                && sa.cols == 1
+                && !sa.data().is_empty()
+                && !sa.data()[0].is_missing() =>
+        {
+            Ok(runmat_types::ClassIdentity::new(
+                sa.data()[0]
+                    .as_str()
+                    .expect("checked nonmissing string")
+                    .trim(),
+            )
+            .ok())
         }
         Value::CharArray(ca) if ca.rows == 1 => {
             let text = super::text::decode_utf16_with_error(ca.data(), || {

@@ -17,15 +17,19 @@ impl TextScalarError {
 
 pub(crate) fn text_scalar(value: &Value) -> Result<String, TextScalarError> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
             runmat_value::decode_utf16_code_units(array.data()).map_err(TextScalarError::Encoding)
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         _ => Err(TextScalarError::NotTextScalar),
     }

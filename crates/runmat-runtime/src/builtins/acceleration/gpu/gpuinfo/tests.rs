@@ -65,7 +65,9 @@ fn extra_argument_has_own_error_before_provider_metadata_access() {
     );
     assert_eq!(error.to_string(), GPU_INFO_ERROR_TOO_MANY_INPUTS.message);
     assert_eq!(METADATA_PROBE.reads.load(Ordering::SeqCst), 0);
-    assert!(matches!(call(), Ok(Value::String(text)) if text.contains("metadata-probe")));
+    assert!(
+        matches!(call(), Ok(Value::String(runmat_value::StringElement::Text(text))) if text.contains("metadata-probe"))
+    );
     assert_eq!(METADATA_PROBE.reads.load(Ordering::SeqCst), 1);
 }
 
@@ -84,7 +86,7 @@ fn gpu_info_with_provider_formats_summary() {
     test_support::with_test_provider(|_| {
         let value = call().expect("gpuInfo");
         match value {
-            Value::String(text) => {
+            Value::String(runmat_value::StringElement::Text(text)) => {
                 assert!(text.starts_with("GPU["), "unexpected prefix: {text}");
                 assert!(
                     text.contains("name='InProcess'"),
@@ -177,7 +179,7 @@ fn gpu_info_wgpu_provider_reports_backend() {
 
     let value = call().expect("gpuInfo");
     match value {
-        Value::String(text) => {
+        Value::String(runmat_value::StringElement::Text(text)) => {
             assert!(text.starts_with("GPU["), "unexpected prefix: {text}");
             let info = provider.device_info_struct();
             let runmat_accelerate_api::ApiDeviceInfo {

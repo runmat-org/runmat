@@ -3,7 +3,7 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Text and boundary semantics", paragraphs: &[
         "extractBefore(str,patOrPos) returns text before the first matching text or pattern marker, or before a one-based numeric position. The matched marker or indexed character is excluded. Nonscalar boundary controls must match the text-element shape.",
-        "The current implementation handles the first marker match and preserves the text container kind. An absent text or pattern marker raises a boundary error. Missing string text uses the current sentinel representation; literal '<missing>' cannot be distinguished from a missing value.",
+        "The current implementation handles the first marker match and preserves the text container kind. An unmatched text or pattern marker raises a boundary error. Typed missing subject elements propagate unchanged; missing boundary controls are rejected. Literal `<missing>` text remains ordinary text.",
         "MATLAB-compatible text inputs are string arrays, character vectors, and cell arrays of character vectors. RunMat mode additionally admits row-wise character matrices and cells containing string scalars or nested cells, subject to each identity's extension gate.",
         "Text and pattern markers and real numeric positions are distinct boundary forms. All eight fixed-width integer classes are accepted as exact structural position controls; nonintegral, zero, and unsupported controls raise errors.",
     ] },

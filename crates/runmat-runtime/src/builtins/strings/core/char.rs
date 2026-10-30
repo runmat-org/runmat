@@ -148,11 +148,10 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>> {
     }
     match value {
         Value::CharArray(ca) => Ok(char_array_rows(ca)),
-        Value::String(s) => Ok(vec![s
-            .as_str()
-            .encode_utf16()
-            .map(Utf16CodeUnit::from_raw)
-            .collect()]),
+        Value::String(s) => Ok(vec![match s.as_str() {
+            Some(text) => text.encode_utf16().map(Utf16CodeUnit::from_raw).collect(),
+            None => Vec::new(),
+        }]),
         Value::Symbolic(expr) => Ok(vec![expr
             .to_string()
             .encode_utf16()
@@ -233,13 +232,10 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>>
     for c in 0..cols_count {
         for r in 0..rows_count {
             let idx = r + c * rows_count;
-            rows.push(
-                sa.data()[idx]
-                    .as_str()
-                    .encode_utf16()
-                    .map(Utf16CodeUnit::from_raw)
-                    .collect(),
-            );
+            rows.push(match sa.data()[idx].as_str() {
+                Some(text) => text.encode_utf16().map(Utf16CodeUnit::from_raw).collect(),
+                None => Vec::new(),
+            });
         }
     }
     Ok(rows)

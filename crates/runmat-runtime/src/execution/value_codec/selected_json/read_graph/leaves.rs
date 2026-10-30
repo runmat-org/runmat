@@ -59,7 +59,9 @@ async fn inline(
             reader.token(b'}')?;
             InlineValue::ComplexF64Bits { real, imaginary }
         }
-        "string" => InlineValue::String(budget.text(reader, c).await?),
+        "string" => InlineValue::String(runmat_execution::value::StringElement(
+            budget.optional_text(reader, c).await?,
+        )),
         "char" => {
             reader.token(b'{')?;
             reader.key("encoding", true)?;
@@ -80,7 +82,21 @@ async fn inline(
             reader.key("shape", true)?;
             let shape = budget.shape(reader, c).await?;
             reader.key("values", false)?;
-            let values = texts(reader, budget, c).await?;
+            reader.token(b'[')?;
+            let mut values = Vec::new();
+            while !reader.is(b']') {
+                budget.elements(1)?;
+                if !values.is_empty() {
+                    reader.token(b',')?;
+                }
+                values.try_reserve(1).map_err(|source| {
+                    with_source("selected string-array allocation failed", source)
+                })?;
+                values.push(runmat_execution::value::StringElement(
+                    budget.optional_text(reader, c).await?,
+                ));
+            }
+            reader.token(b']')?;
             reader.token(b'}')?;
             InlineValue::StringArray { shape, values }
         }

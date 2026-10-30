@@ -11,9 +11,9 @@ pub(crate) fn scalar_keyword_of(
     builtin: &'static str,
 ) -> crate::BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.to_ascii_lowercase())),
+        Value::String(text) => Ok(text.as_str().map(str::to_ascii_lowercase)),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].to_ascii_lowercase()))
+            Ok(array.data()[0].as_str().map(str::to_ascii_lowercase))
         }
         Value::CharArray(array) if array.rows == 1 => array
             .try_row_string()
@@ -95,10 +95,14 @@ fn token_from_value(value: &Value) -> ArgToken {
         Value::Num(num) => ArgToken::Number(*num),
         Value::Int(value) => ArgToken::Integer(value.clone()),
         Value::Bool(value) => ArgToken::Bool(*value),
-        Value::String(text) => ArgToken::String(text.to_ascii_lowercase()),
-        Value::StringArray(arr) if arr.data().len() == 1 => {
-            ArgToken::String(arr.data()[0].to_ascii_lowercase())
-        }
+        Value::String(text) => text
+            .as_str()
+            .map(|text| ArgToken::String(text.to_ascii_lowercase()))
+            .unwrap_or(ArgToken::Unknown),
+        Value::StringArray(arr) if arr.data().len() == 1 => arr.data()[0]
+            .as_str()
+            .map(|text| ArgToken::String(text.to_ascii_lowercase()))
+            .unwrap_or(ArgToken::Unknown),
         Value::CharArray(arr) if arr.rows == 1 => arr
             .try_row_string()
             .ok()

@@ -53,7 +53,7 @@ pub use runmat_builtins::{
 
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
             crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
                 archive_error(
@@ -62,8 +62,12 @@ fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
                 )
             })
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
         }
         _ => Err(archive_error(
             name,
@@ -84,7 +88,14 @@ fn paths_from_value(value: &Value, name: &str, arg: &str) -> BuiltinResult<Vec<P
         Value::StringArray(array) => array
             .data()
             .iter()
-            .map(|text| path_from_text(text, name))
+            .map(|text| {
+                path_from_text(
+                    text.as_str().ok_or_else(|| {
+                        archive_error(name, format!("{name}: missing string is not a filename"))
+                    })?,
+                    name,
+                )
+            })
             .collect(),
         Value::Cell(cell) => cell
             .data()
@@ -282,7 +293,11 @@ fn gunzip_sources_from_value(value: &Value) -> BuiltinResult<Vec<GunzipSource>> 
         Value::StringArray(array) => array
             .data()
             .iter()
-            .map(|text| parse_gunzip_source(text))
+            .map(|text| {
+                parse_gunzip_source(text.as_str().ok_or_else(|| {
+                    archive_error("gunzip", "gunzip: missing string is not a filename")
+                })?)
+            })
             .collect(),
         Value::Cell(cell) => cell
             .data()

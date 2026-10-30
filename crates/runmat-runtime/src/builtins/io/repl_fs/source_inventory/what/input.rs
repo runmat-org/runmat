@@ -20,8 +20,14 @@ pub(super) fn folder(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResu
 
 fn path(value: &Value) -> BuiltinResult<PathBuf> {
     let text = match value {
-        Value::String(text) => text.as_str().to_owned(),
-        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.as_str().to_owned(),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned()
+        }
         Value::CharArray(chars)
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>

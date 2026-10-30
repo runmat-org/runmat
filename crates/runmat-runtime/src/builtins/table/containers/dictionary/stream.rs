@@ -1,14 +1,14 @@
 //! Borrow native bits until a value really enters retained dictionary storage.
 use super::*;
 use crate::object::indexing::{ObjectIndexComponent, ObjectIndexSelector};
-use runmat_value::{NumericDType, Utf16CodeUnit, Utf8Text};
+use runmat_value::{NumericDType, StringElement, Utf16CodeUnit};
 
 #[derive(Clone, Copy)]
 pub(super) enum Element<'a> {
     Borrowed(&'a Value),
     Numeric(NumericScalar),
     Logical(bool),
-    Text(&'a Utf8Text),
+    Text(&'a StringElement),
     Chars(&'a [Utf16CodeUnit]),
     Literal(&'static str),
 }
@@ -89,7 +89,7 @@ impl<'a> Element<'a> {
     fn text(self) -> BuiltinResult<Option<Text<'a>>> {
         Ok(match self {
             Self::Text(value) | Self::Borrowed(Value::String(value)) => {
-                Some(Text::Utf8(value.as_str()))
+                Some(value.as_str().map(Text::Utf8).unwrap_or(Text::Missing))
             }
             Self::Chars(value) => Some(Text::Owned(
                 runmat_value::decode_utf16_code_units(value).map_err(|source| {
@@ -117,6 +117,8 @@ impl<'a> Element<'a> {
         };
         if let (Some(left), Some(right)) = (text(self)?, text(other)?) {
             return Ok(match (left, right) {
+                (Text::Missing, Text::Missing) => true,
+                (Text::Missing, _) | (_, Text::Missing) => false,
                 (Text::Utf8(a), Text::Utf8(b)) => a == b,
                 (Text::Owned(a), Text::Owned(b)) => a == b,
                 (Text::Utf8(a), Text::Owned(b)) | (Text::Owned(b), Text::Utf8(a)) => a == b,
@@ -168,6 +170,7 @@ fn configured_classes_equal(first: &Value, value: &Value) -> bool {
 }
 #[derive(Clone)]
 enum Text<'a> {
+    Missing,
     Utf8(&'a str),
     Owned(String),
 }

@@ -30,7 +30,7 @@ pub use runmat_builtins::{
 
 fn scalar_text<'a>(value: &'a Value, name: &str, arg: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(Cow::Borrowed(text.as_str())),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
             crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
                 line_error(
@@ -40,8 +40,13 @@ fn scalar_text<'a>(value: &'a Value, name: &str, arg: &str) -> BuiltinResult<Cow
             })
             .map(Cow::Owned)
         }
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Cow::Borrowed(array.data()[0].as_str()))
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Cow::Borrowed(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         _ => Err(line_error(
             name,
@@ -143,7 +148,9 @@ async fn writelines_builtin(args: crate::call::BuiltinArguments) -> BuiltinResul
 
 fn lines_from_value(value: &Value) -> BuiltinResult<Vec<Cow<'_, str>>> {
     match value {
-        Value::String(text) => Ok(vec![Cow::Borrowed(text.as_str())]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![Cow::Borrowed(text.as_str())])
+        }
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
             crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
                 line_error("textscan", "text input contains malformed UTF-16")
@@ -162,11 +169,13 @@ fn lines_from_value(value: &Value) -> BuiltinResult<Vec<Cow<'_, str>>> {
             }
             Ok(lines)
         }
-        Value::StringArray(array) => Ok(array
-            .data()
-            .iter()
-            .map(|text| Cow::Borrowed(text.as_str()))
-            .collect()),
+        Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => {
+            Ok(array
+                .data()
+                .iter()
+                .map(|text| Cow::Borrowed(text.as_str().expect("checked nonmissing string")))
+                .collect())
+        }
         Value::Cell(array) => cell_lines(array),
         _ => Err(line_error(
             "writelines",

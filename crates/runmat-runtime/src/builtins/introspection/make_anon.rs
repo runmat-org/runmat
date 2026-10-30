@@ -71,7 +71,7 @@ mod canonical_tests {
         ];
         let args = crate::call::BuiltinArguments::from_borrowed(&values, None).unwrap();
         let output = futures::executor::block_on(make_anon_builtin_registered(None, args)).unwrap();
-        let Value::String(text) = output else {
+        let Value::String(runmat_value::StringElement::Text(text)) = output else {
             panic!("textual representation")
         };
         assert_eq!(text.as_str(), "@anon(18446744073709551615) true");

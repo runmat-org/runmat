@@ -15,7 +15,6 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, ObjectInstance, SparseTensor, Tensor, Value};
 
 use crate::builtins::common::tensor::{tensor_into_values_f64, tensor_values_f64_cow};
-use crate::builtins::strings::common::is_missing_string;
 use crate::builtins::strings::text_analytics::documents::{
     checked_count_len, counts_from_bag, documents_from_object, vocabulary_from_bag,
     words_from_word_vector, BAG_OF_WORDS_CLASS, TOKENIZED_DOCUMENT_CLASS,
@@ -664,9 +663,11 @@ fn ngrams_from_bag(object: &ObjectInstance) -> BuiltinResult<Vec<Vec<String>>> {
     for row in 0..array.rows {
         let mut ngram = Vec::new();
         for col in 0..array.cols {
-            let word = array.data()[row + col * array.rows].as_str().to_owned();
-            if !word.is_empty() && !is_missing_string(&word) {
-                ngram.push(word);
+            if let Some(word) = array.data()[row + col * array.rows]
+                .as_str()
+                .filter(|word| !word.is_empty())
+            {
+                ngram.push(word.to_owned());
             }
         }
         if ngram.is_empty() {

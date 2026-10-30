@@ -53,7 +53,7 @@ fn dynamic_probe_returns_the_same_argument_owner_and_keeps_selected_outcomes_ter
     let Some(Value::String(text)) = arguments.first() else {
         panic!("original string argument retained");
     };
-    assert_eq!(text.as_ptr(), payload);
+    assert_eq!(text.as_str().expect("nonmissing text").as_ptr(), payload);
     let selected = futures::executor::block_on(try_load_and_call_dynamic_function(
         "late".into(),
         arguments,

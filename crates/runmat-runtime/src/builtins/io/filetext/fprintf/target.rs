@@ -165,7 +165,7 @@ fn ensure_writable(info: &FileInfo) -> BuiltinResult<()> {
 
 pub(super) fn match_stream_label(value: &Value) -> BuiltinResult<Option<SpecialStream>> {
     let candidate = match value {
-        Value::String(s) => s.trim().to_string(),
+        Value::String(runmat_value::StringElement::Text(s)) => s.trim().to_string(),
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 fprintf_error_with_detail(
@@ -176,7 +176,12 @@ pub(super) fn match_stream_label(value: &Value) -> BuiltinResult<Option<SpecialS
             .trim()
             .to_string()
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].trim().to_string(),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => sa.data()
+            [0]
+        .text_ref()
+        .expect("checked nonmissing scalar string")
+        .trim()
+        .to_string(),
         _ => return Ok(None),
     };
     Ok(match candidate.to_ascii_lowercase().as_str() {

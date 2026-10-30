@@ -228,9 +228,9 @@ fn logical_tabulate(name: &str, data: Vec<u8>) -> BuiltinResult<Value> {
 
 pub(super) fn label_for_value(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => text.as_str().map(str::to_owned),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            array.data()[0].as_str().map(str::to_owned)
         }
         Value::CharArray(chars) if chars.rows == 1 => Some(
             crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
@@ -244,6 +244,8 @@ pub(super) fn label_for_value(value: &Value) -> BuiltinResult<Option<String>> {
     })
 }
 
+// Missing observations are excluded before this census. Literal spellings and
+// empty present strings remain ordinary labels in the denominator.
 fn string_tabulate(name: &str, labels: impl IntoIterator<Item = String>) -> BuiltinResult<Value> {
     let mut counts = BTreeMap::<String, usize>::new();
     let mut total = 0usize;
@@ -278,10 +280,13 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
         Value::Num(_) | Value::Bool(_) => tensor::value_into_tensor_for(name, value)
             .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
             .and_then(|tensor| numeric_tabulate(name, tensor)),
-        Value::String(text) => string_tabulate(name, [text.as_str().to_owned()]),
+        Value::String(text) => string_tabulate(name, text.as_str().map(str::to_owned)),
         Value::StringArray(array) => string_tabulate(
             name,
-            array.data().iter().map(|text| text.as_str().to_owned()),
+            array
+                .data()
+                .iter()
+                .filter_map(|text| text.as_str().map(str::to_owned)),
         ),
         Value::CharArray(chars) if chars.rows == 1 => {
             let text = crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
@@ -292,6 +297,11 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
             for entry in cell.data() {
+                if matches!(entry, Value::String(runmat_value::StringElement::Missing))
+                    || matches!(entry, Value::StringArray(array) if array.data().len() == 1 && array.data()[0].is_missing())
+                {
+                    continue;
+                }
                 let Some(label) = label_for_value(entry)? else {
                     return Err(descriptive_error(
                         name,
@@ -306,6 +316,45 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
             name,
             format!("{name}: unsupported input type {other:?}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod missing_string_tests {
+    use super::*;
+    use runmat_value::StringElement;
+
+    #[test]
+    fn missing_is_excluded_but_empty_and_literal_labels_are_counted() {
+        let elements = vec![
+            StringElement::text("<missing>"),
+            StringElement::Missing,
+            StringElement::text(""),
+            StringElement::text("<missing>"),
+        ];
+        let array = Value::StringArray(
+            StringArray::from_elements_unbounded(elements.clone(), vec![4, 1]).unwrap(),
+        );
+        let cell = Value::Cell(
+            CellArray::new(elements.into_iter().map(Value::String).collect(), 4, 1).unwrap(),
+        );
+        for input in [array, cell] {
+            let Value::Cell(table) = tabulate_value("tabulate", input).unwrap() else {
+                panic!("text tabulation must return a cell array");
+            };
+            assert_eq!(table.data().len(), 6);
+            for (index, expected) in [(0, ""), (1, "<missing>")] {
+                let Value::StringArray(label) = table.get(index, 0).unwrap() else {
+                    panic!("tabulated label must retain string class");
+                };
+                assert_eq!(label.data()[0].as_str(), Some(expected));
+            }
+            assert!(matches!(table.get(0, 1).unwrap(), Value::Num(1.0)));
+            assert!(matches!(table.get(1, 1).unwrap(), Value::Num(2.0)));
+            assert!(
+                matches!(table.get(1, 2).unwrap(), Value::Num(value) if (value - 200.0 / 3.0).abs() < 1e-12)
+            );
+        }
     }
 }
 

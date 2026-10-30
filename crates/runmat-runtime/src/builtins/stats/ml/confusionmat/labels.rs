@@ -12,6 +12,7 @@ pub(super) enum LabelKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Label {
+    MissingString,
     Numeric(f64),
     Integer(IntValue),
     Text(String),
@@ -27,6 +28,7 @@ pub(super) struct LabelVector {
 
 #[derive(Eq, PartialEq, Hash)]
 pub(super) enum LabelKey {
+    MissingString,
     Numeric(u64),
     Integer(i128),
     Text(String),
@@ -35,6 +37,7 @@ pub(super) enum LabelKey {
 
 pub(super) fn label_key(label: &Label) -> LabelKey {
     match label {
+        Label::MissingString => LabelKey::MissingString,
         Label::Numeric(value) if *value == 0.0 => LabelKey::Numeric(0),
         Label::Numeric(value) => LabelKey::Numeric(value.to_bits()),
         Label::Integer(value) => LabelKey::Integer(integer_sort_key(value)),
@@ -57,7 +60,8 @@ pub(super) fn is_missing_label(label: &Label) -> bool {
     match label {
         Label::Numeric(value) => value.is_nan(),
         Label::Integer(_) => false,
-        Label::Text(value) => value.is_empty() || value == "<missing>",
+        Label::MissingString => true,
+        Label::Text(value) => value.is_empty(),
         Label::Logical(_) => false,
     }
 }

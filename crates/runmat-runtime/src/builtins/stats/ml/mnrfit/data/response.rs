@@ -226,7 +226,24 @@ pub(super) async fn numeric_outcomes(
     })
 }
 
-async fn text_outcomes<T: AsRef<str>>(
+trait ResponseText {
+    fn response_text(&self) -> BuiltinResult<&str>;
+}
+
+impl ResponseText for runmat_value::StringElement {
+    fn response_text(&self) -> BuiltinResult<&str> {
+        self.as_str()
+            .ok_or_else(|| invalid("mnrfit: text response classes must be nonmissing"))
+    }
+}
+
+impl ResponseText for String {
+    fn response_text(&self) -> BuiltinResult<&str> {
+        Ok(self.as_str())
+    }
+}
+
+async fn text_outcomes<T: ResponseText>(
     values: &[T],
     shape: &[usize],
     rows: usize,
@@ -238,7 +255,7 @@ async fn text_outcomes<T: AsRef<str>>(
         ));
     }
     for (index, value) in values.iter().enumerate() {
-        if value.as_ref().is_empty() {
+        if value.response_text()?.is_empty() {
             return Err(invalid("mnrfit: text response classes must be nonempty"));
         }
         if (index + 1).is_multiple_of(16_384) {
@@ -253,7 +270,7 @@ async fn text_outcomes<T: AsRef<str>>(
         .try_reserve_exact(values.len())
         .map_err(|_| invalid("mnrfit: text class census exceeds available host resources"))?;
     for (index, value) in values.iter().enumerate() {
-        classes.push(class_census::clone_text(value.as_ref(), cooperation).await?);
+        classes.push(class_census::clone_text(value.response_text()?, cooperation).await?);
         if (index + 1).is_multiple_of(16_384) {
             cooperation.completed(16_384).await?;
         }
@@ -268,9 +285,10 @@ async fn text_outcomes<T: AsRef<str>>(
     let logits = classes.len() - 1;
     let mut outcomes = columns(logits, rows, "text outcomes", &|| Ok(()), cooperation).await?;
     for (row, value) in values.iter().enumerate() {
-        let class_idx = class_census::find_text_class(&classes, value.as_ref(), cooperation)
-            .await?
-            .ok_or_else(|| internal("mnrfit: failed to map response class"))?;
+        let class_idx =
+            class_census::find_text_class(&classes, value.response_text()?, cooperation)
+                .await?
+                .ok_or_else(|| internal("mnrfit: failed to map response class"))?;
         if class_idx < logits {
             outcomes[class_idx][row] = 1.0;
         }
@@ -297,7 +315,9 @@ async fn cellstr_outcomes(
         .map_err(|_| invalid("mnrfit: text response labels exceed available host resources"))?;
     for (index, value) in cell.data().iter().enumerate() {
         let label = match value {
-            Value::String(text) => class_census::clone_text(text, cooperation).await?,
+            Value::String(runmat_value::StringElement::Text(text)) => {
+                class_census::clone_text(text, cooperation).await?
+            }
             Value::CharArray(chars) if chars.rows == 1 => {
                 char_rows_cooperatively(chars, cooperation)
                     .await?

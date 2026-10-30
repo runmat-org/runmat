@@ -234,7 +234,9 @@ impl FrozenStudyGeneratorInventory {
                     "frozen study generator entry has unexpected fields",
                 ));
             }
-            let Some(Value::String(study_id)) = row.fields.get("study_id") else {
+            let Some(Value::String(runmat_value::StringElement::Text(study_id))) =
+                row.fields.get("study_id")
+            else {
                 return Err(builtin_error(
                     builtin,
                     &ERROR_INPUT,
@@ -344,7 +346,9 @@ fn decode_bindings(
                     "frozen generator entry has unexpected fields",
                 ));
             }
-            let Some(Value::String(signal_id)) = row.fields.get("signal_id") else {
+            let Some(Value::String(runmat_value::StringElement::Text(signal_id))) =
+                row.fields.get("signal_id")
+            else {
                 return Err(builtin_error(
                     builtin,
                     &ERROR_INPUT,

@@ -16,8 +16,14 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
     }
 
     let name = match value {
-        Value::String(text) => normalize_handle_name(&text),
-        Value::StringArray(sa) if sa.data().len() == 1 => normalize_handle_name(&sa.data()[0]),
+        Value::String(runmat_value::StringElement::Text(text)) => normalize_handle_name(&text),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            normalize_handle_name(
+                &sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string"),
+            )
+        }
         Value::StringArray(_) => {
             return Err(crate::runtime_descriptor_error_with_detail(
                 "str2func",
@@ -79,9 +85,15 @@ pub(crate) fn dispatch_func2str(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name) => Ok(Value::String(name.into_text_owner())),
-        Value::BoundFunctionHandle(handle) => Ok(Value::String(handle.name.clone())),
-        Value::Closure(closure) => Ok(Value::String(closure.function_name.clone())),
+        | Value::MethodFunctionHandle(name) => Ok(Value::String(
+            runmat_value::StringElement::Text(name.into_text_owner()),
+        )),
+        Value::BoundFunctionHandle(handle) => Ok(Value::String(runmat_value::StringElement::Text(
+            handle.name.clone(),
+        ))),
+        Value::Closure(closure) => Ok(Value::String(runmat_value::StringElement::Text(
+            closure.function_name.clone(),
+        ))),
         Value::ScopedFunctionHandle(_) => Ok(Value::from("<invocation-scoped callable>")),
         other => Err(crate::runtime_descriptor_error_with_detail(
             "func2str",
@@ -138,7 +150,7 @@ mod tests {
                 _ => unreachable!(),
             };
             let result = dispatch_func2str(value).unwrap();
-            let Value::String(text) = result else {
+            let Value::String(runmat_value::StringElement::Text(text)) = result else {
                 panic!("string scalar expected")
             };
             assert_eq!(text.as_str(), expected);

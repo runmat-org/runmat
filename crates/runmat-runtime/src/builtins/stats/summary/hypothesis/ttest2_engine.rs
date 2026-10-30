@@ -144,15 +144,16 @@ pub(super) fn ensure_exact_ttest2_integer_scalar(value: &Value, role: &str) -> B
 
 pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(Cow::Borrowed(text.as_str())),
         Value::CharArray(array) if array.rows == 1 => Ok(Cow::Owned(
             crate::builtins::stats::decode_utf16_with_error(array.data(), || {
                 invalid_argument(format!("ttest2: {context} is not valid UTF-16 text"))
             })?,
         )),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Cow::Borrowed(array.data()[0].as_str()))
-        }
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .map(Cow::Borrowed)
+            .ok_or_else(|| invalid_argument(format!("ttest2: {context} must be nonmissing text"))),
         Value::Cell(cell) if cell.data().len() == 1 => scalar_text(&cell.data()[0], context),
         other => Err(invalid_argument(format!(
             "ttest2: {context} must be a string scalar, got {other:?}"

@@ -25,6 +25,7 @@ mod standardize;
 mod text_output;
 
 use errors::{gather_error, internal_error, invalid_argument, unsupported_type};
+#[cfg(test)]
 use metadata::MISSING_TEXT;
 use runmat_builtins::{
     FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION, FILLMISSING_INTEGER_DATA_EXTENSION,

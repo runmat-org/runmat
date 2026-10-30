@@ -36,7 +36,7 @@ pub(super) fn value_to_json(
         }
         Value::Complex(re, im) => complex_scalar_to_json(*re, *im, options),
         Value::ComplexTensor(ct) => complex_tensor_to_json(ct, options),
-        Value::String(s) => Ok(JsonValue::String(s.clone())),
+        Value::String(s) => Ok(string_element_to_json(s)),
         Value::Symbolic(expr) => Ok(JsonValue::String(expr.to_string().into())),
         Value::SymbolicArray(array) => symbolic_array_to_json(array, options),
         Value::StringArray(sa) => string_array_to_json(sa, options),
@@ -81,6 +81,13 @@ pub(super) fn value_to_json(
         | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(jsonencode_error(&JSONENCODE_ERROR_UNSUPPORTED_TYPE)),
+    }
+}
+
+fn string_element_to_json(value: &runmat_value::StringElement) -> JsonValue {
+    match value {
+        runmat_value::StringElement::Text(text) => JsonValue::String(text.clone()),
+        runmat_value::StringElement::Missing => JsonValue::Null,
     }
 }
 
@@ -232,10 +239,10 @@ fn string_array_to_json(
     }
     let keep_dims = compute_keep_dims(&sa.shape, true);
     if keep_dims.is_empty() {
-        return Ok(JsonValue::String(sa.data()[0].clone()));
+        return Ok(string_element_to_json(&sa.data()[0]));
     }
     build_strided_array(&sa.shape, &keep_dims, |offset| {
-        Ok(JsonValue::String(sa.data()[offset].clone()))
+        Ok(string_element_to_json(&sa.data()[offset]))
     })
 }
 

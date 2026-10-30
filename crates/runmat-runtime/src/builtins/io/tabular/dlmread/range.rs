@@ -30,7 +30,7 @@ pub(super) fn validate_range(spec: RangeSpec) -> BuiltinResult<RangeSpec> {
 
 pub(super) fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
     match value {
-        Value::String(s) => parse_range_string(s),
+        Value::String(runmat_value::StringElement::Text(s)) => parse_range_string(s),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text = crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 dlmread_error_with(
@@ -41,8 +41,12 @@ pub(super) fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
             parse_range_string(&text)
         }
         Value::StringArray(sa) => {
-            if sa.data().len() == 1 {
-                parse_range_string(&sa.data()[0])
+            if sa.data().len() == 1 && !sa.data()[0].is_missing() {
+                parse_range_string(
+                    sa.data()[0]
+                        .as_str()
+                        .expect("checked nonmissing scalar string"),
+                )
             } else {
                 Err(dlmread_error_with(
                     &DLMREAD_ERROR_RANGE,

@@ -84,8 +84,8 @@ fn column_labels(
             categorical_labels(value, atoms)
         }
         Value::LogicalArray(_) | Value::Bool(_) => logical_labels(atoms),
-        Value::StringArray(_) | Value::String(_) => StringArray::new(
-            atoms.into_iter().map(|atom| atom.label()).collect(),
+        Value::StringArray(_) | Value::String(_) => StringArray::from_elements_unbounded(
+            atoms.into_iter().map(|atom| atom.string_label()).collect(),
             vec![index.keys.len(), 1],
         )
         .map(Value::StringArray)

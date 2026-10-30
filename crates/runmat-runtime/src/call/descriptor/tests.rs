@@ -229,7 +229,7 @@ async fn captured_body(
             [
                 object.properties().entries().as_ptr() as usize,
                 record.fields.entries().as_ptr() as usize,
-                text.as_str().as_ptr() as usize,
+                text.as_str().expect("nonmissing text").as_ptr() as usize,
                 tensor.as_f64_slice().unwrap().as_ptr() as usize,
             ]
         )
@@ -343,7 +343,7 @@ fn bounded_captured_builtin_preserves_original_generations_and_pending_roots() {
                     pointers.set([
                         object.properties().entries().as_ptr() as usize,
                         record.fields.entries().as_ptr() as usize,
-                        text.as_str().as_ptr() as usize,
+                        text.as_str().expect("nonmissing text").as_ptr() as usize,
                         tensor.as_f64_slice().unwrap().as_ptr() as usize,
                     ])
                 });
@@ -516,7 +516,7 @@ fn selected_named_fallback_error_is_not_absence_or_replayed() {
             Value::CharArray(runmat_value::CharArray::new_row("logical")),
         ] {
             let original_name = match &target {
-                Value::String(text) => Some(text.as_str().as_ptr()),
+                Value::String(text) => text.as_str().map(str::as_ptr),
                 Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => {
                     Some(name.name().as_ptr())
                 }

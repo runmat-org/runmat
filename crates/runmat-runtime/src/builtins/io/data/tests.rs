@@ -155,11 +155,56 @@ fn attribute_json_preserves_native_integer_text() {
 }
 
 #[test]
-fn attribute_json_roundtrips_wide_integer_values_without_f64() {
+fn attribute_json_roundtrips_exact_scalars_and_rejects_untyped_aggregates() {
     for value in [IntValue::I64(i64::MIN), IntValue::U64(u64::MAX)] {
         let json = value_to_json(&Value::Int(value.clone())).unwrap();
         assert_eq!(json_to_value(&json), Value::Int(value));
     }
+    for element in [
+        "<missing>".into(),
+        "<MISSING>".into(),
+        "".into(),
+        runmat_value::StringElement::Missing,
+    ] {
+        let original = Value::String(element.clone());
+        let json = value_to_json(&original).unwrap();
+        assert_eq!(json_to_value(&json), original);
+        let scalar_array =
+            runmat_value::StringArray::from_elements_unbounded(vec![element], vec![1, 1]).unwrap();
+        assert_eq!(
+            value_to_json(&Value::StringArray(scalar_array)).unwrap(),
+            json
+        );
+    }
+    for number in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(value_to_json(&Value::Num(number)).is_err());
+    }
+    assert_eq!(
+        value_to_json(&Value::Num(1.5)).unwrap(),
+        serde_json::json!(1.5)
+    );
+    let row = runmat_value::CharArray::new_row("<missing>");
+    assert_eq!(
+        value_to_json(&Value::CharArray(row)).unwrap(),
+        serde_json::json!("<missing>")
+    );
+    let matrix = runmat_value::CharArray::from_unicode_scalars(vec!['a', 'b'], 2, 1).unwrap();
+    assert!(value_to_json(&Value::CharArray(matrix)).is_err());
+    let pages = runmat_value::CharArray::from_code_units_with_shape(
+        vec![
+            runmat_value::Utf16CodeUnit::from_raw(97),
+            runmat_value::Utf16CodeUnit::from_raw(98),
+        ],
+        vec![1, 1, 2],
+    )
+    .unwrap();
+    assert!(value_to_json(&Value::CharArray(pages)).is_err());
+    let strings = runmat_value::StringArray::from_elements_unbounded(
+        vec!["literal".into(), runmat_value::StringElement::Missing],
+        vec![1, 2],
+    )
+    .unwrap();
+    assert!(value_to_json(&Value::StringArray(strings)).is_err());
 }
 
 #[test]
@@ -1080,7 +1125,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     for method in ["Dataset.id", "Dataset.version"] {
         let identity = call_builtin(method, std::slice::from_ref(result.value()))
             .expect("sealed Dataset identity accessor");
-        let Value::String(value) = identity.value() else {
+        let Value::String(runmat_value::StringElement::Text(value)) = identity.value() else {
             panic!("{method} must return text");
         };
         assert!(!value.is_empty());
@@ -1244,7 +1289,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
         &[result.value().clone(), Value::String("owner-check".into())],
     )
     .expect("snapshot stays on original provider");
-    let Value::String(snapshot) = snapshot.value() else {
+    let Value::String(runmat_value::StringElement::Text(snapshot)) = snapshot.value() else {
         panic!("Dataset.snapshot must return a path");
     };
     assert!(std::path::Path::new(snapshot.as_str()).is_file());

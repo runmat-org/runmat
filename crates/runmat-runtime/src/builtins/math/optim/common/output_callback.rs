@@ -281,8 +281,8 @@ pub(crate) async fn notify(
         Some(value) => Value::Num(value),
         None => empty(runtime.as_ref())?,
     };
-    let procedure =
-        crate::call::argument_text::copy_str("", runtime.as_ref()).map(Value::String)?;
+    let procedure = crate::call::argument_text::copy_str("", runtime.as_ref())
+        .map(|text| Value::String(text.into()))?;
     let fields = [
         ("iteration", Value::Num(values.iteration as f64)),
         ("funccount", Value::Num(values.func_count as f64)),
@@ -299,8 +299,8 @@ pub(crate) async fn notify(
         runtime.as_ref(),
         fields.iter().map(|(name, value)| (*name, value)),
     )?;
-    let state =
-        crate::call::argument_text::copy_str(state.name(), runtime.as_ref()).map(Value::String)?;
+    let state = crate::call::argument_text::copy_str(state.name(), runtime.as_ref())
+        .map(|text| Value::String(text.into()))?;
     let groups = [ObserverGroup {
         value: Some(callback),
         form: CallbackForm::Handles,

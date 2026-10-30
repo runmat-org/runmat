@@ -41,8 +41,16 @@ fn table_columns(table: &Value) -> (Vec<String>, Vec<String>, Vec<Value>) {
         panic!("Value column expected")
     };
     (
-        layers.data().iter().map(ToString::to_string).collect(),
-        roles.data().iter().map(ToString::to_string).collect(),
+        layers
+            .data()
+            .iter()
+            .map(|text| text.as_str().expect("present layer fixture").to_owned())
+            .collect(),
+        roles
+            .data()
+            .iter()
+            .map(|text| text.as_str().expect("present parameter fixture").to_owned())
+            .collect(),
         values.data().to_vec(),
     )
 }

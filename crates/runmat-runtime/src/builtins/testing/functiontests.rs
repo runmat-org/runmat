@@ -90,7 +90,10 @@ fn build_function_suite(
             |(name, handle)| -> BuiltinResult<crate::execution::RootedValue> {
                 let fields = [
                     ("Name", Value::string(format!("{suite_name}/{name}"))),
-                    ("ProcedureName", Value::String(name)),
+                    (
+                        "ProcedureName",
+                        Value::String(runmat_value::StringElement::Text(name)),
+                    ),
                     ("TestFile", Value::string(source_path.clone())),
                     (
                         "Tags",
@@ -227,7 +230,9 @@ mod tests {
             };
             assert!(object.property("__runmat_fixture_setup").is_some());
             assert!(object.property("__runmat_fixture_teardown").is_some());
-            let Value::String(procedure) = object.property("ProcedureName").unwrap() else {
+            let Value::String(runmat_value::StringElement::Text(procedure)) =
+                object.property("ProcedureName").unwrap()
+            else {
                 panic!("procedure name");
             };
             assert_eq!(

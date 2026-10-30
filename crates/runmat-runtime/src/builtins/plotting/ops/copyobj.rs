@@ -366,7 +366,7 @@ mod tests {
 
     fn value_string(value: Value) -> String {
         match value {
-            Value::String(value) => value.to_string(),
+            Value::String(runmat_value::StringElement::Text(value)) => value.to_string(),
             other => panic!("expected string, got {other:?}"),
         }
     }

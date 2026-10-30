@@ -144,7 +144,7 @@ pub(super) async fn transpose_builtin(
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Bool(b)),
-        Value::String(s) => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::String(s.into())),
         other => Err(invalid_input(format!(
             "transpose: unsupported input type {other:?}"
         ))),
@@ -262,7 +262,7 @@ fn transpose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
     if rank <= 2 {
         let rows = sa.rows;
         let cols = sa.cols;
-        let mut out = vec![runmat_value::Utf8Text::default(); sa.data().len()];
+        let mut out = vec![runmat_value::StringElement::default(); sa.data().len()];
         for r in 0..rows {
             for c in 0..cols {
                 let src = r + c * rows;
@@ -283,7 +283,7 @@ fn transpose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
         } else {
             vec![cols, rows]
         };
-        StringArray::from_texts_unbounded(out, new_shape)
+        StringArray::from_elements_unbounded(out, new_shape)
             .map_err(|e| internal_error(format!("{NAME}: {e}")))
     } else {
         let order = transpose_order(rank);

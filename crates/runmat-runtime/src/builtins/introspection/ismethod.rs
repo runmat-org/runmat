@@ -62,8 +62,12 @@ fn ismethod_builtin(receiver: Value, method_designator: Value) -> crate::Builtin
 
 fn parse_method_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::CharArray(ca) if ca.rows <= 1 && ca.shape().iter().skip(2).all(|n| *n == 1) => {
             super::text::decode_utf16_with_error(ca.data(), || {
                 ismethod_error(&ISMETHOD_ERROR_NAME_INVALID)

@@ -9,7 +9,7 @@ use runmat_value::{ExactHostLogicalTensorAllocation, LogicalArray, StringArray, 
 
 use super::super::numeric::is_missing_text;
 use super::super::text_output::{selected_string_array, TextLiteral};
-use super::super::{internal_error, invalid_argument, unsupported_type, MISSING_TEXT};
+use super::super::{internal_error, invalid_argument, unsupported_type};
 use super::lines::FillLines;
 use super::text::{fill_selection_map, selected, NeighborSelection};
 use super::{FillMethod, FillOptions};
@@ -33,10 +33,12 @@ pub(super) fn fill_missing_string_array(
     };
     let literal = match &options.method {
         FillMethod::Constant(value) => match value {
-            Value::String(value) => TextLiteral::Utf8(value.as_str()),
-            Value::StringArray(value) if value.data().len() == 1 => {
-                TextLiteral::Utf8(value.data()[0].as_str())
-            }
+            Value::String(value) => value
+                .as_str()
+                .map_or(TextLiteral::Missing, TextLiteral::Utf8),
+            Value::StringArray(value) if value.data().len() == 1 => value.data()[0]
+                .as_str()
+                .map_or(TextLiteral::Missing, TextLiteral::Utf8),
             Value::CharArray(value) if value.rows == 1 => TextLiteral::Chars(value.data()),
             _ => {
                 return Err(invalid_argument(
@@ -44,7 +46,7 @@ pub(super) fn fill_missing_string_array(
                 ))
             }
         },
-        _ => TextLiteral::Utf8(MISSING_TEXT),
+        _ => TextLiteral::Missing,
     };
     let admission = |cause| super::super::errors::allocation_error(runtime, "fillmissing", cause);
     let count = array.data().len();
@@ -83,8 +85,7 @@ pub(super) fn fill_missing_string_array(
             mask_receipt.checkpoint(runtime).map_err(admission)?;
         }
         *flag = u8::from(
-            selections.as_slice()[index] != index
-                && !is_missing_text(output.data()[index].as_str()),
+            selections.as_slice()[index] != index && !is_missing_text(&output.data()[index]),
         );
     }
     let mask = mask_receipt

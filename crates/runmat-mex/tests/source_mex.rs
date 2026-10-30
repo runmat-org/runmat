@@ -850,6 +850,10 @@ public:
             throw matlab::Exception("string input did not retain its Data API type");
         }
         outputs[0] = inputs[0];
+        matlab::data::MATLABString literal = strings[1];
+        if (!literal || literal.value() != u"<missing>") {
+            throw matlab::Exception("literal missing spelling lost its text discriminant");
+        }
         strings[1] = matlab::data::String(u"changed");
         outputs[1] = strings;
 
@@ -873,7 +877,7 @@ public:
     .unwrap();
 
     let input = Value::StringArray(
-        runmat_value::StringArray::new(vec!["alpha".into(), "untouched".into()], vec![1, 2])
+        runmat_value::StringArray::new(vec!["alpha".into(), "<missing>".into()], vec![1, 2])
             .unwrap(),
     );
     let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
@@ -902,11 +906,17 @@ public:
     assert_eq!(
         result.outputs[4],
         Value::StringArray(
-            runmat_value::StringArray::new(vec!["<missing>".into(), "value".into()], vec![1, 2])
-                .unwrap()
+            runmat_value::StringArray::from_elements_unbounded(
+                vec![runmat_value::StringElement::Missing, "value".into()],
+                vec![1, 2]
+            )
+            .unwrap()
         )
     );
-    assert_eq!(result.outputs[5], Value::String("<missing>".into()));
+    assert_eq!(
+        result.outputs[5],
+        Value::String(runmat_value::StringElement::Missing)
+    );
     let Value::Cell(string_cell) = &result.outputs[6] else {
         panic!("C++ string cell output must remain a cell");
     };

@@ -874,7 +874,7 @@ pub(crate) mod tests {
     #[test]
     fn strfind_missing_subject_returns_empty() {
         let result = run_strfind(
-            Value::String("<missing>".into()),
+            Value::String(runmat_value::StringElement::Missing),
             Value::String("abc".into()),
             Vec::new(),
         )

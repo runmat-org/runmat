@@ -685,10 +685,10 @@ impl CallableDescriptor {
     ) -> Self {
         match func_val {
             Value::String(text) => {
-                if Self::is_at_prefixed_text(&text) {
+                if text.as_str().is_some_and(Self::is_at_prefixed_text) {
                     return Self::feval_forward(Value::String(text), args, requested_outputs);
                 }
-                if let Some(name) = Self::parse_handle_name(&text) {
+                if let Some(name) = text.as_str().and_then(Self::parse_handle_name) {
                     return Self::feval_named(name, args, requested_outputs, function_resolver);
                 }
                 Self::feval_forward(Value::String(text), args, requested_outputs)
@@ -706,10 +706,10 @@ impl CallableDescriptor {
                 Self::feval_forward(Value::CharArray(ca), args, requested_outputs)
             }
             Value::StringArray(sa) if sa.data().len() == 1 => {
-                if Self::is_at_prefixed_text(&sa.data()[0]) {
+                if sa.data()[0].as_str().is_some_and(Self::is_at_prefixed_text) {
                     return Self::feval_forward(Value::StringArray(sa), args, requested_outputs);
                 }
-                if let Some(name) = Self::parse_handle_name(&sa.data()[0]) {
+                if let Some(name) = sa.data()[0].as_str().and_then(Self::parse_handle_name) {
                     return Self::feval_named(name, args, requested_outputs, function_resolver);
                 }
                 Self::feval_forward(Value::StringArray(sa), args, requested_outputs)

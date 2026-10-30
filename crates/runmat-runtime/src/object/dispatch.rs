@@ -353,7 +353,7 @@ async fn call_getfield_with_indices_with_context(
         .try_map_mixed_async(count, runtime, async |slot| {
             if slot == 0 {
                 return Ok(crate::execution::ArgumentProjection::Source(Value::String(
-                    field.clone(),
+                    field.clone().into(),
                 )));
             }
             crate::execution::structure::cell::from_borrowed_values(

@@ -4,7 +4,7 @@ use super::*;
 use crate::builtins::common::uniform_scalar_output::{UniformScalarCollector, UniformScalarError};
 use crate::context::RuntimeContext;
 use crate::execution::RootedValue;
-use runmat_value::{ExactArrayStorage, OutputListStorage, SharedShape, Utf8Text};
+use runmat_value::{ExactArrayStorage, OutputListStorage, SharedShape, StringElement};
 
 fn uniform_error(error: UniformScalarError) -> crate::RuntimeError {
     match error.into_failure() {
@@ -121,7 +121,7 @@ pub(super) fn output<'a>(
         at(linear)
     };
     let raw_list = if strings {
-        ExactArrayStorage::<Utf8Text>::requested_bytes(count)
+        ExactArrayStorage::<StringElement>::requested_bytes(count)
     } else {
         OutputListStorage::requested_bytes(count)
     }
@@ -136,11 +136,11 @@ pub(super) fn output<'a>(
             let Value::String(text) = at(index) else {
                 unreachable!("preflight strings")
             };
-            if !text.has_retained_claim() {
+            if let Some(text) = text.text_ref().filter(|text| !text.has_retained_claim()) {
                 retained = add(
                     retained,
                     exact_bytes(
-                        Utf8Text::requested_bytes_for_capacity(text.len())
+                        StringElement::requested_bytes_for_capacity(text.len())
                             .map_err(|cause| allocation(runtime, cause.into()))?,
                         usize::from(!text.is_empty()),
                         runtime,
@@ -162,7 +162,7 @@ pub(super) fn output<'a>(
                         text.clone()
                     })
                     .collect();
-                return StringArray::from_texts_unbounded(data, shape.to_vec())
+                return StringArray::from_elements_unbounded(data, shape.to_vec())
                     .map(Value::StringArray)
                     .map_err(invalid_variable);
             }

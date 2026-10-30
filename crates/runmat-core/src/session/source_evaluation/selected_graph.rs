@@ -467,18 +467,15 @@ impl SelectedGraphPrimary {
                     .unit
                     .as_ref()
                     .ok_or_else(|| "retained graph product has no indexed V3 bytes".to_string())?;
-                let mut envelope = unit.portable_primary_source_envelope(
+                let envelope = unit.portable_primary_source_envelope_with_static_imports(
                     &self.current_functions,
                     self.primary_source,
                     self.interop.clone(),
+                    self.static_targets
+                        .iter()
+                        .map(|target| target.import)
+                        .collect(),
                 )?;
-                if let Some(section) = static_import_section_for(&self.static_targets)? {
-                    envelope.manifest.optional_sections.push(section);
-                    envelope
-                        .manifest
-                        .optional_sections
-                        .sort_by(|left, right| left.name.cmp(&right.name));
-                }
                 envelope
                     .canonical_bytes()
                     .map(Arc::<[u8]>::from)

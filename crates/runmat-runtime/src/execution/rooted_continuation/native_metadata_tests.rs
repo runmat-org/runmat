@@ -537,7 +537,9 @@ fn dynamic_load_preserves_original_miss_owner_and_terminal_control_failures() {
         let arguments = RootedFunctionArguments::ordinary(
             RootedValues::new(vec![runmat_value::Value::String("original".into())]).unwrap(),
         );
-        let runmat_value::Value::String(original) = &arguments[0] else {
+        let runmat_value::Value::String(runmat_value::StringElement::Text(original)) =
+            &arguments[0]
+        else {
             unreachable!()
         };
         let pointer = original.as_ptr();
@@ -583,7 +585,7 @@ fn dynamic_load_preserves_original_miss_owner_and_terminal_control_failures() {
                         unreachable!()
                     };
                     assert_eq!(
-                        value.as_ptr(),
+                        value.as_str().expect("nonmissing text").as_ptr(),
                         pointer,
                         "a miss moves the original owner without cloning"
                     );

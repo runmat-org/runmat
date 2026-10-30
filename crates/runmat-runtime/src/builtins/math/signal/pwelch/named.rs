@@ -67,9 +67,13 @@ pub(super) fn split_named_controls(
 
 pub(super) fn keyword(value: &Value) -> BuiltinResult<Option<PwelchKeyword>> {
     Ok(match value {
-        Value::String(text) => Some(PwelchKeyword::decode(text)),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Some(PwelchKeyword::decode(&array.data()[0]))
+        Value::String(runmat_value::StringElement::Text(text)) => Some(PwelchKeyword::decode(text)),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Some(PwelchKeyword::decode(
+                &array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string"),
+            ))
         }
         Value::CharArray(chars) if chars.rows <= 1 => {
             let text = runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {

@@ -282,8 +282,8 @@ fn labels_padded_to_ticks(mut labels: Vec<String>, tick_count: usize) -> Vec<Str
 
 fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
-        Value::StringArray(strings) => Ok(strings.data().iter().map(|text| text.as_str().to_owned()).collect()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(vec![s.as_str().to_owned()]),
+        Value::StringArray(strings) => strings.data().iter().map(|text| text.as_str().map(str::to_owned).ok_or_else(|| plotting_error(builtin, "tick labels must be text"))).collect(),
         Value::CharArray(chars) => Ok(char_array_rows(chars).map_err(|source|crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?),
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
@@ -327,7 +327,7 @@ fn label_value(labels: Vec<String>) -> Value {
 
 fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => {
             Some(runmat_value::decode_utf16_code_units(chars.data())?)
         }

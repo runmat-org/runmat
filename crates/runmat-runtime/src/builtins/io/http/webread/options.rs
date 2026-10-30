@@ -106,20 +106,24 @@ pub(super) fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64>
 
 pub(super) fn expect_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 webread_error(context)
             })
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         _ => Err(webread_error(context)),
     }
 }
 
 pub(super) fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 webread_error(format!(
@@ -127,7 +131,11 @@ pub(super) fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<
                 ))
             })
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::Num(n) => Ok(format!("{}", n)),
         Value::Int(i) => Ok(i.decimal_string()),
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),

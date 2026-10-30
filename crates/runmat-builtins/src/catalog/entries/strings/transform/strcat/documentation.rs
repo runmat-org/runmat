@@ -5,7 +5,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Behavior",
         paragraphs: &[
             "Inputs are concatenated element-wise. Scalars expand across arrays of matching dimensions using MATLAB's implicit expansion rules.",
-            "When at least one input is a string array (or string scalar), the result is a string array. `<missing>` values propagate, so any missing operand yields a missing result for that element.",
+            "When at least one input is a string array (or string scalar), the result is a string array. Typed missing string values propagate, so any missing operand yields a missing result for that element. Literal `<missing>` text concatenates as ordinary text.",
             "When no string arrays are present but any input is a cell array of character vectors, the result is a cell array whose elements are character vectors.",
             "Otherwise, the result is a character array. Character and character-cell operands have trailing ASCII whitespace removed before concatenation; leading and internal spaces remain intact.",
             "Cell array elements must be character vectors (or string scalars). Mixing cell arrays with unsupported content raises a MATLAB-compatible error.",

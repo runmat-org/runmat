@@ -163,9 +163,9 @@ pub(super) fn ensure_calendar_duration_class_registered() {
 
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(text) => Ok(nonmissing_text(text, context)?.to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+            Ok(nonmissing_text(&array.data()[0], context)?.to_owned())
         }
         Value::CharArray(array) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data()).map_err(datetime_utf16_error)
@@ -303,9 +303,9 @@ pub(super) fn serial_tensor_from_value(value: Value, context: &str) -> BuiltinRe
 
 pub(super) fn format_for_object(obj: &ObjectInstance) -> BuiltinResult<String> {
     Ok(match obj.properties().get(FORMAT_FIELD) {
-        Some(Value::String(text)) => text.as_str().to_owned(),
+        Some(Value::String(text)) => nonmissing_text(text, "Format")?.to_owned(),
         Some(Value::StringArray(array)) if array.data().len() == 1 => {
-            array.data()[0].as_str().to_owned()
+            nonmissing_text(&array.data()[0], "Format")?.to_owned()
         }
         Some(Value::CharArray(array)) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data()).map_err(datetime_utf16_error)?
@@ -433,4 +433,12 @@ pub(super) async fn gather_in_runtime(
         Some(runtime) => runtime.scope(gather).await,
         None => gather.await,
     }
+}
+
+pub(super) fn nonmissing_text<'a>(
+    text: &'a runmat_value::StringElement,
+    context: &str,
+) -> BuiltinResult<&'a str> {
+    text.as_str()
+        .ok_or_else(|| datetime_error(format!("datetime: {context} must not be missing")))
 }

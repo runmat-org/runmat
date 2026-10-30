@@ -231,10 +231,13 @@ fn empty_struct_array() -> BuiltinResult<Value> {
 
 fn parse_field_name(value: &Value) -> BuiltinResult<String> {
     let text = match value {
-        Value::String(s) => s.to_string(),
+        Value::String(runmat_value::StringElement::Text(s)) => s.to_string(),
         Value::StringArray(sa) => {
             if sa.data().len() == 1 {
-                sa.data()[0].to_string()
+                sa.data()[0]
+                    .as_str()
+                    .ok_or_else(|| struct_error(&STRUCT_ERROR_FIELD_NAME_TYPE))?
+                    .to_owned()
             } else {
                 return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_SCALAR));
             }

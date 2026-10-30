@@ -401,7 +401,7 @@ pub(super) fn parse_nonnegative_integer(
 
 pub(super) fn value_as_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Some(text.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
                 let mut error = sample_error_with_detail(

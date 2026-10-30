@@ -163,7 +163,7 @@ pub(in crate::builtins::fea) fn plot_request_from_args(
         .properties()
         .get("field_id")
         .and_then(|value| match value {
-            Value::String(field_id) => Some(field_id.clone()),
+            Value::String(field_id) => field_id.text_ref().cloned(),
             _ => None,
         })
         .ok_or_else(|| {

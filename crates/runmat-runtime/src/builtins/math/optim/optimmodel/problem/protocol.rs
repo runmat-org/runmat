@@ -103,7 +103,7 @@ async fn initial_member_container(
                 None
             };
             let text = RootedValue::in_optional_context(
-                Value::String(Utf8Text::new(sense.name().to_owned())),
+                Value::String(Utf8Text::new(sense.name().to_owned()).into()),
                 cooperation.runtime(),
             )?;
             return crate::execution::structure::construct_struct_from_fields_in_optional_context(

@@ -54,7 +54,8 @@ async fn exact_format<'a>(
         return Err(datetime_error("datetime: expected a datetime value"));
     };
     let property = object.property(FORMAT_FIELD);
-    if let Some(value @ Value::String(_)) = property {
+    if let Some(value @ Value::String(text)) = property {
+        super::super::super::nonmissing_text(text, "Format")?;
         return Ok(FormatOwner::Borrowed(value));
     }
     // Character-format conversion uses the existing admitted control owner;
@@ -65,7 +66,9 @@ async fn exact_format<'a>(
         None
     };
     let source = match property {
-        Some(Value::StringArray(array)) if array.data().len() == 1 => array.data()[0].as_str(),
+        Some(Value::StringArray(array)) if array.data().len() == 1 => {
+            super::super::super::nonmissing_text(&array.data()[0], "Format")?
+        }
         Some(Value::CharArray(array)) if array.rows == 1 => control
             .as_ref()
             .and_then(PreparedControl::text)
@@ -103,7 +106,7 @@ async fn exact_format<'a>(
     work.check()?;
     // The completed text retains its physical claim; unused stage headroom
     // need not outlive the exact copy or inflate the returned format owner.
-    Ok(FormatOwner::Owned(Value::String(text)))
+    Ok(FormatOwner::Owned(Value::String(text.into())))
 }
 
 pub(super) async fn publish(

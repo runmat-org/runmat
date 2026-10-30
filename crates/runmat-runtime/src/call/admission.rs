@@ -20,7 +20,11 @@ pub(crate) fn text_target_name(text: &str) -> Option<&str> {
 /// callback before materializing other operands.
 pub(crate) fn admit_feval_target(value: &Value) -> BuiltinResult<()> {
     let text = match value {
-        Value::String(text) => Some(text.as_str()),
+        Value::String(text) => {
+            Some(text.as_str().ok_or_else(|| {
+                runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
+            })?)
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             let units = chars.data().iter().map(|unit| unit.raw());
             for decoded in char::decode_utf16(units.clone()) {
@@ -39,7 +43,9 @@ pub(crate) fn admit_feval_target(value: &Value) -> BuiltinResult<()> {
             );
         }
         Value::StringArray(strings) if strings.data().len() == 1 => {
-            Some(strings.data()[0].as_str())
+            Some(strings.data()[0].as_str().ok_or_else(|| {
+                runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
+            })?)
         }
         Value::CharArray(_) => {
             return Err(runtime_descriptor_error_with_detail(

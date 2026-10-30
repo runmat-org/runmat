@@ -29,7 +29,7 @@ pub(super) struct OutputTarget {
 
 impl OutputTarget {
     pub(super) fn from_selector(value: &Value) -> BuiltinResult<Self> {
-        let Value::String(name) = value else {
+        let Value::String(runmat_value::StringElement::Text(name)) = value else {
             return Err(error::build(
                 &TYPECAST_ERROR_INVALID_ARGUMENT,
                 "newtype must be a string scalar",
@@ -67,7 +67,8 @@ impl OutputTarget {
         selector: &Value,
         prototype: &Value,
     ) -> BuiltinResult<Self> {
-        if !matches!(selector, Value::String(keyword) if keyword.eq_ignore_ascii_case("like")) {
+        if !matches!(selector, Value::String(runmat_value::StringElement::Text(keyword)) if keyword.eq_ignore_ascii_case("like"))
+        {
             return Err(error::build(
                 &TYPECAST_ERROR_INVALID_ARGUMENT,
                 "three-input syntax requires the literal string \"like\"",

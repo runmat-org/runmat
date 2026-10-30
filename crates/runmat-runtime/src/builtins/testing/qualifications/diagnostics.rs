@@ -57,8 +57,14 @@ fn string_diagnostic(
     };
     let fields = [
         ("Identifier", Value::String("".into())),
-        ("Message", Value::String(message.clone())),
-        ("DiagnosticText", Value::String(message)),
+        (
+            "Message",
+            Value::String(runmat_value::StringElement::Text(message.clone())),
+        ),
+        (
+            "DiagnosticText",
+            Value::String(runmat_value::StringElement::Text(message)),
+        ),
     ];
     crate::execution::object::construct_object_from_borrowed_fields(
         runtime,
@@ -132,7 +138,7 @@ fn log_verbosity(level: &Value) -> BuiltinResult<u8> {
         Value::Tensor(tensor) if tensor.len() == 1 => tensor
             .numeric_value_at(0)
             .expect("a one-element numeric tensor has a scalar value"),
-        Value::String(level) => return named_verbosity(level),
+        Value::String(runmat_value::StringElement::Text(level)) => return named_verbosity(level),
         Value::CharArray(chars) if chars.rows <= 1 => {
             let text =
                 crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
@@ -173,7 +179,9 @@ fn named_verbosity(level: &str) -> BuiltinResult<u8> {
 
 fn diagnostic_message(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(message) => Ok(message.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(message)) => {
+            Ok(message.as_str().to_owned())
+        }
         Value::CharArray(chars) if chars.rows <= 1 => {
             crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
                 testing_diagnostic_error("log: diagnostic message is not valid UTF-16 text")
@@ -189,7 +197,9 @@ fn diagnostic_message(value: &Value) -> BuiltinResult<String> {
                 .properties()
                 .get("Message")
                 .and_then(|value| match value {
-                    Value::String(message) => Some(message.as_str().to_owned()),
+                    Value::String(runmat_value::StringElement::Text(message)) => {
+                        Some(message.as_str().to_owned())
+                    }
                     _ => None,
                 })
                 .ok_or_else(|| testing_diagnostic_error("log: diagnostic has no text Message"))

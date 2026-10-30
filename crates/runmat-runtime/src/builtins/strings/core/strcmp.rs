@@ -74,7 +74,10 @@ async fn strcmp_builtin(
         return Ok(Value::Bool(false));
     }
     let host_scalar_lengths = match (&a, &b) {
-        (Value::String(left), Value::String(right)) => Some((left.len(), right.len())),
+        (Value::String(left), Value::String(right)) => left
+            .as_str()
+            .zip(right.as_str())
+            .map(|(left, right)| (left.len(), right.len())),
         _ => None,
     };
     let a = gather_if_needed_async(&a)
@@ -289,7 +292,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_missing_strings_compare_false() {
-        let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
+        let strings = StringArray::from_elements_unbounded(
+            vec![runmat_value::StringElement::Missing],
+            vec![1, 1],
+        )
+        .unwrap();
         let result = strcmp_builtin(
             Value::StringArray(strings.clone()),
             Value::StringArray(strings),
@@ -301,7 +308,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_missing_string_false() {
-        let array = StringArray::new(vec!["alpha".into(), "<missing>".into()], vec![1, 2]).unwrap();
+        let array = StringArray::from_elements_unbounded(
+            vec!["alpha".into(), runmat_value::StringElement::Missing],
+            vec![1, 2],
+        )
+        .unwrap();
         let result =
             strcmp_builtin(Value::StringArray(array), Value::String("alpha".into())).expect("cmp");
         let expected = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();

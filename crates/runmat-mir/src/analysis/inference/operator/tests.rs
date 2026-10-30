@@ -227,12 +227,24 @@ fn uncataloged_object_operator_stays_dynamic_without_weakening_numeric_rules() {
     )));
     let primitive = infer_binary_operator(
         OperatorKind::Add,
-        structure,
+        structure.clone(),
         number(),
         [LiteralValue::Unknown, LiteralValue::Unknown],
     );
-    assert!(primitive
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "RM-TYPE-BINARY-OPERAND"));
+    let canonical = runmat_builtins::infer_catalog_call(
+        &runmat_builtins::PLUS_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![structure, number()],
+            literals: LiteralContext::new(vec![LiteralValue::Unknown, LiteralValue::Unknown]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+    );
+    assert_eq!(primitive.diagnostics, canonical.diagnostics);
+    assert_eq!(canonical.outputs.len(), 1);
+    assert_eq!(primitive.fact, canonical.outputs[0]);
+    assert!(primitive.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-CATALOG-BINARY-ARITHMETIC-INPUT"
+            && diagnostic.severity == runmat_types::InferenceSeverity::Error
+            && diagnostic.argument == Some(0)
+    }));
 }

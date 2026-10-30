@@ -1157,8 +1157,10 @@ fn nonnegative_span(name: &'static str, raw: f64, what: &str) -> BuiltinResult<f
 
 fn value_as_string(name: &'static str, value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            sa.data()[0].as_str().map(str::to_owned)
+        }
         Value::CharArray(ca) if ca.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
                 let mut error = invalid_argument(name, source.to_string());

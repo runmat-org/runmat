@@ -54,15 +54,19 @@ pub(super) fn numeric_elements(
                 .iter()
                 .map(|ch| WriteElement::Floating((u32::from(*ch) & 0xff) as f64)),
         ),
-        Value::String(text) => Box::new(
+        Value::String(runmat_value::StringElement::Text(text)) => Box::new(
             text.chars()
                 .map(|ch| WriteElement::Floating(u32::from(ch) as f64)),
         ),
-        Value::StringArray(array) if array.data().len() == 1 => Box::new(
-            array.data()[0]
-                .chars()
-                .map(|ch| WriteElement::Floating(u32::from(ch) as f64)),
-        ),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Box::new(
+                array.data()[0]
+                    .as_str()
+                    .expect("checked nonmissing scalar string")
+                    .chars()
+                    .map(|ch| WriteElement::Floating(u32::from(ch) as f64)),
+            )
+        }
         Value::StringArray(_) => {
             return Err(write_flow(
                 &WRITE_ERROR_INVALID_DATA,

@@ -48,7 +48,7 @@ pub(super) async fn normalize(
 }
 
 fn text(value: &str, runtime: Option<&RuntimeContext>) -> BuiltinResult<Value> {
-    crate::call::argument_text::copy_str(value, runtime).map(Value::String)
+    crate::call::argument_text::copy_str(value, runtime).map(|text| Value::String(text.into()))
 }
 
 fn empty_placeholder(runtime: Option<&RuntimeContext>) -> BuiltinResult<Value> {

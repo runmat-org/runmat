@@ -25,7 +25,9 @@ pub async fn timer_builtin(
     let Value::Object(object) = object else {
         unreachable!("timer constructor publishes an object")
     };
-    let Some(Value::String(visibility_text)) = object.properties().get("ObjectVisibility") else {
+    let Some(Value::String(runmat_value::StringElement::Text(visibility_text))) =
+        object.properties().get("ObjectVisibility")
+    else {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_PROPERTY,
             "timer: invalid ObjectVisibility value",

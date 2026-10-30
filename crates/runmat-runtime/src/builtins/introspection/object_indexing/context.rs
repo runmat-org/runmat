@@ -51,7 +51,9 @@ pub(super) fn parse_indexing_context(value: &Value) -> crate::BuiltinResult<Inde
                 || object.class_name().is(LEGACY_INDEXING_CONTEXT_CLASS) =>
         {
             match object.property(ENUM_MEMBER_PROPERTY) {
-                Some(Value::String(member)) => member.as_str().to_owned(),
+                Some(Value::String(runmat_value::StringElement::Text(member))) => {
+                    member.as_str().to_owned()
+                }
                 Some(Value::CharArray(chars)) => {
                     super::super::text::decode_utf16_with_error(chars.data(), || {
                         num_args_error(
@@ -107,10 +109,10 @@ pub(super) fn indexing_context_value_in_context(
     runtime: &crate::context::RuntimeContext,
     context: IndexingContext,
 ) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
-    let member = Value::String(crate::call::argument_text::copy_str(
-        indexing_context_member(context),
-        Some(runtime),
-    )?);
+    let member = Value::String(
+        crate::call::argument_text::copy_str(indexing_context_member(context), Some(runtime))?
+            .into(),
+    );
     crate::execution::object::construct_object_from_borrowed_fields(
         Some(runtime),
         INDEXING_CONTEXT_CLASS.display_name(),

@@ -273,16 +273,25 @@ pub(in crate::builtins::io::data) fn value_to_json(
     value: &Value,
 ) -> BuiltinResult<serde_json::Value> {
     Ok(match value {
-        Value::String(s) => serde_json::Value::String(s.as_str().to_owned()),
-        Value::CharArray(chars) => serde_json::Value::String(
-            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+        Value::String(s) => s
+            .as_str()
+            .map(|s| serde_json::Value::String(s.to_owned()))
+            .unwrap_or(serde_json::Value::Null),
+        Value::StringArray(strings) if strings.data().len() == 1 => strings.data()[0]
+            .as_str()
+            .map(|text| serde_json::Value::String(text.to_owned()))
+            .unwrap_or(serde_json::Value::Null),
+        Value::CharArray(chars) if chars.rows == 1 && chars.shape().iter().skip(2).all(|&extent| extent == 1) => {
+            chars.validate_layout().map_err(|cause| data_error(format!("attribute character row has invalid layout: {cause}")))?;
+            serde_json::Value::String(crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
                 data_error("attribute value contains malformed UTF-16 text")
-            })?,
-        ),
-        Value::Num(n) => serde_json::json!(n),
+            })?)
+        }
+        Value::Num(n) if n.is_finite() => serde_json::json!(n),
+        Value::Num(_) => return Err(data_error("attribute numeric value must be finite; JSON null is reserved for typed missing strings")),
         Value::Int(i) => int_value_to_json(i),
         Value::Bool(b) => serde_json::json!(b),
-        _ => serde_json::Value::String(format!("{value:?}")),
+        _ => return Err(data_error("attribute value must be a scalar string, character row, finite number, integer, or logical value; aggregate values require explicit encoding")),
     })
 }
 
@@ -311,6 +320,6 @@ pub(in crate::builtins::io::data) fn json_to_value(value: &serde_json::Value) ->
             }
             Value::Struct(s.finish())
         }
-        serde_json::Value::Null => Value::string("".to_string()),
+        serde_json::Value::Null => Value::String(runmat_value::StringElement::Missing),
     }
 }

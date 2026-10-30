@@ -2,6 +2,19 @@ use crate::*;
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "typed-string-presence",
+        title: "Distinguish missing strings from literal spellings",
+        program: "values = [string(missing), \"<missing>\", \"<MISSING>\", \"\"];\nmask = ismissing(values)",
+        display_output: Some("mask = [true false false false]"),
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(mask, logical([1 0 0 0]))); assert(isequal(values(2), \"<missing>\")); assert(isequal(values(3), \"<MISSING>\"));",
+        },
+    },
+    BuiltinExample {
         id: "nan-values",
         title: "Detect NaN values",
         program: "tf = ismissing([1 NaN 3])",
@@ -34,14 +47,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("ismissing"),
     slug: Some("ismissing"),
     summary: "Return a logical mask identifying missing entries.",
-    description: "`ismissing(A)` identifies missing entries in supported values. Numeric and complex entries are missing when a stored component is NaN; missing strings use the `<missing>` sentinel.",
+    description: "`ismissing(A)` identifies missing entries in supported values. Numeric and complex entries are missing when a stored component is NaN; strings are missing only when their elements carry typed absence, not when their text spells `<missing>`.",
     keywords: &["ismissing", "missing", "NaN", "NaT", "string", "table"],
     related: &["missing", "anymissing", "fillmissing", "rmmissing"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Containers and calendar values",
             paragraphs: &[
-                "Character-array rows are missing when blank or equal to `<missing>`. Cells are tested element by element. Structures retain their fields with recursively classified values. Tables return one logical column per table variable, ordered as the table variables are stored.",
+                "Character-array rows are missing when blank; literal `<missing>` characters are ordinary text. Cells are tested element by element. Structures retain their fields with recursively classified values. Tables return one logical column per table variable, ordered as the table variables are stored.",
                 "Datetime and duration objects are missing where their stored numeric calendar or duration representation is NaN. Fixed-width integer and logical arrays have no standard missing element; they produce false masks without floating conversion.",
             ],
         },

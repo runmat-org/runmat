@@ -423,7 +423,7 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_heads_from_object
 pub(in crate::builtins::strings::text_analytics) fn dependency_details_from_object(
     object: &ObjectInstance,
     fn_name: &str,
-) -> BuiltinResult<Option<Vec<Vec<String>>>> {
+) -> BuiltinResult<Option<Vec<Vec<runmat_value::StringElement>>>> {
     let Some(value) = object.properties().get(DEPENDENCY_DETAILS_PROPERTY) else {
         return Ok(None);
     };
@@ -455,13 +455,7 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_details_from_obje
                 ),
             ));
         }
-        out.push(
-            array
-                .data()
-                .iter()
-                .map(|text| text.as_str().to_owned())
-                .collect(),
-        );
+        out.push(array.data().iter().cloned().collect());
     }
     Ok(Some(out))
 }
@@ -550,7 +544,11 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
+            Value::StringArray(array) => array
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("nonmissing test text").to_owned())
+                .collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }

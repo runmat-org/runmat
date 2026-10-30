@@ -1140,8 +1140,15 @@ fn parse_directions(value: &Value) -> crate::BuiltinResult<Option<Vec<SortDirect
             array
                 .data()
                 .iter()
-                .map(|text| Cow::Borrowed(text.as_str()))
-                .collect::<Vec<_>>(),
+                .map(|text| {
+                    text.as_str().map(Cow::Borrowed).ok_or_else(|| {
+                        sortrows_error_with(
+                            &SORTROWS_ERROR_INVALID_ARGUMENT,
+                            "sortrows: directions must be strings",
+                        )
+                    })
+                })
+                .collect::<crate::BuiltinResult<Vec<_>>>()?,
         ),
         Value::Cell(cell) => {
             let mut strings = Vec::with_capacity(cell.data().len());

@@ -1063,7 +1063,7 @@ fn ensure_uniform_spacing(values: &[f64]) -> BuiltinResult<()> {
 fn parse_hist_normalization(arg: Option<Value>) -> BuiltinResult<HistNormalization> {
     match arg {
         None => Ok(HistNormalization::Count),
-        Some(Value::String(s)) => parse_norm_string(&s),
+        Some(Value::String(runmat_value::StringElement::Text(s))) => parse_norm_string(&s),
         Some(Value::CharArray(chars)) => {
             let text: String =
                 runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
@@ -1106,7 +1106,7 @@ fn parse_norm_string(text: &str) -> BuiltinResult<HistNormalization> {
 
 fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) => Some(runmat_value::decode_utf16_code_units(chars.data())?),
         _ => None,
     })

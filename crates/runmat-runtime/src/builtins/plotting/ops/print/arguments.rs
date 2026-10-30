@@ -268,7 +268,7 @@ fn has_extension(path: &Path, expected: &str) -> bool {
 
 fn string_arg(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
             ca.data(),
         )
@@ -281,7 +281,11 @@ fn string_arg(value: &Value) -> BuiltinResult<String> {
             &PRINT_ERROR_INVALID_INPUT,
             "character vector arguments must be 1-by-N",
         )),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::StringArray(_) => Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
             "string array arguments must be scalar",

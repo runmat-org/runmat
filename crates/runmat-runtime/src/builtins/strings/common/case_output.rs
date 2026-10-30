@@ -1,6 +1,5 @@
 //! Exact retained UTF-8 output for the case-changing string-array builtins.
 
-use super::is_missing_string;
 use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPlan, HostAllocationReceipt, HostTypedWorkspace,
 };
@@ -8,7 +7,7 @@ use crate::context::RuntimeContext;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_value::{
     exact_capacity_vec, ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray,
-    Utf8Text,
+    StringElement, Utf8Text,
 };
 
 const CHECKPOINT_CHUNK: usize = 4096;
@@ -29,12 +28,6 @@ fn visit_case(
     suffix_cased: Option<&[u8]>,
     mut visit: impl FnMut(char) -> Result<(), HostAllocationError>,
 ) -> Result<(), HostAllocationError> {
-    if is_missing_string(input) {
-        for character in input.chars() {
-            visit(character)?;
-        }
-        return Ok(());
-    }
     let mut prefix_cased = false;
     for (byte_index, character) in input.char_indices() {
         match mode {
@@ -160,24 +153,21 @@ pub(crate) fn transform_string_array_case(
         let values = input
             .data()
             .iter()
-            .map(|text| {
-                let text = text.as_str();
-                if is_missing_string(text) {
-                    text.to_owned()
-                } else {
-                    match mode {
-                        TextCase::Lower => text.to_lowercase(),
-                        TextCase::Upper => text.to_uppercase(),
-                    }
-                }
+            .map(|text| match text.as_str() {
+                None => StringElement::Missing,
+                Some(text) => StringElement::text(match mode {
+                    TextCase::Lower => text.to_lowercase(),
+                    TextCase::Upper => text.to_uppercase(),
+                }),
             })
             .collect();
-        StringArray::new(values, input.shape().to_vec()).map_err(|error| invalid(error))
+        StringArray::from_elements_unbounded(values, input.shape().to_vec())
+            .map_err(|error| invalid(error))
     };
     let Some(runtime) = runtime else {
         return ordinary();
     };
-    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(input.data().len())
+    let mut physical = ExactArrayStorage::<StringElement>::requested_bytes(input.data().len())
         .map_err(|cause| admission_error(runtime, HostAllocationError::Numeric(cause)))?;
     let reuse_shape = input.shape.is_admitted();
     if !reuse_shape {
@@ -192,13 +182,14 @@ pub(crate) fn transform_string_array_case(
     let mut claims = usize::from(!input.data().is_empty()) + usize::from(!reuse_shape);
     let mut sigma_scratch_len = 0usize;
     for text in input.data() {
-        if is_missing_string(text.as_str()) && text.has_retained_claim() {
-            continue;
+        if runtime.is_cancelled() {
+            return Err(admission_error(runtime, HostAllocationError::Cancelled));
         }
-        if mode == TextCase::Lower && text.as_str().contains('Σ') {
-            sigma_scratch_len = sigma_scratch_len.max(text.as_str().len());
+        let Some(text) = text.as_str() else { continue };
+        if mode == TextCase::Lower && text.contains('Σ') {
+            sigma_scratch_len = sigma_scratch_len.max(text.len());
         }
-        let bytes = transformed_bytes(text.as_str(), mode, Some(runtime))
+        let bytes = transformed_bytes(text, mode, Some(runtime))
             .map_err(|cause| admission_error(runtime, cause))?;
         physical = physical
             .checked_add(
@@ -252,15 +243,17 @@ pub(crate) fn transform_string_array_case(
         .with_output_construction(runtime, |permit| {
             ExactArrayStorage::try_initialize(input.data().len(), permit, |index| {
                 let text = &input.data()[index];
-                if is_missing_string(text.as_str()) && text.has_retained_claim() {
-                    return Ok(text.clone());
-                }
-                let bytes = transformed_bytes(text.as_str(), mode, Some(runtime))?;
+                receipt.checkpoint(runtime)?;
+                let Some(text) = text.as_str() else {
+                    return Ok(StringElement::Missing);
+                };
+                let bytes = transformed_bytes(text, mode, Some(runtime))?;
                 let flags = sigma_scratch
                     .as_mut()
                     .map(|scratch| scratch.as_mut_slice())
                     .unwrap_or(&mut []);
-                make_exact_text(text.as_str(), mode, bytes, runtime, &receipt, permit, flags)
+                make_exact_text(text, mode, bytes, runtime, &receipt, permit, flags)
+                    .map(StringElement::Text)
             })
         })
         .map_err(|cause| admission_error(runtime, cause))?
@@ -282,33 +275,29 @@ pub(crate) fn transform_string_array_case(
 
 pub(crate) fn transform_scalar_case(
     runtime: Option<&RuntimeContext>,
-    input: Utf8Text,
+    input: StringElement,
     mode: TextCase,
     admission_error: impl Fn(&RuntimeContext, HostAllocationError) -> RuntimeError,
-) -> BuiltinResult<Utf8Text> {
+) -> BuiltinResult<StringElement> {
     if let Some(runtime) = runtime {
         if runtime.is_cancelled() {
             return Err(admission_error(runtime, HostAllocationError::Cancelled));
         }
     }
-    if is_missing_string(input.as_str()) && input.has_retained_claim() {
-        return Ok(input);
-    }
+    let Some(input) = input.as_str() else {
+        return Ok(StringElement::Missing);
+    };
     let ordinary = || {
-        let text = if is_missing_string(input.as_str()) {
-            input.as_str().to_owned()
-        } else {
-            match mode {
-                TextCase::Lower => input.as_str().to_lowercase(),
-                TextCase::Upper => input.as_str().to_uppercase(),
-            }
+        let text = match mode {
+            TextCase::Lower => input.to_lowercase(),
+            TextCase::Upper => input.to_uppercase(),
         };
-        Ok(Utf8Text::new(text))
+        Ok(StringElement::text(text))
     };
     let Some(runtime) = runtime else {
         return ordinary();
     };
-    let bytes = transformed_bytes(input.as_str(), mode, Some(runtime))
+    let bytes = transformed_bytes(input, mode, Some(runtime))
         .map_err(|cause| admission_error(runtime, cause))?;
     let physical = Utf8Text::requested_bytes_for_capacity(bytes)
         .map_err(|cause| admission_error(runtime, HostAllocationError::Numeric(cause)))?;
@@ -318,8 +307,8 @@ pub(crate) fn transform_scalar_case(
         usize::from(bytes != 0),
     )
     .map_err(|cause| admission_error(runtime, cause))?;
-    let sigma_scratch_len = if mode == TextCase::Lower && input.as_str().contains('Σ') {
-        input.as_str().len()
+    let sigma_scratch_len = if mode == TextCase::Lower && input.contains('Σ') {
+        input.len()
     } else {
         0
     };
@@ -351,22 +340,14 @@ pub(crate) fn transform_scalar_case(
                 .as_mut()
                 .map(|scratch| scratch.as_mut_slice())
                 .unwrap_or(&mut []);
-            make_exact_text(
-                input.as_str(),
-                mode,
-                bytes,
-                runtime,
-                &receipt,
-                permit,
-                flags,
-            )
+            make_exact_text(input, mode, bytes, runtime, &receipt, permit, flags)
         })
         .map_err(|cause| admission_error(runtime, cause))?
         .map_err(|cause| admission_error(runtime, cause))?;
     receipt
         .checkpoint(runtime)
         .map_err(|cause| admission_error(runtime, cause))?;
-    Ok(output)
+    Ok(StringElement::Text(output))
 }
 
 #[cfg(test)]

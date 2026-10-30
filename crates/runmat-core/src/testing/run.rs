@@ -212,16 +212,32 @@ mod tests {
         .unwrap();
 
         assert_eq!(run.results.len(), 2, "{run:#?}");
+        // Plan order is by stable opaque test identity, not source order.
+        let result_for = |case_name| {
+            run.results
+                .iter()
+                .find(|result| {
+                    result
+                        .report_identity
+                        .as_ref()
+                        .is_some_and(|identity| identity.case_name == case_name)
+                })
+                .unwrap_or_else(|| panic!("missing result for {case_name}: {run:#?}"))
+        };
+        let passed = result_for("testPass");
+        let failed = result_for("testFail");
         assert_eq!(
-            run.results[0].state.disposition,
-            TerminalDisposition::Passed
+            passed.state.disposition,
+            TerminalDisposition::Passed,
+            "{run:#?}"
         );
         assert_eq!(
-            run.results[1].state.disposition,
-            TerminalDisposition::Failed
+            failed.state.disposition,
+            TerminalDisposition::Failed,
+            "{run:#?}"
         );
-        assert!(run.results[1].state.failed);
-        assert!(!run.results[1].attempts[0].diagnostics.is_empty());
+        assert!(failed.state.failed);
+        assert!(!failed.attempts[0].diagnostics.is_empty());
     }
 
     #[test]

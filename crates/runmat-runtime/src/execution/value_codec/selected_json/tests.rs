@@ -17,7 +17,7 @@ fn selected_json_preserves_large_node_bits_frames_and_original_cancellation() {
         let mut cooperation = Cooperation::new(&runtime, &mut budget).unwrap();
         let dense_bits = [(-0.0f64).to_bits(), 0x7ff8_0000_0000_0137];
         let bytes: Vec<u8> = dense_bits.into_iter().flat_map(u64::to_le_bytes).collect();
-        let graph = PayloadGraph {
+        let mut graph = PayloadGraph {
             roots: vec![GraphNodeRef(0)],
             nodes: vec![
                 GraphNode::Leaf {
@@ -46,7 +46,7 @@ fn selected_json_preserves_large_node_bits_frames_and_original_cancellation() {
                 },
                 GraphNode::Leaf {
                     value: ValuePayload::Inline(Box::new(InlineValue::String(
-                        "λ\\\"\n😀".repeat(1400),
+                        "λ\\\"\n😀".repeat(1400).into(),
                     ))),
                 },
                 GraphNode::Leaf {
@@ -84,6 +84,22 @@ fn selected_json_preserves_large_node_bits_frames_and_original_cancellation() {
                 },
             ],
         };
+        graph.nodes.extend([
+            GraphNode::Leaf {
+                value: ValuePayload::Inline(Box::new(InlineValue::String(StringElement(None)))),
+            },
+            GraphNode::Leaf {
+                value: ValuePayload::Inline(Box::new(InlineValue::StringArray {
+                    shape: vec![1, 4],
+                    values: vec![
+                        "<missing>".into(),
+                        "<MISSING>".into(),
+                        "".into(),
+                        StringElement(None),
+                    ],
+                })),
+            },
+        ]);
         let expected = serde_json::to_vec(&graph).unwrap();
         let mut writer = Writer::new();
         writer.graph(&graph, &mut cooperation).await.unwrap();

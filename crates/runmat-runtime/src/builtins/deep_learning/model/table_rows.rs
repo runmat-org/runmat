@@ -37,9 +37,18 @@ pub(super) fn text(
     function: &'static str,
 ) -> BuiltinResult<Vec<String>> {
     match variables(table, property, function)?.fields.get(name) {
-        Some(Value::StringArray(array)) if array.shape == [array.data().len(), 1] => {
-            Ok(array.data().iter().map(ToString::to_string).collect())
-        }
+        Some(Value::StringArray(array)) if array.shape == [array.data().len(), 1] => array
+            .data()
+            .iter()
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    deep_learning_error(
+                        function,
+                        format!("{function}: {name} must contain nonmissing text"),
+                    )
+                })
+            })
+            .collect(),
         // Kept only as an input extension for older value-network callers.
         Some(Value::Cell(cell)) if cell.shape == [cell.data().len(), 1] => cell
             .data()

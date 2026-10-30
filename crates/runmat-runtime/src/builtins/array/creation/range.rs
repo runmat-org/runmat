@@ -256,9 +256,16 @@ fn parse_arguments(
 
 fn parse_nan_flag(value: &Value) -> crate::BuiltinResult<Option<NanMode>> {
     let text = match value {
-        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Some(std::borrow::Cow::Borrowed(s.as_str()))
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            Some(std::borrow::Cow::Borrowed(
+                sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
             runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
@@ -282,9 +289,16 @@ fn parse_nan_flag(value: &Value) -> crate::BuiltinResult<Option<NanMode>> {
 
 fn is_all_flag(value: &Value) -> crate::BuiltinResult<bool> {
     let text = match value {
-        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Some(std::borrow::Cow::Borrowed(s.as_str()))
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            Some(std::borrow::Cow::Borrowed(
+                sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
             runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {

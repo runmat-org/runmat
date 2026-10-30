@@ -266,7 +266,7 @@ fn tick_value(data: Vec<f64>) -> Value {
 
 fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     Ok(match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) => Some(runmat_value::decode_utf16_code_units(chars.data())?),
         _ => None,
     })

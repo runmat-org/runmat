@@ -503,7 +503,17 @@ async fn text_to_decimal_builtin(value: Value, conversion: TextConversion) -> Bu
     let values = parsed
         .items
         .iter()
-        .map(|text| parse_base_text(text, conversion))
+        .map(|text| {
+            parse_base_text(
+                text.as_str().ok_or_else(|| {
+                    conversion_error(
+                        builtin,
+                        format!("{builtin}: input text must contain digits"),
+                    )
+                })?,
+                conversion,
+            )
+        })
         .collect::<BuiltinResult<Vec<_>>>()?;
     value_from_decimal_text_values(values, parsed.shape, parsed.preserve_shape, parsed.column)
         .map_err(|err| conversion_error(builtin, format!("{builtin}: {err}")))
@@ -747,7 +757,7 @@ fn parse_min_digits(value: &Value, builtin: &'static str) -> BuiltinResult<usize
 
 #[derive(Debug)]
 struct ParsedTextItems {
-    items: runmat_value::ExactArrayStorage<runmat_value::Utf8Text>,
+    items: runmat_value::ExactArrayStorage<runmat_value::StringElement>,
     shape: Vec<usize>,
     preserve_shape: bool,
     column: bool,
@@ -810,7 +820,7 @@ fn text_items_from_cell(cell: CellArray, builtin: &'static str) -> BuiltinResult
                 format!("{builtin}: cell array elements must be text"),
             ));
         };
-        items.push(text);
+        items.push(text.into());
     }
     Ok(ParsedTextItems {
         shape: vec![items.len(), 1],
@@ -1450,8 +1460,8 @@ fn value_as_string(
     builtin: &'static str,
 ) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
     Ok(match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::String(s) => s.text_ref().cloned(),
+        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].text_ref().cloned(),
         Value::CharArray(ca) if ca.rows == 1 => Some(
             runmat_value::decode_utf16_code_units(ca.data())
                 .map_err(|source| {

@@ -8,6 +8,34 @@ use std::num::NonZeroU64;
 use std::rc::Rc;
 
 #[test]
+fn string_group_presence_uses_tags_not_literal_spellings_in_every_carrier() {
+    use runmat_value::StringElement;
+    for (element, present) in [
+        (StringElement::Missing, false),
+        (StringElement::text(""), false),
+        (StringElement::text("  "), true),
+        (StringElement::text("<missing>"), true),
+        (StringElement::text("<undefined>"), true),
+        (StringElement::text("missing"), true),
+    ] {
+        let scalar = Value::String(element.clone());
+        let array = Value::StringArray(
+            StringArray::from_elements_unbounded(vec![element.clone()], vec![1, 1]).unwrap(),
+        );
+        let cell = Value::Cell(CellArray::new(vec![Value::String(element.clone())], 1, 1).unwrap());
+        for value in [scalar, array, cell] {
+            let labels = group_labels(&value, 1).unwrap();
+            assert_eq!(labels[0].is_some(), present, "{value:?}");
+            if present {
+                assert!(
+                    matches!(labels[0].as_deref(), Some([KeyAtom::Text(text)]) if Some(text.as_str()) == element.as_str())
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn scalar_group_label_reads_typed_integer_storage_without_double_mirror() {
     let tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).unwrap();
     let Some(label) = scalar_group_label(&Value::Tensor(tensor)).unwrap() else {

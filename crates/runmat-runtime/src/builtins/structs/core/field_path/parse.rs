@@ -89,9 +89,16 @@ fn parse_component(
             })?;
             parse_text(&text, uses_textual_index)
         }
-        Value::String(text) => parse_text(text, uses_textual_index),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            parse_text(&array.data()[0], uses_textual_index)
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            parse_text(text, uses_textual_index)
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            parse_text(
+                &array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string"),
+                uses_textual_index,
+            )
         }
         Value::Tensor(array) if array.len() != 1 => {
             let indices = if let Some(result) =

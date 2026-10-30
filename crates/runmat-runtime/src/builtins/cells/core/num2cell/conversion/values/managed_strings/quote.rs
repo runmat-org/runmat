@@ -1,4 +1,4 @@
-use runmat_value::{ExactArrayStorage, OutputListStorage, SharedShape, StringArray, Utf8Text};
+use runmat_value::{ExactArrayStorage, OutputListStorage, SharedShape, StringArray, StringElement};
 
 use crate::context::host_allocation::{HostAllocationError, HostAllocationPlan};
 use crate::context::RuntimeContext;
@@ -51,7 +51,7 @@ pub(super) fn retained_bytes(
         .map_err(|cause| numeric(runtime, cause))?;
     add(runtime, &mut physical, &mut claims, shape, 1)?;
     if plan.slice_count() != 1 {
-        let group_list = ExactArrayStorage::<Utf8Text>::requested_bytes(plan.slice_count())
+        let group_list = ExactArrayStorage::<StringElement>::requested_bytes(plan.slice_count())
             .map_err(|cause| numeric(runtime, cause))?;
         let group_shape = SharedShape::requested_bytes_for_rank(plan.slice_shape().len())
             .map_err(|cause| numeric(runtime, cause))?;
@@ -77,8 +77,12 @@ pub(super) fn retained_bytes(
         if text.has_retained_claim() || text.capacity() == 0 {
             continue;
         }
-        let capacity = if unique { text.capacity() } else { text.len() };
-        let bytes = Utf8Text::requested_bytes_for_capacity(capacity)
+        let capacity = if unique {
+            text.capacity()
+        } else {
+            text.text_ref().map_or(0, |text| text.len())
+        };
+        let bytes = StringElement::requested_bytes_for_capacity(capacity)
             .map_err(|cause| numeric(runtime, cause))?;
         add(
             runtime,

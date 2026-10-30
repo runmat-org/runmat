@@ -513,8 +513,12 @@ fn expect_string_scalar(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::CharArray(array) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data()).map_err(|decode_error| {
                 optimoptions_error_with(error, format!("{context}: {decode_error}"))
@@ -605,7 +609,7 @@ mod tests {
 
     fn string_field<'a>(options: &'a StructValue, field: &str) -> &'a str {
         match options.fields.get(field) {
-            Some(Value::String(value)) => value.as_str(),
+            Some(Value::String(runmat_value::StringElement::Text(value))) => value.as_str(),
             other => panic!("expected string field {field}, got {other:?}"),
         }
     }

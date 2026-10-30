@@ -171,7 +171,7 @@ impl ScatterplotOptions {
 
 fn parse_marker(value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::String(_) => {}
+        Value::String(runmat_value::StringElement::Text(_)) => {}
         Value::CharArray(chars) if chars.rows == 1 => {}
         Value::CharArray(_) => {
             return Err(scatterplot_error(

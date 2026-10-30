@@ -168,7 +168,7 @@ impl ArchivedCallbacks {
             let (source, callback) = match role {
                 Role::Builtin(builtin) => {
                     let source = RootedValue::in_context(
-                        Value::String(crate::call::argument_text::copy_str(
+                        Value::string(crate::call::argument_text::copy_str(
                             &builtin.0,
                             Some(runtime),
                         )?),

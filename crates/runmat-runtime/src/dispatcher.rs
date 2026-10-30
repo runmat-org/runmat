@@ -788,12 +788,14 @@ fn distributed_literal_context(
     runmat_types::LiteralContext::new(
         args.iter()
             .map(|value| match value {
-                Value::String(value) => {
-                    runmat_types::LiteralValue::String(value.as_str().to_owned())
-                }
-                Value::StringArray(value) if value.data().len() == 1 => {
-                    runmat_types::LiteralValue::String(value.data()[0].as_str().to_owned())
-                }
+                Value::String(value) => value
+                    .as_str()
+                    .map(|text| runmat_types::LiteralValue::String(text.to_owned()))
+                    .unwrap_or(runmat_types::LiteralValue::Unknown),
+                Value::StringArray(value) if value.data().len() == 1 => value.data()[0]
+                    .as_str()
+                    .map(|text| runmat_types::LiteralValue::String(text.to_owned()))
+                    .unwrap_or(runmat_types::LiteralValue::Unknown),
                 Value::CharArray(value) if value.rows == 1 => {
                     // Inference cannot publish an argument error; the selected
                     // builtin decodes and validates the actual text.
@@ -1182,8 +1184,10 @@ pub(crate) async fn invoke_registered_static_method(
     let method = resolved.registration.declaration;
     let args = if let Some(class) = method.implicit_class_argument.as_ref() {
         let text = crate::call::argument_text::copy_str(class.display_name(), context)?;
-        let inserted =
-            crate::execution::RootedValue::in_optional_context(Value::String(text), context)?;
+        let inserted = crate::execution::RootedValue::in_optional_context(
+            Value::String(text.into()),
+            context,
+        )?;
         match context {
             Some(context) => args
                 .fork()

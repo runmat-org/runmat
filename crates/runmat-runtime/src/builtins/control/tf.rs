@@ -402,7 +402,7 @@ fn parse_variable(value: &Value) -> BuiltinResult<String> {
 
 fn is_text_value(value: &Value) -> bool {
     match value {
-        Value::String(_) => true,
+        Value::String(runmat_value::StringElement::Text(_)) => true,
         Value::StringArray(array) => array.data().len() == 1,
         Value::CharArray(array) => array.rows == 1,
         _ => false,

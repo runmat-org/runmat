@@ -150,7 +150,7 @@ pub(super) fn classify_arguments<'a>(
 
 pub(super) fn is_string_like(value: &Value) -> bool {
     match value {
-        Value::String(_) => true,
+        Value::String(runmat_value::StringElement::Text(_)) => true,
         Value::CharArray(ca) => ca.rows == 1,
         Value::StringArray(sa) => sa.data().len() == 1,
         _ => false,
@@ -343,13 +343,17 @@ pub(super) fn machine_format_from_label(label: &str) -> Result<MachineFormat, St
 
 pub(super) fn scalar_string(value: &Value, err: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => {
             crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 fwrite_error_with_detail(&FWRITE_ERROR_INVALID_OPTION, err)
             })
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         _ => Err(fwrite_error_with_detail(&FWRITE_ERROR_INVALID_OPTION, err)),
     }
 }

@@ -86,7 +86,7 @@ impl DormantSwitch {
         Ok(match self {
             Self::Bool(value) => Some(Value::Bool(*value)),
             Self::Number(value) => Some(Value::Num(f64::from_bits(*value))),
-            Self::Text(value) => Some(Value::String(crate::call::argument_text::copy_str(
+            Self::Text(value) => Some(Value::string(crate::call::argument_text::copy_str(
                 value,
                 c.runtime(),
             )?)),

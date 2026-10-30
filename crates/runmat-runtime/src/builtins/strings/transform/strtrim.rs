@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::strings::common::{
     cell_has_valid_string_scalar, char_row_to_string_slice,
-    contains_numeric_or_resident_text_input, is_missing_string, transform_scalar_borrowed,
+    contains_numeric_or_resident_text_input, transform_scalar_borrowed,
     transform_string_array_borrowed,
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -241,9 +241,6 @@ fn trim_whitespace(text: &str) -> String {
 }
 
 fn trim_whitespace_with_mode(text: &str, strict: bool) -> &str {
-    if is_missing_string(text) {
-        return text;
-    }
     text.trim_matches(|c: char| crate::builtins::strings::common::trimmable_whitespace(c, strict))
 }
 
@@ -281,10 +278,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data()
-                        .iter()
-                        .map(|text| text.as_str())
-                        .collect::<Vec<_>>(),
+                    sa.data().iter().cloned().collect::<Vec<_>>(),
                     vec!["one", "<missing>", "two", "three"]
                 );
             }
@@ -392,9 +386,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_preserves_missing_strings() {
-        let result =
-            run_strtrim(Value::String("<missing>".into())).expect("strtrim missing string");
-        assert_eq!(result, Value::String("<missing>".into()));
+        let result = run_strtrim(Value::String(runmat_value::StringElement::Missing))
+            .expect("strtrim missing string");
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

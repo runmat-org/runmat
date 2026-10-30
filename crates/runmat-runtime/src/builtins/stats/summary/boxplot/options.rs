@@ -47,10 +47,11 @@ pub(super) fn text_scalar(value: &Value, label: &str) -> BuiltinResult<String> {
 
 pub(super) fn value_text_preserve_case(value: &Value, label: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
-        }
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| invalid(format!("boxplot: {label} must be nonmissing text"))),
         Value::CharArray(array) if array.rows == 1 => {
             crate::builtins::stats::decode_utf16_with_error(array.data(), || {
                 invalid(format!("boxplot: {label} is not valid UTF-16 text"))
@@ -62,12 +63,18 @@ pub(super) fn value_text_preserve_case(value: &Value, label: &str) -> BuiltinRes
 
 pub(super) fn text_vector(value: &Value, label: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
-        Value::StringArray(array) => Ok(array
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
+        Value::StringArray(array) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| invalid(format!("boxplot: {label} must be nonmissing text")))
+            })
+            .collect(),
         Value::CharArray(array) => char_rows(array),
         Value::Cell(cell) => cell
             .data()
@@ -142,9 +149,9 @@ pub(super) fn parse_symbol(text: &str) -> BuiltinResult<(Option<MarkerStyle>, Op
 
 pub(super) fn parse_colors(value: &Value) -> BuiltinResult<Vec<Vec4>> {
     if let Some(text) = match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => text.as_str().map(str::to_owned),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            array.data()[0].as_str().map(str::to_owned)
         }
         Value::CharArray(array) if array.rows == 1 => Some(
             crate::builtins::stats::decode_utf16_with_error(array.data(), || {

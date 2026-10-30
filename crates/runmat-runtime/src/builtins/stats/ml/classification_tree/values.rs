@@ -11,12 +11,12 @@ pub(super) fn predict_scalar_text(value: &Value) -> BuiltinResult<Option<String>
 
 fn decode_scalar_text(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::String(text) => Ok(text.as_str().map(str::to_owned)),
         Value::CharArray(array) if array.rows == 1 => {
             decode_utf16_code_units(array.data()).map(Some)
         }
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+            Ok(array.data()[0].as_str().map(str::to_owned))
         }
         _ => Ok(None),
     }
@@ -24,13 +24,19 @@ fn decode_scalar_text(value: &Value) -> Result<Option<String>, runmat_value::Utf
 
 pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         Value::CharArray(array) => fit_char_rows(array),
-        Value::StringArray(array) => Ok(array
+        Value::StringArray(array) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| fitctree_invalid("fitctree: text entries must be nonmissing"))
+            })
+            .collect(),
         Value::Cell(cell) => cell
             .data()
             .iter()
@@ -267,12 +273,18 @@ pub(super) fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinRes
 
 pub(super) fn string_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<String>> {
     match object.properties().get(name) {
-        Some(Value::StringArray(array)) => Ok(array
+        Some(Value::StringArray(array)) => array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
-        Some(Value::String(text)) => Ok(vec![text.as_str().to_owned()]),
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    predict_invalid("predict: model text metadata must be nonmissing")
+                })
+            })
+            .collect(),
+        Some(Value::String(runmat_value::StringElement::Text(text))) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         _ => Err(predict_invalid(format!("predict: tree is missing {name}"))),
     }
 }

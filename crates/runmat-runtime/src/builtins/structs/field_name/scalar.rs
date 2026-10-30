@@ -8,12 +8,18 @@ pub(crate) enum ExpectedScalarFieldName {
 
 pub(crate) fn decode(value: &Value) -> Result<String, ExpectedScalarFieldName> {
     match value {
-        Value::String(name) => Ok(name.to_string()),
+        Value::String(name) => name
+            .as_str()
+            .map(str::to_owned)
+            .ok_or(ExpectedScalarFieldName::Type),
         Value::CharArray(array) if array.rows == 1 => {
             runmat_value::decode_utf16_code_units(array.data())
                 .map_err(ExpectedScalarFieldName::Encoding)
         }
-        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or(ExpectedScalarFieldName::Type),
         _ => Err(ExpectedScalarFieldName::Type),
     }
 }

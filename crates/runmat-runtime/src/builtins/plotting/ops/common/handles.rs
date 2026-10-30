@@ -38,7 +38,7 @@ pub fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureH
             }
             data.iter().map(|v| handle_from_scalar(*v, ctx)).collect()
         }
-        Value::CharArray(_) | Value::String(_) => {
+        Value::CharArray(_) | Value::String(runmat_value::StringElement::Text(_)) => {
             let text = parse_string(value)
                 .map_err(|source| {
                     crate::builtins::plotting::plotting_error_with_source(
@@ -164,7 +164,7 @@ pub fn parse_optional_figure_handle(
     ctx: &str,
 ) -> BuiltinResult<Option<FigureHandle>> {
     match value {
-        Value::CharArray(_) | Value::String(_) => {
+        Value::CharArray(_) | Value::String(runmat_value::StringElement::Text(_)) => {
             let text = parse_string(value)
                 .map_err(|source| {
                     crate::builtins::plotting::plotting_error_with_source(

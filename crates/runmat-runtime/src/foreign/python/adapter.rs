@@ -1342,15 +1342,23 @@ fn string_argument_ref(value: Option<&Value>, label: &str) -> Result<String, Run
 fn output_names(value: Option<Value>) -> Result<Vec<String>, RuntimeError> {
     match value {
         None => Ok(Vec::new()),
-        Some(Value::String(value)) => Ok(vec![value.into_string_unbounded()]),
+        Some(Value::String(value)) => value
+            .into_text()
+            .map(|text| vec![text.into_string_unbounded()])
+            .ok_or_else(|| invalid_call("Python output names must be text")),
         Some(Value::CharArray(value)) => value_text_scalar_string(&Value::CharArray(value))
             .map(|value| vec![value])
             .ok_or_else(|| invalid_call("Python outputs must be text")),
-        Some(Value::StringArray(value)) => Ok(value
+        Some(Value::StringArray(value)) => value
             .data()
             .iter()
-            .map(|value| value.as_str().to_owned())
-            .collect()),
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| invalid_call("Python output names must be text"))
+            })
+            .collect(),
         Some(Value::Cell(value)) => value
             .data()
             .iter()
@@ -1366,15 +1374,23 @@ fn output_names(value: Option<Value>) -> Result<Vec<String>, RuntimeError> {
 pub(super) fn output_names_ref(value: Option<&Value>) -> Result<Vec<String>, RuntimeError> {
     match value {
         None => Ok(Vec::new()),
-        Some(Value::String(value)) => Ok(vec![value.as_str().to_owned()]),
+        Some(Value::String(value)) => value
+            .as_str()
+            .map(|text| vec![text.to_owned()])
+            .ok_or_else(|| invalid_call("Python output names must be text")),
         Some(Value::CharArray(value)) => value_text_scalar_string(&Value::CharArray(value.clone()))
             .map(|value| vec![value])
             .ok_or_else(|| invalid_call("Python outputs must be text")),
-        Some(Value::StringArray(value)) => Ok(value
+        Some(Value::StringArray(value)) => value
             .data()
             .iter()
-            .map(|value| value.as_str().to_owned())
-            .collect()),
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| invalid_call("Python output names must be text"))
+            })
+            .collect(),
         Some(Value::Cell(value)) => value
             .data()
             .iter()

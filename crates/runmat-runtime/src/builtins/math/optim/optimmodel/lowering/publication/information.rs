@@ -89,7 +89,10 @@ pub(in crate::builtins::math::optim::optimmodel::lowering) async fn publish(
         fields.try_reserve(1).map_err(|e| policy.reserve(e))?;
         fields.push((
             name,
-            RootedValue::in_optional_context(Value::String(Utf8Text::new(value)), c.runtime())?,
+            RootedValue::in_optional_context(
+                Value::String(Utf8Text::new(value).into()),
+                c.runtime(),
+            )?,
         ));
         c.completed(1).await?;
     }

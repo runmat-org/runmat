@@ -64,7 +64,10 @@ pub(in crate::builtins::math::optim) async fn indices(
     for ordinal in 0..count {
         let name = match value {
             Value::Cell(cell) => policy.text(&cell.data()[ordinal], cooperation.runtime())?,
-            Value::StringArray(array) => array.data()[ordinal].clone(),
+            Value::StringArray(array) => policy.text(
+                &Value::String(array.data()[ordinal].clone()),
+                cooperation.runtime(),
+            )?,
             _ => policy.text(value, cooperation.runtime())?,
         };
         let mut found = false;

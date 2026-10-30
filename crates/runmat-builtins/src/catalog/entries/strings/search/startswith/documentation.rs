@@ -4,9 +4,9 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "Accepts text inputs as string scalars/arrays, character vectors/arrays, or cell arrays of character vectors.",
         "Accepts patterns in the same formats; scalar inputs expand across the other argument following MATLAB broadcast rules.",
-        "Missing strings (`<missing>`) never match any pattern.",
+        "Typed missing strings (displayed as `<missing>`) never match any pattern.",
         "Empty patterns (`\"\"` or `''`) always match non-missing text elements.",
-        "Patterns that are `<missing>` never match and therefore return `false`.",
+        "Typed missing pattern elements never match and therefore return `false`; literal `<missing>` patterns are ordinary text.",
         "Character arrays treat each row as an independent element; zero-row character arrays yield empty outputs.",
         "MATLAB-compatible mode accepts the documented `'IgnoreCase', logicalValue` name-value form. RunMat mode additionally accepts positional, numeric, textual, and resident scalar flag forms behind explicit compatibility extensions.",
         "All eight integer classes are read exactly as RunMat-only IgnoreCase controls: zero is false and every nonzero value is true.",
@@ -77,7 +77,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
     BuiltinExample {
         id: "example-8", title: "Handle empty and missing values",
-        program: "texts = [\"\", \"<missing>\"];\ntf = startsWith(texts, \"\")", display_output: Some("tf = 1×2 logical array\n   1   0"),
+        program: "texts = [\"\", string(missing)];\ntf = startsWith(texts, \"\")", display_output: Some("tf = 1×2 logical array\n   1   0"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

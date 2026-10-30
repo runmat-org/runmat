@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use regex::RegexBuilder;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Utf8Text, Value};
+use runmat_value::{CellArray, CharArray, StringArray, StringElement, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -24,7 +24,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::char_row_to_string_slice;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::split")]
@@ -410,7 +410,7 @@ impl SplitOptions {
 }
 
 struct TextMatrix {
-    data: Vec<Utf8Text>,
+    data: Vec<StringElement>,
     rows: usize,
     cols: usize,
 }
@@ -472,11 +472,15 @@ impl TextMatrix {
             for row in 0..rows {
                 let idx = row * cols + col;
                 let value_ref: &Value = &data[idx];
-                strings.push(
-                    cell_element_to_string(value_ref, BUILTIN_NAME, &SPLIT_ERROR_CELL_ELEMENT)?
-                        .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?
-                        .into(),
-                );
+                strings.push(match value_ref {
+                    Value::String(text) => text.clone(),
+                    Value::StringArray(array) if array.data().len() == 1 => array.data()[0].clone(),
+                    value => {
+                        cell_element_to_string(value, BUILTIN_NAME, &SPLIT_ERROR_CELL_ELEMENT)?
+                            .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?
+                            .into()
+                    }
+                });
             }
         }
         Ok(Self {
@@ -514,13 +518,24 @@ impl TextMatrix {
             return Ok(parts);
         }
 
-        let mut per_element: Vec<Vec<String>> = Vec::with_capacity(data.len());
-        let mut per_element_matches: Vec<Vec<String>> = Vec::with_capacity(data.len());
+        let mut per_element: Vec<Vec<StringElement>> = Vec::with_capacity(data.len());
+        let mut per_element_matches: Vec<Vec<StringElement>> = Vec::with_capacity(data.len());
         let mut max_tokens = 0usize;
         let mut max_matches = 0usize;
         for text in &data {
-            let tokens = split_text(text, options);
-            let matches = split_delimiter_matches(text, options);
+            let (tokens, matches) = match text.as_str() {
+                Some(text) => (
+                    split_text(text, options)
+                        .into_iter()
+                        .map(StringElement::text)
+                        .collect::<Vec<_>>(),
+                    split_delimiter_matches(text, options)
+                        .into_iter()
+                        .map(StringElement::text)
+                        .collect::<Vec<_>>(),
+                ),
+                None => (vec![StringElement::Missing], Vec::new()),
+            };
             max_tokens = max_tokens.max(tokens.len());
             max_matches = max_matches.max(matches.len());
             per_element.push(tokens);
@@ -531,7 +546,7 @@ impl TextMatrix {
         }
         let dimension = dimension.unwrap_or_else(|| default_split_dimension(rows, cols));
         let (output, shape) = orient_split_values(&per_element, rows, cols, dimension, max_tokens)?;
-        let array = StringArray::new(output, shape).map_err(|e| {
+        let array = StringArray::from_elements_unbounded(output, shape).map_err(|e| {
             split_error_with_message(format!("{BUILTIN_NAME}: {e}"), &SPLIT_ERROR_INTERNAL)
         })?;
         let parts = Value::StringArray(array);
@@ -541,9 +556,13 @@ impl TextMatrix {
             }
             let (matches, match_shape) =
                 orient_split_values(&per_element_matches, rows, cols, dimension, max_matches)?;
-            let matches = StringArray::new(matches, match_shape).map_err(|error| {
-                split_error_with_message(format!("{BUILTIN_NAME}: {error}"), &SPLIT_ERROR_INTERNAL)
-            })?;
+            let matches =
+                StringArray::from_elements_unbounded(matches, match_shape).map_err(|error| {
+                    split_error_with_message(
+                        format!("{BUILTIN_NAME}: {error}"),
+                        &SPLIT_ERROR_INTERNAL,
+                    )
+                })?;
             return Ok(crate::output_count::output_list_with_padding(
                 output_count,
                 vec![parts, Value::StringArray(matches)],
@@ -564,12 +583,12 @@ fn default_split_dimension(rows: usize, cols: usize) -> usize {
 }
 
 fn orient_split_values(
-    per_element: &[Vec<String>],
+    per_element: &[Vec<StringElement>],
     rows: usize,
     cols: usize,
     dimension: usize,
     value_count: usize,
-) -> BuiltinResult<(Vec<String>, Vec<usize>)> {
+) -> BuiltinResult<(Vec<StringElement>, Vec<usize>)> {
     let mut input_shape = vec![rows, cols.max(1)];
     while input_shape.len() < dimension {
         input_shape.push(1);
@@ -592,7 +611,7 @@ fn orient_split_values(
     output
         .try_reserve_exact(total)
         .map_err(|_| split_error(&SPLIT_ERROR_INTERNAL))?;
-    output.resize(total, "<missing>".to_string());
+    output.resize(total, StringElement::Missing);
     for (input_linear, values) in per_element.iter().enumerate() {
         let input_coords = linear_to_subscripts(input_linear, &input_shape);
         for value_index in 0..value_count {
@@ -638,9 +657,6 @@ fn subscripts_to_linear(subscripts: &[usize], shape: &[usize]) -> usize {
 }
 
 fn split_text(text: &str, options: &SplitOptions) -> Vec<String> {
-    if is_missing_string(text) {
-        return vec![text.to_string()];
-    }
     match &options.delimiters {
         DelimiterSpec::Whitespace => split_whitespace(text, options),
         DelimiterSpec::Patterns(patterns) => split_by_patterns(text, patterns, options),
@@ -648,7 +664,7 @@ fn split_text(text: &str, options: &SplitOptions) -> Vec<String> {
 }
 
 fn split_delimiter_matches(text: &str, options: &SplitOptions) -> Vec<String> {
-    if text.is_empty() || is_missing_string(text) {
+    if text.is_empty() {
         return Vec::new();
     }
     match &options.delimiters {
@@ -852,12 +868,19 @@ fn extract_delimiters_for_builtin(
     cell_descriptor: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::String(text) => Ok(vec![text
+            .as_str()
+            .ok_or_else(|| builtin_error_with_descriptor(builtin, descriptor.message, descriptor))?
+            .to_owned()]),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
-            .map(|text| text.as_str().to_owned())
-            .collect()),
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    builtin_error_with_descriptor(builtin, descriptor.message, descriptor)
+                })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?),
         Value::CharArray(array) => {
             if array.rows == 0 {
                 return Ok(Vec::new());
@@ -902,9 +925,9 @@ fn cell_element_to_string(
     descriptor: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::String(text) => Ok(text.as_str().map(str::to_owned)),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+            Ok(array.data()[0].as_str().map(str::to_owned))
         }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
@@ -925,9 +948,9 @@ fn value_to_scalar_string(
     descriptor: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::String(text) => Ok(text.as_str().map(str::to_owned)),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
+            Ok(array.data()[0].as_str().map(str::to_owned))
         }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
@@ -1034,7 +1057,7 @@ fn builtin_error_with_descriptor(
     builder.build()
 }
 
-fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, Utf8Text)> {
+fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, StringElement)> {
     match value {
         Value::String(text) => Ok((StrsplitInputKind::String, text)),
         Value::StringArray(array) if array.data().len() == 1 => {
@@ -1063,21 +1086,24 @@ fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, U
 }
 
 fn strsplit_text(
-    text: &str,
+    text: &StringElement,
     options: &StrsplitOptions,
-) -> BuiltinResult<(Vec<String>, Vec<String>)> {
+) -> BuiltinResult<(Vec<StringElement>, Vec<StringElement>)> {
     let regex = compile_strsplit_regex(options)?;
+    let Some(text) = text.as_str() else {
+        return Ok((vec![StringElement::Missing], Vec::new()));
+    };
     let mut parts = Vec::new();
     let mut matches = Vec::new();
     let mut last = 0usize;
 
     for found in regex.find_iter(text) {
-        parts.push(text[last..found.start()].to_string());
-        matches.push(found.as_str().to_string());
+        parts.push(StringElement::text(text[last..found.start()].to_string()));
+        matches.push(StringElement::text(found.as_str().to_string()));
         last = found.end();
     }
 
-    parts.push(text[last..].to_string());
+    parts.push(StringElement::text(text[last..].to_string()));
     Ok((parts, matches))
 }
 
@@ -1117,13 +1143,20 @@ fn compile_strsplit_regex(options: &StrsplitOptions) -> BuiltinResult<regex::Reg
     })
 }
 
-fn make_strsplit_output(tokens: Vec<String>, kind: StrsplitInputKind) -> BuiltinResult<Value> {
+fn make_strsplit_output(
+    tokens: Vec<StringElement>,
+    kind: StrsplitInputKind,
+) -> BuiltinResult<Value> {
     match kind {
         StrsplitInputKind::String => {
             let len = tokens.len();
-            let array = StringArray::new(tokens, vec![1, len]).map_err(|err| {
-                strsplit_error_with_message(format!("strsplit: {err}"), &STRSPLIT_ERROR_INTERNAL)
-            })?;
+            let array =
+                StringArray::from_elements_unbounded(tokens, vec![1, len]).map_err(|err| {
+                    strsplit_error_with_message(
+                        format!("strsplit: {err}"),
+                        &STRSPLIT_ERROR_INTERNAL,
+                    )
+                })?;
             Ok(Value::StringArray(array))
         }
         StrsplitInputKind::Char => {
@@ -1574,12 +1607,12 @@ pub(crate) mod tests {
     #[test]
     fn split_string_array_multiple_columns() {
         let data = vec![
-            "RunMat Core".to_string(),
-            "VM Interpreter".to_string(),
-            "Accelerate Engine".to_string(),
-            "<missing>".to_string(),
+            StringElement::text("RunMat Core"),
+            StringElement::text("VM Interpreter"),
+            StringElement::text("Accelerate Engine"),
+            StringElement::Missing,
         ];
-        let array = StringArray::new(data, vec![2, 2]).unwrap();
+        let array = StringArray::from_elements_unbounded(data, vec![2, 2]).unwrap();
         let input = Value::StringArray(array);
         let result = split_builtin(input, Vec::new()).expect("split");
         match result {
@@ -1588,14 +1621,14 @@ pub(crate) mod tests {
                 assert_eq!(
                     array.data(),
                     vec![
-                        "RunMat".to_string(),
-                        "VM".to_string(),
-                        "Accelerate".to_string(),
-                        "<missing>".to_string(),
-                        "Core".to_string(),
-                        "Interpreter".to_string(),
-                        "Engine".to_string(),
-                        "<missing>".to_string()
+                        StringElement::text("RunMat"),
+                        StringElement::text("VM"),
+                        StringElement::text("Accelerate"),
+                        StringElement::Missing,
+                        StringElement::text("Core"),
+                        StringElement::text("Interpreter"),
+                        StringElement::text("Engine"),
+                        StringElement::Missing
                     ]
                 );
             }
@@ -1637,7 +1670,7 @@ pub(crate) mod tests {
             Value::String("alpha beta".to_string().into()),
             Value::String("gamma".to_string().into()),
             Value::String("delta epsilon".to_string().into()),
-            Value::String("<missing>".to_string().into()),
+            Value::String(StringElement::Missing),
         ];
         let cell = crate::make_cell(values, 2, 2).expect("cell");
         let result = split_builtin(cell, Vec::new()).expect("split");
@@ -1647,14 +1680,14 @@ pub(crate) mod tests {
                 assert_eq!(
                     array.data(),
                     vec![
-                        "alpha".to_string(),
-                        "delta".to_string(),
-                        "gamma".to_string(),
-                        "<missing>".to_string(),
-                        "beta".to_string(),
-                        "epsilon".to_string(),
-                        "<missing>".to_string(),
-                        "<missing>".to_string()
+                        StringElement::text("alpha"),
+                        StringElement::text("delta"),
+                        StringElement::text("gamma"),
+                        StringElement::Missing,
+                        StringElement::text("beta"),
+                        StringElement::text("epsilon"),
+                        StringElement::Missing,
+                        StringElement::Missing
                     ]
                 );
             }
@@ -1665,14 +1698,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_missing_string_propagates() {
-        let input = Value::String("<missing>".to_string().into());
-        let result = split_builtin(input, Vec::new()).expect("split");
-        match result {
-            Value::StringArray(array) => {
-                assert_eq!(array.shape, vec![1, 1]);
-                assert_eq!(array.data(), vec!["<missing>".to_string()]);
-            }
-            other => panic!("expected string array, got {other:?}"),
+        for source in [
+            StringElement::Missing,
+            StringElement::text("<missing>"),
+            StringElement::text("<Missing>"),
+            StringElement::text(""),
+        ] {
+            let result = split_builtin(Value::String(source.clone()), Vec::new()).expect("split");
+            let Value::StringArray(array) = result else {
+                panic!("expected string array")
+            };
+            assert_eq!(array.shape, vec![1, 1]);
+            assert_eq!(array.data(), &[source]);
         }
     }
 
@@ -1788,10 +1825,10 @@ pub(crate) mod tests {
                 assert_eq!(
                     array.data(),
                     vec![
-                        "alpha".to_string(),
-                        "gamma".to_string(),
-                        "beta".to_string(),
-                        "<missing>".to_string()
+                        StringElement::text("alpha"),
+                        StringElement::text("gamma"),
+                        StringElement::text("beta"),
+                        StringElement::Missing
                     ]
                 );
             }

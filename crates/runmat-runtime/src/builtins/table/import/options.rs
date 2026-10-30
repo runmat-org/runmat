@@ -646,7 +646,7 @@ pub(in crate::builtins::table) fn is_detected_numeric(
     options: &ReadTableOptions,
 ) -> bool {
     match value {
-        ImportCell::Empty | ImportCell::Number(_) => true,
+        ImportCell::Empty | ImportCell::Missing | ImportCell::Number(_) => true,
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             options.is_missing(token) || parse_numeric(token).is_some()
@@ -660,7 +660,7 @@ pub(in crate::builtins::table) fn is_detected_logical(
     options: &ReadTableOptions,
 ) -> bool {
     match value {
-        ImportCell::Empty | ImportCell::Logical(_) => true,
+        ImportCell::Empty | ImportCell::Missing | ImportCell::Logical(_) => true,
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             options.is_missing(token) || parse_logical(token).is_some()
@@ -674,7 +674,7 @@ pub(in crate::builtins::table) fn is_detected_datetime(
     options: &ReadTableOptions,
 ) -> bool {
     match value {
-        ImportCell::Empty | ImportCell::DateTime(_) => true,
+        ImportCell::Empty | ImportCell::Missing | ImportCell::DateTime(_) => true,
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             options.is_missing(token) || parse_iso_datetime_to_datenum(token).is_some()
@@ -1257,7 +1257,10 @@ pub(in crate::builtins::table) struct RangeSpec {
 impl RangeSpec {
     pub(in crate::builtins::table) fn parse(value: &Value) -> BuiltinResult<Self> {
         match value {
-            Value::String(text) => Self::parse_text(text),
+            Value::String(text) => Self::parse_text(
+                text.as_str()
+                    .ok_or_else(|| invalid_argument("readtable: Range must not be missing"))?,
+            ),
             Value::CharArray(ca) if ca.rows == 1 => {
                 let text = runmat_value::decode_utf16_code_units(ca.data()).map_err(|error| {
                     table_error_with_source(
@@ -1268,7 +1271,11 @@ impl RangeSpec {
                 })?;
                 Self::parse_text(&text)
             }
-            Value::StringArray(sa) if sa.data().len() == 1 => Self::parse_text(&sa.data()[0]),
+            Value::StringArray(sa) if sa.data().len() == 1 => Self::parse_text(
+                sa.data()[0]
+                    .as_str()
+                    .ok_or_else(|| invalid_argument("readtable: Range must not be missing"))?,
+            ),
             Value::Tensor(t) if tensor_len(t) == 2 || tensor_len(t) == 4 => {
                 let len = tensor_len(t);
                 let mut indices = Vec::with_capacity(len);

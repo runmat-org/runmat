@@ -375,7 +375,7 @@ fn exact_output_class(graph: &AccelGraph, control: Option<ValueId>) -> Option<Im
         return Some(ImageMeanOutput::Default);
     };
     let option = match graph.value(control)?.constant.as_ref()? {
-        Value::String(text) => MeanControl::from_public_option(text),
+        Value::String(text) => text.as_str().and_then(MeanControl::from_public_option),
         Value::CharArray(chars) if chars.rows == 1 => {
             MeanControl::from_public_code_units(chars.data().iter().map(|unit| unit.raw()))
         }

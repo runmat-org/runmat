@@ -135,12 +135,11 @@ fn value_footprint(value: &Value, path: &str) -> Result<(u64, u64, u64), ValueCo
             0,
             len(array.shape.len())?,
         ),
-        Value::String(text) => (0, len(text.len())?, 0),
+        Value::String(text) => (0, len(text.as_str().map_or(0, str::len))?, 0),
         Value::StringArray(array) => {
-            let text = array
-                .data()
-                .iter()
-                .try_fold(0_u64, |bytes, item| add(bytes, len(item.len())?))?;
+            let text = array.data().iter().try_fold(0_u64, |bytes, item| {
+                add(bytes, len(item.as_str().map_or(0, str::len))?)
+            })?;
             (
                 0,
                 add(text, mul(len(array.data().len())?, 64)?)?,

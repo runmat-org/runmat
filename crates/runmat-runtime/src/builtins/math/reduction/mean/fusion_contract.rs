@@ -59,9 +59,17 @@ fn lexical_plan<'a>(controls: &FusionReductionControls<'a>) -> Option<Plan<'a>> 
     let mut output_set = false;
     for value in controls.values {
         let control = match value {
-            Value::String(text) => MeanControl::from_public_option(text),
-            Value::StringArray(array) if array.data().len() == 1 => {
-                MeanControl::from_public_option(&array.data()[0])
+            Value::String(runmat_value::StringElement::Text(text)) => {
+                MeanControl::from_public_option(text)
+            }
+            Value::StringArray(array)
+                if array.data().len() == 1 && !array.data()[0].is_missing() =>
+            {
+                MeanControl::from_public_option(
+                    &array.data()[0]
+                        .text_ref()
+                        .expect("checked nonmissing scalar string"),
+                )
             }
             Value::CharArray(array) if array.rows == 1 => {
                 MeanControl::from_public_code_units(array.data().iter().map(|unit| unit.raw()))

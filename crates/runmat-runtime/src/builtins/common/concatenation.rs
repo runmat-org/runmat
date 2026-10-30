@@ -342,7 +342,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_value::StringArray::from_texts_unbounded(
+                    let sa = runmat_value::StringArray::from_elements_unbounded(
                         vec![s.clone()],
                         vec![1, 1],
                     )
@@ -443,7 +443,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
             }
         }
-        let sa = runmat_value::StringArray::from_texts_unbounded(data, vec![rows, cols_total])
+        let sa = runmat_value::StringArray::from_elements_unbounded(data, vec![rows, cols_total])
             .map_err(|e| concat_error(format!("string hcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -636,7 +636,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_value::StringArray::from_texts_unbounded(
+                    let sa = runmat_value::StringArray::from_elements_unbounded(
                         vec![s.clone()],
                         vec![1, 1],
                     )
@@ -722,7 +722,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
             }
         }
-        let sa = runmat_value::StringArray::from_texts_unbounded(data, vec![rows_total, cols])
+        let sa = runmat_value::StringArray::from_elements_unbounded(data, vec![rows_total, cols])
             .map_err(|e| concat_error(format!("string vcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -1737,7 +1737,7 @@ mod tests {
             output
                 .data()
                 .iter()
-                .map(|text| text.as_str())
+                .map(|text| text.as_str().expect("present concatenated fixture"))
                 .collect::<Vec<_>>(),
             ["a", "b", "e", "f", "c", "d", "g", "h"]
         );

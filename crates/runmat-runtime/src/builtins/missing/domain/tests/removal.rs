@@ -156,7 +156,7 @@ fn rmmissing_cell_arrays_use_cell_row_major_order() {
             vec![
                 Value::Num(1.0),
                 Value::StringArray(
-                    StringArray::new(vec![MISSING_TEXT.into()], vec![1, 1]).unwrap(),
+                    StringArray::from_elements_unbounded(vec![MISSING_TEXT], vec![1, 1]).unwrap(),
                 ),
                 Value::Num(2.0),
                 Value::Num(3.0),

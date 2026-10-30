@@ -129,7 +129,7 @@ pub(in crate::builtins::deep_learning) fn numeric_payload_shape<'a>(
         if object.class_name().is(super::DLARRAY_CLASS) {
             let format = match object.properties().get("Format") {
                 None => "",
-                Some(Value::String(format)) => format.as_str(),
+                Some(Value::String(runmat_value::StringElement::Text(format))) => format.as_str(),
                 _ => {
                     return Err(deep_learning_error(
                         function,
@@ -139,7 +139,7 @@ pub(in crate::builtins::deep_learning) fn numeric_payload_shape<'a>(
             };
             let labels = match object.properties().get("Labels") {
                 None => format,
-                Some(Value::String(labels)) => labels.as_str(),
+                Some(Value::String(runmat_value::StringElement::Text(labels))) => labels.as_str(),
                 _ => {
                     return Err(deep_learning_error(
                         function,

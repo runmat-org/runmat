@@ -56,10 +56,12 @@ impl OptimizableRange {
                     categories,
                 })
             }
-            Value::String(text) if explicit_type == Some(VariableType::Categorical) => {
+            Value::String(runmat_value::StringElement::Text(text))
+                if explicit_type == Some(VariableType::Categorical) =>
+            {
                 check_categories(std::slice::from_ref(&text))?;
                 Ok(Self::Categorical {
-                    value: Value::String(text.clone()),
+                    value: Value::string(text.clone()),
                     categories: vec![text],
                 })
             }
@@ -187,8 +189,20 @@ fn validate_integer_transform(lower: f64, transform: Transform) -> BuiltinResult
 fn text_categories_from_string_array(
     array: &StringArray,
 ) -> BuiltinResult<Vec<runmat_value::Utf8Text>> {
-    check_categories(array.data_owner().as_slice())?;
-    Ok(array.data().to_vec())
+    let categories = array
+        .data()
+        .iter()
+        .map(|value| {
+            value.text_ref().cloned().ok_or_else(|| {
+                error(
+                    "optimizableVariable: categorical Range values must be nonempty text",
+                    &ERROR_INVALID_RANGE,
+                )
+            })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    check_categories(&categories)?;
+    Ok(categories)
 }
 
 fn text_categories_from_cell(cell: &CellArray) -> BuiltinResult<Vec<runmat_value::Utf8Text>> {

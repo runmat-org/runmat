@@ -72,7 +72,7 @@ async fn rot90_builtin(
             Ok(rot90_string_array(strings, steps).map(Value::StringArray)?)
         }
         Value::CharArray(chars) => Ok(rot90_char_array(chars, steps).map(Value::CharArray)?),
-        Value::String(s) => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::String(s.into())),
         v @ (Value::Num(_) | Value::Int(_) | Value::Bool(_)) => {
             let tensor = tensor::value_into_tensor_for("rot90", v)
                 .map_err(|e| rot90_error_with_message(e, &ROT90_ERROR_INTERNAL))?;
@@ -214,9 +214,16 @@ fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
 
 fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<i64>> {
     let text = match value {
-        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data().len() == 1 => {
-            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Some(std::borrow::Cow::Borrowed(s.as_str()))
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            Some(std::borrow::Cow::Borrowed(
+                sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
             runmat_value::decode_utf16_code_units(ca.data()).map_err(|error| {
@@ -337,7 +344,7 @@ fn rot90_string_array(array: StringArray, steps: usize) -> crate::BuiltinResult<
         return Ok(array);
     }
     let (data, shape) = rot90_generic(array.data(), &array.shape, steps)?;
-    StringArray::from_texts_unbounded(data, shape)
+    StringArray::from_elements_unbounded(data, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 

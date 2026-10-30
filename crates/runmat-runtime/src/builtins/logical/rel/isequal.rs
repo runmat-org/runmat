@@ -152,13 +152,17 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
         }
 
         // Strings
-        (Value::String(a), Value::String(b)) => a == b,
-        (Value::StringArray(a), Value::StringArray(b)) => string_arrays_equal(a, b),
+        (Value::String(a), Value::String(b)) => string_elements_equal(a, b, nan_equal),
+        (Value::StringArray(a), Value::StringArray(b)) => string_arrays_equal(a, b, nan_equal),
         (Value::String(a), Value::StringArray(b)) => {
-            array_shapes_equal(&b.shape, &[1, 1]) && b.data().len() == 1 && b.data()[0] == *a
+            array_shapes_equal(&b.shape, &[1, 1])
+                && b.data().len() == 1
+                && string_elements_equal(&b.data()[0], a, nan_equal)
         }
         (Value::StringArray(a), Value::String(b)) => {
-            array_shapes_equal(&a.shape, &[1, 1]) && a.data().len() == 1 && a.data()[0] == *b
+            array_shapes_equal(&a.shape, &[1, 1])
+                && a.data().len() == 1
+                && string_elements_equal(&a.data()[0], b, nan_equal)
         }
 
         // Cells
@@ -351,11 +355,27 @@ fn complex_scalar_tensor_equal(
         && numeric_scalars_equal(NumericScalar::F64(imag), tensor_imag, nan_equal)
 }
 
-fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
+fn string_elements_equal(
+    a: &runmat_value::StringElement,
+    b: &runmat_value::StringElement,
+    nan_equal: bool,
+) -> bool {
+    match (a.as_str(), b.as_str()) {
+        (Some(a), Some(b)) => a == b,
+        (None, None) => nan_equal,
+        _ => false,
+    }
+}
+
+fn string_arrays_equal(a: &StringArray, b: &StringArray, nan_equal: bool) -> bool {
     if !array_shapes_equal(&a.shape, &b.shape) {
         return false;
     }
-    a.data() == b.data()
+    a.data().len() == b.data().len()
+        && a.data()
+            .iter()
+            .zip(b.data())
+            .all(|(a, b)| string_elements_equal(a, b, nan_equal))
 }
 
 fn cells_equal(a: &CellArray, b: &CellArray, nan_equal: bool) -> bool {

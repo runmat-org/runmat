@@ -62,7 +62,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::SymbolicArray(arr) => Some(arr.shape.to_vec()),
         Value::LogicalArray(arr) => Some(arr.shape.as_slice().to_vec()),
         Value::StringArray(sa) => Some(sa.shape.to_vec()),
-        Value::String(s) => Some(vec![1, s.chars().count()]),
+        Value::String(_) => Some(vec![1, 1]),
         Value::CharArray(ca) => Some(ca.shape.to_vec()),
         Value::Tensor(t) => Some(t.shape().to_vec()),
         Value::SparseTensor(s) => Some(vec![s.rows, s.cols]),
@@ -129,8 +129,12 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::ComplexTensor(t) => (t.len() as u64)
             .saturating_mul(t.numeric_dtype().byte_size() as u64)
             .saturating_mul(2),
-        Value::String(s) => s.len() as u64,
-        Value::StringArray(sa) => sa.data().iter().map(|s| s.len() as u64).sum(),
+        Value::String(s) => s.as_str().map_or(0, str::len) as u64,
+        Value::StringArray(sa) => sa
+            .data()
+            .iter()
+            .map(|s| s.as_str().map_or(0, str::len) as u64)
+            .sum(),
         Value::CharArray(ca) => ca.data().len() as u64,
         Value::Symbolic(expr) => expr.to_string().len() as u64,
         Value::SymbolicArray(arr) => arr

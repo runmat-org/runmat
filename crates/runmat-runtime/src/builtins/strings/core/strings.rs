@@ -93,8 +93,8 @@ async fn strings_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinR
     })?;
 
     let fill_text = match fill {
-        FillKind::Empty => String::new(),
-        FillKind::Missing => "<missing>".to_string(),
+        FillKind::Empty => runmat_value::StringElement::text(""),
+        FillKind::Missing => runmat_value::StringElement::Missing,
     };
 
     let mut data = Vec::with_capacity(total);
@@ -102,8 +102,8 @@ async fn strings_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinR
         data.push(fill_text.clone());
     }
 
-    let array =
-        StringArray::new(data, shape).map_err(|_| strings_error(&STRINGS_ERROR_INTERNAL))?;
+    let array = StringArray::from_elements_unbounded(data, shape)
+        .map_err(|_| strings_error(&STRINGS_ERROR_INTERNAL))?;
     Ok(Value::StringArray(array))
 }
 
@@ -430,7 +430,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![4, 4]);
-                assert!(array.data().iter().all(|s| s.is_empty()));
+                assert!(array.data().iter().all(|s| s.as_str() == Some("")));
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -637,7 +637,10 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
                 assert_eq!(array.data().len(), 6);
-                assert!(array.data().iter().all(|s| s == "<missing>"));
+                assert!(array
+                    .data()
+                    .iter()
+                    .all(runmat_value::StringElement::is_missing));
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -650,7 +653,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 1]);
-                assert_eq!(array.data(), vec!["<missing>".to_string()]);
+                assert_eq!(array.data(), &[runmat_value::StringElement::Missing]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -672,7 +675,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, proto.shape);
-                assert!(array.data().iter().all(|s| s.is_empty()));
+                assert!(array.data().iter().all(|s| s.as_str() == Some("")));
             }
             other => panic!("expected string array, got {other:?}"),
         }

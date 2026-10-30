@@ -7,7 +7,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "When you omit the dimension, `join` operates along the **last dimension whose size is not 1**. If all dimensions are singleton, it uses dimension 2.",
             "The default delimiter is a single space character. You can pass a scalar delimiter (string or character vector) or supply a string/cell array whose shape matches the input, with the join dimension reduced by one, to customise delimiters for each gap.",
             "Inputs may be string scalars, string arrays (including N-D), character arrays, or cell arrays of character vectors. Cell inputs return cell arrays; all other inputs return string scalars or string arrays.",
-            "If any element participating in a join is the string `<missing>`, the result for that slice is also `<missing>`, matching MATLAB’s missing propagation rules.",
+            "If any element participating in a join is a typed missing string, the result for that slice is also missing. Literal `<missing>` text joins as ordinary text.",
             "Joining along a dimension greater than `ndims(str)` leaves the input unchanged.",
             "The documented dimension is a positive integer-valued double scalar. Native typed-integer dimensions and the reversed `join(str,dim,delimiter)` argument order are accepted only in RunMat compatibility mode.",
         ],
@@ -145,8 +145,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             answer: "Yes. Supply a string array or a cell array of character vectors with the same size as `str`, except that the join dimension must be one element shorter. Values of size 1 in other dimensions broadcast.",
         },
         BuiltinDocumentationFaq {
-            question: "What happens when `str` contains `<missing>`?",
-            answer: "The result for that slice becomes `<missing>`. This matches MATLAB’s behaviour and ensures missing values propagate.",
+            question: "What happens when `str` contains a missing string?",
+            answer: "The result for that slice is a typed missing string, displayed as `<missing>`. Literal text with that spelling remains nonmissing.",
         },
         BuiltinDocumentationFaq {
             question: "Can I pass GPU-resident text or delimiters?",

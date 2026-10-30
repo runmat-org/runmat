@@ -300,10 +300,7 @@ fn captured_program_revision(program: &[u8]) -> ProgramRevision {
         ProgramEnvironment::new(
             runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
             runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
-            Digest::sha256(format!(
-                "runmat-runtime-abi-v1\0{}",
-                env!("CARGO_PKG_VERSION")
-            )),
+            runmat_runtime::native::linked_runtime_fingerprint(),
             Digest::sha256(b"runmat-local-captured-catalog-v1"),
             "matlab",
         )

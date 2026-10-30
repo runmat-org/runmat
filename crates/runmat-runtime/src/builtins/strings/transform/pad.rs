@@ -9,7 +9,7 @@ use runmat_builtins::{
 };
 
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, IntValue, StringArray, Utf8Text, Value};
+use runmat_value::{CellArray, CharArray, IntValue, StringArray, StringElement, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -158,18 +158,18 @@ async fn pad_builtin(
     }
 }
 
-fn pad_string(text: Utf8Text, options: PadOptions) -> BuiltinResult<Value> {
+fn pad_string(text: StringElement, options: PadOptions) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
-        return Ok(Value::string(text));
+        return Ok(Value::String(text));
     }
-    let char_count = string_length(&text);
+    let char_count = string_length(text.as_str().expect("nonmissing subject"));
     let base_target = options.base_target(char_count);
     let target_len = element_target_length(&options, base_target, char_count);
     if char_count >= target_len {
         return Ok(Value::String(text));
     }
     Ok(Value::string(apply_padding_owned(
-        text.as_str(),
+        text.as_str().expect("nonmissing subject"),
         char_count,
         target_len,
         &options,
@@ -182,13 +182,13 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Va
     if matches!(options.target, PadTarget::Auto) {
         for text in &data {
             if !is_missing_string(text) {
-                auto_len = auto_len.max(string_length(text));
+                auto_len = auto_len.max(string_length(text.as_str().expect("nonmissing subject")));
             }
         }
     }
     let base_target = options.base_target(auto_len);
-    let mut padded: Vec<Utf8Text> = Vec::with_capacity(data.len());
-    let values: Vec<Utf8Text> = match data.try_into_owned() {
+    let mut padded: Vec<StringElement> = Vec::with_capacity(data.len());
+    let values: Vec<StringElement> = match data.try_into_owned() {
         Ok(values) => values.into_iter().collect(),
         Err(data) => data.iter().cloned().collect(),
     };
@@ -197,20 +197,20 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Va
             padded.push(text);
             continue;
         }
-        let char_count = string_length(&text);
+        let char_count = string_length(text.as_str().expect("nonmissing subject"));
         let target_len = element_target_length(&options, base_target, char_count);
         if char_count >= target_len {
             padded.push(text);
         } else {
-            padded.push(Utf8Text::new(apply_padding_owned(
-                text.as_str(),
+            padded.push(StringElement::text(apply_padding_owned(
+                text.as_str().expect("nonmissing subject"),
                 char_count,
                 target_len,
                 &options,
             )?));
         }
     }
-    let result = StringArray::from_texts_unbounded(padded, shape.to_vec())
+    let result = StringArray::from_elements_unbounded(padded, shape.to_vec())
         .map_err(|e| pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL))?;
     Ok(Value::StringArray(result))
 }
@@ -280,7 +280,11 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
         let item = match gathered {
             Value::String(text) => {
                 let is_missing = is_missing_string(&text);
-                let len = if is_missing { 0 } else { string_length(&text) };
+                let len = if is_missing {
+                    0
+                } else {
+                    string_length(text.as_str().expect("nonmissing subject"))
+                };
                 if !is_missing {
                     auto_len = auto_len.max(len);
                 }
@@ -288,13 +292,16 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
                     kind: CellKind::String,
                     text,
                     char_count: len,
-                    is_missing,
                 }
             }
             Value::StringArray(sa) if sa.data().len() == 1 => {
                 let text = sa.data().first().cloned().unwrap_or_default();
                 let is_missing = is_missing_string(&text);
-                let len = if is_missing { 0 } else { string_length(&text) };
+                let len = if is_missing {
+                    0
+                } else {
+                    string_length(text.as_str().expect("nonmissing subject"))
+                };
                 if !is_missing {
                     auto_len = auto_len.max(len);
                 }
@@ -302,14 +309,12 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
                     kind: CellKind::String,
                     text,
                     char_count: len,
-                    is_missing,
                 }
             }
             Value::CharArray(ca) if ca.rows == 0 => CellItem {
                 kind: CellKind::EmptyChar(ca),
-                text: Utf8Text::default(),
+                text: StringElement::default(),
                 char_count: 0,
-                is_missing: false,
             },
             Value::CharArray(ca) if ca.rows == 1 => {
                 let text = char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
@@ -319,9 +324,8 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
                 auto_len = auto_len.max(len);
                 CellItem {
                     kind: CellKind::Char { rows: ca.rows },
-                    text: Utf8Text::new(text),
+                    text: StringElement::text(text),
                     char_count: len,
-                    is_missing: false,
                 }
             }
             Value::CharArray(_) => return Err(pad_error(&PAD_ERROR_CELL_ELEMENT)),
@@ -337,17 +341,25 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
             // Preserve both the original empty payload owner and full shape.
             // A positive target must not create nonempty data with zero rows.
             CellKind::EmptyChar(array) => results.push(Value::CharArray(array)),
-            CellKind::String if item.is_missing => results.push(Value::string(item.text)),
+            CellKind::String if item.text.is_missing() => results.push(Value::String(item.text)),
             CellKind::String => {
                 let target_len = element_target_length(&options, base_target, item.char_count);
-                let padded =
-                    apply_padding_owned(item.text.as_str(), item.char_count, target_len, &options)?;
+                let padded = apply_padding_owned(
+                    item.text.as_str().expect("nonmissing subject"),
+                    item.char_count,
+                    target_len,
+                    &options,
+                )?;
                 results.push(Value::string(padded));
             }
             CellKind::Char { rows } => {
                 let target_len = element_target_length(&options, base_target, item.char_count);
-                let padded =
-                    apply_padding_owned(item.text.as_str(), item.char_count, target_len, &options)?;
+                let padded = apply_padding_owned(
+                    item.text.as_str().expect("nonmissing subject"),
+                    item.char_count,
+                    target_len,
+                    &options,
+                )?;
                 let chars: Vec<char> = padded.chars().collect();
                 let cols = padded.encode_utf16().count();
                 let array = CharArray::from_unicode_scalars(chars, rows, cols).map_err(|e| {
@@ -365,9 +377,8 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
 #[derive(Clone)]
 struct CellItem {
     kind: CellKind,
-    text: Utf8Text,
+    text: StringElement,
     char_count: usize,
-    is_missing: bool,
 }
 
 #[derive(Clone)]
@@ -513,10 +524,10 @@ fn parse_pad_char(value: &Value) -> BuiltinResult<char> {
 
 fn value_to_single_string(value: &Value) -> BuiltinResult<Option<String>> {
     Ok(match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => text.as_str().map(str::to_owned),
         Value::StringArray(sa) => {
             if sa.data().len() == 1 {
-                Some(sa.data()[0].as_str().to_owned())
+                sa.data()[0].as_str().map(str::to_owned)
             } else {
                 None
             }
@@ -848,9 +859,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_preserves_missing_string() {
-        let result =
-            pad_builtin(Value::String("<missing>".into()), vec![Value::Num(8.0)]).expect("pad");
-        assert_eq!(result, Value::String("<missing>".into()));
+        let result = pad_builtin(
+            Value::String(runmat_value::StringElement::Missing),
+            vec![Value::Num(8.0)],
+        )
+        .expect("pad");
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

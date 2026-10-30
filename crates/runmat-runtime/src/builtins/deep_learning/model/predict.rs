@@ -62,7 +62,7 @@ pub(in crate::builtins) async fn predict_deep_learning_object_in_runtime(
     let observations = parse_observations_in(rest.view())?;
     let formatted = matches!(&xnew, Value::Object(value)
         if value.class_name().is(DLARRAY_CLASS)
-            && matches!(value.properties().get("Format"), Some(Value::String(format)) if !format.is_empty()));
+            && matches!(value.properties().get("Format"), Some(Value::String(runmat_value::StringElement::Text(format))) if !format.is_empty()));
     let unformatted_dlarray = matches!(&xnew, Value::Object(value)
         if value.class_name().is(DLARRAY_CLASS) && !formatted);
     let input = prepare_input(xnew, observations)?;
@@ -109,7 +109,7 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
                 deep_learning_error("predict", "predict: dlarray is missing Data")
             })?;
             let format = match value.properties().get("Format") {
-                Some(Value::String(text)) => text.as_str(),
+                Some(Value::String(runmat_value::StringElement::Text(text))) => text.as_str(),
                 None => "",
                 Some(_) => {
                     return Err(deep_learning_error(
@@ -119,7 +119,7 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
                 }
             };
             let labels = match value.properties().get("Labels") {
-                Some(Value::String(text)) => text.as_str(),
+                Some(Value::String(runmat_value::StringElement::Text(text))) => text.as_str(),
                 None => format,
                 Some(_) => {
                     return Err(deep_learning_error(

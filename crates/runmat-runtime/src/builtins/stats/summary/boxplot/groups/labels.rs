@@ -78,6 +78,10 @@ pub(super) async fn group_labels_cooperative(
 
 fn scalar_group_label(value: &Value) -> BuiltinResult<Option<GroupLabel>> {
     match value {
+        Value::String(value) if value.is_missing() => Ok(None),
+        Value::StringArray(value) if value.data().len() == 1 && value.data()[0].is_missing() => {
+            Ok(None)
+        }
         Value::Num(value) => Ok(value.is_finite().then_some(vec![KeyAtom::Number(*value)])),
         Value::Int(value) => Ok(Some(vec![KeyAtom::Integer(value.clone())])),
         Value::Bool(value) => Ok(Some(vec![KeyAtom::Logical(*value)])),

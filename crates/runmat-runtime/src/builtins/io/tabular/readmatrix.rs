@@ -101,10 +101,13 @@ pub(crate) async fn readmatrix_builtin(
     }
     preflight_host_options(runtime.as_ref(), rest.view())?;
     if admission::finite_budget(runtime.as_ref()) {
-        if matches!(&path, Value::String(raw) if raw.is_empty()) {
+        if matches!(&path, Value::String(runmat_value::StringElement::Text(raw)) if raw.is_empty())
+        {
             return Err(readmatrix_error(&READMATRIX_ERROR_FILENAME_EMPTY));
         }
-        if let (Some(runtime), Value::String(raw)) = (runtime.as_ref(), &path) {
+        if let (Some(runtime), Value::String(runmat_value::StringElement::Text(raw))) =
+            (runtime.as_ref(), &path)
+        {
             let provider = runmat_filesystem::current_provider();
             let borrowed = Path::new(raw.as_str());
             if rest.is_empty()
@@ -576,7 +579,9 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
     let mut stack = vec![value.clone()];
     while let Some(value) = stack.pop() {
         match value {
-            Value::String(s) => out.push(s.into_string_unbounded()),
+            Value::String(runmat_value::StringElement::Text(s)) => {
+                out.push(s.into_string_unbounded())
+            }
             Value::CharArray(ca) if ca.rows == 1 => out.push(
                 crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                     readmatrix_error_with(
@@ -585,9 +590,12 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
                     )
                 })?,
             ),
-            Value::StringArray(sa) => {
-                out.extend(sa.data().iter().map(|text| text.as_str().to_owned()))
-            }
+            Value::StringArray(sa) if sa.data().iter().all(|text| !text.is_missing()) => out
+                .extend(
+                    sa.data()
+                        .iter()
+                        .map(|text| text.as_str().expect("checked nonmissing string").to_owned()),
+                ),
             Value::Num(n) => out.push(format_numeric_token(n)),
             Value::Int(i) => out.push(i.decimal_string()),
             Value::Tensor(t) => {
@@ -905,7 +913,7 @@ use reader::validate_encoding_label;
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
-        Value::String(s) => normalize_path(s),
+        Value::String(runmat_value::StringElement::Text(s)) => normalize_path(s),
         Value::CharArray(_) => {
             match crate::builtins::common::validation::value_text_scalar_string(value) {
                 Some(text) => normalize_path(&text),

@@ -80,7 +80,9 @@ fn format_field(key: &str, value: &Value) -> Option<String> {
         Value::Int(intv) => Some(format!("{key}={}", int_to_string(intv))),
         Value::Num(n) => Some(format!("{key}={}", Value::Num(*n))),
         Value::Bool(flag) => Some(format!("{key}={}", if *flag { "true" } else { "false" })),
-        Value::String(text) => Some(format!("{key}='{}'", escape_single_quotes(text))),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Some(format!("{key}='{}'", escape_single_quotes(text)))
+        }
         _ => None,
     }
 }

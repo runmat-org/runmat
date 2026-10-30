@@ -35,8 +35,10 @@ fn preflight(
     type_error: &'static runmat_builtins::BuiltinErrorDescriptor,
 ) -> crate::BuiltinResult<()> {
     match value {
-        Value::String(_) => Ok(()),
-        Value::StringArray(array) if array.data().len() == 1 => Ok(()),
+        Value::String(runmat_value::StringElement::Text(_)) => Ok(()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(())
+        }
         Value::CharArray(chars) if is_row(&chars.shape) => Ok(()),
         Value::Tensor(tensor) if is_row(tensor.shape()) => require_numeric_extension(),
         Value::GpuTensor(handle) if is_row(handle.shape()) => require_numeric_extension(),
@@ -49,8 +51,11 @@ async fn text(
     type_error: &'static runmat_builtins::BuiltinErrorDescriptor,
 ) -> crate::BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.into_string_unbounded()),
-        Value::StringArray(array) => Ok(array.data()[0].as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.into_string_unbounded()),
+        Value::StringArray(array) => Ok(array.data()[0]
+            .as_str()
+            .ok_or_else(|| super::errors::descriptor(type_error))?
+            .to_owned()),
         Value::CharArray(chars) => {
             crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
                 super::errors::descriptor(type_error)

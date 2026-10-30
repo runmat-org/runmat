@@ -485,7 +485,7 @@ fn h5writeatt_h5info_and_h5disp_report_metadata() {
     ))
     .expect("disp");
     match text {
-        Value::String(s) => {
+        Value::String(runmat_value::StringElement::Text(s)) => {
             assert!(s.contains("Dataset: /data"));
             assert!(s.contains("Attribute: units"));
         }

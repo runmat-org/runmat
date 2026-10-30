@@ -21,7 +21,7 @@ const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Data with matching values changed to the class-appropriate missing sentinel.",
+    description: "Data with matching values changed to the class-appropriate missing representation.",
 }];
 pub const STANDARDIZE_MISSING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {

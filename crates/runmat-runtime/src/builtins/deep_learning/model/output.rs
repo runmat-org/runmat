@@ -124,7 +124,7 @@ pub(super) fn present(
         OutputPresentation::PredictRaw => has_prediction_node,
     };
     let format = match presentation {
-        OutputPresentation::Forward if dlarray_format(input).is_empty() => String::new(),
+        OutputPresentation::Forward if dlarray_format(input, function)?.is_empty() => String::new(),
         OutputPresentation::PredictUnformattedArray | OutputPresentation::PredictRaw => {
             String::new()
         }

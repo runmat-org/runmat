@@ -10,7 +10,7 @@ pub(super) enum CellElementKind {
 /// A scalar text element inside a cell array. `Value::Cell` itself determines
 /// the container's identity; the element check only validates its text payload.
 pub(super) enum TextCellScalar<'a> {
-    String(&'a str),
+    String(&'a runmat_value::StringElement),
     Char(&'a CharArray),
 }
 
@@ -26,11 +26,14 @@ impl<'a> TextCellScalar<'a> {
         }
     }
 
-    pub(super) fn text(&self) -> Result<String, runmat_value::Utf16DecodeError> {
+    pub(super) fn text(
+        &self,
+    ) -> Result<runmat_value::StringElement, runmat_value::Utf16DecodeError> {
         match self {
-            Self::String(text) => Ok((*text).to_string()),
-            Self::Char(array) if array.rows == 0 => Ok(String::new()),
-            Self::Char(array) => char_row_to_string_slice(array.data(), array.cols, 0),
+            Self::String(text) => Ok((*text).clone()),
+            Self::Char(array) if array.rows == 0 => Ok(runmat_value::StringElement::text("")),
+            Self::Char(array) => char_row_to_string_slice(array.data(), array.cols, 0)
+                .map(runmat_value::StringElement::text),
         }
     }
 

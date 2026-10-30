@@ -111,7 +111,7 @@ enum NgramSource {
     Empty,
     Documents(Vec<Vec<String>>),
     Unique {
-        ngrams: Vec<Vec<String>>,
+        ngrams: Vec<Vec<runmat_value::StringElement>>,
         counts: Tensor,
         requested_lengths: Option<Vec<usize>>,
     },
@@ -330,7 +330,7 @@ fn bag_from_documents(
 
 fn bag_from_unique_ngrams(
     runtime: Option<&crate::context::RuntimeContext>,
-    raw_ngrams: Vec<Vec<String>>,
+    raw_ngrams: Vec<Vec<runmat_value::StringElement>>,
     counts: Tensor,
     requested_lengths: Option<Vec<usize>>,
 ) -> BuiltinResult<Value> {
@@ -364,6 +364,10 @@ fn bag_from_unique_ngrams(
         if ngram.iter().any(|word| is_missing_string(word)) {
             continue;
         }
+        let ngram = ngram
+            .iter()
+            .filter_map(|word| word.as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
         if ngram.is_empty() {
             return Err(ngrams_error(
                 "bagOfNgrams: each n-gram must contain at least one word",
@@ -429,7 +433,7 @@ fn infer_ngram_lengths(ngrams: &[Vec<String>]) -> Vec<usize> {
 fn unique_ngrams_from_value(
     value: &Value,
     expected_rows: usize,
-) -> BuiltinResult<Vec<Vec<String>>> {
+) -> BuiltinResult<Vec<Vec<runmat_value::StringElement>>> {
     match value {
         Value::StringArray(array) => {
             if array.rows != expected_rows {
@@ -443,17 +447,17 @@ fn unique_ngrams_from_value(
                 let mut ngram = Vec::new();
                 let mut row_has_missing = false;
                 for col in 0..array.cols {
-                    let word = array.data()[row + col * array.rows].as_str().to_owned();
+                    let word = array.data()[row + col * array.rows].clone();
                     if is_missing_string(&word) {
                         row_has_missing = true;
                         break;
                     }
-                    if !word.is_empty() {
+                    if word.as_str().is_some_and(|word| !word.is_empty()) {
                         ngram.push(word);
                     }
                 }
                 if row_has_missing {
-                    out.push(vec!["<missing>".to_string()]);
+                    out.push(vec![runmat_value::StringElement::Missing]);
                 } else {
                     out.push(ngram);
                 }
@@ -473,18 +477,25 @@ fn unique_ngrams_from_value(
                 let mut row_has_missing = false;
                 for col in 0..cell.cols {
                     let idx = row + col * cell.rows;
-                    let word = scalar_text(&cell.data()[idx], "bagOfNgrams")
-                        .map_err(|err| ngrams_error(err.to_string()))?;
+                    let word = match &cell.data()[idx] {
+                        Value::String(text) => text.clone(),
+                        Value::StringArray(array) if array.data().len() == 1 => {
+                            array.data()[0].clone()
+                        }
+                        value => scalar_text(value, "bagOfNgrams")
+                            .map(runmat_value::StringElement::text)
+                            .map_err(|err| ngrams_error(err.to_string()))?,
+                    };
                     if is_missing_string(&word) {
                         row_has_missing = true;
                         break;
                     }
-                    if !word.is_empty() {
+                    if word.as_str().is_some_and(|word| !word.is_empty()) {
                         ngram.push(word);
                     }
                 }
                 if row_has_missing {
-                    out.push(vec!["<missing>".to_string()]);
+                    out.push(vec![runmat_value::StringElement::Missing]);
                 } else {
                     out.push(ngram);
                 }
@@ -500,7 +511,7 @@ fn unique_ngrams_from_value(
             }
             Ok(vec![words
                 .into_iter()
-                .filter(|word| !word.is_empty())
+                .filter(|word| word.as_str().is_none_or(|word| !word.is_empty()))
                 .collect()])
         }
     }
@@ -566,8 +577,8 @@ pub(in crate::builtins::strings::text_analytics) fn ngrams_from_bag(
                 let mut ngram = Vec::new();
                 for col in 0..array.cols {
                     let word = &array.data()[row + col * array.rows];
-                    if !word.is_empty() && !is_missing_string(word) {
-                        ngram.push(word.as_str().to_owned());
+                    if let Some(word) = word.as_str().filter(|word| !word.is_empty()) {
+                        ngram.push(word.to_owned());
                     }
                 }
                 if ngram.is_empty() {

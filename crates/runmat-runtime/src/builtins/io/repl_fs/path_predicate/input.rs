@@ -25,7 +25,9 @@ pub(super) fn parse(
     };
     let input = args.first().expect("validated single input");
     match input {
-        Value::String(text) => Ok(PathInputs::Scalar(path(text, builtin)?)),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(PathInputs::Scalar(path(text, builtin)?))
+        }
         Value::CharArray(chars) if character_is_row(chars) => Ok(PathInputs::Scalar(path(
             &character_row(chars, path_error, builtin)?,
             builtin,
@@ -34,7 +36,13 @@ pub(super) fn parse(
             paths: array
                 .data()
                 .iter()
-                .map(|text| path(text, builtin))
+                .map(|text| {
+                    path(
+                        text.as_str()
+                            .ok_or_else(|| descriptor_error(path_error, builtin))?,
+                        builtin,
+                    )
+                })
                 .collect::<BuiltinResult<_>>()?,
             shape: array.shape.as_slice().to_vec(),
         }),

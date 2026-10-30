@@ -41,10 +41,7 @@ impl RepeatableCallable {
             .build());
         }
         let target = RootedValue::in_context(
-            Value::String(crate::call::argument_text::copy_str(
-                &builtin.0,
-                Some(runtime),
-            )?),
+            Value::String(crate::call::argument_text::copy_str(&builtin.0, Some(runtime))?.into()),
             runtime,
         )?;
         let owner = RetainedValueReadLease::prepare_callable_rooted(target, Some(runtime))?;
@@ -158,10 +155,12 @@ impl RepeatableCallable {
 mod invocation;
 pub(super) fn retained_target_name(value: &Value) -> Option<&str> {
     match value {
-        Value::String(text) => crate::call::admission::text_target_name(text),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            crate::call::admission::text_target_name(&array.data()[0])
-        }
+        Value::String(text) => text
+            .as_str()
+            .and_then(crate::call::admission::text_target_name),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .and_then(crate::call::admission::text_target_name),
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
         | Value::MethodFunctionHandle(name) => Some(name.name().trim()),

@@ -166,13 +166,13 @@ impl TextEntries {
                     let value = flattened_text_at(source.view(), index)
                         .expect("validated Java text entry index");
                     return crate::call::argument_text::convert(value, Some(runtime))
-                        .map(Value::String);
+                        .map(|text| Value::String(text.into()));
                 }
                 crate::call::argument_text::copy_str(
                     suffix.expect("second Java argument has a suffix"),
                     Some(runtime),
                 )
-                .map(Value::String)
+                .map(|text| Value::String(text.into()))
             })
     }
 
@@ -187,7 +187,8 @@ impl TextEntries {
             .try_map_preserving_roots_in_context(count, runtime, move |_, source| {
                 let value = next_flattened_text(source.view(), &mut outer, &mut inner)
                     .expect("validated Java text entry count");
-                crate::call::argument_text::convert(value, Some(runtime)).map(Value::String)
+                crate::call::argument_text::convert(value, Some(runtime))
+                    .map(|text| Value::String(text.into()))
             })
     }
 }
@@ -274,11 +275,19 @@ pub(super) fn text_scalar_eq(value: &Value, expected: &str, ignore_ascii_case: b
         }
     };
     match value {
-        Value::String(text) => compare(text.as_str()),
+        Value::String(runmat_value::StringElement::Text(text)) => compare(text.as_str()),
         Value::StringArray(strings)
-            if strings.data().len() == 1 && strings.rows == 1 && strings.cols == 1 =>
+            if strings.data().len() == 1
+                && strings.rows == 1
+                && strings.cols == 1
+                && !strings.data()[0].is_missing() =>
         {
-            compare(strings.data()[0].as_str())
+            compare(
+                strings.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            )
         }
         Value::CharArray(chars)
             if chars.rows == 1
@@ -313,11 +322,19 @@ pub(super) fn text_scalar_eq(value: &Value, expected: &str, ignore_ascii_case: b
 
 fn nonempty_text_scalar(value: &Value) -> bool {
     match value {
-        Value::String(text) => !text.as_str().trim().is_empty(),
+        Value::String(runmat_value::StringElement::Text(text)) => !text.as_str().trim().is_empty(),
         Value::StringArray(strings)
-            if strings.data().len() == 1 && strings.rows == 1 && strings.cols == 1 =>
+            if strings.data().len() == 1
+                && strings.rows == 1
+                && strings.cols == 1
+                && !strings.data()[0].is_missing() =>
         {
-            !strings.data()[0].as_str().trim().is_empty()
+            !strings.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .trim()
+                .is_empty()
         }
         Value::CharArray(chars)
             if chars.rows == 1

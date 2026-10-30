@@ -14,10 +14,19 @@ use std::fmt::Write;
 
 pub fn convert(value: &Value, runtime: Option<&RuntimeContext>) -> Result<Utf8Text, RuntimeError> {
     match value {
-        Value::String(text) => retain(text, runtime),
+        Value::String(text) => retain(
+            text.text_ref()
+                .ok_or_else(|| invalid("cannot convert missing string to scalar text"))?,
+            runtime,
+        ),
         Value::StringArray(array) => {
             if array.data().len() == 1 {
-                retain(&array.data()[0], runtime)
+                retain(
+                    array.data()[0]
+                        .text_ref()
+                        .ok_or_else(|| invalid("cannot convert missing string to scalar text"))?,
+                    runtime,
+                )
             } else {
                 Err(invalid("cannot convert string array to scalar string"))
             }
@@ -310,7 +319,7 @@ mod tests {
         assert_eq!(adopted.as_str().as_ptr(), pointer);
         let text = Utf8Text::new("a🙂é".to_owned());
         let pointer = text.as_str().as_ptr();
-        let retained = convert(&Value::String(text), None).unwrap();
+        let retained = convert(&Value::String(text.into()), None).unwrap();
         assert_eq!(retained.as_str().as_ptr(), pointer);
         let characters =
             runmat_value::CharArray::from_unicode_scalars(vec!['a', '🙂', 'é'], 1, 4).unwrap();

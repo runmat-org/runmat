@@ -99,7 +99,7 @@ async fn circshift_builtin(
             .map(Value::StringArray)
             .map_err(Into::into),
         Value::CharArray(chars) => circshift_char_array(chars, dims, shifts).map_err(Into::into),
-        Value::String(scalar) => Ok(Value::String(scalar)),
+        Value::String(scalar) => Ok(Value::String(scalar.into())),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor =
                 tensor::value_into_tensor_for("circshift", value).map_err(circshift_internal)?;
@@ -694,7 +694,7 @@ fn circshift_string_array(
         ..
     } = plan;
     let rotated = circshift_generic(&data, &ext_shape, &positive)?;
-    StringArray::from_texts_unbounded(rotated, ext_shape)
+    StringArray::from_elements_unbounded(rotated, ext_shape)
         .map_err(|e| circshift_internal(format!("circshift: {e}")))
 }
 

@@ -596,7 +596,7 @@ fn value_is_placeholder(graph: &AccelGraph, vid: ValueId) -> bool {
         Value::StringArray(sa) => sa.data().is_empty(),
         Value::CharArray(ca) => ca.data().is_empty(),
         Value::Cell(cell) => cell.data().is_empty(),
-        Value::String(s) => s.is_empty(),
+        Value::String(_) => false,
         _ => false,
     }
 }
@@ -2016,7 +2016,7 @@ impl FusionGroupPlan {
             .constants
             .values()
             .chain(self.const_values.values())
-            .any(|value| matches!(value, Value::String(text) if text.eq_ignore_ascii_case("all")));
+            .any(|value| matches!(value, Value::String(text) if text.as_str().is_some_and(|text| text.eq_ignore_ascii_case("all"))));
         if reduce_all {
             return Some(0);
         }
@@ -2082,7 +2082,9 @@ impl FusionGroupPlan {
         let axis = self.legacy_reduction_axis()?;
         // Detect omitnan constant (compile-time selection)
         let omitnan = self.constants.values().any(|v| match v {
-            Value::String(s) => s.eq_ignore_ascii_case("omitnan"),
+            Value::String(s) => s
+                .as_str()
+                .is_some_and(|text| text.eq_ignore_ascii_case("omitnan")),
             _ => false,
         });
 
@@ -3602,7 +3604,7 @@ fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId,
     if let Some(control_vid) = node.inputs.get(2) {
         let control_value = source_literal_constant(graph, *control_vid)?;
         let control = match control_value {
-            Value::String(text) => MeanControl::from_public_option(text),
+            Value::String(text) => text.as_str().and_then(MeanControl::from_public_option),
             Value::CharArray(chars) if chars.rows == 1 => {
                 MeanControl::from_public_code_units(chars.data().iter().map(|unit| unit.raw()))
             }

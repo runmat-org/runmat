@@ -89,7 +89,7 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
         Value::StringArray(array) => array
             .data()
             .get(row)
-            .map(ToString::to_string)
+            .map(|text| text.display().to_string())
             .unwrap_or_default(),
         Value::LogicalArray(array) => array
             .data
@@ -100,7 +100,7 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
             crate::builtins::datetime::datetime_string_array(value)
                 .ok()
                 .flatten()
-                .and_then(|array| array.data().get(row).map(ToString::to_string))
+                .and_then(|array| array.data().get(row).map(|text| text.display().to_string()))
                 .unwrap_or_else(|| value.to_string())
         }
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => {
@@ -120,7 +120,7 @@ pub(crate) fn categorical_label_at(object: &ObjectInstance, row: usize) -> Optio
     }
     let idx = code.round() as usize - 1;
     match object.properties().get("Categories")? {
-        Value::StringArray(array) => array.data().get(idx).map(ToString::to_string),
+        Value::StringArray(array) => array.data().get(idx).map(|text| text.display().to_string()),
         _ => None,
     }
 }

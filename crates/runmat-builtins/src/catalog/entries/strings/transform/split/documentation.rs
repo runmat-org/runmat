@@ -9,7 +9,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "RunMat mode retains the advanced `'CollapseDelimiters'` and `'IncludeDelimiters'` options behind one compatibility gate; they are not presented as MATLAB-compatible `split` options.",
             "A documented positive double `dim` controls output orientation. Typed integer dimensions are available only in RunMat mode because the compatibility target does not enumerate their storage classes. RunMat rejects dimensions above its supported rank ceiling of 1024 before allocating shape metadata.",
             "Without an explicit dimension, scalar input produces an N×1 string column, a column vector produces M×N, and a multidimensional input appends the token dimension. An explicit dimension inserts or replaces that dimension using column-major ordering.",
-            "When requested, the second output contains the matched delimiters with the same orientation rules. Missing values are padded with `<missing>`.",
+            "When requested, the second output contains the matched delimiters with the same orientation rules. Padding slots contain typed missing strings, displayed as `<missing>`.",
             "Missing string scalars propagate unchanged.",
         ],
     },
@@ -113,14 +113,14 @@ const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
         id: "example-7",
         title: "Handle Missing String Inputs",
-        program: "names = [\"RunMat\"; \"<missing>\"; \"Accelerate Engine\"];\nsplit_names = split(names)",
+        program: "names = [\"RunMat\"; string(missing); \"Accelerate Engine\"];\nsplit_names = split(names)",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(isequal(split_names,[\"RunMat\",\"<missing>\";\"<missing>\",\"<missing>\";\"Accelerate\",\"Engine\"]));",
+            source: "assert(isequal(size(split_names),[3 2])); assert(isequal(ismissing(split_names),logical([0 1;1 1;0 0]))); assert(isequal(split_names(1,1),\"RunMat\")); assert(isequal(split_names(3,:),[\"Accelerate\",\"Engine\"]));",
         },
     },
 ];
@@ -155,7 +155,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationFaq {
             question: "How does `split` handle missing strings?",
-            answer: "Missing string scalars propagate unchanged. When padding is required, `<missing>` is used so MATLAB and RunMat stay aligned.",
+            answer: "Typed missing string scalars propagate unchanged. Padding slots also contain typed missing strings; literal `<missing>` text is split as ordinary text.",
         },
         BuiltinDocumentationFaq {
             question: "Can I provide empty delimiters?",

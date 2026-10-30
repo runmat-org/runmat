@@ -30,9 +30,14 @@ pub(super) fn finite_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>
 
 pub(super) fn value_to_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Cow::Borrowed(array.data()[0].as_str()))
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(Cow::Borrowed(text.as_str())),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Cow::Borrowed(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
         }
         Value::CharArray(chars) if chars.rows == 1 => {
             runmat_value::decode_utf16_code_units(chars.data())
@@ -160,7 +165,9 @@ pub(super) fn is_empty_option(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor.is_empty(),
         Value::Cell(cell) => cell.data().is_empty(),
-        Value::String(text) => text.is_empty() || text.eq_ignore_ascii_case("none"),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            text.is_empty() || text.eq_ignore_ascii_case("none")
+        }
         Value::StringArray(array) => array.data().is_empty(),
         _ => false,
     }

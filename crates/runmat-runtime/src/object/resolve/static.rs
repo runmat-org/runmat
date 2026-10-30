@@ -89,7 +89,7 @@ fn enumeration_value_unbounded(class: &ClassIdentity, member: &str) -> Value {
 /// Consumers retain responsibility for their typed class/member contract.
 pub(crate) fn enumeration_member_name(object: &runmat_value::ObjectInstance) -> Option<&str> {
     match object.property(ENUMERATION_MEMBER_PROPERTY) {
-        Some(Value::String(name)) => Some(name.as_str()),
+        Some(Value::String(name)) => name.as_str(),
         _ => None,
     }
 }
@@ -108,7 +108,7 @@ pub(crate) fn enumeration_value_in(
                     .build(),
             );
         }
-        let value = Value::String(crate::call::argument_text::copy_str(member, runtime)?);
+        let value = Value::String(crate::call::argument_text::copy_str(member, runtime)?.into());
         crate::execution::object::construct_object_from_borrowed_fields(
             runtime,
             class.display_name(),

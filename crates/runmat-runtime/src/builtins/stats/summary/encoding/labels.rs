@@ -41,7 +41,7 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
             categories: None,
         }),
         Value::String(text) => Ok(LabelArray {
-            labels: vec![text_label(text.as_str().to_owned())],
+            labels: vec![text.as_str().and_then(|text| text_label(text.to_owned()))],
             shape: vec![1, 1],
             kind: LabelKind::String,
             categories: None,
@@ -50,7 +50,7 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
             labels: array
                 .data()
                 .iter()
-                .map(|text| text_label(text.as_str().to_owned()))
+                .map(|text| text.as_str().and_then(|text| text_label(text.to_owned())))
                 .collect(),
             shape: normalized_shape(&array.shape),
             kind: LabelKind::String,
@@ -68,7 +68,15 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
             for item in cell.data().iter() {
-                labels.push(text_label(scalar_text(item, name, name.name())?));
+                labels.push(match item {
+                    Value::String(text) if text.is_missing() => None,
+                    Value::StringArray(array)
+                        if array.data().len() == 1 && array.data()[0].is_missing() =>
+                    {
+                        None
+                    }
+                    _ => text_label(scalar_text(item, name, name.name())?),
+                });
             }
             Ok(LabelArray {
                 labels,
@@ -81,7 +89,7 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
             let labels =
                 crate::builtins::table::categorical_labels(&Value::Object(object.clone()))?
                     .into_iter()
-                    .map(text_label)
+                    .map(|label| label.as_str().and_then(|text| text_label(text.to_owned())))
                     .collect();
             let shape = categorical_shape(&object);
             Ok(LabelArray {
@@ -254,7 +262,7 @@ pub(super) fn numeric_label(value: NumericScalar) -> Option<Label> {
 }
 
 pub(super) fn text_label(value: String) -> Option<Label> {
-    (!value.is_empty() && value != "<missing>").then_some(Label::Text(value))
+    (!value.is_empty()).then_some(Label::Text(value))
 }
 
 pub(super) fn same_label(left: &Label, right: &Label) -> bool {
@@ -428,11 +436,16 @@ pub(super) fn scalar_text(
     context: &str,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars) => decode_utf16_code_units(chars.data())
             .map_err(|error| invalid_utf16(builtin, context, error)),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(array.data()[0].as_str().to_owned())
+            array.data()[0].as_str().map(str::to_owned).ok_or_else(|| {
+                invalid(
+                    builtin,
+                    format!("{context}: expected string scalar, got {value:?}"),
+                )
+            })
         }
         other => Err(invalid(
             builtin,

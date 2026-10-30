@@ -27,7 +27,7 @@ fn prepare_cell(
     requested_type: Option<ImportVariableType>,
 ) -> BuiltinResult<ImportCell> {
     let missing = match &value {
-        ImportCell::Empty => true,
+        ImportCell::Empty | ImportCell::Missing => true,
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             options.is_missing(token) || variable.is_missing(token)
@@ -49,7 +49,11 @@ fn prepare_cell(
                 Ok(ImportCell::Text(value.to_i128().to_string()))
             }
             Some(fill) => fill_cell(fill),
-            None => Ok(ImportCell::Empty),
+            None => Ok(if matches!(value, ImportCell::Missing) {
+                ImportCell::Missing
+            } else {
+                ImportCell::Empty
+            }),
         };
     }
     let ImportCell::Text(text) = value else {
@@ -99,7 +103,13 @@ fn fill_cell(value: &Value) -> BuiltinResult<ImportCell> {
         Value::Num(value) => Ok(ImportCell::Number(*value)),
         Value::Int(value) => Ok(ImportCell::Number(value.to_f64())),
         Value::Bool(value) => Ok(ImportCell::Logical(*value)),
-        Value::String(value) => Ok(ImportCell::Text(value.to_string())),
+        Value::String(value) => Ok(match value.as_str() {
+            Some(text) => ImportCell::Text(text.to_owned()),
+            None => ImportCell::Missing,
+        }),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            fill_cell(&Value::String(array.data()[0].clone()))
+        }
         Value::CharArray(value) if value.rows == 1 => {
             runmat_value::decode_utf16_code_units(value.data())
                 .map(ImportCell::Text)

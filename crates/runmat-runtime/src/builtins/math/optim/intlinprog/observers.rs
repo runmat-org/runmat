@@ -130,7 +130,7 @@ impl Observers {
             fields.iter().map(|(name, value)| (*name, value)),
         )?;
         let state = crate::call::argument_text::copy_str(state.name(), runtime.as_ref())
-            .map(Value::String)?;
+            .map(|text| Value::String(text.into()))?;
         let value = |field: Field| {
             self.options
                 .as_ref()

@@ -33,7 +33,10 @@ fn managed_string_partition_moves_unique_text_and_refunds_exact_output() {
             RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
         );
     let input = StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap();
-    let source_ptr = input.data()[0].as_str().as_ptr();
+    let source_ptr = input.data()[0]
+        .as_str()
+        .expect("present text fixture")
+        .as_ptr();
     let Value::Cell(output) = block_on(super::super::num2cell_builtin(
         Some(context.clone()),
         Value::StringArray(input),
@@ -45,8 +48,11 @@ fn managed_string_partition_moves_unique_text_and_refunds_exact_output() {
     let Value::String(first) = &output.data()[0] else {
         panic!("expected text child")
     };
-    assert_eq!(first.as_str(), "alpha");
-    assert_eq!(first.as_str().as_ptr(), source_ptr);
+    assert_eq!(first.as_str(), Some("alpha"));
+    assert_eq!(
+        first.as_str().expect("present text fixture").as_ptr(),
+        source_ptr
+    );
     assert!(first.has_retained_claim());
     let retained = ledger.snapshot().live_reserved_bytes;
     assert!(retained > 0);
@@ -61,7 +67,10 @@ fn managed_string_partition_moves_unique_text_and_refunds_exact_output() {
         vec![2, 2],
     )
     .unwrap();
-    let source_ptr = grouped.data()[0].as_str().as_ptr();
+    let source_ptr = grouped.data()[0]
+        .as_str()
+        .expect("present text fixture")
+        .as_ptr();
     let Value::Cell(output) = block_on(super::super::num2cell_builtin(
         Some(context),
         Value::StringArray(grouped),
@@ -75,9 +84,15 @@ fn managed_string_partition_moves_unique_text_and_refunds_exact_output() {
         panic!("expected grouped text child")
     };
     assert_eq!(first.shape.as_slice(), &[2, 1]);
-    assert_eq!(first.data()[0].as_str().as_ptr(), source_ptr);
-    assert_eq!(first.data()[0].as_str(), "a");
-    assert_eq!(first.data()[1].as_str(), "b");
+    assert_eq!(
+        first.data()[0]
+            .as_str()
+            .expect("present text fixture")
+            .as_ptr(),
+        source_ptr
+    );
+    assert_eq!(first.data()[0].as_str(), Some("a"));
+    assert_eq!(first.data()[1].as_str(), Some("b"));
     drop(output);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }

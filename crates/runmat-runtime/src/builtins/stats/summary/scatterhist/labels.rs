@@ -55,7 +55,7 @@ pub(super) fn group_labels(
             Ok(vec![Some(KeyAtom::Logical(*value))])
         }
         Value::String(value) if expected_len == 1 => {
-            Ok(vec![Some(KeyAtom::Text(value.as_str().to_owned()))])
+            Ok(vec![value.as_str().map(|text| KeyAtom::Text(text.to_owned()))])
         }
         Value::LogicalArray(array) if array.len() == expected_len => Ok(array
             .data
@@ -70,7 +70,7 @@ pub(super) fn group_labels(
         Value::StringArray(array) if array.data().len() == expected_len => Ok(array
             .data()
             .iter()
-            .map(|value| Some(KeyAtom::Text(value.as_str().to_owned())))
+            .map(|value| value.as_str().map(|text| KeyAtom::Text(text.to_owned())))
             .collect()),
         Value::CharArray(chars) if chars.rows == expected_len => (0..chars.rows)
             .map(|row| -> BuiltinResult<Option<KeyAtom>> {
@@ -111,13 +111,15 @@ fn scalar_group_label(value: &Value) -> BuiltinResult<Option<KeyAtom>> {
         Value::Num(value) => Ok(scatterhist_numeric_key(NumericScalar::F64(*value))),
         Value::Int(value) => Ok(Some(KeyAtom::Integer(value.clone()))),
         Value::Bool(value) => Ok(Some(KeyAtom::Logical(*value))),
-        Value::String(value) => Ok(Some(KeyAtom::Text(value.as_str().to_owned()))),
+        Value::String(value) => Ok(value.as_str().map(|text| KeyAtom::Text(text.to_owned()))),
         Value::CharArray(chars) => Ok(Some(KeyAtom::Text(
             crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
                 invalid("scatterhist: Group label is not valid UTF-16 text")
             })?,
         ))),
-        Value::StringArray(array) => Ok(Some(KeyAtom::Text(array.data()[0].as_str().to_owned()))),
+        Value::StringArray(array) => Ok(array.data()[0]
+            .as_str()
+            .map(|text| KeyAtom::Text(text.to_owned()))),
         Value::Tensor(tensor) => Ok(tensor.numeric_value_at(0).and_then(scatterhist_numeric_key)),
         Value::LogicalArray(array) => Ok(Some(KeyAtom::Logical(array.data[0] != 0))),
         _ => Err(invalid("scatterhist: cell Group labels must be scalar")),

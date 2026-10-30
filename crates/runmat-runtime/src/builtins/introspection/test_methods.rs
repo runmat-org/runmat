@@ -117,7 +117,7 @@ async fn overidx_read_step(
         (
             Value::Object(o),
             crate::object::indexing::ObjectIndexKind::Member,
-            Value::String(field),
+            Value::String(runmat_value::StringElement::Text(field)),
         ) => {
             // If field exists, return it; otherwise sentinel 77
             if let Some(v) = o.property(field.as_str()) {
@@ -210,7 +210,10 @@ async fn overidx_write_step(
             object.insert("lastCell".to_string(), rhs);
             Ok(())
         }
-        (crate::object::indexing::ObjectIndexKind::Member, Value::String(field)) => {
+        (
+            crate::object::indexing::ObjectIndexKind::Member,
+            Value::String(runmat_value::StringElement::Text(field)),
+        ) => {
             object.insert(field.as_str().to_owned(), rhs);
             Ok(())
         }

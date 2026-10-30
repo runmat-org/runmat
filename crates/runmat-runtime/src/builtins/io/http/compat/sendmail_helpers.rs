@@ -132,12 +132,25 @@ pub(super) fn value_contains_resident(value: &Value) -> bool {
 
 pub(super) fn recipients_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::StringArray(array) => Ok(array
-            .data()
-            .iter()
-            .filter(|value| !value.trim().is_empty())
-            .map(|value| value.as_str().to_owned())
-            .collect()),
+        Value::StringArray(array) if array.data().iter().all(|text| !text.is_missing()) => {
+            Ok(array
+                .data()
+                .iter()
+                .filter(|value| {
+                    !value
+                        .as_str()
+                        .expect("checked nonmissing string")
+                        .trim()
+                        .is_empty()
+                })
+                .map(|value| {
+                    value
+                        .as_str()
+                        .expect("checked nonmissing string")
+                        .to_owned()
+                })
+                .collect())
+        }
         Value::Cell(cell) => {
             let mut out = Vec::new();
             for value in cell.data() {

@@ -319,7 +319,7 @@ async fn unconstrained(original: &RuntimeContext) {
         vec![-3.]
     );
     assert!(
-        matches!(field(&values[3],"message"),Value::String(message) if message.contains("ObjectiveLimit"))
+        matches!(field(&values[3],"message"),Value::String(runmat_value::StringElement::Text(message)) if message.contains("ObjectiveLimit"))
     );
     let bounded = call(
         original,

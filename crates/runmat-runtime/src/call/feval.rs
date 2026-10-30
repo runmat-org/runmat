@@ -167,7 +167,9 @@ pub(crate) fn refine_target(
         _ => None,
     };
     match text {
-        Some(text) => RootedValue::new(Value::String(text)).map_err(|e| e.into_runtime_error()),
+        Some(text) => {
+            RootedValue::new(Value::String(text.into())).map_err(|e| e.into_runtime_error())
+        }
         None => Ok(target),
     }
 }

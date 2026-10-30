@@ -23,7 +23,7 @@ use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericStorage, StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
+    NumericStorage, StringArray, StringElement, Tensor, Utf16CodeUnit, Value,
 };
 
 use super::{
@@ -327,19 +327,19 @@ fn setdiff_host(
             setdiff_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
-            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
@@ -924,20 +924,20 @@ fn setdiff_string_elements(
     b: StringArray,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
-    let mut b_keys: HashSet<&str> = HashSet::new();
+    let mut b_keys: HashSet<&StringElement> = HashSet::new();
     for value in b.data() {
-        b_keys.insert(value.as_str());
+        b_keys.insert(value);
     }
 
-    let mut seen: HashSet<&str> = HashSet::new();
+    let mut seen: HashSet<&StringElement> = HashSet::new();
     let mut entries = Vec::<StringDiffEntry>::new();
     let mut order_counter = 0usize;
 
     for (idx, value) in a.data().iter().enumerate() {
-        if b_keys.contains(value.as_str()) {
+        if !value.is_missing() && b_keys.contains(value) {
             continue;
         }
-        if !seen.insert(value.as_str()) {
+        if !value.is_missing() && !seen.insert(value) {
             continue;
         }
         entries.push(StringDiffEntry {
@@ -990,10 +990,10 @@ fn setdiff_string_rows(
             row_values.push(&a.data()[idx]);
         }
         let key = RowStringKey(row_values.clone());
-        if b_keys.contains(&key) {
+        if !row_values.iter().any(|text| text.is_missing()) && b_keys.contains(&key) {
             continue;
         }
-        if !seen.insert(key) {
+        if !row_values.iter().any(|text| text.is_missing()) && !seen.insert(key) {
             continue;
         }
         entries.push(StringRowDiffEntry {
@@ -1333,7 +1333,7 @@ fn assemble_string_setdiff(
         ia.push((entry.index + 1) as f64);
     }
 
-    let value_array = StringArray::from_texts_unbounded(values, vec![order.len(), 1])
+    let value_array = StringArray::from_elements_unbounded(values, vec![order.len(), 1])
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
@@ -1362,7 +1362,7 @@ fn assemble_string_row_setdiff(
     }
 
     let unique_rows = order.len();
-    let mut values = vec![Utf8Text::default(); unique_rows * cols];
+    let mut values = vec![StringElement::default(); unique_rows * cols];
     let mut ia = Vec::with_capacity(unique_rows);
 
     for (row_pos, &entry_idx) in order.iter().enumerate() {
@@ -1374,7 +1374,7 @@ fn assemble_string_row_setdiff(
         ia.push((entry.row_index + 1) as f64);
     }
 
-    let value_array = StringArray::from_texts_unbounded(values, vec![unique_rows, cols])
+    let value_array = StringArray::from_elements_unbounded(values, vec![unique_rows, cols])
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
@@ -1443,14 +1443,14 @@ struct CharRowDiffEntry {
 
 #[derive(Clone, Debug)]
 struct StringDiffEntry<'a> {
-    value: &'a Utf8Text,
+    value: &'a StringElement,
     index: usize,
     order_rank: usize,
 }
 
 #[derive(Clone, Debug)]
 struct StringRowDiffEntry<'a> {
-    row_data: Vec<&'a Utf8Text>,
+    row_data: Vec<&'a StringElement>,
     row_index: usize,
     order_rank: usize,
 }
@@ -1479,7 +1479,7 @@ impl RowCharKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey<'a>(Vec<&'a Utf8Text>);
+struct RowStringKey<'a>(Vec<&'a StringElement>);
 
 #[derive(Debug)]
 pub struct SetdiffEvaluation {
@@ -1587,7 +1587,7 @@ fn compare_char_rows(a: &[Utf16CodeUnit], b: &[Utf16CodeUnit]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[&Utf8Text], b: &[&Utf8Text]) -> Ordering {
+fn compare_string_rows(a: &[&StringElement], b: &[&StringElement]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {

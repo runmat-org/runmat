@@ -196,11 +196,8 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data()
-                        .iter()
-                        .map(|text| text.as_str())
-                        .collect::<Vec<_>>(),
-                    vec!["GPU", "ACCEL", "<missing>", "MIXED"]
+                    sa.data().iter().cloned().collect::<Vec<_>>(),
+                    vec!["GPU", "ACCEL", "<MISSING>", "MIXED"]
                 );
             }
             other => panic!("expected string array, got {other:?}"),
@@ -361,8 +358,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_preserves_missing_string() {
-        let result = run_upper(Value::String("<missing>".into())).expect("upper");
-        assert_eq!(result, Value::String("<missing>".into()));
+        let result = run_upper(Value::String(runmat_value::StringElement::Missing)).expect("upper");
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

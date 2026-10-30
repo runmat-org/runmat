@@ -62,8 +62,14 @@ async fn gather_one(value: &Value, protected: &[&Value]) -> BuiltinResult<Value>
 pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<Cow<'a, str>> {
     validate_scalar_text(value, context)?;
     match value {
-        Value::String(value) => Ok(Cow::Borrowed(value.as_str())),
-        Value::StringArray(value) => Ok(Cow::Borrowed(value.data()[0].as_str())),
+        Value::String(runmat_value::StringElement::Text(value)) => {
+            Ok(Cow::Borrowed(value.as_str()))
+        }
+        Value::StringArray(value) => Ok(Cow::Borrowed(
+            value.data()[0]
+                .as_str()
+                .expect("validated nonmissing scalar text"),
+        )),
         Value::CharArray(value) => runmat_value::decode_utf16_code_units(value.data())
             .map(Cow::Owned)
             .map_err(|source| {
@@ -79,8 +85,10 @@ pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<
 
 pub(super) fn validate_scalar_text(value: &Value, context: &str) -> BuiltinResult<()> {
     match value {
-        Value::String(_) => Ok(()),
-        Value::StringArray(value) if value.data().len() == 1 => Ok(()),
+        Value::String(runmat_value::StringElement::Text(_)) => Ok(()),
+        Value::StringArray(value) if value.data().len() == 1 && !value.data()[0].is_missing() => {
+            Ok(())
+        }
         Value::CharArray(value)
             if value.rows <= 1
                 && crate::builtins::common::shape::effective_rank(&value.shape) <= 2 =>

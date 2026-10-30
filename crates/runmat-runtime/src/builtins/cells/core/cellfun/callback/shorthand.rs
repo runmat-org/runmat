@@ -13,7 +13,7 @@ pub(in crate::builtins::cells::core::cellfun) enum CellfunShorthand {
 impl CellfunShorthand {
     pub(super) fn parse_bare_value(value: &Value) -> BuiltinResult<Option<Self>> {
         let text = match value {
-            Value::String(text) => text.as_str(),
+            Value::String(runmat_value::StringElement::Text(text)) => text.as_str(),
             Value::CharArray(value) if value.rows == 1 => {
                 return Ok(Self::parse_name(
                     &runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
@@ -23,7 +23,14 @@ impl CellfunShorthand {
                     })?,
                 ));
             }
-            Value::StringArray(value) if value.data().len() == 1 => value.data()[0].as_str(),
+            Value::StringArray(value)
+                if value.data().len() == 1 && !value.data()[0].is_missing() =>
+            {
+                value.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+            }
             _ => return Ok(None),
         };
         Ok(Self::parse_name(text))
@@ -70,7 +77,7 @@ async fn is_class(arguments: crate::call::FunctionArgumentView<'_>) -> BuiltinRe
 
 fn class_identity(value: &Value) -> BuiltinResult<Option<runmat_types::ClassIdentity>> {
     let text = match value {
-        Value::String(text) => text.to_string(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.to_string(),
         Value::CharArray(value) if value.rows == 1 => {
             runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
                 let mut error = error::invalid(source.to_string());
@@ -78,7 +85,12 @@ fn class_identity(value: &Value) -> BuiltinResult<Option<runmat_types::ClassIden
                 error
             })?
         }
-        Value::StringArray(value) if value.data().len() == 1 => value.data()[0].to_string(),
+        Value::StringArray(value) if value.data().len() == 1 && !value.data()[0].is_missing() => {
+            value.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .to_string()
+        }
         _ => return Ok(None),
     };
     Ok(runmat_types::ClassIdentity::new(text.trim()).ok())

@@ -2,6 +2,25 @@ use super::*;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn string_wire_distinguishes_missing_from_every_literal_spelling() {
+    let elements = vec![
+        "<missing>".into(),
+        "<MISSING>".into(),
+        "".into(),
+        runmat_value::StringElement::Missing,
+    ];
+    for element in &elements {
+        let json = value_to_json(&Value::String(element.clone()), 0);
+        assert_eq!(json["value"], serde_json::to_value(element).unwrap());
+        assert_eq!(json["shape"], json!([1, 1]));
+    }
+    let array = runmat_value::StringArray::from_elements_unbounded(elements, vec![1, 4]).unwrap();
+    let json = value_to_json(&Value::StringArray(array), 0);
+    assert_eq!(json["preview"], json!(["<missing>", "<MISSING>", "", null]));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn transient_output_sequence_is_not_projected_as_a_portable_value() {
     let json = value_to_json(&Value::output_list(vec![Value::Num(1.0)]), 0);
     assert_eq!(json["kind"], "unavailable");

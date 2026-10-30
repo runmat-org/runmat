@@ -18,7 +18,9 @@ pub(super) fn parse_controls(
     let mut text: [Cow<'_, str>; 2] = [Cow::Borrowed(""), Cow::Borrowed("")];
     for (index, argument) in arguments.iter().enumerate() {
         let value = match argument {
-            Value::String(value) => Cow::Borrowed(value.as_str()),
+            Value::String(runmat_value::StringElement::Text(value)) => {
+                Cow::Borrowed(value.as_str())
+            }
             Value::CharArray(value) if value.rows == 1 => Cow::Owned(
                 runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
                     let mut error =
@@ -27,8 +29,15 @@ pub(super) fn parse_controls(
                     error
                 })?,
             ),
-            Value::StringArray(value) if value.data().len() == 1 => {
-                Cow::Borrowed(value.data()[0].as_str())
+            Value::StringArray(value)
+                if value.data().len() == 1 && !value.data()[0].is_missing() =>
+            {
+                Cow::Borrowed(
+                    value.data()[0]
+                        .text_ref()
+                        .expect("checked nonmissing scalar string")
+                        .as_str(),
+                )
             }
             _ => {
                 return Err(drawnow_error(

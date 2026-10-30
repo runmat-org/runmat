@@ -220,14 +220,20 @@ pub(super) fn parse_wave(bytes: &[u8], file_size: u64) -> Result<AudioMetadata, 
 
 pub(super) fn resolve_audioinfo_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
-        Value::String(s) => normalize_audioinfo_path(s),
+        Value::String(runmat_value::StringElement::Text(s)) => normalize_audioinfo_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text = crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
                 audioinfo_error(&AUDIOINFO_ERROR_ARGUMENT)
             })?;
             normalize_audioinfo_path(&text)
         }
-        Value::StringArray(sa) if sa.data().len() == 1 => normalize_audioinfo_path(&sa.data()[0]),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            normalize_audioinfo_path(
+                &sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string"),
+            )
+        }
         _ => Err(audioinfo_error(&AUDIOINFO_ERROR_ARGUMENT)),
     }
 }

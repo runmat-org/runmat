@@ -29,7 +29,7 @@ impl Input {
             Value::Tensor(value) => Storage::Numeric(value),
             Value::ComplexTensor(value) => Storage::Complex(value),
             Value::LogicalArray(value) => Storage::Logical(value),
-            Value::String(value) => Storage::String(StringArray::from_texts_unbounded(vec![value], vec![1, 1]).map_err(internal)?),
+            Value::String(value) => Storage::String(StringArray::from_elements_unbounded(vec![value], vec![1, 1]).map_err(internal)?),
             Value::StringArray(value) => Storage::String(value),
             Value::CharArray(value) => Storage::Character(value),
             Value::Complex(real, imaginary) => Storage::Complex(ComplexTensor::new(vec![(real, imaginary)], vec![1, 1]).map_err(internal)?),

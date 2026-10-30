@@ -177,7 +177,7 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                     data: MatData::Char { data },
                 })
             }
-            Value::String(s) => {
+            Value::String(runmat_value::StringElement::Text(s)) => {
                 let data = text_to_utf16_cooperative(&s, owner, &mut cooperation).await?;
                 Ok(MatArray {
                     class: MatClass::Char,
@@ -196,6 +196,7 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 }
                 let mut elements = Vec::with_capacity(sa.data().len());
                 for text in sa.data() {
+                    let text = text.as_str().ok_or_else(|| owner.error(MatEncodingFailure::Unsupported, "typed missing strings are not representable in this MAT character encoding"))?;
                     let data = text_to_utf16_cooperative(text, owner, &mut cooperation).await?;
                     elements.push(MatArray {
                         class: MatClass::Char,

@@ -4,7 +4,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Behavior",
         paragraphs: &[
-            "String scalars remain strings. Missing string values (`<missing>`) propagate unchanged.",
+            "String scalars remain strings. Typed missing string values (displayed as `<missing>`) propagate unchanged; literal `<missing>` text remains ordinary text.",
             "String arrays are processed element-wise while preserving their full shape and orientation.",
             "Character arrays are handled row by row. Rows expand or shrink as needed and are padded with spaces so the result stays a rectangular char array, just like MATLAB.",
             "Cell arrays must contain character vectors or string scalars. The result is a cell array of identical size where each element has had the replacement applied.",
@@ -26,7 +26,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Current implementation frontier",
         paragraphs: &[
             "Character arrays with non-singleton dimensions beyond two, including those inside cells and delimiter controls, reject before row extraction. String and cell array geometry follows the per-entry behavior described here.",
-            "The host implementation also processes string arrays and character matrices inside cells, broader than scalar cellstr prose. Missing strings share the literal sentinel. The retired GPU example was not executable: gpuArray has no text representation. Its host equivalent is asserted below. General managed text allocation remains incomplete.",
+            "The host implementation also processes string arrays and character matrices inside cells, broader than scalar cellstr prose. Typed missing strings remain distinct from literal text. The retired GPU example was not executable: gpuArray has no text representation. Its host equivalent is asserted below. General managed text allocation remains incomplete.",
         ],
     },
 ];
@@ -100,14 +100,14 @@ const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
         id: "example-6",
         title: "Leaving missing string values untouched",
-        program: "vals = [\"RunMat\", \"<missing>\", \"Accelerate\"];\nout = strrep(vals, \"RunMat\", \"RUNMAT\")",
+        program: "vals = [\"RunMat\", string(missing), \"Accelerate\"];\nout = strrep(vals, \"RunMat\", \"RUNMAT\")",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(isequal(out,[\"RUNMAT\",\"<missing>\",\"Accelerate\"]));",
+            source: "assert(isequal(out(1),\"RUNMAT\")); assert(ismissing(out(2))); assert(isequal(out(3),\"Accelerate\"));",
         },
     },
     BuiltinExample {

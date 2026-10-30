@@ -58,12 +58,12 @@ impl WritableData {
                 data: array.data.into_iter().map(|v| v != 0).collect(),
                 shape: array.shape.to_vec(),
             }),
-            Value::String(text) => Ok(Self::Strings {
+            Value::String(runmat_value::StringElement::Text(text)) => Ok(Self::Strings {
                 data: encode_strings(builtin, &[text])?,
                 shape: vec![1, 1],
             }),
             Value::StringArray(array) => Ok(Self::Strings {
-                data: encode_strings(builtin, array.data())?,
+                data: encode_strings(builtin, &array.data().iter().map(|value| value.as_str().ok_or_else(|| hdf5_error(builtin, &ERR_UNSUPPORTED, format!("{builtin}: HDF5 string data cannot represent missing strings")))).collect::<BuiltinResult<Vec<_>>>()?)?,
                 shape: array.shape.to_vec(),
             }),
             Value::CharArray(chars) => Ok(Self::Strings {
