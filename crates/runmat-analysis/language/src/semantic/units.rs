@@ -117,10 +117,16 @@ pub(crate) fn dimension_requirement(
 pub(crate) fn describe_quantity_type(quantity: runmat_types::physical::DynamicDimension) -> String {
     use runmat_types::physical::QuantitySpec;
     let requirement = dimension_requirement(quantity.physical_dimension());
-    let kind = quantity.semantic_kind().and_then(|kind| {
-        serde_json::to_value(kind)
-            .ok()
-            .and_then(|value| value.as_str().map(|name| name.replace('_', " ")))
+    // QuantityKind variant names are the authored type names in CamelCase.
+    let kind = quantity.semantic_kind().map(|kind| {
+        let mut words = String::new();
+        for character in format!("{kind:?}").chars() {
+            if character.is_ascii_uppercase() && !words.is_empty() {
+                words.push(' ');
+            }
+            words.push(character.to_ascii_lowercase());
+        }
+        words
     });
     let name = kind
         .or_else(|| requirement.map(|(description, _)| description.to_string()))
