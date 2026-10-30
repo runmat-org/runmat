@@ -4,9 +4,8 @@ use crate::scalar::c64;
 use crate::testutil::poisson3d;
 
 fn relative_residual<T: Scalar>(a: &CsrMatrix<T>, x: &[T], b: &[T]) -> f64 {
-    let mut ax = vec![T::zero(); b.len()];
-    a.as_ref().spmv(x, &mut ax);
-    let r: Vec<T> = b.iter().zip(&ax).map(|(b, a)| *b - *a).collect();
+    let mut r = vec![T::zero(); b.len()];
+    a.as_ref().residual(x, b, &mut r);
     par::norm2(&r) / par::norm2(b)
 }
 

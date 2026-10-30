@@ -155,18 +155,15 @@ impl<'a, T: Scalar> SparseInput<'a, T> {
             SparseInput::Csc(m) => (*m, false),
         }
     }
-    /// Row-oriented view for residual computation (`A` itself for CSR, `Aᵀ` for CSC).
-    pub(crate) fn residual(&self, x: &[T], b: &[T], r: &mut [T]) {
+    /// Evaluate the original operator's residual; CSC uses caller-owned row-error scratch.
+    pub(crate) fn residual(&self, x: &[T], b: &[T], r: &mut [T], scratch: &mut [T]) {
         match self {
             SparseInput::Csr(m) => {
-                m.spmv(x, r);
+                m.residual(x, b, r);
             }
             SparseInput::Csc(m) => {
-                m.as_transpose_csr().spmv_transpose(x, r, false);
+                m.residual(x, b, r, scratch);
             }
-        }
-        for i in 0..r.len() {
-            r[i] = b[i] - r[i];
         }
     }
     pub(crate) fn pattern_fingerprint(&self) -> PatternFingerprint {
@@ -561,7 +558,7 @@ impl<T: FactorScalar> DirectSolver<T> {
             let bc = &b[column * n..(column + 1) * n];
             let b_norm = par::norm2(bc);
             let xc = &mut x[column * n..(column + 1) * n];
-            matrix.residual(xc, bc, &mut residual);
+            matrix.residual(xc, bc, &mut residual, &mut correction);
             let mut relative = if b_norm > 0.0 {
                 par::norm2(&residual) / b_norm
             } else {
@@ -576,7 +573,7 @@ impl<T: FactorScalar> DirectSolver<T> {
                 for i in 0..n {
                     xc[i] += correction[i];
                 }
-                matrix.residual(xc, bc, &mut residual);
+                matrix.residual(xc, bc, &mut residual, &mut correction);
                 let next = if b_norm > 0.0 {
                     par::norm2(&residual) / b_norm
                 } else {
