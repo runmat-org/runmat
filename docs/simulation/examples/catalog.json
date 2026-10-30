@@ -756,7 +756,45 @@
         "caption": "Modal model \u00b7 clamp the bottom of the stem; leave the tines free. No forcing or damping is applied.",
         "width": 760,
         "height": 280
-      }
+      },
+      "receipts": [
+        {
+          "id": "mode-1-frequency",
+          "quantity": "Natural frequency of mode 1, stem bottom face fixed",
+          "value": 364.85,
+          "unit": "Hz",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "30 mm",
+            "nodes": 11144
+          },
+          "run": {
+            "cli": "runmat-qsnap2-8a1ac9e2bf",
+            "commit": "8a1ac9e2bf",
+            "date": "2026-10-29",
+            "study": "tuning-fork-modal.fea (snapshot capture, q-site-examples-2)",
+            "result": "run_remote_b70b3940d87739716b244c9489b4bec0f4af3c2cf26f4e9fcc435fc9eccb195f_a18e327cbc42f6878116b6000"
+          }
+        },
+        {
+          "id": "mode-2-frequency",
+          "quantity": "Natural frequency of mode 2, stem bottom face fixed",
+          "value": 475.17,
+          "unit": "Hz",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "30 mm",
+            "nodes": 11144
+          },
+          "run": {
+            "cli": "runmat-qsnap2-8a1ac9e2bf",
+            "commit": "8a1ac9e2bf",
+            "date": "2026-10-29",
+            "study": "tuning-fork-modal.fea (snapshot capture, q-site-examples-2)",
+            "result": "run_remote_b70b3940d87739716b244c9489b4bec0f4af3c2cf26f4e9fcc435fc9eccb195f_a18e327cbc42f6878116b6000"
+          }
+        }
+      ]
     },
     {
       "id": "cantilever-coarse",

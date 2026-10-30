@@ -43,7 +43,7 @@ Color shows displacement magnitude in meters on the deformed shape; the shape is
 
 <!-- fea:example:cantilever-static:stress -->
 
-Color shows the element von Mises stress in pascals: each element's own value, without smoothing between elements. The stress rises toward the support, where the bending moment is largest, and peaks on the top and bottom surfaces.
+Color shows the element von Mises stress in pascals: each element's own value, without smoothing between elements. The stress rises toward the support, where the bending moment is largest, and peaks on the top and bottom surfaces. The legend maximum, [5.39 MPa](receipt:cantilever-static#peak-element-von-mises), is the largest element value; an element value averages over the element's volume, so it reads lower than the surface value at the same place.
 
 Read the stress one section depth from the support, at x = 100 mm on the top surface: the nodal von Mises stress there is **[5.43 MPa](receipt:cantilever-static#top-von-mises)**. Don't read it at the clamped edge itself. A fully fixed face meeting a free surface is a stress singularity: the theoretical stress there is unbounded, so the largest element value near that edge does not settle as the mesh is refined ([5.39 MPa](receipt:cantilever-static#peak-element-von-mises), [5.27 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-50) and [5.76 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-25) at 150, 50 and 25 mm), while the value at x = 100 mm settles ([5.43 MPa](receipt:cantilever-static#top-von-mises), [5.41 MPa](receipt:cantilever-static#top-von-mises-tet10-50), [5.41 MPa](receipt:cantilever-static#top-von-mises-tet10-25)). The [mesh refinement guide](./mesh-refinement.md) shows this sequence.
 
