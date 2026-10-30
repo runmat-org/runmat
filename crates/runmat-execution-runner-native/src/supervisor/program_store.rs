@@ -1,6 +1,6 @@
 //! Immutable original attempt assignments and provider reports; job IDs only route them.
 use super::filesystem::{atomic_json, immutable_json, read_json, read_optional_json};
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use super::model::ProgramBatchSubmission;
 use super::model::{DurableProgramAttempt, ProgramBatchExecution};
 use super::store::{JobStore, PersistedRequest, PersistedWorkload};
@@ -22,7 +22,7 @@ struct Completion {
 }
 
 impl JobStore {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn program_submission(
         &self,
         id: JobId,

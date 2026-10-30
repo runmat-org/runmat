@@ -221,7 +221,7 @@ impl JobStore {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn create_graph(
         &self,
         submission: GraphBatchSubmission,

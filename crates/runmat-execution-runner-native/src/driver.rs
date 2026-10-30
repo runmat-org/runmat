@@ -793,7 +793,7 @@ impl LocalDriver {
     /// The service's internal-result retention owner calls this only after
     /// decode or verified cancellation. Scheduler/checkpoint history remains;
     /// the redundant live completion/response source-map cache does not.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn settled_callback_completion_for_test() -> Arc<TaskCompletion> {
         let completion = Arc::new(TaskCompletion::new());
         completion.complete(
@@ -1087,12 +1087,12 @@ impl LocalDriver {
         });
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn fail_next_checkpoint_for_test(&self) {
         self.fail_next_checkpoint.store(true, Ordering::Release);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn scheduler_snapshot_for_test(&self) -> runmat_execution_runner::DriverSnapshot {
         self.driver
             .lock()

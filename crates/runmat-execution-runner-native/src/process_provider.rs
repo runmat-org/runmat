@@ -134,7 +134,7 @@ impl ObservedAttempt {
         (self.result, report)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn not_started(request: &AttemptRequest, started: Instant, message: String) -> Self {
         observe(
             request,

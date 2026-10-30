@@ -72,7 +72,7 @@ impl FutureTable {
             .map(|(id, record)| (id, &mut record.state))
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn len(&self) -> usize {
         self.0.len()
     }
