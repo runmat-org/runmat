@@ -24189,6 +24189,79 @@
       ]
     },
     {
+      "name": "clibgen.buildInterface",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "interface = clibgen.buildInterface(header, 'Libraries', library, [name, value]...)",
+          "inputs": [
+            {
+              "name": "header",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "C declaration header path."
+            },
+            {
+              "name": "optionName",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Libraries, InterfaceName, IncludePath or IncludeDirectories."
+            },
+            {
+              "name": "optionValue",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One scalar text-coercible option value."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional name-value pairs; include paths may repeat."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "interface",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Loaded session interface alias, not a MATLAB C++ definition object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Primitive integer scalars are converted to preparation text, not native ABI data or numeric computation."
+      }
+    },
+    {
       "name": "clim",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -71017,7 +71090,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "execution = fea.ExecutionStep.new(step, backend, solverOptions)",
+          "label": "execution = fea.ExecutionStep.new(step, backend, solverOptions, strict)",
           "inputs": [
             {
               "name": "step",
@@ -71039,6 +71112,13 @@
               "arity": "Required",
               "default": null,
               "description": "Typed fea.SolverOptions compatible with the step's procedure."
+            },
+            {
+              "name": "strict",
+              "ty": "LogicalArray",
+              "arity": "Optional",
+              "default": "false",
+              "description": "Optional logical scalar (default false); true fails closed when a GPU step cannot run on the accelerator."
             }
           ],
           "outputs": [
@@ -176595,7 +176675,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "String array containing the canonical missing sentinel."
+              "description": "String array containing typed missing elements."
             }
           ]
         },
@@ -176616,7 +176696,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "String array containing the canonical missing sentinel."
+              "description": "String array containing typed missing elements."
             }
           ]
         }
@@ -208819,6 +208899,34 @@
               "description": "Element-wise result with the broadcasted operand shape."
             }
           ]
+        },
+        {
+          "label": "S = plus(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Host string or convertible numeric, logical, character, or scalar-convertible cell data; at least one operand must be a string."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second host operand; converted string shapes must permit implicit expansion."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "String scalar or array with the broadcasted converted shape; missing values propagate."
+            }
+          ]
         }
       ],
       "errors": [
@@ -208837,7 +208945,7 @@
         {
           "code": "RM.PLUS.INVALID_INPUT",
           "identifier": "RunMat:plus:InvalidInput",
-          "when": "Operands or prototypes cannot be converted into supported numeric or symbolic forms.",
+          "when": "Operands or prototypes cannot be converted into the selected numeric, symbolic, or host string form.",
           "message": "plus: invalid input"
         },
         {
@@ -208928,6 +209036,49 @@
           "backend": "GatherFallback",
           "overload": "BroadcastCompatible",
           "notes": "Same-class integer sums are exact and saturating. Scalar-double arithmetic uses MATLAB rounding, including the extended-precision 64-bit rule; resident paths use native kernels when supported and otherwise gather authoritative storage."
+        },
+        {
+          "form": "S = plus(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer operand converts directly from its native class when the other operand is a string; all integer bits contribute to decimal text."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "String addition preserves exact integer text and applies implicit expansion to the converted shapes."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "BroadcastCompatible",
+          "notes": "String addition returns host strings, not integer sums. Explicitly gather device values first; numeric output prototypes do not apply."
         }
       ]
     },
@@ -244454,7 +244605,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Data with matching values changed to the class-appropriate missing sentinel."
+              "description": "Data with matching values changed to the class-appropriate missing representation."
             }
           ]
         }
