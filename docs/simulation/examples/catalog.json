@@ -885,6 +885,102 @@
           "end": null
         }
       ]
+    },
+    {
+      "id": "heated-bar-thermal-stress",
+      "title": "Heat a clamped steel bar",
+      "description": "Clamp both ends of a one-meter steel bar, raise its temperature by 80 K, and read the thermal stress and the force on the clamps.",
+      "entry": "thermal-stress-static.fea",
+      "files": [
+        "thermal-stress-static.fea",
+        "geometry/bar.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in meters",
+        "Element stress and von Mises stress, in pascals",
+        "Clamp reaction, in newtons"
+      ],
+      "host_note": "Open the complete project in RunMat Desktop to edit the study and run it.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-COUPLING-THERMOELASTIC-001"
+      ],
+      "snapshot": false,
+      "receipts": [
+        {
+          "id": "mid-von-mises",
+          "quantity": "Nodal von Mises stress at the center of the bar (x = 500 mm)",
+          "output": "mid_von_mises",
+          "value": 197.584,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 192,
+            "unit": "MPa",
+            "source": "one-dimensional restrained bar, E \u03b1 \u0394T"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "47aafa885d",
+            "date": "2026-10-29",
+            "study": "r-heated-bar.fea: thermal-stress-static.fea with outputs mid_von_mises, clamp_reaction and largest_displacement (named end_growth in the run)",
+            "result": "run_remote_bd85757a4e6c1d02cbe8dc8612de7005f8c67f863d9ab750268f5dd618d41621_a18e332fbde059fc002fb8000"
+          }
+        },
+        {
+          "id": "clamp-reaction",
+          "quantity": "Axial reaction resultant on the clamped face at x = 0",
+          "output": "clamp_reaction",
+          "value": 1975.84,
+          "unit": "kN",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 1920,
+            "unit": "kN",
+            "source": "one-dimensional restrained bar, E A \u03b1 \u0394T"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "47aafa885d",
+            "date": "2026-10-29",
+            "study": "r-heated-bar.fea: thermal-stress-static.fea with outputs mid_von_mises, clamp_reaction and largest_displacement (named end_growth in the run)",
+            "result": "run_remote_bd85757a4e6c1d02cbe8dc8612de7005f8c67f863d9ab750268f5dd618d41621_a18e332fbde059fc002fb8000"
+          }
+        },
+        {
+          "id": "largest-displacement",
+          "quantity": "Largest displacement magnitude in the bar (sideways growth of the section corners)",
+          "output": "largest_displacement",
+          "value": 0.0905128,
+          "unit": "mm",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "47aafa885d",
+            "date": "2026-10-29",
+            "study": "r-heated-bar.fea: thermal-stress-static.fea with outputs mid_von_mises, clamp_reaction and largest_displacement (named end_growth in the run)",
+            "result": "run_remote_bd85757a4e6c1d02cbe8dc8612de7005f8c67f863d9ab750268f5dd618d41621_a18e332fbde059fc002fb8000"
+          }
+        }
+      ]
     }
   ]
 }

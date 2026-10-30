@@ -1,8 +1,8 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readJson, copyInput } from "./documents.mjs";
 import { loadLedger, pendingView } from "./ledger.mjs";
-import { feaGrammar } from "./fea-grammar.mjs";
+import { COMMITTED_GRAMMAR } from "./fea-grammar.mjs";
 export function collectFea(source, output, register, examples, evidence, validate) {
     if (register.schema_version !== 1 || register.posture !== "discovery_only" || !Array.isArray(register.requirements))
         throw new Error("Unsupported requirement export");
@@ -42,6 +42,9 @@ export function collectFea(source, output, register, examples, evidence, validat
     }
     // The ledger drives the site's "Not yet in RunMat" flags (fea/pending-features.json is its pending view).
     mkdirSync(join(output, "fea"), { recursive: true });
-    for (const [name, value] of [["requirements", register], ["manual", manual], ["evidence-index", evidence], ["ledger", ledger], ["pending-features", pendingView(ledger)], ["fea.tmLanguage", feaGrammar(source)]])
+    for (const [name, value] of [["requirements", register], ["manual", manual], ["evidence-index", evidence], ["ledger", ledger], ["pending-features", pendingView(ledger)]])
         writeFileSync(join(output, `fea/${name}.json`), JSON.stringify(value, null, 2) + "\n");
+    // The one `.fea` grammar (committed in runmat-fea-syntax and kept current by fea-grammar.test.mjs),
+    // so the site colors code exactly as the language server does. Fixture trees carry no compiler.
+    if (existsSync(join(source, COMMITTED_GRAMMAR))) copyFileSync(join(source, COMMITTED_GRAMMAR), join(output, "fea/fea.tmLanguage.json"));
 }

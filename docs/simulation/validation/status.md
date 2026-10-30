@@ -63,7 +63,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electromagnetic nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### electromagnetic.transient
 
@@ -71,7 +71,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electromagnetic transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Finite-element analysis](../index.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Finite-element analysis](../index.md), [Procedure reference](../language/reference/procedures.md).
 
 #### magnetic.harmonic.vector-potential
 
@@ -97,7 +97,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `acoustic nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### acoustic.periodic.rotational
 
@@ -114,7 +114,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `acoustic static` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
 - Scope: awaiting a product decision on whether this belongs in the final system.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### output.transmission_loss
 
@@ -132,7 +132,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
 - Scope: awaiting a product decision on whether this belongs in the final system.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### fluid.non-newtonian
 
@@ -147,7 +147,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### fluid.periodic
 
@@ -208,7 +208,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `thermomechanical harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### thermomechanical.transient
 
@@ -216,7 +216,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `thermomechanical transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 ### Electrothermal
 
@@ -226,7 +226,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electrothermal harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### electrothermal.nonlinear
 
@@ -234,7 +234,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electrothermal nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 ### Conjugate heat transfer
 
@@ -251,7 +251,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `conjugate_heat_transfer harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### conjugate-heat-transfer.nonlinear
 
@@ -259,7 +259,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `conjugate_heat_transfer nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 ### Fluid–structure interaction
 
@@ -269,7 +269,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid_structure_interaction harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 #### fluid-structure-interaction.nonlinear
 
@@ -277,7 +277,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid_structure_interaction nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Families and procedures](../generated/family-procedure-matrix.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedure reference](../language/reference/procedures.md).
 
 ### The `.fea` language
 
@@ -354,6 +354,14 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 - Kind: output.
 - Ships when: `coefficient_of_variation` is a cataloged output operation; the static-mixer study runs.
 
+#### output.interpolate-line-and-surface-meshes
+
+**`interpolate(field, at = point)` on beam and shell meshes, where the solver mesh has no solid elements.**
+
+- Kind: output.
+- Ships when: An explicit spatial observation on a line or surface solver mesh resolves to the containing beam or shell element: `interpolate(analysis.static.field.node.displacement, at = [2000 mm, 0 mm, 3000 mm])` on portal-frame.fea runs and publishes the girder midspan displacement.
+- Described in: [Outputs, fields and observations](../language/outputs-fields-and-observations.md).
+
 #### output.mode-location
 
 **Study outputs at the `mode` location, such as `analysis.modes.field.mode.modal_frequency`.**
@@ -362,12 +370,31 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 - Ships when: `output frequencies = analysis.modes.field.mode.modal_frequency` checks and runs on tuning-fork-modal and publishes one value per mode.
 - Described in: [Modal analysis](../guides/modal-analysis.md), [Outputs, fields and observations](../language/outputs-fields-and-observations.md).
 
+#### output.point-sample-assessment
+
+**Assessments on a value sampled at a point, such as `interpolate(field, at = point)`.**
+
+- Kind: output.
+- Ships when: `assessment stress_allowable { value = output.top_stress; maximum = 167 MPa; evidence = authored_samples }` with `output top_stress = interpolate(analysis.static.field.node.von_mises_stress, at = [100 mm, 50 mm, 100 mm])` checks and runs on cantilever-static.fea and publishes a verdict.
+- Described in: [Linear static](../guides/linear-static.md).
+
 #### output.time-mean
 
 **Time-mean of a field over a transient step (`mean` over time).**
 
 - Kind: output.
 - Ships when: A `mean` overload over the time domain of a transient field checks and runs.
+
+## Known defects
+
+Defects found in capabilities the current release includes. Each is engineering work with the evidence that shows it; it is removed from the ledger when the witness passes.
+
+#### defect.buckling-eigensolver-convergence
+
+**Buckling eigensolve reports non-convergence with residuals at round-off.**
+
+- Affects: Structural mechanics.
+- Fixed when: The buckling example (cantilever.step, 100 MPa axial traction, preload then buckling with two modes, Tet10 at 150 mm) completes on every mesh the mesher produces, and the eigensolver's convergence flag agrees with its residual test.
 
 ## Validation by family
 

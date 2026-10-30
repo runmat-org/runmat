@@ -269,7 +269,7 @@ The largest element value, [5.39 MPa](receipt:cantilever-static#peak-element-von
 
 **Problem 1.3.** Change the mesh to linear tetrahedra (`order = linear`) at a 50 mm target size and compare the tip deflection with the Tet10 result. It falls well short, at [0.1625 mm](receipt:cantilever-static#tip-deflection-tet4-50): constant-strain elements cannot represent bending and make the beam too stiff.
 
-**Problem 1.4.** Put the stress criterion in the study, so every run reports both verdicts:
+**Problem 1.4.** Put the stress criterion in the study, so every run reports both verdicts. The two outputs run today; an assessment on a value sampled at a point is [not yet in the current release](pending:output.point-sample-assessment).
 
 ```fea fragment
 output top_stress = interpolate(analysis.static.field.node.von_mises_stress, at = [100 mm, 50 mm, 100 mm])

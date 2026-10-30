@@ -46,7 +46,8 @@ export function statusPage(source) {
     const references = pendingReferences(root, markdownFiles(root)).filter(reference => !GENERATED_PAGES.includes(reference.file));
     const capabilities = ledger.capabilities;
     const procedures = capabilities.filter(capability => capability.identity);
-    const pending = capabilities.filter(capability => capability.status === "pending");
+    const pending = capabilities.filter(capability => capability.status === "pending" && capability.kind !== "defect");
+    const defects = capabilities.filter(capability => capability.status === "pending" && capability.kind === "defect").sort((a, b) => a.id.localeCompare(b.id));
     const lines = HEADER(
         "What the current RunMat release runs for each physics family and procedure, which loads, constraints and outputs it accepts, and which documented features are planned, with acceptance criteria.",
         ["release status", "supported analyses", "family and procedure matrix", "planned features", "not yet in the current release", "FEA"],
@@ -89,6 +90,13 @@ export function statusPage(source) {
             lines.push("");
         }
     }
+    lines.push("## Known defects", "");
+    if (!defects.length) lines.push("No open defects are recorded against capabilities in the current release.", "");
+    else lines.push("Defects found in capabilities the current release includes. Each is engineering work with the evidence that shows it; it is removed from the ledger when the witness passes.", "");
+    for (const defect of defects) {
+        lines.push(`#### ${defect.id}`, "", `**${defect.title}.**`, "", `- Affects: ${AREAS[defect.area] ?? defect.area}.`, `- Fixed when: ${defect.acceptance}`);
+        lines.push("");
+    }
     lines.push("## Validation by family", "", ...Object.entries(VALIDATION_AREAS).map(([area, label]) => `- [${label}](./${area}.md)`), "", "The [validation methodology](./methodology.md) explains how cases, references and tests are read.", "");
     return lines.join("\n");
 }
@@ -103,7 +111,7 @@ export function familyPage(source, area) {
     const root = join(source, "docs/simulation");
     const { ledger } = loadLedger(source);
     const label = VALIDATION_AREAS[area];
-    const capabilities = ledger.capabilities.filter(capability => capability.area === area);
+    const capabilities = ledger.capabilities.filter(capability => capability.area === area && capability.kind !== "defect");
     const cases = ledger.cases.filter(entry => entry.area === area);
     const evidence = evidenceIndex(root);
     const lines = HEADER(

@@ -2694,6 +2694,74 @@
         "guides/modal-analysis.md",
         "language/outputs-fields-and-observations.md"
       ]
+    },
+    {
+      "id": "output.interpolate-line-and-surface-meshes",
+      "title": "`interpolate(field, at = point)` on beam and shell meshes, where the solver mesh has no solid elements",
+      "kind": "output",
+      "area": "results",
+      "status": "pending",
+      "acceptance": "An explicit spatial observation on a line or surface solver mesh resolves to the containing beam or shell element: `interpolate(analysis.static.field.node.displacement, at = [2000 mm, 0 mm, 3000 mm])` on portal-frame.fea runs and publishes the girder midspan displacement.",
+      "owner": "q-structural-linear",
+      "gaps": [
+        "DEF-SPATIAL-OBSERVATION"
+      ],
+      "witness": [
+        "q-docs-4 (2026-10-29), runmat-qdocs1-60daf3650d and runmat-qd6cs2-8ce36b8ca8, runmat-build-mac:~/runs/q-docs-4/defects/d1-frame-interpolate.fea (portal-frame.fea plus a girder-midspan interpolate output): `runmat check` passes; `runmat run` fails: observation `girder_mid` cannot resolve target: point lies outside the admitted solid topology",
+        "runmat run d1-frame-interpolate.fea"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-PUBLIC-001"
+      ],
+      "verification": [],
+      "docs": [
+        "language/outputs-fields-and-observations.md"
+      ]
+    },
+    {
+      "id": "defect.buckling-eigensolver-convergence",
+      "title": "Buckling eigensolve reports non-convergence with residuals at round-off",
+      "kind": "defect",
+      "area": "structural",
+      "status": "pending",
+      "acceptance": "The buckling example (cantilever.step, 100 MPa axial traction, preload then buckling with two modes, Tet10 at 150 mm) completes on every mesh the mesher produces, and the eigensolver's convergence flag agrees with its residual test.",
+      "owner": "q-structural-linear",
+      "gaps": [
+        "DEF-BUCKLING-CONVERGENCE"
+      ],
+      "witness": [
+        "q-docs-4 (2026-10-29), runmat-qdocs1-60daf3650d, runmat-build-mac:~/runs/q-docs-4/defects/d3-buckling.fea: FEA_SOLVE_FAILED: buckling eigensolver retained 2/2 positive modes after 1 iterations (converged=false, maximum_residual=1.7e-8)",
+        "Same study on runmat-qd6cs2-8ce36b8ca8 (different mesh, 2,168 nodes) completes and publishes buckling.load_factor, buckling.mode_shape.1–2 and buckling.rotation_shape.1–2, so mode-shape publication itself is fixed"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-PUBLIC-001"
+      ],
+      "verification": [],
+      "docs": [],
+      "doc_less": "A defect in a released procedure: listed under Known defects on Validation → Status, not flagged in the docs that describe buckling."
+    },
+    {
+      "id": "output.point-sample-assessment",
+      "title": "Assessments on a value sampled at a point, such as `interpolate(field, at = point)`",
+      "kind": "output",
+      "area": "results",
+      "status": "pending",
+      "acceptance": "`assessment stress_allowable { value = output.top_stress; maximum = 167 MPa; evidence = authored_samples }` with `output top_stress = interpolate(analysis.static.field.node.von_mises_stress, at = [100 mm, 50 mm, 100 mm])` checks and runs on cantilever-static.fea and publishes a verdict.",
+      "owner": "q-structural-linear",
+      "gaps": [
+        "DOC-Q4-1"
+      ],
+      "witness": [
+        "q-docs-4 (2026-10-29), runmat-qdocs1-60daf3650d, runmat-build-mac:~/runs/q-docs-4/frag/frag.fea: error[fea.semantic.procedure]: study output is invalid: assessment `stress_allowable` requires a declared real scalar output",
+        "runmat check frag.fea"
+      ],
+      "requirements": [
+        "FEA-PUBLIC-LANGUAGE-001"
+      ],
+      "verification": [],
+      "docs": [
+        "guides/linear-static.md"
+      ]
     }
   ],
   "cases": [

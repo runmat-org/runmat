@@ -42,7 +42,7 @@
         "properties": {
           "id": { "$ref": "#/definitions/id", "description": "Stable dotted key. For a pending row it is the pending id that docs flags, `runmat check` diagnostics and the agent share." },
           "title": { "type": "string", "minLength": 1 },
-          "kind": { "enum": ["procedure", "language", "load", "constraint", "interface", "material", "output", "meshing", "execution", "builtin", "geometry", "tooling"] },
+          "kind": { "enum": ["procedure", "language", "load", "constraint", "interface", "material", "output", "meshing", "execution", "builtin", "geometry", "tooling", "defect"] },
           "area": { "$ref": "#/definitions/area" },
           "identity": {
             "type": "object",

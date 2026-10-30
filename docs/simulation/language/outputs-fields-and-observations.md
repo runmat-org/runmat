@@ -76,7 +76,7 @@ output top_stress = interpolate(analysis.static.field.node.von_mises_stress, at 
 output tip_deflection = interpolate(analysis.static.field.node.displacement, at = [200 mm, 0 mm, 50 mm])
 ```
 
-`interpolate(field, at = point)` returns the value at one point in model coordinates. For a nodal field it evaluates the shape functions of the element that contains the point, so the value follows the gradient to the point; compare this with a surface stress from beam or plate theory. For an element field it returns the containing element's value. A point on a shared face or edge reads one of the elements that touch it. A point outside the meshed solid is an error; it is never moved to the nearest surface.
+`interpolate(field, at = point)` returns the value at one point in model coordinates. For a nodal field it evaluates the shape functions of the element that contains the point, so the value follows the gradient to the point; compare this with a surface stress from beam or plate theory. For an element field it returns the containing element's value. A point on a shared face or edge reads one of the elements that touch it. A point outside the meshed solid is an error; it is never moved to the nearest surface. On a beam or shell mesh, the point is located on the containing line or surface element ([not yet in the current release](pending:output.interpolate-line-and-surface-meshes)).
 
 ## Histories and retention
 

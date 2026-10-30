@@ -121,8 +121,8 @@
       ],
       "related_topics": [
         {
-          "title": "Validation: modal",
-          "href": "/docs/simulation/validation/modal"
+          "title": "Validation: structural",
+          "href": "/docs/simulation/validation/structural"
         },
         {
           "title": "Linear static analysis",
@@ -165,6 +165,40 @@
       ],
       "scope": {
         "procedure": "Structural static",
+        "example_mesh": "Quadratic tetrahedra"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "thermal-stress",
+      "route": "/docs/simulation/guides/thermal-stress",
+      "title": "Thermal stress",
+      "summary": "Find the stress and support force in a clamped steel bar heated by 80 K, from the restrained-bar formula and a thermomechanical finite-element solution in RunMat.",
+      "keywords": [
+        "thermal stress",
+        "thermal expansion",
+        "thermomechanical",
+        "restrained bar",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 5,
+      "narrative": "docs/simulation/guides/thermal-stress.md",
+      "examples": [
+        "heated-bar-thermal-stress"
+      ],
+      "related_topics": [
+        {
+          "title": "Thermomechanical validation",
+          "href": "/docs/simulation/validation/thermomechanical"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/guides/linear-static"
+        }
+      ],
+      "scope": {
+        "procedure": "Thermomechanical steady",
         "example_mesh": "Quadratic tetrahedra"
       },
       "verification_labels": {}
