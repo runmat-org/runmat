@@ -20,6 +20,21 @@ pub(super) async fn imfilter_gpu(
     if let Value::GpuTensor(kernel) = &kernel_value {
         preflight_resident_input(kernel, "H")?;
     }
+    let invalid_owner = || {
+        imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            "no exact provider owns the resident A/H operands",
+        )
+    };
+    if let Value::GpuTensor(kernel) = &kernel_value {
+        gpu_helpers::require_resident_compute_owners(
+            &[&image_handle, kernel],
+            false,
+            invalid_owner,
+        )?;
+    } else {
+        gpu_helpers::require_resident_compute_owner(&image_handle, invalid_owner)?;
+    }
     let output_class = ImageOutputClass::from_gpu_handle(&image_handle)?;
     let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")

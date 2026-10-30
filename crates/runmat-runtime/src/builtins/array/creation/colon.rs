@@ -860,7 +860,7 @@ fn tolerance(start: f64, step: f64, stop: f64) -> f64 {
 async fn parse_real_scalar(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
     match value {
         Value::GpuTensor(handle) => {
-            gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+            runmat_accelerate_api::numeric_readback_for_handle(&handle).map_err(|_| {
                 colon_error_with_message(
                     "colon: no exact owner for resident scalar",
                     &COLON_ERROR_INTERNAL,

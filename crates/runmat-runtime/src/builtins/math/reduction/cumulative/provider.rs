@@ -76,8 +76,9 @@ fn admit(
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build()
     })?;
-    let provider = gpu_helpers::exact_provider_for_handle(input)
-        .ok_or_else(|| super::failure(kind, "resident input has no exact owning provider"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(input, || {
+        super::failure(kind, "resident input has no exact owning provider")
+    })?;
     let owner = HostAllocationReceipt::capture_owner(runtime)
         .map_err(|e| super::admission::control(kind, runtime, e))?;
     check(kind, runtime, owner.as_ref())?;

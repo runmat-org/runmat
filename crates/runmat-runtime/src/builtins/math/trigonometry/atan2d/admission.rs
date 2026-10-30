@@ -21,7 +21,7 @@ fn operand(value: &Value) -> BuiltinResult<Operand<'_>> {
             return Err(error(&ATAN2D_ERROR_COMPLEX_UNSUPPORTED, "complex input"));
         }
         Value::GpuTensor(handle) => {
-            if gpu_helpers::exact_provider_for_handle(handle).is_none()
+            if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err()
                 || !gpu_helpers::expected_handle_numeric_element_type(handle).is_ok_and(|element| {
                     gpu_helpers::numeric_descriptor_matches(
                         handle,
@@ -83,6 +83,12 @@ pub(super) fn pair(y_value: &Value, x_value: &Value) -> BuiltinResult<()> {
     };
     BroadcastPlan::new(y.shape, x.shape)
         .map_err(|cause| error(&ATAN2D_ERROR_SIZE_MISMATCH, cause))?;
+    gpu_helpers::require_resident_compute_values(&[y_value, x_value], true, || {
+        error(
+            &ATAN2D_ERROR_INVALID_INPUT,
+            "resident inputs require one exact owning provider",
+        )
+    })?;
     if let (Value::GpuTensor(y), Value::GpuTensor(x)) = (y_value, x_value) {
         gpu_helpers::exact_provider_for_binary_inputs(y, x)
             .map_err(|cause| error(&ATAN2D_ERROR_INVALID_INPUT, cause))?;

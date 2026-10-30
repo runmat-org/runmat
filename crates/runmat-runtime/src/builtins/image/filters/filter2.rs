@@ -358,6 +358,21 @@ async fn filter2_gpu(
                 runmat_accelerate_api::ProviderExecutionError::from_source(error),
             )
         })?;
+    let invalid_owner = || {
+        filter2_error_with_detail(
+            &FILTER2_ERROR_INVALID_INPUT,
+            "no exact provider owns the resident X/H operands",
+        )
+    };
+    if let Value::GpuTensor(kernel) = &kernel_value {
+        gpu_helpers::require_resident_compute_owners(
+            &[&image_handle, kernel],
+            false,
+            invalid_owner,
+        )?;
+    } else {
+        gpu_helpers::require_resident_compute_owner(&image_handle, invalid_owner)?;
+    }
     let provider = match gpu_helpers::exact_provider_for_handle(&image_handle) {
         Some(p) => p,
         None => {

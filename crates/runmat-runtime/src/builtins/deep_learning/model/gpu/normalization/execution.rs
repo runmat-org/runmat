@@ -121,7 +121,13 @@ async fn execute(
         return Ok(Err(GpuCapabilityReason::AxisLayout));
     }
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
-        .ok_or_else(|| unsupported_error(function, "no provider owns the GPU dlarray input"))?;
+        .ok_or_else(|| {
+            crate::builtins::common::gpu_helpers::ResidentComputeDecline::InvalidOwner
+                .with_domain_error(unsupported_error(
+                    function,
+                    "no provider owns the GPU dlarray input",
+                ))
+        })?;
     let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         unreachable!("host plan admitted network Layers")
     };

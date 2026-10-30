@@ -7,6 +7,12 @@ use runmat_accelerate_api::{
 
 pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     ensure_matrix_shape(NAME, handle.shape())?;
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        trace_error_with_message(
+            "trace: resident input has no exact owning provider",
+            &TRACE_ERROR_INTERNAL,
+        )
+    })?;
     let (rows, _) = matrix_extents_from_shape(handle.shape());
     let diag_len = rows;
     let storage = runmat_accelerate_api::handle_storage(&handle);

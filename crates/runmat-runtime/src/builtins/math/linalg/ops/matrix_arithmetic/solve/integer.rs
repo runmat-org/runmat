@@ -20,6 +20,12 @@ pub(super) async fn evaluate(
     lhs: &Value,
     rhs: &Value,
 ) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_values(&[lhs, rhs], false, || {
+        errors::internal(
+            orientation,
+            format!("{}: resident input owner was lost", orientation.name()),
+        )
+    })?;
     let restore_source = gpu_helpers::select_resident_output_source(
         [lhs, rhs].into_iter().filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
@@ -57,7 +63,11 @@ pub(super) async fn evaluate(
         orientation.name(),
         &source,
     )
-    .map_err(|error| errors::map_control_flow(orientation, error))
+    .map_err(|error| {
+        let mut error = errors::map_control_flow(orientation, error);
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error
+    })
 }
 
 fn host_integer(orientation: SolveOrientation, lhs: Value, rhs: Value) -> BuiltinResult<Value> {

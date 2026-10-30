@@ -9,8 +9,9 @@ use super::{error, BUILTIN_NAME};
 pub(super) fn for_handle(
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<&'static dyn runmat_accelerate_api::AccelProvider> {
-    gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| error::internal("no active GPU provider for rescale input"))
+    gpu_helpers::require_resident_compute_owner(handle, || {
+        error::internal("no active GPU provider for rescale input")
+    })
 }
 
 pub(super) fn output(

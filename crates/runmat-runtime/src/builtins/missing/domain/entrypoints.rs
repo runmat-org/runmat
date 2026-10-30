@@ -63,7 +63,7 @@ pub(super) fn ismissing_resident_integer(
     let integer = runmat_accelerate_api::handle_integer_type(handle)
         .expect("resident integer predicate requires integer metadata");
     let storage = runmat_accelerate_api::handle_storage(handle);
-    if gpu_helpers::exact_provider_for_handle(handle).is_none()
+    if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err()
         || storage != runmat_accelerate_api::GpuTensorStorage::Real
         || runmat_accelerate_api::handle_precision(handle).is_some()
         || runmat_accelerate_api::handle_is_logical(handle)
@@ -150,8 +150,9 @@ pub(super) async fn rmmissing_builtin(
         _ => None,
     };
     let value = if let Some(handle) = source.as_ref() {
-        let owner = gpu_helpers::exact_provider_for_handle(handle)
-            .ok_or_else(|| invalid_argument("rmmissing: no provider owns the resident input"))?;
+        let owner = gpu_helpers::require_resident_compute_owner(handle, || {
+            invalid_argument("rmmissing: no provider owns the resident input")
+        })?;
         gpu_helpers::download_value_preserving_residency_async(owner, handle)
             .await
             .map_err(|err| gather_error("rmmissing", "input", err))?
@@ -391,8 +392,9 @@ pub(super) async fn movmad_builtin(
         )?;
     }
     if let Some(handle) = source.as_ref() {
-        gpu_helpers::exact_provider_for_handle(handle)
-            .ok_or_else(|| invalid_argument("movmad: no provider owns the resident input"))?;
+        gpu_helpers::require_resident_compute_owner(handle, || {
+            invalid_argument("movmad: no provider owns the resident input")
+        })?;
     }
     let value = gather_if_needed_async(&value)
         .await

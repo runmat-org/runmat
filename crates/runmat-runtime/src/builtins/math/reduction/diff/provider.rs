@@ -11,8 +11,9 @@ pub(super) async fn diff_gpu(
         return Err(diff_invalid_argument("diff: dimension must be >= 1"));
     }
 
-    let provider = gpu_helpers::exact_provider_for_handle(&handle)
-        .ok_or_else(|| diff_internal_error("diff: GPU input has no owning provider"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+        diff_internal_error("diff: GPU input has no owning provider")
+    })?;
     let exact_or_nonreal = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
         || runmat_accelerate_api::handle_storage(&handle)

@@ -94,10 +94,16 @@ pub(super) async fn parse(
         let gathered;
         let value = if let Value::GpuTensor(handle) = value {
             call.fallback([value])?;
-            let owner = gpu_helpers::exact_provider_for_handle(handle)
-                .ok_or_else(|| prod_internal_error("dimension has no owning provider"))?;
-            gathered =
-                gpu_helpers::download_value_preserving_residency_async(owner, handle).await?;
+            let readback =
+                runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+                    crate::runtime_error::with_provider_execution_source(
+                        prod_internal_error("dimension has no owning provider"),
+                        source.into(),
+                    )
+                })?;
+            gathered = gpu_helpers::download_readback_value_in_context(call.runtime, &readback)
+                .await
+                .map_err(super::super::numerical_execution::terminal)?;
             call.check()?;
             &gathered
         } else {

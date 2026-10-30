@@ -455,8 +455,9 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
 }
 
 async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle)
-        .ok_or_else(|| repmat_internal("repmat: no acceleration provider is registered"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+        repmat_internal("repmat: no acceleration provider is registered")
+    })?;
     let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let shape = gpu_helpers::replication_shape(handle.shape(), reps)
         .ok_or_else(|| repmat_invalid_factors("repmat: requested output dimensions overflow"))?;

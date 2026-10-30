@@ -11,9 +11,7 @@ use runmat_accelerate_api::{
 };
 use runmat_value::{IntegerStorage, Value};
 
-use crate::builtins::common::gpu_helpers::{
-    exact_provider_for_handle, gpu_class_metadata_matches, ResidencyRestoreGuard,
-};
+use crate::builtins::common::gpu_helpers::{gpu_class_metadata_matches, ResidencyRestoreGuard};
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, GpuGatherRetry, RuntimeError};
 
@@ -295,21 +293,22 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
                             .build(),
                         ))
                     })?;
-            if expected_type.element_size() <= 4 {
-                true
-            } else {
-                let provider = exact_provider_for_handle(handle).ok_or_else(|| {
+            let readback = runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
                     IntegerBoundaryFailure::Operational(Box::new(
                         build_runtime_error(
                             "integer exactness check: no acceleration provider owns the input handle",
                         )
+                        .with_source(runmat_accelerate_api::ProviderExecutionError::from(source))
                         .with_gpu_gather_retry(GpuGatherRetry::Never)
                         .build(),
                     ))
                 })?;
+            if expected_type.element_size() <= 4 {
+                true
+            } else {
                 let _residency = ResidencyRestoreGuard::new(handle);
                 if storage == GpuTensorStorage::ComplexInterleaved {
-                    let gathered = provider.download_numeric(handle).await.map_err(|source_error| {
+                    let gathered = readback.download_numeric().await.map_err(|source_error| {
                         let mut error = build_runtime_error(format!(
                             "integer exactness check: owner-preserving native complex download failed: {source_error}"
                         ))
@@ -336,19 +335,43 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
                     resident_payload = Some(PreparedIntegerPayload::Complex(gathered));
                     exact
                 } else {
-                    let gathered =
-                        provider
-                            .download_integer(handle)
-                            .await
-                            .map_err(|source_error| {
-                                let mut error = build_runtime_error(format!(
+                    let gathered = readback.download_numeric().await.map_err(|source_error| {
+                        let mut error = build_runtime_error(format!(
                         "integer exactness check: owner-preserving download failed: {source_error}"
                     ))
-                                .with_gpu_gather_retry(GpuGatherRetry::Never)
-                                .build();
-                                error.source = Some(source_error.into_boxed_dyn_error());
-                                IntegerBoundaryFailure::Operational(Box::new(error))
-                            })?;
+                        .with_gpu_gather_retry(GpuGatherRetry::Never)
+                        .build();
+                        error.source = Some(source_error.into_boxed_dyn_error());
+                        IntegerBoundaryFailure::Operational(Box::new(error))
+                    })?;
+                    if gathered.storage != GpuTensorStorage::Real {
+                        return Err(IntegerBoundaryFailure::Operational(Box::new(
+                            build_runtime_error("integer exactness check: provider returned nonreal integer payload")
+                                .with_gpu_gather_retry(GpuGatherRetry::Never).build())));
+                    }
+                    // Move the existing native integer backing into the same
+                    // prepared carrier; no widened numeric copy or mirror.
+                    let data = match gathered.data {
+                        HostNumericDataOwned::I8(data) => HostIntegerDataOwned::I8(data),
+                        HostNumericDataOwned::I16(data) => HostIntegerDataOwned::I16(data),
+                        HostNumericDataOwned::I32(data) => HostIntegerDataOwned::I32(data),
+                        HostNumericDataOwned::I64(data) => HostIntegerDataOwned::I64(data),
+                        HostNumericDataOwned::U8(data) => HostIntegerDataOwned::U8(data),
+                        HostNumericDataOwned::U16(data) => HostIntegerDataOwned::U16(data),
+                        HostNumericDataOwned::U32(data) => HostIntegerDataOwned::U32(data),
+                        HostNumericDataOwned::U64(data) => HostIntegerDataOwned::U64(data),
+                        _ => return Err(IntegerBoundaryFailure::Operational(Box::new(
+                            build_runtime_error(
+                                "integer exactness check: provider changed native integer class",
+                            )
+                            .with_gpu_gather_retry(GpuGatherRetry::Never)
+                            .build(),
+                        ))),
+                    };
+                    let gathered = HostIntegerTensorOwned {
+                        data,
+                        shape: gathered.shape,
+                    };
                     let actual_len = match &gathered.data {
                         HostIntegerDataOwned::I8(values) => values.len(),
                         HostIntegerDataOwned::I16(values) => values.len(),

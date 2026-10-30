@@ -17,7 +17,7 @@ pub(super) async fn execute(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             "GPU input class metadata contradicts its physical storage",
         ));
     }
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         builtin_error_with_detail(&CONJ_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
     if storage == GpuTensorStorage::Real {

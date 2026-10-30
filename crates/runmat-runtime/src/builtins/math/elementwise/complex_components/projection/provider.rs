@@ -10,8 +10,9 @@ use crate::BuiltinResult;
 use super::{host, ProjectionKind};
 
 pub(super) async fn execute(kind: ProjectionKind, handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle)
-        .ok_or_else(|| kind.internal("GPU provider unavailable for input"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+        kind.internal("GPU provider unavailable for input")
+    })?;
     if gpu_helpers::expected_handle_numeric_element_type(&handle).is_err() {
         return Err(kind.internal("GPU input class metadata contradicts its physical storage"));
     }

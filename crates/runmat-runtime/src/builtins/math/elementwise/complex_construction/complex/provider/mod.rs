@@ -20,7 +20,7 @@ pub(super) async fn unary(value: Value) -> BuiltinResult<Value> {
     let Value::GpuTensor(handle) = value else {
         return host::unary(value);
     };
-    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let owner = gpu_helpers::require_resident_compute_owner(&handle, || {
         error(
             &COMPLEX_ERROR_INTERNAL,
             "GPU provider unavailable for input",
@@ -42,6 +42,12 @@ pub(super) async fn unary(value: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) async fn binary(real: Value, imaginary: Value) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_values(&[&real, &imaginary], true, || {
+        error(
+            &COMPLEX_ERROR_INTERNAL,
+            "GPU provider unavailable for input",
+        )
+    })?;
     if !matches!(real, Value::GpuTensor(_)) && !matches!(imaginary, Value::GpuTensor(_)) {
         return host::binary(real, imaginary);
     }
@@ -60,7 +66,7 @@ pub(super) async fn binary(real: Value, imaginary: Value) -> BuiltinResult<Value
             "resident construction had no output owner",
         )
     })?;
-    let owner = gpu_helpers::exact_provider_for_handle(&source).ok_or_else(|| {
+    let owner = gpu_helpers::require_resident_compute_owner(&source, || {
         error(
             &COMPLEX_ERROR_INTERNAL,
             "GPU provider unavailable for input",

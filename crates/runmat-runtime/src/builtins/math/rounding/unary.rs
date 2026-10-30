@@ -88,7 +88,7 @@ pub(super) fn input_provider(
     builtin: &str,
     internal_error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<&'static dyn AccelProvider> {
-    let provider = gpu_helpers::exact_provider_for_handle(input).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(input, || {
         error_with_detail(
             builtin,
             internal_error,

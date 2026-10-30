@@ -13,9 +13,14 @@ pub(super) async fn cast_gpu_value(
     target: IntegerClass,
 ) -> Result<Value, CastError> {
     admit_gpu_value(&handle)?;
-    let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
-        .ok_or_else(|| {
-            CastError::Internal("no acceleration provider owns the input handle".into())
+    let provider = crate::builtins::common::gpu_helpers::resolve_resident_compute_owner(&handle)
+        .map_err(|decline| {
+            retained_error(
+                decline.with_domain_error(
+                    crate::build_runtime_error("no acceleration provider owns the input handle")
+                        .build(),
+                ),
+            )
         })?;
 
     let provenance = runmat_accelerate_api::handle_provenance(&handle)
@@ -68,7 +73,7 @@ pub(super) async fn cast_gpu_value(
 
 /// Side-effect-free resident admission, also used before operand preparation.
 pub(super) fn admit_gpu_value(handle: &GpuTensorHandle) -> Result<(), CastError> {
-    if crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none() {
+    if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err() {
         return Err(CastError::Internal(
             "no acceleration provider owns the input handle".into(),
         ));

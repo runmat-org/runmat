@@ -190,6 +190,12 @@ async fn try_kron_gpu_pair(
     {
         return Ok(None);
     }
+    gpu_helpers::require_resident_compute_owners(&[left, right], false, || {
+        kron_error_with_message(
+            "kron: no exact provider owns the resident operands",
+            &KRON_ERROR_INTERNAL,
+        )
+    })?;
     let Some(owner) = gpu_helpers::exact_provider_for_handle(left) else {
         return Ok(None);
     };
@@ -280,6 +286,12 @@ async fn try_kron_gpu_host(
         }
         _ => return Ok(None),
     };
+    gpu_helpers::require_resident_compute_owner(source, || {
+        kron_error_with_message(
+            "kron: no exact provider owns the resident operand",
+            &KRON_ERROR_INTERNAL,
+        )
+    })?;
     let Some(owner) = gpu_helpers::exact_provider_for_handle(source) else {
         return Ok(None);
     };

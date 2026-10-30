@@ -133,6 +133,14 @@ async fn nnz_builtin(
         }
         None => None,
     };
+    if let Value::GpuTensor(handle) = &value {
+        gpu_helpers::require_resident_compute_owner(handle, || {
+            super::numerical_execution::error(
+                runmat_builtins::NumericalReductionKind::CountNonzero,
+                "resident count input has no exact owning provider",
+            )
+        })?;
+    }
     let result = match &value {
         Value::GpuTensor(handle) => provider::execute(handle, dim, &call).await,
         _ => {
@@ -155,10 +163,17 @@ async fn parse_dimension_arg(
     let gathered;
     let boolean;
     let control = if let Value::GpuTensor(handle) = control {
-        let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
-            super::numerical_execution::error(call.kind, "dimension has no exact owning provider")
-        })?;
-        gathered = gpu_helpers::download_value_preserving_residency_async(owner, handle).await?;
+        let readback =
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+                let error = super::numerical_execution::error(
+                    call.kind,
+                    "dimension has no exact owning provider",
+                );
+                crate::runtime_error::with_provider_execution_source(error, source.into())
+            })?;
+        gathered = gpu_helpers::download_readback_value_in_context(call.runtime, &readback)
+            .await
+            .map_err(super::numerical_execution::terminal)?;
         call.check()?;
         &gathered
     } else {

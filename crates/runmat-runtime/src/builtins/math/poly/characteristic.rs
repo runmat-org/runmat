@@ -83,14 +83,22 @@ async fn poly_builtin(context: Option<RuntimeContext>, input: Value) -> BuiltinR
         {
             return Err(invalid("poly requires single or double real/complex input"));
         }
-        let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-            .ok_or_else(|| {
-                unsupported_provider("poly cannot resolve the resident input's exact provider")
+        let readback =
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+                crate::runtime_error::with_provider_execution_source(
+                    unsupported_provider("poly cannot resolve the resident input's exact provider"),
+                    source.into(),
+                )
             })?;
-        crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
-            owner, handle,
+        crate::builtins::common::gpu_helpers::download_readback_value_in_context(
+            context.as_ref(),
+            &readback,
         )
-        .await?
+        .await
+        .map_err(|mut error| {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })?
     } else {
         input
     };

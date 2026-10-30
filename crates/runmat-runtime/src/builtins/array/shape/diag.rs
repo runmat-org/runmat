@@ -387,7 +387,7 @@ async fn evaluate_diag_host(value: Value, parsed: &ParsedDiagArgs) -> BuiltinRes
 }
 
 async fn diag_resident(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         diag_error(
             MESSAGE_ID_INVALID_INPUT,
             "diag: no owning acceleration provider",

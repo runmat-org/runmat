@@ -21,6 +21,12 @@ pub(super) async fn reduce(
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        config.error(
+            config.internal,
+            "resident input has no exact owning provider",
+        )
+    })?;
     if route::select(config.kind, nan_mode) == route::LogicalReductionRoute::HostExact {
         return fallback(config, handle, spec, nan_mode).await;
     }

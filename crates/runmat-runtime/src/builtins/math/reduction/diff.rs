@@ -169,6 +169,11 @@ async fn diff_builtin(
     if !matches!(value, Value::GpuTensor(_)) {
         call.host()?;
     }
+    if let Value::GpuTensor(handle) = &value {
+        gpu_helpers::require_resident_compute_owner(handle, || {
+            diff_internal_error("diff: GPU input has no owning provider")
+        })?;
+    }
     let result = match value {
         Value::Tensor(tensor) => {
             diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)

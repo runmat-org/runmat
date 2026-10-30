@@ -646,6 +646,9 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 async fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        std_internal_error("std: resident input has no exact owning provider")
+    })?;
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         handle
             .allocation_lease()

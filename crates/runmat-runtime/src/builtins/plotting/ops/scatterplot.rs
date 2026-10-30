@@ -234,7 +234,7 @@ async fn extract_scatter_values(
 ) -> BuiltinResult<(Value, Value, Option<(f64, f64)>)> {
     match value {
         Value::GpuTensor(handle) if n == 1 && offset == 0 => {
-            if let Some((real, imag)) = gpu_real_imag_handles(&handle).await {
+            if let Some((real, imag)) = gpu_real_imag_handles(&handle).await? {
                 let limits = symmetric_limits_from_gpu_bounds(&real, &imag);
                 return Ok((Value::GpuTensor(real), Value::GpuTensor(imag), limits));
             }
@@ -256,11 +256,30 @@ async fn extract_scatter_values(
 
 async fn gpu_real_imag_handles(
     handle: &GpuTensorHandle,
-) -> Option<(GpuTensorHandle, GpuTensorHandle)> {
-    let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)?;
-    let real = provider.unary_real(handle).await.ok()?;
-    let imag = provider.unary_imag(handle).await.ok()?;
-    Some((real, imag))
+) -> BuiltinResult<Option<(GpuTensorHandle, GpuTensorHandle)>> {
+    // Decomposition is optional preparation before any figure/registry effect.
+    // A declined compute route uses the existing mandatory plotting readback,
+    // never a whole-builtin replay or permission to compute under that policy.
+    use crate::builtins::common::gpu_helpers::{
+        resolve_resident_compute_owner, ResidentComputeDecline,
+    };
+    let provider = match resolve_resident_compute_owner(handle) {
+        Ok(provider) => provider,
+        Err(ResidentComputeDecline::PolicyDenied) => return Ok(None),
+        Err(decline @ ResidentComputeDecline::InvalidOwner) => {
+            return Err(decline.with_domain_error(scatterplot_error(
+                "scatterplot: no exact provider owns the sample input",
+                &SCATTERPLOT_ERROR_PLOT_FAILED,
+            )))
+        }
+    };
+    let Ok(real) = provider.unary_real(handle).await else {
+        return Ok(None);
+    };
+    let Ok(imag) = provider.unary_imag(handle).await else {
+        return Ok(None);
+    };
+    Ok(Some((real, imag)))
 }
 
 async fn gather_gpu_value(handle: GpuTensorHandle) -> BuiltinResult<Value> {

@@ -17,9 +17,9 @@ pub(in super::super) async fn try_resident_numerator(
     numerator: &GpuTensorHandle,
     denominator: &Value,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let Some(provider) = gpu_helpers::exact_provider_for_handle(numerator) else {
-        return Ok(None);
-    };
+    let provider = gpu_helpers::require_resident_compute_owner(numerator, || {
+        context.provider_contract_error("resident numerator has no exact owning provider")
+    })?;
     let Value::Num(scalar) = denominator else {
         return Ok(None);
     };
@@ -100,9 +100,9 @@ pub(in super::super) async fn try_resident_denominator(
     numerator: &Value,
     denominator: &GpuTensorHandle,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let Some(provider) = gpu_helpers::exact_provider_for_handle(denominator) else {
-        return Ok(None);
-    };
+    let provider = gpu_helpers::require_resident_compute_owner(denominator, || {
+        context.provider_contract_error("resident denominator has no exact owning provider")
+    })?;
     let Value::Num(scalar) = numerator else {
         return Ok(None);
     };

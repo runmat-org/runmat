@@ -135,12 +135,9 @@ async fn cov_builtin(value: Value, rest: crate::call::BuiltinArguments) -> Built
             _ => None,
         })
     {
-        if gpu_helpers::exact_provider_for_handle(handle).is_none() {
-            let mut error =
-                cov_internal_error("cov: resident operand has no exact owning provider");
-            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            return Err(error);
-        }
+        gpu_helpers::require_resident_compute_owner(handle, || {
+            cov_internal_error("cov: resident operand has no exact owning provider")
+        })?;
         handle.allocation_lease().validate_live().map_err(|error| {
             cov_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
                 error,

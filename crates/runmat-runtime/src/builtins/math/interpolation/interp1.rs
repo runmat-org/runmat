@@ -101,6 +101,19 @@ async fn interp1_builtin_registered(
     args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let explicit = args.len() >= 3 && !third_arg_is_option(args.view())?;
+    if args.len() >= 2 {
+        let data = [
+            &args[0],
+            &args[1],
+            if explicit { &args[2] } else { &args[1] },
+        ];
+        gpu_helpers::require_resident_compute_values(&data, false, || {
+            interp1_error_with_message(
+                "interp1: resident input has no exact provider owner",
+                &INTERP1_ERROR_INTERNAL,
+            )
+        })?;
+    }
     let sample_plan = if explicit {
         preflight_interp1_explicit_x(&args[0]).await?;
         Some(
@@ -353,7 +366,7 @@ async fn try_interp1_gpu(
         return Ok(None);
     }
 
-    let provider = gpu_helpers::exact_provider_for_handle(series.y).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(series.y, || {
         interp1_error_with_message(
             "interp1: no acceleration provider owns the resident Y input",
             &INTERP1_ERROR_INTERNAL,

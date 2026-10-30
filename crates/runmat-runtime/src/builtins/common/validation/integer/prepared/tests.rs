@@ -104,6 +104,9 @@ impl runmat_accelerate_api::AccelProvider for CountedIntegerOwner {
         handle: &'a runmat_accelerate_api::GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
         self.numeric_downloads.fetch_add(1, Ordering::SeqCst);
+        if self.fail_download {
+            return Box::pin(async { anyhow::bail!("injected integer download failure") });
+        }
         self.inner.download_numeric(handle)
     }
 }
@@ -266,7 +269,8 @@ fn resident_wide_payload_is_retained_after_one_download_and_source_stays_live() 
     let prepared = futures::executor::block_on(prepare_direct_integer_f64_boundary(&source, None))
         .expect("resident preparation");
     assert!(!prepared.is_exact());
-    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.numeric_downloads.load(Ordering::SeqCst), 1);
     assert_eq!(
         prepared
             .resident_payload()
@@ -282,7 +286,8 @@ fn resident_wide_payload_is_retained_after_one_download_and_source_stays_live() 
     ));
     assert!(std::ptr::eq(prepared.source(), &source));
     drop(prepared);
-    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.numeric_downloads.load(Ordering::SeqCst), 1);
     assert!(futures::executor::block_on(provider.download_integer(&handle)).is_ok());
     handle.release().expect("release source");
 }
@@ -309,7 +314,8 @@ fn resident_provider_failure_keeps_original_cause_and_source_lease() {
         .to_string()
         .contains("injected integer download failure")));
     assert_eq!(failure.gpu_gather_retry, GpuGatherRetry::Never);
-    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.numeric_downloads.load(Ordering::SeqCst), 1);
     assert!(futures::executor::block_on(provider.inner.download_integer(&handle)).is_ok());
     handle.release().unwrap();
 }

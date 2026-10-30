@@ -12,6 +12,9 @@ pub(super) fn select_binary_source(
     values: [&Value; 2],
     builtin: &str,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
+    gpu_helpers::require_resident_compute_values(&values, true, || {
+        errors::execution(builtin, "no provider owns the resident operands")
+    })?;
     gpu_helpers::select_resident_output_source(
         values.into_iter().filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
@@ -25,6 +28,9 @@ pub(super) fn select_unary_source(
     value: &Value,
     builtin: &str,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
+    gpu_helpers::require_resident_compute_values(&[value], false, || {
+        errors::execution(builtin, "no provider owns the resident operand")
+    })?;
     gpu_helpers::select_resident_output_source(
         match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
@@ -43,10 +49,12 @@ pub(super) fn binary_hook(
     if !floating_real(lhs) || !floating_real(rhs) || lhs.device_id() != rhs.device_id() {
         return Ok(None);
     }
-    let owner = gpu_helpers::exact_provider_for_handle(lhs)
-        .ok_or_else(|| errors::execution(builtin, "no provider owns the left operand"))?;
-    let rhs_owner = gpu_helpers::exact_provider_for_handle(rhs)
-        .ok_or_else(|| errors::execution(builtin, "no provider owns the right operand"))?;
+    let owner = gpu_helpers::require_resident_compute_owner(lhs, || {
+        errors::execution(builtin, "no provider owns the left operand")
+    })?;
+    let rhs_owner = gpu_helpers::require_resident_compute_owner(rhs, || {
+        errors::execution(builtin, "no provider owns the right operand")
+    })?;
     if !runmat_accelerate_api::same_provider_instance(owner, rhs_owner)
         || runmat_accelerate_api::handle_precision(lhs)
             != runmat_accelerate_api::handle_precision(rhs)
@@ -79,8 +87,9 @@ pub(super) fn unary_hook(input: &GpuTensorHandle, builtin: &str) -> BuiltinResul
     if !floating_real(input) {
         return Ok(None);
     }
-    let owner = gpu_helpers::exact_provider_for_handle(input)
-        .ok_or_else(|| errors::execution(builtin, "no provider owns the input operand"))?;
+    let owner = gpu_helpers::require_resident_compute_owner(input, || {
+        errors::execution(builtin, "no provider owns the input operand")
+    })?;
     let mut output = match owner.logical_not(input) {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => return Ok(None),

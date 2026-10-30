@@ -171,6 +171,11 @@ async fn evaluate_requested(
         return Err(polyfit_argument_error("polyfit: too many input arguments"));
     }
     let deg = parse_degree(&degree)?;
+    gpu_helpers::require_resident_compute_values(
+        &[&x, &y, rest.first().unwrap_or(&x)],
+        false,
+        || polyfit_internal_error("polyfit: no exact owner for resident input"),
+    )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&x, "polyfit")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&y, "polyfit")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&degree, "polyfit")?;
@@ -290,11 +295,16 @@ async fn try_gpu_polyfit(
         degree,
         outputs,
     )?;
-    let provider = gpu_helpers::exact_provider_for_handle(x_handle)
-        .ok_or_else(|| polyfit_internal_error("polyfit: no exact owner for resident input"))?;
+    gpu_helpers::require_resident_compute_owners(&inputs, false, || {
+        polyfit_internal_error("polyfit: no exact owner for resident input")
+    })?;
+    let provider = gpu_helpers::require_resident_compute_owner(x_handle, || {
+        polyfit_internal_error("polyfit: no exact owner for resident input")
+    })?;
     for input in &inputs {
-        let owner = gpu_helpers::exact_provider_for_handle(input)
-            .ok_or_else(|| polyfit_internal_error("polyfit: no exact owner for resident input"))?;
+        let owner = gpu_helpers::require_resident_compute_owner(input, || {
+            polyfit_internal_error("polyfit: no exact owner for resident input")
+        })?;
         if !runmat_accelerate_api::same_provider_instance(owner, provider)
             || input.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
             || runmat_accelerate_api::handle_is_logical(input)

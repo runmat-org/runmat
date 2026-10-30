@@ -12,8 +12,9 @@ use super::{errors, host, BUILTIN_NAME};
 
 pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
     reject_unsupported_storage(&input)?;
-    let provider = gpu_helpers::exact_provider_for_handle(&input)
-        .ok_or_else(|| errors::internal("resident input has no exact owner"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&input, || {
+        errors::internal("resident input has no exact owner")
+    })?;
     match probe_gpu_lower_bound(provider, &input, 0.0).await {
         Ok(GpuLowerBoundResult::Below) => Err(errors::with_detail(
             &REALSQRT_ERROR_DOMAIN,

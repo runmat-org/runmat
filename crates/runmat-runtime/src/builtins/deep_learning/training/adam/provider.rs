@@ -172,6 +172,21 @@ pub(super) fn try_adamupdate_gpu(
         ));
     }
 
+    gpu_helpers::require_resident_compute_owners(
+        &[
+            parameters,
+            gradient,
+            average_grad.unwrap_or(parameters),
+            average_sq_grad.unwrap_or(parameters),
+        ],
+        false,
+        || {
+            deep_learning_error(
+                "adamupdate",
+                "adamupdate: no exact provider owns the optimizer tensors",
+            )
+        },
+    )?;
     let Some(provider) = gpu_helpers::exact_provider_for_handle(parameters) else {
         return Ok(None);
     };

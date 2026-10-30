@@ -47,14 +47,14 @@ async fn gather_one(value: &Value, protected: &[&Value]) -> BuiltinResult<Value>
             _ => None,
         })
         .collect::<Vec<_>>();
-    let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+    runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|_| {
         error::transfer(
             crate::build_runtime_error("discretize: no exact input provider")
                 .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
                 .build(),
         )
     })?;
-    gpu_helpers::download_value_preserving_residency_async(owner, handle)
+    gpu_helpers::gather_value_async(value)
         .await
         .map_err(error::transfer)
 }

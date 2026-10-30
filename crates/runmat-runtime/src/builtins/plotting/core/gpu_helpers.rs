@@ -100,7 +100,12 @@ pub(crate) fn prepare_shared_wgpu_context(
     inputs: &[&GpuTensorHandle],
     name: &'static str,
 ) -> BuiltinResult<Option<SharedWgpuContext>> {
+    use crate::builtins::common::gpu_helpers::{
+        resolve_resident_compute_owner, ResidentComputeDecline,
+    };
     let mut owner = None;
+    let mut policy_denied = false;
+    let mut different_owners = false;
     for input in inputs {
         input.allocation_lease().validate_live().map_err(|source| {
             crate::runtime_error::with_provider_execution_source(
@@ -108,20 +113,51 @@ pub(crate) fn prepare_shared_wgpu_context(
                 runmat_accelerate_api::ProviderExecutionError::from_source(source),
             )
         })?;
-        let current = runmat_accelerate_api::provider_for_handle(input).ok_or_else(|| {
-            preparation_failure(
-                plotting_error(name, format!("{name}: no provider owns plotting input")),
-                name,
-                false,
-            )
-        })?;
+        let current = match resolve_resident_compute_owner(input) {
+            Ok(owner) => owner,
+            Err(ResidentComputeDecline::PolicyDenied) => {
+                policy_denied = true;
+                // Check every source before choosing the existing host route.
+                // A sibling's invalid lease/assignment must not be concealed.
+                continue;
+            }
+            Err(decline) => {
+                return Err(preparation_failure(
+                    decline.with_domain_error(plotting_error(
+                        name,
+                        format!("{name}: no valid provider owns plotting input"),
+                    )),
+                    name,
+                    false,
+                ));
+            }
+        };
         if let Some(previous) = owner {
             if !runmat_accelerate_api::same_provider_instance(previous, current) {
-                return Ok(None);
+                different_owners = true;
             }
         } else {
             owner = Some(current);
         }
+    }
+    if policy_denied {
+        if crate::context::current_acceleration_policy()
+            .is_some_and(|policy| policy.allow_host_fallback)
+        {
+            // Optional GPU preparation has not exported a buffer or mutated a
+            // figure. Its caller owns the normal host data/preparation route;
+            // do not request replay of an outer plotting invocation.
+            return Ok(None);
+        }
+        let mut error = ResidentComputeDecline::PolicyDenied.with_domain_error(plotting_error(
+            name,
+            format!("{name}: invocation policy forbids GPU preparation and host fallback"),
+        ));
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(error);
+    }
+    if different_owners {
+        return Ok(None);
     }
     let Some(owner) = owner else {
         return Ok(None);
@@ -244,6 +280,58 @@ pub async fn gpu_xyz_bounds_async(
 mod tests {
     use super::*;
     use runmat_value::{IntegerStorage, NumericStorage};
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn optional_rendering_admission_separates_policy_decline_from_invalid_owner() {
+        use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
+        runmat_gc::gc_test_context(|| {
+            let provider = Box::leak(Box::new(
+                runmat_accelerate::simple_provider::InProcessProvider::new(),
+            ));
+            let _provider = ThreadProviderGuard::set(Some(provider));
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1., 2.],
+                    shape: &[2, 1],
+                })
+                .unwrap();
+            let context = |fallback| {
+                crate::context::RuntimeContext::new(std::rc::Rc::new(
+                    crate::execution::RuntimeExecutionService::new(),
+                ))
+                .with_acceleration_policy(
+                    crate::context::RuntimeAccelerationPolicy {
+                        enabled: false,
+                        provider: crate::context::RuntimeProviderPreference::Auto,
+                        automatic_offload: false,
+                        allow_host_fallback: fallback,
+                        calibrate: false,
+                    },
+                )
+            };
+            for fallback in [true, false] {
+                let runtime = context(fallback);
+                let _scope = runtime.enter();
+                let result = prepare_shared_wgpu_context(&[&input], "plot");
+                if fallback {
+                    assert!(result.unwrap().is_none());
+                } else {
+                    let error = result
+                        .err()
+                        .expect("strict policy must not choose host work");
+                    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                }
+            }
+            let other = Box::leak(Box::new(
+                runmat_accelerate::simple_provider::InProcessProvider::new(),
+            ));
+            let _other = ThreadProviderGuard::set(Some(other));
+            let runtime = context(true);
+            let _scope = runtime.enter();
+            assert!(prepare_shared_wgpu_context(&[&input], "plot").is_err());
+        });
+    }
 
     #[test]
     fn value_to_scalar_reads_authoritative_single_and_integer_storage() {

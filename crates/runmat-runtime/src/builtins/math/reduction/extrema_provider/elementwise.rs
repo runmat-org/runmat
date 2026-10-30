@@ -184,7 +184,7 @@ impl ExtremaKind {
         scalar: f64,
         scalar_left: bool,
     ) -> BuiltinResult<Option<GpuTensorHandle>> {
-        let provider = self.owner(input)?;
+        let provider = self.compute_owner(input)?;
         self.scalar_values_with_owner(provider, input, other, scalar, scalar_left, None)
             .await
     }

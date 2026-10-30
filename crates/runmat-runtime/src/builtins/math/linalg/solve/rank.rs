@@ -164,7 +164,10 @@ async fn rank_builtin(value: Value, rest: crate::call::BuiltinArguments) -> Buil
 }
 
 async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
-    let owner = gpu_helpers::exact_provider_for_handle(&handle);
+    let owner = Some(gpu_helpers::require_resident_compute_owner(
+        &handle,
+        || internal_error("rank: resident input has no exact owning provider"),
+    )?);
     if runmat_accelerate_api::handle_integer_type(&handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(&handle)
     {

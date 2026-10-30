@@ -44,8 +44,9 @@ pub(super) fn reshape(
             });
     }
 
-    let provider = gpu_helpers::exact_provider_for_handle(&source)
-        .ok_or_else(|| error("no acceleration provider owns the lazy-layout input"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&source, || {
+        error("no acceleration provider owns the lazy-layout input")
+    })?;
     let mut output = provider.reshape(&source, shape).map_err(|cause| {
         crate::build_runtime_error(format!("{builtin}: layout materialization failed: {cause}"))
             .with_builtin(builtin)

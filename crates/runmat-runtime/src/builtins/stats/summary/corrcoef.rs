@@ -103,6 +103,12 @@ async fn corrcoef_builtin(
     let _argument_sources = rest.fork();
     let args = CorrcoefArgs::parse(value, rest)?;
     ensure_corrcoef_extensions(&args)?;
+    if crate::output_count::current_output_count() != Some(0) {
+        let values = [&args.first, args.second.as_ref().unwrap_or(&args.first)];
+        gpu_helpers::require_resident_compute_values(&values, false, || {
+            corrcoef_internal_error("corrcoef: resident operand has no exact owning provider")
+        })?;
+    }
     admit_corrcoef_inputs(&args)?;
     let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
     let requested_outputs = crate::output_count::current_output_count();

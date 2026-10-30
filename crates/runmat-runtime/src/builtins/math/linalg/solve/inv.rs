@@ -123,7 +123,7 @@ async fn inv_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         inv_error_with_message(
             "inv: no acceleration provider owns the input handle",
             &INV_ERROR_INTERNAL,

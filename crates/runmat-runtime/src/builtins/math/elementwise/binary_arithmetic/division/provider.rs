@@ -18,6 +18,9 @@ pub(super) async fn try_pair(
     numerator: &GpuTensorHandle,
     denominator: &GpuTensorHandle,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
+    gpu_helpers::require_resident_compute_owners(&[numerator, denominator], false, || {
+        context.provider_contract_error("resident inputs require one exact owning provider")
+    })?;
     let Some(provider) = common_owner(numerator, denominator) else {
         return Ok(None);
     };

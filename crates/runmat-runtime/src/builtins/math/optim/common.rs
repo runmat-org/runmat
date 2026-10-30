@@ -340,7 +340,7 @@ pub(crate) fn preflight_scalar_operand(
                 .with_gpu_gather_retry(GpuGatherRetry::Never)
                 .build()
             })?;
-            if crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none() {
+            if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err() {
                 return Err(invalid("has no owning provider"));
             }
             let element =

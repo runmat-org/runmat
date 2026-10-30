@@ -15,11 +15,14 @@ pub(crate) mod host_upload;
 mod managed_download;
 pub(crate) mod query_metadata;
 mod residency_cleanup;
-pub(crate) use managed_download::download_value_preserving_residency_in_context;
 pub use managed_download::{
     adopt_settled_native_download, download_exact_native, download_exact_native_readback,
     quote_exact_native_download, quote_exact_native_readback, ExactDownloadFailure,
     ExactDownloadPhase, ExactNativeDownloadQuote,
+};
+pub(crate) use managed_download::{
+    download_readback_value_in_context, download_readback_value_with_admission_in_context,
+    download_value_preserving_residency_in_context,
 };
 pub(crate) mod complex_transfer;
 pub use complex_transfer::native_complex_upload_workspace;
@@ -95,34 +98,28 @@ impl ResidentComputeDecline {
 
 /// Used only at canonical resident compute ingress, before provider effects.
 /// A readback capability proves that data egress is legal without granting
-/// compute. Inspecting the retained registry never substitutes an ambient owner.
+/// compute. Capability metadata proves the exact registered or scoped-thread
+/// owner; a failed compute lookup alone is never evidence of policy denial.
 pub fn resolve_resident_compute_owner(
     handle: &GpuTensorHandle,
 ) -> Result<&'static dyn AccelProvider, ResidentComputeDecline> {
-    runmat_accelerate_api::numeric_readback_for_handle(handle)
+    let readback = runmat_accelerate_api::numeric_readback_for_handle(handle)
         .map_err(|_| ResidentComputeDecline::InvalidOwner)?;
     if let Some(provider) = exact_provider_for_handle(handle) {
         return Ok(provider);
     }
-    let mut after = None;
-    while let Some((device, provider)) = runmat_accelerate_api::next_registered_provider(after) {
-        if device == handle.device_id() {
-            return Err(
-                if crate::context::current_acceleration_policy()
-                    .is_some_and(|policy| !policy.permits_provider(provider))
-                {
-                    ResidentComputeDecline::PolicyDenied
-                } else {
-                    ResidentComputeDecline::InvalidOwner
-                },
-            );
-        }
-        if device > handle.device_id() {
-            break;
-        }
-        after = Some(device);
-    }
-    Err(ResidentComputeDecline::InvalidOwner)
+    let has_wgpu_access = readback
+        .owner_has_wgpu_access()
+        .map_err(|_| ResidentComputeDecline::InvalidOwner)?;
+    Err(
+        if crate::context::current_acceleration_policy()
+            .is_some_and(|policy| !policy.permits_provider_metadata(has_wgpu_access))
+        {
+            ResidentComputeDecline::PolicyDenied
+        } else {
+            ResidentComputeDecline::InvalidOwner
+        },
+    )
 }
 
 pub fn require_resident_compute_owner(
@@ -130,6 +127,70 @@ pub fn require_resident_compute_owner(
     error: impl FnOnce() -> crate::RuntimeError,
 ) -> crate::BuiltinResult<&'static dyn AccelProvider> {
     resolve_resident_compute_owner(handle).map_err(|decline| decline.with_domain_error(error()))
+}
+
+/// Validate the complete pre-effect source set before admitting migration.
+/// Integrity/assignment errors (including a required same-owner mismatch)
+/// dominate a policy decline on any sibling. No input or provider is cloned.
+pub fn require_resident_compute_owners(
+    handles: &[&GpuTensorHandle],
+    require_same_owner: bool,
+    error: impl FnOnce() -> crate::RuntimeError,
+) -> crate::BuiltinResult<()> {
+    require_resident_compute_set(handles.iter().copied(), require_same_owner, error)
+}
+
+/// Direct admitted data roles only; container/identity inspection is not a
+/// compute ingress and deliberately does not use this bridge.
+pub fn require_resident_compute_values(
+    values: &[&Value],
+    require_same_owner: bool,
+    error: impl FnOnce() -> crate::RuntimeError,
+) -> crate::BuiltinResult<()> {
+    require_resident_compute_value_iter(values.iter().copied(), require_same_owner, error)
+}
+
+pub fn require_resident_compute_value_iter<'a>(
+    values: impl Iterator<Item = &'a Value>,
+    require_same_owner: bool,
+    error: impl FnOnce() -> crate::RuntimeError,
+) -> crate::BuiltinResult<()> {
+    require_resident_compute_set(
+        values.filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        }),
+        require_same_owner,
+        error,
+    )
+}
+
+fn require_resident_compute_set<'a>(
+    handles: impl Iterator<Item = &'a GpuTensorHandle>,
+    require_same_owner: bool,
+    error: impl FnOnce() -> crate::RuntimeError,
+) -> crate::BuiltinResult<()> {
+    let mut policy_denied = false;
+    let mut invalid = false;
+    let mut first_device = None;
+    for handle in handles {
+        match resolve_resident_compute_owner(handle) {
+            Ok(_) => {}
+            Err(ResidentComputeDecline::InvalidOwner) => invalid = true,
+            Err(ResidentComputeDecline::PolicyDenied) => policy_denied = true,
+        }
+        if require_same_owner && first_device.is_some_and(|first| first != handle.device_id()) {
+            invalid = true;
+        }
+        first_device.get_or_insert(handle.device_id());
+    }
+    if invalid {
+        Err(ResidentComputeDecline::InvalidOwner.with_domain_error(error()))
+    } else if policy_denied {
+        Err(ResidentComputeDecline::PolicyDenied.with_domain_error(error()))
+    } else {
+        Ok(())
+    }
 }
 
 /// Resolve one exact owner for two resident operands.
@@ -159,19 +220,26 @@ pub fn select_resident_output_source(
     handles: impl IntoIterator<Item = GpuTensorHandle>,
     builtin: &str,
 ) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
-    let mut selected: Option<(GpuTensorHandle, &'static dyn AccelProvider)> = None;
+    let mut selected: Option<GpuTensorHandle> = None;
     for handle in handles {
-        let owner = exact_provider_for_handle(&handle).ok_or_else(|| {
+        let ownership_error = |source: anyhow::Error| {
             build_runtime_error(format!(
                 "{builtin}: no acceleration provider owns a resident input"
             ))
             .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .with_source(runmat_accelerate_api::ProviderExecutionError::from(source))
             .build()
-        })?;
-        if let Some((current, current_owner)) = &selected {
+        };
+        let readback =
+            runmat_accelerate_api::numeric_readback_for_handle(&handle).map_err(ownership_error)?;
+        if let Some(current) = &selected {
+            let current_readback = runmat_accelerate_api::numeric_readback_for_handle(current)
+                .map_err(ownership_error)?;
             if current.device_id() != handle.device_id()
-                || !runmat_accelerate_api::same_provider_instance(*current_owner, owner)
+                || !current_readback
+                    .same_owner(&readback)
+                    .map_err(ownership_error)?
             {
                 return Err(build_runtime_error(format!(
                     "{builtin}: resident inputs must share one owning provider"
@@ -183,13 +251,13 @@ pub fn select_resident_output_source(
             if !runmat_accelerate_api::handle_is_explicit(current)
                 && runmat_accelerate_api::handle_is_explicit(&handle)
             {
-                selected = Some((handle, owner));
+                selected = Some(handle);
             }
         } else {
-            selected = Some((handle, owner));
+            selected = Some(handle);
         }
     }
-    Ok(selected.map(|(handle, _)| handle))
+    Ok(selected)
 }
 
 pub use runmat_accelerate_api::ResidencyRestoreGuard;

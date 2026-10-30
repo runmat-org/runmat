@@ -91,6 +91,15 @@ impl ExtremaKind {
             .ok_or_else(|| self.contract_error("resident input has no exact owning provider"))
     }
 
+    pub(super) fn compute_owner(
+        self,
+        input: &GpuTensorHandle,
+    ) -> BuiltinResult<&'static dyn AccelProvider> {
+        gpu_helpers::require_resident_compute_owner(input, || {
+            self.contract_error("resident input has no exact owning provider")
+        })
+    }
+
     pub(super) fn optional<T, E: Into<runmat_accelerate_api::ProviderExecutionError>>(
         self,
         operation: &str,
@@ -132,7 +141,7 @@ impl ExtremaKind {
         dimension: usize,
         demand: ExtremaDemand,
     ) -> BuiltinResult<Option<ExtremaResult>> {
-        let provider = self.owner(input)?;
+        let provider = self.compute_owner(input)?;
         // The dimensional provider hooks implement real extrema only. Complex
         // magnitude/phase selection belongs to the owning host comparator.
         if input.physical().storage() == GpuTensorStorage::ComplexInterleaved {
@@ -250,8 +259,11 @@ impl ExtremaKind {
         left: &GpuTensorHandle,
         right: &GpuTensorHandle,
     ) -> BuiltinResult<Option<&'static dyn AccelProvider>> {
-        let left_owner = self.owner(left)?;
-        let right_owner = self.owner(right)?;
+        gpu_helpers::require_resident_compute_owners(&[left, right], false, || {
+            self.contract_error("resident input has no exact owning provider")
+        })?;
+        let left_owner = self.compute_owner(left)?;
+        let right_owner = self.compute_owner(right)?;
         // The existing mixed-provider route gathers each input through its
         // own provider. Never dispatch one owner's allocation to the other.
         Ok(

@@ -10,7 +10,7 @@ pub(in crate::builtins::math::linalg::ops) fn owner(
     input: &GpuTensorHandle,
     error: ErrorMapper,
 ) -> BuiltinResult<&'static dyn AccelProvider> {
-    let provider = gpu_helpers::exact_provider_for_handle(input).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(input, || {
         error(anyhow::anyhow!(
             "resident input has no exact owning provider"
         ))

@@ -265,6 +265,9 @@ pub async fn evaluate(
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => {
+            gpu_helpers::require_resident_compute_owner(&handle, || {
+                lu_internal_error("lu: no exact owner for resident input")
+            })?;
             if let Some(eval) = evaluate_gpu(&handle, pivot_mode).await? {
                 return Ok(eval);
             }

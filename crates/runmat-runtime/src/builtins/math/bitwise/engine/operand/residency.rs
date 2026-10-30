@@ -33,6 +33,13 @@ impl<T> AdmittedBuffer<T> {
         match self {
             Self::Host(value) => Ok(value),
             Self::Resident(handle) => {
+                gpu_helpers::require_resident_compute_owner(&handle, || {
+                    error_with_detail(
+                        name,
+                        &ERROR_INVALID_INPUT,
+                        "no provider owns the resident operand",
+                    )
+                })?;
                 let value = gpu_helpers::gather_tensor_async(&handle)
                     .await
                     .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))?;
@@ -85,7 +92,7 @@ pub(super) fn admit_resident(
             "resident bitwise operands require explicit real storage",
         ));
     }
-    if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+    if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err() {
         return Err(error_with_detail(
             name,
             &ERROR_INVALID_INPUT,

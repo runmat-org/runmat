@@ -45,6 +45,9 @@ impl RealGpuOperand {
     ) -> BuiltinResult<Self> {
         match value {
             RealOperand::Resident(handle) => {
+                // The binary root already fenced every original source before
+                // uploading either operand. This later integrity check must
+                // never grant a whole-call retry after a sibling upload.
                 let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
                     error(
                         &COMPLEX_ERROR_INVALID_INPUT,

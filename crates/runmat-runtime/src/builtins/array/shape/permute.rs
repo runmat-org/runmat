@@ -385,7 +385,7 @@ pub(crate) async fn permute_gpu(
             );
         }
     }
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         permute_error(
             builtin,
             format!("{builtin}: no acceleration provider owns the input handle"),

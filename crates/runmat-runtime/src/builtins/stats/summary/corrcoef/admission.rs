@@ -144,7 +144,7 @@ pub(super) fn admit_corrcoef_inputs(args: &CorrcoefArgs) -> BuiltinResult<()> {
             _ => None,
         })
     {
-        if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+        if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err() {
             let mut error =
                 corrcoef_internal_error("corrcoef: resident operand has no exact owning provider");
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;

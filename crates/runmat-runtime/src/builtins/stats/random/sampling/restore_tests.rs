@@ -111,4 +111,55 @@ fn resident_restore_failure_retains_cause_and_consumes_rng_exactly_once() {
         futures::executor::block_on(provider.download(&source)).is_ok(),
         "borrowed source must remain live"
     );
+
+    // Both policy changes publish automatic results on the host without a
+    // restore attempt or a second draw. Explicit residency remains strict and
+    // must be rejected before the stream is consumed.
+    use crate::context::{RuntimeAccelerationPolicy, RuntimeContext, RuntimeProviderPreference};
+    for (enabled, preference) in [
+        (false, RuntimeProviderPreference::Auto),
+        (true, RuntimeProviderPreference::InProcess),
+    ] {
+        let runtime = RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_acceleration_policy(RuntimeAccelerationPolicy {
+            enabled,
+            provider: preference,
+            automatic_offload: false,
+            allow_host_fallback: true,
+            calibrate: false,
+        });
+        let _scope = runtime.enter();
+        random::reset_rng();
+        let output = futures::executor::block_on(randsample::randsample_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(source.clone()),
+                Value::Num(3.0),
+            ]),
+        ))
+        .unwrap();
+        assert!(!matches!(output, Value::GpuTensor(_)));
+        assert_eq!(provider.restore_attempts.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            random::snapshot().unwrap().state,
+            expected_after_one_sample.state
+        );
+
+        random::reset_rng();
+        let before_explicit = random::snapshot().unwrap();
+        let explicit = source
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        let error = futures::executor::block_on(randsample::randsample_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(explicit),
+                Value::Num(3.0),
+            ]),
+        ))
+        .unwrap_err();
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_eq!(random::snapshot().unwrap().state, before_explicit.state);
+        assert_eq!(provider.restore_attempts.load(Ordering::Relaxed), 1);
+    }
 }

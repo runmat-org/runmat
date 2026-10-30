@@ -508,10 +508,22 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
 async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let owner = gpu_helpers::exact_provider_for_handle(&handle)
-                .ok_or_else(|| polyval_error("polyval: no exact owner for resident points"))?;
-            let host =
-                gpu_helpers::download_value_preserving_residency_async(owner, &handle).await?;
+            let readback =
+                runmat_accelerate_api::numeric_readback_for_handle(&handle).map_err(|source| {
+                    let mut error = crate::runtime_error::with_provider_execution_source(
+                        polyval_error("polyval: no exact owner for resident points"),
+                        source.into(),
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
+                })?;
+            let runtime = crate::context::legacy::active();
+            let host = gpu_helpers::download_readback_value_in_context(runtime.as_ref(), &readback)
+                .await
+                .map_err(|mut error| {
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
+                })?;
             let (array, _) = convert_points(host).await?;
             Ok((array, true))
         }

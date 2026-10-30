@@ -65,21 +65,23 @@ pub(super) fn admit_real_resident(
 
 // Provider availability is an execution precondition, not source-language
 // numeric admission. Check it only after pure operand-pair errors are resolved.
-pub(super) fn require_resident_provider(
-    value: &Value,
+pub(super) fn require_resident_pair(
+    lhs: &Value,
+    rhs: &Value,
     builtin: &str,
     error: &'static runmat_builtins::BuiltinErrorDescriptor,
 ) -> BuiltinResult<()> {
-    if let Value::GpuTensor(handle) = value {
-        if crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none() {
-            return Err(super::unary::error_with_detail(
+    crate::builtins::common::gpu_helpers::require_resident_compute_values(
+        &[lhs, rhs],
+        false,
+        || {
+            super::unary::error_with_detail(
                 builtin,
                 error,
                 "expected an owned real numeric resident input",
-            ));
-        }
-    }
-    Ok(())
+            )
+        },
+    )
 }
 
 pub(super) async fn gather_real(

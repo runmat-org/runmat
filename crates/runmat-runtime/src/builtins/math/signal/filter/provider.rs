@@ -100,6 +100,15 @@ pub(super) async fn try_filter_gpu(
         }
         None | Some(_) => return Ok(None),
     };
+    if let Some(initial) = args.initial.gpu_handle.as_ref() {
+        gpu_helpers::require_resident_compute_owners(&[signal, initial], false, || {
+            filter_error(&FILTER_ERROR_INTERNAL)
+        })?;
+    } else {
+        gpu_helpers::require_resident_compute_owner(signal, || {
+            filter_error(&FILTER_ERROR_INTERNAL)
+        })?;
+    }
     let Some(provider) = gpu_helpers::exact_provider_for_handle(signal) else {
         return Ok(None);
     };

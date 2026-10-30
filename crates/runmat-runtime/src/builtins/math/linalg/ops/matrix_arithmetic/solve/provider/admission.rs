@@ -11,6 +11,15 @@ pub(super) fn select_provider(
     lhs: &Value,
     rhs: &Value,
 ) -> BuiltinResult<Option<&'static dyn AccelProvider>> {
+    gpu_helpers::require_resident_compute_values(&[lhs, rhs], false, || {
+        errors::internal(
+            orientation,
+            format!(
+                "{}: resident input has no exact provider owner",
+                orientation.name()
+            ),
+        )
+    })?;
     let source = gpu_helpers::select_resident_output_source(
         [lhs, rhs].into_iter().filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
@@ -22,7 +31,7 @@ pub(super) fn select_provider(
     let Some(source) = source else {
         return Ok(None);
     };
-    let provider = gpu_helpers::exact_provider_for_handle(&source).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&source, || {
         errors::internal(
             orientation,
             format!(

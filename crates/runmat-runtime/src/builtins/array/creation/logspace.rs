@@ -117,24 +117,83 @@ async fn logspace_builtin(
 }
 
 struct SourceResidency {
-    owner: &'static dyn runmat_accelerate_api::AccelProvider,
     explicit: bool,
     handles: Vec<runmat_accelerate_api::GpuTensorHandle>,
+}
+
+impl SourceResidency {
+    fn compute_owner(
+        &self,
+    ) -> crate::BuiltinResult<Option<&'static dyn runmat_accelerate_api::AccelProvider>> {
+        use gpu_helpers::ResidentComputeDecline;
+        let invalid = || {
+            terminal_gpu_error(
+                "logspace: no exact owner for GPU scalar input",
+                &LOGSPACE_ERRORS[4],
+            )
+        };
+        // Only immutable handle/lease metadata is retained between scalar
+        // readback and publication. Reauthenticate every original source.
+        for handle in &self.handles {
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|_| invalid())?;
+        }
+        let handle = self.handles.first().ok_or_else(invalid)?;
+        match gpu_helpers::resolve_resident_compute_owner(handle) {
+            Ok(owner) => Ok(Some(owner)),
+            Err(ResidentComputeDecline::PolicyDenied) => Ok(None),
+            Err(ResidentComputeDecline::InvalidOwner) => Err(invalid()),
+        }
+    }
+}
+
+fn sequence_provider(
+    source: Option<&SourceResidency>,
+) -> crate::BuiltinResult<Option<&'static dyn runmat_accelerate_api::AccelProvider>> {
+    match source {
+        Some(source) => source.compute_owner(),
+        None => Ok(runmat_accelerate_api::provider()),
+    }
 }
 
 fn merge_source_owners(
     lhs: Option<SourceResidency>,
     rhs: Option<SourceResidency>,
 ) -> crate::BuiltinResult<Option<SourceResidency>> {
-    match (lhs, rhs) {
-        (Some(lhs), Some(rhs))
-            if !runmat_accelerate_api::same_provider_instance(lhs.owner, rhs.owner) =>
-        {
-            Err(terminal_gpu_error(
+    // Reauthenticate both original sources before comparing retained owner
+    // facade identity. No compute provider escapes this metadata check.
+    for source in [lhs.as_ref(), rhs.as_ref()].into_iter().flatten() {
+        for handle in &source.handles {
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|_| {
+                terminal_gpu_error(
+                    "logspace: no exact owner for GPU scalar input",
+                    &LOGSPACE_ERRORS[4],
+                )
+            })?;
+        }
+    }
+    if let (Some(lhs), Some(rhs)) = (lhs.as_ref(), rhs.as_ref()) {
+        let invalid = || {
+            terminal_gpu_error(
+                "logspace: no exact owner for GPU scalar input",
+                &LOGSPACE_ERRORS[4],
+            )
+        };
+        let lhs = runmat_accelerate_api::numeric_readback_for_handle(
+            lhs.handles.first().ok_or_else(invalid)?,
+        )
+        .map_err(|_| invalid())?;
+        let rhs = runmat_accelerate_api::numeric_readback_for_handle(
+            rhs.handles.first().ok_or_else(invalid)?,
+        )
+        .map_err(|_| invalid())?;
+        if !lhs.same_owner(&rhs).map_err(|_| invalid())? {
+            return Err(terminal_gpu_error(
                 "logspace: GPU scalar inputs must have the same owning provider",
                 &LOGSPACE_ERRORS[4],
-            ))
+            ));
         }
+    }
+    match (lhs, rhs) {
         (Some(mut lhs), Some(rhs)) => {
             lhs.explicit |= rhs.explicit;
             lhs.handles.extend(rhs.handles);
@@ -202,18 +261,21 @@ async fn parse_scalar(
                     "{name}: endpoints must be single or double scalars"
                 )));
             }
-            let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+            runmat_accelerate_api::numeric_readback_for_handle(&handle).map_err(|_| {
                 terminal_gpu_error(
                     "logspace: no exact owner for GPU scalar input",
                     &LOGSPACE_ERRORS[4],
                 )
             })?;
             let source = Some(SourceResidency {
-                owner,
                 explicit: runmat_accelerate_api::handle_is_explicit(&handle),
                 handles: vec![handle.clone()],
             });
-            match gpu_helpers::download_value_preserving_residency_async(owner, &handle).await? {
+            let gathered = {
+                let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?
+            };
+            match gathered {
                 Value::Tensor(tensor) => {
                     tensor_scalar(name, &tensor).map(|scalar| (scalar, source))
                 }
@@ -367,33 +429,35 @@ async fn build_sequence(
         }
         .map_err(|e| builtin_error(format!("logspace: {e}")))?;
         if let Some(source) = source {
-            match upload_complex_sequence(source.owner, &tensor, precision, &protected) {
-                Ok(handle) => {
-                    if valid_uploaded_sequence_handle(
-                        &handle,
-                        count,
-                        source.owner,
-                        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-                        precision,
-                        Some(source),
-                    ) {
-                        return finalize_sequence_handle(handle, Some(source));
+            if let Some(owner) = source.compute_owner()? {
+                match upload_complex_sequence(owner, &tensor, precision, &protected) {
+                    Ok(handle) => {
+                        if valid_uploaded_sequence_handle(
+                            &handle,
+                            count,
+                            owner,
+                            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                            precision,
+                            Some(source),
+                        ) {
+                            return finalize_sequence_handle(handle, Some(source));
+                        }
+                        return Err(gpu_helpers::reject_gpu_output(
+                            handle,
+                            builtin_error(
+                                "logspace: provider returned malformed complex sequence output",
+                            ),
+                        ));
                     }
-                    return Err(gpu_helpers::reject_gpu_output(
-                        handle,
-                        builtin_error(
-                            "logspace: provider returned malformed complex sequence output",
-                        ),
-                    ));
-                }
-                Err(runmat_accelerate_api::NumericUploadError::Provider(error))
-                    if error.is_unsupported() && !source.explicit => {}
-                Err(error) => {
-                    return Err(sequence_upload_error(
-                        Some(source),
-                        "typed complex sequence upload",
-                        error,
-                    ))
+                    Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                        if error.is_unsupported() && !source.explicit => {}
+                    Err(error) => {
+                        return Err(sequence_upload_error(
+                            Some(source),
+                            "typed complex sequence upload",
+                            error,
+                        ))
+                    }
                 }
             }
             if source.explicit {
@@ -444,10 +508,7 @@ async fn build_sequence(
                 );
             }
         }
-        if let Some(provider) = source
-            .map(|source| source.owner)
-            .or_else(runmat_accelerate_api::provider)
-        {
+        if let Some(provider) = sequence_provider(source)? {
             if !gpu_helpers::real_sequence_upload_feasible(provider, precision, tensor.shape()) {
                 if source.is_some_and(|source| source.explicit) {
                     return Err(terminal_gpu_error(
@@ -562,9 +623,7 @@ fn try_gpu_logspace(
             );
         }
     }
-    let provider = source
-        .map(|source| source.owner)
-        .or_else(runmat_accelerate_api::provider);
+    let provider = sequence_provider(source)?;
     let Some(provider) = provider else {
         return Ok(None);
     };

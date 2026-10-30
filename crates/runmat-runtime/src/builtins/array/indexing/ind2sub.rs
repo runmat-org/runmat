@@ -192,25 +192,13 @@ async fn try_gpu_ind2sub(
     total: usize,
     indices: &Value,
 ) -> crate::BuiltinResult<Option<Value>> {
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-    if !provider.supports_ind2sub() {
-        return Ok(None);
-    }
     let handle = match indices {
         Value::GpuTensor(handle) => handle,
         _ => return Ok(None),
     };
-    let provider = match gpu_helpers::exact_provider_for_handle(handle) {
-        Some(provider) => provider,
-        None => {
-            return Err(ind2sub_provider_error(
-                "ind2sub: no acceleration provider owns the index handle.",
-            ))
-        }
-    };
+    let provider = gpu_helpers::require_resident_compute_owner(handle, || {
+        ind2sub_provider_error("ind2sub: no acceleration provider owns the index handle.")
+    })?;
     if !provider.supports_ind2sub() {
         return Ok(None);
     }

@@ -50,8 +50,9 @@ pub(super) async fn evaluate(
     operation: LogarithmOperation,
     handle: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle)
-        .ok_or_else(|| super::errors::missing_provider(operation))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+        super::errors::missing_provider(operation)
+    })?;
     gpu_helpers::expected_handle_numeric_element_type(&handle).map_err(|_| {
         super::errors::internal(
             operation,

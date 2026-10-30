@@ -25,6 +25,16 @@ pub(super) fn try_meshgrid_gpu_from_vector_axes(
         None => None,
     };
 
+    let invalid_owner = || builtin_error("meshgrid: no exact provider owns the resident axes");
+    if let Some(z) = z_handle {
+        gpu_helpers::require_resident_compute_owners(
+            &[x_handle, y_handle, z],
+            false,
+            invalid_owner,
+        )?;
+    } else {
+        gpu_helpers::require_resident_compute_owners(&[x_handle, y_handle], false, invalid_owner)?;
+    }
     let Some(provider) = gpu_helpers::exact_provider_for_handle(x_handle) else {
         return Ok(None);
     };

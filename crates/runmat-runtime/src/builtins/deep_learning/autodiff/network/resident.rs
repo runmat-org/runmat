@@ -108,8 +108,13 @@ pub(in crate::builtins::deep_learning) fn admit_parents(
     function: &'static str,
 ) -> BuiltinResult<ResidentTapeAdmission> {
     resident_precision(resident)?;
-    crate::builtins::common::gpu_helpers::exact_provider_for_handle(resident)
-        .ok_or_else(|| deep_learning_error(function, "resident network owner retired"))?;
+    crate::builtins::common::gpu_helpers::exact_provider_for_handle(resident).ok_or_else(|| {
+        crate::builtins::common::gpu_helpers::ResidentComputeDecline::InvalidOwner
+            .with_domain_error(deep_learning_error(
+                function,
+                "resident network owner retired",
+            ))
+    })?;
     let input_parent = parent(input)?;
     let mut parameters = HashMap::new();
     for row in model::parameters::view(network, function)? {
@@ -174,7 +179,13 @@ pub(in crate::builtins::deep_learning::autodiff) fn plan_reverse(
     let source = resident_precision(&execution.trace.output)?;
     let provider =
         crate::builtins::common::gpu_helpers::exact_provider_for_handle(&execution.trace.output)
-            .ok_or_else(|| deep_learning_error(function, "dlgradient: resident owner retired"))?;
+            .ok_or_else(|| {
+                crate::builtins::common::gpu_helpers::ResidentComputeDecline::InvalidOwner
+                    .with_domain_error(deep_learning_error(
+                        function,
+                        "dlgradient: resident owner retired",
+                    ))
+            })?;
     let mut cast_budget = cast::CastBudget::default();
     let mut required_parents = HashSet::new();
     let input_cast = if let Some(parent) = execution
@@ -262,7 +273,11 @@ pub(in crate::builtins::deep_learning::autodiff) async fn reverse(
     }
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&result.input)
         .ok_or_else(|| {
-        deep_learning_error("dlgradient", "dlgradient: resident owner retired")
+        crate::builtins::common::gpu_helpers::ResidentComputeDecline::InvalidOwner
+            .with_domain_error(deep_learning_error(
+                "dlgradient",
+                "dlgradient: resident owner retired",
+            ))
     })?;
     let mut borrowed = Vec::with_capacity(result.parameters.len() + 2);
     borrowed.push(execution.trace.output.clone());

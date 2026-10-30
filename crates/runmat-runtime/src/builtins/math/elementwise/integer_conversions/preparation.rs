@@ -20,6 +20,13 @@ pub(super) async fn execute(
         let converted = cast_value(value, target).await.map_err(error)?;
         return RootedValue::new(converted).map_err(|cause| cause.into_runtime_error());
     }
+    if let Value::GpuTensor(handle) = &value {
+        crate::builtins::common::gpu_helpers::require_resident_compute_owner(handle, || {
+            error(CastError::Internal(
+                "no acceleration provider owns the input handle".into(),
+            ))
+        })?;
+    }
     execute_invocation(
         runtime,
         BuiltinPreparationAdmission {

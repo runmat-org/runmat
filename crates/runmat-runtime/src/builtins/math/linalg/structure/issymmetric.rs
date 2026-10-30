@@ -154,6 +154,12 @@ async fn issymmetric_gpu(
     mode: SymmetryMode,
     tol: f64,
 ) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        issymmetric_error_with_detail(
+            &ISSYMMETRIC_ERROR_INTERNAL,
+            "no acceleration provider owns the input",
+        )
+    })?;
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let kind = match mode {

@@ -262,7 +262,15 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     {
         return Err(conversion_error("complex"));
     }
-    let provider = gpu_helpers::exact_provider_for_handle(&handle);
+    let provider = Some(gpu_helpers::require_resident_compute_owner(
+        &handle,
+        || {
+            logical_error_with_message(
+                "logical: GPU input has no owning provider",
+                &LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE,
+            )
+        },
+    )?);
 
     if let Some(p) = provider {
         let contains_nan = match provider_input_contains_nan(p, &handle).await? {

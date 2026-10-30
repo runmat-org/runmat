@@ -162,6 +162,12 @@ fn logical_to_tensor(logical: &LogicalArray) -> BuiltinResult<Tensor> {
 }
 
 async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        symrcm_error_with_detail(
+            &SYMRCM_ERROR_INTERNAL,
+            "no acceleration provider owns the input",
+        )
+    })?;
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         match provider.sym_rcm(&handle).await {

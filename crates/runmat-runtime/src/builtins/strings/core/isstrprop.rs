@@ -66,15 +66,17 @@ pub(crate) async fn isstrprop_builtin(
     // before a selected resident input incurs provider work.
     let text = match &text {
         Value::GpuTensor(handle) => {
-            let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-                .ok_or_else(|| {
-                    compat_error(
+            let readback =
+                runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+                    let error = compat_error(
                         "isstrprop",
                         "isstrprop: no provider owns the resident input",
-                    )
+                    );
+                    crate::runtime_error::with_provider_execution_source(error, source.into())
                 })?;
-            crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
-                owner, handle,
+            crate::builtins::common::gpu_helpers::download_readback_value_in_context(
+                runtime.as_ref(),
+                &readback,
             )
             .await?
         }

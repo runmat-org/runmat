@@ -267,7 +267,11 @@ fn zero_for_unconnected_resident_target(target: &Value) -> BuiltinResult<Value> 
         Some(Value::GpuTensor(handle)) => {
             let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
                 .ok_or_else(|| {
-                    deep_learning_error("dlgradient", "dlgradient: target resident owner retired")
+                    crate::builtins::common::gpu_helpers::ResidentComputeDecline::InvalidOwner
+                        .with_domain_error(deep_learning_error(
+                            "dlgradient",
+                            "dlgradient: target resident owner retired",
+                        ))
                 })?;
             let mut zero = provider
                 .fill_like(handle, 0.0)

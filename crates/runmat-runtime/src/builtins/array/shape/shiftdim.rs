@@ -489,7 +489,7 @@ async fn permute_gpu(handle: GpuTensorHandle, order: &[usize]) -> crate::Builtin
         return gpu_helpers::restore_class_preserving_value(&handle, permuted, NAME);
     }
     let logical = runmat_accelerate_api::handle_is_logical(&handle);
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         shiftdim_error(
             &SHIFTDIM_ERROR_UNSUPPORTED_INPUT,
             "shiftdim: no acceleration provider owns the GPU input",

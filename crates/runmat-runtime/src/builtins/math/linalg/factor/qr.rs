@@ -387,6 +387,11 @@ async fn evaluate_with_options(
     request: QrOutputRequest,
 ) -> BuiltinResult<QrEval> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    if let Value::GpuTensor(handle) = &value {
+        gpu_helpers::require_resident_compute_owner(handle, || {
+            qr_internal_error("qr: no exact owner for resident input")
+        })?;
+    }
     if crate::builtins::common::validation::value_has_native_integer_class(&value)
         && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
             .await?
@@ -400,6 +405,9 @@ async fn evaluate_with_options(
             if handle.shape().len() > 2 {
                 return Err(qr_invalid_input("qr: input must be 2-D"));
             }
+            gpu_helpers::require_resident_compute_owner(&handle, || {
+                qr_internal_error("qr: no exact owner for resident input")
+            })?;
             let integer_input = runmat_accelerate_api::handle_integer_type(&handle).is_some();
             if !integer_input {
                 if let Some(eval) = evaluate_gpu(&handle, &options, request).await? {

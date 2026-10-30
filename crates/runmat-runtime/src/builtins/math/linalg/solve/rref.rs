@@ -134,7 +134,23 @@ async fn rref_builtin(value: Value, rest: crate::call::BuiltinArguments) -> Buil
 }
 
 async fn rref_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<RrefEval> {
-    let owner = gpu_helpers::exact_provider_for_handle(&handle);
+    // Automatic host execution need not recreate a device result after the
+    // user disables or switches compute. Explicit output intent stays strict.
+    let owner = match gpu_helpers::resolve_resident_compute_owner(&handle) {
+        Ok(owner) => Some(owner),
+        Err(gpu_helpers::ResidentComputeDecline::PolicyDenied)
+            if !runmat_accelerate_api::handle_is_explicit(&handle) =>
+        {
+            None
+        }
+        Err(decline) => {
+            let mut error = decline.with_domain_error(internal_error(
+                "rref: resident input has no exact owning provider",
+            ));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+    };
     let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(map_control_flow)?;
@@ -143,7 +159,10 @@ async fn rref_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Rr
     if let Value::Tensor(matrix) = &eval.reduced {
         if let Some(provider) = owner {
             let uploaded = gpu_helpers::upload_tensor(provider, matrix).map_err(|err| {
-                internal_error(format!("{NAME}: failed to upload reduced matrix ({err})"))
+                let mut error =
+                    internal_error(format!("{NAME}: failed to upload reduced matrix ({err})"));
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
             })?;
             eval.reduced = Value::GpuTensor(uploaded);
         }

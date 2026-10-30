@@ -324,6 +324,9 @@ async fn try_gpu_linsolve(
             }
         })
         .collect();
+    gpu_helpers::require_resident_compute_owners(&gpu_handles, false, || {
+        builtin_error("linsolve: resident input has no exact owning provider")
+    })?;
     let provider = match gpu_handles
         .first()
         .map(|handle| gpu_helpers::exact_provider_for_handle(handle))

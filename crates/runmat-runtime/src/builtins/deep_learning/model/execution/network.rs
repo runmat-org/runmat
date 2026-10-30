@@ -44,6 +44,7 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
         .build());
     }
     let active_tape = autodiff::tape_is_active();
+    gpu::preflight_network_compute_owners(&plan, resident_input_handle(request.input), function)?;
     if let Some(handle) = resident_input_handle(request.input) {
         let resident_tape_admission = if active_tape {
             Some(autodiff::admit_resident_tape_parents(

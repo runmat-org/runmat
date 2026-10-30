@@ -28,7 +28,7 @@ impl WgpuNumericReadbackSource {
         let access = WgpuDeviceAccess {
             inner: authority.inner.clone(),
         };
-        let owner = crate::provider_registry::get(source.device_id())
+        let owner = crate::numeric_readback::exact_source_owner(source.device_id())
             .ok_or_else(|| anyhow!("numeric readback owner disappeared"))?;
         ensure!(
             provider

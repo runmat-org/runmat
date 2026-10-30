@@ -19,7 +19,7 @@ pub(super) fn validate_binary_resident_inputs(
             continue;
         };
         validate_real_handle(handle)?;
-        let actual_owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+        let actual_owner = gpu_helpers::require_resident_compute_owner(handle, || {
             error(
                 &COMPLEX_ERROR_INTERNAL,
                 "GPU provider unavailable for input",

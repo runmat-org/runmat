@@ -561,7 +561,7 @@ pub(crate) async fn flip_gpu_with(
             format!("{builtin}: dimension indices must be >= 1"),
         ));
     }
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         flip_error_for(
             builtin,
             format!("{builtin}: no acceleration provider owns the input handle"),

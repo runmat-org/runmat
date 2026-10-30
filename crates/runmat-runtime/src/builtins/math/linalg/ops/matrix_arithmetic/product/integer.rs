@@ -19,6 +19,9 @@ pub(super) async fn evaluate(
     lhs: &Value,
     rhs: &Value,
 ) -> crate::BuiltinResult<BuiltinResult<Value>> {
+    gpu_helpers::require_resident_compute_values(&[lhs, rhs], false, || {
+        errors::internal("mtimes: resident input owner was lost")
+    })?;
     let restore_source = gpu_helpers::select_resident_output_source(
         [lhs, rhs].into_iter().filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
@@ -34,5 +37,10 @@ pub(super) async fn evaluate(
     };
     let owner = product_try!(gpu_helpers::exact_provider_for_handle(&source)
         .ok_or_else(|| errors::internal("mtimes: resident input owner was lost")));
-    provider_restore::upload_value_like(owner, result, NAME, &source).map(Ok)
+    provider_restore::upload_value_like(owner, result, NAME, &source)
+        .map(Ok)
+        .map_err(|mut error| {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })
 }

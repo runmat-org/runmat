@@ -419,13 +419,12 @@ async fn range_gpu(
     selection: DimSelection,
     nan_mode: NanMode,
 ) -> crate::BuiltinResult<Value> {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+        builtin_error("range: no acceleration provider owns the input")
+    })?;
     if matches!(nan_mode, NanMode::Omit) {
         return range_gpu_fallback(&handle, selection, nan_mode).await;
     }
-
-    let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
-        return range_gpu_fallback(&handle, selection, nan_mode).await;
-    };
 
     handle
         .allocation_lease()

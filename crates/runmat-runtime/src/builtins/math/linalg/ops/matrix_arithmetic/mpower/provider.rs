@@ -11,12 +11,12 @@ pub(super) async fn try_power(base: &Value, exponent: &Value) -> BuiltinResult<O
     let Value::GpuTensor(base) = base else {
         return Ok(None);
     };
+    let provider = gpu_helpers::require_resident_compute_owner(base, || {
+        super::errors::internal("mpower: resident base has no exact provider owner")
+    })?;
     if !compatible_base(base) {
         return Ok(None);
     }
-    let provider = gpu_helpers::exact_provider_for_handle(base).ok_or_else(|| {
-        super::errors::internal("mpower: resident base has no exact provider owner")
-    })?;
     let Some(exponent) = super::exponent::parse(exponent)? else {
         return Ok(None);
     };

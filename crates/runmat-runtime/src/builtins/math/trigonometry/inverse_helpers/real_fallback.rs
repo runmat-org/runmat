@@ -36,7 +36,7 @@ pub(in crate::builtins::math::trigonometry) async fn compute(
     extension: &'static BuiltinExtensionDescriptor,
     compute: impl FnOnce(Tensor) -> BuiltinResult<Value>,
 ) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         build_runtime_error(format!("{builtin}: GPU input has no owning provider"))
             .with_builtin(builtin)
             .with_identifier(format!("RunMat:{builtin}:Internal"))

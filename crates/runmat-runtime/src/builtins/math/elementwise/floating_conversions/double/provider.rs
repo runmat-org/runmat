@@ -19,7 +19,7 @@ pub(super) async fn double_from_gpu(
 ) -> BuiltinResult<Value> {
     let mut protected = borrowed.to_vec();
     protected.push(&handle);
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         double_error_with_detail(&DOUBLE_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
     let input_element =

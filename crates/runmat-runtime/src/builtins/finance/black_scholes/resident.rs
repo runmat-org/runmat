@@ -58,6 +58,13 @@ pub(super) async fn try_blsprice_gpu(
             _ => None,
         })
         .collect();
+    gpu_helpers::require_resident_compute_owners(&borrowed, false, || {
+        error(
+            BLSPRICE,
+            "blsprice: resident input has no exact owning provider",
+            &ERROR_INTERNAL,
+        )
+    })?;
     let Some(anchor) = borrowed.first() else {
         return Ok(None);
     };

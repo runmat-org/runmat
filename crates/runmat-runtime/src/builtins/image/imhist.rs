@@ -207,13 +207,8 @@ async fn gather_preserving_resident_value(value: &Value) -> BuiltinResult<Value>
     let Value::GpuTensor(handle) = value else {
         return Ok(value.clone());
     };
-    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| internal("no acceleration provider owns the gpuArray input"))?;
     let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(handle);
-    let result = crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
-        owner, handle,
-    )
-    .await;
+    let result = crate::builtins::common::gpu_helpers::gather_value_async(value).await;
     result.map_err(map_flow)
 }
 

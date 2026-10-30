@@ -234,6 +234,9 @@ async fn gpu_structure_predicate(
     predicate: StructurePredicate,
     ctx: BuiltinContext,
 ) -> BuiltinResult<bool> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        runtime_error_with_detail(ctx, ctx.internal, "no acceleration provider owns the input")
+    })?;
     if runmat_accelerate_api::handle_storage(&handle) != GpuTensorStorage::ComplexInterleaved {
         let Some((_rows, _cols)) = matrix_dims_or_false(handle.shape()) else {
             return Ok(false);
@@ -296,6 +299,13 @@ enum MatrixInput {
 impl MatrixInput {
     async fn from_value(value: Value, ctx: BuiltinContext) -> BuiltinResult<Self> {
         if let Value::GpuTensor(handle) = value {
+            gpu_helpers::require_resident_compute_owner(&handle, || {
+                runtime_error_with_detail(
+                    ctx,
+                    ctx.internal,
+                    "no acceleration provider owns the input",
+                )
+            })?;
             return matrix_from_gpu(handle, ctx).await;
         }
         matrix_from_host_value(value, ctx)

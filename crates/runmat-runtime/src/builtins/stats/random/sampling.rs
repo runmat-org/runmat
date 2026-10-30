@@ -898,19 +898,32 @@ pub mod randsample {
             }
             _ => None,
         });
+        // Choose publication before consuming the authoritative RNG stream.
+        // A policy-disabled automatic source publishes the normal host result;
+        // explicit device intent and invalid owners fail before any sampling.
+        let restore_provider = match resident_population.as_ref() {
+            Some(source) => {
+                match crate::builtins::common::gpu_helpers::resolve_resident_compute_owner(source) {
+                    Ok(provider) => Some(provider),
+                    Err(
+                        crate::builtins::common::gpu_helpers::ResidentComputeDecline::PolicyDenied,
+                    ) if !runmat_accelerate_api::handle_is_explicit(source) => None,
+                    Err(decline) => {
+                        let mut error = decline.with_domain_error(sampling_error(
+                            "randsample",
+                            "randsample: resident population owner is unavailable",
+                        ));
+                        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        return Err(error);
+                    }
+                }
+            }
+            None => None,
+        };
         let args = super::parse_randsample_args(args).await?;
         let mut turn = random::acquire_turn(None, "randsample").await?;
         let output = super::randsample_compute(&mut turn, args)?;
-        if let Some(source) = resident_population {
-            let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&source)
-                .ok_or_else(|| {
-                    let mut error = sampling_error(
-                        "randsample",
-                        "randsample: resident population owner is unavailable",
-                    );
-                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                    error
-                })?;
+        if let (Some(source), Some(provider)) = (resident_population, restore_provider) {
             return crate::builtins::common::provider_restore::upload_value_like(
                 provider,
                 output,

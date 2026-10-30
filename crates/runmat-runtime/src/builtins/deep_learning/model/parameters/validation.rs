@@ -95,7 +95,7 @@ pub(in crate::builtins::deep_learning) fn numeric_payload_shape<'a>(
                 && !runmat_accelerate_api::handle_is_logical(handle) =>
         {
             if runmat_accelerate_api::handle_precision(handle).is_none()
-                || crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none()
+                || runmat_accelerate_api::numeric_readback_for_handle(handle).is_err()
             {
                 return Err(deep_learning_error(
                     function,

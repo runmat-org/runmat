@@ -29,8 +29,9 @@ pub(super) async fn execute(
     call: &NumericalCall<'_>,
 ) -> BuiltinResult<Value> {
     // Readback is the declared nnz output boundary, not input-host fallback.
-    let owner = gpu_helpers::exact_provider_for_handle(input)
-        .ok_or_else(|| failure("resident count input has no exact owning provider"))?;
+    let owner = gpu_helpers::require_resident_compute_owner(input, || {
+        failure("resident count input has no exact owning provider")
+    })?;
     input.allocation_lease().validate_live().map_err(|source| {
         crate::build_runtime_error("nnz input allocation is unavailable")
             .with_source(source)

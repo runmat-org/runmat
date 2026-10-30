@@ -219,7 +219,7 @@ async fn null_gpu(handle: GpuTensorHandle, mode: NullMode) -> BuiltinResult<Valu
             "{NAME}: the rational basis option is not supported for gpuArray input"
         )));
     }
-    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let owner = gpu_helpers::require_resident_compute_owner(&handle, || {
         build_runtime_error(format!(
             "{NAME}: no acceleration provider owns the input handle"
         ))

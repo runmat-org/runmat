@@ -188,9 +188,13 @@ async fn parse_scalar(
                     "{name}: endpoints must be single or double scalars"
                 )));
             }
-            let provider = gpu_helpers::exact_provider_for_handle(&handle)
-                .ok_or_else(|| builtin_error(format!("{name}: no provider owns the endpoint")))?;
-            match gpu_helpers::download_value_preserving_residency_async(provider, &handle).await? {
+            runmat_accelerate_api::numeric_readback_for_handle(&handle)
+                .map_err(|_| builtin_error(format!("{name}: no provider owns the endpoint")))?;
+            let gathered = {
+                let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?
+            };
+            match gathered {
                 Value::Tensor(tensor) => {
                     tensor_scalar(name, &tensor).map(|scalar| (scalar, Some(handle)))
                 }

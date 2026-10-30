@@ -27,16 +27,23 @@ pub(super) async fn materialize(value: &Value) -> BuiltinResult<Cow<'_, Value>> 
     let Value::GpuTensor(handle) = value else {
         return Ok(Cow::Borrowed(value));
     };
-    let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
-        build_runtime_error("integral: resident value has no owning provider")
-            .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
-            .with_builtin(NAME)
-            .with_gpu_gather_retry(GpuGatherRetry::Never)
-            .build()
-    })?;
-    let downloaded = gpu_helpers::download_value_preserving_residency_async(owner, handle)
+    let readback =
+        runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+            let error = build_runtime_error("integral: resident value has no owning provider")
+                .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+                .with_builtin(NAME)
+                .with_gpu_gather_retry(GpuGatherRetry::Never)
+                .build();
+            crate::runtime_error::with_provider_execution_source(error, source.into())
+        })?;
+    let runtime = crate::context::legacy::active();
+    let downloaded = gpu_helpers::download_readback_value_in_context(runtime.as_ref(), &readback)
         .await
-        .map_err(|source| integral_map_error(source, &INTEGRAL_ERROR_INVALID_INPUT))?;
+        .map_err(|source| {
+            let mut error = integral_map_error(source, &INTEGRAL_ERROR_INVALID_INPUT);
+            error.gpu_gather_retry = GpuGatherRetry::Never;
+            error
+        })?;
     Ok(Cow::Owned(downloaded))
 }
 

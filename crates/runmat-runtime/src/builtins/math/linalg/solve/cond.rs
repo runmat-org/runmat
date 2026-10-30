@@ -174,7 +174,10 @@ fn ensure_cond_input_policy(value: &Value) -> BuiltinResult<()> {
 }
 
 async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Value> {
-    let maybe_provider = gpu_helpers::exact_provider_for_handle(&handle);
+    let maybe_provider = Some(gpu_helpers::require_resident_compute_owner(
+        &handle,
+        || internal_error("cond: resident input has no exact owning provider"),
+    )?);
 
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))

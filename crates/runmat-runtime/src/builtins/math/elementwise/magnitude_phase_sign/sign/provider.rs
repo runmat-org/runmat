@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         OPERATION.error(&SIGN_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
     if gpu_helpers::expected_handle_numeric_element_type(&handle).is_err() {

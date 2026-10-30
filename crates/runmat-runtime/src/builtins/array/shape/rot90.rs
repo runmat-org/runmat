@@ -393,7 +393,10 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
             );
         }
     }
-    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+        rot90_error_with_message("rot90: no provider owns the input", &ROT90_ERROR_INTERNAL)
+    })?;
+    {
         if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
             if let Some(mut out) = rot90_gpu_via_provider(provider, &handle, steps).await? {
                 out = gpu_helpers::propagate_owned_output_provenance(out, [&handle])?;
@@ -401,9 +404,6 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
             }
         }
     }
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
-        rot90_error_with_message("rot90: no provider owns the input", &ROT90_ERROR_INTERNAL)
-    })?;
     let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
     let rotated = match host {
         Value::Tensor(value) => tensor::tensor_into_value(rot90_tensor(value, steps)?),

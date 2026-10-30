@@ -155,7 +155,7 @@ async fn pinv_builtin(value: Value, rest: crate::call::BuiltinArguments) -> Buil
 }
 
 async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         pinv_error_with_message(
             "pinv: resident input has no exact provider owner",
             &PINV_ERROR_INTERNAL,

@@ -12,8 +12,9 @@ use crate::builtins::common::gpu_helpers;
 use crate::BuiltinResult;
 
 pub(super) async fn value(input: &GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(input)
-        .ok_or_else(|| super::super::errors::class("eps", "GPU input has no owning provider"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(input, || {
+        super::super::errors::class("eps", "GPU input has no owning provider")
+    })?;
     let precision = runmat_accelerate_api::handle_precision(input)
         .ok_or_else(|| super::super::errors::invalid_floating_prototype("eps"))?;
     let storage = input

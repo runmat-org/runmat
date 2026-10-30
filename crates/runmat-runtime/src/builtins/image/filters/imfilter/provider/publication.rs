@@ -87,7 +87,7 @@ pub(super) fn preflight_resident_input(handle: &GpuTensorHandle, name: &str) -> 
                 runmat_accelerate_api::ProviderExecutionError::from_source(source),
             )
         })?;
-    if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+    if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err() {
         let mut error = imfilter_error_with_detail(
             &IMFILTER_ERROR_INVALID_INPUT,
             format!("no exact provider owns {name}"),

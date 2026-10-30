@@ -17,8 +17,9 @@ pub(super) async fn evaluate(
     operation: ExponentialOperation,
     handle: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle)
-        .ok_or_else(|| super::errors::internal(operation, "GPU provider unavailable for input"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+        super::errors::internal(operation, "GPU provider unavailable for input")
+    })?;
     gpu_helpers::expected_handle_numeric_element_type(&handle).map_err(|_| {
         super::errors::internal(
             operation,

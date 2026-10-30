@@ -17,6 +17,12 @@ pub(super) fn try_covariance_gpu(
             format!("{name}: complex covariance matrices are not supported"),
         ));
     }
+    gpu_helpers::require_resident_compute_owner(handle, || {
+        conversion_error(
+            name,
+            format!("{name}: resident input has no exact owning provider"),
+        )
+    })?;
     if runmat_accelerate_api::handle_integer_type(handle).is_some()
         || runmat_accelerate_api::handle_is_logical(handle)
     {

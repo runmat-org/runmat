@@ -24,6 +24,9 @@ impl Request {
         coefficients: &Value,
         options: crate::call::FunctionArgumentView<'_>,
     ) -> BuiltinResult<Self> {
+        gpu_helpers::require_resident_compute_values(&[points, coefficients], false, || {
+            polyval_error("polyval: no exact owner for resident input")
+        })?;
         let anchor = [points, coefficients]
             .into_iter()
             .find_map(|value| match value {
@@ -32,8 +35,9 @@ impl Request {
             });
         let owner = anchor
             .map(|handle| {
-                gpu_helpers::exact_provider_for_handle(handle)
-                    .ok_or_else(|| polyval_error("polyval: no exact owner for resident input"))
+                gpu_helpers::require_resident_compute_owner(handle, || {
+                    polyval_error("polyval: no exact owner for resident input")
+                })
             })
             .transpose()?;
         let mut originals = Vec::new();

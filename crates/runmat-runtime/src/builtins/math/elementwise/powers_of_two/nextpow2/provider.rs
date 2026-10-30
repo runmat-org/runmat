@@ -12,8 +12,9 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_storage(&input) == GpuTensorStorage::ComplexInterleaved {
         return Err(errors::invalid("complex gpuArray input is not supported"));
     }
-    let provider = gpu_helpers::exact_provider_for_handle(&input)
-        .ok_or_else(|| errors::internal("GPU input has no owning provider"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&input, || {
+        errors::internal("GPU input has no owning provider")
+    })?;
     if output_representation(&input).integer.is_some()
         || runmat_accelerate_api::handle_is_logical(&input)
     {

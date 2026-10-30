@@ -28,6 +28,16 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
     left: &GpuTensorHandle,
     right: &GpuTensorHandle,
 ) -> BuiltinResult<Option<Value>> {
+    crate::builtins::common::gpu_helpers::require_resident_compute_owners(
+        &[left, right],
+        false,
+        || {
+            provider_contract_error(
+                operation,
+                "resident inputs require one exact owning provider",
+            )
+        },
+    )?;
     let Some(provider) = common_owner(left, right) else {
         return Ok(None);
     };

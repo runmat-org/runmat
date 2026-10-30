@@ -21,6 +21,11 @@ pub(super) fn select(
     left: Value,
     right: Value,
 ) -> BuiltinResult<Selected> {
+    crate::builtins::common::gpu_helpers::require_resident_compute_values(
+        &[&left, &right],
+        false,
+        || super::super::builtin_error("power: resident inputs have no exact owning provider"),
+    )?;
     let inputs = RootedValueLease::for_values([&left, &right].into_iter())
         .map_err(|cause| cause.into_runtime_error())?;
     if input_count == 2 {

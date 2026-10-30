@@ -82,7 +82,7 @@ async fn nonzeros_builtin(value: Value) -> BuiltinResult<Value> {
     let Value::GpuTensor(source) = value else {
         return nonzeros_value(&value);
     };
-    let owner = gpu_helpers::exact_provider_for_handle(&source).ok_or_else(|| {
+    let owner = gpu_helpers::require_resident_compute_owner(&source, || {
         sparse_error(
             &SPARSE_ERROR_INTERNAL,
             "nonzeros: no acceleration provider owns the input handle",

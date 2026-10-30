@@ -358,14 +358,13 @@ pub(super) async fn preflight_known_host_pixels(
     Ok(())
 }
 
-fn validate_resident_numeric_metadata(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
+fn validate_resident_numeric_metadata<'h>(
+    handle: &'h runmat_accelerate_api::GpuTensorHandle,
     error: &'static BuiltinErrorDescriptor,
-) -> BuiltinResult<&'static dyn runmat_accelerate_api::AccelProvider> {
-    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| {
-            imwrite_error_with_detail(error, "no acceleration provider owns the gpuArray handle")
-        })?;
+) -> BuiltinResult<runmat_accelerate_api::NumericReadback<'h>> {
+    let readback = runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|_| {
+        imwrite_error_with_detail(error, "no acceleration provider owns the gpuArray handle")
+    })?;
     if runmat_accelerate_api::handle_storage(handle)
         != runmat_accelerate_api::GpuTensorStorage::Real
     {
@@ -385,25 +384,29 @@ fn validate_resident_numeric_metadata(
             "gpuArray class metadata contradicts its physical storage",
         ));
     }
-    if integer.is_none() && precision != Some(owner.precision()) {
+    let owner_precision = readback.owner_precision().map_err(|source| {
+        imwrite_error_with_source(
+            error,
+            "resident owner metadata is unavailable",
+            runmat_accelerate_api::ProviderExecutionError::from(source),
+        )
+    })?;
+    if integer.is_none() && precision != Some(owner_precision) {
         return Err(imwrite_error_with_detail(
             error,
             "gpuArray precision metadata contradicts its owning provider",
         ));
     }
-    Ok(owner)
+    Ok(readback)
 }
 
 pub(super) async fn gather_imwrite_argument(value: &Value) -> BuiltinResult<Value> {
     let Value::GpuTensor(handle) = value else {
         return Ok(value.clone());
     };
-    let owner = validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
+    validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
     let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(handle);
-    let result = crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
-        owner, handle,
-    )
-    .await;
+    let result = crate::builtins::common::gpu_helpers::gather_value_async(value).await;
     result.map_err(|err| {
         imwrite_error_with_source(
             &IMWRITE_ERROR_INVALID_ARGUMENT,

@@ -8,10 +8,20 @@ pub(in crate::builtins::math::reduction) async fn try_provider_integration(
     args: &IntegrationArguments<'_>,
     call: &NumericalCall<'_>,
 ) -> BuiltinResult<Option<Value>> {
+    gpu_helpers::require_resident_compute_values(
+        &[args.y, args.spacing.unwrap_or(args.y)],
+        false,
+        || {
+            super::super::numerical_execution::error(
+                call.kind,
+                "sampled data has no exact owning provider",
+            )
+        },
+    )?;
     let Value::GpuTensor(input) = args.y else {
         return Ok(None);
     };
-    let provider = gpu_helpers::exact_provider_for_handle(input).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(input, || {
         super::super::numerical_execution::error(
             call.kind,
             "sampled data has no exact owning provider",

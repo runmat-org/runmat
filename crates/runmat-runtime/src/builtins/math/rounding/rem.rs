@@ -162,8 +162,7 @@ async fn rem_non_tabular(
     if crate::builtins::duration::is_duration_object(&lhs)
         || crate::builtins::duration::is_duration_object(&rhs)
     {
-        super::binary::require_resident_provider(&lhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
-        super::binary::require_resident_provider(&rhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
+        super::binary::require_resident_pair(&lhs, &rhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
         let lhs = gather_value(lhs).await?;
         let rhs = gather_value(rhs).await?;
         let published =
@@ -197,8 +196,7 @@ async fn rem_non_tabular(
     crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME)
         .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?;
-    super::binary::require_resident_provider(&lhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
-    super::binary::require_resident_provider(&rhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
+    super::binary::require_resident_pair(&lhs, &rhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
     super::preparation::remainder(
         runtime,
         &runmat_builtins::REM_CATALOG_ENTRY,

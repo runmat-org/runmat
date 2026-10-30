@@ -7,8 +7,9 @@ use crate::BuiltinResult;
 use super::super::{errors, unary as host, BUILTIN_NAME};
 
 pub(in super::super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&input)
-        .ok_or_else(|| errors::internal("resident input has no exact owner"))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&input, || {
+        errors::internal("resident input has no exact owner")
+    })?;
     let typed_fallback = runmat_accelerate_api::handle_integer_type(&input).is_some()
         || runmat_accelerate_api::handle_is_logical(&input);
     if !typed_fallback {

@@ -44,10 +44,16 @@ pub(super) async fn parse_spacing_argument(
         let Value::GpuTensor(handle) = value else {
             unreachable!()
         };
-        let owner = gpu_helpers::exact_provider_for_handle(handle)
-            .ok_or_else(|| gradient_internal_error("spacing has no exact owning provider"))?;
-        let gathered =
-            gpu_helpers::download_value_preserving_residency_async(owner, handle).await?;
+        let readback =
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+                crate::runtime_error::with_provider_execution_source(
+                    gradient_internal_error("spacing has no exact owning provider"),
+                    source.into(),
+                )
+            })?;
+        let gathered = gpu_helpers::download_readback_value_in_context(call.runtime, &readback)
+            .await
+            .map_err(super::super::numerical_execution::terminal)?;
         call.check()?;
         return parse_host_spacing_argument(&gathered, dim_len);
     }

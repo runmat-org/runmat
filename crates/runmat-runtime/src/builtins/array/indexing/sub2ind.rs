@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 
 #[path = "sub2ind/resident_owner.rs"]
@@ -154,6 +154,9 @@ async fn try_gpu_sub2ind(
         }
     }
 
+    gpu_helpers::require_resident_compute_owners(&handles, false, || {
+        sub2ind_provider_error("sub2ind: no exact provider owns the resident subscripts")
+    })?;
     let Some(provider) = resident_owner::direct_owner(source, &handles) else {
         return Ok(None);
     };

@@ -365,6 +365,55 @@ fn real_builtin_policy_decline_retries_only_automatic_valid_owner_inputs() {
             assert_eq!(allocation.probe.retirements(), 1);
         }
     }
+    // Multi-input ingress must not turn a sibling ownership failure into a
+    // requested retry merely because another source is policy-denied.
+    let valid = provider
+        .owner
+        .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let missing_owner = TestAllocationOwner::new();
+    let missing = missing_owner
+        .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_acceleration_policy(RuntimeAccelerationPolicy {
+            enabled: false,
+            provider: RuntimeProviderPreference::Auto,
+            automatic_offload: false,
+            allow_host_fallback: true,
+            calibrate: false,
+        });
+    let _scope = runtime.enter();
+    for (sources, expected) in [
+        (
+            [&valid.handle, &valid.handle],
+            crate::GpuGatherRetry::Requested,
+        ),
+        (
+            [&valid.handle, &missing.handle],
+            crate::GpuGatherRetry::Never,
+        ),
+        (
+            [&missing.handle, &valid.handle],
+            crate::GpuGatherRetry::Never,
+        ),
+    ] {
+        let error = gpu_helpers::require_resident_compute_owners(&sources, true, || {
+            crate::build_runtime_error("original domain diagnostic")
+                .with_source(std::io::Error::other("original cause"))
+                .build()
+        })
+        .unwrap_err();
+        assert_eq!(error.message(), "original domain diagnostic");
+        assert_eq!(error.gpu_gather_retry, expected);
+        let source = error.source.as_deref().unwrap();
+        if expected == crate::GpuGatherRetry::Requested {
+            assert!(source.is::<gpu_helpers::ResidentComputePolicyDenied>());
+            assert!(source.source().unwrap().is::<std::io::Error>());
+        } else {
+            assert!(source.is::<std::io::Error>());
+        }
+    }
 }
 
 #[test]

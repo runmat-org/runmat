@@ -152,7 +152,10 @@ async fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         )));
     }
 
-    let owner = gpu_helpers::exact_provider_for_handle(&handle);
+    let owner = Some(gpu_helpers::require_resident_compute_owner(
+        &handle,
+        || builtin_error("rcond: resident input has no exact owning provider"),
+    )?);
     let nonfloating = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle);
     let source_single = !nonfloating

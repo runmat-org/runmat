@@ -7,7 +7,10 @@ pub(super) async fn gradient_gpu_outputs(
     requires_host_gpu: bool,
     call: &super::super::numerical_execution::NumericalCall<'_>,
 ) -> BuiltinResult<Vec<Value>> {
-    let owner = gpu_helpers::exact_provider_for_handle(&handle);
+    let owner = Some(gpu_helpers::require_resident_compute_owner(
+        &handle,
+        || gradient_internal_error("gradient: resident input has no exact owning provider"),
+    )?);
     let complex_storage =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 

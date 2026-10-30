@@ -31,13 +31,17 @@ pub(in crate::builtins::math::reduction) async fn gather_integration_inputs(
 async fn gather(value: &Value, call: &NumericalCall<'_>) -> BuiltinResult<Value> {
     call.check()?;
     let result = if let Value::GpuTensor(handle) = value {
-        let provider = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
-            super::super::numerical_execution::error(
-                call.kind,
-                "integration input has no exact owning provider",
-            )
-        })?;
-        gpu_helpers::download_value_preserving_residency_async(provider, handle).await?
+        let readback =
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+                let error = super::super::numerical_execution::error(
+                    call.kind,
+                    "integration input has no exact owning provider",
+                );
+                crate::runtime_error::with_provider_execution_source(error, source.into())
+            })?;
+        gpu_helpers::download_readback_value_in_context(call.runtime, &readback)
+            .await
+            .map_err(super::super::numerical_execution::terminal)?
     } else {
         value.clone()
     };

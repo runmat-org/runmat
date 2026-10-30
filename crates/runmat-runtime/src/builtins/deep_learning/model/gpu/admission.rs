@@ -9,6 +9,49 @@ use runmat_accelerate_api::{
 use runmat_types::ClassIdentity;
 use std::fmt;
 
+/// Validated public network ingress, before tape publication, uploads or any
+/// layer execution. Inspect all known resident operands before allowing a
+/// policy decline: an invalid owner/assignment must never become a retry.
+pub(super) fn preflight_network_compute_owners(
+    host: &crate::builtins::deep_learning::model::plan::host::HostNetworkPlan<'_>,
+    input: Option<&GpuTensorHandle>,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    use crate::builtins::common::gpu_helpers::{self, ResidentComputeDecline};
+    let operands = || {
+        input
+            .map(|handle| (handle, GpuOperand::Input))
+            .into_iter()
+            .chain(host.parameter_views().iter().filter_map(|row| {
+                match row
+                    .value
+                    .map(crate::builtins::deep_learning::model::admission::forward_data)
+                {
+                    Some(Value::GpuTensor(handle)) => {
+                        Some((handle, GpuOperand::Parameter(row.key.role)))
+                    }
+                    _ => None,
+                }
+            }))
+    };
+    let mut device = None;
+    for (handle, operand) in operands() {
+        if matches!(
+            gpu_helpers::resolve_resident_compute_owner(handle),
+            Err(ResidentComputeDecline::InvalidOwner)
+        ) || device.is_some_and(|device| device != handle.device_id())
+        {
+            return Err(ResidentComputeDecline::InvalidOwner
+                .with_domain_error(invalid_owner(function, operand)));
+        }
+        device = Some(handle.device_id());
+    }
+    for (handle, operand) in operands() {
+        gpu_helpers::require_resident_compute_owner(handle, || invalid_owner(function, operand))?;
+    }
+    Ok(())
+}
+
 fn has_global_pool(layers: &[Value]) -> bool {
     layers.iter().any(|layer| {
         matches!(layer, Value::Object(object) if ForwardLayerKind::from_identity(object.class_name())

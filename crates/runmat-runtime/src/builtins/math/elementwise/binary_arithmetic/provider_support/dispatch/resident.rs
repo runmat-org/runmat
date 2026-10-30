@@ -38,9 +38,12 @@ async fn try_host_scalar(
     host: &Value,
     host_is_left: bool,
 ) -> BuiltinResult<Option<Value>> {
-    let Some(provider) = gpu_helpers::exact_provider_for_handle(resident) else {
-        return Ok(None);
-    };
+    let provider = gpu_helpers::require_resident_compute_owner(resident, || {
+        super::common::provider_contract_error(
+            operation,
+            "resident input has no exact owning provider",
+        )
+    })?;
     // Original floating class precedes the legacy f64 scalar ABI. A mixed
     // Add decline goes directly to host execution, never a wrong-class scalar hook.
     if matches!(operation, ArithmeticProviderOperation::Add)

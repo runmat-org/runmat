@@ -20,7 +20,7 @@ pub(super) fn admit(inputs: &[Value], outputs: Option<usize>) -> BuiltinResult<V
             Value::Num(_) | Value::Int(_) => vec![1, 1],
             Value::Tensor(tensor) => tensor.shape().to_vec(),
             Value::GpuTensor(handle) => {
-                if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+                if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err() {
                     return Err(pol2cart_error(
                         &ERROR_INTERNAL,
                         "GPU input has no owning provider",
@@ -64,6 +64,9 @@ pub(super) fn admit(inputs: &[Value], outputs: Option<usize>) -> BuiltinResult<V
             "output element count overflows",
         ));
     }
+    gpu_helpers::require_resident_compute_value_iter(inputs.iter(), true, || {
+        pol2cart_error(&ERROR_INTERNAL, "GPU input has no owning provider")
+    })?;
     // Gate every integer role before any role's exactness check may download.
     for (value, extension) in inputs.iter().zip([
         &POL2CART_INTEGER_THETA_EXTENSION,

@@ -45,6 +45,27 @@ pub(super) async fn try_crossentropy_gpu(
     let Some(mut options) = GpuCrossentropyOptions::from_args(rest, predictions.shape())? else {
         return Ok(None);
     };
+    crate::builtins::common::gpu_helpers::require_resident_compute_owners(
+        &[
+            predictions,
+            targets,
+            match options.weights.as_ref() {
+                Some(GpuLossFactor::Resident(handle)) => handle,
+                _ => predictions,
+            },
+            match options.mask.as_ref() {
+                Some(GpuLossFactor::Resident(handle)) => handle,
+                _ => predictions,
+            },
+        ],
+        false,
+        || {
+            deep_learning_error(
+                "crossentropy",
+                "crossentropy: no exact provider owns the resident operands",
+            )
+        },
+    )?;
     let Some(provider) =
         crate::builtins::common::gpu_helpers::exact_provider_for_handle(predictions)
     else {

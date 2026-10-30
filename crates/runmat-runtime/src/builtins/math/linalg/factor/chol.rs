@@ -405,8 +405,9 @@ async fn evaluate_in_context(
             .await
         }
         Value::GpuTensor(handle) => {
-            let provider = gpu_helpers::exact_provider_for_handle(&handle)
-                .ok_or_else(|| chol_internal_error("chol: no exact owner for resident input"))?;
+            let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+                chol_internal_error("chol: no exact owner for resident input")
+            })?;
             if !integer_input {
                 if let Some(eval) = evaluate_gpu(&handle, triangle).await? {
                     return Ok(eval);

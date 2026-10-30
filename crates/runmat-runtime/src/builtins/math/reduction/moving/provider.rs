@@ -11,6 +11,12 @@ pub(super) async fn moving_gpu(
     handle: GpuTensorHandle,
     parsed: &ParsedMoving,
 ) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        invalid_input(
+            name,
+            format!("{name}: resident input has no exact owning provider"),
+        )
+    })?;
     if let Some(output) = moving_gpu_provider(work, name, op, &handle, parsed).await? {
         return gpu_helpers::resident_gpu_value(output).map_err(terminal);
     }

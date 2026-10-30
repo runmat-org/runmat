@@ -128,8 +128,9 @@ async fn det_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle)
-        .ok_or_else(|| builtin_error(format!("{NAME}: GPU input has no owning provider")))?;
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
+        builtin_error(format!("{NAME}: GPU input has no owning provider"))
+    })?;
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
         || runmat_accelerate_api::handle_storage(&handle)

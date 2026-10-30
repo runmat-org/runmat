@@ -39,6 +39,11 @@ async fn pow2_builtin(
         }
         Some(exponent) if rest.is_empty() => {
             compatibility::validate_binary(&first, &exponent).await?;
+            crate::builtins::common::gpu_helpers::require_resident_compute_values(
+                &[&first, &exponent],
+                false,
+                || errors::internal("resident inputs have no exact owning provider"),
+            )?;
             binary::evaluate(first, exponent).await
         }
         Some(_) => Err(errors::invalid_argument("expected one or two inputs")),

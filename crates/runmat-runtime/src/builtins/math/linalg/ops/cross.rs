@@ -210,6 +210,9 @@ async fn cross_builtin(
         (Value::GpuTensor(handle), _) | (_, Value::GpuTensor(handle)) => Some(handle.clone()),
         _ => None,
     };
+    gpu_helpers::require_resident_compute_values(&[&lhs, &rhs], false, || {
+        cross_internal_error("cross: resident input has no exact owning provider")
+    })?;
     let single_output = value_uses_single(&lhs) || value_uses_single(&rhs);
     let complex_output = value_is_complex(&lhs) || value_is_complex(&rhs);
 

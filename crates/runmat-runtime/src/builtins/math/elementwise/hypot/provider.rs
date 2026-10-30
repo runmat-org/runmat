@@ -8,6 +8,12 @@ use crate::BuiltinResult;
 use super::{errors, host, BUILTIN_NAME};
 
 pub(super) async fn pair(left: GpuTensorHandle, right: GpuTensorHandle) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owners(&[&left, &right], true, || {
+        errors::terminal(
+            &HYPOT_ERROR_INVALID_INPUT,
+            "resident inputs require one exact owning provider",
+        )
+    })?;
     let has_integer_input = runmat_accelerate_api::handle_integer_type(&left).is_some()
         || runmat_accelerate_api::handle_integer_type(&right).is_some();
     let provider = gpu_helpers::exact_provider_for_binary_inputs(&left, &right)
@@ -73,7 +79,7 @@ pub(super) async fn mixed(
     host: Value,
     gpu_is_left: bool,
 ) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         errors::terminal(&HYPOT_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
     let gathered = gather(&handle).await?;

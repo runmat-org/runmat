@@ -195,7 +195,10 @@ pub(in crate::builtins::math) enum TensorKind {
 }
 
 async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Value> {
-    let maybe_provider = gpu_helpers::exact_provider_for_handle(&handle);
+    let maybe_provider = Some(gpu_helpers::require_resident_compute_owner(
+        &handle,
+        || internal_error("norm: resident input has no exact owning provider"),
+    )?);
     let is_nonfloating = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle);
 

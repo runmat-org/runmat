@@ -71,8 +71,11 @@ fn gpu_underlying_class_identity(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     owner: UnderlyingQueryOwner,
 ) -> BuiltinResult<runmat_types::ClassIdentity> {
-    crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| metadata_error(owner, "no acceleration provider owns the input handle"))?;
+    runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+        let mut error = metadata_error(owner, "no acceleration provider owns the input handle");
+        error.source = Some(source.into_boxed_dyn_error());
+        error
+    })?;
     // Preferred execution precision is not the class of an owned allocation.
     // The owner has already admitted its immutable physical type and view.
     crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(handle)

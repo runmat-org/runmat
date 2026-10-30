@@ -19,6 +19,62 @@ pub use adoption::adopt_settled_native_download;
 pub use quote::{quote_exact_native_download, quote_exact_native_readback};
 pub use stage::{download_exact_native, download_exact_native_readback};
 
+/// Declared source-only host inspection, not a compute fallback. Reuses the
+/// same finite readback quote, receipt, stage and final adoption as gather.
+pub(crate) async fn download_readback_value_in_context(
+    runtime: Option<&RuntimeContext>,
+    readback: &runmat_accelerate_api::NumericReadback<'_>,
+) -> Result<runmat_value::Value, RuntimeError> {
+    download_readback_value_with_admission_in_context(
+        runtime,
+        readback,
+        "RunMat:Placement:HostReadback",
+        "native readback admission failed",
+    )
+    .await
+}
+
+pub(crate) async fn download_readback_value_with_admission_in_context(
+    runtime: Option<&RuntimeContext>,
+    readback: &runmat_accelerate_api::NumericReadback<'_>,
+    admission_identifier: &'static str,
+    admission_message: &'static str,
+) -> Result<runmat_value::Value, RuntimeError> {
+    use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
+    let allocation = |cause| {
+        host_allocation_runtime_error(runtime, admission_identifier, admission_message, cause)
+    };
+    if HostAllocationReceipt::policy(runtime).map_err(allocation)?
+        == HostAllocationPolicy::Unbounded
+    {
+        let host =
+            super::download_numeric_readback_preserving_residency_async(readback, None).await?;
+        return super::value_from_numeric_download(
+            host,
+            runmat_accelerate_api::handle_is_logical(readback.source()),
+        )
+        .map_err(|cause| {
+            super::provider_payload_mismatch(readback.source(), readback.source().shape(), cause)
+        });
+    }
+    let runtime = runtime.ok_or_else(|| allocation(HostAllocationError::MissingManagedOwner))?;
+    let quote = quote_exact_native_readback(readback)?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        quote.single_source_plan().map_err(allocation)?,
+    )
+    .map_err(allocation)?
+    .ok_or_else(|| allocation(HostAllocationError::MissingManagedOwner))?;
+    let mut budget = runtime.cpu_cooperation();
+    budget
+        .await_cancellable(download_exact_native_readback(
+            runtime, readback, &receipt, quote,
+        ))
+        .await
+        .map_err(|cause| cause.into_runtime_error_in_context(Some(runtime)))?
+        .map_err(|failure| failure.error)
+}
+
 /// Download through the selected operation's authority. The returned native
 /// carrier owns its backing independently of the temporary stage receipt.
 pub(crate) async fn download_value_preserving_residency_in_context(

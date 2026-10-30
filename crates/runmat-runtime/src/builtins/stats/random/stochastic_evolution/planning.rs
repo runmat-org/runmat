@@ -4,7 +4,6 @@
 
 use super::resources::planning_metadata_plan;
 use super::source_eligibility::{StochasticPreparedSource, StochasticTypedPattern};
-use crate::builtins::common::gpu_helpers::exact_provider_for_handle;
 use crate::builtins::common::random::gpu_like::{host_random_mode, ExactHostRandomMode};
 use crate::builtins::common::random::RngAlgorithm;
 use crate::context::host_allocation::{HostAllocationPlan, HostAllocationReceipt};
@@ -127,8 +126,9 @@ pub(super) fn prepare_provider(
 ) -> BuiltinResult<Option<StochasticProviderPlan>> {
     let provider = match prepared.state() {
         Value::GpuTensor(handle) => Some(
-            exact_provider_for_handle(handle)
-                .ok_or_else(|| invalid("stochastic state has no exact live provider owner"))?,
+            crate::builtins::common::gpu_helpers::require_resident_compute_owner(handle, || {
+                invalid("stochastic state has no exact live provider owner")
+            })?,
         ),
         _ => context.command_device_provider(),
     };

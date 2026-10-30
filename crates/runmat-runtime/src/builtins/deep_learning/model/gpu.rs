@@ -14,7 +14,9 @@ mod pooling;
 pub(in crate::builtins::deep_learning) mod mixed;
 
 pub(in crate::builtins::deep_learning) use admission::GpuCapabilityReason;
-pub(super) use admission::{admit_gpu_forward, GpuForwardAdmission};
+pub(super) use admission::{
+    admit_gpu_forward, preflight_network_compute_owners, GpuForwardAdmission,
+};
 pub(in crate::builtins::deep_learning) use mixed::{
     admit_host_route, execute_host_route_selected, AdmittedHostRoute,
 };
@@ -66,10 +68,11 @@ pub(super) async fn evaluate_network_gpu(
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| {
-            unsupported_error(
-                function,
-                format!("{function}: no acceleration provider owns the resident input"),
-            )
+            crate::builtins::common::gpu_helpers::ResidentComputeDecline::InvalidOwner
+                .with_domain_error(unsupported_error(
+                    function,
+                    format!("{function}: no acceleration provider owns the resident input"),
+                ))
         })?;
     let layers = object
         .properties()

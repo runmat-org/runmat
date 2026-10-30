@@ -10,15 +10,20 @@ async fn resident_host_value(value: &Value) -> BuiltinResult<Option<Value>> {
     let Value::GpuTensor(handle) = value else {
         return Ok(None);
     };
-    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| {
+    let readback =
+        runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
             build_runtime_error(VALIDATION_ERROR_PROVIDER_OWNERSHIP.message)
+                .with_source(runmat_accelerate_api::ProviderExecutionError::from(source))
                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                 .build()
         })?;
-    crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(owner, handle)
-        .await
-        .map(Some)
+    let runtime = crate::context::legacy::active();
+    crate::builtins::common::gpu_helpers::download_readback_value_in_context(
+        runtime.as_ref(),
+        &readback,
+    )
+    .await
+    .map(Some)
 }
 
 pub(super) async fn host_value(value: &Value) -> BuiltinResult<Value> {
@@ -48,7 +53,7 @@ pub fn validate_resident_metadata(value: &Value) -> BuiltinResult<()> {
     let Value::GpuTensor(handle) = value else {
         return Ok(());
     };
-    crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+    runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
         build_runtime_error(VALIDATION_ERROR_PROVIDER_OWNERSHIP.message)
             .with_identifier(
                 VALIDATION_ERROR_PROVIDER_OWNERSHIP
@@ -56,6 +61,7 @@ pub fn validate_resident_metadata(value: &Value) -> BuiltinResult<()> {
                     .expect("validator provider-ownership descriptor identifier"),
             )
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .with_source(runmat_accelerate_api::ProviderExecutionError::from(source))
             .build()
     })?;
     let storage = handle_storage(handle);

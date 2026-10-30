@@ -14,6 +14,14 @@ pub(super) async fn moving_builtin(
     args: BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let work = MovingCall::new(runtime, name)?;
+    if let Some(Value::GpuTensor(handle)) = args.first() {
+        gpu_helpers::require_resident_compute_owner(handle, || {
+            invalid_input(
+                name,
+                format!("{name}: resident input has no exact owning provider"),
+            )
+        })?;
+    }
     let result = async {
         if args.len() < 2 { return Err(invalid_argument(name, format!("{name}: expected at least A and k"))); }
         for argument in &args { crate::builtins::common::validation::reject_typed_complex_integer(argument, name)?; }

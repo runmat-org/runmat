@@ -286,11 +286,17 @@ pub async fn evaluate_in_context(
     if let Some(b) = request.b {
         crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
         ensure_eig_coefficient_extension_enabled(&b)?;
+        gpu_helpers::require_resident_compute_values(&[&value, &b], false, || {
+            eig_internal_error("eig: no acceleration provider owns the input handle")
+        })?;
         return evaluate_generalized(runtime, value, b, request.options, require_left).await;
     }
     let options = request.options;
     match value {
         Value::GpuTensor(handle) => {
+            gpu_helpers::require_resident_compute_owner(&handle, || {
+                eig_internal_error("eig: no acceleration provider owns the input handle")
+            })?;
             if is_nonfloating_coefficient(&Value::GpuTensor(handle.clone())) {
                 let gathered = gather_eig_resident_value_in_context(runtime, &handle).await?;
                 ensure_exact_eig_integer_boundary(&gathered, "A")?;

@@ -255,6 +255,9 @@ pub(super) async fn try_reduce(
             "resident input allocation is not live",
         ));
     }
+    gpu_helpers::require_resident_compute_owner(input, || {
+        super::options::invalid(kind, "resident input has no exact owner")
+    })?;
     let Some(provider) = gpu_helpers::exact_provider_for_handle(input) else {
         return Err(super::options::invalid(
             kind,

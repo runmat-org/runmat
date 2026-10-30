@@ -23,9 +23,13 @@ impl<'a> InputAdmission<'a> {
         if self.admitted {
             return Ok(());
         }
+        gpu_helpers::require_resident_compute_owners(&self.inputs, false, || {
+            terminal("median: resident input has no exact owning provider")
+        })?;
         for handle in &self.inputs {
-            gpu_helpers::exact_provider_for_handle(handle)
-                .ok_or_else(|| terminal("median: resident input has no exact owning provider"))?;
+            gpu_helpers::require_resident_compute_owner(handle, || {
+                terminal("median: resident input has no exact owning provider")
+            })?;
             handle
                 .allocation_lease()
                 .validate_live()

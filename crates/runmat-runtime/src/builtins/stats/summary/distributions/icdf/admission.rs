@@ -34,6 +34,12 @@ impl IcdfAdmission {
         } else {
             OutputPrecision::Double
         };
+        gpu_helpers::require_resident_compute_value_iter(values.clone(), false, || {
+            build_runtime_error("icdf: no acceleration provider owns a resident input")
+                .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+                .with_builtin("icdf")
+                .build()
+        })?;
         let gpu_source = gpu_helpers::select_resident_output_source(
             values.filter_map(|value| match value {
                 Value::GpuTensor(handle) => Some(handle.clone()),
@@ -92,20 +98,29 @@ impl IcdfAdmission {
     }
 }
 
-pub(super) async fn gather_input(value: Value) -> BuiltinResult<Value> {
+pub(super) async fn gather_input(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     let Value::GpuTensor(handle) = &value else {
         return Ok(value);
     };
-    let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
-        build_runtime_error("icdf: resident input owner is unavailable")
-            .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .with_builtin("icdf")
-            .build()
-    })?;
-    gpu_helpers::download_value_preserving_residency_async(owner, handle)
+    let readback =
+        runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+            let error = build_runtime_error("icdf: resident input owner is unavailable")
+                .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .with_builtin("icdf")
+                .build();
+            crate::runtime_error::with_provider_execution_source(error, source.into())
+        })?;
+    gpu_helpers::download_readback_value_in_context(runtime, &readback)
         .await
-        .map_err(|error| super::with_distribution_context("icdf", error))
+        .map_err(|error| {
+            let mut error = super::with_distribution_context("icdf", error);
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })
 }
 
 pub(super) fn ensure_exact_integer_boundary(value: &Value, label: &str) -> BuiltinResult<()> {

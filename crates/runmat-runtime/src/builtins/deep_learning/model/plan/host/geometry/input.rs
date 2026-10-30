@@ -88,7 +88,7 @@ pub(super) fn metadata<'a>(
                 .allocation_lease()
                 .validate_live()
                 .map_err(|error| fail(function, error))?;
-            if crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none() {
+            if runmat_accelerate_api::numeric_readback_for_handle(handle).is_err() {
                 return Err(fail(function, "input has no live owning provider"));
             }
             let dtype = match runmat_accelerate_api::handle_precision(handle) {

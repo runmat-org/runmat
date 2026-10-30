@@ -83,6 +83,11 @@ async fn polyint_builtin(
         reject_unsupported_numeric_class(value, "constant")?;
     }
 
+    gpu_helpers::require_resident_compute_values(
+        &[&coeffs, rest.first().unwrap_or(&coeffs)],
+        false,
+        || polyint_error("polyint: resident input has no exact owning provider"),
+    )?;
     let mut protected = Vec::new();
     for value in &rest {
         dispatcher::try_visit_gpu_handles(value, &mut |handle| protected.push(handle.clone()))?;
@@ -161,6 +166,9 @@ fn try_polyint_gpu(
         return Ok(None);
     }
     ensure_vector_shape(handle.shape())?;
+    gpu_helpers::require_resident_compute_owner(handle, || {
+        polyint_error("polyint: resident input has no exact owning provider")
+    })?;
     let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) else {
         return Ok(None);
     };

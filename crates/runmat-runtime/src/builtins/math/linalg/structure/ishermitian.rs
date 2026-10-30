@@ -158,6 +158,12 @@ async fn ishermitian_gpu(
     mode: HermitianMode,
     tol: f64,
 ) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        ishermitian_error_with_detail(
+            &ISHERMITIAN_ERROR_INTERNAL,
+            "no acceleration provider owns the input",
+        )
+    })?;
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let provider_mode = match mode {

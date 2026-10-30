@@ -348,14 +348,8 @@ async fn download_kernel_tensor(handle: &GpuTensorHandle) -> BuiltinResult<Tenso
             "H GPU class metadata contradicts double storage",
         ));
     }
-    let provider = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
-        imfilter_error_with_detail(
-            &IMFILTER_ERROR_INVALID_INPUT,
-            "no acceleration provider owns H",
-        )
-    })?;
     let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(handle);
-    let result = gpu_helpers::download_value_preserving_residency_async(provider, handle).await;
+    let result = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await;
     let value = result.map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
     host_kernel_tensor(value)
 }

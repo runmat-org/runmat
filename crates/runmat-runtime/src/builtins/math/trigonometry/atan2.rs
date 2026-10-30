@@ -137,10 +137,16 @@ fn reject_excess_outputs() -> BuiltinResult<()> {
 }
 
 async fn atan2_admitted(y: Value, x: Value, protected: &[GpuTensorHandle]) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_values(&[&y, &x], true, || {
+        atan2_error_with_detail(
+            &ATAN2_ERROR_INVALID_INPUT,
+            "resident inputs require one exact owning provider",
+        )
+    })?;
     match (y, x) {
         (Value::GpuTensor(yh), Value::GpuTensor(xh)) => atan2_gpu_pair(yh, xh, protected).await,
         (Value::GpuTensor(yh), other) => {
-            let provider = gpu_helpers::exact_provider_for_handle(&yh).ok_or_else(|| {
+            let provider = gpu_helpers::require_resident_compute_owner(&yh, || {
                 atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, "GPU input has no owning provider")
             })?;
             let gathered = gpu_helpers::gather_tensor_async(&yh).await?;
@@ -154,7 +160,7 @@ async fn atan2_admitted(y: Value, x: Value, protected: &[GpuTensorHandle]) -> Bu
             )
         }
         (other, Value::GpuTensor(xh)) => {
-            let provider = gpu_helpers::exact_provider_for_handle(&xh).ok_or_else(|| {
+            let provider = gpu_helpers::require_resident_compute_owner(&xh, || {
                 atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, "GPU input has no owning provider")
             })?;
             let gathered = gpu_helpers::gather_tensor_async(&xh).await?;

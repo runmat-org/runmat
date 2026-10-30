@@ -286,6 +286,12 @@ fn bandwidth_host_sparse(sparse: &SparseTensor) -> (usize, usize) {
 
 async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)> {
     let (rows, cols) = ensure_matrix_shape(handle.shape())?;
+    gpu_helpers::require_resident_compute_owner(handle, || {
+        bandwidth_error_with_detail(
+            &BANDWIDTH_ERROR_INTERNAL,
+            "no acceleration provider owns the input",
+        )
+    })?;
     if rows == 0 || cols == 0 {
         return Ok((0, 0));
     }

@@ -15,11 +15,16 @@ fn owner(inputs: &[&GpuTensorHandle]) -> BuiltinResult<Option<&'static dyn Accel
     for input in inputs {
         ensure_vector_shape("polyder", "coefficient", input.shape())?;
     }
-    let provider = gpu_helpers::exact_provider_for_handle(inputs[0])
-        .ok_or_else(|| polyder_error("polyder: no exact owner for resident input"))?;
+    gpu_helpers::require_resident_compute_owners(inputs, false, || {
+        polyder_error("polyder: no exact owner for resident input")
+    })?;
+    let provider = gpu_helpers::require_resident_compute_owner(inputs[0], || {
+        polyder_error("polyder: no exact owner for resident input")
+    })?;
     for input in inputs {
-        let actual = gpu_helpers::exact_provider_for_handle(input)
-            .ok_or_else(|| polyder_error("polyder: no exact owner for resident input"))?;
+        let actual = gpu_helpers::require_resident_compute_owner(input, || {
+            polyder_error("polyder: no exact owner for resident input")
+        })?;
         if !runmat_accelerate_api::same_provider_instance(actual, provider)
             || input.physical().storage() != GpuTensorStorage::Real
             || runmat_accelerate_api::handle_is_logical(input)
