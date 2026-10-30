@@ -53,7 +53,6 @@ pub async fn prepare_cluster_program(
         .map_err(error)?;
     session
         .install_project_handoff(handoff.clone())
-        .await
         .map_err(error)?;
     let source = runmat_core::ExecutableSource::capture_project_primary(
         &handoff.project,
