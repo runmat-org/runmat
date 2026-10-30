@@ -17,6 +17,7 @@ pub enum ObjectNamespace {
     Checkpoint,
     ForeignArtifact,
     ForeignPolicy,
+    ProjectRuntimePolicy,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

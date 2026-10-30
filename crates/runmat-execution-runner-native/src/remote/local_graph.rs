@@ -45,6 +45,7 @@ pub(super) async fn execute(
             Capability::ProcessIsolation,
             Capability::GraphSelectedValuesV11,
             Capability::GraphCallableArgumentsV12,
+            Capability::GraphProjectRuntimePolicyV13,
         ]),
     };
     run_owned_attempt(
@@ -124,6 +125,9 @@ pub(in crate::remote) async fn execute_remote_attempt(
     resources
         .capabilities
         .insert(Capability::GraphCallableArgumentsV12);
+    resources
+        .capabilities
+        .insert(Capability::GraphProjectRuntimePolicyV13);
     run_owned_attempt(
         run_id,
         attempt_id.bytes(),

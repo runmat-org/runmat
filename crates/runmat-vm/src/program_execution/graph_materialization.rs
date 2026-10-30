@@ -132,6 +132,7 @@ pub fn materialize_deferred_graph_call(
     )
     .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     let request = GraphExecutionRequest {
+        project_runtime_policy: None,
         schema_version: captured.required_schema.version(),
         recipe,
         artifact,

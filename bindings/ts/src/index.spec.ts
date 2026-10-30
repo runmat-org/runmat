@@ -12,6 +12,9 @@ import {
   exportWorkspaceState,
   importWorkspaceState,
   resetPlotState,
+  configurePlotSurfaceViewer,
+  plotSurfaceAntialiasingModes,
+  handlePlotSurfaceEvent,
   resolveRunmatConfig,
   patchRunmatConfig,
   migrateLegacyRunmatConfig,
@@ -353,7 +356,11 @@ describe("initRunMat wiring", () => {
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
-      }
+      },
+      resolveRuntimeSettings: vi.fn(() => ({
+        config: { accelerate: { enabled: false, provider: "wgpu", allow_inprocess_fallback: true } },
+        sources: { "runtime.accelerate.enabled": { layer: "user", path: null } }
+      }))
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
@@ -364,6 +371,14 @@ describe("initRunMat wiring", () => {
     expect(captured[0].applicationSettings).toBe("isolatedMemory");
     await initRunMat({ enableGpu: false });
     expect(captured[1].applicationSettings).toBeUndefined();
+    const runtimeSettings = { userSettingsJson: '{"runtime":{"accelerate":{"enabled":false}}}' };
+    await initRunMat({ runtimeSettings });
+    expect(captured[2].runtimeSettings).toBe(runtimeSettings);
+    expect(captured[2].enableGpu).toBe(false);
+    for (const field of ["enableJit", "verbose", "telemetryConsent", "wgpuPowerPreference", "wgpuForceFallbackAdapter"]) {
+      expect(captured[2][field]).toBeUndefined();
+    }
+    expect(native.resolveRuntimeSettings).toHaveBeenCalledWith(runtimeSettings);
   });
 
   it("passes the browser execution host through without interpreting it", async () => {
@@ -522,7 +537,7 @@ describe("initRunMat wiring", () => {
     expect(captured[0].fsProvider).toBe(autoProvider);
   });
 
-  it("creates a plot surface before calling initRunMat", async () => {
+  it("initializes collector policy before creating a plot surface", async () => {
     const order: string[] = [];
     const createSurfaceSpy = vi.fn(async () => {
       order.push("createPlotSurface");
@@ -540,7 +555,8 @@ describe("initRunMat wiring", () => {
     const canvas = { id: "canvas" } as unknown as HTMLCanvasElement;
     await initRunMat({ plotCanvas: canvas, enableGpu: false });
 
-    expect(order).toEqual(["createPlotSurface", "initRunMat"]);
+    // Renderer initialization can install process logging, so effective collector policy must win first.
+    expect(order).toEqual(["initRunMat", "createPlotSurface"]);
     expect(createSurfaceSpy).toHaveBeenCalledWith(canvas);
   });
 
@@ -559,6 +575,20 @@ describe("initRunMat wiring", () => {
     await expect(
       initRunMat({ plotCanvas: {} as HTMLCanvasElement, enableGpu: false })
     ).rejects.toMatchObject({ code: "PlotCanvas" });
+  });
+
+  it("routes real viewer configuration, supported AA and classified trackpad events", async () => {
+    const configure = vi.fn();
+    const event = vi.fn();
+    __internals.setNativeModuleOverride({ stringElementWireSchemaVersion: () => 1, default: async () => {},
+      configurePlotSurfaceViewer: configure, plotSurfaceAntialiasingModes: () => ["off", "x4"], handlePlotSurfaceEvent: event } as NativeModule);
+    const navigation = { preset: "cad" as const, orbitCenter: "underCursor" as const, zoomSpeed: 2, reverseZoom: true, trackpadPan: true };
+    await configurePlotSurfaceViewer(7, navigation, "x4");
+    expect(configure).toHaveBeenCalledWith(7, navigation, "x4");
+    expect(await plotSurfaceAntialiasingModes(7)).toEqual(["off", "x4"]);
+    const scroll = { kind: "trackpadScroll" as const, x: 30, y: 40, wheelDeltaX: 2, wheelDeltaY: 3, wheelDeltaMode: 0 };
+    await handlePlotSurfaceEvent(7, scroll);
+    expect(event).toHaveBeenCalledWith(7, scroll);
   });
 
   it("disposes the session and blocks further calls", async () => {

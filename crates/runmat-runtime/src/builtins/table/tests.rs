@@ -2230,7 +2230,7 @@ fn groupsummary_missing_controls_default_true_and_require_zero_or_one() {
 }
 
 #[test]
-fn groupsummary_canonicalizes_distinct_nan_payloads_and_empty_strings_as_missing_last() {
+fn groupsummary_canonicalizes_nan_and_typed_missing_but_preserves_empty_strings() {
     let nan_a = f64::from_bits(0x7ff8_0000_0000_0001);
     let nan_b = f64::from_bits(0x7ff8_0000_0000_0002);
     let numeric_group = Value::Tensor(Tensor::new(vec![nan_a, 1.0, nan_b], vec![3, 1]).unwrap());
@@ -2256,8 +2256,19 @@ fn groupsummary_canonicalizes_distinct_nan_payloads_and_empty_strings_as_missing
     assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
 
     let text_group = Value::StringArray(
-        StringArray::new(vec!["".into(), "a".into(), "".into()], vec![3, 1]).unwrap(),
+        StringArray::from_elements_unbounded(
+            vec![
+                "".into(),
+                "a".into(),
+                runmat_value::StringElement::Missing,
+                "".into(),
+                runmat_value::StringElement::Missing,
+            ],
+            vec![5, 1],
+        )
+        .unwrap(),
     );
+    let values = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0, 10.0], vec![5, 1]).unwrap());
     let table = table_from_columns(vec!["G".into(), "X".into()], vec![text_group, values]).unwrap();
     let summary = object(
         groupsummary_impl(
@@ -2272,7 +2283,14 @@ fn groupsummary_canonicalizes_distinct_nan_payloads_and_empty_strings_as_missing
     else {
         panic!("expected counts");
     };
-    assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
+    assert_eq!(counts.materialize_f64(), vec![2.0, 1.0, 2.0]);
+    let Value::StringArray(groups) = table_member_get(&summary, &Value::from("G")).unwrap() else {
+        panic!("expected string groups");
+    };
+    assert_eq!(
+        groups.data(),
+        &["".into(), "a".into(), runmat_value::StringElement::Missing]
+    );
 }
 
 #[test]

@@ -73,7 +73,6 @@ pub struct RunMatWasm {
     #[cfg(target_arch = "wasm32")]
     input_handler: RefCell<Option<JsInputHandler>>,
     pub(crate) fea_selection: RefCell<Option<super::fea_execution::BrowserFeaSelection>>,
-    pub(crate) fea_run_admission: RefCell<Option<JsValue>>,
     clear_workspace_after_flight: Cell<bool>,
     #[cfg(target_arch = "wasm32")]
     local_tasks: RefCell<std::rc::Rc<runmat_runtime::context::BrowserLocalTaskSupervisor>>,
@@ -201,7 +200,6 @@ impl RunMatWasm {
             #[cfg(target_arch = "wasm32")]
             input_handler: RefCell::new(None),
             fea_selection: RefCell::new(None),
-            fea_run_admission: RefCell::new(None),
             clear_workspace_after_flight: Cell::new(false),
             #[cfg(target_arch = "wasm32")]
             local_tasks,
@@ -1220,6 +1218,9 @@ impl RunMatWasm {
         let consent = config.telemetry_consent;
         let mut session = RunMatSession::with_options(config.enable_jit, config.verbose)
             .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
+        session
+            .apply_runtime_config(&config.runtime)
+            .map_err(|error| js_error(&error.to_string()))?;
         if let Some(settings) = &self.application_settings {
             session
                 .install_application_settings(settings.clone())

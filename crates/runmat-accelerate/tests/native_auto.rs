@@ -42,7 +42,7 @@ fn make_tensor(len: usize) -> Tensor {
 }
 
 #[tokio::test]
-async fn selected_canonical_plus_promotes_large_tensors_and_publishes_real_feedback() {
+async fn selected_canonical_plus_promotes_large_tensors_without_exporting_session_feedback() {
     let provider = provider();
     let _selected = ThreadProviderGuard::set(Some(provider));
     let value = Value::Tensor(make_tensor(8_192));
@@ -89,14 +89,10 @@ async fn selected_canonical_plus_promotes_large_tensors_and_publishes_real_feedb
             .map(|index| 2.0 * index as f64)
             .collect::<Vec<_>>()
     );
-    let profile = placement.profile_snapshot();
-    let samples: Vec<_> = profile
-        .feedback
-        .iter()
-        .filter(|sample| sample.signature.operation == "plus")
-        .collect();
-    assert_eq!(samples.len(), 1);
-    assert_eq!(samples[0].samples, 1);
+    // Runtime-binding generations are session-local and cannot be reused by
+    // another process via profile export. Actual managed observation insertion
+    // and one-shot deferred delivery are covered by the placement owner tests.
+    assert!(placement.profile_snapshot().feedback.is_empty());
 }
 
 #[tokio::test]
@@ -120,7 +116,12 @@ async fn selected_sink_gathers_actual_resident_input() {
         .await
         .expect("selected sink owns its real gather");
     assert!(provider.telemetry_snapshot().download_bytes > before);
-    assert!(!capture.finish().unwrap().is_empty());
+    // Inspect the admitted entries without flattening their managed backing
+    // into an unbudgeted String outside the language output boundary.
+    assert!(capture
+        .finish_entries()
+        .iter()
+        .any(|entry| !entry.text.is_empty()));
 }
 
 #[tokio::test]

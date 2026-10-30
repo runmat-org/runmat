@@ -187,6 +187,8 @@ struct PlotSurfaceEventPayload {
     #[serde(default)]
     wheel_delta_mode: u32,
     #[serde(default)]
+    trackpad: Option<bool>,
+    #[serde(default)]
     shift_key: bool,
     #[serde(default)]
     ctrl_key: bool,
@@ -236,7 +238,7 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
             buttons: payload.buttons,
             modifiers,
         },
-        "wheel" => {
+        "wheel" | "trackpadScroll" => {
             let mut wheel_delta_x = payload.wheel_delta_x;
             let mut wheel_delta_y = payload.wheel_delta_y;
             match payload.wheel_delta_mode {
@@ -253,6 +255,17 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
             }
             wheel_delta_x = -wheel_delta_x;
             wheel_delta_y = -wheel_delta_y;
+            if payload.kind == "trackpadScroll"
+                || payload.trackpad.unwrap_or(payload.wheel_delta_mode == 0)
+            {
+                return runmat_runtime::builtins::plotting::handle_surface_trackpad_scroll(
+                    surface_id,
+                    position,
+                    Vec2::new(wheel_delta_x, wheel_delta_y),
+                    modifiers,
+                )
+                .map_err(|error| runtime_error_to_js(&error));
+            }
             PlotEvent::MouseWheel {
                 position,
                 delta: Vec2::new(wheel_delta_x, wheel_delta_y),
@@ -266,6 +279,34 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
     };
 
     runtime_handle_plot_surface_event(surface_id, event).map_err(|err| runtime_error_to_js(&err))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = configurePlotSurfaceViewer)]
+pub fn configure_plot_surface_viewer(
+    surface_id: u32,
+    navigation: JsValue,
+    antialiasing: JsValue,
+) -> Result<(), JsValue> {
+    let navigation: runmat_plot::core::NavigationOptions =
+        serde_wasm_bindgen::from_value(navigation).map_err(|error| js_error(&error.to_string()))?;
+    let antialiasing: runmat_plot::core::Antialiasing =
+        serde_wasm_bindgen::from_value(antialiasing)
+            .map_err(|error| js_error(&error.to_string()))?;
+    runmat_runtime::builtins::plotting::configure_surface_viewer(
+        surface_id,
+        navigation,
+        antialiasing,
+    )
+    .map_err(|error| runtime_error_to_js(&error))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = plotSurfaceAntialiasingModes)]
+pub fn plot_surface_antialiasing_modes(surface_id: u32) -> Result<JsValue, JsValue> {
+    let modes = runmat_runtime::builtins::plotting::surface_antialiasing_modes(surface_id)
+        .map_err(|error| runtime_error_to_js(&error))?;
+    serde_wasm_bindgen::to_value(&modes).map_err(|error| js_error(&error.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -240,7 +240,9 @@ pub(super) async fn run_remote_driver(
         if bootstrap.desired_worker_count == 0 {
             match admitted {
                 AdmittedRemoteProgram::Direct(admitted) => {
-                    let response = execute_local_direct(*admitted, input_objects).await?;
+                    let response =
+                        execute_local_direct(*admitted, input_objects, &bootstrap.driver_resources)
+                            .await?;
                     Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(response))
                 }
                 AdmittedRemoteProgram::Graph(admitted) => {
@@ -371,6 +373,7 @@ pub(super) async fn run_remote_driver(
 async fn execute_local_direct(
     admitted: program::AdmittedDirectProgram,
     input_objects: Vec<ProgramExecutionObject>,
+    allocation: &runmat_execution_transport_native::control::ResourceRequest,
 ) -> NativeExecutionResult<super::pool_execution::RemotePoolExecutionResult> {
     let program::AdmittedDirectProgram {
         mut request,
@@ -378,6 +381,16 @@ async fn execute_local_direct(
         bundle,
         ..
     } = admitted;
+    let config = runmat_core::cluster_settings::runtime_config(&bundle)
+        .map_err(protocol)?
+        .ok_or_else(|| protocol("cluster Direct bundle lacks project-only runtime settings"))?;
+    super::runtime_settings::admit_limits(
+        &config,
+        allocation.cpu_millicores,
+        allocation.memory_bytes,
+        !allocation.accelerators.is_empty(),
+    )
+    .map_err(protocol)?;
     let objects = super::object_transfer::RemoteObjectStore::new()?;
     let mut values = std::collections::HashMap::new();
     for object in input_objects {

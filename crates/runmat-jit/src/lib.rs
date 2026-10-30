@@ -11,4 +11,4 @@ pub mod tiering;
 pub use error::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use compile::GenericCompiler;
+pub use compile::{CompilerOptimization, GenericCompiler};

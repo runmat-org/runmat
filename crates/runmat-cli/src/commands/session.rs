@@ -33,6 +33,11 @@ pub(crate) fn create_session_with_graphics(
 ) -> Result<RunMatSession> {
     let mut engine =
         RunMatSession::with_options(enable_jit, verbose).context(create_error_context)?;
+    let mut effective = config.clone();
+    effective.jit.enabled = enable_jit;
+    engine
+        .apply_runtime_config(&effective)
+        .context("failed to apply runtime settings")?;
     let execution = runmat_execution_runner_native::NativeExecutionService::new(
         runmat_execution_runner_native::NativeExecutionConfig::for_current_executable()
             .context("failed to configure local process execution")?,
@@ -44,13 +49,7 @@ pub(crate) fn create_session_with_graphics(
     ));
     engine.set_telemetry_consent(config.telemetry.enabled);
     engine.set_telemetry_sink(runtime_sink());
-    engine.set_compat_mode(parser_compat(config.language.compat));
-    engine.set_callstack_limit(config.runtime.callstack_limit);
     engine.set_error_namespace(resolved_error_namespace(config));
-    engine
-        .set_foreign_config(&config.foreign)
-        .context("failed to configure foreign runtimes")?;
-    engine.set_selected_foreign_config(std::sync::Arc::new(config.clone()));
     engine
         .attach_graphics_host(graphics)
         .context("failed to attach native graphics host")?;

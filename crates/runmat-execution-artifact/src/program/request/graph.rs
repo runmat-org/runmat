@@ -73,6 +73,10 @@ fn validate_root_context(
 #[serde(deny_unknown_fields)]
 pub struct GraphExecutionRequest {
     pub schema_version: u16,
+    /// Canonical project-only execution policy, included in the authenticated
+    /// Program bytes. Required by V13 and absent on generic local V10–V12.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_runtime_policy: Option<crate::LogicalObject>,
     pub recipe: ProgramBuildRecipe,
     pub artifact: ProgramArtifact,
     /// Additional canonical admitted V3 envelopes in graph-unit order. Unit
@@ -376,6 +380,17 @@ impl GraphExecutionRequest {
     /// bundles to the worker host. This avoids a second archive decode before
     /// materialization while keeping `validate` as the public check API.
     pub fn validate_and_admit_bundles(&self) -> ArtifactResult<Vec<Option<ExecutionBundle>>> {
+        if (self.schema_version == runmat_execution::value::GRAPH_REQUEST_SCHEMA_V13)
+            != self.project_runtime_policy.is_some()
+        {
+            return Err(ArtifactError::Invalid(
+                "Graph V13 requires a project runtime policy; older Graph schemas cannot carry one"
+                    .into(),
+            ));
+        }
+        if let Some(policy) = &self.project_runtime_policy {
+            crate::validate_project_runtime_policy_object(policy)?;
+        }
         if GraphRequiredSchema::from_version(self.schema_version)
             .is_none_or(|schema| schema < self.graph.required_schema())
         {

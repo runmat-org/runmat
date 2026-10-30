@@ -7,6 +7,7 @@ pub(super) async fn execute_study_remotely(
     inputs: Vec<AuthoredStudyInputBinding>,
     target: RemoteExecutionTarget,
     compute: FeaComputeAllocation,
+    project_policy: runmat_config::runtime::ClusterRuntimePolicy,
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
@@ -34,8 +35,13 @@ pub(super) async fn execute_study_remotely(
     .map_err(anyhow::Error::msg)?;
     let study_id = placeholder.realized.study_id.clone();
     let revision = placeholder.revision.clone();
-    let mut builder =
-        ExecutionBundleBuilder::native(frozen, revision.clone())?.with_compiled_package_closure();
+    runmat_core::cluster_settings::validate_program_environment(&project_policy, &revision)
+        .map_err(anyhow::Error::msg)?;
+    let runtime_policy = runmat_core::cluster_settings::capture_project_policy(&project_policy)
+        .map_err(anyhow::Error::msg)?;
+    let mut builder = ExecutionBundleBuilder::native(frozen, revision.clone())?
+        .with_compiled_package_closure()
+        .with_project_runtime_policy_object(runtime_policy)?;
     for program in prepared_root.required_programs() {
         builder = builder.with_materialized_program(
             program.recipe.clone(),

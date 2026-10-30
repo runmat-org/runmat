@@ -858,6 +858,13 @@ async fn run_encrypted_remote_request_with_prior_sequence(
     prior_checkpoint_sequence: Option<u64>,
     callable: Option<ProgramCallable>,
 ) -> ProgramExecutionResponse {
+    let bundle = if bundle.manifest.project_runtime_policy.is_none() {
+        let policy =
+            crate::remote::runtime_settings::fixture_policy(&bundle.manifest.program_revision);
+        bundle.with_project_runtime_policy_object(policy).unwrap()
+    } else {
+        bundle
+    };
     let revision = bundle.manifest.program_revision.clone();
     let recipe = bundle.manifest.recipes.first().cloned().unwrap();
     let artifact = bundle.manifest.artifacts.first().cloned().unwrap();

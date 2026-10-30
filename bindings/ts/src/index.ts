@@ -1,6 +1,12 @@
 export { physicalLengthUnit, physicalLengthUnitName, isPhysicalLengthUnit, resolvedSourceLengthUnit, sourceLengthUnitLabel, PHYSICAL_LENGTH_UNITS } from "./physical.js";
 export type { LengthUnit, LengthUnitEvidence } from "./physical.js";
+import { resolveNativeRuntimeSettings, editNativeUserRuntimeSettings } from "./settings.js";
+import type { HostRuntimeSettings, ResolvedRuntimeSettings, UserRuntimeSettingsEdit, RuntimeSettingsNativeExports, PreparedClusterProgram } from "./settings.js";
+export type { HostRuntimeSettings, ResolvedRuntimeSettings, RuntimeSettingsConfig, RuntimeSettingSource, UserRuntimeSettingsEdit, SettingsJsonValue, PreparedClusterProgram } from "./settings.js";
 import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
+import { invokeOpenTelemetry } from "./observability.js";
+import type { OpenTelemetryNativeExports, OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
+export type { OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
 import type {
   RunMatProgramTaskCancellation,
   RunMatProgramTaskTerminal,
@@ -405,6 +411,9 @@ export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAss
 export type ApplicationSettingsMode = "isolatedMemory";
 
 export interface RunMatInitOptions {
+  runtimeSettings?: HostRuntimeSettings;
+  /** Runtime-only collector credentials; never stored in runtimeSettings or user/project files. */
+  openTelemetryHeaders?: OpenTelemetryStartupHeaders;
   applicationSettings?: ApplicationSettingsMode;
   enableGpu?: boolean;
   enableJit?: boolean;
@@ -554,6 +563,17 @@ export type FigurePlotKind =
 export type FigureEventListener = (event: FigureEvent) => void;
 export type HoldMode = "on" | "off" | "toggle" | boolean;
 
+/** Omitted fields preserve the runtime's existing navigation defaults. */
+export interface PlotNavigationOptions {
+  preset?: "legacy" | "cad" | "dcc";
+  orbitCenter?: "viewCenter" | "origin" | "underCursor";
+  zoomSpeed?: number;
+  reverseZoom?: boolean;
+  zoomToCursor?: boolean;
+  trackpadPan?: boolean;
+}
+export type PlotAntialiasing = "off" | "x2" | "x4" | "x8";
+
 export type PlotSurfaceEvent =
   | {
       kind: "mouseDown";
@@ -587,12 +607,15 @@ export type PlotSurfaceEvent =
       metaKey?: boolean;
     }
   | {
-      kind: "wheel";
+      /** Hosts classify two-finger scroll separately; Ctrl/Cmd pinch remains zoom. */
+      kind: "wheel" | "trackpadScroll";
       x: number;
       y: number;
     wheelDeltaX: number;
     wheelDeltaY: number;
       wheelDeltaMode?: number;
+      /** Override pixel-scroll inference for precise mice or known trackpads. */
+      trackpad?: boolean;
       shiftKey?: boolean;
       ctrlKey?: boolean;
       altKey?: boolean;
@@ -1167,12 +1190,10 @@ export interface GeometryPreviewResult extends GeometryInspectResult {
   previewMessage?: string | null;
 }
 
-export type { FeaRunRequest, FeaRunDenied, FeaRunUsage, FeaRunOutcome, FeaRunAdmission, FeaRunDelegation, FeaRunWorkerAdmission } from "./fea-run-admission.js";
-import type { FeaRunAdmission, FeaRunWorkerAdmission } from "./fea-run-admission.js";
+export type { LocalFeaWorkerContext } from "./fea-run-context.js";
+import type { LocalFeaWorkerContext } from "./fea-run-context.js";
 
 export interface RunMatSessionHandle {
-  /** Install the browser host lease adapter; unset admission denies mesh/solve. */
-  setFeaRunAdmission(admission: FeaRunAdmission): void;
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
@@ -1253,6 +1274,8 @@ export interface RunMatSessionHandle {
 }
 
 interface NativeInitOptions {
+  runtimeSettings?: HostRuntimeSettings;
+  openTelemetryHeaders?: OpenTelemetryStartupHeaders;
   applicationSettings?: ApplicationSettingsMode;
   enableGpu?: boolean;
   enableJit?: boolean;
@@ -1277,7 +1300,6 @@ interface NativeInitOptions {
 }
 
 interface RunMatNativeSession {
-  setFeaRunAdmission?: (admission: FeaRunAdmission) => void;
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
@@ -1509,7 +1531,7 @@ export interface GeometryScenePickResult {
 }
 
 
-interface RunMatNativeModule {
+interface RunMatNativeModule extends OpenTelemetryNativeExports, RuntimeSettingsNativeExports {
   default: (
     module?:
       | { module_or_path: WasmInitInput | Promise<WasmInitInput> }
@@ -1521,8 +1543,7 @@ interface RunMatNativeModule {
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
-  executePreparedFeaStudy?: (json: string, memoryBytes: number, admission?: FeaRunWorkerAdmission) => Promise<string>;
-  feaRunAdmissionSupported?: () => boolean;
+  executePreparedFeaStudy?: (json: string, memoryBytes: number, context?: LocalFeaWorkerContext) => Promise<string>;
   executeWorkerProgram?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
@@ -1601,6 +1622,8 @@ interface RunMatNativeModule {
   setGeometryScenePresentation?: (surfaceId: number, presentation: GeometryScenePresentationState) => void;
   pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number, mode: string) => GeometryScenePickResult | null;
   handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
+  configurePlotSurfaceViewer?: (surfaceId: number, navigation: PlotNavigationOptions, antialiasing: PlotAntialiasing) => void;
+  plotSurfaceAntialiasingModes?: (surfaceId: number) => PlotAntialiasing[];
   takePlotSurfaceHostActions?: (surfaceId: number) => unknown;
   fitPlotSurfaceExtents?: (surfaceId: number) => void;
   resetPlotSurfaceCamera?: (surfaceId: number) => void;
@@ -1698,6 +1721,57 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
   const native = await loadNativeModule(options.wasmModule);
   const fsProvider = await resolveFsProvider(options.fsProvider);
   const packageCache = await resolvePackageCache(options.packageCache);
+  const layeredSettings = options.runtimeSettings
+    ? resolveNativeRuntimeSettings(native, options.runtimeSettings)
+    : undefined;
+  const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
+  const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
+  const requestedGpu = (options.enableGpu ?? layeredSettings?.config.accelerate.enabled ?? true)
+    && layeredSettings?.config.accelerate.provider !== "inprocess";
+  const allowCpuFallback = layeredSettings?.config.accelerate.allow_inprocess_fallback ?? true;
+  let effectiveEnableGpu: boolean;
+  if (hasExplicitEnableFlag) {
+    if (requestedGpu && !supportsWebGpu && allowCpuFallback) {
+      console.warn(
+        "[runmat] GPU acceleration was explicitly requested, but WebGPU APIs are unavailable in this context."
+      );
+      effectiveEnableGpu = !allowCpuFallback;
+    } else {
+      effectiveEnableGpu = requestedGpu;
+    }
+  } else {
+    effectiveEnableGpu = requestedGpu && (supportsWebGpu || !allowCpuFallback);
+    if (requestedGpu && !supportsWebGpu && allowCpuFallback) {
+      console.warn("[runmat] WebGPU is not available in this environment; falling back to CPU execution.");
+    }
+  }
+  const session = await native.initRunMat({
+    runtimeSettings: options.runtimeSettings,
+    openTelemetryHeaders: options.openTelemetryHeaders,
+    applicationSettings: options.applicationSettings,
+    enableGpu: effectiveEnableGpu,
+    enableJit: options.enableJit,
+    verbose: options.verbose,
+    logLevel: options.logLevel,
+    gpuBufferPoolMaxPerKey: options.gpuBufferPoolMaxPerKey,
+    telemetryConsent: options.telemetryConsent,
+    telemetryId: options.telemetryId,
+    telemetryRunKind: options.telemetryRunKind,
+    telemetryEmitter: options.telemetryEmitter,
+    wgpuPowerPreference: options.wgpuPowerPreference,
+    wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter,
+    scatterTargetPoints: options.scatterTargetPoints,
+    surfaceVertexBudget: options.surfaceVertexBudget,
+    emitFusionPlan: options.emitFusionPlan ?? false,
+    callstackLimit: options.callstackLimit,
+    errorNamespace: options.errorNamespace,
+    languageCompat: options.language?.compat,
+    fsProvider,
+    packageCacheProvider: packageCache.provider,
+    executionHost: options.executionHost
+  });
+  // initRunMat resolves collector policy and installs logging before any renderer
+  // can initialize the process-global subscriber with an unconfigured layer.
   if (options.plotCanvas) {
     if (typeof native.createPlotSurface === "function") {
       await native.createPlotSurface(options.plotCanvas);
@@ -1709,49 +1783,25 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
       throw err;
     }
   }
-  const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
-  const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
-  const requestedGpu = options.enableGpu ?? true;
-  let effectiveEnableGpu: boolean;
-  if (hasExplicitEnableFlag) {
-    if (requestedGpu && !supportsWebGpu) {
-      console.warn(
-        "[runmat] GPU acceleration was explicitly requested, but WebGPU APIs are unavailable in this context."
-      );
-      effectiveEnableGpu = false;
-    } else {
-      effectiveEnableGpu = requestedGpu;
-    }
-  } else {
-    effectiveEnableGpu = requestedGpu && supportsWebGpu;
-    if (requestedGpu && !supportsWebGpu) {
-      console.warn("[runmat] WebGPU is not available in this environment; falling back to CPU execution.");
-    }
-  }
-  const session = await native.initRunMat({
-    applicationSettings: options.applicationSettings,
-    enableGpu: effectiveEnableGpu,
-    enableJit: options.enableJit ?? false,
-    verbose: options.verbose ?? false,
-    logLevel: options.logLevel,
-    gpuBufferPoolMaxPerKey: options.gpuBufferPoolMaxPerKey,
-    telemetryConsent: options.telemetryConsent ?? true,
-    telemetryId: options.telemetryId,
-    telemetryRunKind: options.telemetryRunKind,
-    telemetryEmitter: options.telemetryEmitter,
-    wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
-    wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
-    scatterTargetPoints: options.scatterTargetPoints,
-    surfaceVertexBudget: options.surfaceVertexBudget,
-    emitFusionPlan: options.emitFusionPlan ?? false,
-    callstackLimit: options.callstackLimit,
-    errorNamespace: options.errorNamespace,
-    languageCompat: options.language?.compat,
-    fsProvider,
-    packageCacheProvider: packageCache.provider,
-    executionHost: options.executionHost
-  });
   return new WebRunMatSession(session, packageCache.close);
+}
+
+/** Emit a correlated test span+log and await actual collector acceptance for both. */
+export async function sendOpenTelemetryTest(wasmModule?: WasmInitInput): Promise<OpenTelemetryExportStats> {
+  return invokeOpenTelemetry(await loadNativeModule(wasmModule), "sendOpenTelemetryTest");
+}
+
+export async function flushOpenTelemetry(wasmModule?: WasmInitInput): Promise<OpenTelemetryExportStats> {
+  return invokeOpenTelemetry(await loadNativeModule(wasmModule), "flushOpenTelemetry");
+}
+
+/** Runtime-wide: flush before terminating the shared worker/runtime, not after each session. */
+export async function shutdownOpenTelemetry(wasmModule?: WasmInitInput): Promise<OpenTelemetryExportStats> {
+  return invokeOpenTelemetry(await loadNativeModule(wasmModule), "shutdownOpenTelemetry");
+}
+
+export async function openTelemetryStats(wasmModule?: WasmInitInput): Promise<OpenTelemetryExportStats> {
+  return invokeOpenTelemetry(await loadNativeModule(wasmModule), "openTelemetryStats");
 }
 
 export async function executeProgramArtifact(
@@ -1765,14 +1815,35 @@ export async function executeProgramArtifact(
   return native.executeProgramArtifact(request);
 }
 
-/** Execute a worker request only after asynchronous host admission. */
-export async function executePreparedFeaStudy(json: string, memoryBytes: number, wasmModule?: WasmInitInput, admission?: FeaRunWorkerAdmission): Promise<string> {
-  if (!admission?.admission) {
-    throw Object.assign(new Error("Meshing and solving need a signed-in RunMat account. Run `runmat login`, then run this study again."), { identifier: "RM.FEA.SignInRequired" });
-  }
+/** Resolve user/project fields and exact provenance without creating a session. */
+export async function resolveRuntimeSettings(settings: HostRuntimeSettings, wasmModule?: WasmInitInput): Promise<ResolvedRuntimeSettings> {
+  return resolveNativeRuntimeSettings(await loadNativeModule(wasmModule), settings);
+}
+
+/** Edit only the user layer. Persist the returned JSON using the host settings store. */
+export async function editUserRuntimeSettings(source: string, edits: UserRuntimeSettingsEdit[], wasmModule?: WasmInitInput): Promise<string> {
+  return editNativeUserRuntimeSettings(await loadNativeModule(wasmModule), source, edits);
+}
+
+/** Freeze a project and compile under project-only cluster policy, never laptop user defaults. */
+export async function prepareClusterProgram(sourcePath: string, functionName?: string, wasmModule?: WasmInitInput): Promise<PreparedClusterProgram> {
   const native = await loadNativeModule(wasmModule);
-  if (!native.executePreparedFeaStudy || native.feaRunAdmissionSupported?.() !== true) throw new Error("Rebuild the browser numerical runtime assets with FEA admission support.");
-  return native.executePreparedFeaStudy(json, memoryBytes, admission);
+  if (!native.prepareClusterProgram) throw new Error("The loaded RunMat module lacks project-only cluster program preparation; rebuild the browser runtime assets.");
+  return native.prepareClusterProgram(sourcePath, functionName);
+}
+
+/** Bind project policy to a selected Graph without reinterpreting compiled language/foreign semantics. */
+export async function prepareClusterGraph(programJson: Uint8Array, project: NonNullable<HostRuntimeSettings["project"]>, wasmModule?: WasmInitInput): Promise<Uint8Array> {
+  const native = await loadNativeModule(wasmModule);
+  if (!native.prepareClusterGraph) throw new Error("The loaded RunMat module lacks project-only cluster Graph preparation; rebuild the browser runtime assets.");
+  return native.prepareClusterGraph(programJson, project);
+}
+
+/** Execute local numerical work without an account or billing adapter. */
+export async function executePreparedFeaStudy(json: string, memoryBytes: number, wasmModule?: WasmInitInput, context?: LocalFeaWorkerContext): Promise<string> {
+  const native = await loadNativeModule(wasmModule);
+  if (!native.executePreparedFeaStudy) throw new Error("Rebuild the browser numerical runtime assets with prepared FEA execution support.");
+  return native.executePreparedFeaStudy(json, memoryBytes, context);
 }
 
 export async function executeWorkerProgram(
@@ -2079,6 +2150,19 @@ export async function handlePlotSurfaceEvent(surfaceId: number, event: PlotSurfa
   const native = await loadNativeModule();
   requireNativeFunction(native, "handlePlotSurfaceEvent");
   native.handlePlotSurfaceEvent(surfaceId, event);
+}
+
+/** Unsupported AA modes are rejected without changing navigation settings. */
+export async function configurePlotSurfaceViewer(surfaceId: number, navigation: PlotNavigationOptions, antialiasing: PlotAntialiasing): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "configurePlotSurfaceViewer");
+  native.configurePlotSurfaceViewer(surfaceId, navigation, antialiasing);
+}
+
+export async function plotSurfaceAntialiasingModes(surfaceId: number): Promise<PlotAntialiasing[]> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "plotSurfaceAntialiasingModes");
+  return native.plotSurfaceAntialiasingModes(surfaceId);
 }
 
 export async function takePlotSurfaceHostActions(surfaceId: number): Promise<PlotSurfaceHostAction[]> {
@@ -2548,12 +2632,6 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     if (!this.native.runFeaSource) throw new Error("Reload the current runtime to run this simulation.");
     return this.native.runFeaSource(path, planId, inputManifest);
-  }
-
-  setFeaRunAdmission(admission: FeaRunAdmission): void {
-    this.ensureActive();
-    if (!this.native.setFeaRunAdmission) throw new Error("Reload the current runtime to configure FEA admission.");
-    this.native.setFeaRunAdmission(admission);
   }
 
   async checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult> {

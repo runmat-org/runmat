@@ -323,4 +323,7 @@ pub use self::web::{
     PlotCameraState, PlotSurfaceCameraState,
 };
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
-pub use self::web::{handle_plot_surface_event, take_surface_host_actions, PlotSurfaceHostAction};
+pub use self::web::{
+    configure_surface_viewer, handle_plot_surface_event, handle_surface_trackpad_scroll,
+    surface_antialiasing_modes, take_surface_host_actions, PlotSurfaceHostAction,
+};

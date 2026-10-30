@@ -143,6 +143,8 @@ pub(super) async fn admit(
                 ));
             }
             bundle.validate().map_err(protocol)?;
+            runmat_core::cluster_settings::decode_project_policy(&bundle).map_err(protocol)?
+                .ok_or_else(|| protocol("cluster bundle has no project-only runtime policy; rebuild for this target"))?;
             if bundle.manifest.portable_environment != descriptor.environment.entries()
                 || bundle.manifest.program_revision != descriptor.recipe.program_revision
                 || !bundle
@@ -180,6 +182,7 @@ pub(super) async fn admit(
             )))
         }
         RemoteProgramObject::Graph(request) => {
+            runmat_core::cluster_settings::validate_graph_policy(&request).map_err(protocol)?;
             if request.assignment.is_some() {
                 return Err(protocol(
                     "graph Program object must be unassigned before remote scheduling",
@@ -285,6 +288,8 @@ async fn admit_chunked_graph(
             match program {
                 RemoteProgramObject::Graph(request) => {
                     request.validate().map_err(protocol)?;
+                    runmat_core::cluster_settings::validate_graph_policy(&request)
+                        .map_err(protocol)?;
                     if request.assignment.is_some() {
                         return Err(protocol(
                             "staged Graph Program must be unassigned before scheduling",

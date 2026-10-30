@@ -1,7 +1,5 @@
 #[path = "support/fixtures.rs"]
 mod test_fixtures;
-#[path = "../../runmat-runtime/tests/support/fea_admission.rs"]
-mod fea_admission;
 #[path = "analysis_process_conformance/fluid_fourier.rs"]
 mod fluid_fourier;
 #[path = "analysis_process_conformance/fluid_mass_flow.rs"]
@@ -171,18 +169,7 @@ fn main() {
     } else {
         tokio::runtime::Builder::new_current_thread()
     };
-    let host = fea_admission::TestFeaHost::new(None);
-    runtime
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(host.context().run_future(parent()));
-    let events = host.events();
-    assert_eq!(
-        events.requests.len(),
-        events.settlements.len(),
-        "every admitted test root must settle"
-    );
+    runtime.enable_all().build().unwrap().block_on(parent());
 }
 
 async fn parent() {

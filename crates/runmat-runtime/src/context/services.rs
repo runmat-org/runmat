@@ -714,12 +714,20 @@ pub enum RuntimePlacementFeedbackDelivery {
         elapsed_ns: u64,
         outcome: runmat_execution::WholeWorkObservationOutcome,
     },
+    ManagedWholeWork {
+        selected: RuntimeManagedWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    },
 }
 
 impl RuntimePlacementFeedbackDelivery {
     /// Portable diagnostic snapshot only; this does not transfer authority.
     pub fn snapshot(&self) -> Option<runmat_execution::PlacementFeedback> {
         match self {
+            // Finite completion transports the original compact selection;
+            // it does not reconstruct a portable signature for diagnostics.
+            Self::ManagedWholeWork { .. } => None,
             Self::Graph { feedback, .. } => Some(feedback.clone()),
             Self::WholeWork {
                 selected,
@@ -1205,6 +1213,11 @@ pub trait RuntimePlacementService {
                 elapsed_ns,
                 outcome,
             } => self.observe_selected_whole_work(&selected, elapsed_ns, outcome),
+            RuntimePlacementFeedbackDelivery::ManagedWholeWork {
+                selected,
+                elapsed_ns,
+                outcome,
+            } => self.observe_managed_whole_work(&selected, elapsed_ns, outcome),
         }
     }
 

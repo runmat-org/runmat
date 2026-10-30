@@ -147,6 +147,18 @@ pub(super) async fn execute(
         cancellation,
         progress_sender,
     } = ports;
+    let admitted_settings = match &program {
+        WorkerProgramRequest::Direct(_) => bundle
+            .as_ref()
+            .ok_or_else(|| "cluster execution has no admitted project settings bundle".to_owned())
+            .and_then(|bundle| super::runtime_settings::admit(bundle, &resources)),
+        WorkerProgramRequest::Graph(graph) => {
+            super::runtime_settings::admit_graph(graph, &resources)
+        }
+    };
+    if let Err(message) = admitted_settings {
+        return WorkerExecutionOutcome::Response(failure(&message));
+    }
     let program = match program {
         WorkerProgramRequest::Direct(program) => program,
         WorkerProgramRequest::Graph(graph) => {

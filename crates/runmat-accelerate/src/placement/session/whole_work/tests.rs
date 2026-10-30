@@ -267,13 +267,35 @@ fn managed_completion_uses_preallocated_series_and_preserves_portable_profile() 
         let selection = session
             .select_whole_work_borrowed_managed(route.as_ref())
             .expect("managed admission before effects");
-        RuntimePlacementService::observe_managed_whole_work(
-            &session,
-            &selection,
-            elapsed,
-            WholeWorkObservationOutcome::Success,
-        )
-        .expect("inline managed feedback");
+        if elapsed == 17 {
+            RuntimePlacementService::observe_managed_whole_work(
+                &session,
+                &selection,
+                elapsed,
+                WholeWorkObservationOutcome::Success,
+            )
+            .expect("inline managed feedback");
+        } else {
+            let mut receipt = runmat_accelerate_api::observation::ProviderOperationReceipt::new();
+            let submission = receipt.recorder().submission().unwrap();
+            receipt.publish().unwrap();
+            let mut source = crate::placement::completion::managed_whole_work_source_for_test(
+                receipt,
+                selection,
+                route.signature.clone(),
+            );
+            assert!(source.take_ready().is_none(), "no sample before completion");
+            submission.complete();
+            let delivery = source.take_ready().expect("managed terminal completion");
+            assert!(matches!(
+                delivery,
+                runmat_runtime::context::RuntimePlacementFeedbackDelivery::ManagedWholeWork { .. }
+            ));
+            assert!(delivery.snapshot().is_none(), "no portable metadata clone");
+            RuntimePlacementService::observe_deferred_feedback(&session, delivery)
+                .expect("original managed observation owner");
+            assert!(source.take_ready().is_none(), "one terminal delivery only");
+        }
     }
     let observed = session.observed_candidate_duration_digest(
         (&route.signature).into(),

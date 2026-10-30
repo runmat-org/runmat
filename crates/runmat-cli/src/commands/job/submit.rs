@@ -69,7 +69,7 @@ pub(crate) struct JobSubmission {
 pub async fn submit(
     submission: JobSubmission,
     cli: &Cli,
-    config: &runmat_config::runtime::RunMatRuntimeConfig,
+    _config: &runmat_config::runtime::RunMatRuntimeConfig,
 ) -> Result<()> {
     let JobSubmission {
         file,
@@ -90,6 +90,12 @@ pub async fn submit(
         .await?
         .context("remote execution requires a project runmat.toml with an exact frozen graph")?;
     let frozen = &resolved.resolved.frozen;
+    let project_policy =
+        runmat_config::runtime::ClusterRuntimePolicy::from_project_file(&frozen.manifest_path)?;
+    let project_runtime = project_policy.runtime_config()?;
+    let config = &project_runtime;
+    let runtime_policy = runmat_core::cluster_settings::capture_project_policy(&project_policy)
+        .map_err(anyhow::Error::msg)?;
     let project_revision = frozen.revision();
     let revision = ProgramRevision::new(
         Digest::from_bytes(*project_revision.graph_digest.bytes()),
@@ -97,6 +103,7 @@ pub async fn submit(
         runmat_core::program_environment(crate::diagnostics::parser_compat(config.language.compat)),
     )?;
     let mut session = create_session(false, false, config, "create remote compilation session")?;
+    session.apply_cluster_runtime_config(config)?;
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))
         .await?;
@@ -165,6 +172,7 @@ pub async fn submit(
     let mut builder = ExecutionBundleBuilder::native(frozen, revision.clone())?
         .with_compiled_package_closure()
         .with_materialized_program(recipe, form, executable_bytes)
+        .with_project_runtime_policy_object(runtime_policy)?
         .with_foreign_policy_object(foreign_policy)?;
     for object in foreign_artifacts.objects {
         builder = builder.with_foreign_object(object)?;

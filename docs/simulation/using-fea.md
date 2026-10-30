@@ -2,7 +2,7 @@
 
 This guide builds and runs a small structural study, then shows generated inputs, sweeps, and cluster placement. The complete repository examples are checked as part of the release workflow.
 
-Meshing and solving use simulation core-hours; see [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits) for each plan's weekly allowance. Run `runmat login` before starting a local study. Checking, planning, importing geometry and viewing results do not require a lease. An admitted run can finish if its connection drops; RunMat journals its usage for delivery when the connection returns.
+Meshing and solving on your own computer never use core-hours and need no sign-in. Runs sent to a cluster use core-hours; see [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits) for each plan's weekly allowance.
 
 ## A Complete Study
 

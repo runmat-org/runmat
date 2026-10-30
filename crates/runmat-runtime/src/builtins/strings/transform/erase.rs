@@ -407,9 +407,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_array_multiple_patterns() {
-        let strings = StringArray::new(
-            vec!["gpu".into(), "cpu".into(), "<missing>".into()],
-            vec![3, 1],
+        let strings = StringArray::from_elements_unbounded(
+            vec![
+                "gpu".into(),
+                "cpu".into(),
+                "<missing>".into(),
+                runmat_value::StringElement::Missing,
+            ],
+            vec![4, 1],
         )
         .unwrap();
         let result = erase_builtin(
@@ -419,13 +424,14 @@ pub(crate) mod tests {
         .expect("erase");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.shape, vec![3, 1]);
+                assert_eq!(sa.shape, vec![4, 1]);
                 assert_eq!(
                     sa.data(),
                     vec![
-                        String::from("pu"),
-                        String::from("pu"),
-                        String::from("<missing>")
+                        "pu".into(),
+                        "pu".into(),
+                        "<missin>".into(),
+                        runmat_value::StringElement::Missing,
                     ]
                 );
             }

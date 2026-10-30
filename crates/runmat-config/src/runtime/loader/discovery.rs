@@ -56,6 +56,7 @@ pub(crate) fn discover_project_config_path_from(start: &Path) -> Option<PathBuf>
 pub(crate) fn user_config_candidates() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(user_dir) = ApplicationSettingsDirectory::discover() {
+        paths.push(user_dir.settings_file());
         for name in USER_CONFIG_FILENAMES {
             paths.push(user_dir.path().join(name));
         }

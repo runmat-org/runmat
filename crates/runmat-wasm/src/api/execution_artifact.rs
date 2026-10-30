@@ -329,6 +329,11 @@ pub async fn build_execution_bundle(
         );
     }
     let revision = recipe.program_revision.clone();
+    let policy = super::cluster_program::project_policy(&handoff.project).await?;
+    runmat_core::cluster_settings::validate_program_environment(&policy, &revision)
+        .map_err(js_error)?;
+    let runtime_policy =
+        runmat_core::cluster_settings::capture_project_policy(&policy).map_err(js_error)?;
     let reader = move |path: &std::path::Path| {
         source_bytes.get(path).cloned().ok_or_else(|| {
             runmat_execution_artifact::ArtifactError::Invalid(format!(
@@ -345,6 +350,8 @@ pub async fn build_execution_bundle(
                 runmat_execution_artifact::ExecutableForm::InterpreterBytecodeV2,
                 executable_bytes,
             )
+            .with_project_runtime_policy_object(runtime_policy)
+            .map_err(js_error)?
             .build()
             .map_err(js_error)?;
     let mut archive = Vec::new();

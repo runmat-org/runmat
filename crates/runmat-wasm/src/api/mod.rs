@@ -2,6 +2,10 @@
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod config;
 #[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod settings;
+#[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod cluster_program;
+#[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod execution_artifact;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod execution_program;
@@ -9,6 +13,8 @@ pub(crate) mod execution_program;
 pub(crate) mod execution_remote;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod init;
+#[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod observability;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod package;
 pub(crate) mod plot;
@@ -25,4 +31,4 @@ pub(crate) mod testing;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod fea_execution;
 #[cfg(not(feature = "graphics-replay"))]
-pub(crate) mod fea_run_admission;
+pub(crate) mod fea_run_context;

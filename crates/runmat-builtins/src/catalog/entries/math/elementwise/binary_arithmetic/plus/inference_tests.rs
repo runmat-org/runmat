@@ -30,6 +30,17 @@ fn string_addition_owns_converted_shape_type_and_host_placement() {
         assert_eq!(inferred.outputs[0].residency, ResidencyFact::Host);
         assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
     }
+    let mut dynamic_text = text.clone();
+    dynamic_text.certainty =
+        runmat_types::CertaintyFact::Dynamic(runmat_types::DynamicReason::ExternalData);
+    let inferred = infer_catalog_call(
+        &PLUS_CATALOG_ENTRY,
+        &request(vec![text.clone(), dynamic_text]),
+    );
+    assert_eq!(
+        inferred.outputs[0].certainty,
+        runmat_types::CertaintyFact::Dynamic(runmat_types::DynamicReason::ExternalData)
+    );
     let mut resident = numeric(
         NumericClass::Single,
         NumericDomain::Real,

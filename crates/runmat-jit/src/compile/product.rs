@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use runmat_native_executor::{NativeExecutor, NativeExecutorOptions, RepresentationProfile};
 use runmat_types::ProgramPointId;
 
-use super::GenericCompiler;
+use super::{CompilerOptimization, GenericCompiler};
 use crate::JitResult;
 
 impl GenericCompiler {
@@ -74,8 +74,28 @@ impl GenericCompiler {
         coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
         entry_profile: Option<RepresentationProfile>,
     ) -> JitResult<NativeExecutor> {
+        Self::compile_executor_with_policy(
+            assembly,
+            program_capture,
+            interpreter_resume_points,
+            coverage_sites,
+            entry_profile,
+            CompilerOptimization::TierDefault,
+        )
+    }
+
+    pub fn compile_executor_with_policy(
+        assembly: runmat_native_codegen::NativeAssembly,
+        program_capture: Option<Vec<u8>>,
+        interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
+        coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
+        entry_profile: Option<RepresentationProfile>,
+        optimization: CompilerOptimization,
+    ) -> JitResult<NativeExecutor> {
         let compile_started = std::time::Instant::now();
-        let executable = if entry_profile.is_some() {
+        let executable = if optimization != CompilerOptimization::TierDefault {
+            Self::compile_with_policy(&assembly, optimization)?
+        } else if entry_profile.is_some() {
             Self::compile_specialized(&assembly)?
         } else {
             Self::compile(&assembly)?

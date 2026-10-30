@@ -9,7 +9,7 @@ use crate::{
     ObjectDescriptor, ProgramArtifact, ProgramBuildRecipe,
 };
 
-pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 5;
+pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 6;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -44,6 +44,8 @@ pub struct BundleManifest {
     pub sources: Vec<ObjectDescriptor>,
     pub foreign_artifacts: Vec<ObjectDescriptor>,
     pub foreign_artifact_closures: Vec<ForeignArtifactClosure>,
+    /// Project-only Config policy; mandatory at cluster admission, optional for local bundles.
+    pub project_runtime_policy: Option<ObjectDescriptor>,
     pub callables: Vec<BundleCallable>,
     pub recipes: Vec<ProgramBuildRecipe>,
     pub artifacts: Vec<ProgramArtifact>,
@@ -59,6 +61,47 @@ pub struct ExecutionBundle {
 }
 
 impl ExecutionBundle {
+    /// Attach one explicitly captured project-only policy; never reads worker CWD or ambient config.
+    pub fn with_project_runtime_policy_object(
+        mut self,
+        object: LogicalObject,
+    ) -> ArtifactResult<Self> {
+        if self.manifest.project_runtime_policy.is_some()
+            || self.objects.iter().any(|value| {
+                value.descriptor.namespace == crate::ObjectNamespace::ProjectRuntimePolicy
+            })
+        {
+            return Err(ArtifactError::Invalid(
+                "bundle already carries a project runtime policy".into(),
+            ));
+        }
+        crate::validate_project_runtime_policy_object(&object)?;
+        self.manifest.project_runtime_policy = Some(object.descriptor.clone());
+        self.objects.push(object);
+        self.objects
+            .sort_by(|left, right| left.descriptor.cmp(&right.descriptor));
+        self.validate()?;
+        Ok(self)
+    }
+
+    pub fn project_runtime_policy_object(&self) -> ArtifactResult<Option<&LogicalObject>> {
+        self.validate()?;
+        self.manifest
+            .project_runtime_policy
+            .as_ref()
+            .map(|descriptor| {
+                self.objects
+                    .iter()
+                    .find(|object| &object.descriptor == descriptor)
+                    .ok_or_else(|| {
+                        ArtifactError::Identity(
+                            "bundle project runtime policy object is missing".into(),
+                        )
+                    })
+            })
+            .transpose()
+    }
+
     pub fn validate(&self) -> ArtifactResult<()> {
         super::validator::validate(self)
     }
@@ -104,6 +147,12 @@ impl ExecutionBundle {
     }
 
     pub fn requires_materialization(&self) -> bool {
-        self.requires_source_project() || !self.manifest.foreign_artifacts.is_empty()
+        self.requires_source_project()
+            || !self.manifest.foreign_artifacts.is_empty()
+            || self
+                .manifest
+                .recipes
+                .iter()
+                .any(|recipe| recipe.foreign_policy.is_some())
     }
 }

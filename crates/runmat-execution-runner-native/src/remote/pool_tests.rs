@@ -2577,6 +2577,10 @@ end
     .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
         .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &recipe.program_revision,
+        ))
+        .unwrap()
         .with_materialized_program(
             recipe.clone(),
             ExecutableForm::InterpreterRegionSourcesV1,
@@ -2748,6 +2752,10 @@ async fn compile_spmd_region_bundle(
     )
     .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
+        .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &recipe.program_revision,
+        ))
         .unwrap()
         .with_materialized_program(
             recipe.clone(),

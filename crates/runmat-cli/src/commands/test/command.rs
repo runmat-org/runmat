@@ -43,15 +43,54 @@ pub async fn execute(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -
 }
 
 async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
-    let prepared = prepare(
+    let mut prepared = prepare(
         &args,
         cli,
         crate::diagnostics::parser_compat(runtime.language.compat),
     )
     .await?;
+    let cluster = args.cluster.clone().or_else(|| {
+        prepared
+            .test_config
+            .cluster
+            .as_ref()
+            .and_then(|cluster| cluster.profile.clone())
+    });
+    let project_policy = if cluster.is_some() {
+        let project = prepared
+            .project_handoff
+            .as_ref()
+            .context("remote tests require a frozen project")?;
+        Some(
+            runmat_config::runtime::ClusterRuntimePolicy::from_project_file(
+                &project.project.manifest_path,
+            )?,
+        )
+    } else {
+        None
+    };
+    let project_runtime = project_policy
+        .as_ref()
+        .map(|policy| policy.runtime_config())
+        .transpose()?;
+    let runtime = project_runtime.as_ref().unwrap_or(runtime);
+    if project_policy.is_some() {
+        prepared = prepare(
+            &args,
+            cli,
+            crate::diagnostics::parser_compat(runtime.language.compat),
+        )
+        .await?;
+    }
     let enable_jit = runtime.jit.enabled;
     let mut session = runmat_core::RunMatSession::with_options(enable_jit, false)
         .context("failed to initialize test discovery session")?;
+    session
+        .apply_runtime_config(runtime)
+        .context("failed to apply test runtime settings")?;
+    if project_policy.is_some() {
+        session.apply_cluster_runtime_config(runtime)?;
+    }
     session.configure_test_snapshot(&prepared.snapshot)?;
     if let Some(project) = prepared.project_handoff.clone() {
         session
@@ -126,13 +165,6 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
         }
     });
     let mut reporters = reporters(&args, &prepared.test_config.reports);
-    let cluster = args.cluster.clone().or_else(|| {
-        prepared
-            .test_config
-            .cluster
-            .as_ref()
-            .and_then(|cluster| cluster.profile.clone())
-    });
     let cluster_max_workers = args.max_workers.or_else(|| {
         prepared
             .test_config
@@ -204,6 +236,12 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
             project_handoff,
             interop: foreign_artifacts.interop,
             foreign_policy,
+            runtime_policy: runmat_core::cluster_settings::capture_project_policy(
+                project_policy
+                    .as_ref()
+                    .context("remote tests require project runtime policy")?,
+            )
+            .map_err(anyhow::Error::msg)?,
             foreign_artifacts: foreign_artifacts.objects,
             foreign_artifact_closures: foreign_artifacts.closures,
         })

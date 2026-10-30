@@ -17,7 +17,12 @@ impl BrowserWorkerRequest {
     pub(crate) fn validate(&self) -> Result<(), String> {
         match self {
             Self::Direct(request) => request.validate().map_err(|error| error.to_string()),
-            Self::Graph(request) => request.validate().map_err(|error| error.to_string()),
+            Self::Graph(request) => {
+                if request.project_runtime_policy.is_some() {
+                    return Err("project-policy Graph V13 executes on native cluster workers; browser workers support local Graph execution only".into());
+                }
+                request.validate().map_err(|error| error.to_string())
+            }
             Self::OwnedBuiltin(request) => {
                 request.validate_wire().map_err(|error| error.to_string())
             }

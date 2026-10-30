@@ -293,6 +293,50 @@ try {
 }
 ```
 
+## Your OpenTelemetry collector
+
+Configure export before subscribing to log streams or creating plot surfaces.
+Browser collectors must support OTLP HTTP/protobuf and permit the app's origin,
+`POST`, `content-type` and your authorization headers in CORS preflight. HTTPS
+apps require an HTTPS collector, and CSP `connect-src` must allow its origin.
+
+```ts
+import { initRunMat, sendOpenTelemetryTest, flushOpenTelemetry } from "runmat";
+
+const session = await initRunMat({
+  runtimeSettings: {
+    userSettingsJson: JSON.stringify({
+      logging: { otel: {
+        enabled: true,
+        endpoint: "https://collector.example.com:4318",
+        protocol: "http/protobuf",
+        signals: ["traces", "logs"],
+      } },
+    }),
+  },
+  // Runtime-only host input: do not save these headers in settings documents.
+  openTelemetryHeaders: { authorization: `Bearer ${collectorToken}` },
+  telemetryConsent: false, // Product telemetry is independent of your collector.
+});
+await sendOpenTelemetryTest(); // Real correlated span+log, acknowledged by collector.
+await flushOpenTelemetry();
+```
+
+The awaited test/flush calls reject on disabled export, queue overflow, network,
+CORS/TLS, HTTP/gRPC status, malformed response or collector partial rejection;
+success confirms acceptance, not downstream indexing. Browser errors cannot
+distinguish CORS from every network/TLS failure. `openTelemetryStats()` exposes
+drop/failure/export counts without credentials. gRPC and metrics are not supported
+in the browser and are rejected explicitly.
+
+Sessions share one exporter per WASM runtime. Repeating identical collector
+settings and headers reuses it; changing them, enabling after another API already
+initialized logging, or reopening after exporter shutdown returns
+`OpenTelemetryRestartRequired`. Restart the browser worker/runtime to apply those
+changes. Await `shutdownOpenTelemetry()` before terminating that shared runtime,
+not after each session; `session.dispose()` does not stop other sessions' exporter.
+Abrupt tab or worker termination cannot guarantee final delivery.
+
 ## Development
 
 ```bash

@@ -85,6 +85,7 @@ impl JobCommand {
 #[derive(Subcommand, Clone)]
 pub enum JobRecoveryCommand {
     /// Generate a new local recovery key file without sending its secret to RunMat
+    #[command(name = "create", alias = "keygen")]
     Keygen {
         #[arg(long)]
         output: PathBuf,
@@ -134,16 +135,35 @@ pub enum JobRecoveryCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Decrypt an exported binary recovery envelope and result artifact offline
+    Decrypt {
+        #[arg(long)]
+        key: PathBuf,
+        /// Canonical binary envelope (base64url-decode the server envelope first)
+        #[arg(long)]
+        envelope: PathBuf,
+        #[arg(long)]
+        artifact: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        /// Decrypt a diagnostic rather than a result
+        #[arg(long)]
+        diagnostic: bool,
+        /// New private output file; existing files are never overwritten
+        #[arg(long)]
+        output: PathBuf,
+    },
 }
 
 impl JobRecoveryCommand {
-    fn machine_output(&self) -> bool {
+    pub(crate) fn machine_output(&self) -> bool {
         match self {
             Self::Keygen { json, .. }
             | Self::Configure { json, .. }
             | Self::Disable { json, .. }
             | Self::Show { json, .. }
             | Self::Recover { json, .. } => *json,
+            Self::Decrypt { .. } => false,
         }
     }
 }

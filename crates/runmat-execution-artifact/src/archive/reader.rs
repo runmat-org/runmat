@@ -2,7 +2,7 @@ use std::io::Read;
 
 use crate::{
     ArtifactError, ArtifactResult, ExecutionBundle, LogicalObject, ObjectDescriptor,
-    ObjectNamespace, MAX_FOREIGN_POLICY_BYTES,
+    ObjectNamespace, MAX_FOREIGN_POLICY_BYTES, MAX_PROJECT_RUNTIME_POLICY_BYTES,
 };
 
 use super::{
@@ -38,10 +38,15 @@ pub fn read_bundle(
         if descriptor.namespace == ObjectNamespace::ForeignPolicy {
             crate::object::validate_foreign_policy_descriptor(&descriptor)?;
         }
-        let max_bytes = if descriptor.namespace == ObjectNamespace::ForeignPolicy {
-            limits.max_object_bytes.min(MAX_FOREIGN_POLICY_BYTES)
-        } else {
-            limits.max_object_bytes
+        if descriptor.namespace == ObjectNamespace::ProjectRuntimePolicy {
+            crate::validate_project_runtime_policy_descriptor(&descriptor)?;
+        }
+        let max_bytes = match descriptor.namespace {
+            ObjectNamespace::ForeignPolicy => limits.max_object_bytes.min(MAX_FOREIGN_POLICY_BYTES),
+            ObjectNamespace::ProjectRuntimePolicy => limits
+                .max_object_bytes
+                .min(MAX_PROJECT_RUNTIME_POLICY_BYTES),
+            _ => limits.max_object_bytes,
         };
         let bytes = read_bytes(&mut reader, max_bytes, &mut total)?;
         if total > limits.max_total_bytes {

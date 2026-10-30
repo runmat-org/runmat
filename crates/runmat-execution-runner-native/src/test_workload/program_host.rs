@@ -81,6 +81,20 @@ fn prepare_host_unit_route<'a>(
     graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<HostResponseFuture<'a>, HostPreparationError> {
     let failure = |message| HostPreparationError { message };
+    let runtime_config = match &request {
+        HostUnitRequest::Graph(graph) if graph.project_runtime_policy.is_some() => Some(
+            runmat_core::cluster_settings::validate_graph_policy(graph)
+                .map_err(failure)?
+                .runtime_config()
+                .map_err(|error| failure(error.to_string()))?,
+        ),
+        _ => bundle
+            .as_ref()
+            .map(|bundle| runmat_core::cluster_settings::runtime_config(bundle))
+            .transpose()
+            .map_err(failure)?
+            .flatten(),
+    };
     if let HostUnitRequest::Graph(graph) = &request {
         graph.validate().map_err(|error| {
             failure(format!("worker rejected an invalid graph request: {error}"))
@@ -192,6 +206,7 @@ fn prepare_host_unit_route<'a>(
     if interop == runmat_types::InteropManifest::empty()
         && collective.is_none()
         && selected_direct.is_none()
+        && runtime_config.is_none()
         && matches!(graphics, runmat_core::SessionGraphicsHost::Unavailable)
     {
         return Ok(match request {
@@ -207,11 +222,22 @@ fn prepare_host_unit_route<'a>(
         ));
     }
 
-    let mut session = runmat_core::RunMatSession::with_options(true, false).map_err(|error| {
+    let mut session = runmat_core::RunMatSession::with_options(
+        runtime_config
+            .as_ref()
+            .map_or(true, |config| config.jit.enabled),
+        false,
+    )
+    .map_err(|error| {
         failure(format!(
             "failed to initialize foreign execution session: {error}"
         ))
     })?;
+    if let Some(config) = &runtime_config {
+        session
+            .apply_cluster_runtime_config(config)
+            .map_err(|error| failure(error.to_string()))?;
+    }
     if let Err(error) = session.attach_graphics_host(graphics) {
         let revision = match &request {
             HostUnitRequest::Direct(request) => request.recipe.program_revision.clone(),

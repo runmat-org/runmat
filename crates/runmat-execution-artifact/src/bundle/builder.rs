@@ -49,6 +49,7 @@ pub struct ExecutionBundleBuilder<'a, R> {
     portable_environment: Vec<(String, String)>,
     foreign_objects: Vec<LogicalObject>,
     foreign_policy_objects: Vec<LogicalObject>,
+    project_runtime_policy_object: Option<LogicalObject>,
     foreign_artifact_closures: Vec<ForeignArtifactClosure>,
 }
 
@@ -84,6 +85,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             portable_environment: Vec::new(),
             foreign_objects: Vec::new(),
             foreign_policy_objects: Vec::new(),
+            project_runtime_policy_object: None,
             foreign_artifact_closures: Vec::new(),
         })
     }
@@ -110,6 +112,20 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
     pub fn with_resources(mut self, resources: BuildResourceDeclaration) -> Self {
         self.resources = resources;
         self
+    }
+
+    pub fn with_project_runtime_policy_object(
+        mut self,
+        object: LogicalObject,
+    ) -> ArtifactResult<Self> {
+        if self.project_runtime_policy_object.is_some() {
+            return Err(ArtifactError::Invalid(
+                "bundle already carries a project runtime policy".into(),
+            ));
+        }
+        crate::validate_project_runtime_policy_object(&object)?;
+        self.project_runtime_policy_object = Some(object);
+        Ok(self)
     }
 
     pub fn with_foreign_object(mut self, object: LogicalObject) -> ArtifactResult<Self> {
@@ -180,6 +196,13 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         }
         let mut objects = std::mem::take(&mut self.foreign_objects);
         objects.extend(std::mem::take(&mut self.foreign_policy_objects));
+        let project_runtime_policy = self
+            .project_runtime_policy_object
+            .as_ref()
+            .map(|object| object.descriptor.clone());
+        if let Some(object) = self.project_runtime_policy_object.take() {
+            objects.push(object);
+        }
         let mut callables = Vec::new();
         let code_closure = match self.code_closure {
             CodeClosureMode::SourceProject => {
@@ -300,6 +323,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             sources: source_descriptors,
             foreign_artifacts,
             foreign_artifact_closures: self.foreign_artifact_closures,
+            project_runtime_policy,
             callables,
             recipes,
             artifacts,

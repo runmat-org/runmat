@@ -273,30 +273,48 @@ impl LocalPlacementFeedbackAuthority {
 
     pub(super) fn delivery(
         &self,
-        feedback: runmat_execution::PlacementFeedback,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+        elapsed_ns: u64,
+        succeeded: bool,
     ) -> Option<runmat_runtime::context::RuntimePlacementFeedbackDelivery> {
         use runmat_runtime::context::RuntimePlacementFeedbackDelivery;
-        if !self.authorizes(&feedback.signature, &feedback.candidate, feedback.kind) {
+        if !self.authorizes(signature, candidate, kind) {
             return None;
         }
+        let outcome = if succeeded {
+            runmat_execution::WholeWorkObservationOutcome::Success
+        } else {
+            runmat_execution::WholeWorkObservationOutcome::OperationalFailure
+        };
         match self {
             Self::Graph(permit) => Some(RuntimePlacementFeedbackDelivery::Graph {
-                feedback,
+                feedback: runmat_execution::PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.to_owned(),
+                    kind,
+                    total_elapsed_ns: elapsed_ns,
+                    succeeded,
+                },
                 permit: std::sync::Arc::clone(permit),
             }),
             Self::WholeWork(selection) => {
                 let selected = selection.lock().ok()?.take()?;
                 Some(RuntimePlacementFeedbackDelivery::WholeWork {
                     selected,
-                    elapsed_ns: feedback.total_elapsed_ns,
-                    outcome: if feedback.succeeded {
-                        runmat_execution::WholeWorkObservationOutcome::Success
-                    } else {
-                        runmat_execution::WholeWorkObservationOutcome::OperationalFailure
-                    },
+                    elapsed_ns,
+                    outcome,
                 })
             }
-            Self::Managed(_) => None,
+            Self::Managed(slot) => {
+                let selected = slot.lock().ok()?.take()?;
+                Some(RuntimePlacementFeedbackDelivery::ManagedWholeWork {
+                    selected,
+                    elapsed_ns,
+                    outcome,
+                })
+            }
         }
     }
 }
@@ -337,7 +355,13 @@ impl LocalPlacementFeedback {
                 let _ = service.observe_selected_graph(permit.as_ref(), feedback);
             }
             LocalPlacementFeedbackAuthority::WholeWork(_) => {
-                if let Some(delivery) = self.authority.delivery(feedback) {
+                if let Some(delivery) = self.authority.delivery(
+                    &feedback.signature,
+                    &feedback.candidate,
+                    feedback.kind,
+                    feedback.total_elapsed_ns,
+                    feedback.succeeded,
+                ) {
                     let _ = service.observe_deferred_feedback(delivery);
                 }
             }

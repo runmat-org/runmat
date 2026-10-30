@@ -62,15 +62,50 @@ impl From<PreferenceDocumentError> for PreferenceServiceError {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize)]
 pub(super) struct PreferenceDocument {
     pub version: u32,
     pub groups: EncodedGroups,
-    #[serde(default)]
     pub user_path: UserPathSetting,
-    #[serde(default)]
     pub user_path_revision: u64,
+    /// Application settings share this document. Retain fields owned by other
+    /// schemas (including runtime settings), without interpreting or mirroring
+    /// them as durable MATLAB preference values.
+    #[serde(flatten)]
+    application_fields: BTreeMap<String, serde_json::Value>,
+}
+
+/// Unlike Option<T>, this discriminator never treats explicit null as absence.
+/// Typed preference fields must pass their own Deserialize implementation.
+enum StoredField<T> {
+    Absent,
+    Present(T),
+}
+
+impl<T> Default for StoredField<T> {
+    fn default() -> Self {
+        Self::Absent
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for StoredField<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        T::deserialize(deserializer).map(Self::Present)
+    }
+}
+
+#[derive(Deserialize)]
+struct StoredApplicationDocument {
+    #[serde(default)]
+    version: StoredField<u32>,
+    #[serde(default)]
+    groups: StoredField<EncodedGroups>,
+    #[serde(default)]
+    user_path: StoredField<UserPathSetting>,
+    #[serde(default)]
+    user_path_revision: StoredField<u64>,
+    #[serde(flatten)]
+    application_fields: BTreeMap<String, serde_json::Value>,
 }
 
 impl PreferenceDocument {
@@ -80,18 +115,58 @@ impl PreferenceDocument {
             groups: BTreeMap::new(),
             user_path: UserPathSetting::Default,
             user_path_revision: 0,
+            application_fields: BTreeMap::new(),
         }
     }
 
-    /// Unknown or old documents are rejected, never silently reset or
-    /// reinterpreted as execution V2 values. Migration requires an explicit
-    /// future versioned adapter owned by the host.
+    /// Settings-only documents contain no preference fields and hydrate empty
+    /// preferences. Once any durable preference field exists, its explicit
+    /// current schema version remains mandatory. Old/future schemas are never
+    /// silently reinterpreted as execution V2 values.
     pub fn decode(bytes: &[u8]) -> Result<Self, PreferenceDocumentError> {
-        let document: Self =
+        let stored: StoredApplicationDocument =
             serde_json::from_slice(bytes).map_err(PreferenceDocumentError::Json)?;
-        if document.version != PREFERENCE_DOCUMENT_VERSION {
-            return Err(PreferenceDocumentError::Version(document.version));
-        }
+        let document = match stored.version {
+            StoredField::Absent => {
+                if !matches!(stored.groups, StoredField::Absent)
+                    || !matches!(stored.user_path, StoredField::Absent)
+                    || !matches!(stored.user_path_revision, StoredField::Absent)
+                {
+                    return Err(PreferenceDocumentError::Json(
+                        <serde_json::Error as serde::de::Error>::custom(
+                            "preference fields require an explicit current version",
+                        ),
+                    ));
+                }
+                Self {
+                    application_fields: stored.application_fields,
+                    ..Self::empty()
+                }
+            }
+            StoredField::Present(version) => {
+                if version != PREFERENCE_DOCUMENT_VERSION {
+                    return Err(PreferenceDocumentError::Version(version));
+                }
+                let StoredField::Present(groups) = stored.groups else {
+                    return Err(PreferenceDocumentError::Json(
+                        <serde_json::Error as serde::de::Error>::missing_field("groups"),
+                    ));
+                };
+                Self {
+                    version,
+                    groups,
+                    user_path: match stored.user_path {
+                        StoredField::Absent => UserPathSetting::Default,
+                        StoredField::Present(setting) => setting,
+                    },
+                    user_path_revision: match stored.user_path_revision {
+                        StoredField::Absent => 0,
+                        StoredField::Present(revision) => revision,
+                    },
+                    application_fields: stored.application_fields,
+                }
+            }
+        };
         if matches!(&document.user_path, UserPathSetting::Custom(text) if text.is_empty()) {
             return Err(PreferenceDocumentError::InvalidUserPath);
         }
@@ -188,5 +263,61 @@ mod tests {
         let reopened = PreferenceDocument::decode(&updated.encode().unwrap()).unwrap();
         assert_eq!(reopened.user_path, updated.user_path);
         assert_eq!(reopened.user_path_revision, 7);
+    }
+
+    #[test]
+    fn shared_application_settings_survive_preference_mutation_and_roundtrip() {
+        let source = br#"{"runtime":{"jit":{"enabled":false,"future_knob":42}},"future_app":{"theme":"dark"}}"#;
+        let document = PreferenceDocument::decode(source).unwrap();
+        assert!(document.groups.is_empty());
+        assert_eq!(document.user_path_revision, 0);
+        let (updated, _) = apply_mutation(
+            document,
+            DocumentMutation::Set {
+                group: "app".into(),
+                entries: vec![(
+                    "count".into(),
+                    encode_durable_value(&Value::Num(7.0)).unwrap(),
+                )],
+            },
+        )
+        .unwrap();
+        let (updated, _) = apply_mutation(
+            updated,
+            DocumentMutation::UserPath(UserPathSetting::Custom("project-independent/path".into())),
+        )
+        .unwrap();
+        let bytes = updated.encode().unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let original: serde_json::Value = serde_json::from_slice(source).unwrap();
+        assert_eq!(saved["runtime"], original["runtime"]);
+        assert_eq!(saved["future_app"], original["future_app"]);
+        let reopened = PreferenceDocument::decode(&bytes).unwrap();
+        assert_eq!(reopened.groups["app"], updated.groups["app"]);
+        assert_eq!(reopened.user_path, updated.user_path);
+        assert_eq!(reopened.user_path_revision, 1);
+    }
+
+    #[test]
+    fn settings_interop_does_not_weaken_durable_document_admission() {
+        for invalid in [
+            r#"{"groups":{}}"#,
+            r#"{"user_path":"default"}"#,
+            r#"{"user_path_revision":0}"#,
+            r#"{"version":null,"groups":{}}"#,
+            r#"{"version":2}"#,
+            r#"{"version":2,"groups":null}"#,
+            r#"{"version":2,"groups":{},"user_path":null}"#,
+            r#"{"version":2,"groups":{},"user_path_revision":null}"#,
+            r#"{"runtime":{},"groups":{},"version":1}"#,
+            r#"{"runtime":{},"groups":{},"version":3}"#,
+        ] {
+            assert!(
+                PreferenceDocument::decode(invalid.as_bytes()).is_err(),
+                "accepted {invalid}"
+            );
+        }
+        assert!(PreferenceDocument::decode(br#"{"runtime":{},"future_app":null}"#).is_ok());
+        assert!(PreferenceDocument::decode(br#"{}"#).is_ok());
     }
 }

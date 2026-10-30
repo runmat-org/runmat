@@ -126,4 +126,4 @@ openapiv3 = "2.0"
 serde_yaml = "0.9"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_IO"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_IO", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem"] }

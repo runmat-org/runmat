@@ -115,8 +115,16 @@ pub struct NodeJoinArgs {
 pub enum NodeJoinCommand {
     /// Enroll this machine with a single-use token
     Enroll {
-        #[arg(long, env = "RUNMAT_NODE_ENROLLMENT_TOKEN")]
-        token: String,
+        #[arg(
+            long,
+            env = "RUNMAT_NODE_ENROLLMENT_TOKEN",
+            required_unless_present = "token_stdin",
+            conflicts_with = "token_stdin"
+        )]
+        token: Option<String>,
+        /// Read the enrollment token from stdin (never from process arguments)
+        #[arg(long)]
+        token_stdin: bool,
     },
     /// Run the execution-node service in the foreground
     Run,

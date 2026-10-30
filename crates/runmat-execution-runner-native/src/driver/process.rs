@@ -491,6 +491,7 @@ fn staged_graph_launch(
                 assignment,
                 context: graph.context.clone(),
                 requested_outputs: graph.requested_outputs,
+                resources: request.task.resources.clone(),
             },
         },
     )))

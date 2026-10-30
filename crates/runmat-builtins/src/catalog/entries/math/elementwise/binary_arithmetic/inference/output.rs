@@ -3,8 +3,9 @@ use super::{admission::AdmittedCall, class, BinaryArithmeticInferencePolicy, Dia
 use crate::catalog::inference::{argument_error, finish_fixed};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    broadcast_shape_checked, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact,
-    NumericDomain, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    broadcast_shape_checked, CallInference, CallRequest, CertaintyFact, ContiguityFact,
+    DynamicReason, LayoutFact, NumericDomain, ResidencyFact, ShapeFact, StorageFact, ValueFact,
+    ValueKindFact,
 };
 
 pub(super) fn infer(
@@ -53,7 +54,29 @@ pub(super) fn infer_fact(
         ResidencyFact::Unknown
     };
     match class::result(policy, left, right) {
-        Ok(kind) => output.kind = kind,
+        Ok(kind) => {
+            output.certainty = if kind == ValueKindFact::Symbolic {
+                CertaintyFact::Symbolic
+            } else if left.certainty == CertaintyFact::Proven
+                && right.certainty == CertaintyFact::Proven
+            {
+                // Class/domain inference has succeeded for proven operands.
+                // Unknown eventual placement/storage is a separate fact, not
+                // a reason to erase this semantic evidence from later stages.
+                CertaintyFact::Proven
+            } else {
+                [left, right]
+                    .iter()
+                    .find_map(|input| match &input.certainty {
+                        CertaintyFact::Dynamic(reason) => {
+                            Some(CertaintyFact::Dynamic(reason.clone()))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(CertaintyFact::Dynamic(DynamicReason::RuntimeValue))
+            };
+            output.kind = kind;
+        }
         Err(DynamicReason::UnsupportedRepresentation) => {
             diagnostics.push(|| {
                 argument_error(
@@ -114,6 +137,13 @@ pub(super) fn infer_fact(
     if matches!(output.storage, StorageFact::Unknown | StorageFact::Opaque) {
         output.layout = LayoutFact::Unknown;
         output.contiguity = ContiguityFact::Unknown;
+    }
+    if !diagnostics.is_empty() {
+        output.certainty = CertaintyFact::Dynamic(DynamicReason::UnsupportedRepresentation);
+    } else if let Some(prototype) = admitted.prototype {
+        if prototype.certainty != CertaintyFact::Proven {
+            output.certainty = prototype.certainty.clone();
+        }
     }
     (output, diagnostics)
 }

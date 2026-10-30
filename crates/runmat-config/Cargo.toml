@@ -23,7 +23,9 @@ thiserror = { workspace = true }
 toml = "0.8"
 toml_edit = { version = "0.22", features = ["serde"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tempfile = "3.12"
+
 [dev-dependencies]
 futures = "0.3"
 once_cell = "1"
-tempfile = "3.12"

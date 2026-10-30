@@ -104,6 +104,7 @@ async fn selected_graph_worker_preserves_callable_argument_layouts() {
             arguments: graph.roots[1..].to_vec(),
         };
         let request = GraphExecutionRequest {
+            project_runtime_policy: None,
             schema_version,
             recipe: recipe.clone(),
             artifact: artifact.clone(),
@@ -121,6 +122,34 @@ async fn selected_graph_worker_preserves_callable_argument_layouts() {
             requested_outputs: 1,
         };
         request.validate().unwrap();
+        if schema_version == GRAPH_EXECUTION_REQUEST_SCHEMA_V12 {
+            let policy = runmat_config::runtime::ClusterRuntimePolicy::built_in();
+            let cluster =
+                runmat_core::cluster_settings::prepare_graph_for_cluster(request.clone(), &policy)
+                    .unwrap();
+            assert_eq!(
+                cluster.schema_version,
+                runmat_execution_artifact::GRAPH_EXECUTION_REQUEST_SCHEMA_V13
+            );
+            assert!(cluster.project_runtime_policy.is_some());
+            let encoded = serde_json::to_vec(&cluster).unwrap();
+            runmat_execution_artifact::admit_remote_program_object_bytes(&encoded).unwrap();
+            assert!(matches!(
+                execute_host_graph_request(cluster.clone(), None).await,
+                ProgramExecutionResponse::GraphSuccess { .. }
+            ));
+            let mut wrong_language = policy.clone();
+            wrong_language.language.compat = runmat_config::runtime::LanguageCompatMode::Matlab;
+            assert!(runmat_core::cluster_settings::prepare_graph_for_cluster(
+                request.clone(),
+                &wrong_language
+            )
+            .unwrap_err()
+            .contains("recompile"));
+            let mut missing = cluster;
+            missing.project_runtime_policy = None;
+            assert!(missing.validate().is_err());
+        }
         let response = execute_host_graph_request(request, None).await;
         if schema_version == GRAPH_EXECUTION_REQUEST_SCHEMA_V10 {
             let ProgramExecutionResponse::Failure { message } = response else {

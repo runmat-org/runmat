@@ -71,6 +71,10 @@ pub(super) async fn build(
             .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
         .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &recipe.program_revision,
+        ))
+        .unwrap()
         .with_compiled_package_closure()
         .with_materialized_program(
             recipe.clone(),
@@ -82,7 +86,8 @@ pub(super) async fn build(
         .build()
         .unwrap();
     assert!(!bundle.requires_source_project());
-    assert!(bundle.objects.is_empty());
+    assert_eq!(bundle.objects.len(), 1);
+    assert!(bundle.project_runtime_policy_object().unwrap().is_some());
     assert!(bundle.manifest.sources.is_empty());
     let recipe = bundle.manifest.recipes.first().cloned().unwrap();
     let artifact = bundle.manifest.artifacts.first().cloned().unwrap();

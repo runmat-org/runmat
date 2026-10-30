@@ -15,9 +15,11 @@ pub mod scene;
 pub mod viewport;
 
 pub use camera::{Camera, CameraController, CameraViewPreset, MouseButton, ProjectionType};
+mod navigation;
 pub use depth::{ClipPolicy, DepthMode};
 pub use gpu_pack::GpuPackContext;
 pub use interaction::{EventHandler, KeyCode, PlotEvent};
+pub use navigation::{Antialiasing, NavigationOptions, NavigationPreset, OrbitCenter};
 pub use plot_renderer::{plot_utils, PlotRenderConfig, PlotRenderer, RenderResult};
 pub use renderer::*;
 pub use scene::*;

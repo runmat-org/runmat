@@ -289,6 +289,58 @@ impl NativeSurfaceRenderContext {
         self.pixels_per_point = pixels_per_point.clamp(0.5, 4.0);
     }
 
+    /// Query only modes valid for both the actual output and depth attachment,
+    /// including resolve support. Without an adapter, use WebGPU guarantees.
+    /// A supplied adapter must be the one that created this context's device.
+    pub fn supported_antialiasing(
+        &self,
+        adapter: Option<&wgpu::Adapter>,
+    ) -> Result<Vec<crate::core::Antialiasing>, String> {
+        let features = self
+            .renderer
+            .wgpu_renderer
+            .access
+            .with_shared(|emission| emission.device().features())
+            .map_err(|error| error.to_string())?;
+        let get = |format: wgpu::TextureFormat| {
+            if features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
+                if let Some(adapter) = adapter {
+                    return adapter.get_texture_format_features(format);
+                }
+            }
+            format.guaranteed_format_features(features)
+        };
+        let color = get(self.renderer.wgpu_renderer.surface_config.format);
+        let depth = get(crate::core::WgpuRenderer::depth_format());
+        Ok([
+            crate::core::Antialiasing::Off,
+            crate::core::Antialiasing::X2,
+            crate::core::Antialiasing::X4,
+            crate::core::Antialiasing::X8,
+        ]
+        .into_iter()
+        .filter(|mode| mode.supported_by_formats(color, depth))
+        .collect())
+    }
+
+    pub fn set_antialiasing(
+        &mut self,
+        mode: crate::core::Antialiasing,
+        adapter: Option<&wgpu::Adapter>,
+    ) -> Result<(), String> {
+        if !self.supported_antialiasing(adapter)?.contains(&mode) {
+            return Err(format!(
+                "{}x anti-aliasing is unsupported by the active color/depth formats",
+                mode.samples()
+            ));
+        }
+        self.config.msaa_samples = mode.samples();
+        // The ordinary render path rebuilds matching color/depth attachments
+        // and pipelines through ensure_msaa. Do not reuse a retained old frame.
+        self.presented_frame = None;
+        Ok(())
+    }
+
     pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
         self.renderer.set_theme(theme.clone());
         self.config.theme = theme;

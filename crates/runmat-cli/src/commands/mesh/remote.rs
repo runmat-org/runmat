@@ -33,7 +33,7 @@ pub(super) async fn execute(
     command: MeshCommand,
     target: RemoteExecutionTarget,
     cli: &crate::cli::Cli,
-    config: &runmat_config::runtime::RunMatRuntimeConfig,
+    _config: &runmat_config::runtime::RunMatRuntimeConfig,
 ) -> Result<()> {
     let worker_count = target.workers.max(1);
     let output = absolute_output_path(
@@ -63,6 +63,12 @@ pub(super) async fn execute(
         .await?
         .context("remote meshing requires a runmat.toml project containing the source CAD")?;
     let project_revision = resolved.resolved.frozen.revision();
+    let project_policy = runmat_config::runtime::ClusterRuntimePolicy::from_project_file(
+        &resolved.resolved.frozen.manifest_path,
+    )?;
+    let config = project_policy.runtime_config()?;
+    let runtime_policy = runmat_core::cluster_settings::capture_project_policy(&project_policy)
+        .map_err(anyhow::Error::msg)?;
     let revision = ProgramRevision::new(
         Digest::from_bytes(*project_revision.graph_digest.bytes()),
         Digest::from_bytes(*project_revision.source_revision.bytes()),
@@ -79,7 +85,8 @@ pub(super) async fn execute(
         settings.clone(),
     )?;
     let mut builder = ExecutionBundleBuilder::native(&resolved.resolved.frozen, revision.clone())?
-        .with_compiled_package_closure();
+        .with_compiled_package_closure()
+        .with_project_runtime_policy_object(runtime_policy)?;
     for program in placeholder.required_programs()? {
         builder = builder.with_materialized_program(
             program.recipe,
