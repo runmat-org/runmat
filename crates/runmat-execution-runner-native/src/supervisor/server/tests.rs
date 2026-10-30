@@ -5,7 +5,7 @@ async fn dropping_server_releases_authority_with_silent_connections_and_live_run
     let config = crate::supervisor::tests::test_config(&temp);
     let paths = config.paths.clone();
     let client = crate::supervisor::LocalSupervisorClient::new(config.clone());
-    let server = tokio::spawn(crate::supervisor::run_local_supervisor(config));
+    let server = tokio::spawn(crate::supervisor::run_local_supervisor(config.clone()));
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if client.ping().await.is_ok() {
@@ -30,9 +30,7 @@ async fn dropping_server_releases_authority_with_silent_connections_and_live_run
         "a detached service task retained original authority"
     );
     drop(silent);
-    let reopened =
-        crate::supervisor::LocalSupervisor::open(crate::supervisor::tests::test_config(&temp))
-            .unwrap();
+    let reopened = crate::supervisor::LocalSupervisor::open(config).unwrap();
     drop(reopened);
 }
 

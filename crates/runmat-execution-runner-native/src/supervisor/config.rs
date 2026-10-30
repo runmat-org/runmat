@@ -23,10 +23,10 @@ impl LocalSupervisorConfig {
         if let Some(path) = std::env::var_os(super::bootstrap::PROFILE_ENV) {
             return super::bootstrap::read_profile(std::path::Path::new(&path));
         }
-        Self::new(
-            crate::NativeExecutionConfig::for_current_executable()
-                .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?,
+        super::bootstrap::resolve_default_profile(
             SupervisorPaths::platform_default()?,
+            &std::env::current_exe().map_err(filesystem_error)?,
+            || crate::NativeExecutionConfig::for_current_executable().map_err(filesystem_error),
         )
     }
 
@@ -52,4 +52,8 @@ impl LocalSupervisorConfig {
         }
         Ok(())
     }
+}
+
+fn filesystem_error(error: std::io::Error) -> NativeExecutionError {
+    NativeExecutionError::Configuration(error.to_string())
 }

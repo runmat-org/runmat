@@ -178,4 +178,6 @@ Cancellation is scoped. Cancelling a future, closing a pool, interrupting the pa
 
 Native, browser, and remote workers consume the same versioned program request, callable identity, parallel-region contract, value payload, assignment, and structured failure schemas. Platform-specific code owns process creation, browser worker launch, transport, and resource admission; it does not redefine the language or result assembly rules.
 
+Local durable jobs retain a supervisor profile in their execution-state directory. Later CLI commands and a restarted supervisor use that profile's worker executable, capabilities, device-inventory epochs, and admitted capacity. Rediscovering the host does not replace the original authority or its outstanding reservations. A malformed profile or a different executable path is an error; an explicitly different execution profile requires its own authority directory.
+
 Remote execution uses the frozen package graph and exact executable bundle described in [Remote Execution](/docs/runtime/execution/remote). A pool can support `parfor` without supporting SPMD gangs or distributed values; the selected host must advertise each capability it executes.

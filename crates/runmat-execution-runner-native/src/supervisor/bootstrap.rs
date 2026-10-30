@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use super::{filesystem, LocalSupervisorConfig, SupervisorPaths};
 use crate::{NativeExecutionConfig, NativeExecutionError, NativeExecutionResult};
 
+mod default_profile;
+pub(super) use default_profile::resolve_default_profile;
+
 pub(super) const PROFILE_ENV: &str = "RUNMAT_EXECUTION_SUPERVISOR_PROFILE";
 pub(super) const PROFILE_MAX_BYTES: u64 = 64 * 1024;
 
@@ -37,8 +40,12 @@ pub(super) fn read_profile(path: &Path) -> NativeExecutionResult<LocalSupervisor
     let bytes = runmat_filesystem::NativeFsProvider
         .read_bounded_sync(path, PROFILE_MAX_BYTES)
         .map_err(filesystem::io_error)?;
+    decode_profile(path, &bytes)
+}
+
+fn decode_profile(path: &Path, bytes: &[u8]) -> NativeExecutionResult<LocalSupervisorConfig> {
     let profile: Profile<NativeExecutionConfig> =
-        serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string()))?;
+        serde_json::from_slice(bytes).map_err(|error| invalid(error.to_string()))?;
     if profile.schema_version != 1 {
         return Err(invalid("unsupported supervisor bootstrap profile"));
     }
