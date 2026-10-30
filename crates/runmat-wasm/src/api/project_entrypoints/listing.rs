@@ -67,7 +67,7 @@ impl RunMatWasm {
                             Ok(()) => Support::available(),
                             Err(error) => Support::unavailable("project.entrypoint.localUnavailable", error),
                         },
-                        (Err(error), _) => Support::unavailable("project.entrypoint.localUnavailable", crate::wire::errors::js_value_to_string(&error)),
+                        (Err(error), _) => Support::unavailable("project.entrypoint.localUnavailable", crate::wire::errors::js_value_to_string(error)),
                         (_, Err(error)) => Support::unavailable("project.entrypoint.localUnavailable", error.clone()),
                     };
                     let cluster = match cluster_unit {
@@ -75,7 +75,7 @@ impl RunMatWasm {
                             Ok(()) => Support::available(),
                             Err(error) => Support::unavailable("project.entrypoint.clusterUnavailable", error),
                         },
-                        Err(error) => Support::unavailable("project.entrypoint.clusterUnavailable", crate::wire::errors::js_value_to_string(&error)),
+                        Err(error) => Support::unavailable("project.entrypoint.clusterUnavailable", crate::wire::errors::js_value_to_string(error)),
                     };
                     (kind, local, cluster)
                 };
