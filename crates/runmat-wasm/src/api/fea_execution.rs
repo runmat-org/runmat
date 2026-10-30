@@ -133,37 +133,42 @@ impl RunMatWasm {
         path: String,
         filesystem: &CapturedFilesystem,
     ) -> Result<JsValue, JsValue> {
-        let publication_supported = filesystem.publication_supported().await?;
-        filesystem
-            .read
-            .run(async {
-                let cancellation = runmat_execution::cancellation::CancellationSource::new();
-                let _interrupt = super::session::install_wasm_interrupt(
-                    &self.active_interrupt,
-                    cancellation.clone(),
-                );
-                let mut session = self.take_session()?;
-                self.fea_selection.borrow_mut().take();
-                let source = session
-                    .load_and_check_fea_source_path(Path::new(&path))
-                    .await
-                    .map_err(|e| js_error(&e))?;
-                ensure_not_cancelled(&cancellation)?;
-                let plan = browser_fea_plan(&session, &source, publication_supported)?;
-                let ready = plan
-                    .candidates
-                    .iter()
-                    .any(|candidate| candidate.readiness == AnalysisExecutionReadiness::Ready);
-                // A choice is bound to checked inputs, not to a prematurely generated mesh.
-                *self.fea_selection.borrow_mut() = ready.then_some(BrowserFeaSelection {
-                    id: plan.plan_id.clone(),
-                    path,
-                    checked_revision: plan.revision,
-                });
-                crate::wire::json_contract_to_js(&plan).map_err(|e| js_error(&e.to_string()))
-            })
-            .await
-            .map_err(|error| js_error(&error.to_string()))?
+        let mut session = self.take_session()?;
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let _interrupt =
+            super::session::install_wasm_interrupt(&self.active_interrupt, cancellation.clone());
+        let publication_supported = super::session::await_wasm_preparation(
+            &cancellation,
+            filesystem.publication_supported(),
+        )
+        .await?;
+        super::session::await_wasm_preparation(&cancellation, async {
+            filesystem
+                .read
+                .run(async {
+                    self.fea_selection.borrow_mut().take();
+                    let source = session
+                        .load_and_check_fea_source_path(Path::new(&path))
+                        .await
+                        .map_err(|e| js_error(&e))?;
+                    ensure_not_cancelled(&cancellation)?;
+                    let plan = browser_fea_plan(&session, &source, publication_supported)?;
+                    let ready = plan
+                        .candidates
+                        .iter()
+                        .any(|candidate| candidate.readiness == AnalysisExecutionReadiness::Ready);
+                    // A choice is bound to checked inputs, not to a prematurely generated mesh.
+                    *self.fea_selection.borrow_mut() = ready.then_some(BrowserFeaSelection {
+                        id: plan.plan_id.clone(),
+                        path,
+                        checked_revision: plan.revision,
+                    });
+                    crate::wire::json_contract_to_js(&plan).map_err(|e| js_error(&e.to_string()))
+                })
+                .await
+                .map_err(|error| js_error(&error.to_string()))?
+        })
+        .await
     }
     pub(super) async fn run_fea_source_in_scope(
         &self,
@@ -171,12 +176,18 @@ impl RunMatWasm {
         plan_id: String,
         filesystem: &CapturedFilesystem,
     ) -> Result<JsValue, JsValue> {
-        if !filesystem.publication_supported().await? {
-            return Err(js_error(PUBLICATION_HOST_REASON));
-        }
+        let mut session = self.take_session()?;
         let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let _interrupt =
             super::session::install_wasm_interrupt(&self.active_interrupt, cancellation.clone());
+        if !super::session::await_wasm_preparation(
+            &cancellation,
+            filesystem.publication_supported(),
+        )
+        .await?
+        {
+            return Err(js_error(PUBLICATION_HOST_REASON));
+        }
         let _progress = runmat_analysis_fea::replace_fea_progress_context(
             runmat_analysis_fea::FeaProgressContext {
                 handler: Some(std::sync::Arc::new(forward_progress)),
@@ -186,13 +197,15 @@ impl RunMatWasm {
                 ..Default::default()
             },
         );
-        let mut session = self.take_session()?;
-        let fresh = filesystem
-            .read
-            .run(session.load_and_check_fea_source_path(Path::new(&path)))
-            .await
-            .map_err(|error| js_error(&error.to_string()))?
-            .map_err(|e| js_error(&e))?;
+        let fresh = super::session::await_wasm_preparation(&cancellation, async {
+            filesystem
+                .read
+                .run(session.load_and_check_fea_source_path(Path::new(&path)))
+                .await
+                .map_err(|error| js_error(&error.to_string()))?
+                .map_err(|e| js_error(&e))
+        })
+        .await?;
         ensure_not_cancelled(&cancellation)?;
         let checked = fresh.check_result();
         {

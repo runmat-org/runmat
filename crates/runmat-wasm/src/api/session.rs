@@ -160,6 +160,31 @@ pub(crate) fn install_wasm_interrupt(
     }
 }
 
+/// Await read-only preparation with the request's cancellation generation.
+/// Dropping the pending read releases its captured scope and session borrow;
+/// it does not cancel or detach publication/execution owned by another request.
+pub(crate) async fn await_wasm_preparation<T>(
+    cancellation: &runmat_execution::cancellation::CancellationSource,
+    preparation: impl std::future::Future<Output = Result<T, JsValue>>,
+) -> Result<T, JsValue> {
+    use futures::FutureExt;
+    let token = cancellation.token();
+    let cancelled = token.cancelled().fuse();
+    let preparation = preparation.fuse();
+    futures::pin_mut!(cancelled, preparation);
+    futures::select_biased! {
+        _ = cancelled => {
+            let error = runmat_core::RunError::Runtime(
+                runmat_runtime::build_runtime_error("Execution cancelled by user")
+                    .with_identifier("RunMat:ExecutionCancelled")
+                    .build(),
+            );
+            Err(crate::wire::errors::run_error_to_js(&error, None, None))
+        },
+        result = preparation => result,
+    }
+}
+
 impl RunMatWasm {
     pub(crate) fn config_for_named_project(
         &self,

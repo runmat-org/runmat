@@ -19,6 +19,14 @@ impl RunMatWasm {
         )
         .map_err(|error| failure("project.entrypoint.filesystem", error))?;
         let mut session = self.take_session()?;
+        // This request owns preparation before the Core invocation is admitted.
+        // A fresh generation avoids poisoning the next command when discovery
+        // is cancelled before any Core execution admission exists to retire it.
+        let interrupt = runmat_execution::cancellation::CancellationSource::new();
+        let interrupt_guard = super::super::session::install_wasm_interrupt(
+            &self.active_interrupt,
+            interrupt.clone(),
+        );
         let pinned = options
             .input_manifest
             .clone()
@@ -30,36 +38,40 @@ impl RunMatWasm {
         let read_scope = &filesystem.read;
         // Resolve settings, target and source under the immutable owner BEFORE
         // admitting/mutating the live execution session.
-        let (project, target, config, source) = read_scope
-            .run(async {
-                let project = capture(&paths[0]).await?;
-                let target = project
-                    .resolve(&name)
-                    .await
-                    .map_err(|error| failure("project.entrypoint.resolve", error))?;
-                let config = self
-                    .config_for_named_project(
-                        project.project_document.clone(),
-                        options.user_settings_json.clone(),
-                    )
-                    .map_err(|error| failure("project.entrypoint.policy", error))?;
-                self.admit_named_config(&config).map_err(|error| {
-                    failure("project.entrypoint.hostReinitializationRequired", error)
-                })?;
-                let source = if is_fea(&target) {
-                    None
-                } else {
-                    Some(
-                        project
-                            .capture_source(&target)
+        let (project, target, config, source) =
+            super::super::session::await_wasm_preparation(&interrupt, async {
+                read_scope
+                    .run(async {
+                        let project = capture(&paths[0]).await?;
+                        let target = project
+                            .resolve(&name)
                             .await
-                            .map_err(|error| failure("project.entrypoint.source", error))?,
-                    )
-                };
-                Ok::<_, JsValue>((project, target, config, source))
+                            .map_err(|error| failure("project.entrypoint.resolve", error))?;
+                        let config = self
+                            .config_for_named_project(
+                                project.project_document.clone(),
+                                options.user_settings_json.clone(),
+                            )
+                            .map_err(|error| failure("project.entrypoint.policy", error))?;
+                        self.admit_named_config(&config).map_err(|error| {
+                            failure("project.entrypoint.hostReinitializationRequired", error)
+                        })?;
+                        let source = if is_fea(&target) {
+                            None
+                        } else {
+                            Some(
+                                project
+                                    .capture_source(&target)
+                                    .await
+                                    .map_err(|error| failure("project.entrypoint.source", error))?,
+                            )
+                        };
+                        Ok::<_, JsValue>((project, target, config, source))
+                    })
+                    .await
+                    .map_err(|error| failure("project.entrypoint.filesystem", error))?
             })
-            .await
-            .map_err(|error| failure("project.entrypoint.filesystem", error))??;
+            .await?;
         let source_path = path(&target)?;
         let arguments: Vec<runmat_execution::value::ValuePayload> = options
             .arguments_json
@@ -85,6 +97,7 @@ impl RunMatWasm {
                 self.publish_named_config(config);
             }
             drop(session);
+            drop(interrupt_guard);
             let plan = self
                 .plan_fea_source_in_scope(source_path.clone(), &filesystem)
                 .await?;
@@ -96,11 +109,6 @@ impl RunMatWasm {
                     .await?,
             );
         }
-        let interrupt = session.interrupt_handle();
-        let _interrupt = super::super::session::install_wasm_interrupt(
-            &self.active_interrupt,
-            interrupt.clone(),
-        );
         session
             .apply_runtime_config(&config.runtime)
             .map_err(|error| failure("project.entrypoint.policy", error))?;
@@ -114,13 +122,16 @@ impl RunMatWasm {
                 "Code target has no captured source",
             )
         })?;
-        let unit = read_scope
-            .run(session.compile_executable_unit(source, None))
-            .await
-            .map_err(|error| failure("project.entrypoint.filesystem", error))?
-            .map_err(|error| {
-                crate::wire::errors::run_error_to_js(&error, Some(&source_path), None)
-            })?;
+        let unit = super::super::session::await_wasm_preparation(&interrupt, async {
+            read_scope
+                .run(session.compile_executable_unit(source, None))
+                .await
+                .map_err(|error| failure("project.entrypoint.filesystem", error))?
+                .map_err(|error| {
+                    crate::wire::errors::run_error_to_js(&error, Some(&source_path), None)
+                })
+        })
+        .await?;
         let (kind, semantic) = unit
             .entrypoint_identity(target.function.as_deref())
             .map_err(|error| failure("project.entrypoint.compile", error))?;
@@ -137,7 +148,7 @@ impl RunMatWasm {
                     ));
                 }
                 drop(session);
-                drop(_interrupt);
+                drop(interrupt_guard);
                 let request = serde_json::json!({"source":{"kind":"path","path":source_path},"inputManifest":options.input_manifest});
                 return result(
                     Kind::Script,
