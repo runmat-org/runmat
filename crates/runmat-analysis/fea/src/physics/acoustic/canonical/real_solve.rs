@@ -8,7 +8,7 @@
 //! definite instead of continuing with an indefinite solve.
 use super::AcousticHarmonicError;
 use crate::{
-    algebra::{spmv, RealSparseMatrix},
+    algebra::RealSparseMatrix,
     solve::shared_sparse::{ambient_plan, control, with_plan, CsrArrays},
 };
 use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind};
@@ -114,12 +114,11 @@ impl<'a> SpdOperator<'a> {
             ));
         }
         // The acceptance certificate is the true residual of the assembled operator.
-        let applied = self.apply(&values)?;
-        let residual = rhs
-            .iter()
-            .zip(&applied)
-            .map(|(b, a)| b - a)
-            .collect::<Vec<_>>();
+        // Use the same compensated certificate as refinement. An ordinary
+        // SpMV followed by subtraction can lose the small defect of a
+        // well-converged shifted pressure solve through cancellation.
+        let mut residual = vec![0.0; n];
+        arrays.view().residual(&values, rhs, &mut residual);
         let relative_residual = norm(&residual) / norm(rhs);
         if !(relative_residual <= self.relative_tolerance) {
             return Err(AcousticHarmonicError::NotConverged);
@@ -129,10 +128,6 @@ impl<'a> SpdOperator<'a> {
             iterations: report.refinement_steps,
             relative_residual,
         })
-    }
-
-    fn apply(&self, values: &[f64]) -> Result<Vec<f64>, AcousticHarmonicError> {
-        spmv(self.matrix, values).map_err(|error| AcousticHarmonicError::Operator(error.into()))
     }
 }
 
