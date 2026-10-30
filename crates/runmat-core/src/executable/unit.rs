@@ -339,6 +339,29 @@ impl ExecutableUnit {
             .find(|analysis| analysis.function == function)
     }
 
+    /// The compiler's primary coordinate, checked against the captured source
+    /// descriptor. Source-table order and a function's display name are not
+    /// primary-source authority.
+    pub(crate) fn primary_source_id(&self) -> Result<runmat_types::ProgramSourceId, String> {
+        let source = self
+            .bytecode
+            .source_id
+            .and_then(runmat_vm::BytecodeSourceRef::program)
+            .ok_or("executable has no compiled primary-source coordinate")?;
+        let entry = self
+            .source_map
+            .entries()
+            .iter()
+            .find(|entry| entry.source_id == source)
+            .ok_or("compiled primary source is absent from the source table")?;
+        if entry.owner_identity != self.source.owner_identity
+            || entry.relative_path != self.source.relative_path
+        {
+            return Err("compiled primary source differs from its captured descriptor".into());
+        }
+        Ok(source)
+    }
+
     /// Return the exact compiler facts for one named, top-level function defined by the primary
     /// source of this executable. Companion-project functions with the same name are never used as
     /// a substitute.
@@ -346,13 +369,7 @@ impl ExecutableUnit {
         &self,
         name: &str,
     ) -> Result<ExecutableFunctionInterface, String> {
-        let primary_source_ids = self
-            .source_map
-            .entries()
-            .iter()
-            .filter(|entry| entry.relative_path == self.source.relative_path)
-            .map(|entry| entry.source_id)
-            .collect::<Vec<_>>();
+        let primary_source = self.primary_source_id()?;
         let matches = self
             .mir
             .functions
@@ -361,7 +378,7 @@ impl ExecutableUnit {
                 metadata.parent.is_none()
                     && matches!(metadata.kind, runmat_hir::FunctionKind::Named)
                     && metadata.name.0 == name
-                    && primary_source_ids.contains(&metadata.source)
+                    && metadata.source == primary_source
             })
             .collect::<Vec<_>>();
         let (function, metadata) = match matches.as_slice() {

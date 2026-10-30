@@ -186,10 +186,7 @@ fn original_code(
     unit.admit_direct_code(interop.clone(), || {
         let envelope = unit.portable_primary_source_envelope_with_static_imports(
             &unit.compiled_current_body_ids()?,
-            unit.source_map()
-                .entries()
-                .first()
-                .map(|entry| entry.source_id),
+            Some(unit.primary_source_id()?),
             interop,
             unit.original_static_imports().to_vec(),
         )?;

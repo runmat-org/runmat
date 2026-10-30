@@ -24,12 +24,7 @@ impl SourceProductSelection {
         primary: Option<ProgramSourceId>,
     ) -> Result<Self, String> {
         let source = primary.ok_or("interactive product has no primary source")?;
-        if unit
-            .source_map()
-            .entries()
-            .first()
-            .is_none_or(|entry| entry.source_id != source)
-        {
+        if unit.primary_source_id()? != source {
             return Err("interactive product primary source differs from its source map".into());
         }
         // RegisterClass publication instructions do not constitute a script.

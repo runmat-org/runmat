@@ -119,6 +119,44 @@ mod tests {
             assert_eq!(function.module.as_deref(), Some("app.server"));
             assert_eq!(function.function.as_deref(), Some("main"));
             assert!(project.capture_source(&function).await.is_ok());
+            // The companion module also declares `main`; it cannot turn the
+            // selected main.m script into that function. Both local identity
+            // and portable products must select the primary compiled source.
+            for (target, kind) in [
+                (&script, runmat_execution::ExecutableEntrypointKind::Script),
+                (
+                    &function,
+                    runmat_execution::ExecutableEntrypointKind::Function,
+                ),
+            ] {
+                let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+                session
+                    .install_project_handoff(project.handoff.clone())
+                    .unwrap();
+                let source = project.capture_source(target).await.unwrap();
+                let unit = session.compile_executable_unit(source, None).await.unwrap();
+                assert_eq!(
+                    unit.entrypoint_identity(target.function.as_deref())
+                        .unwrap()
+                        .0,
+                    kind
+                );
+                assert_eq!(
+                    unit.portable_envelope_for(target.function.as_deref())
+                        .unwrap()
+                        .manifest
+                        .identity
+                        .entrypoint_kind,
+                    kind
+                );
+                assert_eq!(unit.entrypoint_identity(None).unwrap().0, kind);
+                if kind == runmat_execution::ExecutableEntrypointKind::Script {
+                    assert!(
+                        unit.entrypoint_identity(Some("main")).is_err(),
+                        "a companion function is not a primary-source entrypoint"
+                    );
+                }
+            }
             assert!(project.resolve("absent").await.is_err());
             provider
                 .write_project_path("/workspace/src/main.m", b"answer = 99;")

@@ -14,21 +14,61 @@ pub(super) fn resolve(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
 ) -> Result<PortableEntrypoint, String> {
+    let primary = unit.primary_source_id()?;
+    let current = unit
+        .compiled_current_body_ids()?
+        .into_iter()
+        .filter(|function| {
+            unit.mir()
+                .functions
+                .get(function)
+                .is_some_and(|metadata| metadata.source == primary && metadata.parent.is_none())
+        })
+        .collect::<std::collections::HashSet<_>>();
     if let Some(name) = preferred_function {
-        let function = unit
-            .native_function_id(name)
+        let mut named = unit
+            .mir()
+            .functions
+            .iter()
+            .filter_map(|(function, metadata)| {
+                (current.contains(function)
+                    && metadata.source == primary
+                    && metadata.parent.is_none()
+                    && matches!(
+                        metadata.kind,
+                        runmat_hir::FunctionKind::Named
+                            | runmat_hir::FunctionKind::ClassMethod { .. }
+                    )
+                    && metadata.name.0 == name)
+                    .then_some(*function)
+            });
+        let exact = named.next();
+        if named.next().is_some() {
+            return Err(format!(
+                "primary source defines requested function '{name}' more than once"
+            ));
+        }
+        let function = exact
+            .or_else(|| {
+                let class = runmat_types::ClassIdentity::new(name).ok()?;
+                unit.source_constructor_function_id(&class, primary)
+                    .filter(|function| current.contains(function))
+            })
             .ok_or_else(|| format!("source does not define requested function '{name}'"))?;
         return function_entrypoint(unit, name, function);
     }
-
-    let source_stem = std::path::Path::new(&unit.source().relative_path)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("script");
-    if let Some(function) = unit.native_function_id(source_stem) {
-        return function_entrypoint(unit, source_stem, function);
+    match super::SourceProductSelection::classify(unit, &current, Some(primary))? {
+        super::SourceProductSelection::Script => script_entrypoint(unit),
+        super::SourceProductSelection::Definitions => {
+            resolve_current_definition(unit, &current, primary)
+        }
+        super::SourceProductSelection::Constructor { class, source } => {
+            resolve_constructor_source(unit, &class, source)
+        }
+        super::SourceProductSelection::Declaration { class, source } => {
+            resolve_declaration_source(unit, &class, source)
+        }
     }
-    script_entrypoint(unit)
 }
 
 /// An interactive definition-only source has no script entrypoint. Select an
@@ -116,11 +156,6 @@ fn validate_declaration_source(
     }) {
         return Err("declaration-only product has a constructor body".into());
     }
-    let primary = unit
-        .source_map()
-        .entries()
-        .first()
-        .ok_or("declaration-only product has no primary source")?;
     let declaration = unit
         .mir()
         .classes
@@ -129,7 +164,7 @@ fn validate_declaration_source(
             declaration.source == primary_source && class.matches_qualified_name(&declaration.name)
         })
         .ok_or("declaration-only product lacks its primary class declaration")?;
-    if primary.source_id != primary_source
+    if unit.primary_source_id()? != primary_source
         || primary_registration(unit, &declaration.name, primary_source) != Some(class)
     {
         return Err("declaration-only product lacks its primary class declaration".into());
@@ -369,12 +404,7 @@ pub(super) fn script_entrypoint(unit: &ExecutableUnit) -> Result<PortableEntrypo
     {
         return Err("executable script entrypoint disagrees with its VM layout".into());
     }
-    let primary_source = unit
-        .source_map()
-        .entries()
-        .first()
-        .ok_or_else(|| "executable script has no primary source".to_string())?
-        .source_id;
+    let primary_source = unit.primary_source_id()?;
     if metadata.source != primary_source
         || unit
             .bytecode()

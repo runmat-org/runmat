@@ -65,8 +65,8 @@ impl ExecutableUnit {
     }
 
     /// Build the complete product with an optional explicitly selected function.
-    /// A missing explicit function is an error; implicit selection falls back to
-    /// a script only when the source does not define its stem as a function.
+    /// A missing explicit primary-source function is an error. Implicit
+    /// selection uses the compiler's typed primary-source product role.
     pub fn portable_envelope_for(
         &self,
         preferred_function: Option<&str>,

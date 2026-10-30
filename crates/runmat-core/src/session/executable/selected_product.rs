@@ -99,11 +99,7 @@ impl RunMatSession {
         let selected = SelectedGraphPrimary::new(
             SelectedGraphSource {
                 unit: Rc::new(unit.clone()),
-                primary_source: unit
-                    .source_map()
-                    .entries()
-                    .first()
-                    .map(|entry| entry.source_id),
+                primary_source: Some(unit.primary_source_id().map_err(error)?),
                 code: cached_code
                     .map(SelectedGraphCodeSource::Admitted)
                     .unwrap_or(SelectedGraphCodeSource::Unpublished),

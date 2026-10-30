@@ -267,10 +267,7 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
         let serialize = |interop| {
             unit.portable_primary_source_envelope(
                 &original_ids,
-                unit.source_map()
-                    .entries()
-                    .first()
-                    .map(|entry| entry.source_id),
+                Some(unit.primary_source_id()?),
                 interop,
             )
         };
