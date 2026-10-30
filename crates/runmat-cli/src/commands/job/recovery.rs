@@ -605,11 +605,26 @@ fn require_private_file(path: &Path) -> Result<()> {
     let mode = metadata.permissions().mode();
     if mode & 0o077 != 0 {
         bail!(
-            "recovery key {} is accessible by group or other users; require mode 0600",
-            path.display()
+            "recovery key {:?} is accessible by group or other users; require mode 0600; {}",
+            path,
+            private_mode_guidance(path)
         );
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn private_mode_guidance(path: &Path) -> String {
+    let Some(path) = path.to_str() else {
+        return "the pathname contains non-UTF-8 bytes: use chmod -- 600 with the original filename selected by your shell's filename completion; no lossy copy-pastable pathname is shown".into();
+    };
+    if path.chars().any(char::is_control) {
+        return "the pathname contains control characters: use chmod -- 600 with the original filename selected by your shell's filename completion; no copy-pastable pathname is shown".into();
+    }
+    // POSIX single-quoted arguments preserve spaces and shell metacharacters.
+    // A literal apostrophe closes the quote, emits one quoted apostrophe,
+    // then reopens it. `--` also protects relative names beginning with '-'.
+    format!("run: chmod -- 600 '{}'", path.replace('\'', "'\"'\"'"))
 }
 
 #[cfg(not(unix))]
@@ -658,6 +673,50 @@ mod tests {
         );
         #[cfg(unix)]
         {
+            use std::os::unix::ffi::OsStringExt as _;
+            use std::os::unix::fs::PermissionsExt as _;
+
+            let downloaded = directory.path().join("browser owner's key.json");
+            write_new_key(&downloaded, &document).unwrap();
+            std::fs::set_permissions(&downloaded, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let refusal = load_key(&downloaded)
+                .err()
+                .expect("insecure import refused")
+                .to_string();
+            // Execute the exact diagnostic guidance, including POSIX quoting
+            // of the filename's space and literal apostrophe.
+            let guidance = private_mode_guidance(&downloaded);
+            assert!(guidance.starts_with("run: chmod -- 600 '"));
+            assert!(guidance.ends_with("/browser owner'\"'\"'s key.json'"));
+            assert!(refusal.contains(&guidance));
+            let emitted = guidance.strip_prefix("run: ").unwrap();
+            assert!(std::process::Command::new("sh")
+                .arg("-c")
+                .arg(emitted)
+                .status()
+                .unwrap()
+                .success());
+            assert_eq!(
+                std::fs::metadata(&downloaded).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            load_key(&downloaded).unwrap();
+
+            let non_utf8 = directory
+                .path()
+                .join(std::ffi::OsString::from_vec(b"download-\xff.json".to_vec()));
+            write_new_key(&non_utf8, &document).unwrap();
+            std::fs::set_permissions(&non_utf8, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let refusal = load_key(&non_utf8)
+                .err()
+                .expect("non-UTF-8 insecure import refused")
+                .to_string();
+            assert!(refusal.contains("non-UTF-8"));
+            assert!(refusal.contains("no lossy copy-pastable pathname is shown"));
+            assert!(!private_mode_guidance(&non_utf8).starts_with("run: "));
+            std::fs::set_permissions(&non_utf8, std::fs::Permissions::from_mode(0o600)).unwrap();
+            load_key(&non_utf8).unwrap();
+
             let link = directory.path().join("recovery-key-link.json");
             std::os::unix::fs::symlink(&path, &link).unwrap();
             assert!(load_key(&link).is_err());
