@@ -3,7 +3,9 @@
 use runmat_execution::resource::{
     ProviderHostMetadataAdmission, ProviderHostMetadataError, RetainedHostAllocationClaim,
 };
-use std::{alloc::Layout, fmt, ops::Range, sync::Arc};
+#[cfg(any(feature = "wgpu", test))]
+use std::ops::Range;
+use std::{alloc::Layout, fmt, sync::Arc};
 
 pub(crate) type Claim = Option<Arc<dyn RetainedHostAllocationClaim>>;
 
@@ -69,6 +71,7 @@ impl<T> ClaimedVec<T> {
     pub(crate) fn len(&self) -> usize {
         self.values.len()
     }
+    #[cfg(any(feature = "wgpu", test))]
     pub(crate) fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
@@ -78,6 +81,7 @@ impl<T> ClaimedVec<T> {
     pub(crate) fn as_slice(&self) -> &[T] {
         &self.values
     }
+    #[cfg(any(feature = "wgpu", test))]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
         &mut self.values
     }
@@ -101,6 +105,7 @@ impl<T> ClaimedVec<T> {
         drop(std::mem::replace(self, next));
         Ok(())
     }
+    #[cfg(any(feature = "wgpu", test))]
     pub(crate) fn push(
         &mut self,
         value: T,
@@ -122,9 +127,11 @@ impl<T> ClaimedVec<T> {
         self.values.extend_from_slice(values);
         Ok(())
     }
+    #[cfg(any(feature = "wgpu", test))]
     pub(crate) fn truncate(&mut self, len: usize) {
         self.values.truncate(len);
     }
+    #[cfg(any(feature = "wgpu", test))]
     pub(crate) fn dedup(&mut self)
     where
         T: PartialEq,
@@ -152,6 +159,7 @@ impl ClaimedString {
             bytes: ClaimedVec::with_capacity(bytes, metadata)?,
         })
     }
+    #[cfg(any(feature = "wgpu", test))]
     pub(crate) fn copy_from(
         source: &str,
         metadata: Option<&dyn ProviderHostMetadataAdmission>,
@@ -197,6 +205,7 @@ impl ClaimedString {
         }
         Ok(())
     }
+    #[cfg(any(feature = "wgpu", test))]
     pub(crate) fn remove_range(&mut self, range: Range<usize>) -> Result<(), Error> {
         if self.as_str().get(range.clone()).is_none() {
             return Err(Error::Overflow);
