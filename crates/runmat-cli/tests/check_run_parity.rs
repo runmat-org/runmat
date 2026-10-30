@@ -49,7 +49,11 @@ fn error_codes(payload: &Value) -> Vec<String> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|diagnostic| diagnostic["severity"] == "error")
+        .filter(|diagnostic| {
+            diagnostic["severity"]
+                .as_str()
+                .is_some_and(|severity| severity.eq_ignore_ascii_case("error"))
+        })
         .map(|diagnostic| diagnostic["code"].as_str().unwrap_or_default().to_string())
         .collect()
 }
@@ -102,12 +106,11 @@ fn every_published_example_checks_clean() {
 fn project_with(temp: &TempDir, name: &str, source: &str) -> PathBuf {
     let project = temp.path().join("project");
     fs::create_dir_all(project.join("geometry")).unwrap();
-    for file in ["two-box-assembly.step", "cantilever.step"] {
-        fs::copy(
-            repository().join("docs/simulation/examples/geometry").join(file),
-            project.join("geometry").join(file),
-        )
-        .unwrap();
+    for entry in fs::read_dir(repository().join("docs/simulation/examples/geometry")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            fs::copy(&path, project.join("geometry").join(path.file_name().unwrap())).unwrap();
+        }
     }
     fs::write(project.join(name), source).unwrap();
     project

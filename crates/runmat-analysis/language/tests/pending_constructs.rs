@@ -42,7 +42,16 @@ fn diagnostics_with(select: &str, body: &str, extra: &str) -> Vec<String> {
             root: source_module("project/main.fea", &source, 1),
         },
     });
-    program.diagnostics.iter().map(|d| d.message.clone()).collect()
+    // Parse, binding and semantic diagnostics, as `runmat check` reports them.
+    program
+        .bound
+        .graph
+        .diagnostics
+        .iter()
+        .chain(&program.bound.diagnostics)
+        .chain(&program.diagnostics)
+        .map(|d| d.message.clone())
+        .collect()
 }
 
 fn assert_pending(messages: &[String], id: &str) {
@@ -139,7 +148,7 @@ fn input_value_type_mismatch_names_quantities_not_rust_types() {
     let messages = diagnostics("select result", body);
     let message = messages
         .iter()
-        .find(|message| message.contains("input value") || message.contains("input `rise`"))
+        .find(|message| message.contains("input `rise`") || message.contains("input value"))
         .unwrap_or_else(|| panic!("{messages:#?}"));
     assert!(message.contains("temperature difference"), "{message}");
     for leaked in ["DynamicDimension", "PhysicalDimension", "Quantity("] {

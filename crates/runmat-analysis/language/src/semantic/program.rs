@@ -259,8 +259,10 @@ impl<C: AnalysisOperationCatalog + ?Sized> InputCheck<'_, C> {
             diagnostics.push(FeaDiagnostic::error(
                 "fea.semantic.input_value_type",
                 format!(
-                    "{member} for input `{}` has an incompatible type",
-                    input.name
+                    "{member} for input `{}` has an incompatible type: the input is {}, the value is {}",
+                    input.name,
+                    super::units::describe_fea_type(&input.value_type),
+                    super::units::describe_fea_type(&checked.value_type),
                 ),
                 FeaDiagnosticPhase::Semantic,
                 Some(FeaDiagnosticLocation {

@@ -112,6 +112,8 @@ pub fn logical_source_path(
     physical_path: &Path,
 ) -> Result<LogicalSourcePath, String> {
     let physical_root = normalized_root(physical_root)?;
+    // `crates/runmat-cli/../../docs/x.fea` names the same file as `docs/x.fea`.
+    let physical_path = lexically_normalized(physical_path);
     let relative = physical_path.strip_prefix(&physical_root).map_err(|_| {
         format!(
             "FEA source `{}` is outside source root `{}`",
@@ -218,6 +220,23 @@ pub(super) fn diagnostic(
         message,
         availability,
     }
+}
+
+/// Resolves `.` and `..` components without touching the filesystem.
+fn lexically_normalized(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir
+                if matches!(normalized.components().next_back(), Some(Component::Normal(_))) =>
+            {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn normalized_root(path: &Path) -> Result<PathBuf, String> {

@@ -137,6 +137,32 @@ pub(crate) fn describe_quantity_type(quantity: runmat_types::physical::DynamicDi
     }
 }
 
+/// A checked value type as an author reads it, for type-mismatch diagnostics.
+pub(crate) fn describe_fea_type(value_type: &crate::FeaType) -> String {
+    use crate::FeaType;
+    match value_type {
+        FeaType::Quantity(quantity) => describe_quantity_type(*quantity),
+        FeaType::Vector { element, length } => match length {
+            Some(length) => format!("{length}-component vector of {}", describe_fea_type(element)),
+            None => format!("vector of {}", describe_fea_type(element)),
+        },
+        FeaType::Integer => "integer".into(),
+        FeaType::Real => "real number".into(),
+        FeaType::Boolean => "boolean".into(),
+        FeaType::String => "string".into(),
+        FeaType::Error => "an invalid value".into(),
+        other => type_word(other),
+    }
+}
+
+fn type_word(value_type: &crate::FeaType) -> String {
+    // Remaining variants are declaration and structural types; their variant name is the
+    // author-facing word (`Material`, `Region`, ...), never a nested debug structure.
+    let debug = format!("{value_type:?}");
+    let word = debug.split(['(', ' ', '{']).next().unwrap_or("value");
+    word.to_ascii_lowercase()
+}
+
 /// When `value` is a quantity whose authored unit measures something other than `expected`,
 /// returns the message (`<subject> must be <what>, found <unit>`) and the caret label
 /// (`expected <SI unit>`) for a diagnostic located at the value.
