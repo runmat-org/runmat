@@ -3,7 +3,7 @@ use crate::topology::{AnalysisProjection, TetrahedralEdgeSpace};
 use runmat_meshing_core::{BoundaryFaceRole, StableDigest};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) struct MagneticBoundarySpace {
+pub(crate) struct MagneticBoundarySpace {
     pub free_edges: Vec<usize>,
     pub gauge_nodes: Vec<usize>,
 }
@@ -98,9 +98,15 @@ impl MagneticBoundarySpace {
         }
         // Edge incidence alone permits pinched vertices. Each boundary vertex
         // link must be one connected cycle, not two surfaces meeting at a node.
+        let mut incident_faces = BTreeMap::<usize, Vec<[usize; 3]>>::new();
+        for face in &exterior {
+            for &node in face {
+                incident_faces.entry(node).or_default().push(*face);
+            }
+        }
         for &node in &boundary_nodes {
             let mut link = BTreeMap::<usize, Vec<usize>>::new();
-            for face in exterior.iter().filter(|face| face.contains(&node)) {
+            for face in &incident_faces[&node] {
                 let others: Vec<_> = face
                     .iter()
                     .copied()

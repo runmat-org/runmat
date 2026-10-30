@@ -6,7 +6,7 @@ use runmat_analysis_core::{
     AuthoredOutput, AuthoredStudyInputBinding, CoupledPhysicsFamily, MaterialModel, PhysicsFamily,
     RealizedStudy,
 };
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use runmat_geometry_core::{GeometryDefinitionSource, GeometryDocument, ResolvedGeometryRegions};
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact, StableDigest};
@@ -22,7 +22,7 @@ mod storage;
 
 const STUDY_IDENTITY_PREFIX: &[u8] = b"runmat-compiled-analysis-study\0";
 const STUDY_IDENTITY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 64));
 
 /// Exact compiled study definition shared by local and remote execution.
 ///
@@ -92,7 +92,8 @@ impl CompiledAnalysisStudy {
     /// Identity of the compiled analysis definition and exact topology, independent of placement.
     pub fn definition_digest(&self) -> Result<Digest, AnalysisStudyCompilationError> {
         self.validate_contract()?;
-        let bytes = encode_contract(
+        // Streamed: the compiled study (mesh-sized property identity) is never materialized.
+        let baseline = crate::contracts::canonical_digest::canonical_contract_digest(
             STUDY_IDENTITY_PREFIX,
             "compiled-analysis-study",
             &(
@@ -107,18 +108,16 @@ impl CompiledAnalysisStudy {
             STUDY_IDENTITY_LIMITS,
         )
         .map_err(|error| AnalysisStudyCompilationError::Identity(error.to_string()))?;
-        let baseline = Digest::sha256(bytes);
         if self.assessments.is_empty() {
             return Ok(baseline);
         }
-        let assessed = encode_contract(
+        crate::contracts::canonical_digest::canonical_contract_digest(
             STUDY_IDENTITY_PREFIX,
             "assessed-analysis-study",
             &(baseline, &self.assessments),
             STUDY_IDENTITY_LIMITS,
         )
-        .map_err(|error| AnalysisStudyCompilationError::Identity(error.to_string()))?;
-        Ok(Digest::sha256(assessed))
+        .map_err(|error| AnalysisStudyCompilationError::Identity(error.to_string()))
     }
 
     /// This study with its definition digest, derived once for every holder of the pair.

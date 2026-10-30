@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::Serialize;
@@ -507,7 +507,7 @@ pub(super) fn digest<T: Serialize>(
     domain: &'static str,
     value: &T,
 ) -> Result<Digest, NullspaceEvidenceError> {
-    encode_contract(EVIDENCE_PREFIX, domain, value, LIMITS)
-        .map(Digest::sha256)
+    // Streamed: evidence over mesh-sized bases is hashed without materializing its encoding.
+    crate::contracts::canonical_digest::canonical_contract_digest(EVIDENCE_PREFIX, domain, value, LIMITS)
         .map_err(|error| NullspaceEvidenceError::Encoding(error.to_string()))
 }

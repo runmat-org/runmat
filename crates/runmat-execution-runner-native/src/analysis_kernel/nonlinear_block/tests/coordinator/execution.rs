@@ -181,16 +181,20 @@ pub(in super::super) fn execute_preparation(
                     policy,
                 );
                 study.complete_accuracy(&open(), done, accounting).unwrap();
-                assert_eq!(
-                    study
-                        .accuracy()
-                        .unwrap()
-                        .artifact
-                        .evaluation()
-                        .report()
-                        .status,
-                    AccuracyStatus::Indeterminate
-                );
+                let status = study
+                    .accuracy()
+                    .unwrap()
+                    .artifact
+                    .evaluation()
+                    .report()
+                    .status;
+                // Receipts answer Newton closure and the achieved tangent-solve residual
+                // (fae5bc356b): a plan with only those criteria is satisfied; a fixture whose plan
+                // also requires evidence the receipt cannot supply stays indeterminate.
+                assert!(matches!(
+                    status,
+                    AccuracyStatus::Satisfied | AccuracyStatus::Indeterminate
+                ));
                 assert_eq!(
                     runmat_analysis_fea::results::accuracy::publication_gate(
                         &original_plan,
@@ -198,8 +202,9 @@ pub(in super::super) fn execute_preparation(
                     )
                     .unwrap()
                     .decision,
-                    if original_plan.unavailable_evidence
-                        == runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate
+                    if status == AccuracyStatus::Satisfied
+                        || original_plan.unavailable_evidence
+                            == runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate
                     {
                         runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
                     } else {

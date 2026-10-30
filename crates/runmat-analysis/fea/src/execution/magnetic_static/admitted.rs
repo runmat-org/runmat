@@ -2,7 +2,7 @@
 //! runner's responsibility.
 use super::*;
 use crate::planning::resource::{
-    build_magnetostatic_resource_plan, FeaResourceDemand, FeaResourcePlan, LocalExecutionPlan,
+    build_magnetostatic_resource_plan_with_system, FeaResourceDemand, FeaResourcePlan, LocalExecutionPlan,
     PreparedMagnetostaticResourceFacts,
 };
 impl MagnetostaticWorkload {
@@ -20,7 +20,9 @@ impl MagnetostaticWorkload {
             .output_set
             .clone()
             .ok_or_else(|| invalid("magnetic plan lacks complete output-set reservation"))?;
-        let expected = build_magnetostatic_resource_plan(
+        // The admitted plan (whose demand binds the system identity) is rebuilt once; its compiled input and derived system are the
+        // ones solved, so the projection and sparse support are derived exactly once.
+        let (expected, input, system) = build_magnetostatic_resource_plan_with_system(
             self,
             mesh,
             PreparedMagnetostaticResourceFacts {
@@ -41,32 +43,23 @@ impl MagnetostaticWorkload {
                 "magnetic resource plan differs from exact workload/topology/shared recurrence",
             ));
         }
-        let formulation = self.formulation(mesh)?;
-        let input = crate::physics::magnetic::compile_canonical_input(
-            &self.model,
+        // The retained layout and native selections use the solve's own projection.
+        let sampling = crate::results::field::SampledVolumeFieldTopology::derive_from_projection(
             mesh,
-            self.step_id.as_str(),
-            self.relative_residual_target,
+            &input.projection,
+            crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen,
         )
         .map_err(invalid)?;
-        let system = crate::physics::magnetic::MagneticSystemPlan::derive(
-            &input.projection,
-            &input.grounded_faces,
-        )
-            .map_err(invalid)?;
-        if system.identity().map_err(invalid)? != demand.system_plan_identity {
-            return Err(invalid(
-                "magnetic assembly support differs from admitted plan",
-            ));
-        }
-        let response = crate::physics::magnetic::solve_grounded_volume_with_plan(
+        let formulation = self.formulation_with_sampling(mesh, Some(&sampling))?;
+        let response = crate::physics::magnetic::solve_grounded_volume_derived(
             &input.projection,
             &input.volumes,
             &input.prescribed_potential,
             self.relative_residual_target,
-            &system,
+            system,
         )
         .map_err(invalid)?;
-        MagnetostaticSolverResult::new(self, mesh, formulation, response)
+        drop(input);
+        MagnetostaticSolverResult::new(self, mesh, formulation, sampling, response)
     }
 }

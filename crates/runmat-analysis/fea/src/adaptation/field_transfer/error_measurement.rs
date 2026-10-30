@@ -5,12 +5,11 @@ use super::{
 use runmat_analysis_core::AnalysisField;
 use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::StableDigest;
-use sha2::{Digest as _, Sha256};
 
 const FIELD_CODEC_PREFIX: &[u8] = b"runmat-analysis-fea-field-cbor/v1\0";
 const FIELD_CODEC_DOMAIN: &str = "analysis.fea.field/v1";
 const FIELD_CODEC_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16));
 
 pub fn measure_solver_field_transfer_error(
     transfer: &SolverFieldTransferResult,
@@ -68,12 +67,13 @@ pub fn measure_solver_field_transfer_error(
 }
 
 fn field_digest(field: &AnalysisField) -> Result<StableDigest, SolverFieldTransferError> {
-    let encoded = runmat_canonical_codec::encode_contract(
+    // Streamed: a mesh-sized field is hashed without materializing its encoding.
+    let digest = crate::contracts::canonical_digest::canonical_contract_digest(
         FIELD_CODEC_PREFIX,
         FIELD_CODEC_DOMAIN,
         field,
         FIELD_CODEC_LIMITS,
     )
     .map_err(|_| SolverFieldTransferError::InvalidReferenceField)?;
-    Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
+    Ok(StableDigest::from_bytes(*digest.bytes()))
 }

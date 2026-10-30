@@ -63,6 +63,23 @@ pub fn build_magnetostatic_resource_plan(
     m: &SolverMeshArtifact,
     prepared: PreparedMagnetostaticResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    Ok(build_magnetostatic_resource_plan_with_system(w, m, prepared)?.0)
+}
+
+/// The plan together with the compiled input and derived sparse system it was built from:
+/// the worker solves on exactly these instead of deriving the topology again.
+pub(crate) fn build_magnetostatic_resource_plan_with_system(
+    w: &MagnetostaticWorkload,
+    m: &SolverMeshArtifact,
+    prepared: PreparedMagnetostaticResourceFacts,
+) -> Result<
+    (
+        FeaResourcePlan,
+        crate::physics::magnetic::CompiledMagneticInput,
+        crate::physics::magnetic::DerivedMagneticSystem,
+    ),
+    ResourcePlanningError,
+> {
     let numerical = preflight(w, m)?;
     let payload = payload::profile(w, m)?;
     let profiles = w
@@ -98,9 +115,9 @@ pub fn build_magnetostatic_resource_plan(
         w.relative_residual_target,
     )
     .map_err(invalid)?;
-    let system = MagneticSystemPlan::derive(&input.projection, &input.grounded_faces)
+    let derived = MagneticSystemPlan::derive_with_spaces(&input.projection, &input.grounded_faces)
         .map_err(invalid)?;
-    drop(input);
+    let system = &derived.plan;
     let krylov = estimate::magnetic_static::krylov_envelope(
         system.saddle_pattern().rows(),
         system.saddle_pattern().column_indices().len() as u64,
@@ -117,7 +134,7 @@ pub fn build_magnetostatic_resource_plan(
     )?;
     let source = w.identity().map_err(invalid)?;
     let step = &w.model.sequence.steps[0];
-    build_resource_plan(FeaResourcePlanningInput {
+    let plan = build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::Magnetostatic(source),
         demand: FeaResourceDemand::Magnetostatic(MagnetostaticResourceDemand {
@@ -155,5 +172,6 @@ pub fn build_magnetostatic_resource_plan(
             accelerators: Vec::new(),
         },
         accuracy_ceiling: step.accuracy.resources,
-    })
+    })?;
+    Ok((plan, input, derived))
 }

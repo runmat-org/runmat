@@ -158,16 +158,17 @@ impl CanonicalNonlinearSolidBasis {
                 });
             }
         }
-        let bytes = encode_contract(
+        // Streamed: the follower inventory is hashed without materializing its encoding.
+        let digest = crate::contracts::canonical_digest::canonical_contract_digest(
             b"runmat-fea-follower-boundary-loads/v1\0",
             "follower-boundary-loads",
             &(self.identity, &faces),
-            CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
+            CanonicalLimits::new(0, 0, 4096, 64),
         )
         .map_err(|e| NonlinearSolidError::Authority(e.to_string()))?;
         Ok(Some(FollowerLoadOperator {
             faces,
-            identity: Digest::sha256(bytes),
+            identity: digest,
         }))
     }
 

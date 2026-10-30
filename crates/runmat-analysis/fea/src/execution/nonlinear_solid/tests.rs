@@ -194,3 +194,91 @@ fn original_recovery_rejects_rehashed_terminal_projection_substitutions() {
         }
     }
 }
+
+// witness: FEA-NONLINEAR-GOVERNANCE-001/inequality_restart_converged_base @
+//   nonlinear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: The default structural-nonlinear accuracy plan (mandatory algebraic global-equilibrium
+//   residual bound) is decided by the achieved tangent-solve residual the receipt retains: allowed
+//   at the authored target, refused (not indeterminate) when the target is below the achieved value;
+//   one slab block, not contact or restart.
+#[test]
+fn default_nonlinear_plan_is_decided_by_achieved_tangent_solve_residuals() {
+    use crate::execution::{AccuracyEvaluationRequest, AccuracySourceKind, AccuracySourceReceipt};
+    use crate::results::accuracy::{evaluate_accuracy_artifact, AccuracyStatus, PublicationDecision};
+    use runmat_analysis_core::{AccuracyPlan, AccuracyTolerance};
+    let (mut model, mesh, _) = fixture::prepare(1, false);
+    model.sequence.steps[0].accuracy = AccuracyPlan::baseline("load.accuracy");
+    let workload = NonlinearSolidWorkload {
+        model,
+        controls: NonlinearSolveOptions {
+            increment_count: 2,
+            max_accepted_increments: 8,
+            max_newton_iters: 32,
+            tolerance: 1e-9,
+            linear_tolerance: 1e-12,
+            max_line_search_backtracks: 16,
+            ..NonlinearSolveOptions::default()
+        },
+    };
+    let request = NonlinearSolidBlockRequest {
+        workload: workload.identity().unwrap(),
+        topology: Digest::from_bytes(*mesh.canonical_digest.bytes()),
+        block_ordinal: 0,
+        first_output_ordinal: 1,
+        accepted_block_limit: 8,
+        predecessor: None,
+    };
+    let block = workload.execute_block(mesh, &request, None).unwrap();
+    assert!(block.complete);
+    let receipt = NonlinearSolidNumericalReceiptArtifact::from_canonical_bytes(
+        &NonlinearSolidNumericalReceiptArtifact::new(&workload, &block)
+            .unwrap()
+            .canonical_bytes()
+            .unwrap(),
+    )
+    .unwrap();
+    let achieved = receipt.receipt().maximum_linear_relative_residual;
+    assert!(achieved.is_finite() && achieved <= workload.controls.linear_tolerance);
+    assert_eq!(achieved, block.checkpoint.maximum_linear_relative_residual());
+    let evaluate = |plan: AccuracyPlan| {
+        let request = AccuracyEvaluationRequest::new(
+            workload.producer_identity().unwrap(),
+            AccuracySourceKind::NonlinearSolid,
+            receipt.source_result(),
+            None,
+            plan,
+        )
+        .unwrap();
+        let source = AccuracySourceReceipt::NonlinearSolid(receipt.clone());
+        evaluate_accuracy_artifact(&request, source.evidence(&request).unwrap()).unwrap()
+    };
+    let authored = workload.model.sequence.steps[0].accuracy.clone();
+    let allowed = evaluate(authored.clone());
+    assert_eq!(allowed.gate().decision, PublicationDecision::Allow);
+    assert_eq!(allowed.gate().status, AccuracyStatus::Satisfied);
+    // Unavailable mandatory evidence still blocks: the J2 receipt carries no spatial
+    // convergence study, so such a criterion is indeterminate and the default policy refuses.
+    let mut unavailable = authored.clone();
+    unavailable.criteria.push(runmat_analysis_core::AccuracyCriterion {
+        criterion_id: "spatial_convergence".into(),
+        target: runmat_analysis_core::AccuracyTarget::NumericalResult,
+        contribution: runmat_analysis_core::ErrorContributionKind::SpatialDiscretization,
+        tolerance: AccuracyTolerance::Relative(0.05),
+        evidence: runmat_analysis_core::RequiredAccuracyEvidence::ConvergenceStudy,
+        mandatory: true,
+    });
+    let blocked = evaluate(unavailable.clone());
+    assert_eq!(blocked.gate().status, AccuracyStatus::Indeterminate);
+    assert_eq!(blocked.gate().decision, PublicationDecision::Block);
+    unavailable.unavailable_evidence = runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
+    let labeled = evaluate(unavailable);
+    assert_eq!(labeled.gate().status, AccuracyStatus::Indeterminate);
+    assert_eq!(labeled.gate().decision, PublicationDecision::Allow);
+    let mut unreachable = authored;
+    unreachable.criteria[0].tolerance = AccuracyTolerance::Relative(achieved / 2.0);
+    if achieved > 0.0 {
+        let refused = evaluate(unreachable);
+        assert_eq!(refused.gate().decision, PublicationDecision::Block);
+        assert_eq!(refused.gate().status, AccuracyStatus::NotSatisfied);
+    }
+}

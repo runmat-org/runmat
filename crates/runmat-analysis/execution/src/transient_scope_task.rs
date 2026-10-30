@@ -11,7 +11,7 @@ use runmat_analysis_fea::{
     },
     planning::resource::{FeaResourceDemand, FeaResourcePhase, FeaResourcePlan},
 };
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{
     cache::CacheImport, object::ObjectInventoryLimits, ArtifactAccess, ObjectNamespace,
@@ -32,8 +32,7 @@ use crate::{
 const TASK_PREFIX: &[u8] = b"runmat-analysis-transient-scope-task/v1\0";
 /// Identity digests hash the authored model and constraint plan, which grow with generated
 /// signals and the mesh; only the digest is retained, never the encoded bytes.
-const IDENTITY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64);
+const IDENTITY_LIMITS: CanonicalLimits = CanonicalLimits::new(0, 0, 65_536, 64);
 
 pub struct StructuralTransientScopeTaskPreparation {
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
@@ -322,12 +321,14 @@ pub fn import_structural_transient_scope(
 }
 
 fn digest<T: Serialize>(domain: &'static str, input: &T) -> AnalysisBridgeResult<Digest> {
-    Ok(Digest::sha256(encode_contract(
-        TASK_PREFIX,
-        domain,
-        input,
-        IDENTITY_LIMITS,
-    )?))
+    Ok(
+        runmat_analysis_fea::contracts::canonical_digest::canonical_contract_digest(
+            TASK_PREFIX,
+            domain,
+            input,
+            IDENTITY_LIMITS,
+        )?,
+    )
 }
 
 fn invalid(message: impl Into<String>) -> AnalysisBridgeError {

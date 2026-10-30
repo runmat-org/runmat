@@ -255,13 +255,13 @@ impl SparsePattern {
 
     /// Stable identity for symbolic sparsity reuse across devices and workers.
     pub fn identity(&self) -> Result<Digest, CanonicalCodecError> {
-        runmat_canonical_codec::encode_contract(
+        // Streamed: a mesh-sized pattern is hashed without materializing its encoding.
+        crate::contracts::canonical_digest::canonical_contract_digest(
             PATTERN_IDENTITY_PREFIX,
             PATTERN_IDENTITY_DOMAIN,
             self,
             PATTERN_IDENTITY_LIMITS,
         )
-        .map(Digest::sha256)
     }
 
     // Allocation-aware union and clone operations live in a focused child module.

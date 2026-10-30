@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// inventory, so the codec bounds it only by the wire range. Controller, scope and content
 /// identities are digested from the streamed encoding and never materialize it.
 const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
-const PREFIX: &[u8] = b"runmat-j2-load-continuation-wire/v3\0";
+const PREFIX: &[u8] = b"runmat-j2-load-continuation-wire/v4\0";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,6 +99,8 @@ pub struct NonlinearLoadContinuation {
     /// All accepted blocks in the original trajectory, not merely the current suffix.
     pub(super) maximum_relative_residual: f64,
     pub(super) maximum_relative_increment: f64,
+    /// Largest achieved relative residual of any completed tangent solve in the trajectory.
+    pub(super) maximum_linear_relative_residual: f64,
 }
 
 impl NonlinearLoadContinuation {
@@ -129,11 +131,13 @@ impl NonlinearLoadContinuation {
     }
 
     fn validate_content_digest(&self, expected: Digest) -> Result<(), FeaRunError> {
-        if self.schema_version != 3
+        if self.schema_version != 4
             || !self.maximum_relative_residual.is_finite()
             || self.maximum_relative_residual < 0.0
             || !self.maximum_relative_increment.is_finite()
             || self.maximum_relative_increment < 0.0
+            || !self.maximum_linear_relative_residual.is_finite()
+            || self.maximum_linear_relative_residual < 0.0
             || self.content_digest != expected
             || self.derive_digest()? != expected
         {
@@ -163,6 +167,9 @@ impl NonlinearLoadContinuation {
     pub fn maximum_relative_increment(&self) -> f64 {
         self.maximum_relative_increment
     }
+    pub fn maximum_linear_relative_residual(&self) -> f64 {
+        self.maximum_linear_relative_residual
+    }
     pub fn complete(&self) -> bool {
         self.accepted_state.load_factor().to_bits() == self.original_end.to_bits()
             && self.pending_target.is_none()
@@ -176,7 +183,7 @@ impl NonlinearLoadContinuation {
 
     pub(super) fn derive_digest(&self) -> Result<Digest, FeaRunError> {
         digest(
-            b"runmat-j2-load-continuation/v3\0",
+            b"runmat-j2-load-continuation/v4\0",
             &(
                 self.schema_version,
                 self.controller_scope,
@@ -190,6 +197,7 @@ impl NonlinearLoadContinuation {
                 self.work,
                 self.maximum_relative_residual,
                 self.maximum_relative_increment,
+                self.maximum_linear_relative_residual,
             ),
         )
     }
@@ -206,7 +214,7 @@ impl NonlinearLoadContinuation {
         let nominal = (end - start) / options.increment_count as f64;
         let current = self.accepted_state.load_factor();
         self.validate_content_digest(expected_digest)?;
-        if self.schema_version != 3
+        if self.schema_version != 4
             || self.maximum_relative_residual > options.tolerance
             || self.maximum_relative_increment > options.tolerance
             || self.content_digest != expected_digest

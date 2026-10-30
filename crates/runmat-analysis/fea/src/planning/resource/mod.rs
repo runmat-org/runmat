@@ -31,6 +31,7 @@ pub use statistical_recovery::{
     build_statistical_field_recovery_resource_plan, statistical_field_recovery_shape,
 };
 mod magnetic_static;
+pub(crate) use magnetic_static::build_magnetostatic_resource_plan_with_system;
 mod maxwell_harmonic;
 mod maxwell_recovery;
 mod acoustic_response;

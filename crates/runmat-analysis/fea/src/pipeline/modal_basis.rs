@@ -2,7 +2,7 @@ mod metrics;
 mod coordinates;
 pub use coordinates::{ModalBasisCoordinates, ModalShapeLayout};
 
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,7 @@ use metrics::{
 
 const MODAL_BASIS_PREFIX: &[u8] = b"runmat-fea-modal-basis/v2\0";
 const MODAL_BASIS_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -576,7 +576,7 @@ impl ModalBasisArtifact {
     }
 
     fn derive_identity(&self) -> Result<ModalBasisIdentity, FeaRunError> {
-        encode_contract(
+        crate::contracts::canonical_digest::canonical_contract_digest(
             MODAL_BASIS_PREFIX,
             "modal-basis-artifact",
             &(
@@ -594,7 +594,6 @@ impl ModalBasisArtifact {
             ),
             MODAL_BASIS_LIMITS,
         )
-        .map(Digest::sha256)
         .map(ModalBasisIdentity)
         .map_err(|error| FeaRunError::Assembly(error.to_string()))
     }

@@ -11,6 +11,19 @@ impl SampledVolumeFieldTopology {
     ) -> Result<Self, RecoveredFieldError> {
         let projection =
             AnalysisProjection::derive(mesh).map_err(|error| invalid(error.to_string()))?;
+        Self::derive_from_projection(mesh, &projection, rule)
+    }
+
+    /// The layout of an already derived canonical projection of `mesh` (the caller's
+    /// projection must be `AnalysisProjection::derive(mesh)`; its digest is recorded).
+    pub(crate) fn derive_from_projection(
+        mesh: &SolverMeshArtifact,
+        projection: &AnalysisProjection,
+        rule: VolumeFieldSamplingRule,
+    ) -> Result<Self, RecoveredFieldError> {
+        if projection.mesh_digest != mesh.canonical_digest {
+            return Err(invalid("sampling projection belongs to another mesh"));
+        }
         let element_corner_nodes = projection
             .elements
             .iter()
@@ -46,7 +59,7 @@ impl SampledVolumeFieldTopology {
         };
         let value = Self::admit(data, None)?;
         // Every sample of the rule must exist with finite positive geometry.
-        value.visit_integration_geometry(&projection, |_| {})?;
+        value.visit_integration_geometry(projection, |_| {})?;
         Ok(value)
     }
 }

@@ -280,11 +280,12 @@ impl CanonicalNonlinearSolidBasis {
                 .map(|e| (e.identity, e.dofs.as_slice(), e.points.as_slice()))
                 .collect(),
         };
-        let bytes = encode_contract(
+        // Streamed: the mesh-sized basis authority is hashed without materializing it.
+        let basis_digest = crate::contracts::canonical_digest::canonical_contract_digest(
             b"runmat-fea-nonlinear-solid-basis/v1\0",
             "nonlinear-solid-basis",
             &authority,
-            CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
+            CanonicalLimits::new(0, 0, 4096, 64),
         )
         .map_err(|e| NonlinearSolidError::Authority(e.to_string()))?;
         // The kinematic description is part of the operator: total Lagrangian solids publish a
@@ -298,12 +299,12 @@ impl CanonicalNonlinearSolidBasis {
                 step.structural_kinematics()
             });
         let identity = match kinematics {
-            StructuralKinematics::SmallStrain => Digest::sha256(bytes),
+            StructuralKinematics::SmallStrain => basis_digest,
             StructuralKinematics::LargeDeformation => Digest::sha256(
                 encode_contract(
                     b"runmat-fea-nonlinear-solid-basis-total-lagrangian/v1\0",
                     "nonlinear-solid-basis-total-lagrangian",
-                    &Digest::sha256(bytes),
+                    &basis_digest,
                     CanonicalLimits::new(4096, 64, 64, 8),
                 )
                 .map_err(|e| NonlinearSolidError::Authority(e.to_string()))?,
