@@ -47,6 +47,12 @@ existing immutable-provider admission. Function invocation retains session
 ownership, cancellation and the canonical output codec. No replacement local
 runtime or source interpreter is created to execute a named target.
 
+`cancelExecution()` also covers asynchronous project/source discovery and
+read-only FEA preparation. Cancellation stops waiting for those reads, rejects
+with `RunMat:ExecutionCancelled`, and releases the session for the next request.
+The filesystem provider may still finish its outstanding I/O; cancellation does
+not detach a RunMat execution or publish a result from the cancelled preparation.
+
 `prepareClusterProgram({ projectPath, name })` selects the same named target and
 delegates to the existing project-only cluster producer. The legacy path plus
 optional function-name form remains available. A named selection cannot also
