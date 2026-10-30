@@ -345,13 +345,36 @@ impl NativeCompilationInput {
 }
 
 impl ExecutableUnit {
-    /// Resolve adaptive native entry through the same source-owned selection
-    /// used to prepare the compiled product, including function-file entry.
+    /// Explicit native calls may select any exact registered body owned by
+    /// this compilation, including an admitted companion. Source entrypoint
+    /// discovery remains primary-source-only; it must not select these bodies
+    /// merely because a companion happens to share the primary filename.
+    fn native_selection(
+        &self,
+        preferred_function: Option<&str>,
+    ) -> Result<super::portable_entrypoint::PortableEntrypoint, String> {
+        if let Some(name) = preferred_function {
+            if let Some(function) = self.functions().resolve_name(name) {
+                if !self.owns_callable(function) {
+                    return Err(
+                        "native procedure has no original compiled owner in this unit".into(),
+                    );
+                }
+                return super::portable_entrypoint::resolve_compiled_function_with_label(
+                    self, function, name,
+                );
+            }
+        }
+        super::portable_entrypoint::resolve(self, preferred_function)
+    }
+
+    /// Resolve the exact selection shared by native tiering and preparation.
     pub(crate) fn native_entrypoint_function(
         &self,
         preferred_function: Option<&str>,
     ) -> Result<runmat_hir::FunctionId, runmat_runtime::RuntimeError> {
-        match super::portable_entrypoint::resolve(self, preferred_function)
+        match self
+            .native_selection(preferred_function)
             .map_err(native_product_error)?
         {
             super::portable_entrypoint::PortableEntrypoint::Callable {
@@ -386,45 +409,42 @@ impl ExecutableUnit {
         preferred_function: Option<&str>,
         interop: runmat_types::InteropManifest,
     ) -> Result<NativeCompilationInput, runmat_runtime::RuntimeError> {
-        let envelope = self
-            .portable_envelope_for_with_interop(preferred_function, interop)
+        let selected = self
+            .native_selection(preferred_function)
             .map_err(native_product_error)?;
-        let selected = super::portable_entrypoint::resolve(self, preferred_function)
-            .map_err(native_product_error)?;
-        let (compiled_entrypoint, portable_function) = match selected {
+        let (compiled_entrypoint, portable_function, kind) = match &selected {
             super::portable_entrypoint::PortableEntrypoint::Callable {
                 compiled_function,
                 function,
                 kind,
                 ..
-            } => {
-                if kind == runmat_execution::ExecutableEntrypointKind::Function {
-                    let body = self.functions().get(compiled_function).ok_or_else(|| {
-                        native_product_error(
-                            "native entrypoint has no exact selected function body".into(),
-                        )
-                    })?;
-                    let expected = runmat_execution::FunctionBindingOrigin::from_revision(
-                        &envelope.manifest.identity.program,
-                        function,
-                    )
-                    .map_err(|error| native_product_error(error.to_string()))?;
-                    if body.portable_function != function
-                        || body.binding_origin.is_some_and(|origin| origin != expected)
-                    {
-                        return Err(native_product_error(
-                            "native entrypoint lies outside its portable executable origin".into(),
-                        ));
-                    }
-                }
-                (compiled_function, function)
-            }
+            } => (*compiled_function, *function, *kind),
             super::portable_entrypoint::PortableEntrypoint::DeclarationOnly(_) => {
                 return Err(native_product_error(
                     "declaration-only executable has no native callable entrypoint".into(),
                 ));
             }
         };
+        let envelope = self
+            .portable_envelope_with_entrypoint(interop, None, |_| Ok(selected))
+            .map_err(native_product_error)?;
+        if kind == runmat_execution::ExecutableEntrypointKind::Function {
+            let body = self.functions().get(compiled_entrypoint).ok_or_else(|| {
+                native_product_error("native entrypoint has no exact selected function body".into())
+            })?;
+            let expected = runmat_execution::FunctionBindingOrigin::from_revision(
+                &envelope.manifest.identity.program,
+                portable_function,
+            )
+            .map_err(|error| native_product_error(error.to_string()))?;
+            if body.portable_function != portable_function
+                || body.binding_origin.is_some_and(|origin| origin != expected)
+            {
+                return Err(native_product_error(
+                    "native entrypoint lies outside its portable executable origin".into(),
+                ));
+            }
+        }
         let entrypoint = runmat_native_codegen::NativeEntrypointBinding::new(
             self.mir(),
             compiled_entrypoint,

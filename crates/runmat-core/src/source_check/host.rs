@@ -80,17 +80,6 @@ where
     } else {
         None
     };
-    let settings = HostRuntimeSettings {
-        user_settings_json: request.user_settings_json.clone(),
-        project: project_document,
-        policy: request.policy,
-    };
-    let config = resolve(settings)?.config;
-    let compat = match config.language.compat {
-        LanguageCompatMode::RunMat => crate::CompatMode::RunMat,
-        LanguageCompatMode::Matlab => crate::CompatMode::Matlab,
-        LanguageCompatMode::Strict => crate::CompatMode::Strict,
-    };
     let (kind, selected) = match &request.target {
         CheckTarget::Script { .. } => ("script", vec![(path.clone(), None)]),
         CheckTarget::Function { function, .. } => {
@@ -119,8 +108,7 @@ where
             ("project", paths)
         }
     };
-    let mut documents = Vec::with_capacity(selected.len());
-    for (selected, function) in selected {
+    for (selected, _) in &selected {
         if !selected
             .extension()
             .and_then(|s| s.to_str())
@@ -128,9 +116,37 @@ where
         {
             return Err("ordinary source checks require an indexed .m source".into());
         }
+    }
+    // Validate and retain the requested immutable source before entering the
+    // embedding host's resolver. Move those bytes into analysis below rather
+    // than reading them twice or falling back to a live workspace version.
+    let mut primary_content = match &request.target {
+        CheckTarget::Script { .. } | CheckTarget::Function { .. } => {
+            Some(captured_content(&path, project.as_ref(), provider.as_ref()).await?)
+        }
+        CheckTarget::Project { .. } => None,
+    };
+    let settings = HostRuntimeSettings {
+        user_settings_json: request.user_settings_json.clone(),
+        project: project_document,
+        policy: request.policy,
+    };
+    let config = resolve(settings)?.config;
+    let compat = match config.language.compat {
+        LanguageCompatMode::RunMat => crate::CompatMode::RunMat,
+        LanguageCompatMode::Matlab => crate::CompatMode::Matlab,
+        LanguageCompatMode::Strict => crate::CompatMode::Strict,
+    };
+    let mut documents = Vec::with_capacity(selected.len());
+    for (selected, function) in selected {
+        let content = match primary_content.take() {
+            Some(content) => content,
+            None => captured_content(&selected, project.as_ref(), provider.as_ref()).await?,
+        };
         documents.push(
             check_document(
                 &selected,
+                content,
                 function,
                 &request,
                 project.as_ref(),
@@ -158,22 +174,30 @@ where
     })
 }
 
+async fn captured_content(
+    path: &Path,
+    frozen: Option<&FrozenProject>,
+    provider: &dyn runmat_filesystem::FsProvider,
+) -> Result<String, String> {
+    match frozen {
+        Some(project) => Ok(
+            crate::ExecutableSource::capture_project_primary(project, path)
+                .await?
+                .text,
+        ),
+        None => read(provider, path).await,
+    }
+}
+
 async fn check_document(
     path: &Path,
+    content: String,
     function: Option<String>,
     request: &SourceCheckRequest,
     frozen: Option<&FrozenProject>,
     provider: Arc<dyn runmat_filesystem::FsProvider>,
     compat: crate::CompatMode,
 ) -> Result<CheckedDocument, String> {
-    let content = match frozen {
-        Some(project) => {
-            crate::ExecutableSource::capture_project_primary(project, path)
-                .await?
-                .text
-        }
-        None => read(provider.as_ref(), path).await?,
-    };
     let directory = path
         .parent()
         .ok_or("checked source has no parent directory")?;

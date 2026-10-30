@@ -291,7 +291,7 @@ impl ExecutableUnit {
         Ok(envelope)
     }
 
-    fn portable_envelope_with_entrypoint(
+    pub(super) fn portable_envelope_with_entrypoint(
         &self,
         interop: runmat_types::InteropManifest,
         included: Option<&std::collections::HashSet<runmat_hir::FunctionId>>,
