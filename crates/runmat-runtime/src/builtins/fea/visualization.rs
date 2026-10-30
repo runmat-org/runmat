@@ -11,12 +11,15 @@ pub(super) use request::{mesh_request_from_args, plot_request_from_args};
 #[cfg(feature = "plot-core")]
 use request::{reject_requested_device_field, FeaPlotRequest};
 
-pub(super) fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     #[cfg(feature = "plot-core")]
     {
         let request = plot_request_from_args(&args)?;
-        reject_requested_device_field(&request)?;
-        let mut figures = generate_plot_figures(&request)?;
+        let mut figures = super::artifact_access::read(PLOT_NAME, || {
+            reject_requested_device_field(&request)?;
+            generate_plot_figures(&request)
+        })
+        .await?;
         let figure = select_generated_figure(&mut figures, &request.field_id)?;
         let handle = import_generated_figure(figure);
         Ok(Value::Num(f64::from(handle)))
@@ -32,23 +35,26 @@ pub(super) fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-pub(super) fn create_mesh_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn create_mesh_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     #[cfg(feature = "plot-core")]
     {
         let request = mesh_request_from_args(&args)?;
-        let figure = crate::analysis::analysis_generate_study_run_mesh_figure(
-            &request.study,
-            &request.run_id,
-            crate::analysis::AnalysisFigureGenerationOptions {
-                mesh_source: request.source,
-                show_solver_mesh_edges: request.show_edges,
-                apply_deformation_overlay: false,
-                include_comparison: false,
-                include_trends: false,
-                ..crate::analysis::AnalysisFigureGenerationOptions::default()
-            },
-        )
-        .map_err(|err| builtin_error(MESH_NAME, &ERROR_OPERATION, err))?;
+        let figure = super::artifact_access::read(MESH_NAME, || {
+            crate::analysis::analysis_generate_study_run_mesh_figure(
+                &request.study,
+                &request.run_id,
+                crate::analysis::AnalysisFigureGenerationOptions {
+                    mesh_source: request.source,
+                    show_solver_mesh_edges: request.show_edges,
+                    apply_deformation_overlay: false,
+                    include_comparison: false,
+                    include_trends: false,
+                    ..crate::analysis::AnalysisFigureGenerationOptions::default()
+                },
+            )
+            .map_err(|err| builtin_error(MESH_NAME, &ERROR_OPERATION, err))
+        })
+        .await?;
         let handle = import_generated_figure(figure);
         Ok(Value::Num(f64::from(handle)))
     }

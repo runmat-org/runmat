@@ -104,16 +104,19 @@ export class BrowserProjectSession {
     const existingLock =
       request.inputManifest ? undefined : request.existingLock ??
       (lockPath === null ? undefined : await this.readExistingLock(lockPath));
-    const project = await this.resolver.resolve({
-      manifestPath: request.manifestPath,
-      existingLock,
-      options: request.options,
-      ...(request.inputManifest ? { inputManifest: request.inputManifest } : {}),
-    }, this.config.session.prepareCapturedProject?.bind(this.config.session));
-
     try {
+      const project = await this.resolver.resolve({
+        manifestPath: request.manifestPath,
+        existingLock,
+        options: request.options,
+        ...(request.inputManifest ? { inputManifest: request.inputManifest } : {}),
+      }, this.config.session.prepareCapturedProject?.bind(this.config.session));
       const handoff = await this.config.native.handoffFromFrozenProject(project.frozen);
-      await this.config.session.setFsProvider?.(this.resolver.filesystem);
+      // Captured preparation already installed the provider retained by the
+      // pinned project. Reinstalling it would replace that owner's identity.
+      if (!request.inputManifest) {
+        await this.config.session.setFsProvider?.(this.resolver.filesystem);
+      }
       const revision = await this.config.session.installProjectHandoff(handoff);
       const lockWritten =
         !request.inputManifest && lockPath !== null && project.lock_decision === "write-generated"

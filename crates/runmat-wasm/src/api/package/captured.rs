@@ -23,8 +23,11 @@ impl RunMatWasm {
         let request: CapturedRequest = serde_wasm_bindgen::from_value(request)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let provider = JsPackageSourceProvider::new(provider)?;
-        crate::runtime::filesystem::install_js_fs_provider(&filesystem)?;
+        // Install one provider owner, including the session's dialog service.
+        // The captured project retains this exact owner for later admission.
+        self.set_fs_provider(filesystem)?;
         let workspace = runmat_filesystem::current_provider();
+        let mut session = self.take_session()?;
         let captured = runmat_package::resolve_captured_project_async(
             std::path::Path::new(&request.manifest_path),
             request.input_manifest,
@@ -38,8 +41,7 @@ impl RunMatWasm {
         // Acquire the durable lease before installing execution authority. The
         // browser owner renews/releases this lease through the existing resolver.
         let receipt = super::finish_resolution(captured.project.clone(), &provider).await?;
-        self.session
-            .borrow_mut()
+        session
             .install_captured_project(captured)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         Ok(receipt)

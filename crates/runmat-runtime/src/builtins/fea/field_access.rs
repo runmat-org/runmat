@@ -14,7 +14,7 @@ use super::{
     usize_from_value, ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION, FIELD_PAGE_NAME,
 };
 
-pub(super) fn create_page_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn create_page_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() || args.len() > 3 {
         return Err(builtin_error(
             FIELD_PAGE_NAME,
@@ -54,16 +54,20 @@ pub(super) fn create_page_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             "field page start and count must be positive integers",
         ));
     }
-    let page = analysis_field_page_by_run_id_op(
-        run_id,
-        selection_from_field_object(FIELD_PAGE_NAME, field)?,
-        AnalysisFieldRequestOptions {
-            offset: Some(start - 1),
-            limit: Some(count),
-        },
-        OperationContext::new(None, None),
-    )
-    .map_err(|error| operation_error(FIELD_PAGE_NAME, &ERROR_OPERATION, error))?
+    let selection = selection_from_field_object(FIELD_PAGE_NAME, field)?;
+    let page = super::artifact_access::read(FIELD_PAGE_NAME, || {
+        analysis_field_page_by_run_id_op(
+            run_id,
+            selection,
+            AnalysisFieldRequestOptions {
+                offset: Some(start - 1),
+                limit: Some(count),
+            },
+            OperationContext::new(None, None),
+        )
+        .map_err(|error| operation_error(FIELD_PAGE_NAME, &ERROR_OPERATION, error))
+    })
+    .await?
     .data;
     page_to_value(
         page,

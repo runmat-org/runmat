@@ -1089,27 +1089,11 @@ impl RunMatWasm {
         inputs: JsValue,
     ) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
-        let inputs: Option<runmat_filesystem::pinned::InputManifest> =
-            if inputs.is_null() || inputs.is_undefined() {
-                None
-            } else {
-                Some(
-                    serde_wasm_bindgen::from_value(inputs)
-                        .map_err(|err| js_error(&format!("Invalid run inputs: {err}")))?,
-                )
-            };
-        let _filesystem = inputs
-            .map(|manifest| {
-                runmat_filesystem::pinned::PinnedFsProvider::new(
-                    runmat_filesystem::current_provider(),
-                    manifest,
-                )
-                .map(|provider| runmat_filesystem::replace_provider(std::sync::Arc::new(provider)))
-            })
-            .transpose()
-            .map_err(|err| js_error(&format!("Invalid run inputs: {err}")))?;
-        let payload = check_fea_path(path, &self.session)
-            .await
+        let (filesystem, path) =
+            crate::runtime::filesystem::captured::CapturedFilesystem::simulation(&path, inputs)?;
+        let payload = filesystem
+            .run(check_fea_path(path, &self.session))
+            .await?
             .map_err(|err| js_error(&err))?;
         crate::wire::json_contract_to_js(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA check result: {err}")))

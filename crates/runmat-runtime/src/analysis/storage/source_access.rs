@@ -39,16 +39,12 @@ pub fn load_assessment_metadata(
 /// Committed attempts of a definition run id, oldest first; the last is what the definition
 /// run id resolves to.
 pub fn run_attempts(definition_run_id: &str) -> Result<Vec<String>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    let guard = capture_artifact_store()?;
     guard.run_attempts(definition_run_id)
 }
 
 /// A definition run id resolves to its latest committed attempt; any other id is itself.
 pub fn resolve_run_attempt(run_id: &str) -> Result<String, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    let guard = capture_artifact_store()?;
     guard.resolve_run_attempt(run_id)
 }

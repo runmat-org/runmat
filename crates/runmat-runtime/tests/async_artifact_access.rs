@@ -104,6 +104,22 @@ fn canonical_publication_reopens_and_failed_operations_do_not_publish() {
             store.commit_publication(prepared)
         }).await.unwrap().unwrap();
         assert!(receipt.manifest_artifact_path.is_some());
+        with_artifact_access(false, |_| -> Result<(), String> {
+            assert!(run_attempts(&run.run_id)?.is_empty());
+            assert_eq!(resolve_run_attempt(&run.run_id)?, run.run_id);
+            let result = analysis_results_by_run_id_op(
+                &run.run_id,
+                AnalysisResultsQuery::metadata_only(),
+                runmat_runtime::operations::OperationContext::new(None, None),
+            )
+            .map_err(|error| error.message)?;
+            assert_eq!(result.data.field_descriptors.len(), 1);
+            Ok(())
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(resolve_run_attempt(&run.run_id).is_err());
         let field = with_artifact_access(false, |store| {
             store.load_field_page(
                 &run.run_id,

@@ -99,3 +99,34 @@ pub async fn with_artifact_access<T, E>(
         Some(IdReused) => Err("The simulation publication identity was reused.".into()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_attempt_queries_use_the_captured_store_and_restore_the_global_owner() {
+        let _host = crate::analysis::tests::analysis_test_guard();
+        // An uncaptured memory filesystem refuses coherent access. It must
+        // remain the global owner, not replace the scoped transaction below.
+        let global: Arc<dyn AnalysisArtifactStore> = Arc::new(FilesystemAnalysisArtifactStore {
+            provider: Arc::new(runmat_filesystem::MemoryFsProvider::new()),
+            root: "/results".into(),
+            manifests: RwLock::new(FilesystemManifestCache::default()),
+        });
+        replace_artifact_store(Arc::clone(&global)).unwrap();
+        assert!(super::super::run_attempts("definition").is_err());
+        {
+            let scoped: Arc<dyn AnalysisArtifactStore> =
+                Arc::new(InMemoryAnalysisArtifactStore::new());
+            let _restore = Restore(SCOPED_STORE.with(|slot| slot.replace(Some(scoped))));
+            assert!(super::super::run_attempts("definition").unwrap().is_empty());
+            assert_eq!(
+                super::super::resolve_run_attempt("definition").unwrap(),
+                "definition"
+            );
+            assert!(Arc::ptr_eq(&*global_store().read().unwrap(), &global));
+        }
+        assert!(super::super::resolve_run_attempt("definition").is_err());
+    }
+}

@@ -57,6 +57,7 @@ pub(crate) mod domains;
 pub(crate) mod excitations;
 pub(crate) mod execution;
 mod field_access;
+mod artifact_access;
 pub(crate) mod field_selectors;
 pub(crate) mod generator_policies;
 pub(crate) mod initial_conditions;
@@ -274,7 +275,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_results_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
-    create_results_object_from_args(args)
+    create_results_object_from_args(args).await
 }
 
 #[runtime_builtin(
@@ -283,7 +284,7 @@ pub async fn fea_results_builtin(args: crate::call::BuiltinArguments) -> Builtin
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_field_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
-    create_field_object_from_args(args)
+    create_field_object_from_args(args).await
 }
 
 #[runtime_builtin(
@@ -293,7 +294,7 @@ pub async fn fea_field_builtin(args: crate::call::BuiltinArguments) -> BuiltinRe
 )]
 pub async fn fea_field_page_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let args: Vec<Value> = args.into_iter().collect();
-    field_access::create_page_from_args(args)
+    field_access::create_page_from_args(args).await
 }
 
 #[runtime_builtin(
@@ -303,7 +304,7 @@ pub async fn fea_field_page_builtin(args: crate::call::BuiltinArguments) -> Buil
 )]
 pub async fn fea_plot_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let args: Vec<Value> = args.into_iter().collect();
-    visualization::create_plot_from_args(args)
+    visualization::create_plot_from_args(args).await
 }
 
 #[runtime_builtin(
@@ -313,7 +314,7 @@ pub async fn fea_plot_builtin(args: crate::call::BuiltinArguments) -> BuiltinRes
 )]
 pub async fn fea_mesh_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let args: Vec<Value> = args.into_iter().collect();
-    visualization::create_mesh_from_args(args)
+    visualization::create_mesh_from_args(args).await
 }
 
 #[runtime_builtin(
@@ -322,7 +323,7 @@ pub async fn fea_mesh_builtin(args: crate::call::BuiltinArguments) -> BuiltinRes
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_compare_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
-    create_compare_object_from_args(args)
+    create_compare_object_from_args(args).await
 }
 
 #[runtime_builtin(
@@ -331,7 +332,7 @@ pub async fn fea_compare_builtin(args: crate::call::BuiltinArguments) -> Builtin
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_trends_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
-    create_trends_object_from_args(args)
+    create_trends_object_from_args(args).await
 }
 
 async fn resolve_document_input(
@@ -361,7 +362,9 @@ enum RuntimeResolvedDocument {
     Sweep(modeling::ComposedSweep),
 }
 
-fn create_results_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+async fn create_results_object_from_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Err(builtin_error(
             RESULTS_NAME,
@@ -375,6 +378,18 @@ fn create_results_object_from_args(args: crate::call::BuiltinArguments) -> Built
         }
     }
     let requested = run_id_from_value(RESULTS_NAME, &args[0])?;
+    let query = results_query_from_args(args.view().range(1..)?)?;
+    artifact_access::read(RESULTS_NAME, || {
+        create_persisted_results_object(args, requested, query)
+    })
+    .await
+}
+
+fn create_persisted_results_object(
+    args: crate::call::BuiltinArguments,
+    requested: String,
+    query: AnalysisResultsQuery,
+) -> BuiltinResult<Value> {
     // A definition run id names every attempt; the object reports the attempt it holds.
     let run_id = crate::analysis::storage::resolve_run_attempt(&requested).map_err(|err| {
         builtin_error(
@@ -383,7 +398,6 @@ fn create_results_object_from_args(args: crate::call::BuiltinArguments) -> Built
             format!("failed to resolve the latest FEA run attempt: {err}"),
         )
     })?;
-    let query = results_query_from_args(args.view().range(1..)?)?;
     let envelope = analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None))
         .map_err(|err| operation_error(RESULTS_NAME, &ERROR_OPERATION, err))?;
     let mut public_data = envelope.data;
@@ -448,7 +462,9 @@ fn create_results_object_from_args(args: crate::call::BuiltinArguments) -> Built
     Ok(Value::Object(object))
 }
 
-fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+async fn create_field_object_from_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !(2..=3).contains(&args.len()) {
         return Err(builtin_error(
             FIELD_NAME,
@@ -461,7 +477,7 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
         None => AnalysisFieldSelection::new(&field_id, None),
         Some(value) => field_sample_selection(&field_id, value)?,
     };
-    let results = results_data_from_value(FIELD_NAME, &args[0])?;
+    let results = results_data_from_value(FIELD_NAME, &args[0]).await?;
     let sampled = selection.sample.is_some() || selection.transient_sample_index.is_some();
     // A shell (declared shape, no values) is paged from the artifact rather than returned empty.
     let inline_field = (!sampled)
@@ -484,16 +500,19 @@ fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> Builtin
                 "artifact-backed FEA field selection requires a persisted run identity",
             )
         })?;
-        let page = analysis_field_page_by_run_id_op(
-            &run_id,
-            selection,
-            AnalysisFieldRequestOptions {
-                offset: Some(0),
-                limit: Some(0),
-            },
-            OperationContext::new(None, None),
-        )
-        .map_err(|error| operation_error(FIELD_NAME, &ERROR_OPERATION, error))?
+        let page = artifact_access::read(FIELD_NAME, || {
+            analysis_field_page_by_run_id_op(
+                &run_id,
+                selection,
+                AnalysisFieldRequestOptions {
+                    offset: Some(0),
+                    limit: Some(0),
+                },
+                OperationContext::new(None, None),
+            )
+            .map_err(|error| operation_error(FIELD_NAME, &ERROR_OPERATION, error))
+        })
+        .await?
         .data;
         field_object(&page.descriptor, None)?
     };
@@ -562,7 +581,9 @@ fn field_sample_selection(field_id: &str, value: &Value) -> BuiltinResult<Analys
     }
 }
 
-fn create_compare_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+async fn create_compare_object_from_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.len() != 2 {
         return Err(builtin_error(
             COMPARE_NAME,
@@ -572,30 +593,35 @@ fn create_compare_object_from_args(args: crate::call::BuiltinArguments) -> Built
     }
     let baseline_run_id = scalar_string(&args[0], COMPARE_NAME, &ERROR_INPUT)?;
     let candidate_run_id = scalar_string(&args[1], COMPARE_NAME, &ERROR_INPUT)?;
-    operation_result_to_object_preserving_integers(
-        COMPARE_NAME,
-        &ERROR_OPERATION,
-        &ERROR_INTERNAL,
-        FEA_COMPARE_CLASS,
-        analysis_results_compare_op(
-            AnalysisResultsCompareQuery {
-                baseline_run_id,
-                candidate_run_id,
-            },
-            OperationContext::new(None, None),
-        ),
-        &[
-            "quality_reason_count_delta",
-            "failed_increment_delta",
-            "max_iteration_delta",
-            "nonlinear_spike_count_delta",
-            "nonlinear_stall_count_delta",
-        ],
-        &[],
-    )
+    artifact_access::read(COMPARE_NAME, || {
+        operation_result_to_object_preserving_integers(
+            COMPARE_NAME,
+            &ERROR_OPERATION,
+            &ERROR_INTERNAL,
+            FEA_COMPARE_CLASS,
+            analysis_results_compare_op(
+                AnalysisResultsCompareQuery {
+                    baseline_run_id,
+                    candidate_run_id,
+                },
+                OperationContext::new(None, None),
+            ),
+            &[
+                "quality_reason_count_delta",
+                "failed_increment_delta",
+                "max_iteration_delta",
+                "nonlinear_spike_count_delta",
+                "nonlinear_stall_count_delta",
+            ],
+            &[],
+        )
+    })
+    .await
 }
 
-fn create_trends_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+async fn create_trends_object_from_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let mut window_size = AnalysisTrendsQuery::default().window_size;
     let mut window_size_seen = false;
     for pair in expect_name_value_tail(TRENDS_NAME, args.view())? {
@@ -629,16 +655,19 @@ fn create_trends_object_from_args(args: crate::call::BuiltinArguments) -> Builti
             }
         }
     }
-    operation_result_to_object(
-        TRENDS_NAME,
-        &ERROR_OPERATION,
-        &ERROR_INTERNAL,
-        FEA_TRENDS_CLASS,
-        analysis_trends_op(
-            AnalysisTrendsQuery { window_size },
-            OperationContext::new(None, None),
-        ),
-    )
+    artifact_access::read(TRENDS_NAME, || {
+        operation_result_to_object(
+            TRENDS_NAME,
+            &ERROR_OPERATION,
+            &ERROR_INTERNAL,
+            FEA_TRENDS_CLASS,
+            analysis_trends_op(
+                AnalysisTrendsQuery { window_size },
+                OperationContext::new(None, None),
+            ),
+        )
+    })
+    .await
 }
 
 fn object_payload<T: DeserializeOwned>(
@@ -806,7 +835,7 @@ fn run_id_from_object(object: &ObjectInstance) -> Option<String> {
         })
 }
 
-fn results_data_from_value(
+async fn results_data_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<crate::analysis::AnalysisResultsData> {
@@ -816,13 +845,16 @@ fn results_data_from_value(
         }
         _ => {
             let run_id = run_id_from_value(builtin, value)?;
-            analysis_results_by_run_id_op(
-                &run_id,
-                AnalysisResultsQuery::default(),
-                OperationContext::new(None, None),
-            )
-            .map(|envelope| envelope.data)
-            .map_err(|err| operation_error(builtin, &ERROR_OPERATION, err))
+            artifact_access::read(builtin, || {
+                analysis_results_by_run_id_op(
+                    &run_id,
+                    AnalysisResultsQuery::default(),
+                    OperationContext::new(None, None),
+                )
+                .map(|envelope| envelope.data)
+                .map_err(|err| operation_error(builtin, &ERROR_OPERATION, err))
+            })
+            .await
         }
     }
 }
@@ -3593,24 +3625,24 @@ mod tests {
             assert_eq!(canonical_field_name(alias), expected, "{alias}");
         }
 
-        let field_error = create_field_object_from_args(
+        let field_error = futures::executor::block_on(create_field_object_from_args(
             crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Num(1.0),
                 Value::Num(1.0),
                 Value::Num(2.0),
                 Value::Num(2.0),
             ]),
-        )
+        ))
         .expect_err("surplus fea.field argument");
         assert_eq!(field_error.context.builtin.as_deref(), Some(FIELD_NAME));
 
-        let compare_error = create_compare_object_from_args(
+        let compare_error = futures::executor::block_on(create_compare_object_from_args(
             crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("base".into()),
                 Value::String("candidate".into()),
                 Value::Num(2.0),
             ]),
-        )
+        ))
         .expect_err("surplus fea.compare argument");
         assert_eq!(compare_error.context.builtin.as_deref(), Some(COMPARE_NAME));
 
@@ -4334,6 +4366,29 @@ mod tests {
             .properties()
             .contains_key(FEA_STUDY_CONTEXT_PROPERTY));
 
+        // Inline values remain usable even when the configured store cannot
+        // provide synchronous access outside a captured transaction.
+        let original_store = crate::analysis::storage::replace_artifact_store(std::sync::Arc::new(
+            crate::analysis::storage::InMemoryAnalysisArtifactStore::new(),
+        ))
+        .unwrap();
+        let filesystem = runmat_filesystem::replace_provider(std::sync::Arc::new(
+            runmat_filesystem::MemoryFsProvider::new(),
+        ));
+        crate::analysis::storage::configure_artifact_store(
+            crate::analysis::storage::AnalysisArtifactStoreConfig::Filesystem {
+                root: "/unavailable-results".into(),
+            },
+        )
+        .unwrap();
+        assert!(crate::analysis::storage::resolve_run_attempt(&run_id).is_err());
+        assert_eq!(
+            block_on(fea_results_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![results.clone()]),
+            ))
+            .unwrap(),
+            results,
+        );
         let field = block_on(fea_field_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![
                 results,
@@ -4341,6 +4396,8 @@ mod tests {
             ]),
         ))
         .expect("field should resolve by unique suffix");
+        crate::analysis::storage::replace_artifact_store(original_store).unwrap();
+        drop(filesystem);
         let Value::Object(field_object) = &field else {
             panic!("expected field object");
         };

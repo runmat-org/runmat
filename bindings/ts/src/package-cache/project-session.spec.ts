@@ -71,11 +71,13 @@ describe("BrowserProjectSession", () => {
     const filesystem = workspaceFilesystem({ "/workspace/runmat.lock": "peer-lock" });
     const native = nativeBindings();
     const prepareCapturedProject = vi.fn(async () => resolved("write-generated"));
+    const setFsProvider = vi.fn();
     const project = new BrowserProjectSession({
       native, filesystem, packageCache: cacheProvider(),
       gitGateway: { baseUrl: "https://api.runmat.test" },
       session: {
         prepareCapturedProject,
+        setFsProvider,
         async installProjectHandoff() { return {}; },
         async clearProjectHandoff() {},
         async projectRevision() { return {}; },
@@ -89,11 +91,39 @@ describe("BrowserProjectSession", () => {
       project.filesystem,
     );
     expect(native.resolveProject).not.toHaveBeenCalled();
+    expect(setFsProvider).not.toHaveBeenCalled();
     expect(native.decodePackageLock).not.toHaveBeenCalled();
     expect(native.encodePackageLock).not.toHaveBeenCalled();
     expect(resolution.lockWritten).toBe(false);
     expect(new TextDecoder().decode(await filesystem.readFile("/workspace/runmat.lock"))).toBe("peer-lock");
     await project.dispose();
+    expect(setFsProvider).toHaveBeenCalledOnce();
+    expect(setFsProvider).toHaveBeenCalledWith(filesystem);
+  });
+
+  it("restores the original provider when captured preparation fails", async () => {
+    const filesystem = workspaceFilesystem({});
+    const setFsProvider = vi.fn();
+    const clearProjectHandoff = vi.fn(async () => {});
+    const failure = new Error("captured source unavailable");
+    const project = new BrowserProjectSession({
+      native: nativeBindings(), filesystem, packageCache: cacheProvider(),
+      gitGateway: { baseUrl: "https://api.runmat.test" },
+      session: {
+        async prepareCapturedProject() { throw failure; },
+        setFsProvider, clearProjectHandoff,
+        async installProjectHandoff() { return {}; },
+        async projectRevision() { return {}; },
+      },
+    });
+    await expect(project.resolve({
+      ...request(), inputManifest: { snapshotId: "capture", entries: [] },
+    })).rejects.toBe(failure);
+    expect(clearProjectHandoff).toHaveBeenCalledOnce();
+    expect(setFsProvider).toHaveBeenCalledOnce();
+    expect(setFsProvider).toHaveBeenCalledWith(filesystem);
+    await project.dispose();
+    expect(setFsProvider).toHaveBeenCalledOnce();
   });
 
   it("supports locked offline reload without writing the lock", async () => {
