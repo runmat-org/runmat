@@ -20,7 +20,16 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: A study whose nonlinear step follows or precedes other steps (`after`) passes `runmat check` and runs to completion; state transfers into and out of the nonlinear step are tested.
-- Described in: [Procedure reference](./language/reference/procedures.md).
+- Described in: [Procedure reference](./language/reference/procedures.md), [Studies, analyses and state](./language/studies-analyses-and-state.md).
+
+## Heat transfer
+
+### thermal.heat-generation.total-power
+
+**Volumetric heat generation given as a total power (W) on a solid region.**
+
+- Kind: load.
+- Ships when: A heat-generation load accepts a power (W) and distributes it over the region's volume; the enclosure study checks and runs.
 
 ## Electromagnetics
 
@@ -38,7 +47,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electromagnetic transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
+- Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Finite-element analysis](./index.md), [Procedure reference](./language/reference/procedures.md).
 
 ### magnetic.harmonic.vector-potential
 
@@ -83,6 +92,13 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Scope: awaiting a product decision on whether this procedure belongs in the final system.
 - Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
+### output.transmission_loss
+
+**Acoustic transmission loss output (`transmission_loss`) between inlet and outlet ports.**
+
+- Kind: output.
+- Ships when: `transmission_loss` is a cataloged output operation; the muffler study checks and runs with a receipt against a plane-wave reference.
+
 ## Fluid flow
 
 ### fluid.harmonic
@@ -93,6 +109,13 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Ships when: `runmat check` and `runmat run` admit `fluid harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
 - Scope: awaiting a product decision on whether this procedure belongs in the final system.
 - Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
+
+### fluid.non-newtonian
+
+**Generalized-Newtonian fluid laws (`carreau`, `power_law`) in the page's unit form.**
+
+- Kind: material.
+- Ships when: `law = carreau` and `law = power_law` with consistency written in Pa*s^n check and run; the static-mixer study runs.
 
 ### fluid.nonlinear
 
@@ -109,6 +132,48 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Kind: constraint.
 - Ships when: A study with `fluid.periodic` on matching face pairs checks and runs; a periodic channel matches the infinite-channel Poiseuille profile.
 - Described in: [Fluid constraints](./constraints/fluid.md).
+
+### fluid.porous
+
+**Darcy–Forchheimer porous regions in incompressible flow, in the page's material form.**
+
+- Kind: material.
+- Ships when: A `porous` material with `law = darcy_forchheimer` assigned to a cell region checks and runs in a fluid static step; the filter study runs with a receipt.
+
+### fluid.species-transport
+
+**Species transport in flow: species declarations, advection–diffusion, concentration constraints and fields.**
+
+- Kind: procedure.
+- Ships when: A `species` declaration with transport, a concentration constraint and a concentration field checks and runs; the static-mixer study runs.
+
+### lubrication.family
+
+**Hydrodynamic lubrication: journal bearings with `rpm` speed, film pressure, Elrod cavitation and friction torque.**
+
+- Kind: procedure.
+- Ships when: The `rpm` unit, `lubrication.journal` and `lubrication.pressure` constraints, a steady lubrication step with Elrod cavitation, and `film_pressure`, `friction_torque` and `resultant` over film pressure check and run; the journal-bearing study matches a short-bearing reference.
+
+### output.oscillatory-shear-index
+
+**Oscillatory shear index output (`oscillatory_shear_index`) over a cardiac cycle.**
+
+- Kind: output.
+- Ships when: `oscillatory_shear_index` is a cataloged output operation over a transient wall-shear history; the carotid study runs.
+
+### output.pressure_drop
+
+**Pressure drop output (`pressure_drop`) between two face regions.**
+
+- Kind: output.
+- Ships when: `pressure_drop` is a cataloged output operation; cold-plate, cold-plate sweep and filter studies check and run.
+
+### output.wall-shear-stress
+
+**Wall shear stress output over a wall region in transient flow.**
+
+- Kind: output.
+- Ships when: `wall_shear_stress` reduces over a wall face region in a transient fluid step; the carotid study runs.
 
 ## Thermomechanical
 
@@ -147,6 +212,13 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Described in: [Family and procedure matrix](./generated/family-procedure-matrix.md), [Procedure reference](./language/reference/procedures.md).
 
 ## Conjugate heat transfer
+
+### cht.buoyancy
+
+**Buoyancy-driven flow in conjugate heat transfer (Boussinesq with gravity).**
+
+- Kind: load.
+- Ships when: A Boussinesq buoyancy term with a gravity vector checks and runs in conjugate heat transfer; a natural-convection benchmark matches its reference.
 
 ### conjugate-heat-transfer.harmonic
 
@@ -198,7 +270,7 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: language.
 - Ships when: Declared input, let and output names may be keywords; `input load : force = 1.5 kN` checks clean and resolves as `input.load`.
-- Described in: [Types, units and expressions](./language/types-units-and-expressions.md).
+- Described in: [Grammar reference](./language/reference/grammar.md), [Types, units and expressions](./language/types-units-and-expressions.md).
 
 ### language.vector.trailing-unit
 
@@ -208,6 +280,20 @@ Which procedures each physics family runs is listed in the [family and procedure
 - Ships when: Every member that expects a vector quantity accepts both `[0 m, 0 m, 0 m]` and `[0, 0, 0] m` through one normalization point; orientation and frame members check clean.
 - Described in: [Types, units and expressions](./language/types-units-and-expressions.md).
 
+### signal.harmonic-nonconstant-value
+
+**Harmonic signals whose value is an expression rather than a constant scalar or vector.**
+
+- Kind: load.
+- Ships when: A harmonic signal accepts the page's non-constant value form; the speaker study checks and runs.
+
+### signal.tabulated-file
+
+**Signals sampled from a CSV file (`samples = file(...)`) with periodic spline interpolation.**
+
+- Kind: language.
+- Ships when: `samples = file("<csv>")` and `interpolation = periodic_spline` check and run; the carotid study's heartbeat signal resolves.
+
 ## Geometry
 
 ### geometry.select.predicate
@@ -216,4 +302,20 @@ Which procedures each physics family runs is listed in the [family and procedure
 
 - Kind: geometry.
 - Ships when: A region selected by a bounded geometric predicate checks with cardinality evidence, resolves to canonical ids, and stays stable across re-import of the same CAD revision.
-- Described in: [Declaration reference](./language/reference/declarations.md).
+- Described in: [Geometry, models and assignments](./language/geometry-models-and-assignments.md), [Declaration reference](./language/reference/declarations.md).
+
+## Results
+
+### output.coefficient-of-variation
+
+**Coefficient of variation of a field over a region (`coefficient_of_variation`).**
+
+- Kind: output.
+- Ships when: `coefficient_of_variation` is a cataloged output operation; the static-mixer study runs.
+
+### output.time-mean
+
+**Time-mean of a field over a transient step (`mean` over time).**
+
+- Kind: output.
+- Ships when: A `mean` overload over the time domain of a transient field checks and runs.
