@@ -28,7 +28,10 @@ pub use native_otel::{
 #[cfg(not(target_arch = "wasm32"))]
 use tracing_subscriber::reload;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(any(feature = "otlp", feature = "browser-otlp"))
+))]
 use std::time::SystemTime;
 
 #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
@@ -83,6 +86,7 @@ type TraceHook = Arc<dyn Fn(&[TraceEvent]) + Send + Sync>;
 
 static LOG_HOOK: OnceCell<LogHook> = OnceCell::new();
 static TRACE_HOOK: OnceCell<TraceHook> = OnceCell::new();
+#[cfg(not(any(feature = "otlp", feature = "browser-otlp")))]
 static FALLBACK_TRACE_ID: OnceCell<String> = OnceCell::new();
 static EVENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 #[cfg(not(target_arch = "wasm32"))]
@@ -564,23 +568,25 @@ fn current_span_id() -> Option<String> {
     current_trace_span_ids().1
 }
 
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 fn current_trace_span_ids() -> (Option<String>, Option<String>) {
-    #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
-    {
-        use opentelemetry::trace::TraceContextExt;
-        use tracing_opentelemetry::OpenTelemetrySpanExt;
-        let span = tracing::Span::current();
-        let ctx = span.context();
-        let span = ctx.span();
-        let sc = span.span_context();
-        if sc.is_valid() {
-            return (
-                Some(sc.trace_id().to_string()),
-                Some(sc.span_id().to_string()),
-            );
-        }
-        return (None, None);
+    use opentelemetry::trace::TraceContextExt;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    let span = tracing::Span::current();
+    let ctx = span.context();
+    let span = ctx.span();
+    let sc = span.span_context();
+    if sc.is_valid() {
+        return (
+            Some(sc.trace_id().to_string()),
+            Some(sc.span_id().to_string()),
+        );
     }
+    (None, None)
+}
+
+#[cfg(not(any(feature = "otlp", feature = "browser-otlp")))]
+fn current_trace_span_ids() -> (Option<String>, Option<String>) {
     let span_id = tracing::Span::current()
         .id()
         .map(|id| id.into_u64().to_string());
@@ -588,6 +594,7 @@ fn current_trace_span_ids() -> (Option<String>, Option<String>) {
     (trace_id, span_id)
 }
 
+#[cfg(not(any(feature = "otlp", feature = "browser-otlp")))]
 fn fallback_trace_id() -> String {
     FALLBACK_TRACE_ID
         .get_or_init(|| {
