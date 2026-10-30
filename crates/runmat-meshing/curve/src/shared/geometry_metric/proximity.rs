@@ -105,6 +105,11 @@ pub(super) fn derive_proximity_contributions(
             let mut minimum = f64::INFINITY;
             let mut separation_direction = [0.0; 3];
             for left_point in &left.points_m {
+                // The pair search is quadratic in the sample counts: probe responsiveness per
+                // row so the work between checkpoints is one row, not one whole pair.
+                control
+                    .checkpoint()
+                    .map_err(|error| geometry_error(&left.edge_id, error))?;
                 for right_point in &right.points_m {
                     control
                         .consume_search_work(1)
@@ -276,6 +281,13 @@ pub(super) fn derive_face_proximity_contributions(
             );
             let mut minimum = f64::INFINITY;
             for (left_point, left_normal) in &left.samples {
+                control.checkpoint().map_err(|error| {
+                    SharedCurveError::new(
+                        SharedCurveErrorKind::GeometryEvaluation(error.kind),
+                        "surface proximity search",
+                        error.reason,
+                    )
+                })?;
                 for (right_point, right_normal) in &right.samples {
                     control.consume_search_work(1).map_err(|error| {
                         SharedCurveError::new(
@@ -562,6 +574,58 @@ mod tests {
                 runmat_geometry_core::GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
             )
         );
+    }
+
+    /// Densely sampled curves (rolling-ball fillets) make one edge pair's search quadratic in
+    /// its samples. The sweep probes responsiveness per row, so the work between checkpoints is
+    /// bounded by one row, not by a whole pair.
+    #[test]
+    fn dense_pair_search_checkpoints_every_row() {
+        let mut left = witness(1, 0.0);
+        let mut right = witness(2, 0.2);
+        left.points_m = (0..400).map(|i| [0.0, i as f64 * 1.0e-3, 0.0]).collect();
+        right.points_m = (0..400).map(|i| [0.2, i as f64 * 1.0e-3, 0.0]).collect();
+        let control = RowControl::default();
+        derive_proximity_contributions(
+            vec![left, right],
+            &ContactProximityPairs::default(),
+            MetricTensor3::isotropic_length_m(1.0).unwrap(),
+            1.0,
+            2,
+            &control,
+        )
+        .unwrap();
+        let load = |value: &AtomicU64| value.load(Ordering::Relaxed);
+        assert_eq!(load(&control.total), 400 * 400);
+        assert!(load(&control.worst) <= 400, "work between checkpoints {}", load(&control.worst));
+    }
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[derive(Default)]
+    struct RowControl {
+        since: AtomicU64,
+        worst: AtomicU64,
+        total: AtomicU64,
+    }
+
+    impl GeometryEvaluationControl for RowControl {
+        fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
+            self.since.store(0, Ordering::Relaxed);
+            Ok(())
+        }
+        fn consume_iterations(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
+        fn consume_search_work(&self, count: u64) -> Result<(), GeometryEvaluationError> {
+            let since = self.since.fetch_add(count, Ordering::Relaxed) + count;
+            self.total.fetch_add(count, Ordering::Relaxed);
+            self.worst.fetch_max(since, Ordering::Relaxed);
+            Ok(())
+        }
+        fn consume_allocation_bytes(&self, _count: u64) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
     }
 
     #[test]
