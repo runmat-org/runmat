@@ -4,6 +4,7 @@ mod exit_observation;
 mod limits;
 mod process_tree;
 mod retirement;
+mod retirement_observation;
 mod spawn;
 mod startup;
 mod stderr;

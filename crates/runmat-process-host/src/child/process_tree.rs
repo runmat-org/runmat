@@ -1,5 +1,8 @@
 use tokio::process::{Child, Command};
 
+#[cfg(target_vendor = "apple")]
+use super::retirement_observation::group_probe_error;
+use super::retirement_observation::{retirement_observed, RetirementObservation};
 use super::ResourceLimits;
 use crate::command::ProcessGroupPlacement;
 
@@ -162,12 +165,15 @@ pub(super) async fn await_retirement(
     placement: ProcessGroupPlacement,
 ) -> std::io::Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut first_probe_error = None;
     loop {
-        if tree_retired(child, process_id, containment, placement)? {
+        let observation = tree_retired(child, process_id, containment, placement)?;
+        if retirement_observed(
+            observation,
+            std::time::Instant::now() >= deadline,
+            &mut first_probe_error,
+        )? {
             return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(retirement_timeout());
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
@@ -180,22 +186,18 @@ pub(super) fn await_retirement_blocking(
     placement: ProcessGroupPlacement,
 ) -> std::io::Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut first_probe_error = None;
     loop {
-        if tree_retired(child, process_id, containment, placement)? {
+        let observation = tree_retired(child, process_id, containment, placement)?;
+        if retirement_observed(
+            observation,
+            std::time::Instant::now() >= deadline,
+            &mut first_probe_error,
+        )? {
             return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(retirement_timeout());
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-}
-
-fn retirement_timeout() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::TimedOut,
-        "owned process tree did not retire within the deadline",
-    )
 }
 
 pub(super) fn begin_termination(
@@ -281,13 +283,13 @@ fn tree_retired(
     process_id: Option<u32>,
     containment: Option<&ProcessContainment>,
     placement: ProcessGroupPlacement,
-) -> std::io::Result<bool> {
+) -> std::io::Result<RetirementObservation> {
     let leader_reaped = child.try_wait()?.is_some();
     #[cfg(unix)]
     {
         let _ = containment;
         if placement == ProcessGroupPlacement::JoinAncestorGroup {
-            return Ok(leader_reaped);
+            return Ok(RetirementObservation::from_retired(leader_reaped));
         }
         let group = owned_group(process_id)?;
         let descendants_gone = if unsafe { libc::kill(-group, 0) } != 0 {
@@ -295,18 +297,28 @@ fn tree_retired(
             if error.raw_os_error() == Some(libc::ESRCH) {
                 true
             } else {
+                // Darwin's permission verdict leaves group absence unconfirmed,
+                // regardless of leader reap. Retry only this read-only probe;
+                // the lifecycle has already committed never to signal again.
+                #[cfg(target_vendor = "apple")]
+                {
+                    return group_probe_error(error);
+                }
+                #[cfg(not(target_vendor = "apple"))]
                 return Err(error);
             }
         } else {
             false
         };
-        Ok(leader_reaped && descendants_gone)
+        Ok(RetirementObservation::from_retired(
+            leader_reaped && descendants_gone,
+        ))
     }
     #[cfg(windows)]
     {
         let _ = process_id;
         if placement == ProcessGroupPlacement::JoinAncestorGroup {
-            return Ok(leader_reaped);
+            return Ok(RetirementObservation::from_retired(leader_reaped));
         }
         use std::mem::size_of;
         use std::os::windows::io::AsRawHandle as _;
@@ -333,7 +345,9 @@ fn tree_retired(
         if inspected == 0 {
             return Err(std::io::Error::last_os_error());
         }
-        Ok(leader_reaped && accounting.ActiveProcesses == 0)
+        Ok(RetirementObservation::from_retired(
+            leader_reaped && accounting.ActiveProcesses == 0,
+        ))
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -468,6 +482,7 @@ fn unix_process_id(process_id: u32) -> std::io::Result<i32> {
     any(target_os = "linux", target_os = "android", target_vendor = "apple")
 ))]
 mod tests {
+
     #[tokio::test]
     async fn terminal_leader_can_retire_before_lifecycle_observes_its_exit() {
         for (script, expected) in [
