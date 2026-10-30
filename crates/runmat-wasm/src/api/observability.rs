@@ -110,15 +110,38 @@ pub fn open_telemetry_stats() -> Result<JsValue, JsValue> {
     export_result(Ok(stats))
 }
 
+/// The public SDK consumes object properties, not JavaScript Map entries.
+/// Serialize a typed receipt so the wire shape does not depend on the default
+/// serializer's handling of serde_json::Value::Object.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserExportReceipt {
+    dropped_records: u64,
+    failed_batches: u64,
+    exported_spans: u64,
+    exported_logs: u64,
+    collector_warnings: u64,
+    queued_bytes: u64,
+}
+
+impl From<runmat_logging::browser_otel::BrowserExportStats> for BrowserExportReceipt {
+    fn from(stats: runmat_logging::browser_otel::BrowserExportStats) -> Self {
+        Self {
+            dropped_records: stats.dropped_records,
+            failed_batches: stats.failed_batches,
+            exported_spans: stats.exported_spans,
+            exported_logs: stats.exported_logs,
+            collector_warnings: stats.collector_warnings,
+            queued_bytes: stats.queued_bytes,
+        }
+    }
+}
+
 fn export_result(
     result: Result<runmat_logging::browser_otel::BrowserExportStats, String>,
 ) -> Result<JsValue, JsValue> {
     let stats = result.map_err(|message| JsValue::from_str(&message))?;
     // Keep host receipts stable and credential-free, independent of SDK internals.
-    serde_wasm_bindgen::to_value(&serde_json::json!({
-        "droppedRecords": stats.dropped_records, "failedBatches": stats.failed_batches,
-        "exportedSpans": stats.exported_spans, "exportedLogs": stats.exported_logs,
-        "collectorWarnings": stats.collector_warnings, "queuedBytes": stats.queued_bytes,
-    }))
-    .map_err(|_| JsValue::from_str("OpenTelemetry receipt could not be serialized"))
+    serde_wasm_bindgen::to_value(&BrowserExportReceipt::from(stats))
+        .map_err(|_| JsValue::from_str("OpenTelemetry receipt could not be serialized"))
 }
