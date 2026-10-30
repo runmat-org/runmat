@@ -22,8 +22,9 @@ pub fn region_selector(
     if words.get(1).is_some_and(|kind| GEOMETRIC_PREDICATES.contains(&kind.as_str())) {
         return Err(format!(
             "geometric-predicate selector `select {} ...` is not accepted yet; select a CAD-authored \
-             name, a tag or a persistent id [pending:geometry.select.predicate]",
-            words[1]
+             name, a tag or a persistent id{}",
+            words[1],
+            crate::semantic::pending::marker(crate::semantic::pending::GEOMETRY_SELECT_PREDICATE)
         ));
     }
     match words.as_slice() {

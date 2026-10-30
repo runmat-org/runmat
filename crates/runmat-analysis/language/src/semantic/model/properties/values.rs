@@ -77,7 +77,10 @@ pub(in crate::semantic::model) fn validate_assignments(
             diagnostic(
                 declaration,
                 statement.span,
-                format!("unsupported definition member `{name}`"),
+                crate::semantic::pending::with_pending(
+                    format!("unsupported definition member `{name}`"),
+                    crate::semantic::pending::definition_member(name.as_str()),
+                ),
                 diagnostics,
             );
         } else if !seen.insert(name) {
@@ -296,7 +299,8 @@ pub(in crate::semantic::model) fn required_vector(
                 value.span,
                 format!(
                     "definition member `{name}` takes a unit on each component (`[0 m, 0 m, 0 m]`); \
-                     one trailing unit on the vector is not accepted yet [pending:language.vector.trailing-unit]"
+                     one trailing unit on the vector is not accepted yet{}",
+                    crate::semantic::pending::marker(crate::semantic::pending::VECTOR_TRAILING_UNIT)
                 ),
                 diagnostics,
             );

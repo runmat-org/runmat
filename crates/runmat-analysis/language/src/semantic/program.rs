@@ -547,8 +547,11 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                         runmat_fea_syntax::FeaExpressionKind::Call { callee, .. } => {
                             diagnostics.push(FeaDiagnostic::error(
                                 "fea.semantic.include_arguments",
-                                "an include binds no inputs yet; include the model by reference \
-                                 and set its inputs inside it [pending:language.include.parameterized]",
+                                super::pending::with_pending(
+                                    "an include binds no inputs yet; include the model by reference \
+                                     and set its inputs inside it",
+                                    Some(super::pending::INCLUDE_PARAMETERIZED),
+                                ),
                                 FeaDiagnosticPhase::Semantic,
                                 Some(FeaDiagnosticLocation {
                                     path: path.clone(),

@@ -139,10 +139,17 @@ pub(crate) fn unit_mismatch(
     }
     let (description, expected_unit) =
         dimension_requirement(expected).unwrap_or(("a different physical quantity", "SI units"));
+    // A total power (W) on a heat-generation region is planned: thermal.heat-generation.total-power.
+    let pending = (subject == "heat_generation_density"
+        && found.dimension() == PhysicalDimension::POWER)
+        .then_some(super::pending::HEAT_GENERATION_TOTAL_POWER);
     Some((
-        format!(
-            "{} must be {description}, found {unit}",
-            subject.replace('_', " ")
+        super::pending::with_pending(
+            format!(
+                "{} must be {description}, found {unit}",
+                subject.replace('_', " ")
+            ),
+            pending,
         ),
         format!("expected {expected_unit}"),
     ))

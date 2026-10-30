@@ -24,10 +24,18 @@ model base {
 model structure {
     BODY
 }
+EXTRA
 "#;
 
 fn diagnostics(select: &str, body: &str) -> Vec<String> {
-    let source = BASE.replace("SELECT", select).replace("BODY", body);
+    diagnostics_with(select, body, "")
+}
+
+fn diagnostics_with(select: &str, body: &str, extra: &str) -> Vec<String> {
+    let source = BASE
+        .replace("SELECT", select)
+        .replace("BODY", body)
+        .replace("EXTRA", extra);
     let program = FeaCompiler::new(&TestHost::default()).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),
@@ -83,4 +91,28 @@ fn trailing_unit_vector_reports_its_pending_id() {
 fn keyword_declared_name_reports_its_pending_id() {
     let body = "input load : force = 1.5 kN\n    include model.base";
     assert_pending(&diagnostics("select result", body), "language.keyword-names");
+}
+
+#[test]
+fn species_material_member_reports_its_pending_id() {
+    let extra = "material dyed {\n    mass_density = 1000 kg/m^3\n    species dye { diffusivity = 1e-10 m^2/s }\n}";
+    assert_pending(
+        &diagnostics_with("select result", "include model.base", extra),
+        "fluid.species-transport",
+    );
+}
+
+#[test]
+fn lubrication_constraint_reports_its_pending_id() {
+    let body = "include model.base\n    constraint bearing {\n        lubrication.journal { target = geometry.part.region.skin }\n    }";
+    assert_pending(&diagnostics("select result", body), "lubrication.family");
+}
+
+#[test]
+fn total_power_heat_generation_reports_its_pending_id() {
+    let body = "include model.base\n    load heater {\n        heat_generation on geometry.part.region.body = 2 W\n    }";
+    assert_pending(
+        &diagnostics("select result", body),
+        "thermal.heat-generation.total-power",
+    );
 }
