@@ -224,6 +224,152 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
+    fixture_with_capacity(1).await
+}
+
+#[tokio::test]
+async fn late_result_from_unknown_work_cannot_replace_or_collect_a_distinct_commit() {
+    // Hold the original launch at the established completion-authority fixture
+    // boundary. Reports are delivered synchronously, not through timers or a
+    // test-only production visibility escape.
+    let mut fixture = fixture_with_capacity(2).await;
+    let pool = Arc::clone(&fixture.pool);
+    let old_attempt = fixture.attempt.clone();
+    let scope_id = old_attempt.scope_id;
+    let pool_id = old_attempt.task.pool_id;
+    let task_id = old_attempt.task_id;
+    let worker_id = old_attempt.worker_id;
+    let artifact_id = old_attempt.task.program_artifact_id().unwrap();
+    let program = {
+        let programs = pool.programs.lock().unwrap();
+        match programs[&task_id].as_ref() {
+            runmat_execution_artifact::WorkerProgramRequest::Direct(program) => program.clone(),
+            _ => panic!("Direct completion fixture"),
+        }
+    };
+    let bundle = Arc::new(pool.direct_bundle.as_ref().unwrap().bytes.to_vec());
+    pool.remove_worker(worker_id, true).await.unwrap();
+    assert!(!pool.worker_is_ready_and_routed(worker_id).await);
+    let failure = fixture.receiver.try_recv().unwrap().1.unwrap_err();
+    assert!(matches!(failure, NativeProgramFailure::WorkerLost(_)));
+    let before = pool.snapshot();
+    assert_eq!(before.tasks[&task_id].active_attempt, Some(old_attempt.id));
+    assert_eq!(
+        before.tasks[&task_id].state,
+        runmat_execution::state::TaskState::Indeterminate
+    );
+    assert!(before.tasks[&task_id].committed.is_none());
+    assert_eq!(
+        before.pools[&pool_id].workers[&worker_id].active_attempts,
+        1
+    );
+    assert_eq!(
+        before.pools[&pool_id].workers[&worker_id]
+            .allocated
+            .cpu_millicores,
+        1_000
+    );
+
+    // Independent capacity and identity, not a retry of the unknown operation.
+    let new_worker = WorkerSpec {
+        host: crate::test_support::host_inventory(),
+        id: WorkerId::derive(&[b"independent-result-worker"]),
+        pool_id,
+        resources: inventory(1_000),
+    };
+    let bytes = Arc::new(b"committed shared object".to_vec());
+    let reference = object_reference(pool.value_scope(), &bytes);
+    pool.add_worker(Arc::new(ResultObjectWorker {
+        spec: new_worker.clone(),
+        bundle,
+        reference: reference.clone(),
+        bytes,
+        corrupt_download: false,
+    }))
+    .await
+    .unwrap();
+    let new_id = TaskId::derive(&[b"independent-result-task"]);
+    let success = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        pool.submit(
+            submission(scope_id, pool_id, new_id, artifact_id),
+            program.clone(),
+        )
+        .unwrap()
+        .wait(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(success.result_objects(), std::slice::from_ref(&reference));
+    let committed = pool.snapshot().tasks[&new_id].committed.clone().unwrap();
+    assert_eq!(committed.driver_fence, old_attempt.driver_fence);
+    assert_eq!(
+        pool.snapshot().attempts[&committed.attempt_id]
+            .request
+            .worker_id,
+        new_worker.id
+    );
+    assert!(pool.execution_object(&reference).unwrap().is_some());
+
+    // Inject the original route's late result at the actual backend-report
+    // boundary. Its object overlaps the independently committed result, so GC
+    // must preserve that commit while rejecting old publication. No sleep or
+    // fabricated retirement proof is needed to order this observation.
+    let stale = AttemptSuccess::new(
+        &old_attempt,
+        vec![ValuePayload::Object(Box::new(reference.clone()))],
+        vec![reference.clone()],
+        1,
+        reference.encoded_length,
+        0,
+    )
+    .unwrap();
+    pool.apply_report(runmat_execution_runner::port::BackendReport::for_request(
+        &old_attempt,
+        AttemptReport::Succeeded { result: stale },
+    ));
+    let after = pool.snapshot();
+    assert_eq!(after.tasks[&new_id].committed.as_ref(), Some(&committed));
+    assert_eq!(after.tasks[&new_id].attempt_count, 1);
+    assert_eq!(after.tasks[&task_id], before.tasks[&task_id]);
+    assert_eq!(after.tasks[&task_id].attempt_count, 1);
+    let old_record = &after.attempts[&old_attempt.id];
+    assert_eq!(old_record.request, old_attempt);
+    assert!(old_record.terminal.is_none());
+    assert!(old_record
+        .unverified_retirement
+        .as_ref()
+        .unwrap()
+        .retired_at_driver_millis
+        .is_none());
+    assert_eq!(
+        after.pools[&pool_id].workers[&worker_id].allocated,
+        before.pools[&pool_id].workers[&worker_id].allocated
+    );
+    assert_eq!(after.pools[&pool_id].active_attempts, 1);
+    assert_eq!(
+        pool.execution_object(&reference).unwrap().unwrap().as_ref(),
+        b"committed shared object"
+    );
+    assert!(pool
+        .submit(
+            submission(scope_id, pool_id, task_id, artifact_id),
+            program.clone()
+        )
+        .is_err());
+    let reused = pool
+        .submit(submission(scope_id, pool_id, new_id, artifact_id), program)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    assert_eq!(reused, success);
+    assert_eq!(pool.snapshot().tasks[&new_id].attempt_count, 1);
+    assert_eq!(pool.snapshot().attempts.len(), 2);
+}
+
+async fn fixture_with_capacity(workers: u32) -> Fixture {
     let (program, artifact, bundle) = executable_bundle().await;
     let scope_id = ExecutionScopeId::derive(&[b"completion-authority"]);
     let pool_id = PoolId::derive(&[b"completion-authority"]);
@@ -232,9 +378,9 @@ async fn fixture() -> Fixture {
         PoolSpec {
             id: pool_id,
             min_workers: 1,
-            max_workers: 1,
-            max_in_flight: 1,
-            resource_limit: inventory(1_000),
+            max_workers: workers,
+            max_in_flight: workers,
+            resource_limit: inventory(1_000 * workers),
         },
         7,
         bundle,
