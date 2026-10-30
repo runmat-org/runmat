@@ -44,12 +44,17 @@ pub fn default_fea_artifact_root() -> PathBuf {
 }
 
 pub fn configure_fea_runtime(config: FeaRuntimeConfig) -> Result<(), String> {
+    replace_fea_runtime(config).map(|_| ())
+}
+
+/// Embedded hosts serialize runtime commands and restore the returned exact
+/// configuration when their execution scope exits.
+pub fn replace_fea_runtime(config: FeaRuntimeConfig) -> Result<FeaRuntimeConfig, String> {
     if config.publication_staging_bytes == 0 {
         return Err("publication staging budget must be positive".into());
     }
     let mut guard = fea_runtime_config()
         .write()
         .map_err(|_| "FEA runtime config lock poisoned".to_string())?;
-    *guard = config;
-    Ok(())
+    Ok(std::mem::replace(&mut *guard, config))
 }

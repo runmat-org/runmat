@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ForeignConfig {
     #[serde(default)]
@@ -96,7 +96,7 @@ fn default_python_minimum_version() -> String {
     "3.9".into()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JavaConfig {
     #[serde(default)]
@@ -127,7 +127,7 @@ fn default_java_minimum_version() -> NonZeroU16 {
     NonZeroU16::new(8).expect("Java minimum version is nonzero")
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeFfiConfig {
     #[serde(default)]
@@ -224,7 +224,7 @@ impl Default for NativeFfiConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MexConfig {
     #[serde(default)]

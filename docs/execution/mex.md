@@ -274,6 +274,8 @@ Source compatibility is not arbitrary third-party binary compatibility. A binary
 
 The isolated host uses authenticated bounded local messages. Large canonical values move through private, digest-verified snapshots, and callbacks are routed to the originating runtime context. A native crash, cancellation, or configured timeout terminates the host without terminating the RunMat driver.
 
+`foreign.mex.timeout_ms` is unset by default. A configured deadline is supported only by the isolated host: arbitrary in-process C/C++/Fortran code cannot be safely preempted. A manifested native invocation with a configured timeout is rejected **before loading the library** with `RunMat:MEX:TimeoutUnsupported`; RunMat does not abandon live native references, pretend a timer stopped native instructions, or silently change module ownership/routing. Leave the timeout unset only when intentionally accepting native execution without a hard deadline, or use a supported isolated execution route. Default no-timeout native invocation and its existing cooperative callback cancellation remain unchanged.
+
 A broken isolated-host transport rejects further calls while the driver attempts to retire the host. RunMat does not retry a partially executed gateway. During graceful shutdown, callback services and retained values remain owned until process-tree retirement succeeds; an unconfirmed retirement is reported as a shutdown failure rather than a successful unload.
 
 Isolation is crash containment, not a security sandbox. Native code retains the child process's filesystem, network, and user permissions.

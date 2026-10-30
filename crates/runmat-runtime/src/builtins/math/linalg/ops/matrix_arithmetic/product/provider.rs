@@ -15,7 +15,7 @@ pub(super) async fn try_product(
     rhs: &Value,
 ) -> BuiltinResult<ProductResult<Option<Value>>> {
     gpu_helpers::require_resident_compute_values(&[lhs, rhs], false, || {
-        super::errors::internal("mtimes: resident input has no exact provider owner")
+        crate::RuntimeError::new("mtimes: resident input has no exact provider owner")
     })?;
     if contains_complex(lhs) || contains_complex(rhs) {
         return Ok(Ok(None));
@@ -30,9 +30,9 @@ pub(super) async fn try_product(
     else {
         return Ok(Ok(None));
     };
-    let provider = product_try!(gpu_helpers::require_resident_compute_owner(&source, || {
-        super::errors::internal("mtimes: resident input has no exact provider owner")
-    }));
+    let provider = gpu_helpers::require_resident_compute_owner(&source, || {
+        crate::RuntimeError::new("mtimes: resident input has no exact provider owner")
+    })?;
 
     if let Some(result) = product_try!(try_scalar_product(provider, lhs, rhs).await?) {
         return Ok(Ok(Some(result)));

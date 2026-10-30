@@ -227,13 +227,13 @@ pub(super) fn preflight_resident_argument_roles(
         let map = &args[1];
         let shape = match map {
             Value::GpuTensor(handle) => {
-                let owner =
-                    validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_COLORMAP)?;
+                // Shared metadata validation already proves that floating
+                // precision agrees with the exact source owner's precision.
+                validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_COLORMAP)?;
                 if runmat_accelerate_api::handle_integer_type(handle).is_some()
                     || runmat_accelerate_api::handle_is_logical(handle)
                     || runmat_accelerate_api::handle_precision(handle)
                         != Some(runmat_accelerate_api::ProviderPrecision::F64)
-                    || owner.precision() != runmat_accelerate_api::ProviderPrecision::F64
                 {
                     return Err(imwrite_error_with_detail(
                         &IMWRITE_ERROR_INVALID_COLORMAP,

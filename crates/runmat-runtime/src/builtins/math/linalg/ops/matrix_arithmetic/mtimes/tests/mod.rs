@@ -9,6 +9,60 @@ fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
     err
 }
 
+#[test]
+fn operational_owner_errors_keep_retry_causes_and_public_identity() {
+    use crate::builtins::common::gpu_helpers::ResidentComputeDecline;
+    for (decline, retry) in [
+        (
+            ResidentComputeDecline::PolicyDenied,
+            crate::GpuGatherRetry::Requested,
+        ),
+        (
+            ResidentComputeDecline::InvalidOwner,
+            crate::GpuGatherRetry::Never,
+        ),
+    ] {
+        let original = crate::build_runtime_error("shared product owner failure")
+            .with_source(std::io::Error::other("retained owner cause"))
+            .build();
+        let mapped = errors::map_control_flow(decline.with_domain_error(original));
+        assert_eq!(
+            mapped.identifier(),
+            runmat_builtins::MTIMES_ERROR_INTERNAL.identifier
+        );
+        assert_eq!(mapped.context.builtin.as_deref(), Some("mtimes"));
+        assert_eq!(mapped.gpu_gather_retry, retry);
+        let mut cause = std::error::Error::source(&mapped);
+        let mut retained = false;
+        while let Some(error) = cause {
+            retained |= error.downcast_ref::<std::io::Error>().is_some();
+            cause = error.source();
+        }
+        assert!(retained);
+    }
+    let cancellation = crate::build_runtime_error("cancelled")
+        .with_identifier("RunMat:Cancelled")
+        .with_failure_origin(
+            crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation,
+        )
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build();
+    let mapped = errors::map_control_flow(cancellation);
+    assert_eq!(mapped.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(
+        mapped.failure_origin(),
+        crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation
+    );
+    assert_eq!(mapped.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    let specific = crate::build_runtime_error("provider integrity failure")
+        .with_identifier("RunMat:Provider:Integrity")
+        .build();
+    assert_eq!(
+        errors::map_control_flow(specific).identifier(),
+        Some("RunMat:Provider:Integrity")
+    );
+}
+
 fn integer_scalar_mtimes_cases() -> Vec<(IntegerStorage, IntValue, IntegerStorage)> {
     vec![
         (

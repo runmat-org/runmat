@@ -47,7 +47,7 @@ runmat package publish \
   --package-id pkg_0123456789abcdef0123456789abcdef
 ```
 
-The CLI builds the artifact, creates a publication, uploads through the Server-issued transfer contract, completes upload, requests verification, requests approval, and finalizes. It retries only operations whose idempotency contract makes retry safe. Transfer URLs and authorization grants are ephemeral and never enter the lock or artifact.
+The CLI builds the artifact, creates a publication, uploads through the Server-issued transfer contract, and requests verification. The Server decides whether its checks and policy permit automatic approval. The CLI never approves its own publication. If approval is pending, publish reports “waiting for approval,” identifies the organization/package/publication, and points to Settings › Packages. Another organization admin can review the pending approval and required checks there. Rerun the same publish command after approval to finalize; private encrypted retry state is retained until finalization. Already-approved publications finalize normally. It retries only operations whose idempotency contract makes retry safe. Transfer URLs and authorization grants are ephemeral and never enter the lock or artifact.
 
 For a private package, first register recipient keys for principals that need to decrypt it, then add `--private`:
 

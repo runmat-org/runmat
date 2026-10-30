@@ -18,6 +18,26 @@ impl RunMatSession {
     /// Apply session-scoped settings without consulting ambient files or env.
     /// Hosts resolve the correct local/cluster policy before calling this.
     pub fn apply_runtime_config(&mut self, config: &RunMatRuntimeConfig) -> Result<()> {
+        if config.jit.threshold == 0 {
+            anyhow::bail!("JIT threshold must be positive");
+        }
+        #[cfg(target_arch = "wasm32")]
+        if config.foreign != runmat_config::runtime::ForeignConfig::default() {
+            anyhow::bail!("native Python, Java and MEX settings require a native execution host");
+        }
+        // Foreign adapters become immutable after startup. Replaying the same
+        // resolved policy is not a request to recreate those adapters. Admit
+        // real changes before mutating the rest of the session policy.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let unchanged = match self.selected_foreign_config.as_ref() {
+                Some(previous) => previous.foreign == config.foreign,
+                None => false,
+            };
+            if !unchanged {
+                self.set_foreign_config(&config.foreign)?;
+            }
+        }
         self.set_jit_config(&config.jit)?;
         self.set_compat_mode(match config.language.compat {
             LanguageCompatMode::RunMat => CompatMode::RunMat,
@@ -32,21 +52,12 @@ impl RunMatSession {
             config.runtime.error_namespace.clone()
         });
         self.set_telemetry_consent(config.telemetry.enabled);
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.set_foreign_config(&config.foreign)?;
-            self.set_selected_foreign_config(Arc::new(config.clone()));
-        }
-        #[cfg(target_arch = "wasm32")]
-        if serde_json::to_value(&config.foreign)?
-            != serde_json::to_value(runmat_config::runtime::ForeignConfig::default())?
-        {
-            anyhow::bail!("native Python, Java and MEX settings require a native execution host");
-        }
         self.runtime_context = self
             .runtime_context
             .clone()
             .with_acceleration_policy(crate::cluster_settings::acceleration_policy(config));
+        #[cfg(not(target_arch = "wasm32"))]
+        self.set_selected_foreign_config(Arc::new(config.clone()));
         Ok(())
     }
 
@@ -207,6 +218,21 @@ mod tests {
             })
             .is_err());
         assert!(retained.executor.retained_code_bytes() > 0);
+        let mut applied = RunMatRuntimeConfig::default();
+        session.apply_runtime_config(&applied).unwrap();
+        session.apply_runtime_config(&applied).unwrap();
+        let accepted = Arc::clone(session.selected_foreign_config.as_ref().unwrap());
+        applied.jit.threshold = 0;
+        applied
+            .foreign
+            .java
+            .options
+            .push("-Dmust-not-apply=true".into());
+        assert!(session.apply_runtime_config(&applied).is_err());
+        assert!(Arc::ptr_eq(
+            &accepted,
+            session.selected_foreign_config.as_ref().unwrap()
+        ));
         let mut over_budget = RunMatRuntimeConfig::default();
         over_budget.gc.threads = Some(4);
         assert!(RunMatSession::configure_gc_with_resource_limits(

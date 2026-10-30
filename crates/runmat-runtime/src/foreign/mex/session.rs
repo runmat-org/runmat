@@ -690,6 +690,15 @@ impl MexRuntimeSession {
                 "in-process MEX invocation requires the process thread stack",
             )));
         }
+        // Arbitrary in-process native instructions have no safe preemption
+        // hook. Reject a requested deadline before loading a library (which
+        // can itself run native initializers), never by abandoning live native
+        // references or the origin callback services after a timer fires.
+        if let Err(error) =
+            admit_manifested_native_timeout(self.isolation_policy.borrow().invocation_timeout)
+        {
+            return Some(Err(error));
+        }
         let lane = match self.native_lane() {
             Ok(lane) => lane,
             Err(error) => return Some(Err(error)),
@@ -1700,6 +1709,20 @@ fn runtime_error(identifier: &str, message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+fn admit_manifested_native_timeout(
+    timeout: Option<std::time::Duration>,
+) -> Result<(), RuntimeError> {
+    if timeout.is_some() {
+        let mut error = runtime_error(
+            "MEX:TimeoutUnsupported",
+            "foreign.mex.timeout_ms cannot be enforced for manifested in-process MEX code; bounded deadlines require a supported isolated execution route. Remove the timeout only to explicitly allow native execution without a hard deadline",
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[cfg(not(target_family = "wasm"))]
 fn native_runtime_error(
     identifier: &str,
@@ -1717,6 +1740,52 @@ mod tests {
     use super::*;
     use crate::execution::RuntimeExecutionService;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn manifested_native_timeout_admission_preserves_unbounded_default() {
+        assert!(
+            admit_manifested_native_timeout(MexIsolationPolicy::default().invocation_timeout)
+                .is_ok()
+        );
+        for timeout in [
+            std::time::Duration::from_nanos(1),
+            std::time::Duration::from_secs(60),
+        ] {
+            let error = admit_manifested_native_timeout(Some(timeout)).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:MEX:TimeoutUnsupported"));
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert!(error.message().contains("isolated"));
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let module = directory.path().join("must_not_load.mex");
+        // Presence chooses the manifested route; neither these invalid bytes
+        // nor a nonexistent module may reach the native loader under a deadline.
+        std::fs::write(
+            runmat_mex::MexArtifactManifest::path_for_module(&module),
+            b"must not be parsed or loaded",
+        )
+        .unwrap();
+        let session = MexRuntimeSession::new();
+        session.set_isolation_policy(MexIsolationPolicy {
+            invocation_timeout: Some(std::time::Duration::from_millis(1)),
+            ..MexIsolationPolicy::default()
+        });
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let result = futures::executor::block_on(session.load_selected_and_call(
+            module,
+            crate::call::RootedFunctionArguments::ordinary(
+                crate::execution::RootedValues::new(Vec::new()).unwrap(),
+            ),
+            0,
+            runtime,
+        ))
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(result.identifier(), Some("RunMat:MEX:TimeoutUnsupported"));
+        assert!(session.native_lane.borrow().is_none());
+        assert!(session.native_modules.borrow().is_empty());
+        assert!(session.native_values.borrow().is_empty());
+    }
 
     #[test]
     fn selected_mex_outputs_are_rooted_before_decoded_batch_retires() {

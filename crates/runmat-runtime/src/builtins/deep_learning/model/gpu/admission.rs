@@ -12,7 +12,7 @@ use std::fmt;
 /// Validated public network ingress, before tape publication, uploads or any
 /// layer execution. Inspect all known resident operands before allowing a
 /// policy decline: an invalid owner/assignment must never become a retry.
-pub(super) fn preflight_network_compute_owners(
+pub(in crate::builtins::deep_learning::model) fn preflight_network_compute_owners(
     host: &crate::builtins::deep_learning::model::plan::host::HostNetworkPlan<'_>,
     input: Option<&GpuTensorHandle>,
     function: &'static str,

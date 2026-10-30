@@ -13,5 +13,6 @@ pub use metadata::{
 pub use publication::{
     AttachKeyEnvelopesRequest, FinalizePublicationResponse, KeyEnvelopeRequest,
     PublicationArtifactRequest, PublicationDependencyRequest, PublicationMetadataRequest,
-    PublicationStatusResponse, StagePublicationRequest, StagePublicationResponse,
+    PublicationStatus, PublicationStatusResponse, StagePublicationRequest,
+    StagePublicationResponse,
 };

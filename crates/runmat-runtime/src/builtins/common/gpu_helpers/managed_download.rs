@@ -65,7 +65,7 @@ pub(crate) async fn download_readback_value_with_admission_in_context(
     )
     .map_err(allocation)?
     .ok_or_else(|| allocation(HostAllocationError::MissingManagedOwner))?;
-    let mut budget = runtime.cpu_cooperation();
+    let budget = runtime.cpu_cooperation();
     budget
         .await_cancellable(download_exact_native_readback(
             runtime, readback, &receipt, quote,

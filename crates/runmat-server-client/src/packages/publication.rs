@@ -1,6 +1,30 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Registry-owned publication state. Verification may approve automatically
+/// according to server policy; a publisher must not manufacture that decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PublicationStatus {
+    Staged,
+    Verified,
+    Approved,
+    Finalized,
+    Rejected,
+}
+
+impl std::fmt::Display for PublicationStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Staged => "staged",
+            Self::Verified => "verified",
+            Self::Approved => "approved",
+            Self::Finalized => "finalized",
+            Self::Rejected => "rejected",
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StagePublicationRequest {
@@ -53,7 +77,7 @@ pub struct PublicationDependencyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct StagePublicationResponse {
     pub id: String,
-    pub status: String,
+    pub status: PublicationStatus,
     pub upload_url: Option<String>,
 }
 
@@ -91,7 +115,32 @@ impl From<runmat_package::PackageKeyEnvelope> for KeyEnvelopeRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PublicationStatusResponse {
     pub id: String,
-    pub status: String,
+    pub status: PublicationStatus,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publication_status_wire_states_are_closed_and_typed() {
+        for (wire, expected) in [
+            ("staged", PublicationStatus::Staged),
+            ("verified", PublicationStatus::Verified),
+            ("approved", PublicationStatus::Approved),
+            ("finalized", PublicationStatus::Finalized),
+            ("rejected", PublicationStatus::Rejected),
+        ] {
+            let reply: PublicationStatusResponse =
+                serde_json::from_value(serde_json::json!({"id":"pub-1", "status":wire})).unwrap();
+            assert_eq!(reply.status, expected);
+            assert_eq!(reply.status.to_string(), wire);
+        }
+        assert!(serde_json::from_value::<PublicationStatusResponse>(
+            serde_json::json!({"id":"pub-1", "status":"unknown"})
+        )
+        .is_err());
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

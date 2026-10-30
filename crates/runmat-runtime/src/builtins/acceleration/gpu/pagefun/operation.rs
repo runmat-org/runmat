@@ -100,7 +100,7 @@ impl PageOperation {
 
     pub(super) async fn evaluate(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
-            Self::Mtimes => crate::builtins::math::linalg::ops::matrix_arithmetic::product::evaluate(&args[0], &args[1]).await?.map_err(|error| {
+            Self::Mtimes => crate::builtins::math::linalg::ops::matrix_arithmetic::product::evaluate(&args[0], &args[1]).await.map_err(pagefun_operational_error)?.map_err(|error| {
                 use crate::builtins::math::linalg::ops::matrix_arithmetic::product::ProductError;
                 match error {
                     ProductError::InvalidInput(message) => pagefun_error_with_detail(&PAGEFUN_ERROR_INVALID_INPUT, message),

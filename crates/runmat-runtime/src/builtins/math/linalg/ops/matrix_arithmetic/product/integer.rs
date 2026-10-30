@@ -20,7 +20,7 @@ pub(super) async fn evaluate(
     rhs: &Value,
 ) -> crate::BuiltinResult<BuiltinResult<Value>> {
     gpu_helpers::require_resident_compute_values(&[lhs, rhs], false, || {
-        errors::internal("mtimes: resident input owner was lost")
+        crate::RuntimeError::new("mtimes: resident input owner was lost")
     })?;
     let restore_source = gpu_helpers::select_resident_output_source(
         [lhs, rhs].into_iter().filter_map(|value| match value {

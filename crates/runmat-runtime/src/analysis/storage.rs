@@ -831,6 +831,28 @@ pub fn configure_artifact_store(config: AnalysisArtifactStoreConfig) -> Result<(
     Ok(())
 }
 
+/// Install a retained host-owned store while preserving the exact previous
+/// owner. Embedded hosts must serialize access and restore it on scope exit;
+/// constructing a fresh in-memory store per command would discard results.
+pub fn replace_artifact_store(
+    store: Arc<dyn AnalysisArtifactStore>,
+) -> Result<Arc<dyn AnalysisArtifactStore>, String> {
+    let mut guard = global_store()
+        .write()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    Ok(std::mem::replace(&mut *guard, store))
+}
+
+/// Scoped host counterpart of `configure_artifact_retention`.
+pub fn replace_artifact_retention(
+    config: AnalysisArtifactRetentionConfig,
+) -> Result<AnalysisArtifactRetentionConfig, String> {
+    let mut guard = retention_config()
+        .write()
+        .map_err(|_| "analysis artifact retention config lock poisoned".to_string())?;
+    Ok(std::mem::replace(&mut *guard, config))
+}
+
 pub fn configure_artifact_retention(config: AnalysisArtifactRetentionConfig) -> Result<(), String> {
     let mut guard = retention_config()
         .write()

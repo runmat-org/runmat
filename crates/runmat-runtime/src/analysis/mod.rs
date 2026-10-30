@@ -153,7 +153,9 @@ pub use study_sweep::{
 
 mod configuration;
 use configuration::current_fea_runtime_config;
-pub use configuration::{configure_fea_runtime, default_fea_artifact_root, FeaRuntimeConfig};
+pub use configuration::{
+    configure_fea_runtime, default_fea_artifact_root, replace_fea_runtime, FeaRuntimeConfig,
+};
 
 /// Host adapter for the path-free structural-static numerical workload. Implementations choose
 /// execution placement but may not persist results or apply runtime publication policy.
