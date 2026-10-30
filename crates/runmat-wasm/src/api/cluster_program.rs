@@ -86,7 +86,7 @@ pub async fn prepare_cluster_program(
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
-        entrypoint: entrypoint.0.to_string(),
+        entrypoint: identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: outputs,
             owned_work: None,

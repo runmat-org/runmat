@@ -147,14 +147,12 @@ pub async fn submit(
     let callable_function = identity.entrypoint_function.ok_or_else(|| {
         anyhow::anyhow!("declaration-only executables cannot be submitted as callable jobs")
     })?;
-    let executable_function = usize::try_from(callable_function.0)
-        .context("portable entrypoint identity exceeds this host")?;
     let executable_bytes = executable.canonical_bytes()?;
     let form = ExecutableForm::ExecutableUnitV4;
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
-        entrypoint: executable_function.to_string(),
+        entrypoint: identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs,
             owned_work: None,
