@@ -61,7 +61,11 @@ try {
         assert.throws(() => assertCadImportParity(corruptArtifact,native), "exact hashes cannot be normalized away");
         console.log(`Browser/desktop source-face, topology, and evaluator parity: ${name}`);
       }
-      for (const [units, expected] of [["meter", [0.04, 0.05, 0.035]], ["millimeter", [40, 50, 35]]]) {
+      for (const [scale, expected] of [[1, [0.04, 0.05, 0.035]], [0.001, [40, 50, 35]]]) {
+        // The canonical LengthUnit wire is a dimensioned SI conversion, not
+        // an enum name. Keep the same meter/millimeter geometry assertions.
+        const units = { dimension: { length: 1, mass: 0, time: 0, current: 0,
+          temperature: 0, amount: 0, luminous_intensity: 0, information: 0 }, scale, offset: 0 };
         const preview = JSON.parse(request("preview", name, bytes, JSON.stringify({
           max_triangles: 16000000, budget_policy: "Strict", units, relative_deflection: false,
           tessellation_profile: { profile_id: "default-v1", chord_tolerance: null, angle_tolerance_deg: null, healing_mode: "safe" },
@@ -72,7 +76,7 @@ try {
           const extent = Math.max(...values) - Math.min(...values);
           assert.ok(Math.abs(extent - expected[axis]) < expected[axis] * 1e-6, `${units} axis ${axis}: ${extent}`);
         }
-        console.log(`Bracket preview scale verified in ${units}`);
+        console.log(`Bracket preview scale verified at ${scale} meters per unit`);
       }
     }
     await filesystem.writeFile(`/${name}`, bytes);

@@ -82,8 +82,10 @@ function close(actual, expected, path = "", scale = 0) {
 }
 export function assertCadImportParity(browser,native) {
   assert.deepEqual(browser.source_digest,native.source_digest,"same source revision");
-  assert.equal(browser.source_units,native.source_units);
-  assert.equal(browser.meters_per_source_unit,native.meters_per_source_unit);
+  for (const field of ["source_format", "source_unit_evidence", "kernel_units"]) {
+    assert.ok(Object.hasOwn(browser, field) && Object.hasOwn(native, field), `${field} must be present in both current contracts`);
+    assert.deepEqual(browser[field], native[field], field);
+  }
   assert.equal(browser.kernel_version,native.kernel_version);
   close(portableSnapshot(browser),portableSnapshot(native));
 }
