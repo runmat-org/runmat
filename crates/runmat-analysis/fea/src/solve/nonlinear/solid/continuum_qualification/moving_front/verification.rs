@@ -168,7 +168,20 @@ fn history_schedule(
     factors: &[f64],
     aligned: bool,
 ) -> Vec<HistoryErrors> {
-    let (model, mesh, summary) = fixture::prepare(cells, quadratic);
+    history_on(
+        fixture::prepare(cells, quadratic),
+        &format!("cells={cells} quadratic={quadratic}"),
+        factors,
+        aligned,
+    )
+}
+
+fn history_on(
+    (model, mesh, summary): (AnalysisModel, SolverMeshArtifact, AssemblySummary),
+    label: &str,
+    factors: &[f64],
+    aligned: bool,
+) -> Vec<HistoryErrors> {
     let basis = CanonicalNonlinearSolidBasis::prepare(&model, &mesh, &summary).unwrap();
     let problem = SolidNewtonProblem::prepare(&basis, &summary, execution::policy()).unwrap();
     let mut state = problem.initial_state().unwrap();
@@ -197,7 +210,7 @@ fn history_schedule(
                 increment.state.accumulated_plastic_dissipation_j,
             );
             eprintln!(
-                "accepted-front cells={cells} quadratic={quadratic} factor={} errors={errors:?}",
+                "accepted-front {label} factor={} errors={errors:?}",
                 increment.state.load_factor
             );
         }
@@ -211,7 +224,7 @@ fn history_schedule(
             factor,
             completion.state.accumulated_plastic_dissipation_j,
         );
-        eprintln!("moving-front cells={cells} quadratic={quadratic} factor={factor} front={} errors={errors:?}", front(factor));
+        eprintln!("moving-front {label} factor={factor} front={} errors={errors:?}", front(factor));
         evidence.push(errors);
         state = completion.state;
     }
@@ -330,6 +343,29 @@ fn check(quadratic: bool) {
             "history fine energies/reactions quadratic={quadratic} factor={} errors={fine:?}",
             (i + 1) as f64 / 8.0
         );
+    }
+    // Tet10 history refinement of alpha needs h < r. Derivation: at factor 0.375 the front is
+    // at r = 0.0291, inside the first element column of every coarse mesh (h/r = 34, 17, 8.6).
+    // While h > r the P2 strain cannot resolve the kink and the error grows as h approaches r:
+    // a 1D P2 Galerkin bar of the same law (evidence/python/oned.py) gives 1.2e-4, 2.5e-4,
+    // 2.3e-4, 1.4e-4 at h/r = 17, 8.6, 4.3, 2.1, falling only once h < r. The same
+    // non-monotone sequence appears with one load step (no history) and with a 125-point
+    // Duffy rule, so neither history nor quadrature is the cause. Coarse Tet10 alpha errors
+    // at this increment are 1.905e-4, 1.164e-4, 1.647e-4 (and 1.957e-4 at cells 8).
+    // Only increments whose front lies strictly inside the first column of the finest
+    // coarse mesh are deferred; every other coarse field and increment keeps its gate.
+    let deferred = (0..8)
+        .filter(|&i| {
+            let r = front((i + 1) as f64 / 8.0);
+            quadratic && r > 0.0 && r < 0.25
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        deferred,
+        if quadratic { vec![2] } else { vec![] },
+        "deferred pre-asymptotic increments changed"
+    );
+    for (i, fine) in runs[2].iter().enumerate() {
         let coarse = runs[0][i];
         let middle = runs[1][i];
         for (name, values) in [
@@ -340,6 +376,9 @@ fn check(quadratic: bool) {
             ("stress", [coarse.stress, middle.stress, fine.stress]),
             ("alpha", [coarse.alpha, middle.alpha, fine.alpha]),
         ] {
+            if name == "alpha" && deferred.contains(&i) {
+                continue;
+            }
             assert!(values.windows(2).all(|p| p[1] < p[0] || (p[0] < 1e-10 && p[1] < 1e-10)),
                 "history refinement quadratic={quadratic} increment={} field={name} errors={values:?}", i + 1);
         }
@@ -350,6 +389,58 @@ fn check(quadratic: bool) {
             elastic.displacement < 1e-7 && elastic.stress < 1e-7 && elastic.alpha == 0.0,
             "Tet10 pre-yield exact quadratic: {elastic:?}"
         );
+        // Asymptotic family with h < r at every increment that yields. A kink error is
+        // C h^(3/2) g(t), where t is the front's relative position in its element; g varies
+        // strongly with t (axial cells 36, 48, 72, 144 give 1.5e-6, 1.6e-5, 1.1e-6, 1.5e-6 at
+        // factor 0.375), so a fair refinement keeps t (nearly) fixed. Axial cells 36 and 70 put
+        // the factor-0.375 front at t = 0.048 and 0.038 (h/r = 0.95, 0.49); expected alpha
+        // errors there are 1.52e-6 and 4.45e-7 (evidence/python/front_family.py). Finer
+        // fixed-t meshes (axial 86, t = 0.50 after 52) reach the double-precision floor of the
+        // fixture's 1e-12 linear residual: eps * || |K| |u| || / ||f|| = 1.2e-12 at 86 cells,
+        // and the sparse Cholesky achieves 1.35e-12 there. The solution is x-only
+        // (Uy = Uz = 0), so the bar refines x and keeps one lateral cell.
+        let r = front(0.375);
+        let family = [36, 70].map(|axial: usize| {
+            let position = r * axial as f64;
+            assert!(
+                position > 1.0 && position.fract() < 0.05,
+                "axial={axial} front position {position}"
+            );
+            history_on(
+                fixture::prepare_mesh(runmat_meshing_core::fixtures::quadratic_slab_bar_mesh(
+                    axial, 1,
+                )),
+                &format!("axial={axial} lateral=1 quadratic=true"),
+                &(1..=8).map(|i| i as f64 / 8.0).collect::<Vec<_>>(),
+                false,
+            )
+        });
+        for i in 0..8 {
+            for errors in family.each_ref().map(|run| run[i]) {
+                assert!(
+                    errors.displacement < 0.02 && errors.stress < 0.05 && errors.alpha < 0.08,
+                    "asymptotic Tet10 family factor={} errors={errors:?}",
+                    (i + 1) as f64 / 8.0
+                );
+                assert!(errors.energies.iter().all(|e| *e < 0.08) && errors.lateral_moment < 0.08);
+            }
+            for (name, values) in [
+                (
+                    "displacement",
+                    family.each_ref().map(|run| run[i].displacement),
+                ),
+                ("stress", family.each_ref().map(|run| run[i].stress)),
+                ("alpha", family.each_ref().map(|run| run[i].alpha)),
+            ] {
+                assert!(
+                    values
+                        .windows(2)
+                        .all(|p| p[1] < p[0] || (p[0] < 1e-10 && p[1] < 1e-10)),
+                    "asymptotic Tet10 refinement increment={} field={name} errors={values:?}",
+                    i + 1
+                );
+            }
+        }
     } else {
         for (i, errors) in history(8, false).iter().enumerate() {
             assert!(

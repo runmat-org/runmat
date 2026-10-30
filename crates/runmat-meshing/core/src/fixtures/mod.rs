@@ -3,7 +3,7 @@ mod cube;
 mod layered;
 mod solver_mesh;
 
-pub use cube::{quadratic_slab_mesh, slab_mesh};
+pub use cube::{quadratic_slab_bar_mesh, quadratic_slab_mesh, slab_bar_mesh, slab_mesh};
 pub use layered::layered_box_mesh;
 
 pub use connected::{
