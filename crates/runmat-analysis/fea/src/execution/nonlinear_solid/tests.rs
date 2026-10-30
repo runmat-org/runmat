@@ -256,6 +256,24 @@ fn default_nonlinear_plan_is_decided_by_achieved_tangent_solve_residuals() {
     let allowed = evaluate(authored.clone());
     assert_eq!(allowed.gate().decision, PublicationDecision::Allow);
     assert_eq!(allowed.gate().status, AccuracyStatus::Satisfied);
+    // Unavailable mandatory evidence still blocks: the J2 receipt carries no spatial
+    // convergence study, so such a criterion is indeterminate and the default policy refuses.
+    let mut unavailable = authored.clone();
+    unavailable.criteria.push(runmat_analysis_core::AccuracyCriterion {
+        criterion_id: "spatial_convergence".into(),
+        target: runmat_analysis_core::AccuracyTarget::NumericalResult,
+        contribution: runmat_analysis_core::ErrorContributionKind::SpatialDiscretization,
+        tolerance: AccuracyTolerance::Relative(0.05),
+        evidence: runmat_analysis_core::RequiredAccuracyEvidence::ConvergenceStudy,
+        mandatory: true,
+    });
+    let blocked = evaluate(unavailable.clone());
+    assert_eq!(blocked.gate().status, AccuracyStatus::Indeterminate);
+    assert_eq!(blocked.gate().decision, PublicationDecision::Block);
+    unavailable.unavailable_evidence = runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
+    let labeled = evaluate(unavailable);
+    assert_eq!(labeled.gate().status, AccuracyStatus::Indeterminate);
+    assert_eq!(labeled.gate().decision, PublicationDecision::Allow);
     let mut unreachable = authored;
     unreachable.criteria[0].tolerance = AccuracyTolerance::Relative(achieved / 2.0);
     if achieved > 0.0 {
