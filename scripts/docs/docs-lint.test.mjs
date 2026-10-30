@@ -111,3 +111,13 @@ test("receipt links quote the catalog value at the precision written", async () 
     assert.equal(receiptMismatch({ value: 1000.2, unit: "N" }, "1,000 N"), null);
     assert.match(receiptMismatch(undefined, "1 N"), /no such receipt/);
 });
+
+test("guide headings name their content, not the template", async () => {
+    const { GUIDE_META_HEADING } = await import("./docs-lint.mjs");
+    for (const heading of ["How it's modeled: beam bending", "The engineering question", "The physics you already know", "2. Model it"]) {
+        assert.ok(GUIDE_META_HEADING.test(heading), heading);
+    }
+    for (const heading of ["Example 1: A steel cantilever under an end load", "Bending of a cantilever beam", "Solution", "Discussion", "Try a change"]) {
+        assert.ok(!GUIDE_META_HEADING.test(heading), heading);
+    }
+});

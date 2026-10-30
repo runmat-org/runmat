@@ -13,6 +13,7 @@
 // - every ```fea block colors every compiler word with the generated grammar (fea-grammar.mjs);
 // - every name in the compiler's closed registries (units, types, field locations and quantities, output
 //   operations, material members) appears on its owner reference page (E-DOC-6, registry-coverage.mjs);
+// - a guide (doc_type: guide) uses no template headings such as "How it's modeled" or "2. Model it";
 // - relative links resolve to a file in docs/simulation and, with `#anchor`, to a heading in it;
 //   links may not leave docs/simulation (the site and the agent corpus only contain that tree).
 import Ajv from "ajv";
@@ -25,6 +26,9 @@ import { GENERATED_PAGES, loadLedger, lintLedger } from "./ledger.mjs";
 import { feaGrammar, knownWords, uncoloredKnownWords } from "./fea-grammar.mjs";
 
 const readJson = path => JSON.parse(readText(path));
+
+/** Template or meta headings a worked guide must not use (owner, 2026-10-29). */
+export const GUIDE_META_HEADING = /^(\d+\.\s|the engineering question|the physics you already know|how it['’]s modeled|model it\b)/i;
 
 /** The ledger as the pending-flag registry: { ledger, byId } over capabilities. */
 export const loadRegistry = loadLedger;
@@ -124,6 +128,13 @@ export function lintDocs(source) {
         if (!front.data) continue;
         if (!checkFrontMatter(front.data)) error(file, 1, "front-matter", ajv.errorsText(checkFrontMatter.errors, { dataVar: "front matter" }));
         for (const id of front.data.examples ?? []) if (!exampleIds.has(id)) error(file, 1, "front-matter", `examples: unknown catalog id \`${id}\``);
+        // Worked guides read as textbook examples (METHOD §1.2): headings name their content, never
+        // the template (no "The engineering question", "How it's modeled", or "2. Model it").
+        if (front.data.doc_type === "guide") {
+            for (const heading of headings(text)) {
+                if (GUIDE_META_HEADING.test(heading.text)) error(file, heading.line, "guide-heading", `"${heading.text}" is a template heading; name the content instead (METHOD §1.2)`);
+            }
+        }
     }
 
     // Excerpts of canonical example files: ```fea source=<examples path> must be a verbatim slice.

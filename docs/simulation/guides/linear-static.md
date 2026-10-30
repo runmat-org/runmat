@@ -1,49 +1,133 @@
 ---
-description: Learn linear static analysis in RunMat on a steel cantilever. Model the part, mesh it, run it, read deflection, stress and reactions the way a practicing engineer does, decide whether to refine, and try design changes.
-keywords: [linear static analysis, structural FEA, cantilever, tip deflection, von Mises stress, support reaction, Tet10, stress singularity, deflection limit, allowable stress, beam bending]
+description: A worked example of linear static analysis. A steel cantilever under an end load is solved by beam theory and by the finite-element method in RunMat, from the governing equations and Tet10 discretization to deflection, stress, reactions and a design check.
+keywords: [linear static analysis, structural FEA, cantilever, beam bending, Euler-Bernoulli, weak form, Tet10, shape functions, stiffness matrix, Ku = f, tip deflection, von Mises stress, support reaction, stress singularity, deflection limit]
 doc_type: guide
 family: [structural]
 examples: [cantilever-static]
 ---
-A linear static analysis finds how far a part deflects, how stressed it is and what its supports carry under a steady load. It answers questions such as "is this bracket stiff enough?", "is this stress below the allowable?" and "what does this bolt have to hold?". It applies while strains stay small, the material stays elastic and contacts neither open nor close. Inertia, plasticity, large rotation and changing contact belong to the [transient, nonlinear and contact procedures](../language/reference/procedures.md).
+A linear static analysis finds the displacement, strain and stress in a supported part under loads that do not change with time. It applies while strains stay small, the material stays elastic and contacts neither open nor close. This page works one example in full: the theory a mechanics-of-materials course teaches, the finite-element method that generalizes it, and the solution in RunMat.
 
-This guide takes one part from the question to a design decision.
+## Example 1: A steel cantilever under an end load
 
-## Checking a steel cantilever against a deflection limit
+A steel cantilever is built into a rigid wall at one end and loaded downward at the other. The design must keep the tip deflection within L/2,000 and the bending stress below an allowable of 167 MPa (yield strength 250 MPa with a factor of safety of 1.5).
 
-A 1 m steel cantilever with a 100 mm × 100 mm square section carries a 1,000 N downward load at its free end.
-
-- Does the tip deflect less than **L/2,000 = 0.5 mm**?
-- Does the bending stress stay below an allowable of **167 MPa** (250 MPa yield with a factor of safety of 1.5)?
-- What force must the support carry?
+**Given**
 
 <!-- fea:example:cantilever-static:setup -->
 
-## How it's modeled: beam bending
+| Quantity | Value |
+| --- | --- |
+| Length | L = 1 m, along x from the wall |
+| Cross-section | square, b = h = 100 mm |
+| Material | steel, E = 200 GPa, ν = 0.3 |
+| Support | the face at x = 0 is fixed in all directions |
+| Load | P = 1,000 N downward (−z), spread uniformly over the end face at x = L as a traction of 100 kPa |
+| Deflection limit | L/2,000 = 0.5 mm |
+| Allowable stress | 167 MPa |
 
-This is the beam from a first course in mechanics of materials. Beam theory gives the tip deflection and the bending stress directly:
+**Find**
+
+1. The tip deflection.
+2. The bending stress near the support.
+3. The force and moment the wall carries.
+4. Whether the beam meets the deflection limit and the allowable stress.
+
+## Bending of a cantilever beam
+
+### Assumptions
+
+Euler–Bernoulli beam theory assumes that plane cross-sections stay plane and normal to the deflected axis, that deflections and rotations are small, and that the material is linear elastic. The first assumption neglects shear deformation, which is reasonable for a slender beam: this one has L/h = 10, and shear adds under 1 % to its deflection.
+
+### Governing equations
+
+With $v(x)$ the downward deflection, the bending moment and the curvature are related by $M = EI\,v''$, and equilibrium of a beam element with no distributed load gives
 
 $$
-\delta = \frac{PL^3}{3EI}, \qquad \sigma = \frac{Mc}{I}, \quad M = P\,(L - x).
+EI\,\frac{d^4 v}{dx^4} = 0, \qquad 0 < x < L.
 $$
 
-The moment is largest at the support, so the stress is too, and it is highest on the top and bottom surfaces, where $c$ is largest. A hand estimate like this sets the size of answer to expect before anything runs.
-
-Finite-element analysis solves the same equilibrium without the beam assumptions. It splits the part into small elements, writes the balance of internal and applied forces for each one, and assembles them into one linear system,
+The wall fixes the deflection and the slope, and the free end carries the shear force P and no moment:
 
 $$
-\mathbf K\,\mathbf u = \mathbf f,
+v(0) = 0, \quad v'(0) = 0, \quad EI\,v''(L) = 0, \quad EI\,v'''(L) = -P.
 $$
 
-where $\mathbf K$ is the stiffness of the meshed part, $\mathbf f$ the applied loads and $\mathbf u$ the displacement of every node. Stress follows from how the displacement varies inside each element. Nothing in this system assumes a slender beam, so the same steps work for a bracket, a housing or a casting, where no textbook formula exists. The [structural physics reference](../physics/structural.md) derives it in full.
+Integrating four times and applying these conditions gives the deflected shape, the tip deflection and the moment:
 
-## Model the beam
+$$
+v(x) = \frac{P x^2 (3L - x)}{6EI}, \qquad \delta = v(L) = \frac{PL^3}{3EI}, \qquad M(x) = P\,(L - x).
+$$
 
-A model is a set of choices: what shape to analyze, what it is made of, how it is held and how it is loaded. Each choice below is one block of the study file.
+The bending stress varies linearly through the depth and is largest on the top and bottom surfaces, at a distance $c = h/2$ from the neutral axis:
+
+$$
+\sigma_x = \frac{M\,c}{I}, \qquad I = \frac{b h^3}{12}.
+$$
+
+For this beam, $I = 8.33 \times 10^{-6}\ \text{m}^4$, so $\delta = 0.200$ mm, the stress at the wall is 6.0 MPa, and the wall carries a force of 1,000 N and a moment of 1,000 N·m. These are the sizes of answer to expect.
+
+### Finite-element formulation
+
+Beam theory needs a slender, prismatic member. The finite-element method solves the equilibrium of the full three-dimensional solid, so the same steps apply to a bracket or a casting where no formula exists.
+
+**Field equations.** Linear elasticity relates the displacement $\mathbf u$, the strain and the stress:
+
+$$
+\boldsymbol\varepsilon = \tfrac12\left(\nabla\mathbf u + \nabla\mathbf u^{\mathsf T}\right), \qquad
+\boldsymbol\sigma = \mathsf C : \boldsymbol\varepsilon, \qquad
+\nabla \cdot \boldsymbol\sigma = \mathbf 0 \ \text{in } \Omega,
+$$
+
+with $\mathbf u = \mathbf 0$ on the fixed face $\Gamma_u$ and $\boldsymbol\sigma\mathbf n = \bar{\mathbf t}$ on the loaded face $\Gamma_t$. For an isotropic material, $\mathsf C$ depends only on $E$ and $\nu$.
+
+**Weak form.** Multiplying the equilibrium equation by a virtual displacement $\mathbf w$ that vanishes on $\Gamma_u$ and integrating by parts gives the principle of virtual work:
+
+$$
+\int_\Omega \boldsymbol\varepsilon(\mathbf w) : \mathsf C : \boldsymbol\varepsilon(\mathbf u)\, d\Omega
+= \int_{\Gamma_t} \mathbf w \cdot \bar{\mathbf t}\, d\Gamma
+\quad \text{for every admissible } \mathbf w.
+$$
+
+**Shape functions.** The solid is divided into ten-node tetrahedra (Tet10): four corner nodes and six mid-edge nodes. In volume coordinates $L_1, \dots, L_4$ (with $\sum L_i = 1$), the shape functions are quadratic:
+
+$$
+N_i = L_i\,(2L_i - 1) \ \text{(corners)}, \qquad N_{ij} = 4\,L_i L_j \ \text{(mid-edges)},
+$$
+
+and the displacement inside an element is interpolated from its nodal values, $\mathbf u^h = \sum_a N_a\,\mathbf u_a$. A quadratic displacement gives a strain that varies linearly across the element, which is exactly how bending strain varies through a beam's depth.
+
+**Element matrices.** Writing the strain in terms of nodal displacements, $\boldsymbol\varepsilon = \mathbf B_e \mathbf u_e$, turns the weak form into element stiffness matrices and load vectors:
+
+$$
+\mathbf K_e = \int_{\Omega_e} \mathbf B_e^{\mathsf T}\, \mathbf D\, \mathbf B_e \, d\Omega, \qquad
+\mathbf f_e = \int_{\Gamma_{t,e}} \mathbf N^{\mathsf T}\, \bar{\mathbf t}\, d\Gamma,
+$$
+
+where $\mathbf D$ is the elasticity matrix. Each $\mathbf K_e$ is 30 × 30 (ten nodes, three displacements each) and is integrated with four Gauss points.
+
+**Assembly and supports.** Summing the element contributions into global positions gives
+
+$$
+\mathbf K\,\mathbf u = \mathbf f .
+$$
+
+The fixed face prescribes $\mathbf u_c = \mathbf 0$ on its nodes. Partitioning the unknowns into free (f) and constrained (c) sets,
+
+$$
+\mathbf K_{ff}\,\mathbf u_f = \mathbf f_f, \qquad \mathbf r_c = \mathbf K_{cf}\,\mathbf u_f - \mathbf f_c ,
+$$
+
+where $\mathbf r_c$ are the support reactions. Once the part is supported, $\mathbf K_{ff}$ is symmetric positive definite, and RunMat solves it with a sparse Cholesky factorization.
+
+**Stress recovery.** Stress follows from the solved displacements, $\boldsymbol\sigma = \mathbf D\,\mathbf B_e\,\mathbf u_e$, at the four Gauss points of each element. The element stress is their volume-weighted average; the nodal stress extrapolates the Gauss-point values to the nodes and averages them between neighboring elements of the same material. The von Mises stress combines the components into one scalar, $\sigma_{vm} = \sqrt{\tfrac32\,\mathbf s : \mathbf s}$, where $\mathbf s$ is the deviatoric stress. The [structural physics reference](../physics/structural.md) covers the other structural procedures.
+
+## Solution
+
+The study file states the geometry, mesh, material, support, load and requested results. Each block below is an excerpt of `cantilever-static.fea`.
 
 ### Geometry
 
-Import the part from CAD and name the faces that carry loads and supports. The names come from the STEP file, so the study refers to "Fixed end" and "Loaded end" instead of face numbers that change when the CAD is edited.
+The beam is imported from a STEP file. Its faces carry names in the CAD, so the study refers to "Fixed end" and "Loaded end" instead of face numbers that change when the CAD is edited.
 
 ```fea source=cantilever-static.fea
 geometry beam {
@@ -55,13 +139,13 @@ geometry beam {
 }
 ```
 
-`expect exactly_one` makes `runmat check` stop with a clear message when a face is renamed or missing in the CAD.
+`expect exactly_one` makes `runmat check` stop with a located message if a face is renamed or missing.
 
 <!-- fea:example:cantilever-static:geometry -->
 
 ### Material
 
-A linear static analysis needs only stiffness: Young's modulus and Poisson's ratio. The density is there for modal or gravity studies of the same part.
+A linear static analysis needs only the elastic constants E and ν. The density is unused here; it serves gravity loads and modal studies of the same part.
 
 ```fea source=cantilever-static.fea
 material steel {
@@ -73,12 +157,9 @@ material steel {
 }
 ```
 
-### Supports and loads
+### Support and load
 
-Supports and loads are where a model most often departs from the real part, so choose them deliberately.
-
-- **Support.** `structural.fixed` holds every displacement on the end face at zero: a perfectly rigid wall. A real bolted or welded joint is a little flexible, so a fully fixed face makes the part slightly too stiff near the support and creates an artificial stress peak along its edge (see [Results](#read-stress-where-it-means-something)).
-- **Load.** The 1,000 N end load is applied as a traction, a force per area, spread over the 0.01 m² end face: 1,000 N / 0.01 m² = 100 kPa. A load spread over a face is closer to how a real load arrives than a force at a single node, which would produce an unbounded local stress.
+`structural.fixed` sets every displacement component on the end face to zero: the $\mathbf u_c = \mathbf 0$ of the formulation. The 1,000 N load is applied as a traction, 1,000 N over the 0.01 m² end face, or 100 kPa. The traction enters $\mathbf f$ through the face integral above, which spreads it over the face nodes consistently. A force at a single node would instead produce an unbounded stress beneath it.
 
 ```fea source=cantilever-static.fea
 model loaded_beam {
@@ -93,12 +174,9 @@ model loaded_beam {
 }
 ```
 
-## Mesh
+### Mesh
 
-Choose the element type first, then the size.
-
-- **Element order.** Use quadratic tetrahedra (Tet10) for parts that bend. A quadratic element represents the linear change of bending strain through the depth, so a few elements through the section are enough. A linear tetrahedron (Tet4) has constant strain, cannot bend inside one element, and makes a bending part far too stiff unless the mesh is very fine.
-- **Size.** Start coarse. A 150 mm target size on this 1 m beam gives about 2,700 nodes and solves in seconds. [Refining the mesh](#refining-the-mesh) decides whether that is fine enough.
+Quadratic tetrahedra are chosen because the part bends: one Tet10 element already represents the linear variation of strain through the depth. A linear tetrahedron (Tet4) has constant strain, cannot bend within one element, and makes a bending part too stiff unless the mesh is very fine. A 150 mm target size gives 1,510 elements and 2,727 nodes, about 8,200 unknowns.
 
 ```fea source=cantilever-static.fea
 mesh beam on geometry.beam {
@@ -112,9 +190,9 @@ mesh beam on geometry.beam {
 
 `maximum_deviation` limits how far the mesh surface may depart from the CAD surface. It matters on curved parts and has no effect on this flat-sided beam.
 
-## Run
+### Study and outputs
 
-The study block ties the pieces together and names the results to publish: the displacement field, the element stress field and a tip-deflection output.
+The study selects a static structural analysis and names the results to publish: the displacement field, the element von Mises stress, the tip deflection, and a check of the tip deflection against the 0.5 mm limit.
 
 ```fea source=cantilever-static.fea
 study cantilever_static {
@@ -133,6 +211,8 @@ study cantilever_static {
 }
 ```
 
+### Run
+
 The complete example opens in RunMat Desktop with its source, the STEP file and saved results:
 
 <!-- fea:example:cantilever-static:edit -->
@@ -144,66 +224,57 @@ runmat check cantilever-static.fea
 runmat run cantilever-static.fea
 ```
 
-`check` catches unit mistakes, broken references and missing CAD names in a few seconds, before any meshing. `run` imports the STEP file, meshes, solves, and publishes the fields and outputs. `runmat plan` prints the work a run will do, and `--json` gives structured output for scripts. See [check, plan and run](../language/index.md#check-plan-and-run).
+`check` catches unit mistakes, broken references and missing CAD names in a few seconds, before any meshing. `run` imports the STEP file, meshes, assembles and solves $\mathbf K_{ff}\mathbf u_f = \mathbf f_f$, recovers stress, and publishes the outputs. See [check, plan and run](../language/index.md#check-plan-and-run).
 
-## Results
+### Reactions
 
-Read the results in this order: reactions, then the deformed shape, then stress.
+The reactions at the fixed face sum to **[1,000 N](receipt:cantilever-static#support-reaction)** upward, equal and opposite to the applied load. Checking this first catches a load on the wrong face, a unit error or a support that restrains too much. Taking moments about the wall, the same reactions carry a moment of P L = 1,000 N·m.
 
-### Check the reactions first
-
-The reaction at the fixed face sums to **[1,000 N](receipt:cantilever-static#support-reaction)** upward, equal and opposite to the applied load. A reaction that does not balance the load means the load went on the wrong face, a unit is off, or a support restrains something it should not. The reaction also answers the third question: the support carries 1,000 N, plus the bending moment that goes with it.
-
-### Look at the deformed shape
+### Deflection
 
 <!-- fea:example:cantilever-static:displacement -->
 
-Color shows the displacement magnitude. The shape is exaggerated so the bending is visible; the scale under the figure applies to the shape only. Check that the part bends the expected way: here the free end drops and the beam curves smoothly from the support. A shape that moves the wrong way, or a part that floats off, points to a load or support mistake.
+Color shows the displacement magnitude, and the shape is exaggerated so the bending is visible. The free end drops and the beam curves smoothly from the wall, the shape $v(x)$ above. The tip moves down by **[0.2000 mm](receipt:cantilever-static#tip-deflection)**, the `tip_deflection` output, and the `deflection_limit` assessment passes.
 
-The free end moves down by **[0.2000 mm](receipt:cantilever-static#tip-deflection)**, the `tip_deflection` output: 40 % of the 0.5 mm limit.
-
-### Read stress where it means something
+### Stress
 
 <!-- fea:example:cantilever-static:stress -->
 
-Color shows the von Mises stress of each element. As beam theory predicts, the stress is highest near the support and on the top and bottom surfaces. The legend maximum, [5.39 MPa](receipt:cantilever-static#peak-element-von-mises), sits in an element right at the clamped edge.
+Color shows the element von Mises stress. As beam theory predicts, it is highest near the wall and on the top and bottom surfaces, and falls toward the free end.
 
-Don't judge the design on that peak. Where a fully fixed face meets a free surface, the idealized model has a stress singularity: the computed stress there keeps changing as the mesh is refined, because a perfectly rigid wall does not exist. It is an artifact of the support model, not a property of the part. Judge the design on the stress a short distance away, about one section depth from the support, where the result is stable. On the top surface at x = 100 mm the stress is **[5.43 MPa](receipt:cantilever-static#top-von-mises)**, about 3 % of the 167 MPa allowable.
+The largest element value, [5.39 MPa](receipt:cantilever-static#peak-element-von-mises), lies in an element on the fixed edge, and it is not a design value. Where a perfectly rigid face meets a free surface, linear elasticity predicts a stress singularity: the computed stress there keeps changing as the elements shrink, because no real support is perfectly rigid. A short distance from the wall the field is smooth. On the top surface at x = 100 mm the nodal von Mises stress is **[5.43 MPa](receipt:cantilever-static#top-von-mises)**; beam theory gives M c / I = 5.4 MPa at the same section.
 
-When the real stress at a joint matters, model the joint instead: the fillet, the bolt or the flexible support. The peak then becomes a real value that settles under refinement.
+### Answers
 
-### The decision
+1. Tip deflection: [0.2000 mm](receipt:cantilever-static#tip-deflection).
+2. Bending stress: [5.43 MPa](receipt:cantilever-static#top-von-mises) on the top surface at x = 100 mm, rising toward about 6 MPa at the wall by the linear moment distribution.
+3. Wall reaction: [1,000 N](receipt:cantilever-static#support-reaction) upward and a moment of 1,000 N·m.
+4. The deflection is 40 % of the 0.5 mm limit, and the stress is under 4 % of the 167 MPa allowable. The beam meets both criteria.
 
-| Criterion | Limit | Result |
-| --- | --- | --- |
-| Tip deflection | 0.5 mm (L/2,000) | [0.2000 mm](receipt:cantilever-static#tip-deflection) |
-| Von Mises stress, top surface at x = 100 mm | 167 MPa | [5.43 MPa](receipt:cantilever-static#top-von-mises) |
-| Support reaction | balances 1,000 N | [1,000 N](receipt:cantilever-static#support-reaction) |
+## Discussion
 
-Both criteria pass with a wide margin. The beam is governed by stiffness long before strength, which is typical of steel parts sized to a deflection limit.
+**Design meaning.** Both criteria pass, but by very different margins: the deflection uses 40 % of its limit, the stress under 4 %. The beam is governed by stiffness, which is typical of steel members sized to a deflection limit. A lighter section would reach the deflection limit long before the stress limit, so a redesign should keep $EI$ and remove material where it contributes little to $I$, for example by changing to an I-section.
 
-## Refining the mesh
+**Model limits.** The analysis is linear: a 0.2 mm deflection on a 1 m span and a stress far below yield are well inside small-strain elasticity. The fixed face is an idealization. A real welded or bolted joint is somewhat flexible, which adds deflection at the tip and removes the singular peak at the edge. When the stress at the joint matters, model the joint itself: the weld fillet, the bolts, or the flexible support. The peak then becomes a real value that settles as the mesh is refined.
 
-A finite-element answer depends on the mesh, so ask whether a finer mesh would change the quantity the decision rests on. Run the study again at a smaller `target_size` and compare. Here, refining from 150 mm to 50 mm changes the tip deflection by about 0.2 % and the stress at x = 100 mm by about 0.4 %, far less than the margins above, so the 150 mm mesh is fine enough for this decision. The peak at the clamped edge does not settle, as expected at a singularity.
-
-A practical rule: refine until the quantity of interest changes by less than 1 to 2 % between meshes, and compare quantities that converge: displacements, reactions, and stresses away from sharp corners and idealized supports. The [mesh refinement guide](./mesh-refinement.md) walks through a full sequence.
+**Refinement.** A finite-element answer depends on the mesh, so the quantities a decision rests on should be checked on a finer mesh. Refining this beam from 150 mm to 50 mm changes the tip deflection by about 0.2 % and the stress at x = 100 mm by about 0.4 %, far less than the margins above. The [mesh refinement guide](./mesh-refinement.md) works through the full sequence, and [structural validation](../validation/structural.md) compares it with beam theory.
 
 ## Try a change
 
-- **Double the load** to 200 kPa. The analysis is linear, so deflection, stress and reaction all double: one run covers every load level by scaling.
-- **Use aluminum** (`youngs_modulus = 68.9 GPa`). The deflection grows by the stiffness ratio, 200 / 68.9 ≈ 2.9 times, to about 0.58 mm, which fails the limit. The stress barely changes, because the moment at each section is set by the load alone.
-- **Switch to linear tetrahedra** (`order = linear`) and compare the tip deflection. It falls well short of the Tet10 value (Tet4 at a 50 mm target size gives [0.1625 mm](receipt:cantilever-static#tip-deflection-tet4-50)): the too-stiff behavior described under [Mesh](#mesh).
-- **Put the criteria in the study.** Outputs and assessments report a pass or fail verdict with every run, so a change that breaks a limit shows up at once:
+**Problem 1.1.** Replace the steel with aluminum (`youngs_modulus = 68.9 GPa`). Predict the tip deflection and the stress at x = 100 mm before running. Does the beam still meet the deflection limit?
+
+*Answer.* The deflection scales with 1/E, to about 0.2000 × 200 / 68.9 ≈ 0.58 mm, which exceeds the limit. The stress barely changes, because the moment at each section depends only on the load.
+
+**Problem 1.2.** Double the load to 200 kPa. Because the problem is linear, deflection, stress and reactions all double; one solution covers every load level by scaling.
+
+**Problem 1.3.** Change the mesh to linear tetrahedra (`order = linear`) at a 50 mm target size and compare the tip deflection with the Tet10 result. It falls well short, at [0.1625 mm](receipt:cantilever-static#tip-deflection-tet4-50): constant-strain elements cannot represent bending and make the beam too stiff.
+
+**Problem 1.4.** Put the stress criterion in the study, so every run reports both verdicts:
 
 ```fea fragment
 output top_stress = interpolate(analysis.static.field.node.von_mises_stress, at = [100 mm, 50 mm, 100 mm])
 output support_reaction = resultant(analysis.static.field.node.reaction_force, over = geometry.beam.region.fixed_end)
 
-assessment deflection_limit {
-    value = output.tip_deflection
-    maximum = 0.5 mm
-    evidence = authored_samples
-}
 assessment stress_allowable {
     value = output.top_stress
     maximum = 167 MPa
@@ -213,7 +284,7 @@ assessment stress_allowable {
 
 ## Next
 
-- [Mesh refinement](./mesh-refinement.md): a full convergence sequence on this beam.
-- [Modal analysis](./modal-analysis.md): the natural frequencies of a part.
-- [Structural physics reference](../physics/structural.md): the equations, elements and solver.
+- [Mesh refinement](./mesh-refinement.md): a convergence study on this beam.
+- [Modal analysis](./modal-analysis.md): natural frequencies and mode shapes.
+- [Structural physics reference](../physics/structural.md): every structural procedure and its equations.
 - [Structural validation](../validation/structural.md): this beam against beam theory across mesh sizes.
