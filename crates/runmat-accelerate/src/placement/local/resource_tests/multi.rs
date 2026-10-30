@@ -318,7 +318,12 @@ fn scoped_no_fallback_keeps_resident_work_on_provider_but_preserves_host_only_wo
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .unwrap();
-    let resident = Value::GpuTensor(allocation.handle);
+    let resident = Value::GpuTensor(
+        allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap(),
+    );
     let leaves = [&resident];
     for fallback in [false, true] {
         let runtime = RuntimeContext::new(Rc::new(
@@ -333,7 +338,10 @@ fn scoped_no_fallback_keeps_resident_work_on_provider_but_preserves_host_only_wo
         });
         let _scope = runtime.enter();
         let representation = tensor_representation(&resident, provider.precision()).unwrap();
-        let mut route = physical(19, 10_000, CandidatePreparationState::Ready);
+        // Host cost includes the real 5us synchronization plus 20us+byte
+        // transfer prior, not just its 1ns body. Make the provider slower than
+        // that entire legal alternative; no-fallback must still retain it.
+        let mut route = physical(19, 1_000_000, CandidatePreparationState::Ready);
         route.data_inputs = &leaves;
         route.source_inputs = Some(vec![representation.clone()]);
         route.prepared_inputs = Some(vec![representation]);

@@ -64,7 +64,7 @@ impl AccelProvider for CountedOwner {
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
-        self.other_downloads.fetch_add(1, Ordering::SeqCst);
+        self.integer_downloads.fetch_add(1, Ordering::SeqCst);
         self.inner.download_numeric(handle)
     }
 
@@ -72,7 +72,7 @@ impl AccelProvider for CountedOwner {
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> AccelIntegerDownloadFuture<'a> {
-        self.integer_downloads.fetch_add(1, Ordering::SeqCst);
+        self.other_downloads.fetch_add(1, Ordering::SeqCst);
         self.inner.download_integer(handle)
     }
 }

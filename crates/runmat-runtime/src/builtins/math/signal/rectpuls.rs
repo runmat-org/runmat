@@ -591,7 +591,6 @@ mod tests {
                 &'a self,
                 handle: &'a GpuTensorHandle,
             ) -> AccelIntegerDownloadFuture<'a> {
-                self.integer_downloads.fetch_add(1, Ordering::SeqCst);
                 self.inner.download_integer(handle)
             }
             fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
@@ -601,6 +600,7 @@ mod tests {
                 &'a self,
                 handle: &'a GpuTensorHandle,
             ) -> AccelNumericDownloadFuture<'a> {
+                self.integer_downloads.fetch_add(1, Ordering::SeqCst);
                 self.inner.download_numeric(handle)
             }
         }

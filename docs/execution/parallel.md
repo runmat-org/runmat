@@ -168,7 +168,9 @@ Distributed values and Composites belong to one pool generation. Closing or resi
 
 A worker error retains its identifier, message, call stack, and source location when it returns to the coordinating process or browser. The coordinator cancels sibling chunks after a terminal loop failure and does not publish partially assembled loop outputs.
 
-Compiler-approved `parfor` chunks use infrastructure-only retry. A worker or transport failure may be retried when the scheduler can prove that no successful result was committed. Program errors are not retried. Lost work that cannot be classified safely becomes indeterminate rather than being reported as success.
+Native Direct attempts use their admitted invocation environment snapshot. Configured cluster Graph attempts have an empty invocation environment; neither ambient worker variables nor selected-unit packaging metadata supplies invocation values. Unconfigured standalone Graph execution retains its local VM environment semantics.
+
+Compiler-approved `parfor` chunks use infrastructure-only retry when the scheduler has a classified failure that permits replay. Program errors are not retried. Losing a route or replacing a driver fences result publication but does not prove that physical work stopped: the original attempt and reservation remain owned, and the task becomes indeterminate even if no result was committed. An authentic original-owner retirement certificate can release capacity; it does not authorize replay of that indeterminate operation. Separately admitted new work may use available capacity under its own identity.
 
 Cancellation is scoped. Cancelling a future, closing a pool, interrupting the parent execution, or cancelling a remote job propagates through the scheduler to its active worker attempts. Native calls and provider work remain cooperative and stop when they reach a cancellation boundary. RunMat reports a requested cancellation separately from worker loss, execution-infrastructure failure, and an error raised by the program.
 

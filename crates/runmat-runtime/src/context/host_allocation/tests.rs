@@ -1654,15 +1654,29 @@ fn finite_requires_its_managed_owner_and_cancellation_or_rebind_revokes_new_clai
     for foreign in [false, true] {
         let _ambient = foreign.then(|| unbounded.enter());
         let error = product(&runtime).expect_err("explicit cancelled sparse owner");
-        assert!(matches!(
-            error
-                .source
-                .as_deref()
-                .and_then(|cause| cause.downcast_ref::<crate::RuntimeError>())
-                .and_then(|cause| cause.source.as_deref())
-                .and_then(|cause| cause.downcast_ref::<crate::execution::ExecutionServiceError>()),
-            Some(crate::execution::ExecutionServiceError::Cancelled)
-        ));
+        assert_eq!(
+            error.identifier(),
+            Some(format!("{}:Cancelled", runtime.error_namespace()).as_str())
+        );
+        assert_eq!(
+            error.failure_origin(),
+            crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation
+        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        let mut typed_cancelled = false;
+        loop {
+            typed_cancelled |= matches!(
+                cause.downcast_ref::<crate::execution::ExecutionServiceError>(),
+                Some(crate::execution::ExecutionServiceError::Cancelled)
+            );
+            let Some(next) = cause.source() else { break };
+            cause = next;
+        }
+        assert!(
+            typed_cancelled,
+            "original typed cancellation cause must survive any presentation wrapper"
+        );
     }
 
     let fresh = runtime.with_cancellation_token(CancellationSource::new().token());

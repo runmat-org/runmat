@@ -222,12 +222,25 @@ fn prepare_host_unit_route<'a>(
         ));
     }
 
-    let mut session = runmat_core::RunMatSession::with_options(
-        runtime_config
-            .as_ref()
-            .map_or(true, |config| config.jit.enabled),
-        false,
-    )
+    // The outer foreground continuation must own the same frozen environment
+    // as the VM invocation. Same-session nested calls inherit that outer
+    // context; seeding it from the process would replace the invocation's
+    // environment when entering a callable.
+    let enable_jit = runtime_config
+        .as_ref()
+        .map_or(true, |config| config.jit.enabled);
+    let mut session = match &request {
+        HostUnitRequest::Direct(request) => runmat_core::RunMatSession::with_frozen_environment(
+            enable_jit,
+            false,
+            request.environment.entries().to_vec(),
+        ),
+        // Graph scheduling admits an empty invocation environment, not access
+        // to ambient worker variables or selected-unit packaging metadata.
+        HostUnitRequest::Graph(_) => {
+            runmat_core::RunMatSession::with_frozen_environment(enable_jit, false, Vec::new())
+        }
+    }
     .map_err(|error| {
         failure(format!(
             "failed to initialize foreign execution session: {error}"

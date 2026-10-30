@@ -67,14 +67,25 @@ fn launch(pool: &RemotePoolDriver) -> runmat_execution_runner::AttemptRequest {
             state: PoolState::Ready,
         })
         .unwrap();
-    driver
+    let mut actions = driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
             host: crate::test_support::host_inventory(),
             id: WorkerId::derive(&[b"checkpoint-worker"]),
             pool_id: pool.pool_id,
             resources: inventory(1000),
         }))
-        .unwrap()
+        .unwrap();
+    // Restore deliberately discards the old pool's software ceiling. Derive
+    // it from this newly registered fixture worker, as production membership
+    // does, rather than resurrecting historical readiness from a checkpoint.
+    actions.extend(
+        driver
+            .handle(DriverCommand::RefreshPoolCapabilities {
+                pool_id: pool.pool_id,
+            })
+            .unwrap(),
+    );
+    actions
         .into_iter()
         .find_map(|action| match action {
             DriverAction::Launch(attempt) => Some(attempt),
@@ -742,7 +753,7 @@ async fn rejected_mixed_graph_does_not_consume_restored_waiter() {
 }
 
 #[tokio::test]
-async fn cold_active_attempt_retry_preserves_admission_and_fences_stale_success() {
+async fn cold_active_attempt_preserves_admission_and_reservations_without_replay() {
     use runmat_execution::state::{AttemptState, TaskState};
     use runmat_execution::task::RetryPolicy;
 
@@ -759,15 +770,11 @@ async fn cold_active_attempt_retry_preserves_admission_and_fences_stale_success(
         let _original_waiter = pool.submit(task.clone(), program.clone()).unwrap();
         let old_attempt = launch(&pool);
         let checkpoint = pool.capture_checkpoint(4).unwrap();
-        let bundle = Arc::clone(
-            &pool
-                .direct_bundle
-                .as_ref()
-                .expect("direct fixture bundle")
-                .bytes,
-        );
+        let saved_pool = &checkpoint.scheduler.snapshot.pools[&pool.pool_id];
+        let allocation = saved_pool.allocated.clone();
+        let worker_allocation = saved_pool.workers[&old_attempt.worker_id].allocated.clone();
+        let bundle = Arc::clone(&pool.direct_bundle.as_ref().unwrap().bytes);
         drop(pool);
-
         let restored = RemotePoolDriver::restore_checkpoint(
             checkpoint.clone(),
             authority(&checkpoint),
@@ -775,127 +782,77 @@ async fn cold_active_attempt_retry_preserves_admission_and_fences_stale_success(
             |_| panic!("inline task has no object inventory"),
         )
         .unwrap();
-        let snapshot = restored.snapshot();
-        assert_eq!(snapshot.driver_fence, 51);
-        assert_eq!(
-            snapshot.tasks[&task.request.id].submission,
-            original_submission
-        );
-        assert_eq!(snapshot.tasks[&task.request.id].attempt_count, 1);
-        assert_eq!(snapshot.attempts[&old_attempt.id].request, old_attempt);
-        assert_eq!(snapshot.attempts[&old_attempt.id].state, AttemptState::Lost);
 
-        // Reconstructed host policy must not extend the persisted deadline or budget.
+        // Reattachment cannot extend the original admission, including retry budget.
         task.request.deadline_unix_millis =
             Some(original_submission.request.deadline_unix_millis.unwrap() + 3_600_000);
         task.request.retry = RetryPolicy::ExplicitlyIdempotent { max_attempts: 99 };
         task.priority = 0;
         let completion = restored.submit(task.clone(), program).unwrap();
+        assert!(matches!(
+            completion.wait().await,
+            Err(crate::NativeProgramFailure::WorkerLost(_))
+        ));
+
+        let stale = AttemptSuccess::new(
+            &old_attempt,
+            vec![ValuePayload::Inline(Box::new(InlineValue::String(
+                "stale".into(),
+            )))],
+            Vec::new(),
+            13,
+            0,
+            0,
+        )
+        .unwrap();
+        restored.apply_report(BackendReport::for_request(
+            &old_attempt,
+            AttemptReport::Succeeded { result: stale },
+        ));
+        let snapshot = restored.snapshot();
+        assert_eq!(snapshot.driver_fence, 51);
+        let task_record = &snapshot.tasks[&task.request.id];
+        assert_eq!(task_record.submission, original_submission);
+        assert_eq!(task_record.state, TaskState::Indeterminate);
+        assert_eq!(task_record.attempt_count, 1);
+        assert_eq!(task_record.active_attempt, Some(old_attempt.id));
+        assert!(task_record.committed.is_none());
+        let attempt = &snapshot.attempts[&old_attempt.id];
+        assert_eq!(attempt.request, old_attempt);
+        assert_eq!(attempt.state, AttemptState::Assigned);
+        assert!(attempt.terminal.is_none());
+        let uncertainty = attempt.unverified_retirement.as_ref().unwrap();
         assert_eq!(
-            restored.snapshot().tasks[&task.request.id].submission,
-            original_submission
+            uncertainty.diagnostic,
+            "driver authority replaced before a retirement certificate"
+        );
+        assert!(uncertainty.retired_at_driver_millis.is_none());
+        assert_eq!(snapshot.pools[&restored.pool_id].allocated, allocation);
+        assert_eq!(
+            snapshot.pools[&restored.pool_id].workers[&old_attempt.worker_id].allocated,
+            worker_allocation
         );
 
-        if retry != (RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 }) {
-            let expected = if retry == RetryPolicy::Never {
-                TaskState::Indeterminate
-            } else {
-                TaskState::Failed
-            };
-            assert_eq!(restored.snapshot().tasks[&task.request.id].state, expected);
-            assert!(completion.wait().await.is_err());
-            let actions = restored
-                .driver
-                .lock()
-                .unwrap()
-                .handle(DriverCommand::RegisterWorker(WorkerSpec {
-                    host: crate::test_support::host_inventory(),
-                    id: old_attempt.worker_id,
-                    pool_id: restored.pool_id,
-                    resources: inventory(1000),
-                }))
-                .unwrap();
-            assert!(!actions
-                .iter()
-                .any(|action| matches!(action, DriverAction::Launch(_))));
-            assert_eq!(restored.snapshot().attempts.len(), 1);
-            continue;
-        }
-
-        assert_eq!(
-            restored.snapshot().tasks[&task.request.id].state,
-            TaskState::Ready
-        );
-        let actions = restored
-            .driver
-            .lock()
-            .unwrap()
+        let mut driver = restored.driver.lock().unwrap();
+        assert!(driver
             .handle(DriverCommand::RegisterWorker(WorkerSpec {
                 host: crate::test_support::host_inventory(),
                 id: old_attempt.worker_id,
                 pool_id: restored.pool_id,
                 resources: inventory(1000),
             }))
-            .unwrap();
-        let retries: Vec<_> = actions
-            .into_iter()
-            .filter_map(|action| match action {
-                DriverAction::Launch(attempt) => Some(attempt),
-                _ => None,
+            .is_err());
+        let actions = driver
+            .handle(DriverCommand::Tick {
+                now_millis: snapshot.now_millis,
             })
-            .collect();
-        assert_eq!(retries.len(), 1);
-        let new_attempt = &retries[0];
-        assert_eq!(new_attempt.driver_fence, 51);
-        assert_ne!(new_attempt.id, old_attempt.id);
-        assert_eq!(new_attempt.task, original_submission.request);
-        assert_eq!(restored.snapshot().tasks[&task.request.id].attempt_count, 2);
-        let success = |attempt: &runmat_execution_runner::AttemptRequest, label: &str| {
-            AttemptSuccess::new(
-                attempt,
-                vec![ValuePayload::Inline(Box::new(InlineValue::String(
-                    label.into(),
-                )))],
-                Vec::new(),
-                13,
-                0,
-                0,
-            )
-            .unwrap()
-        };
-        let mut waiting = Box::pin(completion.wait());
-        restored.apply_report(BackendReport::for_request(
-            &old_attempt,
-            AttemptReport::Succeeded {
-                result: success(&old_attempt, "stale"),
-            },
-        ));
-        assert!(restored.snapshot().tasks[&task.request.id]
-            .committed
-            .is_none());
-        assert_eq!(
-            restored.snapshot().tasks[&task.request.id].active_attempt,
-            Some(new_attempt.id)
-        );
-        tokio::select! {
-            biased;
-            result = &mut waiting => panic!("stale success resolved the waiter: {result:?}"),
-            () = std::future::ready(()) => {}
-        }
-        let accepted = success(new_attempt, "authoritative retry");
-        restored.apply_report(BackendReport::for_request(
-            new_attempt,
-            AttemptReport::Succeeded {
-                result: accepted.clone(),
-            },
-        ));
-        assert_eq!(waiting.await.unwrap(), accepted);
-        let snapshot = restored.snapshot();
-        let commit = snapshot.tasks[&task.request.id].committed.as_ref().unwrap();
-        assert_eq!(commit.attempt_id, new_attempt.id);
-        assert_eq!(commit.driver_fence, 51);
-        assert_eq!(commit.result.resources(), accepted.resources());
-        assert_eq!(snapshot.attempts.len(), 2);
-        assert_eq!(snapshot.attempts[&old_attempt.id].state, AttemptState::Lost);
+            .unwrap();
+        assert!(!actions
+            .iter()
+            .any(|action| matches!(action, DriverAction::Launch(_))));
+        assert_eq!(driver.snapshot().attempts.len(), 1);
+        // Original-owner retirement releases capacity but not replay authority;
+        // that trusted boundary is covered by Runner's retirement_authority.rs
+        // and checkpoint_recovery.rs, not a fabricated remote certificate here.
     }
 }

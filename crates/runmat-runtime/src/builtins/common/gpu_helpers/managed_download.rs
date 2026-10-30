@@ -17,6 +17,7 @@ mod stage;
 
 pub use adoption::adopt_settled_native_download;
 pub use quote::{quote_exact_native_download, quote_exact_native_readback};
+pub(crate) use stage::download_exact_native_readback_with_diagnostics;
 pub use stage::{download_exact_native, download_exact_native_readback};
 
 /// Declared source-only host inspection, not a compute fallback. Reuses the
@@ -47,8 +48,12 @@ pub(crate) async fn download_readback_value_with_admission_in_context(
     if HostAllocationReceipt::policy(runtime).map_err(allocation)?
         == HostAllocationPolicy::Unbounded
     {
-        let host =
-            super::download_numeric_readback_preserving_residency_async(readback, None).await?;
+        let host = super::download_numeric_readback_preserving_residency_async(
+            readback,
+            None,
+            super::NumericDownloadDiagnostic::Gpu,
+        )
+        .await?;
         return super::value_from_numeric_download(
             host,
             runmat_accelerate_api::handle_is_logical(readback.source()),

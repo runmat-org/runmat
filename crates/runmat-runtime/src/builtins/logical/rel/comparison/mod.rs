@@ -87,7 +87,14 @@ async fn gather(value: Value, operator: RelationalOperator) -> crate::BuiltinRes
     if matches!(value, Value::GpuTensor(_)) {
         gpu_helpers::gather_value_async(&value)
             .await
-            .map_err(|_| runtime_error(operator, ComparisonError::InvalidInput))
+            .map_err(|mut error| {
+                // Transfer/control failures are not invalid numeric/text
+                // inputs. Keep their identity, origin, retry and cause chain.
+                if error.context.builtin.is_none() {
+                    error.context.builtin = Some(operator.name().into());
+                }
+                error
+            })
     } else {
         Ok(value)
     }

@@ -20,13 +20,17 @@ pub(super) fn resident_owners(
     initial: Option<&Value>,
     dimension: Option<&Value>,
 ) -> BuiltinResult<()> {
-    for (value, descriptor) in [
+    let roles = [
         (Some(numerator), &FILTER_ERROR_INVALID_COEFFICIENTS),
         (Some(denominator), &FILTER_ERROR_INVALID_COEFFICIENTS),
         (Some(signal), &FILTER_ERROR_INVALID_SIGNAL),
         (initial, &FILTER_ERROR_INVALID_INITIAL_STATE),
         (dimension, &FILTER_ERROR_INVALID_DIMENSION),
-    ] {
+    ];
+    // Validate ALL exact sources before evaluating compute policy for any
+    // role. A later stale/foreign source must dominate an earlier policy-only
+    // decline, with the domain's original per-role diagnostic intact.
+    for (value, descriptor) in roles {
         if let Some(value @ Value::GpuTensor(handle)) = value {
             crate::builtins::common::validation::validate_resident_metadata(value).map_err(
                 |source| {
@@ -39,7 +43,6 @@ pub(super) fn resident_owners(
                     error
                 },
             )?;
-            super::super::resident_output::owner(handle, || filter_error(descriptor))?;
             handle
                 .view()
                 .validate(handle.physical())
@@ -51,6 +54,11 @@ pub(super) fn resident_owners(
                         runmat_accelerate_api::ProviderExecutionError::from_source(source),
                     )
                 })?;
+        }
+    }
+    for (value, descriptor) in roles {
+        if let Some(Value::GpuTensor(handle)) = value {
+            gpu_helpers::require_resident_compute_owner(handle, || filter_error(descriptor))?;
         }
     }
     Ok(())

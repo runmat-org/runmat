@@ -1319,10 +1319,35 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     );
     assert_eq!(cancellations.load(Ordering::SeqCst), 1);
     let snapshot = pool.snapshot();
-    assert!(!snapshot.pools[&pool_id]
-        .allocated
-        .leased_accelerator_domains
-        .is_empty());
+    // Pool accounting aggregates scalar reservations; exact device leases
+    // belong to workers and must remain reserved independently of cancellation
+    // delivery or an ordinary Cancelled response.
+    assert_eq!(snapshot.pools[&pool_id].active_attempts, 1);
+    assert_eq!(snapshot.pools[&pool_id].allocated.cpu_millicores, 1_000);
+    assert_eq!(
+        snapshot.pools[&pool_id].allocated.memory_bytes,
+        snapshot.tasks[&task_id]
+            .submission
+            .request
+            .resources
+            .memory_bytes
+    );
+    assert_eq!(
+        snapshot.pools[&pool_id].allocated.scratch_bytes,
+        snapshot.tasks[&task_id]
+            .submission
+            .request
+            .resources
+            .scratch_bytes
+    );
+    assert_eq!(
+        snapshot.tasks[&task_id].active_attempt,
+        Some(
+            pool.task_execution_evidence(task_id).unwrap().attempts[0]
+                .request
+                .id
+        )
+    );
     assert!(snapshot.pools[&pool_id]
         .workers
         .values()
@@ -1482,7 +1507,7 @@ async fn pinned_quic_ready_v1_upgrades_only_the_opted_in_worker() {
 }
 
 #[tokio::test]
-async fn lost_route_is_fenced_before_retry_and_same_allocation_can_reconnect() {
+async fn lost_route_retains_unknown_attempt_and_blocks_same_allocation_reconnect() {
     let scope_id = ExecutionScopeId::derive(&[b"remote-route-recovery-scope"]);
     let pool_id = PoolId::derive(&[b"remote-route-recovery-pool"]);
     let bundle = Arc::new(executable_bundle().await.2);
@@ -1491,9 +1516,9 @@ async fn lost_route_is_fenced_before_retry_and_same_allocation_can_reconnect() {
         PoolSpec {
             id: pool_id,
             min_workers: 1,
-            max_workers: 1,
-            max_in_flight: 1,
-            resource_limit: inventory(1_000),
+            max_workers: 2,
+            max_in_flight: 2,
+            resource_limit: inventory(2_000),
         },
         21,
         bundle.as_ref().clone(),
@@ -1517,7 +1542,7 @@ async fn lost_route_is_fenced_before_retry_and_same_allocation_can_reconnect() {
     let task_id = TaskId::derive(&[b"route-recovery-task"]);
     let mut retrying = submission(scope_id, pool_id, task_id, artifact_id);
     retrying.request.retry = RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 };
-    let completion = pool.submit(retrying, program).unwrap();
+    let completion = pool.submit(retrying, program.clone()).unwrap();
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
@@ -1533,24 +1558,95 @@ async fn lost_route_is_fenced_before_retry_and_same_allocation_can_reconnect() {
     .unwrap();
     assert!(!pool.worker_is_ready_and_routed(worker.id).await);
 
+    let failure = tokio::time::timeout(Duration::from_secs(1), completion.wait())
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(&failure, NativeProgramFailure::WorkerLost(message)
+        if message == "native execution protocol failed: fixture route failed"));
+    let before = pool.snapshot();
+    let attempt = &before.attempts[&before.tasks[&task_id].active_attempt.unwrap()];
+    assert!(attempt.terminal.is_none());
+    assert!(attempt
+        .unverified_retirement
+        .as_ref()
+        .unwrap()
+        .retired_at_driver_millis
+        .is_none());
+    assert_eq!(
+        before.tasks[&task_id].state,
+        runmat_execution::state::TaskState::Indeterminate
+    );
+    assert_eq!(before.tasks[&task_id].attempt_count, 1);
+    assert!(before.tasks[&task_id].committed.is_none());
+    assert_eq!(
+        before.pools[&pool_id].workers[&worker.id].active_attempts,
+        1
+    );
+    assert_eq!(
+        before.pools[&pool_id].workers[&worker.id]
+            .allocated
+            .cpu_millicores,
+        1_000
+    );
+    let reconnect = pool
+        .add_worker(Arc::new(FailingRouteWorker {
+            spec: worker.clone(),
+            bundle: Arc::clone(&bundle),
+            fail_execute: false,
+            fail_drain: false,
+        }))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(reconnect, crate::NativeExecutionError::Configuration(message)
+        if message.contains("already registered"))
+    );
+    assert!(!pool.worker_is_ready_and_routed(worker.id).await);
+
+    // Distinct inventory is separately admitted; it cannot revive the old
+    // TaskId or reuse the uncertain worker's reservation.
+    let healthy = WorkerSpec {
+        id: WorkerId::derive(&[b"route-independent-worker"]),
+        ..worker.clone()
+    };
     pool.add_worker(Arc::new(FailingRouteWorker {
-        spec: worker.clone(),
+        spec: healthy.clone(),
         bundle,
         fail_execute: false,
         fail_drain: false,
     }))
     .await
     .unwrap();
-    let success = tokio::time::timeout(Duration::from_secs(1), completion.wait())
-        .await
-        .unwrap()
-        .unwrap();
+    let new_id = TaskId::derive(&[b"route-independent-task"]);
+    let success = tokio::time::timeout(
+        Duration::from_secs(1),
+        pool.submit(submission(scope_id, pool_id, new_id, artifact_id), program)
+            .unwrap()
+            .wait(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(success.result_objects().is_empty());
-    assert_eq!(pool.snapshot().tasks[&task_id].attempt_count, 2);
+    let after = pool.snapshot();
+    assert_eq!(after.tasks[&task_id], before.tasks[&task_id]);
+    assert_eq!(after.attempts[&attempt.request.id], *attempt);
+    assert_eq!(
+        after.pools[&pool_id].workers[&worker.id].allocated,
+        before.pools[&pool_id].workers[&worker.id].allocated
+    );
+    assert_eq!(after.tasks[&new_id].attempt_count, 1);
+    assert_eq!(
+        after.attempts[&after.tasks[&new_id].committed.as_ref().unwrap().attempt_id]
+            .request
+            .worker_id,
+        healthy.id
+    );
 }
 
 #[tokio::test]
-async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
+async fn late_result_from_unknown_work_cannot_replace_or_collect_a_distinct_commit() {
     let scope_id = ExecutionScopeId::derive(&[b"remote-stale-result-scope"]);
     let pool_id = PoolId::derive(&[b"remote-stale-result-pool"]);
     let bundle = Arc::new(executable_bundle().await.2);
@@ -1559,9 +1655,9 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
         PoolSpec {
             id: pool_id,
             min_workers: 1,
-            max_workers: 1,
-            max_in_flight: 1,
-            resource_limit: inventory(1_000),
+            max_workers: 2,
+            max_in_flight: 2,
+            resource_limit: inventory(2_000),
         },
         23,
         bundle.as_ref().clone(),
@@ -1574,14 +1670,15 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
         resources: inventory(1_000),
     };
     let old_active = Arc::new(AtomicUsize::new(0));
+    let old_gate = Arc::new(ConcurrencyGate::new(2));
     pool.add_worker(Arc::new(FakeWorker {
         node: "node-stale-result".into(),
         spec: worker.clone(),
         installs: Arc::new(AtomicUsize::new(0)),
         active: Arc::clone(&old_active),
         maximum_active: Arc::new(AtomicUsize::new(0)),
-        start_gate: None,
-        delay: Duration::from_millis(150),
+        start_gate: Some(old_gate),
+        delay: Duration::ZERO,
         cancellations: Arc::new(AtomicUsize::new(0)),
         cancellation_signal: Arc::new(Notify::new()),
         cancel_ack_gate: None,
@@ -1595,7 +1692,7 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
     let task_id = TaskId::derive(&[b"stale-result-task"]);
     let mut retrying = submission(scope_id, pool_id, task_id, artifact_id);
     retrying.request.retry = RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 };
-    let completion = pool.submit(retrying, program).unwrap();
+    let completion = pool.submit(retrying, program.clone()).unwrap();
     tokio::time::timeout(Duration::from_secs(1), async {
         while old_active.load(Ordering::SeqCst) == 0 {
             tokio::task::yield_now().await;
@@ -1605,58 +1702,126 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
     .unwrap();
 
     pool.remove_worker(worker.id, true).await.unwrap();
-    let replacement_worker = WorkerSpec {
+    assert!(!pool.worker_is_ready_and_routed(worker.id).await);
+    let failure = tokio::time::timeout(Duration::from_secs(1), completion.wait())
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(failure, NativeProgramFailure::WorkerLost(_)));
+    let before = pool.snapshot();
+    let old_attempt = before.attempts[&before.tasks[&task_id].active_attempt.unwrap()]
+        .request
+        .clone();
+    assert_eq!(
+        before.tasks[&task_id].state,
+        runmat_execution::state::TaskState::Indeterminate
+    );
+    assert!(before.tasks[&task_id].committed.is_none());
+    assert_eq!(
+        before.pools[&pool_id].workers[&worker.id].active_attempts,
+        1
+    );
+    assert_eq!(
+        before.pools[&pool_id].workers[&worker.id]
+            .allocated
+            .cpu_millicores,
+        1_000
+    );
+
+    // Independent capacity and identity, not a retry of the unknown operation.
+    let new_worker = WorkerSpec {
         host: crate::test_support::host_inventory(),
-        id: WorkerId::derive(&[b"replacement-result-worker"]),
+        id: WorkerId::derive(&[b"independent-result-worker"]),
         pool_id,
         resources: inventory(1_000),
     };
-    pool.add_worker(Arc::new(FakeWorker {
-        node: "node-stale-result".into(),
-        spec: replacement_worker.clone(),
-        installs: Arc::new(AtomicUsize::new(0)),
-        active: Arc::new(AtomicUsize::new(0)),
-        maximum_active: Arc::new(AtomicUsize::new(0)),
-        start_gate: None,
-        delay: Duration::ZERO,
-        cancellations: Arc::new(AtomicUsize::new(0)),
-        cancellation_signal: Arc::new(Notify::new()),
-        cancel_ack_gate: None,
-        drains: Arc::new(AtomicUsize::new(0)),
+    let bytes = Arc::new(b"committed shared object".to_vec());
+    let reference = object_reference(&pool.value_scope, &bytes);
+    pool.add_worker(Arc::new(ResultObjectWorker {
+        spec: new_worker.clone(),
         bundle,
-        described: None,
+        reference: reference.clone(),
+        bytes,
+        corrupt_download: false,
     }))
     .await
     .unwrap();
-    let success = completion.wait().await.unwrap();
+    let new_id = TaskId::derive(&[b"independent-result-task"]);
+    let success = tokio::time::timeout(
+        Duration::from_secs(1),
+        pool.submit(
+            submission(scope_id, pool_id, new_id, artifact_id),
+            program.clone(),
+        )
+        .unwrap()
+        .wait(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(success.result_objects(), std::slice::from_ref(&reference));
+    let committed = pool.snapshot().tasks[&new_id].committed.clone().unwrap();
+    assert_eq!(committed.driver_fence, old_attempt.driver_fence);
     assert_eq!(
-        success.values().expect("value result").0,
-        [ValuePayload::Inline(Box::new(InlineValue::String(
-            replacement_worker.id.to_string().into(),
-        )))],
-        "the retry result must come from the replacement route"
+        pool.snapshot().attempts[&committed.attempt_id]
+            .request
+            .worker_id,
+        new_worker.id
     );
-    let committed_attempt = pool.snapshot().tasks[&task_id]
-        .committed
+    assert!(pool.execution_object(&reference).unwrap().is_some());
+
+    // Inject the original route's late result at the actual backend-report
+    // boundary. Its object overlaps the independently committed result, so GC
+    // must preserve that commit while rejecting old publication. No sleep or
+    // fabricated retirement proof is needed to order this observation.
+    let stale = AttemptSuccess::new(
+        &old_attempt,
+        vec![ValuePayload::Object(Box::new(reference.clone()))],
+        vec![reference.clone()],
+        1,
+        reference.encoded_length,
+        0,
+    )
+    .unwrap();
+    pool.apply_report(runmat_execution_runner::port::BackendReport::for_request(
+        &old_attempt,
+        AttemptReport::Succeeded { result: stale },
+    ));
+    let after = pool.snapshot();
+    assert_eq!(after.tasks[&new_id].committed.as_ref(), Some(&committed));
+    assert_eq!(after.tasks[&new_id].attempt_count, 1);
+    assert_eq!(after.tasks[&task_id], before.tasks[&task_id]);
+    assert_eq!(after.tasks[&task_id].attempt_count, 1);
+    let old_record = &after.attempts[&old_attempt.id];
+    assert!(old_record.terminal.is_none());
+    assert!(old_record
+        .unverified_retirement
         .as_ref()
         .unwrap()
-        .attempt_id;
-
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    let snapshot = pool.snapshot();
-    assert_eq!(snapshot.tasks[&task_id].attempt_count, 2);
+        .retired_at_driver_millis
+        .is_none());
     assert_eq!(
-        snapshot.tasks[&task_id]
-            .committed
-            .as_ref()
-            .unwrap()
-            .attempt_id,
-        committed_attempt
+        after.pools[&pool_id].workers[&worker.id].allocated,
+        before.pools[&pool_id].workers[&worker.id].allocated
     );
-    assert_eq!(
-        snapshot.tasks[&task_id].state,
-        runmat_execution::state::TaskState::Succeeded
-    );
+    assert_eq!(after.pools[&pool_id].active_attempts, 1);
+    assert!(pool.execution_object(&reference).unwrap().is_some());
+    assert_eq!(old_active.load(Ordering::SeqCst), 1);
+    assert!(pool
+        .submit(
+            submission(scope_id, pool_id, task_id, artifact_id),
+            program.clone()
+        )
+        .is_err());
+    let reused = pool
+        .submit(submission(scope_id, pool_id, new_id, artifact_id), program)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    assert_eq!(reused, success);
+    assert_eq!(pool.snapshot().tasks[&new_id].attempt_count, 1);
+    assert_eq!(pool.snapshot().attempts.len(), 2);
 }
 
 #[tokio::test]
@@ -2263,6 +2428,7 @@ async fn execute_encrypted_spmd_program(
             program.bundle,
         )
         .unwrap();
+        let mut owned_channels = Vec::with_capacity(workers.len());
         for (ordinal, (worker, authority, certificate)) in [
             (workers[0].clone(), first_authority, first_certificate),
             (workers[1].clone(), second_authority, second_certificate),
@@ -2289,7 +2455,8 @@ async fn execute_encrypted_spmd_program(
             )
             .await
             .unwrap();
-            pool.add_worker(channel).await.unwrap();
+            pool.add_worker(channel.clone()).await.unwrap();
+            owned_channels.push(channel);
         }
         let gang = GangHandle {
             id: GangId::derive(&[b"remote-spmd-gang"]),
@@ -2314,12 +2481,34 @@ async fn execute_encrypted_spmd_program(
             })
             .unwrap();
         let result = completion.wait().await;
-        for worker in workers {
+        // A failed rank may fence a route without certifying physical
+        // retirement. Test-owned transport teardown is independent of that
+        // scheduler evidence: drain the actual channels even when membership
+        // removal must retain Lost/active reservations.
+        for (worker, channel) in workers.into_iter().zip(owned_channels) {
             // A rank fault may already fence its route. Cleanup must not
             // turn Lost back into Draining or release unresolved capacity.
             let lost = pool.snapshot().pools[&pool_id].workers[&worker.id].lifecycle
                 == runmat_execution_runner::pool::WorkerLifecycle::Lost;
+            let retained = lost.then(|| {
+                let snapshot = pool.snapshot();
+                let worker = &snapshot.pools[&pool_id].workers[&worker.id];
+                (worker.allocated.clone(), worker.active_attempts)
+            });
+            if lost {
+                channel.drain().await.unwrap();
+            }
             pool.remove_worker(worker.id, lost).await.unwrap();
+            if let Some((allocation, attempts)) = retained {
+                let snapshot = pool.snapshot();
+                let worker = &snapshot.pools[&pool_id].workers[&worker.id];
+                assert_eq!(worker.allocated, allocation);
+                assert_eq!(worker.active_attempts, attempts);
+                assert_eq!(
+                    worker.lifecycle,
+                    runmat_execution_runner::pool::WorkerLifecycle::Lost
+                );
+            }
         }
         result
     };

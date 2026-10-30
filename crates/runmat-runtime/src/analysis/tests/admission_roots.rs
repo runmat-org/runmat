@@ -137,17 +137,27 @@ impl StructuralStudyPlacementExecutor for RejectExecution {
 #[test]
 fn local_study_placement_and_meshing_preserve_provider_errors_without_billing() {
     let _host_state = analysis_test_guard();
-    let _meshing = crate::meshing::replace_meshing_execution_provider(Some(Arc::new(|_| {
+    let meshing_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls = Arc::clone(&meshing_calls);
+    let _meshing = crate::meshing::replace_meshing_execution_provider(Some(Arc::new(move |_| {
+        calls.fetch_add(1, Ordering::SeqCst);
         Err("offline local meshing provider reached".into())
     })))
     .unwrap();
     let host = Arc::new(DenyingHost::default());
     let context = FeaRunAdmissionContext::new(host.clone());
-    let study = sample_linear_static_study_spec();
+    // Bind the model to a canonical source identity before provider admission.
+    // The rejecting fixture never opens source bytes or produces a mesh.
+    let mut geometry = closed_cube_geometry_asset();
+    geometry.source.sha256 = hex::encode(
+        runmat_execution::Digest::sha256(b"offline local meshing admission fixture").bytes(),
+    );
+    let study = linear_static_study_spec_for_geometry(geometry);
     let sweep = AnalysisStudySweepSpec {
         sweep_id: "denied_roots".into(),
         studies: vec![study.clone()],
-        fail_fast: false,
+        // This cohort exercises terminal refusals, not collected sweep outcomes.
+        fail_fast: true,
     };
     let operation_context = || OperationContext::new(None, None);
     for (name, error) in context.run_sync(|| {
@@ -173,6 +183,7 @@ fn local_study_placement_and_meshing_preserve_provider_errors_without_billing() 
     }) {
         assert_not_billing_denied(error, name);
     }
+    assert_eq!(meshing_calls.load(Ordering::SeqCst), 3);
     let placement_errors = pollster::block_on(context.run_future(async {
         [
             analysis_execute_structural_study_with_placement(

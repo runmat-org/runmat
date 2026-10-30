@@ -15,19 +15,22 @@ use runmat_value::Value;
 // authorities use exactly the same query, stage receipt and adoption owner.
 enum DownloadSource<'a, 'h> {
     Provider(&'a dyn AccelProvider, &'h GpuTensorHandle),
-    Readback(&'a runmat_accelerate_api::NumericReadback<'h>),
+    Readback(
+        &'a runmat_accelerate_api::NumericReadback<'h>,
+        super::super::NumericDownloadDiagnostic,
+    ),
 }
 impl<'h> DownloadSource<'_, 'h> {
     fn handle(&self) -> &'h GpuTensorHandle {
         match self {
             Self::Provider(_, handle) => handle,
-            Self::Readback(readback) => readback.source(),
+            Self::Readback(readback, _) => readback.source(),
         }
     }
     fn quote(&self) -> Result<ExactNativeDownloadQuote, crate::RuntimeError> {
         match self {
             Self::Provider(provider, handle) => quote_exact_native_download(*provider, handle),
-            Self::Readback(readback) => super::quote::quote_exact_native_readback(readback),
+            Self::Readback(readback, _) => super::quote::quote_exact_native_readback(readback),
         }
     }
     fn prepare(
@@ -39,7 +42,7 @@ impl<'h> DownloadSource<'_, 'h> {
             Self::Provider(provider, handle) => {
                 provider.prepare_numeric_download_stage(handle, query, claim)
             }
-            Self::Readback(readback) => readback.prepare_numeric_download_stage(query, claim),
+            Self::Readback(readback, _) => readback.prepare_numeric_download_stage(query, claim),
         }
     }
     async fn download(
@@ -53,10 +56,11 @@ impl<'h> DownloadSource<'_, 'h> {
                 )
                 .await
             }
-            Self::Readback(readback) => {
+            Self::Readback(readback, diagnostic) => {
                 super::super::download_numeric_readback_preserving_residency_async(
                     readback,
                     Some(stage),
+                    *diagnostic,
                 )
                 .await
             }
@@ -90,7 +94,30 @@ pub async fn download_exact_native_readback(
     receipt: &HostAllocationReceipt,
     quote: ExactNativeDownloadQuote,
 ) -> Result<Value, ExactDownloadFailure> {
-    download_from_source(runtime, DownloadSource::Readback(readback), receipt, quote).await
+    download_exact_native_readback_with_diagnostics(
+        runtime,
+        readback,
+        receipt,
+        quote,
+        super::super::NumericDownloadDiagnostic::Gpu,
+    )
+    .await
+}
+
+pub(crate) async fn download_exact_native_readback_with_diagnostics(
+    runtime: &RuntimeContext,
+    readback: &runmat_accelerate_api::NumericReadback<'_>,
+    receipt: &HostAllocationReceipt,
+    quote: ExactNativeDownloadQuote,
+    diagnostic: super::super::NumericDownloadDiagnostic,
+) -> Result<Value, ExactDownloadFailure> {
+    download_from_source(
+        runtime,
+        DownloadSource::Readback(readback, diagnostic),
+        receipt,
+        quote,
+    )
+    .await
 }
 
 async fn download_from_source(

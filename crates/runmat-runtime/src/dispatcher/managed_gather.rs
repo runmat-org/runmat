@@ -150,7 +150,7 @@ fn walk<'a>(
                         .map_err(|source| {
                             crate::runtime_error::with_provider_execution_source(
                                 crate::build_runtime_error(
-                                    "gather: exact source readback is not authorized",
+                                    "gather: exact source provider is unavailable or not authorized",
                                 )
                                 .with_identifier("RunMat:gather:ProviderUnavailable")
                                 .build(),
@@ -169,9 +169,15 @@ fn walk<'a>(
                         allocation(Some(runtime), HostAllocationError::MissingManagedOwner)
                     })?;
                     let gathered = budget
-                        .await_cancellable(gpu_helpers::download_exact_native_readback(
-                            runtime, &readback, &receipt, quote,
-                        ))
+                        .await_cancellable(
+                            gpu_helpers::download_exact_native_readback_with_diagnostics(
+                                runtime,
+                                &readback,
+                                &receipt,
+                                quote,
+                                gpu_helpers::NumericDownloadDiagnostic::Gather,
+                            ),
+                        )
                         .await
                         .map_err(|source| control(runtime, source))?
                         .map_err(|failure| failure.error)?;

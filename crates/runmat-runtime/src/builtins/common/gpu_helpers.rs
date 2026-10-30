@@ -21,7 +21,8 @@ pub use managed_download::{
     ExactDownloadPhase, ExactNativeDownloadQuote,
 };
 pub(crate) use managed_download::{
-    download_readback_value_in_context, download_readback_value_with_admission_in_context,
+    download_exact_native_readback_with_diagnostics, download_readback_value_in_context,
+    download_readback_value_with_admission_in_context,
     download_value_preserving_residency_in_context,
 };
 pub(crate) mod complex_transfer;
@@ -739,13 +740,27 @@ async fn download_numeric_preserving_residency_with_admission_async(
             result
         }
     };
-    finish_native_download(handle, expected_element, native)
+    finish_native_download(
+        handle,
+        expected_element,
+        native,
+        NumericDownloadDiagnostic::Gpu,
+    )
+}
+
+/// The operation owning a plain provider download failure. Typed provider
+/// RuntimeErrors still retain their original identity, retry and cause chain.
+#[derive(Clone, Copy)]
+pub(crate) enum NumericDownloadDiagnostic {
+    Gpu,
+    Gather,
 }
 
 /// Exact-source data egress without exposing compute/provider authority.
 pub(crate) async fn download_numeric_readback_preserving_residency_async(
     readback: &runmat_accelerate_api::NumericReadback<'_>,
     stage: Option<PreparedNumericDownloadStage>,
+    diagnostic: NumericDownloadDiagnostic,
 ) -> crate::BuiltinResult<HostNumericTensorOwned> {
     let handle = readback.source();
     let _source_guard = ResidencyRestoreGuard::new(handle);
@@ -764,17 +779,22 @@ pub(crate) async fn download_numeric_readback_preserving_residency_async(
     } else {
         readback.download_numeric().await
     };
-    finish_native_download(handle, expected_element, native)
+    finish_native_download(handle, expected_element, native, diagnostic)
 }
 
 fn finish_native_download(
     handle: &GpuTensorHandle,
     expected_element: NumericElementType,
     native: anyhow::Result<HostNumericTensorOwned>,
+    diagnostic: NumericDownloadDiagnostic,
 ) -> crate::BuiltinResult<HostNumericTensorOwned> {
     let host = native.map_err(|error| {
-        let fallback = build_runtime_error(format!("gpu download: {error}"))
-            .with_identifier("RunMat:gpu:DownloadFailed")
+        let (operation, identifier) = match diagnostic {
+            NumericDownloadDiagnostic::Gpu => ("gpu download", "RunMat:gpu:DownloadFailed"),
+            NumericDownloadDiagnostic::Gather => ("gather", "RunMat:gather:DownloadFailed"),
+        };
+        let fallback = build_runtime_error(format!("{operation}: {error}"))
+            .with_identifier(identifier)
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build();
         crate::runtime_error::with_provider_execution_source(fallback, error.into())

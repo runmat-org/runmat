@@ -310,11 +310,14 @@ async fn execute_host_selected_graph_request(
         return GraphHostExecution::Completed(ProgramExecutionResponse::Failure { message });
     }
     let (admitted, admitted_bundles) = admitted.into_admitted_with_bundles();
-    let mut session = match runmat_core::RunMatSession::with_options(
+    // Graph scheduling admits no invocation environment. Selected-unit bundle
+    // metadata cannot grant access to the worker process's ambient variables.
+    let mut session = match runmat_core::RunMatSession::with_frozen_environment(
         runtime_config
             .as_ref()
             .map_or(true, |config| config.jit.enabled),
         false,
+        Vec::new(),
     ) {
         Ok(session) => session,
         Err(error) => {
@@ -833,7 +836,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn host_rejects_a_required_native_interface_before_program_execution() {
+    async fn host_rejects_required_native_interface_without_captured_artifacts_before_execution() {
         let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
         let unit = session
             .compile_executable_unit(
@@ -928,7 +931,12 @@ mod tests {
         let ProgramExecutionResponse::Failure { message } = response else {
             panic!("host executed a program before satisfying its native interface");
         };
-        assert!(message.contains("missing-fixture"), "{message}");
+        // The captured policy has no immutable native artifacts. Admission must
+        // reject that incomplete authority before provider lookup or execution.
+        assert_eq!(
+            message,
+            "selected foreign V3 product has no configured immutable project artifacts"
+        );
     }
 
     #[tokio::test]
@@ -1009,7 +1017,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         .unwrap();
         let entrypoint = envelope.manifest.identity.entrypoint.clone();
         let mut policy_config = runmat_config::runtime::ForeignConfig::default();
-        policy_config.mex.timeout_ms = Some(std::num::NonZeroU64::new(15_000).unwrap());
+        // This proves exact bundled native execution, not unsafe preemption of
+        // manifested in-process code. Deadline refusal has its own admission test.
+        policy_config.mex.timeout_ms = None;
         let policy =
             runmat_core::foreign_artifacts::capture_foreign_policy_object(&policy_config).unwrap();
         let recipe = ProgramBuildRecipe {

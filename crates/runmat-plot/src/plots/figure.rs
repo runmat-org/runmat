@@ -3011,7 +3011,7 @@ mod tests {
 
     #[test]
     fn test_mixed_plot_types() {
-        let mut figure = Figure::new().with_legend(true);
+        let mut figure = Figure::new();
 
         // Add different plot types
         let line = LinePlot::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0])

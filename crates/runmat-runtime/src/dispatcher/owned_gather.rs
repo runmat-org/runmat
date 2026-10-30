@@ -95,7 +95,7 @@ fn gather_in_place<'a>(
                     |source| {
                         crate::runtime_error::with_provider_execution_source(
                             crate::build_runtime_error(
-                                "gather: exact source readback is not authorized",
+                                "gather: exact source provider is unavailable or not authorized",
                             )
                             .with_identifier("RunMat:gather:ProviderUnavailable")
                             .build(),
@@ -131,8 +131,12 @@ fn gather_in_place<'a>(
                         HostAllocationError::MissingManagedOwner,
                     )
                 })?;
-                let download = gpu_helpers::download_exact_native_readback(
-                    &context, &readback, &receipt, quote,
+                let download = gpu_helpers::download_exact_native_readback_with_diagnostics(
+                    &context,
+                    &readback,
+                    &receipt,
+                    quote,
+                    gpu_helpers::NumericDownloadDiagnostic::Gather,
                 );
                 let gathered = match budget.as_deref() {
                     Some(budget) => budget

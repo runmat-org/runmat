@@ -2766,6 +2766,7 @@ mod tests {
                 "clear",
                 "clearCache",
                 "clearvars",
+                "clibgen.buildInterface",
                 "commit",
                 "copyfile",
                 "data.copy",

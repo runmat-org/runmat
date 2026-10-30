@@ -1067,8 +1067,11 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
 }
 
 fn sample_linear_static_study_spec() -> AnalysisStudySpec {
+    linear_static_study_spec_for_geometry(closed_cube_geometry_asset())
+}
+
+fn linear_static_study_spec_for_geometry(geometry: GeometryAsset) -> AnalysisStudySpec {
     let procedure_step = ProcedureStep::structural_static("step_default_static");
-    let geometry = closed_cube_geometry_asset();
     let model = test_model_for_geometry(
         &geometry,
         TestModelSpec {
@@ -6128,7 +6131,9 @@ fn analysis_run_linear_static_thermomechanical_rejects_unknown_temperature_field
         },
     );
 
-    let published = storage::list_run_metadata().expect("list existing runs").len();
+    let published = storage::list_run_metadata()
+        .expect("list existing runs")
+        .len();
     let err = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -6140,7 +6145,10 @@ fn analysis_run_linear_static_thermomechanical_rejects_unknown_temperature_field
     )
     .expect_err("unknown thermo expected region should be rejected");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID");
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"
+    );
     assert_eq!(err.error_type, OperationErrorType::Validation);
     assert!(
         err.message
@@ -6148,7 +6156,9 @@ fn analysis_run_linear_static_thermomechanical_rejects_unknown_temperature_field
         "expected unknown temperature region diagnostic, got: {err:?}"
     );
     assert_eq!(
-        storage::list_run_metadata().expect("list runs after rejection").len(),
+        storage::list_run_metadata()
+            .expect("list runs after rejection")
+            .len(),
         published,
         "invalid temperature region must not publish a run"
     );

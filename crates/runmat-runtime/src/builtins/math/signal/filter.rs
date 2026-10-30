@@ -148,11 +148,6 @@ async fn evaluate_with_runtime(
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
-    gpu_helpers::require_resident_compute_values(
-        &[&b, &a, &x, rest.first().unwrap_or(&x)],
-        false,
-        || filter_error(&FILTER_ERROR_INTERNAL),
-    )?;
     let mut args = FilterArgs::parse(b, a, x, rest, &mut cooperation).await?;
     if let Some(eval) = provider::try_filter_gpu(&args, &mut cooperation).await? {
         return Ok(eval);

@@ -17,13 +17,23 @@ use super::execute_host_graph_request;
 
 #[tokio::test]
 async fn selected_graph_worker_preserves_callable_argument_layouts() {
+    let ambient_path_name = std::env::vars_os()
+        .find_map(|(name, value)| {
+            let name = name.to_str()?;
+            (name.eq_ignore_ascii_case("PATH") && !value.is_empty()).then(|| name.to_owned())
+        })
+        .expect("worker fixture has an ambient executable search path");
+    let source = format!(
+        "function result = graph_callable_arguments(x)\nc = 11;\nh = @(z) c + z + double(~isempty(getenv('{ambient_path_name}')));\nresult = h(x);\nend\n"
+    );
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    session.set_compat_mode(runmat_core::CompatMode::RunMat);
     let unit = session
         .compile_executable_unit(
             runmat_core::ExecutableSource::new(
                 "graph-callable-arguments@1",
                 "graph_callable_arguments.m",
-                "function result = graph_callable_arguments(x)\nc = 11;\nh = @(z) c + z;\nresult = h(x);\nend\n",
+                &source,
             ),
             None,
         )
@@ -134,10 +144,12 @@ async fn selected_graph_worker_preserves_callable_argument_layouts() {
             assert!(cluster.project_runtime_policy.is_some());
             let encoded = serde_json::to_vec(&cluster).unwrap();
             runmat_execution_artifact::admit_remote_program_object_bytes(&encoded).unwrap();
-            assert!(matches!(
+            // Configured remote Graph work has no invocation environment;
+            // the host's PATH must not enter its callable or nested callbacks.
+            assert_single_graph_scalar(
                 execute_host_graph_request(cluster.clone(), None).await,
-                ProgramExecutionResponse::GraphSuccess { .. }
-            ));
+                28.0,
+            );
             let mut wrong_language = policy.clone();
             wrong_language.language.compat = runmat_config::runtime::LanguageCompatMode::Matlab;
             assert!(runmat_core::cluster_settings::prepare_graph_for_cluster(
@@ -161,17 +173,23 @@ async fn selected_graph_worker_preserves_callable_argument_layouts() {
             );
             continue;
         }
-        let ProgramExecutionResponse::GraphSuccess { graph } = response else {
-            panic!("selected callable worker rejected schema {schema_version}: {response:?}");
-        };
-        let [root] = graph.roots.as_slice() else {
-            panic!("selected callable returned an invalid output count");
-        };
-        assert!(matches!(
-            graph.nodes.get(root.0 as usize),
-            Some(GraphNode::Leaf {
-                value: ValuePayload::Inline(value)
-            }) if **value == InlineValue::F64Bits(28.0_f64.to_bits())
-        ));
+        // Unconfigured legacy Graph requests retain their standalone VM
+        // behavior. They do not claim the remote scheduler's empty contract.
+        assert_single_graph_scalar(response, 29.0);
     }
+}
+
+fn assert_single_graph_scalar(response: ProgramExecutionResponse, expected: f64) {
+    let ProgramExecutionResponse::GraphSuccess { graph } = response else {
+        panic!("selected callable worker failed: {response:?}");
+    };
+    let [root] = graph.roots.as_slice() else {
+        panic!("selected callable returned an invalid output count");
+    };
+    assert!(matches!(
+        graph.nodes.get(root.0 as usize),
+        Some(GraphNode::Leaf {
+            value: ValuePayload::Inline(value)
+        }) if **value == InlineValue::F64Bits(expected.to_bits())
+    ));
 }

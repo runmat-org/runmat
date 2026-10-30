@@ -84,17 +84,7 @@ impl WgpuProvider {
                 "provider.download.source_owner",
             );
         };
-        if entry.element_type != source.physical().element_type()
-            || entry.storage != source.physical().storage()
-            || u64::try_from(entry.len).ok() != Some(source.physical().element_capacity())
-            || source.view().checked_element_count().ok() != u64::try_from(entry.len).ok()
-            || !numeric_download_extents_match(
-                entry.allocated_bytes,
-                entry.buffer.size(),
-                source.physical().payload_bytes(),
-                source.physical().requested_bytes(),
-            )
-        {
+        if !numeric_readback_record_matches(&entry, source) {
             return ProviderFeasibility::rejected(
                 ProviderRejectionCode::UnknownResourceEstimate,
                 "provider.download.physical_mismatch",
@@ -126,6 +116,28 @@ impl WgpuProvider {
 /// descriptor and actual buffer must agree on extent in either case. In
 /// particular an empty payload may own one physical element while requiring
 /// no readback staging or transfer.
+fn numeric_readback_record_matches(entry: &BufferEntry, source: &GpuTensorHandle) -> bool {
+    // BufferEntry counts component lanes, whereas descriptor/view capacity
+    // counts logical elements. Keep the exact checked correspondence.
+    let lanes = match entry.storage {
+        GpuTensorStorage::Real => 1,
+        GpuTensorStorage::ComplexInterleaved => 2,
+    };
+    let Some(component_capacity) = source.physical().element_capacity().checked_mul(lanes) else {
+        return false;
+    };
+    entry.element_type == source.physical().element_type()
+        && entry.storage == source.physical().storage()
+        && u64::try_from(entry.len).ok() == Some(component_capacity)
+        && source.view().checked_element_count().ok() == Some(source.physical().element_capacity())
+        && numeric_download_extents_match(
+            entry.allocated_bytes,
+            entry.buffer.size(),
+            source.physical().payload_bytes(),
+            source.physical().requested_bytes(),
+        )
+}
+
 fn numeric_download_extents_match(
     recorded_bytes: u64,
     buffer_bytes: u64,
@@ -843,16 +855,7 @@ impl WgpuProvider {
         let entry = self.get_entry_raw(handle)?;
         if readback.is_some() {
             ensure!(
-                entry.element_type == handle.physical().element_type()
-                    && entry.storage == handle.physical().storage()
-                    && u64::try_from(entry.len).ok() == Some(handle.physical().element_capacity())
-                    && handle.view().checked_element_count().ok() == u64::try_from(entry.len).ok()
-                    && numeric_download_extents_match(
-                        entry.allocated_bytes,
-                        entry.buffer.size(),
-                        handle.physical().payload_bytes(),
-                        handle.physical().requested_bytes()
-                    ),
+                numeric_readback_record_matches(&entry, handle),
                 "numeric readback physical source record changed"
             );
         }
@@ -1248,25 +1251,21 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn exact_readback_survives_compute_denial_without_granting_emission() {
-        use runmat_accelerate_api::{ExecutionProviderAdmission, ExecutionProviderAuthorization};
-        thread_local! { static POLICY: std::cell::Cell<u8> = const { std::cell::Cell::new(0) }; }
-        fn authorize(request: ExecutionProviderAdmission<'_>) -> ExecutionProviderAuthorization {
-            POLICY.with(|policy| match (policy.get(), request) {
-                (0, _) => ExecutionProviderAuthorization::Unrestricted,
-                (1, ExecutionProviderAdmission::NumericReadback { .. }) => {
-                    ExecutionProviderAuthorization::Allowed
-                }
-                _ => ExecutionProviderAuthorization::Denied,
-            })
-        }
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                POLICY.with(|policy| policy.set(0));
-            }
-        }
-        runmat_accelerate_api::register_execution_provider_authorizer(authorize);
-        let _reset = Reset;
+        use runmat_runtime::context::{
+            RuntimeAccelerationPolicy, RuntimeContext, RuntimeProviderPreference,
+        };
+        // Install the real Runtime authorizer, never a test-private callback
+        // into the process-wide first-install-wins authority slot.
+        let runtime = RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_acceleration_policy(RuntimeAccelerationPolicy {
+            enabled: false,
+            provider: RuntimeProviderPreference::Auto,
+            automatic_offload: false,
+            allow_host_fallback: false,
+            calibrate: false,
+        });
         let provider = crate::backend::wgpu::provider::register_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
@@ -1284,25 +1283,42 @@ mod tests {
         let source = provider
             .upload_numeric(&HostNumericTensorView {
                 data: input.as_view(),
-                shape: &[2],
-                storage: GpuTensorStorage::Real,
+                // Two component lanes are ONE logical complex element.
+                // Exercise the same source-record proof as all complex paths.
+                shape: &[1],
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .unwrap();
-        POLICY.with(|policy| policy.set(1));
+        let scope = runtime.enter();
         assert!(provider.access.with_shared(|_| ()).is_err());
         let readback = runmat_accelerate_api::numeric_readback_for_handle(&source).unwrap();
         let host = futures::executor::block_on(readback.download_numeric()).unwrap();
-        assert_eq!(host.shape, [2]);
+        assert_eq!(host.shape, [1]);
+        assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
         match host.data {
             HostNumericDataOwned::F32(values) => assert_eq!(values, [1.0, -2.0]),
             HostNumericDataOwned::F64(values) => assert_eq!(values, [1.0, -2.0]),
             other => panic!("unexpected exact readback class {other:?}"),
         }
         assert!(provider.access.with_shared(|_| ()).is_err());
-        POLICY.with(|policy| policy.set(2));
+        use runmat_execution::identity::{AttemptId, ExecutionScopeId, PoolId, TaskId, WorkerId};
+        let assignment = runtime.enter_execution_assignment(Some(
+            runmat_execution::ProgramExecutionAssignment {
+                scope_id: ExecutionScopeId::derive(&[b"readback-denied-scope"]),
+                pool_id: PoolId::derive(&[b"readback-denied-pool"]),
+                task_id: TaskId::derive(&[b"readback-denied-task"]),
+                attempt_id: AttemptId::derive(&[b"readback-denied-attempt"]),
+                worker_id: WorkerId::derive(&[b"readback-denied-worker"]),
+                backend: runmat_execution::PoolBackend::LocalProcesses,
+                resources: runmat_execution::resource::ResourceAssignment {
+                    accelerator_leases: vec![],
+                },
+            },
+        ));
         assert!(futures::executor::block_on(readback.download_numeric()).is_err());
         drop(readback);
-        POLICY.with(|policy| policy.set(0));
+        drop(assignment);
+        drop(scope);
         source.release().unwrap();
     }
 

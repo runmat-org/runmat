@@ -16,7 +16,9 @@ pub(super) async fn try_pol2cart_gpu(
     let provider = gpu_helpers::exact_provider_for_handle(anchor)
         .ok_or_else(|| pol2cart_error(&ERROR_INTERNAL, "GPU input has no owning provider"))?;
     let Some(precision) = runmat_accelerate_api::handle_precision(anchor) else {
-        return Ok(None);
+        return crate::context::provider_operation::declined_provider_route(
+            crate::context::legacy::active().as_ref(),
+        );
     };
     // Mixed physical classes retain the host formula's individual unary and
     // multiplication precision. Never approximate integer storage on device.
@@ -24,7 +26,9 @@ pub(super) async fn try_pol2cart_gpu(
         .iter()
         .any(|value| !same_float_class(value, provider, precision))
     {
-        return Ok(None);
+        return crate::context::provider_operation::declined_provider_route(
+            crate::context::legacy::active().as_ref(),
+        );
     }
     let mut outputs = owned::Outputs::new(inputs);
     let mut operands = Vec::with_capacity(inputs.len());

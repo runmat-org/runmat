@@ -1162,6 +1162,45 @@ fn admitted_mixed_or_other_owner_bypasses_selected_provider_and_preserves_runtim
         assert_eq!(prepared.args(), &original);
         assert_eq!(selected.uploads.load(Ordering::Relaxed), 0);
         assert!(probe.requests.borrow().is_empty());
+        if mixed {
+            use runmat_runtime::context::{RuntimeAccelerationPolicy, RuntimeProviderPreference};
+            let strict = context
+                .clone()
+                .with_acceleration_policy(RuntimeAccelerationPolicy {
+                    enabled: true,
+                    provider: RuntimeProviderPreference::Auto,
+                    automatic_offload: true,
+                    allow_host_fallback: false,
+                    calibrate: false,
+                });
+            let error = futures::executor::block_on(strict.scope(
+                runmat_runtime::dispatcher::call_builtin_async_with_outputs(
+                    "pol2cart", &original, 3,
+                ),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:Acceleration:FallbackDisabled")
+            );
+            assert_eq!(
+                error.gpu_gather_retry,
+                runmat_runtime::GpuGatherRetry::Never
+            );
+            assert_eq!(selected.downloads.load(Ordering::Relaxed), 0);
+            assert_eq!(other.downloads.load(Ordering::Relaxed), 0);
+            assert!(
+                futures::executor::block_on(strict.scope(
+                    runmat_runtime::dispatcher::call_builtin_async_with_outputs(
+                        "pol2cart",
+                        &[Value::Num(0.0), Value::Num(2.0)],
+                        2,
+                    ),
+                ))
+                .is_ok(),
+                "ordinary host coordinates are not a provider fallback"
+            );
+        }
         let output =
             futures::executor::block_on(context.scope(prepared.execute(|args| async move {
                 runmat_runtime::dispatcher::call_builtin_async_with_outputs("pol2cart", &args, 3)

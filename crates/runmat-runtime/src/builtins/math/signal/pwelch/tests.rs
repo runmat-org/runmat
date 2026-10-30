@@ -158,14 +158,14 @@ fn wide_resident_integer_signal_is_read_back_once_and_input_remains_borrowed() {
             &'a self,
             handle: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> AccelIntegerDownloadFuture<'a> {
-            self.integer_downloads.fetch_add(1, Ordering::SeqCst);
+            self.other_downloads.fetch_add(1, Ordering::SeqCst);
             self.inner.download_integer(handle)
         }
         fn download_numeric<'a>(
             &'a self,
             handle: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
-            self.other_downloads.fetch_add(1, Ordering::SeqCst);
+            self.integer_downloads.fetch_add(1, Ordering::SeqCst);
             self.inner.download_numeric(handle)
         }
     }

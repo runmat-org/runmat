@@ -5004,7 +5004,7 @@ mod tests {
         figure.add_line_plot(LinePlot::from_numeric_data(x, y).unwrap());
 
         let scene = FigureScene::capture(&figure);
-        assert_eq!(scene.schema_version, 6);
+        assert_eq!(scene.schema_version, FigureScene::SCHEMA_VERSION);
         let encoded = serde_json::to_string(&scene).unwrap();
         assert!(encoded.contains(r#""f64_bits":"7ff8000000000042""#));
         assert!(encoded.contains(r#""f32_bits":"7fc00042""#));

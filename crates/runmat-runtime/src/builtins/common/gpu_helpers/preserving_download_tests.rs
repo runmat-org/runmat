@@ -5,6 +5,58 @@ use runmat_accelerate_api::test_support::TestAllocationOwner;
 use runmat_accelerate_api::{GpuTensorLayout, GpuTensorView, TransposeInfo};
 use std::sync::Mutex;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn download_diagnostic_owner_preserves_typed_provider_failure_and_cause() {
+    use std::error::Error as _;
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    for (diagnostic, expected) in [
+        (NumericDownloadDiagnostic::Gpu, "RunMat:gpu:DownloadFailed"),
+        (
+            NumericDownloadDiagnostic::Gather,
+            "RunMat:gather:DownloadFailed",
+        ),
+    ] {
+        let error = finish_native_download(
+            &allocation.handle,
+            NumericElementType::F64,
+            Err(anyhow::anyhow!("injected untyped download failure")),
+            diagnostic,
+        )
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some(expected));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(error
+            .source()
+            .unwrap()
+            .to_string()
+            .contains("injected untyped download failure"));
+        let original = build_runtime_error("typed provider diagnostic")
+            .with_identifier("RunMat:Test:ProviderDownload")
+            .with_source(std::io::Error::other("injected typed download cause"))
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build();
+        let error = finish_native_download(
+            &allocation.handle,
+            NumericElementType::F64,
+            Err(anyhow::Error::new(original)),
+            diagnostic,
+        )
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:Test:ProviderDownload"));
+        assert_eq!(error.message(), "typed provider diagnostic");
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        while let Some(next) = cause.source() {
+            cause = next;
+        }
+        assert_eq!(cause.to_string(), "injected typed download cause");
+    }
+}
+
 fn release_all(handles: impl IntoIterator<Item = GpuTensorHandle>) {
     let handles: Vec<_> = handles.into_iter().collect();
     let leases: Vec<_> = handles

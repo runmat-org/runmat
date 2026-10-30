@@ -64,7 +64,9 @@ pub(super) fn admit(inputs: &[Value], outputs: Option<usize>) -> BuiltinResult<V
             "output element count overflows",
         ));
     }
-    gpu_helpers::require_resident_compute_value_iter(inputs.iter(), true, || {
+    // Independently valid owners may use the established mixed-owner host
+    // formula. Validate every source without inventing a same-owner contract.
+    gpu_helpers::require_resident_compute_value_iter(inputs.iter(), false, || {
         pol2cart_error(&ERROR_INTERNAL, "GPU input has no owning provider")
     })?;
     // Gate every integer role before any role's exactness check may download.

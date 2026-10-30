@@ -223,16 +223,19 @@ fn gather_if_needed_async_impl<'a>(
                 let readback = runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(
                     |source| {
                         crate::runtime_error::with_provider_execution_source(
-                            build_runtime_error("gather: exact source readback is not authorized")
-                                .with_identifier("RunMat:gather:ProviderUnavailable")
-                                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                                .build(),
+                            build_runtime_error(
+                                "gather: exact source provider is unavailable or not authorized",
+                            )
+                            .with_identifier("RunMat:gather:ProviderUnavailable")
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                            .build(),
                             source.into(),
                         )
                     },
                 )?;
                 let host = crate::builtins::common::gpu_helpers::download_numeric_readback_preserving_residency_async(
                     &readback, None,
+                    crate::builtins::common::gpu_helpers::NumericDownloadDiagnostic::Gather,
                 ).await?;
                 crate::builtins::common::gpu_helpers::value_from_numeric_download(
                     host,

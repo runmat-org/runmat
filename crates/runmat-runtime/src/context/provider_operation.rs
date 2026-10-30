@@ -57,7 +57,9 @@ pub(crate) fn unavailable_provider_route<T>(
     declined_provider_route(runtime)
 }
 
-fn declined_provider_route<T>(runtime: Option<&RuntimeContext>) -> BuiltinResult<Option<T>> {
+pub(crate) fn declined_provider_route<T>(
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<Option<T>> {
     if runtime
         .and_then(RuntimeContext::acceleration_policy)
         .is_some_and(|policy| !policy.allow_host_fallback)
