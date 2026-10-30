@@ -102,7 +102,7 @@ async fn try_unary_provider(
                 "provider complex_from_real returned malformed output",
             ),
         )),
-        Err(detail) if gpu_helpers::provider_hook_is_unsupported(&detail) => Ok(None),
+        Err(detail) if gpu_helpers::provider_hook_allows_host_fallback(&detail) => Ok(None),
         Err(detail) => Err(provider_error("complex_from_real", detail)),
     }
 }
@@ -155,7 +155,7 @@ async fn try_binary_provider(
                 "provider complex_from_real_imag returned malformed output",
             ),
         )),
-        Err(detail) if gpu_helpers::provider_hook_is_unsupported(&detail) => Ok(None),
+        Err(detail) if gpu_helpers::provider_hook_allows_host_fallback(&detail) => Ok(None),
         Err(detail) => Err(provider_error("complex_from_real_imag", detail)),
     }
 }

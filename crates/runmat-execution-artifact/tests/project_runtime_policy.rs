@@ -195,8 +195,60 @@ fn builder_accepts_exactly_one_project_policy_object() {
 
 #[test]
 fn selected_compiled_bundle_retains_parent_project_policy_and_private_policy_materialization() {
+    use runmat_execution::{
+        Digest, ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
+        ExecutableSourceMapV2, ExecutableSourceRecordV2, ExecutableUnitEnvelope,
+    };
     let (_directory, project, revision) = support::frozen_project();
-    let bytes = executable_unit_support::bytes(revision.clone());
+    let mut unit = ExecutableUnitEnvelope::from_canonical_bytes(&executable_unit_support::bytes(
+        revision.clone(),
+    ))
+    .unwrap();
+    // Selection decodes source-map schema2: use the actual frozen source, not this
+    // shared opaque-component fixture's schema1 placeholder bytes.
+    let package = project.sources.packages.values().next().unwrap();
+    let source = package
+        .sources
+        .iter()
+        .find(|source| source.qualified_name == "main")
+        .unwrap();
+    let text = std::fs::read_to_string(project.access_paths.get(&source.id).unwrap()).unwrap();
+    let content_revision = Digest::sha256(text.as_bytes());
+    assert_eq!(content_revision.bytes(), source.id.content_digest.bytes());
+    let map = ExecutableSourceMapV2::new(vec![ExecutableSourceRecordV2 {
+        source_id: runmat_types::ProgramSourceId(0),
+        owner_identity: package.package_instance.to_string(),
+        relative_path: source.id.relative_path.to_string(),
+        content_revision,
+        display_name: source.id.relative_path.to_string(),
+        text,
+    }])
+    .unwrap();
+    let payload = ExecutableComponentPayload::new(
+        ExecutableComponentKind::SourceMap,
+        serde_json::to_vec(&map).unwrap(),
+    )
+    .unwrap();
+    let descriptor = ExecutableComponentDescriptor::from_payload(
+        ExecutableComponentKind::SourceMap,
+        2,
+        &payload.bytes,
+    )
+    .unwrap();
+    *unit
+        .payloads
+        .iter_mut()
+        .find(|part| part.kind == ExecutableComponentKind::SourceMap)
+        .unwrap() = payload;
+    *unit
+        .manifest
+        .components
+        .iter_mut()
+        .find(|part| part.kind == ExecutableComponentKind::SourceMap)
+        .unwrap() = descriptor;
+    unit.manifest.revisions.source_map_schema = 2;
+    unit.manifest.identity.source_digest = content_revision;
+    let bytes = unit.canonical_bytes().unwrap();
     let foreign = runmat_execution_artifact::foreign_policy_object(
         br#"{"fixture":"selected-runtime-policy","schema_version":1}"#.to_vec(),
     )

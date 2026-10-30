@@ -144,7 +144,11 @@ impl Request {
         };
         let output = match owner.polyval(&coefficients, &points, &options) {
             Ok(output) => output,
-            Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+            Err(error)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &error,
+                ) =>
+            {
                 return Ok(None)
             }
             Err(error) => {

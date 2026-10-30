@@ -391,6 +391,9 @@ async fn execute_local_direct(
         !allocation.accelerators.is_empty(),
     )
     .map_err(protocol)?;
+    if !allocation.accelerators.is_empty() && request.assignment.is_none() {
+        return Err(protocol("zero-worker GPU execution requires an authenticated exact driver device assignment; requested accelerator resources are not device authority"));
+    }
     let objects = super::object_transfer::RemoteObjectStore::new()?;
     let mut values = std::collections::HashMap::new();
     for object in input_objects {
@@ -403,12 +406,18 @@ async fn execute_local_direct(
     let response = match request.artifact.form {
         runmat_execution_artifact::ExecutableForm::AnalysisWorkload => {
             let mut objects = objects.clone();
-            crate::execute_analysis_program_request(
-                &request,
-                &mut objects,
-                &crate::NativeAnalysisKernel,
-                crate::NativeAnalysisHostLimits::default(),
-            )
+            super::runtime_settings::with_domain_policy(
+                &config,
+                request.assignment.clone(),
+                || {
+                    execute_driver_analysis(
+                        &request,
+                        &mut objects,
+                        &crate::NativeAnalysisKernel,
+                        allocation,
+                    )
+                },
+            )?
         }
         runmat_execution_artifact::ExecutableForm::GeometryWorkload => {
             let mut objects = objects.clone();
@@ -440,6 +449,26 @@ async fn execute_local_direct(
         }
     };
     collect_result_objects(response, objects)
+}
+
+/// The driver is the execution owner when a Direct analysis has no workers.
+/// Its authenticated allocation must cover the governed plan before kernel effects.
+pub(crate) fn execute_driver_analysis<
+    S: runmat_execution_artifact::cache::CacheImport + runmat_execution_artifact::cache::CacheExport,
+>(
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
+    store: &mut S,
+    kernel: &dyn runmat_analysis_execution::AnalysisKernel,
+    allocation: &runmat_execution_transport_native::control::ResourceRequest,
+) -> NativeExecutionResult<ProgramExecutionResponse> {
+    let resources = super::pool_resources::task_resources(allocation)?;
+    Ok(crate::execute_reserved_analysis_program_request(
+        request,
+        store,
+        kernel,
+        crate::NativeAnalysisHostLimits::default(),
+        &resources,
+    ))
 }
 
 async fn report_usage(

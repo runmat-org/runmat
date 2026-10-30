@@ -587,7 +587,9 @@ fn try_conv2_gpu(
             || conv2_error(&CONV2_ERROR_BUILD_OUTPUT),
         )
         .map(Some),
-        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) && placement.is_none() => {
+        Err(err)
+            if gpu_helpers::provider_hook_allows_host_fallback(&err) && placement.is_none() =>
+        {
             Ok(None)
         }
         Err(err) => {

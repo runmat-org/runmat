@@ -110,7 +110,7 @@ enum AttemptError {
 
 impl From<anyhow::Error> for AttemptError {
     fn from(error: anyhow::Error) -> Self {
-        if gpu_helpers::provider_hook_is_unsupported(&error) {
+        if gpu_helpers::provider_hook_allows_host_fallback(&error) {
             Self::Unsupported
         } else {
             let contextual = pol2cart_error(&ERROR_INTERNAL, &error);

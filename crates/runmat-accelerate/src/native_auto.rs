@@ -2209,6 +2209,9 @@ fn builtin_policy(name: &str) -> Option<BuiltinPolicy> {
 }
 
 pub(crate) fn auto_enabled() -> bool {
+    if let Some(policy) = runmat_runtime::context::current_acceleration_policy() {
+        return policy.automatic_offload_enabled();
+    }
     if let Some(flag) = env_bool("RUNMAT_ACCEL_AUTO_OFFLOAD") {
         return flag;
     }
@@ -2216,6 +2219,9 @@ pub(crate) fn auto_enabled() -> bool {
 }
 
 fn calibrate_enabled() -> bool {
+    if let Some(policy) = runmat_runtime::context::current_acceleration_policy() {
+        return policy.calibrate;
+    }
     if let Some(flag) = env_bool("RUNMAT_ACCEL_CALIBRATE") {
         return flag;
     }
@@ -2223,6 +2229,11 @@ fn calibrate_enabled() -> bool {
 }
 
 fn calibrate_refresh_enabled() -> bool {
+    if runmat_runtime::context::current_acceleration_policy().is_some() {
+        // A resolved host/worker policy must not acquire a second ambient
+        // calibration authority while the invocation is running.
+        return false;
+    }
     env_bool("RUNMAT_ACCEL_CALIBRATE_REFRESH").unwrap_or(false)
 }
 

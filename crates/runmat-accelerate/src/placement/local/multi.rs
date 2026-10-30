@@ -375,11 +375,17 @@ fn plan_local_multi_with_provider_mode(
             .then_some(cpu.route.resources),
         LocalCpuAdmission::Unavailable => None,
     };
+    let forbid_host_fallback = runtime
+        .and_then(runmat_runtime::context::RuntimeContext::acceleration_policy)
+        .is_some_and(|policy| !policy.allow_host_fallback);
     let constraint = physical
         .first()
         .and_then(|candidate| {
             candidate.data_inputs.iter().find_map(|value| match value {
-                Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle) => {
+                Value::GpuTensor(handle)
+                    if forbid_host_fallback
+                        || runmat_accelerate_api::handle_is_explicit(handle) =>
+                {
                     Some(runmat_execution::WholeWorkConstraint::ProviderRequired {
                         device_id: handle.device_id(),
                     })
@@ -703,6 +709,18 @@ fn plan_local_multi_with_provider_mode(
     let compare_native_alternatives = native_original_current
         && compare_profitability
         && (cpu.native_alternative.is_some() || cpu.native_host_alternative.is_some());
+    if admitted.is_empty()
+        && forbid_host_fallback
+        && matches!(
+            constraint,
+            runmat_execution::WholeWorkConstraint::ProviderRequired { .. }
+        )
+    {
+        return Err(Box::new(runmat_runtime::runtime_error::semantic_error(
+            "RunMat:Acceleration:FallbackDisabled",
+            "assigned provider rejected all implementations and this invocation forbids host fallback",
+        )));
+    }
     if admitted.is_empty() && !compare_native_alternatives {
         if cpu_resources.is_none() {
             // A VM-owned region can resume its original instructions. An

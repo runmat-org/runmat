@@ -101,8 +101,8 @@ pub(super) fn restore_fallback(
     }
 }
 
-pub(super) fn hook_is_unsupported(error: &anyhow::Error) -> bool {
-    gpu_helpers::provider_hook_is_unsupported(error)
+pub(super) fn hook_allows_host_fallback(error: &anyhow::Error) -> bool {
+    gpu_helpers::provider_hook_allows_host_fallback(error)
 }
 
 #[cfg(test)]

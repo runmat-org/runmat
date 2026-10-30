@@ -477,7 +477,11 @@ fn finalize_output_with_observation(
                         unsupported_fallback: false,
                     });
                 }
-                Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+                Err(err)
+                    if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                        &err,
+                    ) =>
+                {
                     warn!("fspecial: provider hook unavailable, falling back to host path: {err}");
                     unsupported_fallback = true;
                 }

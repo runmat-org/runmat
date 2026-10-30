@@ -115,7 +115,7 @@ impl AllFiniteBoundary {
                     self.internal("provider returned an invalid finite-value mask"),
                 ));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
                 return self.gather_and_reduce(provider, &handle).await;
             }
             Err(error) => {
@@ -138,7 +138,7 @@ impl AllFiniteBoundary {
                     self.internal("provider returned an invalid logical reduction"),
                 ));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
                 return self.gather_and_reduce(provider, &handle).await;
             }
             Err(error) => {

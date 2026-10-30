@@ -1748,6 +1748,11 @@ fn should_retry_with_gpu_gather_values<'a>(
     err: &RuntimeError,
     args: impl Iterator<Item = &'a Value> + Clone,
 ) -> bool {
+    if crate::context::current_acceleration_policy()
+        .is_some_and(|policy| !policy.allow_host_fallback)
+    {
+        return false;
+    }
     if !args.clone().any(value_contains_gpu) {
         return false;
     }
@@ -2088,6 +2093,38 @@ mod tests {
             &wrapped_request,
             &[Value::GpuTensor(requested_handle.clone())]
         ));
+        // The same wrapped provider cause remains classified as requested,
+        // but invocation policy separately decides whether fallback is legal.
+        for fallback in [false, true] {
+            let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+                crate::execution::RuntimeExecutionService::new(),
+            ))
+            .with_acceleration_policy(crate::context::RuntimeAccelerationPolicy {
+                enabled: true,
+                provider: crate::context::RuntimeProviderPreference::Auto,
+                automatic_offload: false,
+                allow_host_fallback: fallback,
+                calibrate: false,
+            });
+            let _scope = runtime.enter();
+            assert_eq!(
+                should_retry_with_gpu_gather(
+                    &wrapped_request,
+                    &[Value::GpuTensor(requested_handle.clone())]
+                ),
+                fallback
+            );
+            let unsupported = runmat_accelerate_api::unsupported_provider_operation("matrix");
+            assert!(
+                crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(&unsupported)
+            );
+            assert_eq!(
+                crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &unsupported
+                ),
+                fallback
+            );
+        }
         let requested_handle = requested_handle
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .unwrap();

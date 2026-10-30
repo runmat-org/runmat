@@ -244,7 +244,11 @@ async fn gpu_structure_predicate(
                 Ok(bandwidth) => {
                     return Ok(bandwidth_satisfies(bandwidth, predicate));
                 }
-                Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+                Err(err)
+                    if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                        &err,
+                    ) =>
+                {
                     debug!("{}: provider bandwidth fallback: {err}", ctx.name);
                 }
                 Err(err) => {

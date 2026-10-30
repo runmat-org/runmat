@@ -519,7 +519,11 @@ async fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Built
         let direct = if precision == provider.precision() {
             match provider.eye(shape) {
                 Ok(output) => Some(output),
-                Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
+                Err(cause)
+                    if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                        &cause,
+                    ) =>
+                {
                     None
                 }
                 Err(cause) => {

@@ -110,7 +110,7 @@ fn admit(
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let output = match outcome {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => return Ok(None),
         Err(error) => return Err(provider_error(error.into())),
     };
     let contract = gpu_helpers::BinaryGpuOutputContract {

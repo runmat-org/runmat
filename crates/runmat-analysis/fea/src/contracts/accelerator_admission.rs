@@ -255,7 +255,17 @@ pub fn with_accelerator_admission_policy<R>(
             POLICY.with(|cell| cell.set(self.0));
         }
     }
-    let _restore = Restore(POLICY.with(|cell| cell.replace(policy)));
+    // A nested authored solve may strengthen its enclosing worker admission,
+    // but must not weaken a strict invocation into CPU fallback.
+    let _restore = Restore(POLICY.with(|cell| {
+        let previous = cell.get();
+        cell.set(if previous == AcceleratorAdmissionPolicy::Required {
+            previous
+        } else {
+            policy
+        });
+        previous
+    }));
     body()
 }
 
@@ -434,6 +444,22 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().starts_with(ACCELERATOR_REQUIRED_CODE));
         assert!(error.to_string().contains("structural static"));
+        with_accelerator_admission_policy(AcceleratorAdmissionPolicy::Required, || {
+            with_accelerator_admission_policy(AcceleratorAdmissionPolicy::FallbackToCpu, || {
+                assert_eq!(
+                    accelerator_admission_policy(),
+                    AcceleratorAdmissionPolicy::Required
+                );
+                assert!(
+                    admit_accelerator(AcceleratorFamily::StructuralModal, ComputeBackend::Gpu)
+                        .is_err()
+                );
+                assert!(
+                    admit_accelerator(AcceleratorFamily::StructuralModal, ComputeBackend::Cpu)
+                        .is_ok()
+                );
+            });
+        });
         // The scope restores the default.
         assert_eq!(
             accelerator_admission_policy(),

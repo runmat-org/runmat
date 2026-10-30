@@ -353,7 +353,7 @@ async fn det_gpu_via_provider(
 
     let lu_result = match provider.lu(handle).await {
         Ok(result) => result,
-        Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => return Ok(None),
+        Err(source) if gpu_helpers::provider_hook_allows_host_fallback(&source) => return Ok(None),
         Err(source) => {
             let mut error = builtin_error(format!("{NAME}: provider LU failed: {source}"));
             error = crate::runtime_error::with_provider_execution_source(error, source.into());

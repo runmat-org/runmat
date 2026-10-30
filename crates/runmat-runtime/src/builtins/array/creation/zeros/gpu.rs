@@ -20,7 +20,11 @@ pub(super) async fn build(shape: &[usize], element_class: GpuElementClass) -> Bu
     let handle = if precision == Some(provider.precision()) {
         match provider.zeros(shape) {
             Ok(handle) => handle,
-            Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
+            Err(cause)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &cause,
+                ) =>
+            {
                 upload_zeros(provider, shape, dtype)?
             }
             Err(cause) => {

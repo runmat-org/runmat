@@ -127,6 +127,12 @@ impl RunMatSession {
         let inherited_command_profiling = parent_context
             .and_then(runmat_runtime::context::RuntimeContext::command_profiling)
             .cloned();
+        let runtime_context =
+            if let Some(policy) = parent_context.and_then(|parent| parent.acceleration_policy()) {
+                runtime_context.with_acceleration_policy(policy)
+            } else {
+                runtime_context
+            };
         let runtime_context = if let Some(origin) = inherited_command_profiling.as_ref() {
             runtime_context.with_command_profiling(origin.clone())
         } else {

@@ -167,6 +167,7 @@ async fn execute_staged_graph(
                 .runtime_config()
                 .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
             &resources,
+            request.assignment.as_ref(),
         )
         .map_err(NativeExecutionError::Protocol)?;
     }

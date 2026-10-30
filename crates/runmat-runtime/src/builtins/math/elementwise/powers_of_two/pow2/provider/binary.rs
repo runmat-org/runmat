@@ -38,7 +38,7 @@ pub(in super::super) fn try_direct(
                     error
                 })
         }
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => Ok(None),
         Err(error) => Err(errors::internal(format!(
             "provider pow2_scale failed: {error}"
         ))),

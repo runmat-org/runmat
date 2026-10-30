@@ -164,7 +164,11 @@ async fn issymmetric_gpu(
             Ok(flag) => {
                 return Ok(Value::Bool(flag));
             }
-            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+            Err(err)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &err,
+                ) =>
+            {
                 log::debug!("issymmetric: provider hook unavailable, falling back to host: {err}");
             }
             Err(err) => {

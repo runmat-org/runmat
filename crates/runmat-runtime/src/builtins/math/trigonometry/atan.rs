@@ -223,7 +223,7 @@ async fn atan_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Bui
                     protected,
                 )
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
             Err(error) => {
                 return Err(atan_error_with_detail(
                     &ATAN_ERROR_INTERNAL,

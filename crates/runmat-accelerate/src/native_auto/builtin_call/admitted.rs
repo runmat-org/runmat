@@ -64,19 +64,19 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
         name: String,
         args: Vec<Value>,
     ) -> RuntimeServiceFuture<Result<Vec<Value>, RuntimeError>> {
-        Box::pin(async move {
+        Box::pin(context.clone().scope(async move {
             super::prepare(&name, &args, Some(&context))
                 .await
                 .map(PreparedBuiltinCall::into_args)
                 .map_err(preparation_error)
-        })
+        }))
     }
     fn prepare_admitted(
         &self,
         context: RuntimeContext,
         request: AdmittedBuiltinPreparation,
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
-        Box::pin(async move {
+        Box::pin(context.clone().scope(async move {
             if request.form().operation == Operation::RuntimeOwned {
                 return request
                     .into_operands()
@@ -111,7 +111,7 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
             .map_err(|error| *error)?;
             let (operands, guard) = prepared.into_execution();
             PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
-        })
+        }))
     }
 }
 

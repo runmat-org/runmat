@@ -11,7 +11,8 @@ impl RunMatSession {
         self.install_application_settings(Rc::new(
             runmat_runtime::context::IsolatedMemoryPreferenceService::new(),
         ))?;
-        self.apply_runtime_config(config)
+        self.apply_runtime_config(config)?;
+        Ok(())
     }
 
     /// Apply session-scoped settings without consulting ambient files or env.
@@ -42,6 +43,10 @@ impl RunMatSession {
         {
             anyhow::bail!("native Python, Java and MEX settings require a native execution host");
         }
+        self.runtime_context = self
+            .runtime_context
+            .clone()
+            .with_acceleration_policy(crate::cluster_settings::acceleration_policy(config));
         Ok(())
     }
 

@@ -126,7 +126,9 @@ pub(super) async fn try_crossentropy_gpu(
         mode: provider_mode(options.mode),
     }) {
         Ok(result) => result,
-        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+        Err(err)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&err) =>
+        {
             return Ok(None)
         }
         Err(err) => return Err(provider_error(err)),
@@ -182,7 +184,11 @@ pub(super) async fn try_crossentropy_gpu(
             }
             let scalar = match provider.read_scalar(&sum, 0) {
                 Ok(value) => value / options.normalization_denominator(len, predictions.shape())?,
-                Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+                Err(err)
+                    if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                        &err,
+                    ) =>
+                {
                     return Ok(None)
                 }
                 Err(err) => return Err(provider_error(err)),

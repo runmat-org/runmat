@@ -154,7 +154,9 @@ fn try_provider_outputs(
     };
     let result = match provider.ndgrid(&request) {
         Ok(result) => result,
-        Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
+        Err(cause)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&cause) =>
+        {
             return Ok(None);
         }
         Err(cause) => {

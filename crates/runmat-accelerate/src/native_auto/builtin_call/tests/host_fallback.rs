@@ -101,6 +101,51 @@ fn scalar(value: &Value) -> f64 {
         _ => panic!("scalar result"),
     }
 }
+
+#[test]
+fn scoped_policy_matrix_keeps_cpu_work_and_explicit_provider_intent_separate() {
+    use runmat_runtime::context::{RuntimeAccelerationPolicy, RuntimeProviderPreference};
+    let provider = super::admitted_owners::owner();
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    for (enabled, automatic_offload, fallback) in [
+        (false, false, false),
+        (true, false, false),
+        (true, false, true),
+    ] {
+        let context = runtime_for(
+            Route::InstalledNoProvider,
+            None,
+            Rc::new(crate::placement::PlacementSession::default()),
+        )
+        .with_acceleration_policy(RuntimeAccelerationPolicy {
+            enabled,
+            provider: RuntimeProviderPreference::Auto,
+            automatic_offload,
+            allow_host_fallback: fallback,
+            calibrate: false,
+        });
+        let result = futures::executor::block_on(context.scope(async {
+            assert!(!auto_enabled());
+            assert_eq!(
+                runmat_accelerate_api::provider().is_some(),
+                enabled,
+                "auto-offload=false does not deny an explicit admitted provider"
+            );
+            runmat_runtime::dispatcher::call_builtin_async_in_context(
+                &context,
+                "plus",
+                &[Value::Num(2.0), Value::Num(5.0)],
+            )
+            .await
+        }))
+        .unwrap();
+        assert_eq!(
+            scalar(result.value()),
+            7.0,
+            "ordinary CPU work is not fallback"
+        );
+    }
+}
 #[test]
 fn cpu_admitted_routes_keep_one_finite_output_owner_and_no_fictitious_placement_sample() {
     for route in [

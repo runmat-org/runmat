@@ -419,6 +419,15 @@ pub fn provider_hook_is_unsupported(error: &anyhow::Error) -> bool {
     runmat_accelerate_api::is_unsupported_provider_operation(error)
 }
 
+/// Admit an unsupported provider hook's host implementation in the current
+/// invocation. Classification alone is not authority to download or execute
+/// host work; callers retain the original error when fallback is forbidden.
+pub fn provider_hook_allows_host_fallback(error: &anyhow::Error) -> bool {
+    provider_hook_is_unsupported(error)
+        && crate::context::current_acceleration_policy()
+            .is_none_or(|policy| policy.allow_host_fallback)
+}
+
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
 ///
 /// This helper routes through the dispatcher so residency hooks and provider

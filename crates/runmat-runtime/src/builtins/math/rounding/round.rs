@@ -239,7 +239,7 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
             Err(RoundingHookFailure::Digits(error))
                 if runmat_accelerate_api::is_unsupported_provider_error(&error) => {}
             Err(RoundingHookFailure::Unary(error))
-                if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
             Err(RoundingHookFailure::Digits(error)) => {
                 return Err(crate::runtime_error::with_provider_execution_source(
                     builtin_error_with_detail(

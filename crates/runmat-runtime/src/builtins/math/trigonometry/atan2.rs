@@ -217,7 +217,7 @@ async fn atan2_gpu_pair(
                         error
                     });
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
             Err(error) => {
                 return Err(atan2_error_with_detail(
                     &ATAN2_ERROR_INTERNAL,

@@ -230,7 +230,11 @@ pub(super) fn try_adamupdate_gpu(
             }
             Ok(Some(AdamUpdateGpuEval::from_provider(result, &request)?))
         }
-        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => Ok(None),
+        Err(err)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&err) =>
+        {
+            Ok(None)
+        }
         Err(err) => Err(adam_provider_error(err)),
     }
 }

@@ -54,6 +54,21 @@ pub(crate) fn unavailable_provider_route<T>(
         .build());
     }
     check_cancelled(runtime)?;
+    declined_provider_route(runtime)
+}
+
+fn declined_provider_route<T>(runtime: Option<&RuntimeContext>) -> BuiltinResult<Option<T>> {
+    if runtime
+        .and_then(RuntimeContext::acceleration_policy)
+        .is_some_and(|policy| !policy.allow_host_fallback)
+    {
+        return Err(build_runtime_error(
+            "provider implementation is unavailable and this invocation forbids host fallback",
+        )
+        .with_identifier("RunMat:Acceleration:FallbackDisabled")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
     Ok(None)
 }
 
@@ -123,11 +138,20 @@ pub(crate) fn select_exact_provider_or_host_operation(
 
 fn select_exact_provider_or_host_operation_with_output_contract(
     runtime: Option<&RuntimeContext>,
-    request: ExactProviderOperation<'_>,
-    host: Option<ExactHostUploadAlternative<'_>>,
+    mut request: ExactProviderOperation<'_>,
+    mut host: Option<ExactHostUploadAlternative<'_>>,
     output_contract: DirectProviderOutputContract,
 ) -> BuiltinResult<Option<ExactProviderOrHostSelection>> {
     check_cancelled(runtime)?;
+    if runtime
+        .and_then(RuntimeContext::acceleration_policy)
+        .is_some_and(|policy| !policy.allow_host_fallback)
+    {
+        // These are provider-owned calls. Disable only their explicit typed
+        // CPU fallback alternatives, not unrelated host work or explicit gather.
+        request.conditional_host_fallback = None;
+        host = None;
+    }
     let provider = request.provider;
     let query = request.query;
     if request.conditional_host_fallback.is_some() && request.conditional_provider_upload.is_some()
@@ -143,7 +167,7 @@ fn select_exact_provider_or_host_operation_with_output_contract(
         .map(|port| port.placement_resources())
         .unwrap_or_default();
     let Some(estimate) = provider_resource_estimate(runtime, provider, query)? else {
-        return Ok(None);
+        return declined_provider_route(runtime);
     };
     if request
         .conditional_provider_upload
@@ -164,7 +188,7 @@ fn select_exact_provider_or_host_operation_with_output_contract(
     )?;
     check_cancelled(runtime)?;
     let Some(mut prepared) = prepared else {
-        return Ok(None);
+        return declined_provider_route(runtime);
     };
     // Observation metadata does not grant physical resource admission.
     let provider_digest = Digest::sha256_serialized(&(
@@ -200,7 +224,7 @@ fn select_exact_provider_or_host_operation_with_output_contract(
             // Only the native candidate lacks a finite queue certificate.
             // The caller can still select its independently admitted host
             // route without treating this pure preflight as an effect.
-            return Ok(None);
+            return declined_provider_route(runtime);
         }
         queue?;
     }
@@ -235,7 +259,7 @@ fn select_exact_provider_or_host_operation_with_output_contract(
     ) else {
         // A resource-only route is not a validated output-publication receipt.
         if host.is_some() {
-            return Ok(None);
+            return declined_provider_route(runtime);
         }
         let provider_resources = provider.placement_resources();
         if parallel.memory_available_bytes.is_some()
@@ -248,10 +272,10 @@ fn select_exact_provider_or_host_operation_with_output_contract(
             .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
             .build());
         }
-        return Ok(None);
+        return declined_provider_route(runtime);
     };
     let Some((runtime, service, revision, _)) = observation else {
-        return Ok(None);
+        return declined_provider_route(runtime);
     };
     let mut signature = operation_signature(&request, &prepared, revision);
     if let Some(host) = host.as_ref() {
@@ -301,7 +325,7 @@ fn select_exact_provider_or_host_operation_with_output_contract(
             let ProviderObservationSupport::Observed(mut receipt) =
                 provider.begin_operation_observation(upload.query)
             else {
-                return Ok(None);
+                return declined_provider_route(runtime);
             };
             receipt
                 .require_provider_execution(provider.device_id(), upload.query.operation.clone());
@@ -325,7 +349,7 @@ fn select_exact_provider_or_host_operation_with_output_contract(
     let ProviderObservationSupport::Observed(mut receipt) =
         provider.begin_operation_observation(query)
     else {
-        return Ok(None);
+        return declined_provider_route(runtime);
     };
     receipt.require_provider_execution(provider.device_id(), query.operation.clone());
     if request.conditional_host_fallback.is_some() {

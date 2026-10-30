@@ -9,7 +9,7 @@ pub(super) async fn provider_input_contains_nan(
     }
     let mask = match provider.logical_isnan(source) {
         Ok(mask) => mask,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => return Ok(None),
         Err(error) => return Err(logical_provider_error(error.into())),
     };
     if !valid_logical_gpu_output(&mask, source, provider) {

@@ -160,7 +160,7 @@ async fn cosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                         BUILTIN_NAME,
                     )
                 }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
                 Err(error) => {
                     return Err(cosh_error_with_detail(
                         &COSH_ERROR_INTERNAL,

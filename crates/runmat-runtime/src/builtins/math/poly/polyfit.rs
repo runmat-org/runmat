@@ -313,7 +313,9 @@ async fn try_gpu_polyfit(
         .await
     {
         Ok(res) => res,
-        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+        Err(error)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&error) =>
+        {
             return Ok(None)
         }
         Err(error) => {

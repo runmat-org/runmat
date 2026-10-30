@@ -168,7 +168,11 @@ async fn ishermitian_gpu(
             Ok(result) => {
                 return Ok(Value::Bool(result));
             }
-            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+            Err(err)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &err,
+                ) =>
+            {
                 log::debug!("ishermitian: provider hook unavailable, falling back to host: {err}");
             }
             Err(err) => {

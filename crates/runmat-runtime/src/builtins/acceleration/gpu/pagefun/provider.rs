@@ -67,7 +67,7 @@ pub(super) fn try_pagefun_gpu(
             let handle = gpu_helpers::propagate_owned_output_provenance(handle, handles.iter())?;
             Ok(Some(gpu_helpers::resident_gpu_value(handle)?))
         }
-        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => Ok(None),
+        Err(err) if gpu_helpers::provider_hook_allows_host_fallback(&err) => Ok(None),
         Err(err) => Err(pagefun_internal_error(format!(
             "provider page product failed: {err}"
         ))),

@@ -4,6 +4,25 @@ use runmat_config::runtime::{ClusterRuntimePolicy, LanguageCompatMode, RunMatRun
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{ExecutionBundle, LogicalObject};
 
+/// Narrow immutable execution projection; it never initializes a process provider.
+pub fn acceleration_policy(
+    config: &RunMatRuntimeConfig,
+) -> runmat_runtime::context::RuntimeAccelerationPolicy {
+    use runmat_config::runtime::AccelerateProviderPreference as Source;
+    use runmat_runtime::context::{RuntimeAccelerationPolicy, RuntimeProviderPreference as Target};
+    RuntimeAccelerationPolicy {
+        enabled: config.accelerate.enabled,
+        provider: match config.accelerate.provider {
+            Source::Auto => Target::Auto,
+            Source::Wgpu => Target::Wgpu,
+            Source::InProcess => Target::InProcess,
+        },
+        automatic_offload: config.accelerate.auto_offload.enabled,
+        allow_host_fallback: config.accelerate.allow_inprocess_fallback,
+        calibrate: config.accelerate.auto_offload.calibrate,
+    }
+}
+
 pub fn decode_project_policy_object(
     object: &LogicalObject,
     revision: &ProgramRevision,

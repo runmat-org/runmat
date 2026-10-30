@@ -240,7 +240,7 @@ async fn cos_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
                     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                     return Err(gpu_helpers::reject_gpu_output(output, error));
                 }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
                 Err(error) => {
                     let mut failure = cos_error_with_detail(
                         &COS_ERROR_INTERNAL,

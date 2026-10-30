@@ -51,7 +51,7 @@ fn identity(
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let output = match provider.eye_like(prototype) {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
             let identity = crate::builtins::common::matrix::matrix_eye(prototype.shape()[0]);
             gpu_helpers::upload_tensor_protecting(provider, &identity, &[prototype])?
         }
@@ -113,7 +113,7 @@ async fn multiply(
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let output = match provider.matmul(lhs, rhs).await {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
             return Ok(None);
         }
         Err(error) => return Err(provider_failure("matrix multiplication", error)),

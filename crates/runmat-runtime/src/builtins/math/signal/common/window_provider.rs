@@ -120,7 +120,11 @@ pub(crate) fn try_generate(
     let periodic = matches!(options.sampling, WindowSampling::Periodic);
     let handle = match kind.execute(provider, options.len, periodic) {
         Ok(handle) => handle,
-        Err(cause) if api::is_unsupported_provider_operation(&cause) => return Ok(None),
+        Err(cause)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&cause) =>
+        {
+            return Ok(None)
+        }
         Err(cause) => {
             return Err(crate::runtime_error::with_provider_execution_source(
                 error(kind, kind.provider_failed()),

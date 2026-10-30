@@ -82,7 +82,7 @@ impl ClassificationBoundary {
                 mask,
                 self.internal("provider returned an invalid logical mask"),
             )),
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
                 let host =
                     gpu_helpers::download_value_preserving_residency_async(provider, &handle)
                         .await

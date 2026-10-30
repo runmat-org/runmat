@@ -48,7 +48,9 @@ pub(super) async fn try_real_pair(
         let _right = gpu_helpers::ResidencyRestoreGuard::new(rhs);
         match provider.classify_real_power(lhs, rhs).await {
             Ok(domain) => domain,
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
+                return Ok(None)
+            }
             Err(error) => return Err(provider_error("domain classification", error)),
         }
     };
@@ -59,7 +61,7 @@ pub(super) async fn try_real_pair(
     };
     match result {
         Ok(output) => publish_pair(provider, lhs, rhs, &shape, domain, output).map(Some),
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
             Err(typed_provider_error(
                 "provider execution after classification",
                 runmat_accelerate_api::ProviderExecutionError::from(error),

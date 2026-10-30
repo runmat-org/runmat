@@ -82,7 +82,7 @@ pub(super) async fn evaluate(
             };
             match result {
                 Ok(output) => contract::validate(operation, provider, &handle, output),
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
                     restore::fallback(operation, provider, &handle).await
                 }
                 Err(error) => {

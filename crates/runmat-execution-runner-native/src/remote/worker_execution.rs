@@ -148,10 +148,12 @@ pub(super) async fn execute(
         progress_sender,
     } = ports;
     let admitted_settings = match &program {
-        WorkerProgramRequest::Direct(_) => bundle
+        WorkerProgramRequest::Direct(request) => bundle
             .as_ref()
             .ok_or_else(|| "cluster execution has no admitted project settings bundle".to_owned())
-            .and_then(|bundle| super::runtime_settings::admit(bundle, &resources)),
+            .and_then(|bundle| {
+                super::runtime_settings::admit(bundle, &resources, request.assignment.as_ref())
+            }),
         WorkerProgramRequest::Graph(graph) => {
             super::runtime_settings::admit_graph(graph, &resources)
         }
@@ -273,15 +275,24 @@ async fn execute_direct(
     }
     if program.artifact.form == ExecutableForm::AnalysisWorkload {
         drop(progress_sender);
+        let config = match bundle
+            .as_ref()
+            .map(|bundle| runmat_core::cluster_settings::runtime_config(bundle))
+        {
+            Some(Ok(Some(config))) => config,
+            _ => return failure("analysis attempt lacks admitted project runtime policy"),
+        };
         return tokio::task::spawn_blocking(move || {
             let _guard = install_analysis_cancellation(attempt_id, &cancellation);
-            crate::execute_reserved_analysis_program_request(
-                &program,
-                &mut objects,
-                &crate::NativeAnalysisKernel,
-                crate::NativeAnalysisHostLimits::default(),
-                &resources,
-            )
+            super::runtime_settings::with_domain_policy(&config, program.assignment.clone(), || {
+                crate::execute_reserved_analysis_program_request(
+                    &program,
+                    &mut objects,
+                    &crate::NativeAnalysisKernel,
+                    crate::NativeAnalysisHostLimits::default(),
+                    &resources,
+                )
+            })
         })
         .await
         .unwrap_or_else(|error| failure(&error.to_string()));

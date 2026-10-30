@@ -111,7 +111,7 @@ async fn try_host_scalar(
             provider,
             resident.shape(),
         ),
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => Ok(None),
         Err(error) => Err(provider_error(operation, error)),
     }
 }

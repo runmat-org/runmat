@@ -627,7 +627,7 @@ async fn filter2_gpu(
             }
             result
         }
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
             drop(uploaded_kernel);
             let fallback = async {
                 let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)

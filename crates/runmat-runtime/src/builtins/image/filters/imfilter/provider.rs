@@ -294,7 +294,7 @@ pub(super) async fn imfilter_gpu(
             }
             result
         }
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
             let explicit = runmat_accelerate_api::handle_is_explicit(&image_handle);
             if explicit {
                 if let Some(selection) = selected.as_mut() {

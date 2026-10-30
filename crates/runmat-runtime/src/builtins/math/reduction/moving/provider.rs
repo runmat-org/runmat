@@ -149,7 +149,7 @@ async fn moving_gpu_provider(
             }
             Ok(Some(output))
         }
-        Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => {
+        Err(source) if gpu_helpers::provider_hook_allows_host_fallback(&source) => {
             output_shape.check(work)?;
             Ok(None)
         }

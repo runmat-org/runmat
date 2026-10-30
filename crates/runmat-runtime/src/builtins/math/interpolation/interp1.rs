@@ -487,7 +487,7 @@ async fn try_interp1_gpu(
             ),
         )),
         Err(error)
-            if gpu_helpers::provider_hook_is_unsupported(&error)
+            if gpu_helpers::provider_hook_allows_host_fallback(&error)
                 || error.to_string() == "interp1 not supported by provider" =>
         {
             Ok(None)

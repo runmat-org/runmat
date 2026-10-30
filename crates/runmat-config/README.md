@@ -95,6 +95,26 @@ Unchanged default values are never materialized by `edit`.
 
 ## User-facing runtime fields
 
+Acceleration restrictions are immutable per-invocation context, including nested
+calls, asynchronous polls and parallel children; they do not replace the global
+provider. `enabled=false` / `provider=inprocess` prevent device execution.
+`auto_offload.enabled=false` suppresses automatic uploads/fusion, but does not
+forbid explicitly requested `gpuArray` operations on an admitted device.
+`allow_inprocess_fallback=false` forbids automatic GPU-to-host retry and optional
+provider-hook CPU implementations (including CPU compute followed by re-upload),
+not ordinary CPU computation or an explicit `gather`. Unsupported-provider
+errors retain their original cause when fallback is forbidden. FEA GPU requests
+use strict accelerator admission under this policy; authored CPU solves stay legal.
+
+Cluster provider preferences resolve only against registered providers matching
+each exact authenticated device lease. Fixed worker inventories currently do not
+attest WGPU power class or fallback-adapter identity: GPU attempts requesting a
+non-`auto` power preference or `wgpu_force_fallback_adapter=true` are refused
+before execution with an actionable error. They are never inferred from vendor
+names. CPU-only attempts remain legal under default WGPU settings. Zero-worker
+GPU Direct execution without an authenticated exact driver device assignment is
+explicitly refused; requested resources alone are not device authority.
+
 All names below are relative to the canonical document's `[runtime]` table.
 The same schema and setters apply to user and project documents. Optional fields
 may be omitted to inherit; `reset` removes only the selected user override.

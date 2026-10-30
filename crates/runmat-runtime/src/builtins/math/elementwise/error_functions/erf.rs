@@ -151,7 +151,7 @@ async fn erf_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 ),
             ));
         }
-        Err(err) if real_unary::hook_is_unsupported(&err) => {}
+        Err(err) if real_unary::hook_allows_host_fallback(&err) => {}
         Err(err) => {
             let mut error = erf_error_with_detail(
                 &ERF_ERROR_INTERNAL,

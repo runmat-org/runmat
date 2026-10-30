@@ -84,8 +84,10 @@ fn native_kernel_executes_connector_observation_admitted_by_portable_preparation
     );
 }
 
-#[test]
-fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
+fn explicit_structural_program() -> (
+    StructuralLinearWorkload,
+    runmat_analysis_execution::PreparedStructuralLinearProgram,
+) {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     model.sequence.steps[0].observations = vec![structural_displacement_observation()];
     let solve = StructuralLinearWorkload {
@@ -122,6 +124,77 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
             },
     })
     .unwrap();
+    (solve, prepared)
+}
+
+#[test]
+fn driver_analysis_requires_allocation_before_kernel_effects() {
+    use runmat_execution_artifact::ProgramExecutionResponse;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingKernel(AtomicUsize);
+    impl AnalysisKernel for CountingKernel {
+        fn execute(
+            &self,
+            invocation: AnalysisKernelInvocation<'_>,
+        ) -> runmat_analysis_execution::AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            NativeAnalysisKernel.execute(invocation)
+        }
+    }
+
+    let (_, prepared) = explicit_structural_program();
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        directory.path().join("objects"),
+        ObjectInventoryLimits::default().max_object_bytes,
+    )
+    .unwrap();
+    prepared.program.write_to(&mut store).unwrap();
+    let required = &prepared.resource_plan.request;
+    let mut allocation = runmat_execution_transport_native::control::ResourceRequest {
+        cpu_millicores: u64::from(required.cpu_millicores) - 1,
+        memory_bytes: required.memory_bytes,
+        scratch_bytes: required.scratch_bytes,
+        maximum_wall_millis: required.max_wall_millis,
+        accelerators: required.accelerators.clone(),
+    };
+    let kernel = CountingKernel(AtomicUsize::new(0));
+    let response = crate::remote::execute_driver_analysis(
+        &prepared.program.request,
+        &mut store,
+        &kernel,
+        &allocation,
+    )
+    .unwrap();
+    assert!(
+        matches!(response, ProgramExecutionResponse::Failure { ref message }
+        if message.contains("CPU reservation")),
+        "{response:?}"
+    );
+    assert_eq!(kernel.0.load(Ordering::SeqCst), 0);
+
+    allocation.cpu_millicores = u64::from(required.cpu_millicores);
+    let response = crate::remote::execute_driver_analysis(
+        &prepared.program.request,
+        &mut store,
+        &kernel,
+        &allocation,
+    )
+    .unwrap();
+    assert!(
+        !matches!(response, ProgramExecutionResponse::Failure { .. }),
+        "{response:?}"
+    );
+    response
+        .validate_against(&prepared.program.request)
+        .unwrap();
+    assert_eq!(kernel.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
+    let (solve, prepared) = explicit_structural_program();
     assert_eq!(prepared.inputs.len(), 3);
     assert!(prepared
         .inputs

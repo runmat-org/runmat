@@ -60,7 +60,7 @@ pub(super) fn binary_hook(
     };
     let mut output = match result {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => return Ok(None),
         Err(error) => {
             return Err(errors::provider(builtin, error));
         }
@@ -83,7 +83,7 @@ pub(super) fn unary_hook(input: &GpuTensorHandle, builtin: &str) -> BuiltinResul
         .ok_or_else(|| errors::execution(builtin, "no provider owns the input operand"))?;
     let mut output = match owner.logical_not(input) {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => return Ok(None),
         Err(error) => {
             return Err(errors::provider(builtin, error));
         }

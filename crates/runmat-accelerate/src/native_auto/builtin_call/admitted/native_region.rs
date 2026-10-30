@@ -38,6 +38,12 @@ pub(super) async fn execute(
     runtime: RuntimeContext,
     request: NativeNumericRegionRequest,
 ) -> Result<NativeNumericRegionOutcome, RuntimeError> {
+    if runtime
+        .acceleration_policy()
+        .is_some_and(|policy| !policy.automatic_offload_enabled())
+    {
+        return Ok(NativeNumericRegionOutcome::Ineligible);
+    }
     let (program_owner, inputs, right) = request.into_parts();
     program_owner
         .checkpoint(&runtime)

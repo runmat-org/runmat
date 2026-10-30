@@ -27,7 +27,12 @@ pub(super) fn try_covariance_gpu(
     };
     match provider.covariance_to_correlation(handle) {
         Ok(result) => CovarianceGpuEval::from_provider(name, provider, handle, result).map(Some),
-        Err(err) if provider_is_unsupported(&err) => Ok(None),
+        Err(err)
+            if provider_is_unsupported(&err)
+                && gpu_helpers::provider_hook_allows_host_fallback(&err) =>
+        {
+            Ok(None)
+        }
         Err(err) => Err(crate::runtime_error::with_provider_execution_source(
             conversion_error(name, format!("{name}: {err}")),
             runmat_accelerate_api::ProviderExecutionError::from(err),

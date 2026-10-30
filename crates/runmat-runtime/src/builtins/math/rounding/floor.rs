@@ -238,7 +238,7 @@ async fn floor_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     &FLOOR_ERROR_INTERNAL,
                 )
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
             Err(error) => {
                 return Err(builtin_error_with_detail(
                     &FLOOR_ERROR_INTERNAL,

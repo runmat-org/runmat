@@ -259,7 +259,7 @@ async fn cross_builtin(
                             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                             return Err(gpu_helpers::reject_gpu_output(handle, error));
                         }
-                        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => {}
+                        Err(err) if gpu_helpers::provider_hook_allows_host_fallback(&err) => {}
                         Err(err) => {
                             let mut error = cross_internal_error(format!(
                                 "cross: provider execution failed: {err}"

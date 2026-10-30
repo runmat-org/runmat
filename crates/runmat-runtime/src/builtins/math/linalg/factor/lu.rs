@@ -415,7 +415,10 @@ async fn evaluate_gpu(
                     lu_internal_error("lu: provider returned invalid factor outputs"),
                 ));
             }
-            Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {}
+            Err(error)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &error,
+                ) => {}
             Err(error) => {
                 return Err(crate::runtime_error::with_provider_execution_source(
                     lu_internal_error(format!("lu: provider execution failed: {error}")),

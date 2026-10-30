@@ -176,7 +176,7 @@ pub(super) async fn try_blsprice_gpu(
         len,
     }) {
         Ok(result) => result,
-        Err(cause) if gpu_helpers::provider_hook_is_unsupported(&cause) => return Ok(None),
+        Err(cause) if gpu_helpers::provider_hook_allows_host_fallback(&cause) => return Ok(None),
         Err(cause) => return Err(provider_error(cause.into())),
     };
     let valid = |handle: &GpuTensorHandle| {

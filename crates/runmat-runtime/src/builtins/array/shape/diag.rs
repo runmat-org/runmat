@@ -572,7 +572,11 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
                 "diag: invalid provider diagonal output",
             ),
         )),
-        Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => Ok(None),
+        Err(cause)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&cause) =>
+        {
+            Ok(None)
+        }
         Err(cause) => Err(crate::build_runtime_error(format!(
             "diag: provider diagonal operation failed: {cause}"
         ))

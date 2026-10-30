@@ -22,7 +22,7 @@ pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }) {
             let diagonal = match provider.diag_extract(&handle, 0) {
                 Ok(diagonal) => Some(diagonal),
-                Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => None,
+                Err(source) if gpu_helpers::provider_hook_allows_host_fallback(&source) => None,
                 Err(source) => return Err(trace_provider_failure(source)),
             };
             if let Some(diagonal) = diagonal {

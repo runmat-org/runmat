@@ -263,10 +263,15 @@ fn try_plan_physical_set_with_context<'a>(
     with_context: bool,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     let runtime = with_context.then(|| {
-        RuntimeContext::new(Rc::new(
+        let runtime = RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ))
-        .with_service_ports(RuntimeServicePorts::default().with_placement(capture.clone()))
+        .with_service_ports(RuntimeServicePorts::default().with_placement(capture.clone()));
+        if let Some(policy) = runmat_runtime::context::current_acceleration_policy() {
+            runtime.with_acceleration_policy(policy)
+        } else {
+            runtime
+        }
     });
     plan_local_multi_with_provider(
         provider,
@@ -297,6 +302,60 @@ fn try_plan_physical_set_with_context<'a>(
         PlacementPolicy::default(),
         implementation,
     )
+}
+
+#[test]
+fn scoped_no_fallback_keeps_resident_work_on_provider_but_preserves_host_only_work() {
+    use runmat_runtime::context::{RuntimeAccelerationPolicy, RuntimeProviderPreference};
+    let provider = registered_fixture();
+    let allocation = provider
+        .owner
+        .as_ref()
+        .unwrap()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let resident = Value::GpuTensor(allocation.handle);
+    let leaves = [&resident];
+    for fallback in [false, true] {
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_acceleration_policy(RuntimeAccelerationPolicy {
+            enabled: true,
+            provider: RuntimeProviderPreference::Auto,
+            automatic_offload: true,
+            allow_host_fallback: fallback,
+            calibrate: false,
+        });
+        let _scope = runtime.enter();
+        let representation = tensor_representation(&resident, provider.precision()).unwrap();
+        let mut route = physical(19, 10_000, CandidatePreparationState::Ready);
+        route.data_inputs = &leaves;
+        route.source_inputs = Some(vec![representation.clone()]);
+        route.prepared_inputs = Some(vec![representation]);
+        let outcome = plan_physical_set(provider, &Rc::new(Capture::default()), 1, vec![route]);
+        let LocalPlacementOutcome::Selected { selected, .. } = outcome else {
+            panic!("selected route")
+        };
+        assert_eq!(selected.kind.is_provider(), !fallback);
+        let host_only = plan_physical_set(
+            provider,
+            &Rc::new(Capture::default()),
+            1,
+            vec![physical(19, 10_000, CandidatePreparationState::Cold)],
+        );
+        let LocalPlacementOutcome::Selected { selected, .. } = host_only else {
+            panic!("host route")
+        };
+        assert!(
+            !selected.kind.is_provider(),
+            "ordinary CPU work is legal under no-fallback"
+        );
+    }
 }
 
 #[test]

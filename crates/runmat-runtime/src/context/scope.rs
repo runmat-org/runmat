@@ -65,6 +65,25 @@ pub(super) fn execution_provider_authorization(
     }
 
     let control = matches!(&admission, ExecutionProviderAdmission::DeviceControl(_));
+    if let Some(policy) = context
+        .as_ref()
+        .and_then(RuntimeContext::acceleration_policy)
+    {
+        let permitted = match &admission {
+            ExecutionProviderAdmission::Provider(provider)
+            | ExecutionProviderAdmission::DeviceControl(provider) => {
+                policy.permits_provider(*provider)
+            }
+            ExecutionProviderAdmission::DeviceAccess(_)
+            | ExecutionProviderAdmission::CanonicalWgpuSubmit(_) => {
+                policy.enabled && policy.provider != super::RuntimeProviderPreference::InProcess
+            }
+            ExecutionProviderAdmission::DeviceEffect(_) => true,
+        };
+        if !permitted {
+            return Authorization::Denied;
+        }
+    }
     match admission {
         ExecutionProviderAdmission::DeviceAccess(access) => {
             let Some(context) = context else {

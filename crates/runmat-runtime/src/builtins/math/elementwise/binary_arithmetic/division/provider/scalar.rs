@@ -88,7 +88,7 @@ pub(in super::super) async fn try_resident_numerator(
                     ),
                 ));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
             Err(error) => return Err(context.provider_error(error)),
         }
     }
@@ -177,7 +177,7 @@ pub(in super::super) async fn try_resident_denominator(
                     ),
                 ));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
             Err(error) => return Err(context.provider_error(error)),
         }
     }

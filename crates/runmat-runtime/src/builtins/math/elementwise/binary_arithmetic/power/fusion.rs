@@ -155,7 +155,11 @@ async fn admit_inner(
         drop((left_metadata, right_metadata));
         match result {
             Ok(domain) => domain,
-            Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+            Err(error)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &error,
+                ) =>
+            {
                 return Ok(None)
             }
             Err(error) => return Err(error),

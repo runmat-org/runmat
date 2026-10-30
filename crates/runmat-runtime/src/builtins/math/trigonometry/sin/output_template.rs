@@ -200,7 +200,7 @@ async fn convert_to_gpu_complex(
                         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                         return Err(gpu_helpers::reject_gpu_output(output, error));
                     }
-                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                    Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
                     Err(error) => {
                         let mut failure = sin_error_with_detail(
                             &SIN_ERROR_INTERNAL,

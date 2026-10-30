@@ -152,7 +152,7 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 internal_error("provider unary_erfcinv returned malformed output"),
             ));
         }
-        Err(err) if real_unary::hook_is_unsupported(&err) => {}
+        Err(err) if real_unary::hook_allows_host_fallback(&err) => {}
         Err(err) => {
             let mut error = internal_error(format!("provider unary_erfcinv failed: {err}"));
             error = crate::runtime_error::with_provider_execution_source(error, err.into());

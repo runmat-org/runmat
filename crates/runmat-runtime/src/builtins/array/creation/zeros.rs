@@ -553,7 +553,9 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
                 })?;
             Ok(Some(Value::GpuTensor(handle)))
         }
-        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+        Err(err)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&err) =>
+        {
             log::warn!("zeros: provider zeros failed ({err}); falling back to host tensor path");
             log_zeros_fallback(shape, dtype, "provider-error");
             Ok(None)

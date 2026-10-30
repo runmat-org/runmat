@@ -34,7 +34,11 @@ fn owner(inputs: &[&GpuTensorHandle]) -> BuiltinResult<Option<&'static dyn Accel
 fn optional<T>(result: anyhow::Result<T>) -> BuiltinResult<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => Ok(None),
+        Err(error)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&error) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(crate::runtime_error::with_provider_execution_source(
             polyder_error(format!("polyder: provider execution failed: {error}")),
             ProviderExecutionError::from(error),

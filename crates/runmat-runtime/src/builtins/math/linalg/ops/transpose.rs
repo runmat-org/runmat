@@ -316,7 +316,7 @@ async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let result = if rank <= 2 {
         match provider.transpose(&handle) {
             Ok(output) => Some(output),
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => None,
             Err(error) => return Err(native_provider_error(error)),
         }
     } else {

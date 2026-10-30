@@ -235,7 +235,7 @@ async fn ceil_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     &CEIL_ERROR_INTERNAL,
                 )
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
             Err(error) => {
                 return Err(builtin_error_with_detail(
                     &CEIL_ERROR_INTERNAL,

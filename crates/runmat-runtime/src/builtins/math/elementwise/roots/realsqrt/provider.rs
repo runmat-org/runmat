@@ -31,7 +31,7 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
                     output,
                     BUILTIN_NAME,
                 ),
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
                     fallback(&input, provider).await
                 }
                 Err(error) => {

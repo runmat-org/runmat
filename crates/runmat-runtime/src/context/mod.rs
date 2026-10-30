@@ -50,6 +50,10 @@ mod preferences;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod process_invocation;
 pub(crate) mod provider_operation;
+mod acceleration_policy;
+pub use acceleration_policy::{
+    current_acceleration_policy, RuntimeAccelerationPolicy, RuntimeProviderPreference,
+};
 mod selected_random;
 mod user_path;
 pub(crate) use portable_host::{accepts_queued_interaction, check_active_host};

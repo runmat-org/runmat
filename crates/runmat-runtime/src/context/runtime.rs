@@ -125,6 +125,7 @@ pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 /// Complete explicit runtime authority for one session/invocation tree.
 #[derive(Clone)]
 pub struct RuntimeContext {
+    acceleration_policy: Option<super::RuntimeAccelerationPolicy>,
     graphics_callback_mutation: Option<super::GraphicsCallbackMutationScope>,
     execution: Rc<dyn RuntimeExecutionServices>,
     /// Call-local selected V3 graph authority. This carrier retains no
@@ -238,6 +239,14 @@ impl std::fmt::Debug for RuntimeContext {
 }
 
 impl RuntimeContext {
+    pub fn with_acceleration_policy(mut self, policy: super::RuntimeAccelerationPolicy) -> Self {
+        self.acceleration_policy = Some(policy);
+        self
+    }
+
+    pub fn acceleration_policy(&self) -> Option<super::RuntimeAccelerationPolicy> {
+        self.acceleration_policy
+    }
     pub(crate) fn with_graphics_callback_mutation(
         mut self,
         scope: Option<super::GraphicsCallbackMutationScope>,
@@ -328,6 +337,7 @@ impl RuntimeContext {
             state,
             parallel_random_scope: None,
             invocation_language_policy: None,
+            acceleration_policy: None,
             invocation_arity: None,
             constructor_receiver: None,
             selected_classes: None,
@@ -1876,6 +1886,7 @@ impl RuntimeContext {
         let mut child = Self::with_cancellation(self.execution.clone(), self.cancellation())
             .with_service_ports(services);
         child.program_revision = self.program_revision.clone();
+        child.acceleration_policy = self.acceleration_policy;
         let child = if let Some(search_path) = &self.search_path {
             child.with_search_path(Arc::clone(search_path))
         } else {

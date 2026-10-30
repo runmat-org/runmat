@@ -38,7 +38,7 @@ pub(super) async fn pair(left: GpuTensorHandle, right: GpuTensorHandle) -> Built
                     error
                 });
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
             Err(error) => {
                 return Err(errors::terminal(
                     &HYPOT_ERROR_INTERNAL,

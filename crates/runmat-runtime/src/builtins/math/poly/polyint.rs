@@ -218,7 +218,11 @@ fn try_polyint_gpu(
             let result = gpu_helpers::propagate_owned_output_provenance(result, [handle])?;
             Ok(Some(result))
         }
-        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => Ok(None),
+        Err(error)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&error) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(crate::runtime_error::with_provider_execution_source(
             polyint_error(format!("polyint: provider execution failed: {error}")),
             runmat_accelerate_api::ProviderExecutionError::from(error),

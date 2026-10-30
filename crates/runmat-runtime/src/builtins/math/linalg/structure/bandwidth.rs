@@ -303,7 +303,11 @@ async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)
                 let upper = result.upper as usize;
                 return Ok((lower, upper));
             }
-            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+            Err(err)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &err,
+                ) =>
+            {
                 debug!("bandwidth: provider bandwidth fallback: {err}");
             }
             Err(err) => {

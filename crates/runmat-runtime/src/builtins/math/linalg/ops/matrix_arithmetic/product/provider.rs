@@ -47,7 +47,9 @@ pub(super) async fn try_product(
     let expected_shape = product_try!(product_shape(lhs.handle(), rhs.handle()));
     let output = match provider.matmul(lhs.handle(), rhs.handle()).await {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(Ok(None)),
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
+            return Ok(Ok(None))
+        }
         Err(error) => return Err(provider_failure("matrix multiplication", error)),
     };
     finish_binary_output(output, provider, lhs.handle(), rhs.handle(), expected_shape)
@@ -80,7 +82,7 @@ fn invoke_scalar_product(
 ) -> BuiltinResult<Option<Value>> {
     let output = match provider.scalar_mul(operand.handle(), scalar) {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+        Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {
             return Ok(None);
         }
         Err(error) => return Err(provider_failure("scalar multiplication", error)),

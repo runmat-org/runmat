@@ -25,7 +25,7 @@ export async function invokeOpenTelemetry(
   native: OpenTelemetryNativeExports,
   operation: OpenTelemetryOperation,
 ): Promise<OpenTelemetryExportStats> {
-  const method = native[operation];
+  const method: ((this: OpenTelemetryNativeExports) => OpenTelemetryExportStats | Promise<OpenTelemetryExportStats>) | undefined = native[operation];
   if (typeof method !== "function") {
     throw new Error(`The loaded RunMat module does not support ${operation}; rebuild the browser runtime assets.`);
   }

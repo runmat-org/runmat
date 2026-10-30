@@ -25,7 +25,13 @@ pub(super) fn execute_study_step(
     structural_executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
     runmat_analysis_fea::accelerator_admission::with_accelerator_admission_policy(
-        execution.accelerator_admission,
+        if crate::context::current_acceleration_policy()
+            .is_some_and(|policy| !policy.allow_host_fallback)
+        {
+            runmat_analysis_fea::accelerator_admission::AcceleratorAdmissionPolicy::Required
+        } else {
+            execution.accelerator_admission
+        },
         || {
             execute_admitted_study_step(
                 model,

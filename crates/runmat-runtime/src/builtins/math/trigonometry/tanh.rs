@@ -161,7 +161,7 @@ async fn tanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                         BUILTIN_NAME,
                     )
                 }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
                 Err(error) => {
                     return Err(tanh_error_with_detail(
                         &TANH_ERROR_INTERNAL,

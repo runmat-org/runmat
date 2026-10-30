@@ -222,7 +222,7 @@ async fn sinc_gpu(
                 let out = gpu_helpers::propagate_owned_output_provenance(out, [&handle])?;
                 return gpu_helpers::resident_gpu_value(out);
             }
-            Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => {
+            Err(err) if gpu_helpers::provider_hook_allows_host_fallback(&err) => {
                 return sinc_gpu_host_fallback(provider, &handle, cooperation).await;
             }
             Err(err) => return Err(provider_error(err)),
