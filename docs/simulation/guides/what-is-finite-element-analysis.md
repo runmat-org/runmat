@@ -1,3 +1,9 @@
+---
+description: What finite element analysis is, how it works, why element order and mesh size matter, and what FEA assumes, with a worked steel cantilever solved in RunMat and compared with beam theory.
+keywords: [what is FEA, finite element analysis, finite element method, FEM, mesh convergence, Tet4, Tet10, stress singularity, verification and validation]
+doc_type: concept
+examples: [cantilever-static]
+---
 # What is finite element analysis (FEA)?
 
 Finite element analysis (FEA) predicts how a physical part responds to loads, heat, current,
@@ -76,14 +82,15 @@ $$
 = 0.200\ \text{mm},
 $$
 
-and the peak bending stress at the fixed end as $\sigma = Mc/I = 6.0$ MPa.
+and the bending stress on the top surface as $\sigma = Mc/I$ with $M = P(L - x)$: 6.0 MPa at the support and 5.40 MPa at x = 100 mm.
 
 <!-- fea:example:cantilever-static:stress -->
 
-The saved result above is a RunMat solve of this beam on quadratic tetrahedra. Its tip deflection is
-0.199 mm, within 0.3% of beam theory. The study that produced it is a short text file:
+The figure above is a RunMat solve of this beam on quadratic tetrahedra. Its tip deflection is
+[0.2000 mm](receipt:cantilever-static#tip-deflection), and the top-surface stress at x = 100 mm is [5.43 MPa](receipt:cantilever-static#top-von-mises), within 0.6 % of beam theory. The
+model part of the study, the supports and the load, is a few lines of text:
 
-```fea
+```fea source=cantilever-static.fea
 model loaded_beam {
     assign material.steel to geometry.beam.region.body
     constraint fixed_end {
@@ -92,10 +99,11 @@ model loaded_beam {
     load end_traction {
         traction on geometry.beam.region.loaded_end = [0, 0, -100000] Pa
     }
+    load_case service { include load.end_traction }
 }
 ```
 
-The [linear static guide](../physics/structural) walks through the complete study, which you can
+The [linear static guide](./linear-static.md) walks through the complete study, which you can
 download and run.
 
 ## Why does element order matter?
@@ -107,9 +115,10 @@ a node at the middle of each edge, can bend, and places those nodes on the exact
 
 | Mesh of the cantilever | Tip deflection | Against beam theory |
 | --- | --- | --- |
-| Linear tetrahedra, 50 mm | [pending: Tet4 tip deflection] | [pending: difference] |
-| Quadratic tetrahedra, 300 mm | 0.1994 mm | −0.3% |
-| Quadratic tetrahedra, 50 mm | [pending: Tet10 50 mm tip deflection] | [pending: difference] |
+| Linear tetrahedra (Tet4), 150 mm, 431 nodes | [0.1007 mm](receipt:cantilever-static#tip-deflection-tet4-150) | −50 % |
+| Linear tetrahedra (Tet4), 50 mm, 729 nodes | [0.1625 mm](receipt:cantilever-static#tip-deflection-tet4-50) | −19 % |
+| Quadratic tetrahedra (Tet10), 150 mm, 2,727 nodes | [0.2000 mm](receipt:cantilever-static#tip-deflection) | +0.02 % |
+| Quadratic tetrahedra (Tet10), 50 mm, 4,679 nodes | [0.2005 mm](receipt:cantilever-static#tip-deflection-tet10-50) | +0.2 % |
 
 Quadratic elements are the usual choice for stress and vibration. Linear elements are cheaper and
 are often adequate for temperature, where the field is smoother. Thin walls and slender frames can
@@ -123,22 +132,18 @@ stops changing, the mesh is fine enough for that quantity. Different quantities 
 different rates: deflection depends on the whole beam and settles early, while peak stress depends
 on a small region and needs more elements there.
 
-| Requested element size | Nodes | Tip deflection | Peak von Mises stress |
-| --- | --- | --- | --- |
-| 300 mm | 748 | 0.19941 mm | 4.86 MPa |
-| 175 mm | 774 | 0.19936 mm | 5.14 MPa |
-| 150 mm | 786 | 0.19937 mm | 5.14 MPa |
-| 50 mm | [pending: node count] | [pending: tip deflection] | [pending: peak stress] |
+| Requested element size (Tet10) | Nodes | Tip deflection | Top-surface stress at x = 100 mm | Largest element stress |
+| --- | ---: | ---: | ---: | ---: |
+| 150 mm | 2,727 | [0.2000 mm](receipt:cantilever-static#tip-deflection) | [5.43 MPa](receipt:cantilever-static#top-von-mises) | [5.39 MPa](receipt:cantilever-static#peak-element-von-mises) |
+| 50 mm | 4,679 | [0.2005 mm](receipt:cantilever-static#tip-deflection-tet10-50) | [5.41 MPa](receipt:cantilever-static#top-von-mises-tet10-50) | [5.27 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-50) |
+| 25 mm | 32,075 | [0.2007 mm](receipt:cantilever-static#tip-deflection-tet10-25) | [5.41 MPa](receipt:cantilever-static#top-von-mises-tet10-25) | [5.76 MPa](receipt:cantilever-static#peak-element-von-mises-tet10-25) |
 
-<!-- fea:example:cantilever-medium:geometry -->
-
-On these coarse meshes the peak stress, an average over each element, sits below the 6.0 MPa
-beam-theory value at the root: an element 150 mm long averages the stress over most of its length.
-A smaller element size raises it toward the true value. A fixed edge adds a special case:
-a perfectly rigid support meeting a sharp corner is a singularity, where the computed stress keeps
-rising as the elements shrink. Read stress a short
-distance from such points, or model the real fillet and support stiffness. The
-[mesh refinement guide](./mesh-refinement) works through a convergence study step by step.
+The deflection and the stress at x = 100 mm settle within 0.4 %. The largest element stress does
+not: it sits at the fixed edge, where a perfectly rigid support meets a free surface. That is a
+singularity, where the exact stress is unbounded, so the computed value keeps changing as the
+elements shrink. Read stress a short distance from such points, or model the real fillet and
+support stiffness. The [mesh refinement guide](./mesh-refinement.md) works through a convergence
+study step by step.
 
 ## What does FEA assume?
 
@@ -161,21 +166,21 @@ An analysis answers the question its inputs describe. Common sources of error ar
 reactions balance the loads, does a simple case match a known answer such as the beam formula
 above? **Validation** asks whether those were the right equations for the real part: do the
 predictions match a test? Both are needed before a result supports a design decision. See
-[Verification and validation](../validation) for how RunMat records both.
+[validation methodology](../validation/methodology.md) for how RunMat records both.
 
 ## Finite element analysis in RunMat
 
 In RunMat a complete analysis is a `.fea` text file: geometry from a STEP file, a mesh, materials,
 loads and supports, and the analyses to run. `runmat check` checks units, regions and every
 reference before anything is meshed, and `runmat run` meshes, solves and saves the result,
-which you can read and plot from MATLAB code.
+which you can read and plot from `.m` code.
 
 ```sh
 runmat check cantilever-static.fea
 runmat run cantilever-static.fea
 ```
 
-Continue with the [linear static guide](../physics/structural), the
-[physics overview](../physics), [meshing](../meshing), or the
+Continue with the [linear static guide](./linear-static.md), the
+[physics reference](../physics/index.md), [meshing](../meshing.md), or the
 [structural](/physics/structural), [thermal](/physics/thermal) and other
 [physics pages](/physics).
