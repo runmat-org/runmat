@@ -232,7 +232,7 @@ pub use study::accuracy::{
 };
 pub use study::{
     analysis_identity_status, family_label, is_exposed_analysis_identity, procedure_label,
-    render_analysis_identity_matrix, AnalysisIdentity, AnalysisIdentityStatus,
+    AnalysisIdentity, AnalysisIdentityStatus,
     ANALYSIS_IDENTITIES,
 };
 pub use study::output::{

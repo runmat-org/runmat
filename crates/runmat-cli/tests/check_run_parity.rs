@@ -76,7 +76,7 @@ fn fea_examples() -> Vec<PathBuf> {
     found
 }
 
-// witness: FEA-PUBLIC-STUDIES-001/bracket_static_study @ linear_structural/mesh_independent/source_check; coverage: partial; boundary: Every published .fea example, including the finished bracket_strength study, passes `runmat check` with its static run admission; it does not run the studies.
+// witness: FEA-PUBLIC-LANGUAGE-001/check_matches_run @ shared_infrastructure/mesh_independent/source_check; coverage: partial; boundary: Every published .fea example, including the finished bracket_strength study, passes `runmat check` with its static run admission; it does not run the studies.
 #[test]
 fn every_published_example_checks_clean() {
     let temp = TempDir::new().unwrap();

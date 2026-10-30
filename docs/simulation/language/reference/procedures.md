@@ -22,7 +22,7 @@ analysis response after analysis.modes {
 }
 ```
 
-Which procedures each family runs is generated from the solver's procedure registry in the [family and procedure matrix](../../generated/family-procedure-matrix.md). `runmat check` applies the same registry, so a combination the family does not run is reported at its line before anything is meshed.
+Which procedures each family runs is generated from the solver's procedure registry in the [family and procedure matrix](../../validation/status.md#families-and-procedures). `runmat check` applies the same registry, so a combination the family does not run is reported at its line before anything is meshed.
 
 ## What each procedure solves
 

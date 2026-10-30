@@ -18,7 +18,7 @@ checks clean is not refused later for a static reason, and a refused study carri
 diagnostic code from both commands:
 
 - the family and procedure must be one the release runs
-  ([family and procedure matrix](../generated/family-procedure-matrix.md)); a planned combination
+  ([family and procedure matrix](../validation/status.md#families-and-procedures)); a planned combination
   names its `pending:<id>` key;
 - the procedure graph, constraint kinds, initial conditions and output observations must be ones the
   selected family solves;
