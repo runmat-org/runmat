@@ -707,21 +707,56 @@ fn missing_closing_paren_produces_error() {
 
 #[test]
 fn unclosed_call_argument_reports_current_token_position() {
-    let src = "t0 = sqrt(2h0/g);";
-    let err = parse(src).unwrap_err();
-    assert_eq!(err.message, "expected ')' after arguments");
-    assert_eq!(err.position, src.find("h0").unwrap());
-    assert_eq!(err.found_token.as_deref(), Some("h0"));
-    assert_eq!(err.expected.as_deref(), Some("')'"));
+    for src in [
+        "t0 = sqrt(2h0/g);",
+        "if true\n t0 = sqrt(2h0/g);\nend",
+        "function out = f()\nif true\n t0 = sqrt(2h0/g);\nend\nend",
+        "classdef C\nmethods\nfunction out = f(obj)\nif true\n t0 = sqrt(2h0/g);\nend\nend\nend\nend",
+        "% 😀é\nif true\n label = \"😀é\"; [a, b] = sqrt(2h0/g);\nend",
+        "classdef C\nproperties\n value = sqrt(2h0/g);\nend\nend",
+    ] {
+        let err = parse(src).unwrap_err();
+        assert_eq!(err.message, "expected ')' after arguments", "{src}");
+        assert_eq!(err.position, src.find("h0").unwrap(), "{src}");
+        assert_eq!(err.found_token.as_deref(), Some("h0"), "{src}");
+        assert_eq!(err.expected.as_deref(), Some("')'"), "{src}");
+    }
 }
 
 #[test]
 fn expected_identifier_reports_offending_token_position() {
-    let src = "?1";
-    let err = parse(src).unwrap_err();
-    assert_eq!(err.message, "expected identifier");
-    assert_eq!(err.position, src.find('1').unwrap());
-    assert_eq!(err.found_token.as_deref(), Some("1"));
+    for src in [
+        "?1",
+        "for 1 = x\nend",
+        "function 1()\nend",
+        "classdef 1\nend",
+    ] {
+        let err = parse(src).unwrap_err();
+        assert_eq!(err.message, "expected identifier", "{src}");
+        assert_eq!(err.position, src.find('1').unwrap(), "{src}");
+        assert_eq!(err.found_token.as_deref(), Some("1"), "{src}");
+        assert_eq!(err.expected.as_deref(), Some("identifier"), "{src}");
+    }
+    for (src, found, message, expected) in [
+        (
+            "function [y, 1] = f()\nend",
+            "1",
+            "expected identifier or '~'",
+            "identifier or '~'",
+        ),
+        (
+            "function y = f(x)\narguments\nx (1.5, 1) double\nend\ny = x;\nend",
+            "1.5",
+            "arguments size spec must use non-negative integer dimensions",
+            "non-negative integer dimension",
+        ),
+    ] {
+        let err = parse(src).unwrap_err();
+        assert_eq!(err.position, src.find(found).unwrap(), "{src}");
+        assert_eq!(err.message, message, "{src}");
+        assert_eq!(err.found_token.as_deref(), Some(found), "{src}");
+        assert_eq!(err.expected.as_deref(), Some(expected), "{src}");
+    }
 }
 
 #[test]

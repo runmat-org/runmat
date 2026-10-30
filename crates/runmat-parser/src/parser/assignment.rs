@@ -135,9 +135,9 @@ impl Parser {
         Ok(Some(stmt))
     }
 
-    pub(super) fn try_parse_multi_assign(&mut self) -> Result<Stmt, String> {
+    pub(super) fn try_parse_multi_assign(&mut self) -> Result<Stmt, SyntaxError> {
         if !self.consume(&Token::LBracket) {
-            return Err("not a multi-assign".into());
+            return Err(self.error("not a multi-assign"));
         }
         let start = self.tokens[self.pos.saturating_sub(1)].position;
         let mut targets = Vec::new();
@@ -146,28 +146,26 @@ impl Parser {
             targets.push(self.parse_multi_assign_target()?);
         }
         if !self.consume(&Token::RBracket) {
-            return Err("expected ']'".into());
+            return Err(self.error("expected ']'"));
         }
         if !self.consume(&Token::Assign) {
-            return Err("expected '='".into());
+            return Err(self.error("expected '='"));
         }
-        let rhs = self.parse_expr().map_err(|e| e.message)?;
+        let rhs = self.parse_expr()?;
         let span = self.span_from(start, rhs.span().end);
         Ok(Stmt::MultiAssign(targets, rhs, false, span))
     }
 
-    fn parse_multi_assign_target(&mut self) -> Result<MultiAssignTarget, String> {
+    fn parse_multi_assign_target(&mut self) -> Result<MultiAssignTarget, SyntaxError> {
         if self.consume(&Token::Tilde) {
             return Ok(MultiAssignTarget::Discard);
         }
         if !self.peek_token().is_some_and(Token::can_be_identifier) {
-            return Err("expected multi-assignment target".into());
+            return Err(self.error("expected multi-assignment target"));
         }
         let base_token = self.next().unwrap();
-        let expr = self
-            .parse_lvalue_base_with_postfix(base_token)
-            .map_err(|e| e.message)?;
-        let lvalue = self.expr_to_lvalue(expr).map_err(|e| e.message)?;
+        let expr = self.parse_lvalue_base_with_postfix(base_token)?;
+        let lvalue = self.expr_to_lvalue(expr)?;
         Ok(MultiAssignTarget::LValue(lvalue))
     }
 }

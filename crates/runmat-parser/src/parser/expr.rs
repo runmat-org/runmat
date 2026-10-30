@@ -691,7 +691,10 @@ impl Parser {
         Ok(Expr::Cell(rows, Span::default()))
     }
 
-    fn try_parse_brace_aggregate_literal(&mut self, base: &Expr) -> Result<Option<Expr>, String> {
+    fn try_parse_brace_aggregate_literal(
+        &mut self,
+        base: &Expr,
+    ) -> Result<Option<Expr>, SyntaxError> {
         enum AggregateBase {
             Struct,
             Object(String),
