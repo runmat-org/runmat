@@ -12,6 +12,8 @@ use crate::supervisor::{
     ProgramBatchSubmission,
 };
 
+mod startup;
+
 enum Command {
     Submit {
         program: Box<runmat_execution_artifact::ProgramExecutionRequest>,
@@ -196,11 +198,19 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
         .build()
     {
         Ok(runtime) => runtime,
-        Err(_) => return,
+        Err(error) => {
+            return startup::reject_until_closed(
+                commands,
+                ExecutionServiceError::Infrastructure(error.to_string()),
+            );
+        }
     };
     let client = match LocalSupervisorClient::for_current_executable() {
         Ok(client) => client,
-        Err(_) => return,
+        Err(error) => {
+            drop(runtime);
+            return startup::reject_until_closed(commands, service_error(error));
+        }
     };
     while let Ok(command) = commands.recv() {
         match command {

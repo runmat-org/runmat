@@ -5,7 +5,7 @@ fn default_profile_reuses_original_authority_and_converges_on_racing_publication
     let original = NativeExecutionConfig::for_current_executable().unwrap();
     let executable = original.executable.clone();
     let temp = tempfile::tempdir().unwrap();
-    let paths = SupervisorPaths::new(temp.path().to_path_buf()).unwrap();
+    let paths = SupervisorPaths::new(temp.path().join("authority")).unwrap();
     let first =
         resolve_default_profile(paths.clone(), &executable, || Ok(original.clone())).unwrap();
     let bytes = std::fs::read(paths.root.join("supervisor-profile.json")).unwrap();
@@ -24,7 +24,7 @@ fn default_profile_reuses_original_authority_and_converges_on_racing_publication
     drop(crate::supervisor::LocalSupervisor::open(cold).unwrap());
 
     let race = tempfile::tempdir().unwrap();
-    let paths = SupervisorPaths::new(race.path().to_path_buf()).unwrap();
+    let paths = SupervisorPaths::new(race.path().join("authority")).unwrap();
     let barrier = std::sync::Barrier::new(2);
     let resolved = std::thread::scope(|scope| {
         let mut threads = Vec::new();
