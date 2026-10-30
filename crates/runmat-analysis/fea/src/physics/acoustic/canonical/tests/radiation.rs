@@ -168,7 +168,8 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
     }
     for quadratic in [false, true] {
         let frequencies: &[f64] = if quadratic { &[0.2, 0.5] } else { &[0.2] };
-        let refinements = if quadratic { [1, 2, 4] } else { [2, 4, 8] };
+        // Tet10 adds cells 8 so both asserted velocity windows lie in the asymptotic range.
+        let refinements: &[usize] = if quadratic { &[1, 2, 4, 8] } else { &[2, 4, 8] };
         for rotated in [false, true] {
             let (rho, c, direction) = if rotated {
                 (
@@ -198,7 +199,7 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
                     let norm = amplitude[0] * amplitude[0] + amplitude[1] * amplitude[1];
                     let mut pressure_errors = Vec::new();
                     let mut velocity_errors = Vec::new();
-                    for cells in refinements {
+                    for &cells in refinements {
                         let result = solve(cells, quadratic, frequency, amplitude, rotated);
                         assert!(
                             executed.insert((
@@ -364,10 +365,27 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
                         context,
                         "pressure={pressure_errors:?}"
                     );
+                    // Tet10 element-mean velocity converges at O(h^2): its error is an
+                    // interpolation term (mean gradient of the P2 interpolant, face integral
+                    // of a cubic, ratios 3.98, 4.00) plus a faster Galerkin term (ratios 4.7,
+                    // 5.6). At cells 1 the two partly cancel (low frequency: interpolation
+                    // 8.30e-4, Galerkin 7.34e-4, total 4.99e-4), so the 1 -> 2 ratio is
+                    // pre-asymptotic, 2.954; then 3.658 and 3.775 (cells 8: 1.223e-5) toward
+                    // 4. Element velocity is pinned to the face integral of the Galerkin
+                    // pressure (recovery gate above), and that pressure is the exact Galerkin
+                    // solution, reproduced to 7 digits by the independent script
+                    // crates/runmat-analysis/fea/evidence/python/acoustic.py. The ratio gate
+                    // therefore applies from cells 2; the 1 -> 2 window must still decrease.
                     gate!(
-                        velocity_errors
-                            .windows(2)
-                            .all(|e| e[0] / e[1] > if quadratic { 3.0 } else { 1.5 }),
+                        velocity_errors.windows(2).enumerate().all(|(window, e)| {
+                            if !quadratic {
+                                e[0] / e[1] > 1.5
+                            } else if window == 0 {
+                                e[1] < e[0]
+                            } else {
+                                e[0] / e[1] > 3.0
+                            }
+                        }),
                         context,
                         "velocity={velocity_errors:?}"
                     );
@@ -378,20 +396,20 @@ fn local_radiation_pressure_phase_mean_velocity_and_signed_power_refine() {
     let mut expected = std::collections::BTreeSet::new();
     // Independent literal inventory, so accidentally removed frequency/order/phase rows reject.
     for (quadratic, frequencies, cells) in [
-        (false, vec![0.2_f64], [2, 4, 8]),
-        (true, vec![0.2_f64, 0.5], [1, 2, 4]),
+        (false, vec![0.2_f64], vec![2, 4, 8]),
+        (true, vec![0.2_f64, 0.5], vec![1, 2, 4, 8]),
     ] {
         for rotated in [false, true] {
             for &frequency in &frequencies {
                 for phase in 0..2 {
-                    for cells in cells {
+                    for &cells in &cells {
                         expected.insert((quadratic, rotated, frequency.to_bits(), phase, cells));
                     }
                 }
             }
         }
     }
-    assert_eq!(executed.len(), 36);
+    assert_eq!(executed.len(), 44);
     assert_eq!(executed, expected, "radiation solve inventory differs");
     eprintln!(
         "radiation completed {} mandatory solves; {} numerical gates failed\n{}",

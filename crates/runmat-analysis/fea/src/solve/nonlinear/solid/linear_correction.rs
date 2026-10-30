@@ -119,7 +119,10 @@ impl SolidNewtonProblem<'_> {
             return Err(SolidNewtonError::NotConverged {
                 factor,
                 cutbacks: 0,
-                reason: format!("physical tangent solve rejected: {:?}", solved.diagnostics),
+                reason: format!(
+                    "physical tangent solve rejected: relative_residual={:?} {:?}",
+                    solved.relative_residual, solved.diagnostics
+                ),
             });
         }
         let achieved = solved.relative_residual.ok_or_else(|| SolidNewtonError::NotConverged {
