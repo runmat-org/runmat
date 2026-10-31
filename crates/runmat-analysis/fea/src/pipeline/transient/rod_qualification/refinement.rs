@@ -78,7 +78,10 @@ fn transient_rod_tet4_and_tet10_converge_to_the_independent_damped_and_undamped_
             // Each order is refined until its spatial error sits below the bound: Tet10 nodal
             // acceleration converges at about h^2 (0.142, 0.029, 0.0061, 0.0014 over cells
             // 1, 2, 4, 8 at 400 intervals) and Tet4 acceleration at about h.
-            let cells = if quadratic { [2, 4, 8] } else { [4, 8, 16] };
+            // The fixed 5% acceleration criterion needs the next Tet4 rung:
+            // 4/8/16 cells converge at h, but 16 cells still gives 0.050625.
+            // Keep both rate gates and the independent absolute bound.
+            let cells = if quadratic { [2, 4, 8] } else { [8, 16, 32] };
             let errors = cells.map(|cells| {
                 let mesh = mesh(quadratic, cells);
                 errors(&mesh, damped, &run(&mesh, damped, 400))

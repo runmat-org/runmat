@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuralDofKind {
     Ux,
@@ -66,9 +66,31 @@ impl StructuralDofKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StructuralNodeDofSet {
     active: Vec<StructuralDofKind>,
+}
+
+impl<'de> Deserialize<'de> for StructuralNodeDofSet {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct EncodedSet {
+            active: Vec<StructuralDofKind>,
+        }
+        let encoded = EncodedSet::deserialize(deserializer)?;
+        if !StructuralDofKind::ORDER
+            .into_iter()
+            .filter(|kind| encoded.active.contains(kind))
+            .eq(encoded.active.iter().copied())
+        {
+            return Err(serde::de::Error::custom(
+                "structural DOF sets must be ordered and unique",
+            ));
+        }
+        Ok(Self {
+            active: encoded.active,
+        })
+    }
 }
 
 impl StructuralNodeDofSet {
@@ -103,17 +125,36 @@ impl StructuralNodeDofSet {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct StructuralDofAddress {
     pub node_index: usize,
     pub kind: StructuralDofKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StructuralDofLayout {
     node_sets: Vec<StructuralNodeDofSet>,
     rows: Vec<StructuralDofAddress>,
     reference_point_count: usize,
+}
+
+impl<'de> Deserialize<'de> for StructuralDofLayout {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct EncodedLayout {
+            node_sets: Vec<StructuralNodeDofSet>,
+            rows: Vec<StructuralDofAddress>,
+            reference_point_count: usize,
+        }
+        let encoded = EncodedLayout::deserialize(deserializer)?;
+        let layout = Self {
+            node_sets: encoded.node_sets,
+            rows: encoded.rows,
+            reference_point_count: encoded.reference_point_count,
+        };
+        layout.validate().map_err(serde::de::Error::custom)?;
+        Ok(layout)
+    }
 }
 
 impl Default for StructuralDofLayout {
@@ -245,9 +286,12 @@ impl StructuralDofLayout {
     }
 
     pub fn index(&self, node_index: usize, kind: StructuralDofKind) -> Option<usize> {
+        // Construction and validate() establish canonical node/component
+        // ordering. Reuse that ordering rather than scanning all model rows
+        // at every boundary quadrature point and transient sample.
         self.rows
-            .iter()
-            .position(|address| address.node_index == node_index && address.kind == kind)
+            .binary_search(&StructuralDofAddress { node_index, kind })
+            .ok()
     }
 
     pub fn reference_point_index(
@@ -370,6 +414,33 @@ mod tests {
         assert_eq!(layout.index(0, StructuralDofKind::Rz), Some(5));
         assert_eq!(layout.index(1, StructuralDofKind::Ux), Some(6));
         assert_eq!(layout.index(1, StructuralDofKind::Rz), None);
+        assert_eq!(layout.index(usize::MAX, StructuralDofKind::Ux), None);
+        let encoded = serde_json::to_value(&layout).unwrap();
+        assert_eq!(
+            serde_json::from_value::<StructuralDofLayout>(encoded.clone()).unwrap(),
+            layout
+        );
+        let mut reordered = encoded;
+        reordered["rows"].as_array_mut().unwrap().reverse();
+        assert!(serde_json::from_value::<StructuralDofLayout>(reordered).is_err());
+        assert!(serde_json::from_value::<StructuralNodeDofSet>(
+            serde_json::json!({"active": ["uz", "ux"]})
+        )
+        .is_err());
+        assert!(StructuralDofKind::ORDER
+            .windows(2)
+            .all(|pair| pair[0] < pair[1]));
+        for node_index in 0..=layout.node_count() {
+            for kind in StructuralDofKind::ORDER {
+                assert_eq!(
+                    layout.index(node_index, kind),
+                    layout
+                        .rows
+                        .iter()
+                        .position(|row| row.node_index == node_index && row.kind == kind)
+                );
+            }
+        }
         assert_eq!(
             layout.address(4),
             Some(StructuralDofAddress {

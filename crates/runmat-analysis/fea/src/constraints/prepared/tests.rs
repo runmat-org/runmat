@@ -155,6 +155,7 @@ fn preparation_inventory_composes_original_occurrences_and_explicit_identity_cop
 fn mixed_selection_inventory_bounds_original_ownership_without_materializing_for_counting() {
     use crate::physics::structural::topology::target::{
         mixed_target_workspace_profile, resolve_mixed_structural_target,
+        MixedStructuralTargetError, MixedStructuralTargetOwnership,
     };
     let mesh = crate::constraints::compilation_tests::mesh(ElementOrder::Tet4);
     let model = crate::fixtures::mixed_solid_beam_model(
@@ -170,6 +171,19 @@ fn mixed_selection_inventory_bounds_original_ownership_without_materializing_for
         let profile = mixed_target_workspace_profile(&target, &mesh, structural).unwrap();
         let selected =
             resolve_mixed_structural_target(&target, &mesh, structural, &topology).unwrap();
+        if target.region_id == "node:1" {
+            assert!(matches!(
+                &selected,
+                MixedStructuralTargetOwnership::Solid { .. }
+            ));
+            assert_eq!(profile.solid_candidate_slots, 1);
+        } else if target.region_id == "node:102" {
+            assert!(matches!(
+                &selected,
+                MixedStructuralTargetOwnership::Explicit { .. }
+            ));
+            assert_eq!(profile.solid_candidate_slots, 1);
+        }
         assert!(
             profile.solid_candidate_slots + profile.explicit_candidate_slots
                 >= selected.canonical_nodes().len()
@@ -179,4 +193,21 @@ fn mixed_selection_inventory_bounds_original_ownership_without_materializing_for
                 >= std::mem::size_of_val(selected.canonical_nodes()) as u64
         );
     }
+    let mut collision = structural.clone();
+    collision.nodes[1].node_id = mesh.topology.nodes[0].node_id as u32;
+    let runmat_analysis_core::StructuralElementKind::Beam(beam) = &mut collision.elements[0].kind
+    else {
+        unreachable!()
+    };
+    beam.node_ids[1] = collision.nodes[1].node_id;
+    let collision_topology = CanonicalStructuralNodeSpace::derive(&mesh, &collision).unwrap();
+    assert!(matches!(
+        resolve_mixed_structural_target(
+            &RegionTarget::point("node:1"),
+            &mesh,
+            &collision,
+            &collision_topology,
+        ),
+        Err(MixedStructuralTargetError::Ambiguous { .. })
+    ));
 }

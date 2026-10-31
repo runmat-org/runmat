@@ -13,7 +13,8 @@ pub(super) mod tests;
 pub struct MaxwellStudyPlanningPolicy {}
 
 /// Preserve the model and the tightest authored relative algebraic criterion.
-/// Canonical harmonic validation rejects unsupported lifecycle, sweeps and coupling;
+/// Each workload selects one authored frequency and retains the complete model.
+/// Canonical harmonic validation rejects unsupported lifecycle and coupling;
 /// this boundary never substitutes a scalar electrical equation or fabricates magnetic vector potential.
 pub fn plan_maxwell_study(
     study: &CompiledAnalysisStudy,

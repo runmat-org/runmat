@@ -461,39 +461,26 @@ impl<'a> MaxwellDiscretization<'a> {
         })
     }
 
-    /// Relative residual of the augmented equations for a given edge/voltage solution.
+    /// Relative residual of the augmented equations for a retained edge/voltage
+    /// solution, certified on the same coalesced operator as the hot LU solve.
     pub fn residual(
         &self,
         entries: &[ComplexEntry],
         rhs: &[(f64, f64)],
         edges: &[ComplexPhasor],
         voltages: &[ComplexPhasor],
-    ) -> f64 {
-        let mut unknowns = vec![ComplexPhasor::ZERO; self.dimension()];
+    ) -> Result<f64, MaxwellError> {
+        let mut unknowns = vec![(0.0, 0.0); self.dimension()];
         for (&edge, &row) in &self.rows {
-            unknowns[row] = edges[edge];
+            let value = edges[edge];
+            unknowns[row] = (value.real, value.imaginary);
         }
         for (&k, &column) in &self.unknown_voltage {
-            unknowns[column] = voltages[k];
+            let value = voltages[k];
+            unknowns[column] = (value.real, value.imaginary);
         }
-        let mut defect: Vec<ComplexPhasor> = rhs
-            .iter()
-            .map(|(a, b)| ComplexPhasor::new(-a, -b))
-            .collect();
-        for entry in entries {
-            defect[entry.row] +=
-                ComplexPhasor::new(entry.real, entry.imaginary) * unknowns[entry.column];
-        }
-        let norm = |values: &mut dyn Iterator<Item = ComplexPhasor>| {
-            values.fold(0.0_f64, |n, v| n.hypot(v.real).hypot(v.imaginary))
-        };
-        let load = norm(&mut rhs.iter().map(|(a, b)| ComplexPhasor::new(*a, *b)));
-        let residual = norm(&mut defect.into_iter());
-        if load > 0.0 {
-            residual / load
-        } else {
-            residual
-        }
+        sparse_direct::complex_relative_residual(self.dimension(), entries, rhs, &unknowns)
+            .map_err(|error| MaxwellError::NotConverged(error.to_string()))
     }
 
     pub fn edge_count(&self) -> usize {
@@ -547,11 +534,14 @@ pub(super) fn solve(
         edges[edge] = solution[row];
     }
     let voltages = system.voltages(&solution);
-    let physical = system.residual(&entries, &rhs, &edges, &voltages);
+    // The factorized, duplicate-coalesced operator and compensated residual are
+    // the same authority used by shared LU refinement and cold revalidation.
+    let physical = solved.relative_residual;
     drop(entries);
     if !physical.is_finite() || physical > tolerance {
         return Err(MaxwellError::NotConverged(format!(
-            "physical complex residual={physical:e}"
+            "physical complex residual={physical:e}, LU refinement residual={:e} after {} steps",
+            solved.refinement_relative_residual, solved.refinement_steps,
         )));
     }
     let evaluation = system.evaluate(&edges, &voltages)?;
@@ -655,7 +645,7 @@ pub(crate) fn validate_retained_consistency(
         .map(|d| d.voltage_v.canonical_value())
         .collect();
     let (entries, rhs) = system.assemble()?;
-    let residual = system.residual(&entries, &rhs, edges, &voltages);
+    let residual = system.residual(&entries, &rhs, edges, &voltages)?;
     drop(entries);
     let evaluation = system.evaluate(edges, &voltages)?;
     if !residual.is_finite()

@@ -51,19 +51,27 @@ fn exact_local_ceiling_and_raw_metadata_are_counted_before_expansion() {
 #[test]
 fn checked_counts_and_actual_shared_krylov_counter_fail_closed() {
     for values in [
-        (1, u64::MAX, 1, 0, 0, 0),
-        (u64::MAX, 1, 1, 0, 0, 0),
-        (1, 1, 1, u64::MAX, 0, 0),
-        (1, 1, 1, 0, u64::MAX, 0),
-        (1, 1, 1, 0, 0, u64::MAX),
+        (1, u64::MAX, 1, 0, 0, 0, 0),
+        (u64::MAX, 1, 1, 0, 0, 0, 0),
+        (1, 1, 1, u64::MAX, 0, 0, 0),
+        (1, 1, 1, 0, u64::MAX, 0, 0),
+        (1, 1, 1, 0, 0, u64::MAX, 0),
+        (1, 1, 1, 0, 0, 0, u64::MAX),
     ] {
-        assert!(from_counts(values.0, values.1, values.2, values.3, values.4, values.5).is_err());
+        assert!(
+            from_counts(values.0, values.1, values.2, values.3, values.4, values.5, values.6)
+                .is_err()
+        );
     }
     // The sparse LU reservation scales with the element count, with no iteration-counter cap.
-    let huge = from_counts(1, u64::from(u32::MAX) / 480 + 1, 1, 0, 0, 0).unwrap();
+    let huge = from_counts(1, u64::from(u32::MAX) / 480 + 1, 1, 0, 0, 0, 0).unwrap();
     assert!(huge.assembly_and_solver_bytes > 16 * (1u64 << 30));
-    let small = from_counts(10, 1, 4, 100, 100, 100).unwrap();
-    let large = from_counts(27, 8, 24, 101, 101, 101).unwrap();
+    let small = from_counts(10, 1, 4, 100, 100, 100, 0).unwrap();
+    let large = from_counts(27, 8, 24, 101, 101, 101, 0).unwrap();
+    let current_drive = from_counts(10, 1, 4, 100, 100, 100, 1).unwrap();
+    assert_eq!(current_drive.real_block_dimension_upper_bound, 14);
+    assert_eq!(current_drive.support_entries_upper_bound, 49);
+    assert!(current_drive.assembly_and_solver_bytes > small.assembly_and_solver_bytes);
     assert!(large.total_bytes > small.total_bytes);
     assert_eq!(
         small.total_bytes,

@@ -5,7 +5,9 @@
 //! compiled source, sparse solve and retained/cold-validation copies are included.
 use super::{MaxwellCurrentSample, MaxwellError, MaxwellFieldSample, MaxwellVolumeData};
 use crate::{results::field::SampledOrientedEdge, topology::AnalysisProjection};
-use runmat_analysis_core::AnalysisModel;
+use runmat_analysis_core::{
+    AnalysisConstraint, AnalysisModel, ElectricalConstraintKind, ExcitationAction,
+};
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -68,6 +70,32 @@ pub(crate) fn require_canonical_ceiling(
                 .materialization_resident_bytes_estimate,
         );
     }
+    // Every current terminal contributes at most one voltage unknown and 13
+    // element triplets (six column, six row, one diagonal). Activation and
+    // conductor grouping can only reduce this authored upper bound.
+    let current_drives = count(
+        model
+            .constraints
+            .iter()
+            .filter(|constraint| {
+                matches!(
+                    constraint,
+                    AnalysisConstraint::Electrical(value)
+                        if matches!(&value.kind, ElectricalConstraintKind::IntegralCurrent { .. })
+                )
+            })
+            .count(),
+    )?;
+    let current_drives = add(
+        current_drives,
+        count(
+            model
+                .excitations
+                .iter()
+                .filter(|action| matches!(action, ExcitationAction::ElectricCurrent(_)))
+                .count(),
+        )?,
+    )?;
     let reservation = from_counts(
         count(mesh.topology.nodes.len())?,
         count(mesh.topology.volume_elements.len())?,
@@ -75,6 +103,7 @@ pub(crate) fn require_canonical_ceiling(
         projection,
         metadata.materialization_resident_bytes_estimate,
         add(selected, assignment)?,
+        current_drives,
     )?;
     if reservation.total_bytes > maximum {
         return Err(resource(format!(
@@ -92,12 +121,13 @@ fn from_counts(
     projection: u64,
     metadata: u64,
     selected: u64,
+    current_drives: u64,
 ) -> Result<MaxwellNumericalReservation, MaxwellError> {
     // Lowest-order corner-edge E, including affine Tet10. Grounding only reduces these.
     let edges = mul(elements, 6)?;
-    let dimension = edges;
+    let dimension = add(edges, current_drives)?;
     let samples = mul(elements, 15)?;
-    let entries = mul(elements, 36)?;
+    let entries = mul(elements, add(36, mul(current_drives, 13)?)?)?;
     let topology = sum(&[
         16_384,
         mul(projection, 2)?,
@@ -123,7 +153,9 @@ fn from_counts(
         mul(edges, 64)?,
     ])?;
     let retained = mul(payload, 3)?;
-    // Triplets, compressed columns and the sparse LU factors. Nested-dissection fill of
+    // Original triplets, builder triplets, coalescing scratch and compressed
+    // columns (also reused by cold residual certification), then sparse LU factors.
+    // Nested-dissection fill of
     // a 3D edge-element operator grows like n^(4/3); 16 complex entries per n^(4/3)
     // bounds L and U together for the meshes this kernel factors.
     let fill = (dimension as f64).powf(4.0 / 3.0) * 16.0 * 32.0;
@@ -131,7 +163,7 @@ fn from_counts(
         return Err(resource("sparse factor envelope overflow"));
     }
     let numerical = sum(&[
-        mul(entries, 3 * 32)?,
+        mul(entries, 4 * 32)?,
         fill as u64,
         mul(dimension, 16 * 8)?,
         mul(nodes, 256)?,

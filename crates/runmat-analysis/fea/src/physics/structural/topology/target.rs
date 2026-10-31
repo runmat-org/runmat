@@ -1,6 +1,6 @@
 use crate::topology::storage::{self, SortedValues, TopologyStorageError};
 
-use runmat_analysis_core::{RegionTarget, StructuralModel};
+use runmat_analysis_core::{EntityDimension, ExpectedTopology, RegionTarget, StructuralModel};
 use runmat_meshing_core::SolverMeshArtifact;
 use thiserror::Error;
 
@@ -56,7 +56,7 @@ pub(crate) fn resolve_mixed_structural_target(
 ) -> Result<MixedStructuralTargetOwnership, MixedStructuralTargetError> {
     let _profile = mixed_target_workspace_profile(target, mesh, structural)?;
     let selector = &target.region_id;
-    let solid = solid_nodes(mesh, target)?;
+    let solid = solid_nodes(mesh, target, topology)?;
     let mut explicit = explicit_target_node_indices(structural, selector)?;
     for node in &mut explicit {
         *node = *topology.explicit_node_indices.get(*node).ok_or_else(|| {
@@ -91,8 +91,37 @@ pub(crate) fn resolve_mixed_structural_target(
 fn solid_nodes(
     mesh: &SolverMeshArtifact,
     target: &RegionTarget,
+    topology: &CanonicalStructuralNodeSpace,
 ) -> Result<Vec<usize>, MixedStructuralTargetError> {
     storage::check_cancelled()?;
+    if let Some(node_id) = exact_mesh_node_id(target) {
+        // The node-space constructor validates canonical mesh ordering and retains
+        // solid nodes in mesh order. The lookup therefore needs no per-target index.
+        if topology.identity.mesh_digest() != Some(mesh.canonical_digest)
+            || topology.solid_node_count != mesh.topology.nodes.len()
+        {
+            return Err(MixedStructuralTargetError::InvalidTopology(
+                "solid node space does not match the solver mesh".into(),
+            ));
+        }
+        storage::slots::<usize>(1)?;
+        let mut nodes = storage::reserve(1)?;
+        if let Ok(index) = mesh
+            .topology
+            .nodes
+            .binary_search_by_key(&node_id, |node| node.node_id)
+        {
+            if topology.nodes.get(index).map(|node| node.identity)
+                != Some(mesh.topology.nodes[index].stable_identity)
+            {
+                return Err(MixedStructuralTargetError::InvalidTopology(
+                    "solid node identity does not match the solver mesh".into(),
+                ));
+            }
+            nodes.push(index);
+        }
+        return Ok(nodes);
+    }
     let node_by_id = SortedValues::derive(
         mesh.topology
             .nodes
@@ -169,6 +198,11 @@ fn solid_candidate_count(
     target: &RegionTarget,
 ) -> Result<usize, TopologyStorageError> {
     storage::check_cancelled()?;
+    if exact_mesh_node_id(target).is_some() {
+        // Count-only upper bound; no ordering assumption is needed before the
+        // canonical node-space has been constructed by the resolver.
+        return Ok(1);
+    }
     let selected_point = if target.resolved_entities().is_empty() {
         target
             .region_id
@@ -218,6 +252,16 @@ fn solid_candidate_count(
     Ok(count)
 }
 
+fn exact_mesh_node_id(target: &RegionTarget) -> Option<u64> {
+    if target.entity_dimension != EntityDimension::Point
+        || target.expected_topology != ExpectedTopology::MeshNode
+        || !target.resolved_entities().is_empty()
+    {
+        return None;
+    }
+    target.region_id.strip_prefix("node:")?.parse().ok()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct MixedTargetWorkspaceProfile {
     pub solid_candidate_slots: usize,
@@ -234,10 +278,15 @@ pub(crate) fn mixed_target_workspace_profile(
 ) -> Result<MixedTargetWorkspaceProfile, TopologyStorageError> {
     let solid_candidate_slots = solid_candidate_count(mesh, target)?;
     let explicit = super::explicit_target_workspace_profile(structural, &target.region_id)?;
+    let node_index_bytes = if exact_mesh_node_id(target).is_some() {
+        0
+    } else {
+        storage::slots::<(u64, usize)>(mesh.topology.nodes.len())?
+    };
     let total_requested_bytes = storage::add(
         explicit.total_requested_bytes,
         storage::add(
-            storage::slots::<(u64, usize)>(mesh.topology.nodes.len())?,
+            node_index_bytes,
             storage::slots::<usize>(solid_candidate_slots)?,
         )?,
     )?;
