@@ -14,7 +14,7 @@ fn canonical_encoding_is_deterministic_and_round_trips() {
     assert_eq!(first, second);
     assert_eq!(
         std::str::from_utf8(&first).unwrap(),
-        r#"{"schema":"runmat-types","major":1,"minor":2,"fact":{"kind":"Unknown","shape":"Unknown","storage":"Unknown","layout":"Unknown","contiguity":"Unknown","view":"Unknown","residency":"Unknown","alias":"Unknown","mutation":"Unknown","certainty":{"Dynamic":"ForeignBoundary"},"invalidation":[]}}"#
+        r#"{"schema":"runmat-types","major":1,"minor":3,"fact":{"kind":"Unknown","shape":"Unknown","storage":"Unknown","layout":"Unknown","contiguity":"Unknown","view":"Unknown","residency":"Unknown","alias":"Unknown","mutation":"Unknown","certainty":{"Dynamic":"ForeignBoundary"},"invalidation":[]}}"#
     );
     assert_eq!(decode_canonical(&first).unwrap(), fact);
 }
@@ -25,18 +25,20 @@ fn canonical_schema_minor_compatibility_is_backward_only() {
     let encoded = encode_canonical(&fact).unwrap();
     let mut envelope: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
 
-    envelope["minor"] = serde_json::json!(1);
-    let schema_1_1 = serde_json::to_vec(&envelope).unwrap();
-    assert_eq!(decode_canonical(&schema_1_1).unwrap(), fact);
+    for minor in 0..=3 {
+        envelope["minor"] = serde_json::json!(minor);
+        let compatible = serde_json::to_vec(&envelope).unwrap();
+        assert_eq!(decode_canonical(&compatible).unwrap(), fact, "v1.{minor}");
+    }
 
-    envelope["minor"] = serde_json::json!(3);
+    envelope["minor"] = serde_json::json!(4);
     let future = serde_json::to_vec(&envelope).unwrap();
     assert!(matches!(
         decode_canonical(&future),
         Err(CanonicalCodecError::UnsupportedSchema {
             schema,
             major: 1,
-            minor: 3,
+            minor: 4,
         }) if schema == "runmat-types"
     ));
 }

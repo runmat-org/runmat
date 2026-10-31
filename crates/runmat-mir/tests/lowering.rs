@@ -1847,8 +1847,10 @@ fn spawn_safety_joins_future_targets_across_cfg_paths() {
 }
 
 #[test]
-fn analyze_assembly_rejects_spawned_future_with_unknown_target() {
-    let mir = lower_mir("function y = f(g); y = spawn(g); end");
+fn analyze_assembly_rejects_spawn_after_overwriting_runtime_future_input() {
+    // A parameter may carry a future with an issued runtime owner. A numeric
+    // overwrite must discard that provenance rather than inherit its admission.
+    let mir = lower_mir("function y = f(g); g = 1; y = spawn(g); end");
 
     let store = analyze_assembly(&mir);
     assert!(store.diagnostics.iter().any(|diagnostic| {
