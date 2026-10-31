@@ -60,21 +60,34 @@ fn main() {
     }
 
     // Explicit LAPACK hints
-    if let Ok(lapack_lib_dir) = env::var("LAPACK_LIB_DIR") {
+    println!("cargo:rerun-if-env-changed=LAPACK_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=LAPACK_LIBS");
+    let lapack_lib_dir = env::var("LAPACK_LIB_DIR").ok();
+    if let Some(ref lapack_lib_dir) = lapack_lib_dir {
         println!("cargo:rustc-link-search=native={lapack_lib_dir}");
-        println!("cargo:rerun-if-env-changed=LAPACK_LIB_DIR");
     }
+    // CLAPACK's lapack.lib depends on libf2c.lib. Probe only the selected
+    // LAPACK provider directory, never an unrelated vcpkg installation.
+    let f2c_lib_path = lapack_lib_dir
+        .as_ref()
+        .map(|dir| Path::new(dir).join("libf2c.lib"))
+        .or_else(|| vcpkg_lib_path.as_ref().map(|dir| dir.join("libf2c.lib")));
+    let lapack_has_f2c =
+        target_os == "windows" && f2c_lib_path.as_ref().is_some_and(|path| path.exists());
     if let Ok(lapack_libs) = env::var("LAPACK_LIBS") {
-        for lib in split_list(&lapack_libs) {
+        let libs = split_list(&lapack_libs);
+        for lib in &libs {
             println!("cargo:rustc-link-lib={lib}");
         }
-        println!("cargo:rerun-if-env-changed=LAPACK_LIBS");
+        if lapack_has_f2c
+            && libs.iter().any(|lib| lib == "lapack")
+            && !libs.iter().any(|lib| lib == "libf2c")
+        {
+            println!("cargo:rustc-link-lib=libf2c");
+        }
     } else if target_os == "windows" {
         println!("cargo:rustc-link-lib=lapack");
-        if vcpkg_lib_path
-            .as_ref()
-            .is_some_and(|path| path.join("libf2c.lib").exists())
-        {
+        if lapack_has_f2c {
             println!("cargo:rustc-link-lib=libf2c");
         }
         println!("cargo:rustc-link-lib=openblas");
