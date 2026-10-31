@@ -48,9 +48,9 @@ diagnostics; it is not a general solver for arbitrary CAD acoustics.
 | Procedure | Required domain/state | Current numerical status |
 | --- | --- | --- |
 | `acoustic static` | Static pressure state | Typed contract; reduced component is harmonic, not static |
-| `acoustic modal` | Positive mode count; acoustic modes state | Canonical Tet4/Tet10 pressure eigen-solve; publishes `modal.frequency_hz` and one `acoustic.pressure` field per mode |
-| `acoustic transient` | Time samples; acoustic pressure state | Canonical Tet4/Tet10 Newmark pressure history; publishes one `acoustic.pressure` field per time sample with acoustic energy |
-| `acoustic harmonic` | Frequency samples and complex pressure | Canonical Tet4/Tet10 complex pressure; one certified sparse LU per frequency solves and proves the operator nonsingular; publishes `acoustic.pressure` and `acoustic.particle_velocity` at every frequency, and authored outputs (pressure, `level` in dB re 20 µPa) at the sampled frequencies |
+| `acoustic modal` | Positive mode count; acoustic modes state | Canonical Tet4/Tet10 pressure eigen-solve; publishes `modal.frequency_hz`, `modal.eigenvalue` and one `acoustic.mode_shape.<mode>` field per mode |
+| `acoustic transient` | Time samples; acoustic pressure state | Canonical Tet4/Tet10 Newmark pressure solve; standalone studies publish the final pressure field, with acoustic energy and absorbed boundary energy over the full time grid. Authored output declarations are rejected by standalone modal/transient admission. |
+| `acoustic harmonic` | Frequency samples and complex pressure | Canonical Tet4/Tet10 complex pressure; one certified sparse LU per frequency solves and proves the operator nonsingular; publishes `acoustic.pressure`, `acoustic.particle_velocity` and `acoustic.intensity` at every frequency, and authored outputs (pressure, `level` in dB re 20 µPa) at the sampled frequencies |
 | `acoustic nonlinear` | Load-factor domain | Typed contract only |
 
 No unsupported procedure is approximated by silently selecting the reduced harmonic component.

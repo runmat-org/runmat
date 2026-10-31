@@ -27,15 +27,8 @@ fn sampled_native_catalog_profiles_cover_partition_boundaries() {
             native_acoustic_field_plan(count, count).unwrap(),
         )
         .unwrap();
-        let definitions = [
-            native_acoustic_field_definition("acoustic.pressure", &request.plan.requirements[0])
-                .unwrap(),
-            native_acoustic_field_definition(
-                "acoustic.particle_velocity",
-                &request.plan.requirements[1],
-            )
-            .unwrap(),
-        ];
+        let definitions = acoustic_native_field_definitions(&request).unwrap();
+        let counts = vec![count; definitions.len()];
         for frequency in [0.1, 0.2, 0.3] {
             let sample = RecoveredFieldSample::FrequencyHertz(frequency);
             let fields = definitions
@@ -70,7 +63,7 @@ fn sampled_native_catalog_profiles_cover_partition_boundaries() {
             let profile = RecoveredFieldArtifactManifest::profile_sampled_shape(
                 &request,
                 &definitions,
-                &[count, count],
+                &counts,
                 sample,
             )
             .unwrap();
