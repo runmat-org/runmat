@@ -1,6 +1,16 @@
 //! One frozen-project fixture compiler for named and capturing signal placement checks.
 use super::*;
 
+const PROJECT_DOCUMENT: &str = "[package]\nname = \"signal-placement-conformance\"\n[sources]\nroots = [\"src\"]\n[runtime.language]\ncompat = \"matlab\"\n";
+
+pub(super) fn project_policy() -> runmat_config::runtime::ClusterRuntimePolicy {
+    runmat_config::runtime::ClusterRuntimePolicy::from_project_document(
+        PROJECT_DOCUMENT,
+        runmat_config::document::RunmatConfigFormat::Toml,
+    )
+    .unwrap()
+}
+
 pub(super) struct CompiledSignalFixture {
     pub session: runmat_core::RunMatSession,
     pub project_root: tempfile::TempDir,
@@ -13,11 +23,7 @@ pub(super) struct CompiledSignalFixture {
 pub(super) async fn compile(source: &str) -> CompiledSignalFixture {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
-    std::fs::write(
-        project_root.path().join("runmat.toml"),
-        "[package]\nname = \"signal-placement-conformance\"\n[sources]\nroots = [\"src\"]\n",
-    )
-    .unwrap();
+    std::fs::write(project_root.path().join("runmat.toml"), PROJECT_DOCUMENT).unwrap();
     let source_path = project_root.path().join("src/pulse.m");
     std::fs::write(&source_path, source).unwrap();
     let project = runmat_package::build_frozen_project(

@@ -113,4 +113,31 @@ impl<S: CacheImport> CacheImport for Overlay<'_, S> {
             self.source.read_verified(digest)
         }
     }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.read_verified_bounded_with_admission(digest, maximum_bytes, &mut |_| Ok(()))
+    }
+
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if let Some(bytes) = self.objects.get(&digest) {
+            runmat_execution_artifact::cache::copy_verified_bounded_with_admission(
+                digest,
+                Some(bytes.as_slice()),
+                maximum_bytes,
+                admit,
+            )
+        } else {
+            self.source
+                .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+        }
+    }
 }

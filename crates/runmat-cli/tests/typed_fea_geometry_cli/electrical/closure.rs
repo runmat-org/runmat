@@ -6,39 +6,8 @@ pub(super) fn reopen(
     retained: &runmat_runtime::analysis::AnalysisRunResult,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
 ) -> runmat_runtime::analysis::ElectricalStudyCompletion {
-    let paths = manifest["numerical_evidence"]["object_artifact_paths"]
-        .as_array()
-        .unwrap();
     let catalog = &manifest["numerical_evidence"]["catalog"];
-    assert_eq!(paths.len(), catalog["objects"].as_array().unwrap().len());
-    assert!(paths.len() > 3);
-    let mut cold = runmat_execution_artifact::cache::FilesystemObjectStore::open(
-        project.path().join("cold-closure"),
-        256 * 1024 * 1024,
-    )
-    .unwrap();
-    let mut digests = std::collections::BTreeSet::new();
-    for path in paths {
-        let object: Value =
-            serde_json::from_slice(&fs::read(project.path().join(path.as_str().unwrap())).unwrap())
-                .unwrap();
-        let bytes: Vec<u8> = serde_json::from_value(object["bytes"].clone()).unwrap();
-        let reference: runmat_execution::value::ValueRef =
-            serde_json::from_value(object["reference"].clone()).unwrap();
-        assert_eq!(
-            runmat_execution::Digest::sha256(&bytes),
-            reference.logical_digest
-        );
-        assert!(digests.insert(reference.logical_digest));
-        let logical = runmat_execution_artifact::LogicalObject::new(
-            runmat_execution_artifact::ObjectNamespace::ResultValue,
-            format!("cold/{}", reference.logical_digest),
-            reference.media_type,
-            bytes,
-        )
-        .unwrap();
-        runmat_execution_artifact::cache::CacheExport::write_verified(&mut cold, &logical).unwrap();
-    }
+    let cold = crate::closure::reopen_catalog_objects(project, manifest);
     let entries = manifest["public_run"]["states"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
     let state = runmat_analysis_fea::execution::CanonicalSemanticState::from_canonical_bytes(

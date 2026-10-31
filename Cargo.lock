@@ -8067,6 +8067,7 @@ dependencies = [
 name = "runmat-execution"
 version = "0.6.2"
 dependencies = [
+ "base64 0.22.1",
  "ed25519-dalek",
  "hex",
  "minicbor",
@@ -8203,6 +8204,7 @@ dependencies = [
  "runmat-server-client",
  "rustls 0.23.40",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
  "socket2 0.6.4",
  "thiserror 1.0.69",
@@ -8743,7 +8745,9 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
+ "futures-util",
  "rand 0.8.6",
+ "reqwest 0.12.28",
  "runmat-accelerate-api",
  "runmat-core",
  "runmat-execution",

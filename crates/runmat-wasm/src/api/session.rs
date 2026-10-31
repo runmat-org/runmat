@@ -1254,12 +1254,7 @@ impl RunMatWasm {
             ));
         }
         wasm_registry::register_all();
-        let builtin_count = runmat_builtins::builtin_functions().len();
-        log::warn!("RunMat wasm: builtins registered ({builtin_count})");
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(
-            &format!("RunMat wasm: builtins registered ({builtin_count})").into(),
-        );
+        log::debug!("RunMat wasm: resetting execution session");
         let installed_handoff = self.session.borrow().project_handoff().cloned();
         let config = self.config.borrow();
         let consent = config.telemetry_consent;

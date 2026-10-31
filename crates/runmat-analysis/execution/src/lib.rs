@@ -209,10 +209,17 @@ pub use statistical_field_recovery::{
 };
 mod magnetic_state_profiles;
 mod acoustic_field_recovery;
+mod acoustic_response_field_recovery;
 pub use acoustic_field_recovery::{
     build_prepared_acoustic_field_recovery_resource_plan, decode_acoustic_recovery_source,
     import_acoustic_recovered_fields, prepare_acoustic_field_recovery,
     AcousticFieldRecoveryPreparation, PreparedAcousticFieldRecovery,
+};
+pub use acoustic_response_field_recovery::{
+    build_prepared_acoustic_response_field_recovery_resource_plan,
+    decode_acoustic_response_recovery_source, import_acoustic_response_recovered_fields,
+    prepare_acoustic_response_field_recovery, AcousticResponseFieldRecoveryPreparation,
+    PreparedAcousticResponseFieldRecovery,
 };
 mod maxwell_field_recovery;
 mod maxwell_harmonic_plan;
@@ -555,7 +562,7 @@ pub use signal_materialization::{
     GeneratorChunkOutput, PlannedGenerator,
 };
 pub use signal_program::{
-    build_generator_task_submission, generator_chunk_output_from_success,
+    build_generator_task_submission, generator_chunk_output_from_success, generator_task_id,
     prepare_generator_descriptor, prepare_generator_program, prepare_signal_materialization,
     GeneratorExecutionContext, GeneratorProgramAdmission, GeneratorProgramAdmissionRef,
     PreparedGeneratorChunk, PreparedGeneratorProgram, PreparedSignalMaterialization,

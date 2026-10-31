@@ -10,6 +10,20 @@ struct InputWorker {
 
 #[async_trait]
 impl RemoteWorkerChannel for InputWorker {
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<Option<super::super::AuthenticatedPhysicalRetirement>> {
+        Ok(Some(super::super::AuthenticatedPhysicalRetirement::issue(
+            request.clone(),
+        )))
+    }
+    async fn acknowledge_physical_retirement(
+        &self,
+        _: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
     fn node_identity(&self) -> &str {
         "cold-input-worker"
     }

@@ -10,7 +10,7 @@ use super::{
     MeshingResourceBudget, MeshingStageKind, PersistentEntityId, StableDigest,
 };
 
-pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 4;
+pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 5;
 const MAX_STAGE_COUNTERS: usize = 256;
 const MAX_STAGE_INVARIANTS: usize = 256;
 const MAX_STAGE_EVIDENCE: usize = 65_536;
@@ -98,10 +98,21 @@ impl InvariantEvidence {
 /// Provenance of original producing-stage observations imported from accepted
 /// artifacts. This is retained lineage, not an independently replayed proof.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReusedMeshingStageOrigin {
+    ImplementationCache {
+        implementation_digest: StableDigest,
+    },
+    AcceptedInvocation {
+        invocation_identity_digest: StableDigest,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReusedMeshingStageObservation {
     pub original_observation_digest: StableDigest,
-    pub implementation_digest: StableDigest,
+    pub origin: ReusedMeshingStageOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -143,9 +154,19 @@ impl MeshingStageEvidence {
             origin
                 .original_observation_digest
                 .validate_nonzero("original observation digest")?;
-            origin
-                .implementation_digest
-                .validate_nonzero("reused implementation digest")?;
+            match &origin.origin {
+                ReusedMeshingStageOrigin::ImplementationCache {
+                    implementation_digest,
+                } => {
+                    implementation_digest.validate_nonzero("reused implementation digest")?;
+                }
+                ReusedMeshingStageOrigin::AcceptedInvocation {
+                    invocation_identity_digest,
+                } => {
+                    invocation_identity_digest
+                        .validate_nonzero("reused invocation identity digest")?;
+                }
+            }
         }
         self.partition.validate()?;
         self.stage_result_digest

@@ -550,11 +550,13 @@ fn write_new_private_bytes(path: &Path, encoded: &[u8]) -> Result<()> {
         .sync_all()
         .context("sync recovery key")?;
     temporary.persist_noclobber(path).map_err(|error| {
-        anyhow::anyhow!(
-            "refusing to overwrite recovery key {}: {}",
-            path.display(),
-            error.error
-        )
+        let context = match error.error.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                format!("refusing to overwrite recovery key {path:?}")
+            }
+            _ => format!("persist private recovery key {path:?}"),
+        };
+        anyhow::Error::new(error.error).context(context)
     })?;
     Ok(())
 }
@@ -603,13 +605,18 @@ fn require_private_file(path: &Path) -> Result<()> {
     }
     let mode = metadata.permissions().mode();
     if mode & 0o077 != 0 {
-        bail!(
-            "recovery key {:?} is accessible by group or other users; require mode 0600; {}",
-            path,
-            private_mode_guidance(path)
-        );
+        return Err(private_file_permissions_error(path));
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn private_file_permissions_error(path: &Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "recovery key {:?} is accessible by group or other users; require mode 0600; {}",
+        path,
+        private_mode_guidance(path)
+    )
 }
 
 #[cfg(unix)]
@@ -665,7 +672,11 @@ mod tests {
             loaded.private_key.public_key_bytes().as_slice(),
             recipient.public_key
         );
-        assert!(write_new_key(&path, &document).is_err());
+        let overwrite = write_new_key(&path, &document).unwrap_err();
+        assert_eq!(
+            overwrite.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
         assert_eq!(
             std::fs::read(&path).unwrap(),
             serde_json::to_vec_pretty(&document).unwrap()
@@ -704,17 +715,14 @@ mod tests {
             let non_utf8 = directory
                 .path()
                 .join(std::ffi::OsString::from_vec(b"download-\xff.json".to_vec()));
-            write_new_key(&non_utf8, &document).unwrap();
-            std::fs::set_permissions(&non_utf8, std::fs::Permissions::from_mode(0o644)).unwrap();
-            let refusal = load_key(&non_utf8)
-                .err()
-                .expect("non-UTF-8 insecure import refused")
-                .to_string();
+            // Unix path values can contain non-UTF-8 bytes even where the
+            // filesystem (including APFS) rejects those names. Exercise the
+            // production diagnostic independently of filesystem encoding.
+            let refusal = private_file_permissions_error(&non_utf8).to_string();
             assert!(refusal.contains("non-UTF-8"));
             assert!(refusal.contains("no lossy copy-pastable pathname is shown"));
+            assert!(!refusal.contains('\u{fffd}'));
             assert!(!private_mode_guidance(&non_utf8).starts_with("run: "));
-            std::fs::set_permissions(&non_utf8, std::fs::Permissions::from_mode(0o600)).unwrap();
-            load_key(&non_utf8).unwrap();
 
             let link = directory.path().join("recovery-key-link.json");
             std::os::unix::fs::symlink(&path, &link).unwrap();

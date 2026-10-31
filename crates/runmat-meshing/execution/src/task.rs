@@ -104,18 +104,7 @@ pub fn build_task_submission(
     validate_inputs(workload, &input_roots, &context.artifact_access)?;
     let capabilities = map_capabilities(workload, stage_identity, resolved_request)?;
     let retry = map_retry(workload.stage, effect)?;
-    let partition_identity = MeshingPartitionIdentity {
-        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-        stage_identity_digest: workload.stage_identity_digest,
-        partition: workload.partition.clone(),
-    };
-    partition_identity.validate()?;
-    let partition_digest = partition_identity.canonical_digest()?;
-    let task_id = TaskId::derive(&[
-        b"runmat-meshing-task-v2",
-        context.scope_id.bytes(),
-        partition_digest.bytes(),
-    ]);
+    let task_id = meshing_task_id(context.scope_id, host)?;
     if dependencies.contains(&task_id) {
         return Err(MeshingExecutionError::Invalid(
             "meshing task cannot depend on itself".into(),
@@ -163,6 +152,25 @@ pub fn build_task_submission(
         dependencies,
         priority: context.priority,
     })
+}
+
+/// Canonical stage identity before program lowering or scheduler admission.
+pub fn meshing_task_id(
+    scope_id: runmat_execution::ExecutionScopeId,
+    host: &MeshingHostWorkload,
+) -> MeshingExecutionResult<TaskId> {
+    let partition_identity = MeshingPartitionIdentity {
+        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
+        stage_identity_digest: host.workload.stage_identity_digest,
+        partition: host.workload.partition.clone(),
+    };
+    partition_identity.validate()?;
+    let partition_digest = partition_identity.canonical_digest()?;
+    Ok(TaskId::derive(&[
+        b"runmat-meshing-task-v2",
+        scope_id.bytes(),
+        partition_digest.bytes(),
+    ]))
 }
 
 fn validate_identity_binding(

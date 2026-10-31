@@ -104,6 +104,9 @@ pub(crate) async fn execute(
     ));
     let supervisor = Rc::new(BrowserLocalTaskSupervisor::new());
     let ports = factory::ports()
+        // No console transport is provisioned in this isolated CPU worker.
+        // Do not retain fallback output or inherit interactive/UI services.
+        .with_host(Rc::new(runmat_runtime::context::NonCapturingPortableHost))
         .with_workspace(workspace_service.clone())
         .with_base_workspace(workspace_service)
         .with_local_tasks(supervisor.submission_port(runtime.local_identity()));

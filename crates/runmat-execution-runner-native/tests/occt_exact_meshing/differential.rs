@@ -20,7 +20,15 @@ const TOLERANCE: f64 = 1.0e-10;
 fn runmat_and_independent_meshers_agree_on_box_invariants() {
     let (topology, result) = execute_box();
     let artifact = &result.artifact;
-    let oracle = import_geometry("box.brep", BOX, GeometryImportOptions::default()).unwrap();
+    let oracle = import_geometry(
+        "box.brep",
+        BOX,
+        GeometryImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..GeometryImportOptions::default()
+        },
+    )
+    .unwrap();
     let oracle_surface = oracle.asset.surface_meshes.first().unwrap();
 
     assert_watertight(&oracle_surface.vertices, &oracle_surface.triangles);
@@ -28,7 +36,9 @@ fn runmat_and_independent_meshers_agree_on_box_invariants() {
     let runmat_triangles = runmat_boundary_triangles(artifact);
     assert_watertight(&runmat_coordinates, &runmat_triangles);
     assert_eq!(oracle_surface.triangles.len(), 12);
-    assert_eq!(artifact.topology.boundary_faces.len(), 12);
+    // The fixed solver request refines the box; the independent planar
+    // tessellator remains the twelve-triangle reference, not the same grid.
+    assert_eq!(artifact.topology.boundary_faces.len(), 736);
     assert_eq!(
         bounds(&oracle_surface.vertices),
         ([0.0, 0.0, 0.0], [1.0, 2.0, 3.0])
@@ -49,8 +59,12 @@ fn runmat_and_independent_meshers_agree_on_box_invariants() {
     let runmat_areas = triangle_areas(&runmat_coordinates, &runmat_triangles);
     assert_close(oracle_areas.iter().sum(), EXPECTED_BOX_AREA);
     assert_close(runmat_areas.iter().sum(), EXPECTED_BOX_AREA);
-    let area_median_ratio = median(&runmat_areas) / median(&oracle_areas);
-    assert!((0.25..=4.0).contains(&area_median_ratio));
+    assert_box_face_areas(
+        &oracle_surface.vertices,
+        &oracle_surface.triangles,
+        &oracle_areas,
+    );
+    assert_box_face_areas(&runmat_coordinates, &runmat_triangles, &runmat_areas);
 
     assert_close(
         surface_volume(&oracle_surface.vertices, &oracle_surface.triangles),
@@ -319,10 +333,31 @@ fn maximum_box_surface_deviation(vertices: &[[f64; 3]]) -> f64 {
         .unwrap()
 }
 
-fn median(values: &[f64]) -> f64 {
-    let mut values = values.to_vec();
-    values.sort_by(f64::total_cmp);
-    values[values.len() / 2]
+fn assert_box_face_areas(vertices: &[[f64; 3]], triangles: &[[u32; 3]], areas: &[f64]) {
+    assert_eq!(triangles.len(), areas.len());
+    let mut faces = [[0.0; 2]; 3];
+    for (triangle, area) in triangles.iter().zip(areas) {
+        assert!(area.is_finite() && *area > 0.0, "degenerate box triangle");
+        let points = triangle.map(|index| vertices[index as usize]);
+        let mut matched = 0;
+        for (axis, extent) in [1.0, 2.0, 3.0].into_iter().enumerate() {
+            for (side, position) in [0.0, extent].into_iter().enumerate() {
+                if points
+                    .iter()
+                    .all(|point| (point[axis] - position).abs() <= TOLERANCE)
+                {
+                    faces[axis][side] += area;
+                    matched += 1;
+                }
+            }
+        }
+        assert_eq!(matched, 1, "triangle must lie on exactly one box face");
+    }
+    for (actual, expected) in faces.into_iter().zip([6.0, 3.0, 2.0]) {
+        for area in actual {
+            assert_close(area, expected);
+        }
+    }
 }
 
 fn subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {

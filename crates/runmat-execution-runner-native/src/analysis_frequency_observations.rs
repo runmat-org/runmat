@@ -132,11 +132,6 @@ pub(crate) async fn execute_structural_frequency_observations(
         fanouts.push((sample, *dependency, fanout));
     }
 
-    let source_catalogs = fanouts.iter().map(|(_, _, fanout)| {
-        fanout.partitions.iter().flat_map(|partition| &partition.inputs)
-            .find(|input| input.manifest.kind == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ObservationFieldCatalog)
-            .cloned().ok_or_else(|| NativeExecutionError::Protocol("frequency observation source catalog is missing".into()))
-    }).collect::<NativeExecutionResult<Vec<_>>>()?;
     let mut partition_origins = Vec::new();
     let mut prepared_partitions = Vec::new();
     for (sample_index, (_, _, fanout)) in fanouts.iter_mut().enumerate() {
@@ -270,7 +265,6 @@ pub(crate) async fn execute_structural_frequency_observations(
         policy,
         &fanouts,
         &reduced,
-        &source_catalogs,
         &mut resource_attempts,
     )
     .await?;
@@ -420,7 +414,6 @@ async fn execute_histories(
         runmat_analysis_execution::PreparedObservationFanout,
     )],
     reduced: &[ReducedRecord],
-    source_catalogs: &[PreparedAnalysisObjects],
     resource_attempts: &mut Vec<runmat_analysis_execution::PlannedResourceUsageAttempt>,
 ) -> NativeExecutionResult<Vec<CompletedStructuralFrequencyHistory>> {
     let history_ids = execution
@@ -518,9 +511,11 @@ async fn execute_histories(
         }
     }
     let mut histories = Vec::new();
-    let samples = source_catalogs
+    let samples = fanouts
         .iter()
-        .map(|objects| ObservationFieldCatalog::from_canonical_bytes(&objects.payload()))
+        .map(|(_, _, fanout)| {
+            ObservationFieldCatalog::from_canonical_bytes(&fanout.source_catalog.payload())
+        })
         .collect::<Result<Vec<_>, _>>()
         .map_err(super::analysis_task_pool::protocol)?;
     let catalog = ObservationFieldCatalog::structural_frequency_history(samples)

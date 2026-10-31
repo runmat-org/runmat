@@ -52,6 +52,11 @@ fn canonical_iir_bindings_have_no_legacy_gpu_or_fusion_spec_rows() {
 #[test]
 fn compiled_inventory_preserves_runtime_registration_provenance() {
     let inventory = migration_inventory();
+    assert_eq!(
+        serde_json::to_vec(&super::registration_manifest()).unwrap(),
+        serde_json::to_vec(&inventory.snapshot.observed.registration_manifest).unwrap(),
+        "bootstrap and full reporting must retain identical registration verification",
+    );
 
     let name = "struct";
     let catalog_provenance = inventory

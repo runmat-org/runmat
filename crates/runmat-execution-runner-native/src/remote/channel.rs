@@ -62,6 +62,22 @@ pub struct RemoteGraphProgramReceipt {
     pub program_length: u64,
 }
 
+/// Issued only after an encrypted, session-bound worker-owner reply has been
+/// checked against the exact scheduler request. Not a wire/deserializable type.
+pub struct AuthenticatedPhysicalRetirement {
+    request: AttemptRequest,
+}
+
+impl AuthenticatedPhysicalRetirement {
+    pub(crate) fn issue(request: AttemptRequest) -> Self {
+        Self { request }
+    }
+
+    pub(crate) fn matches(&self, request: &AttemptRequest) -> bool {
+        &self.request == request
+    }
+}
+
 /// One allocation-scoped worker route owned by the authoritative driver.
 ///
 /// Implementations may use pinned QUIC or the opaque relay, but must preserve
@@ -133,6 +149,37 @@ pub trait RemoteWorkerChannel: Send + Sync {
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport>;
 
+    /// A non-QUIC implementation has no authority to certify physical owner
+    /// retirement. Control acknowledgements and ordinary reports are insufficient.
+    async fn authenticated_physical_retirement(
+        &self,
+        _request: &AttemptRequest,
+    ) -> NativeExecutionResult<Option<AuthenticatedPhysicalRetirement>> {
+        Ok(None)
+    }
+
+    /// Consume the original worker's retained reservation after exact proof;
+    /// the loss-recovery path calls this after scheduler acceptance. Ordinary
+    /// terminals acknowledge before dispatching subsequent same-route work.
+    async fn acknowledge_physical_retirement(
+        &self,
+        _request: &AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        Err(crate::NativeExecutionError::Protocol(
+            "remote worker channel cannot acknowledge physical retirement".into(),
+        ))
+    }
+
+    async fn prune_durable_checkpoint(
+        &self,
+        _sequence: u64,
+        _attempts: &[CheckpointedAttempt],
+    ) -> NativeExecutionResult<()> {
+        Err(crate::NativeExecutionError::Protocol(
+            "remote worker channel cannot reclaim a durable attempt journal".into(),
+        ))
+    }
+
     fn drain_progress(
         &self,
         _attempt_id: runmat_execution::identity::AttemptId,
@@ -167,4 +214,12 @@ pub trait RemoteWorkerChannel: Send + Sync {
     ) -> NativeExecutionResult<()>;
 
     async fn drain(&self) -> NativeExecutionResult<()>;
+}
+/// Exact attempt identity carried only after authoritative durable checkpoint
+/// publication. This is a storage-reclamation hint, never retirement proof.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CheckpointedAttempt {
+    pub attempt_id: runmat_execution::identity::AttemptId,
+    pub request_digest: Digest,
 }

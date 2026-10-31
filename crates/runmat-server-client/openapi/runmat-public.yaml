@@ -1501,6 +1501,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security: []
+  /v1/execution/drivers/{driverLeaseId}/workers/{allocationLeaseId}/retirement:
+    get:
+      tags:
+      - Execution
+      operationId: get_driver_worker_retirement
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema: { type: integer, format: int64, minimum: 0 }
+      - name: originalAllocationFencingToken
+        in: query
+        required: true
+        schema: { type: integer, format: int64, minimum: 0 }
+      - name: originalDriverFencingToken
+        in: query
+        required: true
+        schema: { type: integer, format: int64, minimum: 0 }
+      - name: X-RunMat-Driver-Credential
+        in: header
+        required: true
+        schema: { type: string }
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: allocationLeaseId
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        '200':
+          description: Exact original worker tree-retirement evidence, if certified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverWorkerRetirementResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: Stale authority or conflicting original fence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
   /v1/execution/drivers/{driverLeaseId}/workers/{allocationLeaseId}/envelope:
     put:
       tags:
@@ -8952,6 +9002,26 @@ components:
           type: integer
           format: int64
           minimum: 0
+        clockStartReceipts:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/NodeClockStartV1'
+        clockStartReservations:
+          type: array
+          maxItems: 128
+          items: { type: string, description: Base64url-encoded 16-byte observation ID }
+        clockEndDemands:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/NodeClockEndDemandV1'
+        clockLookupIds:
+          type: array
+          maxItems: 128
+          items: { type: string, description: Base64url-encoded 16-byte observation ID }
+        clockObservationReleaseManifest:
+          $ref: '#/components/schemas/ClockObservationReleaseManifestV1'
       additionalProperties: false
     DriverHeartbeatResponse:
       type: object
@@ -8967,6 +9037,33 @@ components:
           format: date-time
         runState:
           type: string
+        clockStarts:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/NodeClockStartV1'
+        clockEnds:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/NodeClockEndV1'
+        clockPendingEndDemands:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/NodeClockEndDemandV1'
+        clockAckedStartIds:
+          type: array
+          maxItems: 256
+          items: { type: string, description: Base64url-encoded 16-byte observation ID }
+        clockReservedStartIds:
+          type: array
+          maxItems: 128
+          items: { type: string, description: Base64url-encoded 16-byte observation ID }
+        clockReleaseAccepted:
+          type: boolean
+        clockLatestAcceptedReleaseManifest:
+          $ref: '#/components/schemas/ClockObservationReleaseManifestV1'
     DriverRunBootstrapResponse:
       type: object
       required:
@@ -9158,6 +9255,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DriverWorkerAllocationResponse'
+    DriverWorkerRetirementResponse:
+      type: object
+      properties:
+        evidence:
+          $ref: '#/components/schemas/WorkerTreeRetirementEvidenceV1'
+      additionalProperties: false
     EmailChallengeResponse:
       type: object
       required:
@@ -11186,6 +11289,20 @@ components:
           $ref: '#/components/schemas/ResourceInventoryBody'
         orgId:
           type: string
+        clockStarts:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/NodeClockStartV1'
+        clockEnds:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/NodeClockEndV1'
+        clockReleaseAckConfirmIds:
+          type: array
+          maxItems: 128
+          items: { type: string, description: Base64url-encoded 16-byte observation ID }
       additionalProperties: false
     NodeListResponse:
       type: object
@@ -11246,6 +11363,27 @@ components:
         version:
           type: integer
           format: int64
+          minimum: 0
+        clockDemands:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/NodeClockDemandV1'
+        clockAckedStartIds:
+          type: array
+          maxItems: 128
+          items: { type: string, description: Base64url-encoded 16-byte observation ID }
+        clockAckedEndIds:
+          type: array
+          maxItems: 128
+          items: { type: string, description: Base64url-encoded 16-byte observation ID }
+        clockAckedReleaseConfirmIds:
+          type: array
+          maxItems: 128
+          items: { type: string, description: Base64url-encoded 16-byte observation ID }
+        clockOpenObserverCount:
+          type: integer
+          format: int32
           minimum: 0
     NodeStateRequest:
       type: string
@@ -14572,6 +14710,143 @@ components:
           minimum: 0
         orgId:
           type: string
+        workerRetirementEvidence:
+          $ref: '#/components/schemas/WorkerTreeRetirementEvidenceV1'
+      additionalProperties: false
+    ClockObservationReleaseManifestV1:
+      type: object
+      required: [checkpointSequence, checkpointArtifactId, checkpointCiphertextDigest, driverFence, entries]
+      properties:
+        checkpointSequence: { type: integer, format: int64 }
+        checkpointArtifactId: { type: string }
+        checkpointCiphertextDigest: { type: string }
+        driverFence: { type: integer, format: int64 }
+        entries:
+          type: array
+          maxItems: 4096
+          items:
+            $ref: '#/components/schemas/ClockObservationReleaseEntryV1'
+      additionalProperties: false
+    ClockObservationReleaseEntryV1:
+      type: object
+      required: [observationId, startReceiptDigest, endReceiptDigest]
+      properties:
+        observationId: { type: string, description: Base64url-encoded 16-byte observation ID }
+        startReceiptDigest: { type: string }
+        endReceiptDigest: { type: string }
+      additionalProperties: false
+    NodeClockOwnerV1:
+      type: object
+      required: [orgId, clusterId, nodeId, runId, driverAllocationLeaseId, driverAllocationFence, driverProcessLaunchNonce, observationId, clockDomainNonce, ticksPerSecond, identityPublicKey, identityFingerprint]
+      properties:
+        orgId: { type: string }
+        clusterId: { type: string }
+        nodeId: { type: string }
+        runId: { type: string }
+        driverAllocationLeaseId: { type: string }
+        driverAllocationFence: { type: integer, format: int64 }
+        driverProcessLaunchNonce: { type: string, description: Base64url-encoded 16-byte nonce }
+        observationId: { type: string, description: Base64url-encoded 16-byte opaque observation ID }
+        clockDomainNonce: { type: string, description: Base64url-encoded 16-byte live node epoch }
+        ticksPerSecond: { type: integer, format: int64 }
+        identityPublicKey: { type: string, description: Base64url-encoded Ed25519 public key }
+        identityFingerprint: { type: string }
+      additionalProperties: false
+    NodeClockStartV1:
+      type: object
+      required: [schemaVersion, owner, startedMonotonicTicks, signature]
+      properties:
+        schemaVersion: { type: integer, format: int32 }
+        owner:
+          $ref: '#/components/schemas/NodeClockOwnerV1'
+        startedMonotonicTicks: { type: integer, format: int64 }
+        signature: { type: string, description: Base64url-encoded Ed25519 signature }
+      additionalProperties: false
+    NodeClockEndV1:
+      type: object
+      required: [schemaVersion, owner, startReceiptDigest, demandChallenge, endedMonotonicTicks, signature]
+      properties:
+        schemaVersion: { type: integer, format: int32 }
+        owner:
+          $ref: '#/components/schemas/NodeClockOwnerV1'
+        startReceiptDigest: { type: string, description: SHA-256 digest of canonical signed start fields }
+        demandChallenge: { type: string, description: Base64url-encoded 16-byte demand challenge }
+        endedMonotonicTicks: { type: integer, format: int64 }
+        signature: { type: string, description: Base64url-encoded Ed25519 signature }
+      additionalProperties: false
+    NodeClockEndDemandV1:
+      type: object
+      required: [observationId, startReceiptDigest, demandChallenge]
+      properties:
+        observationId: { type: string, description: Base64url-encoded 16-byte observation ID }
+        startReceiptDigest: { type: string }
+        demandChallenge: { type: string, description: Base64url-encoded 16-byte demand challenge }
+      additionalProperties: false
+    NodeClockDemandV1:
+      type: object
+      required: [startReceipt, demandChallenge]
+      properties:
+        startReceipt:
+          $ref: '#/components/schemas/NodeClockStartV1'
+        demandChallenge: { type: string, description: Base64url-encoded 16-byte demand challenge }
+      additionalProperties: false
+    WorkerTreeRetirementEvidenceV1:
+      type: object
+      required:
+      - schemaVersion
+      - orgId
+      - clusterId
+      - nodeId
+      - runId
+      - allocationLeaseId
+      - allocationFencingToken
+      - driverFencingToken
+      - processId
+      - processLaunchNonce
+      - retiredAtUnixMillis
+      - clockDomainNonce
+      - retiredMonotonicTicks
+      - ticksPerSecond
+      - encryptedAttemptReceipts
+      - identityPublicKey
+      - identityFingerprint
+      - signature
+      properties:
+        schemaVersion: { type: integer, format: int32 }
+        orgId: { type: string }
+        clusterId: { type: string }
+        nodeId: { type: string }
+        runId: { type: string }
+        allocationLeaseId: { type: string }
+        allocationFencingToken: { type: integer, format: int64 }
+        driverFencingToken: { type: integer, format: int64 }
+        processId: { type: integer, format: int64 }
+        processLaunchNonce: { type: string, description: Base64url-encoded 16-byte launch nonce }
+        retiredAtUnixMillis: { type: integer, format: int64 }
+        clockDomainNonce: { type: string, description: Base64url-encoded 16-byte live node-owner clock nonce }
+        retiredMonotonicTicks: { type: integer, format: int64 }
+        ticksPerSecond: { type: integer, format: int64 }
+        encryptedAttemptReceipts:
+          type: array
+          maxItems: 256
+          items:
+            type: string
+            maxLength: 5464
+            description: Base64url-encoded run-encrypted retirement receipt
+        identityPublicKey: { type: string, description: Base64url-encoded Ed25519 public key }
+        identityFingerprint: { type: string }
+        signature: { type: string, description: Base64url-encoded Ed25519 signature }
+      additionalProperties: false
+    RetiredResultInventoryV1:
+      type: object
+      required:
+      - artifactBytes
+      - egressBytes
+      - relayBytes
+      properties:
+        artifactBytes: { type: integer, format: int64 }
+        egressBytes: { type: integer, format: int64 }
+        relayBytes: { type: integer, format: int64 }
       additionalProperties: false
     TrustTierBody:
       type: string

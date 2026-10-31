@@ -94,7 +94,9 @@ mod tests {
             let mut reused = stage;
             reused.reused_from = Some(ReusedMeshingStageObservation {
                 original_observation_digest: expected,
-                implementation_digest: StableDigest::from_bytes([9; 32]),
+                origin: ReusedMeshingStageOrigin::ImplementationCache {
+                    implementation_digest: StableDigest::from_bytes([9; 32]),
+                },
             });
             assert_eq!(original_digest(&reused, &control).unwrap(), expected);
             reused.validate().unwrap();
@@ -127,8 +129,20 @@ mod tests {
         let original = evidence.stages[0].canonical_digest().unwrap();
         evidence.stages[0].reused_from = Some(ReusedMeshingStageObservation {
             original_observation_digest: original,
-            implementation_digest: StableDigest::from_bytes([9; 32]),
+            origin: ReusedMeshingStageOrigin::ImplementationCache {
+                implementation_digest: StableDigest::from_bytes([9; 32]),
+            },
         });
         evidence.validate(&artifact).unwrap();
+        evidence.stages[0].reused_from.as_mut().unwrap().origin =
+            ReusedMeshingStageOrigin::AcceptedInvocation {
+                invocation_identity_digest: StableDigest::from_bytes([10; 32]),
+            };
+        evidence.validate(&artifact).unwrap();
+        evidence.stages[0].reused_from.as_mut().unwrap().origin =
+            ReusedMeshingStageOrigin::AcceptedInvocation {
+                invocation_identity_digest: StableDigest::from_bytes([0; 32]),
+            };
+        assert!(evidence.validate(&artifact).is_err());
     }
 }

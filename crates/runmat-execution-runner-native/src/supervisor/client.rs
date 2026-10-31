@@ -16,6 +16,13 @@ use super::protocol::{
 use super::LocalSupervisorConfig;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
+/// The supervisor's disposition, not a storage-layer "created" flag.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JobSubmissionDisposition {
+    Created,
+    Duplicate,
+}
+
 #[derive(Clone)]
 pub struct LocalSupervisorClient {
     config: Arc<LocalSupervisorConfig>,
@@ -122,17 +129,14 @@ impl LocalSupervisorClient {
     pub async fn submit(
         &self,
         submission: BatchSubmission,
-    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+    ) -> NativeExecutionResult<(LocalJobRecord, JobSubmissionDisposition)> {
         self.connect_or_start().await?;
-        match self
-            .request(SupervisorCommand::Submit {
+        submitted(
+            self.request(SupervisorCommand::Submit {
                 submission: Box::new(submission),
             })
-            .await?
-        {
-            SupervisorResponse::Submitted { record, duplicate } => Ok((record, duplicate)),
-            response => unexpected(response),
-        }
+            .await?,
+        )
     }
 
     pub async fn list(&self) -> NativeExecutionResult<Vec<LocalJobRecord>> {
@@ -146,33 +150,27 @@ impl LocalSupervisorClient {
     pub async fn submit_program(
         &self,
         submission: ProgramBatchSubmission,
-    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+    ) -> NativeExecutionResult<(LocalJobRecord, JobSubmissionDisposition)> {
         self.connect_or_start().await?;
-        match self
-            .request(SupervisorCommand::SubmitProgram {
+        submitted(
+            self.request(SupervisorCommand::SubmitProgram {
                 submission: Box::new(submission),
             })
-            .await?
-        {
-            SupervisorResponse::Submitted { record, duplicate } => Ok((record, duplicate)),
-            response => unexpected(response),
-        }
+            .await?,
+        )
     }
 
     pub async fn submit_graph(
         &self,
         submission: GraphBatchSubmission,
-    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+    ) -> NativeExecutionResult<(LocalJobRecord, JobSubmissionDisposition)> {
         self.connect_or_start().await?;
-        match self
-            .request(SupervisorCommand::SubmitGraph {
+        submitted(
+            self.request(SupervisorCommand::SubmitGraph {
                 submission: Box::new(submission),
             })
-            .await?
-        {
-            SupervisorResponse::Submitted { record, duplicate } => Ok((record, duplicate)),
-            response => unexpected(response),
-        }
+            .await?,
+        )
     }
 
     pub async fn show(&self, job_id: JobId) -> NativeExecutionResult<LocalJobRecord> {
@@ -278,6 +276,22 @@ impl LocalSupervisorClient {
         ClientOptions::new()
             .open(&self.config.paths.pipe)
             .map_err(|source| NativeExecutionError::SupervisorTransport { source })
+    }
+}
+
+fn submitted(
+    response: SupervisorResponse,
+) -> NativeExecutionResult<(LocalJobRecord, JobSubmissionDisposition)> {
+    match response {
+        SupervisorResponse::Submitted { record, duplicate } => Ok((
+            record,
+            if duplicate {
+                JobSubmissionDisposition::Duplicate
+            } else {
+                JobSubmissionDisposition::Created
+            },
+        )),
+        response => unexpected(response),
     }
 }
 

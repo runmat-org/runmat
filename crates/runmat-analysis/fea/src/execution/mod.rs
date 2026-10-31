@@ -16,6 +16,7 @@ pub use acoustic::{
 };
 mod accuracy_source;
 mod acoustic_response;
+pub(crate) use acoustic_response::acoustic_response_pressure_definition;
 pub use acoustic_response::{
     AcousticResponseDiagnostics, AcousticResponseNumericalReceipt,
     AcousticResponseNumericalReceiptArtifact, AcousticResponseSolver, AcousticResponseSolverResult,

@@ -18,9 +18,114 @@ type PendingTaskResolution = (
     super::CompletionResult,
 );
 
+#[derive(Clone, Copy)]
+enum ReportAuthority<'a> {
+    Unauthenticated,
+    PhysicalRetirement(&'a runmat_execution_runner::AttemptRequest),
+    CertifiedNeverAdmitted(&'a runmat_execution_runner::AttemptRequest),
+}
+
 impl RemotePoolDriver {
-    pub(super) fn apply_report(self: &Arc<Self>, mut report: BackendReport) {
-        if matches!(&report.report, AttemptReport::Retired) {
+    pub(super) fn apply_authenticated_retirement(
+        self: &Arc<Self>,
+        request: &runmat_execution_runner::AttemptRequest,
+        evidence: super::super::AuthenticatedPhysicalRetirement,
+        resources: Option<runmat_execution_runner::task::AttemptResourceAccounting>,
+    ) -> bool {
+        if !evidence.matches(request) {
+            return false;
+        }
+        let mut report = BackendReport::for_request(request, AttemptReport::Retired);
+        report.unsuccessful_resources = resources.map(Box::new);
+        // The exact original-request check and terminal report are one driver
+        // lock transaction in apply_report_inner. Cancellation cannot race a
+        // pre-check into an unaccounted terminal state.
+        self.apply_report_inner(report, ReportAuthority::PhysicalRetirement(request));
+        self.driver
+            .lock()
+            .expect("remote driver poisoned")
+            .snapshot()
+            .attempts
+            .get(&request.id)
+            .is_some_and(|attempt| {
+                &attempt.request == request
+                    && (attempt
+                        .unverified_retirement
+                        .as_ref()
+                        .is_some_and(|record| record.retired_at_driver_millis.is_some())
+                        || (attempt.state == AttemptState::Cancelled
+                            && attempt.cancellation_requested_at.is_some()))
+            })
+    }
+
+    pub(super) fn apply_certified_never_admitted(
+        self: &Arc<Self>,
+        witness: super::recovery::CertifiedNeverAdmitted,
+    ) -> bool {
+        let request = witness.request();
+        if !witness.matches(request) {
+            return false;
+        }
+        let report = BackendReport::for_request(request, AttemptReport::CertifiedNotStarted {});
+        self.apply_report_inner(report, ReportAuthority::CertifiedNeverAdmitted(request));
+        self.driver
+            .lock()
+            .expect("remote driver poisoned")
+            .snapshot()
+            .attempts
+            .get(&request.id)
+            .is_some_and(|attempt| {
+                &attempt.request == request
+                    && attempt.terminal.as_ref().is_some_and(|terminal| {
+                        terminal.disposition
+                        == runmat_execution_runner::task::AttemptDisposition::CertifiedNotStarted
+                    })
+            })
+    }
+
+    pub(super) fn apply_report(self: &Arc<Self>, report: BackendReport) {
+        self.apply_report_inner(report, ReportAuthority::Unauthenticated);
+    }
+
+    pub(super) fn apply_report_with_authenticated_evidence(
+        self: &Arc<Self>,
+        report: BackendReport,
+        request: &runmat_execution_runner::AttemptRequest,
+        evidence: super::super::AuthenticatedPhysicalRetirement,
+    ) -> bool {
+        if !evidence.matches(request) {
+            self.apply_report(report);
+            return false;
+        }
+        self.apply_report_inner(report, ReportAuthority::PhysicalRetirement(request));
+        self.driver
+            .lock()
+            .expect("remote driver poisoned")
+            .snapshot()
+            .attempts
+            .get(&request.id)
+            .is_some_and(|attempt| {
+                &attempt.request == request
+                    && (attempt
+                        .unverified_retirement
+                        .as_ref()
+                        .is_some_and(|record| record.retired_at_driver_millis.is_some())
+                        || (attempt.state == AttemptState::Cancelled
+                            && attempt.cancellation_requested_at.is_some()))
+            })
+    }
+
+    fn apply_report_inner(
+        self: &Arc<Self>,
+        mut report: BackendReport,
+        authority: ReportAuthority<'_>,
+    ) {
+        if matches!(authority, ReportAuthority::Unauthenticated)
+            && matches!(
+                &report.report,
+                AttemptReport::Retired | AttemptReport::CertifiedNotStarted {}
+            )
+        {
             // Only the local process owner can issue this certificate. A
             // remote worker cannot prove parent-owned process-tree cleanup.
             report.report = AttemptReport::RetirementUnverified {
@@ -28,10 +133,51 @@ impl RemotePoolDriver {
             };
         }
         let task_id = report.task_id;
-        let terminal_report = report.report.clone();
         let spmd_task = self.spmd_task_context(task_id);
         let (actions, outcome, committed_watermark) = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
+            let verified_request = match authority {
+                ReportAuthority::Unauthenticated => None,
+                ReportAuthority::PhysicalRetirement(request)
+                | ReportAuthority::CertifiedNeverAdmitted(request) => Some(request),
+            };
+            let exact_original =
+                verified_request.is_some_and(|request| {
+                    driver
+                        .snapshot()
+                        .attempts
+                        .get(&request.id)
+                        .is_some_and(|attempt| {
+                            &attempt.request == request
+                                && report.attempt_id == request.id
+                                && report.worker_id == request.worker_id
+                                && report.task_id == request.task_id
+                                && report.driver_fence == request.driver_fence
+                                && (attempt.cancellation_requested_at.is_some()
+                                    || attempt.unverified_retirement.as_ref().is_some_and(
+                                        |record| record.retired_at_driver_millis.is_none(),
+                                    ))
+                        })
+                });
+            if exact_original {
+                report.report = match authority {
+                    ReportAuthority::CertifiedNeverAdmitted(_) => {
+                        AttemptReport::CertifiedNotStarted {}
+                    }
+                    ReportAuthority::PhysicalRetirement(_) => AttemptReport::Retired,
+                    ReportAuthority::Unauthenticated => unreachable!(),
+                };
+            } else if matches!(
+                &report.report,
+                AttemptReport::Retired | AttemptReport::CertifiedNotStarted {}
+            ) {
+                report.report = AttemptReport::RetirementUnverified {
+                    message:
+                        "authenticated retirement no longer matches the original fenced attempt"
+                            .into(),
+                };
+            }
+            let terminal_report = report.report.clone();
             let previous_events = driver.events().len();
             let actions = match driver.handle(DriverCommand::BackendReport(report)) {
                 Ok(actions) => actions,
@@ -86,6 +232,33 @@ impl RemotePoolDriver {
                     if *committed == task_id)
                 .then_some(event.sequence + 1)
             });
+            if committed_watermark.is_some() {
+                let mut intervals = self
+                    .task_wall_intervals
+                    .lock()
+                    .expect("remote task wall intervals poisoned");
+                match intervals.get_mut(&task_id) {
+                    Some(super::timing::TaskWallInterval::ObservedPending(owner)) => {
+                        if self
+                            .task_clocks
+                            .lock()
+                            .expect("task clock bindings poisoned")
+                            .get(&task_id)
+                            != Some(owner)
+                        {
+                            tracing::error!(%task_id, "committed task lost its original observer binding");
+                        }
+                    }
+                    Some(interval) => {
+                        if let Err(error) = interval.finish() {
+                            tracing::error!(%task_id, %error, "original task wall interval invalid");
+                        }
+                    }
+                    None => {
+                        tracing::error!(%task_id, "committed task lacks original wall interval")
+                    }
+                }
+            }
             (actions, outcome, committed_watermark)
         };
         self.dispatch(actions);
@@ -212,6 +385,7 @@ fn report_failure(
             NativeProgramFailure::WorkerLost(message)
         }
         AttemptReport::Cancelled | AttemptReport::Retired => NativeProgramFailure::Cancelled,
+        AttemptReport::CertifiedNotStarted {} => NativeProgramFailure::WorkerLost(message),
         _ => state_failure(state, message),
     }
 }

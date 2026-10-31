@@ -182,8 +182,12 @@ impl ResourceAccountingSummary {
         for interval in intervals {
             interval.validate()?;
             if graph_wall_millis < interval.usage.wall_millis {
-                return Err(summary_error(
-                    "graph wall time is shorter than a measured interval",
+                return Err(ContractError::invalid(
+                    "resource accounting summary",
+                    format!(
+                        "graph wall time is shorter than a measured interval: graph={} ms, interval={} ms",
+                        graph_wall_millis, interval.usage.wall_millis,
+                    ),
                 ));
             }
             let usage = &mut summary.usage;

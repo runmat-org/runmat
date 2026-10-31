@@ -12,7 +12,8 @@ use runmat_execution_artifact::{
     PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE, PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA,
 };
 use runmat_execution_transport_native::control::{
-    DriverArtifactKind, DriverAuthority, DriverControlPlane,
+    ClockDriverHeartbeatRequestV1, ClockObservationReleaseManifestV1, DriverArtifactKind,
+    DriverAuthority, DriverControlPlane,
 };
 use tokio::sync::Mutex;
 
@@ -36,6 +37,7 @@ struct PublicationState {
     pool_catalog: Option<ProgramExecutionObjectLocation>,
     physical_locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
     pool_locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
+    last_checkpoint: Option<(u64, String, String)>,
 }
 
 impl PublicationState {
@@ -106,6 +108,7 @@ impl<'a> RemoteRecoveryPublisher<'a> {
                 pool_catalog: None,
                 physical_locations,
                 pool_locations: BTreeMap::new(),
+                last_checkpoint: None,
             })),
         })
     }
@@ -192,6 +195,51 @@ impl<'a> RemoteRecoveryPublisher<'a> {
         self.publish_pool_through(0).await
     }
 
+    /// The acknowledged post-end checkpoint is the sole release authority.
+    /// A lost manifest ACK leaves the bounded signed records in place; the
+    /// replacement driver may retry against the latest durable checkpoint.
+    pub(super) async fn publish_closed_wave(&self) -> NativeExecutionResult<()> {
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or_else(|| protocol("closed wave has no bound pool"))?;
+        let entries = pool.closed_clock_release_entries()?;
+        if entries.is_empty() {
+            return Err(protocol("closed wave has no signed node clock end"));
+        }
+        let mut state = self.state.lock().await;
+        self.commit(&mut state, None, 0).await?;
+        let (sequence, artifact_id, digest) = state
+            .last_checkpoint
+            .clone()
+            .ok_or_else(|| protocol("post-end checkpoint has no acknowledged artifact"))?;
+        let response = self
+            .control
+            .clock_heartbeat(
+                self.authority,
+                30,
+                ClockDriverHeartbeatRequestV1 {
+                    release_manifest: Some(ClockObservationReleaseManifestV1 {
+                        checkpoint_sequence: sequence,
+                        checkpoint_artifact_id: artifact_id,
+                        checkpoint_ciphertext_digest: digest,
+                        driver_fence: self.authority.fencing_token,
+                        entries: entries.clone(),
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(protocol)?;
+        if !response.release_accepted {
+            return Err(protocol(
+                "Server did not acknowledge the post-end clock release manifest",
+            ));
+        }
+        pool.prune_released_clock_entries(&entries)?;
+        Ok(())
+    }
+
     pub(super) async fn publish_pool_through(
         &self,
         required_event_watermark: u64,
@@ -254,7 +302,7 @@ impl<'a> RemoteRecoveryPublisher<'a> {
         // control plane is still persisting the checkpoint. No clone of this
         // publisher may reuse the sequence without a replacement bootstrap.
         state.checkpoint_write_uncertain = true;
-        super::driver::store_driver_checkpoint(
+        let stored = super::driver::store_driver_checkpoint_with_identity(
             self.control,
             self.authority,
             self.run_key,
@@ -262,6 +310,14 @@ impl<'a> RemoteRecoveryPublisher<'a> {
         )
         .await?;
         state.checkpoint_write_uncertain = false;
+        state.last_checkpoint = Some((sequence, stored.artifact_id, stored.ciphertext_digest));
+        if let (Some(driver), Some(published)) = (&self.pool, &pool) {
+            // Only the server's acknowledged latest checkpoint can reclaim
+            // worker-sandbox accounting. A lost store ACK never enters here.
+            driver
+                .prune_durable_attempt_journals(sequence, &published.checkpointed_attempts)
+                .await;
+        }
         // Neither root nor its reuse cache advances on upload failure or lost acknowledgment.
         state.sequence = sequence;
         state.physical_catalog = physical_catalog;

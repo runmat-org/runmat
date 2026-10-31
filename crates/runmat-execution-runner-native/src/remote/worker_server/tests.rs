@@ -111,6 +111,9 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
         materialized_project: None,
         bundle_digest: None,
         attempts: Default::default(),
+        retirement_receipts: std::collections::VecDeque::with_capacity(
+            super::MAX_RETIREMENT_RECEIPTS,
+        ),
         allocated: ResourceAllocation::default(),
         cancelled_attempts: Default::default(),
         values: Default::default(),
@@ -158,11 +161,29 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
             collective: None,
             cooperative: true,
             finished,
+            request_digest: runmat_execution::Digest::sha256(b"reservation-lifecycle-request"),
         },
     );
 
-    assert!(state.finish_attempt(attempt_id).is_some());
-    assert_eq!(state.allocated, ResourceAllocation::default());
-    assert!(state.finish_attempt(attempt_id).is_none());
+    assert!(state.finish_attempt(attempt_id, true).is_some());
+    // Completion is not retirement ACK: retain the physical grant and its
+    // exact receipt until the driver has accepted the certificate.
+    assert_eq!(state.allocated.memory_bytes, 60);
+    let claim = state
+        .retirement_receipts
+        .front_mut()
+        .unwrap()
+        .claim
+        .take()
+        .unwrap();
+    release(&mut state.allocated, &claim.0, &claim.1);
+    assert!(state
+        .retirement_receipts
+        .front_mut()
+        .unwrap()
+        .claim
+        .take()
+        .is_none());
+    assert!(state.finish_attempt(attempt_id, true).is_none());
     assert_eq!(state.allocated, ResourceAllocation::default());
 }

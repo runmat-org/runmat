@@ -128,6 +128,28 @@ pub struct WorkerBootstrapCredential {
 pub trait NodeControlPlane: Send + Sync {
     async fn enroll(&self, request: EnrollmentRequest) -> TransportResult<EnrolledNode>;
     async fn heartbeat(&self, heartbeat: NodeHeartbeat) -> TransportResult<NodeStatus>;
+    async fn clock_heartbeat(
+        &self,
+        heartbeat: NodeHeartbeat,
+        starts: Vec<runmat_execution::security::NodeClockStartV1>,
+        ends: Vec<runmat_execution::security::NodeClockEndV1>,
+        release_ack_confirm_ids: Vec<[u8; 16]>,
+    ) -> TransportResult<super::ClockNodeHeartbeatResponseV1> {
+        if !starts.is_empty() || !ends.is_empty() || !release_ack_confirm_ids.is_empty() {
+            return Err(crate::TransportError::Unavailable(
+                "node clock heartbeat is unsupported".into(),
+            ));
+        }
+        let node = self.heartbeat(heartbeat).await?;
+        Ok(super::ClockNodeHeartbeatResponseV1 {
+            node,
+            open_observer_count: 0,
+            demands: Vec::new(),
+            acked_start_ids: Vec::new(),
+            acked_end_ids: Vec::new(),
+            acked_release_confirm_ids: Vec::new(),
+        })
+    }
     async fn rotate_credential(
         &self,
         heartbeat: &NodeHeartbeat,
@@ -174,5 +196,31 @@ pub trait NodeControlPlane: Send + Sync {
         heartbeat: &NodeHeartbeat,
         allocation: &NodeAllocation,
     ) -> TransportResult<()>;
+    /// An ordinary lease release is never proof of process-tree retirement.
+    /// Unsupported control planes fail closed rather than degrading to release.
+    async fn release_retired_worker(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+        evidence: &runmat_execution::security::WorkerTreeRetirementEvidenceV1,
+    ) -> TransportResult<()> {
+        let _ = (heartbeat, allocation, evidence);
+        Err(crate::TransportError::Unavailable(
+            "certified worker retirement is unsupported".into(),
+        ))
+    }
+    /// Retry a durable certified retirement after the lease has disappeared
+    /// from the active allocation listing. The signed evidence is the exact
+    /// allocation/fencing authority for this terminal transition.
+    async fn release_retired_worker_evidence(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        evidence: &runmat_execution::security::WorkerTreeRetirementEvidenceV1,
+    ) -> TransportResult<()> {
+        let _ = (heartbeat, evidence);
+        Err(crate::TransportError::Unavailable(
+            "independent certified worker retirement is unsupported".into(),
+        ))
+    }
     async fn complete_drain(&self, heartbeat: &NodeHeartbeat) -> TransportResult<()>;
 }

@@ -46,6 +46,26 @@ impl AnalysisRunResultView {
             .filter(|f| f.field_id == id)
             .collect()
     }
+
+    fn unique_field(&self, id: &str) -> &runmat_analysis_core::AnalysisField {
+        let fields = self.field(id);
+        assert_eq!(fields.len(), 1, "exactly one public field {id}");
+        fields[0]
+    }
+
+    fn assert_inventory(&self, expected: impl IntoIterator<Item = String>) {
+        let mut expected: Vec<_> = expected.into_iter().collect();
+        let mut actual: Vec<_> = self
+            .0
+            .run
+            .fields
+            .iter()
+            .map(|f| f.field_id.clone())
+            .collect();
+        expected.sort();
+        actual.sort();
+        assert_eq!(actual, expected, "complete public field inventory");
+    }
 }
 
 // witness: FEA-ACOUSTIC-MODAL-001/rigid_box_modes @ acoustic_modal/tet10/public_study; coverage:
@@ -60,10 +80,7 @@ impl AnalysisRunResultView {
 //   not run.
 #[test]
 fn rigid_cube_cavity_modes_match_rectangular_room_frequencies() {
-    let project = project(&STUDY.replace(
-        "analysis sound { acoustic transient { start_time = 0 s; end_time = 2 ms; time_step = 0.1 ms } }",
-        "analysis sound { acoustic modal { modes = 5 } }",
-    ).replace(
+    let project = project(&study("acoustic modal { modes = 5 }", "").replace(
         "    constraint drive {\n        acoustic.pressure { target = geometry.part.region.surface; value = signal.pulse }\n    }\n",
         "    load walls {\n        acoustic.rigid_wall { target = geometry.part.region.surface }\n    }\n",
     ));
@@ -76,21 +93,61 @@ fn rigid_cube_cavity_modes_match_rectangular_room_frequencies() {
     for value in &values[1..4] {
         assert!((value - 171.5).abs() / 171.5 < 0.02, "{values:?}");
     }
-    assert_eq!(run.field("acoustic.pressure").len(), 5);
+    run.assert_inventory(
+        (1..=5)
+            .map(|mode| format!("acoustic.mode_shape.{mode}"))
+            .chain(["modal.frequency_hz".into(), "modal.eigenvalue".into()]),
+    );
+    for mode in 1..=5 {
+        let pressure = run.unique_field(&format!("acoustic.mode_shape.{mode}"));
+        assert!(!pressure.as_host_f64().unwrap().is_empty());
+        assert!(pressure
+            .as_host_f64()
+            .unwrap()
+            .iter()
+            .all(|value| value.is_finite()));
+    }
     assert!(run.0.numerically_acceptable);
 }
 
 // witness: FEA-ACOUSTIC-TRANSIENT-001/pressure_time_history_publication @
 //   acoustic_transient/tet10/public_study; coverage: partial;
-//   boundary: A quadratic-mesh pulse study run through the CLI publishes 21 pressure snapshots on a
-//   21-point time axis ending at 2 ms, all finite, with the prescribed surface carrying the pulse
-//   peak at 0.5 ms; cold reopening is covered by other tests.
+//   boundary: A quadratic-mesh pulse study run through the CLI publishes 21 native pressure
+//   snapshots and the complete authored history on a 21-point time axis ending at 2 ms, all
+//   finite, with the prescribed surface carrying the pulse peak at 0.5 ms. The run is reopened
+//   from public storage before these assertions.
 #[test]
 fn pressure_transient_publishes_its_complete_time_history() {
-    let project = project(STUDY);
+    let project = project(&study(
+        "acoustic transient { start_time = 0 s; end_time = 2 ms; time_step = 0.1 ms }",
+        r#"
+    output pressure_history {
+        value = sample(
+            analysis.sound.field.node.acoustic_pressure,
+            over = time,
+            at = [0 ms, 0.1 ms, 0.2 ms, 0.3 ms, 0.4 ms, 0.5 ms, 0.6 ms,
+                  0.7 ms, 0.8 ms, 0.9 ms, 1 ms, 1.1 ms, 1.2 ms, 1.3 ms,
+                  1.4 ms, 1.5 ms, 1.6 ms, 1.7 ms, 1.8 ms, 1.9 ms, 2 ms],
+        )
+        retention = explicit_samples
+        maximum_samples = 21
+    }
+"#,
+    ));
     let (summary, run) = run(&project, "response");
     assert_eq!(summary["procedure"], "acoustic_transient");
-    let snapshots = run.field("acoustic.pressure");
+    run.assert_inventory(
+        (1..=21)
+            .map(|index| format!("acoustic.pressure.time.{index}"))
+            .chain([
+                "acoustic.time_s".into(),
+                "acoustic.energy_j".into(),
+                "acoustic.boundary_absorbed_energy_j".into(),
+            ]),
+    );
+    let snapshots: Vec<_> = (1..=21)
+        .map(|index| run.unique_field(&format!("acoustic.pressure.time.{index}")))
+        .collect();
     assert_eq!(snapshots.len(), 21);
     let times = run.field("acoustic.time_s")[0].as_host_f64().unwrap();
     assert_eq!(times.len(), 21);
@@ -105,9 +162,28 @@ fn pressure_transient_publishes_its_complete_time_history() {
         .iter()
         .all(|v| v.is_finite())));
     assert!(at_peak.iter().any(|v| (v - 1.0).abs() < 1e-9));
+    let [history] = run.0.run.observation_histories.as_slice() else {
+        panic!("one cold-authored acoustic pressure history");
+    };
+    assert_eq!(history.manifest().observation_id.0, "pressure_history");
+    assert_eq!(history.manifest().samples.len(), 21);
+    assert_eq!(
+        history.manifest().samples.first().unwrap().coordinate,
+        runmat_analysis_fea::results::field::RecoveredFieldSample::TimeSeconds(0.0)
+    );
+    assert_eq!(
+        history.manifest().samples.last().unwrap().coordinate,
+        runmat_analysis_fea::results::field::RecoveredFieldSample::TimeSeconds(2e-3)
+    );
 }
 
-const STUDY: &str = r#"
+fn study(analysis: &str, outputs: &str) -> String {
+    format!(
+        "{MODEL}\nstudy response {{\n    geometry = geometry.part\n    mesh = mesh.volume\n    model = model.cavity\n    analysis sound {{ {analysis} }}\n{outputs}\n}}\n"
+    )
+}
+
+const MODEL: &str = r#"
 import function makePart from "./makePart.m"
 geometry part {
     generated by function.makePart { arguments {} }
@@ -149,11 +225,5 @@ model cavity {
     constraint drive {
         acoustic.pressure { target = geometry.part.region.surface; value = signal.pulse }
     }
-}
-study response {
-    geometry = geometry.part
-    mesh = mesh.volume
-    model = model.cavity
-    analysis sound { acoustic transient { start_time = 0 s; end_time = 2 ms; time_step = 0.1 ms } }
 }
 "#;

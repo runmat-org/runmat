@@ -680,9 +680,14 @@ async fn remote_conformance() {
             // The remote worker advertises one core; the pool rejects larger requests.
             MeshingExecutionPolicy {
                 cpu_millicores: worker_inventory().cpu_millicores,
+                // Externalized results cross the QUIC worker boundary. Grant
+                // their existing inventory bound, not the local-only default
+                // of zero egress; relay traffic remains unrequested.
+                maximum_egress_bytes: limits().inventory.max_total_bytes,
                 ..MeshingExecutionPolicy::default()
             },
             limits().inventory.max_object_bytes,
+            limits().inventory,
         )
         .unwrap();
         let full_result = tokio::time::timeout(
@@ -869,11 +874,8 @@ fn remote_fixture(
 ) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
-    std::fs::write(
-        project_root.path().join("runmat.toml"),
-        "[package]\nname = \"remote-meshing\"\n[sources]\nroots = [\"src\"]\n",
-    )
-    .unwrap();
+    let project_document = "[package]\nname = \"remote-meshing\"\n[sources]\nroots = [\"src\"]\n[runtime.language]\ncompat = \"matlab\"\n";
+    std::fs::write(project_root.path().join("runmat.toml"), project_document).unwrap();
     let project = runmat_package::build_frozen_project(
         &project_root.path().join("runmat.toml"),
         BTreeSet::new(),
@@ -911,6 +913,17 @@ fn remote_fixture(
     materializations.dedup_by_key(|(recipe, _)| recipe.id().unwrap());
     assert_eq!(materializations.len(), 1);
     let mut builder = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_project_runtime_policy_object(
+            runmat_core::cluster_settings::capture_project_policy(
+                &runmat_config::runtime::ClusterRuntimePolicy::from_project_document(
+                    project_document,
+                    runmat_config::document::RunmatConfigFormat::Toml,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
         .unwrap()
         .with_compiled_package_closure();
     for (recipe, executable_bytes) in materializations {
@@ -1045,7 +1058,9 @@ fn submission_for(
             ]),
             artifact_access: host.artifact_access.clone(),
             cpu_millicores: 1000,
-            maximum_egress_bytes: 0,
+            // Remote completion transfers its content-addressed artifacts;
+            // admit that transfer within the same stage artifact ceiling.
+            maximum_egress_bytes: host.ceilings.maximum_artifact_bytes,
             maximum_relay_bytes: 0,
             deadline_unix_millis: None,
             priority: 0,

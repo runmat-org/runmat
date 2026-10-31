@@ -70,6 +70,32 @@ impl<T: CacheImport> CacheImport for MissingObject<'_, T> {
             self.source.read_verified(digest)
         }
     }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if digest == self.missing {
+            Ok(None)
+        } else {
+            self.source.read_verified_bounded(digest, maximum_bytes)
+        }
+    }
+
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if digest == self.missing {
+            Ok(None)
+        } else {
+            self.source
+                .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+        }
+    }
 }
 
 pub(in super::super) fn assert_authored_result(case: Case, result: &ExactStructuralStudyResult) {

@@ -11,6 +11,7 @@ pub enum AttemptDisposition {
     Succeeded,
     Failed { kind: AttemptFailureKind },
     Lost,
+    CertifiedNotStarted,
     Cancelled,
 }
 
@@ -21,7 +22,7 @@ impl AttemptDisposition {
                 kind: AttemptFailureKind::Rejected,
             } => AttemptState::Rejected,
             Self::Succeeded | Self::Failed { .. } => AttemptState::Completed,
-            Self::Lost => AttemptState::Lost,
+            Self::Lost | Self::CertifiedNotStarted => AttemptState::Lost,
             Self::Cancelled => AttemptState::Cancelled,
         }
     }
@@ -61,6 +62,44 @@ pub struct AttemptRetirementUnverified {
 
 impl AttemptTerminal {
     pub(crate) fn validate_against(&self, attempt: &AttemptRecord) -> Result<(), String> {
+        if attempt
+            .unverified_retirement
+            .as_ref()
+            .is_some_and(|original| {
+                original
+                    .resources
+                    .as_ref()
+                    .is_some_and(|saved| self.resources.as_ref() != Some(saved))
+                    || original
+                        .execution
+                        .as_ref()
+                        .is_some_and(|saved| self.execution.as_ref() != Some(saved))
+                    || original
+                        .console
+                        .as_ref()
+                        .is_some_and(|saved| self.console.as_ref() != Some(saved))
+            })
+        {
+            return Err("terminal report replaced original uncertain attempt evidence".into());
+        }
+        if self.disposition == AttemptDisposition::CertifiedNotStarted
+            && (self.resources.is_some()
+                || self.execution.is_some()
+                || self.console.is_some()
+                || self.diagnostic.is_some()
+                || attempt
+                    .unverified_retirement
+                    .as_ref()
+                    .is_none_or(|uncertainty| {
+                        uncertainty.resources.is_some()
+                            || uncertainty.execution.is_some()
+                            || uncertainty.console.is_some()
+                            || uncertainty.failure.is_some()
+                            || uncertainty.failure_kind.is_some()
+                    }))
+        {
+            return Err("certified never-started attempt carries execution evidence or lacks original uncertainty".into());
+        }
         if let Some(console) = &self.console {
             console.validate().map_err(|error| error.to_string())?;
             if Some(console.limits()) != attempt.request.task.console {

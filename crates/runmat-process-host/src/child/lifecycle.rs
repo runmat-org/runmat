@@ -130,7 +130,9 @@ impl ChildProcess {
         Ok(self.child.try_wait()?.map(process_exit))
     }
 
-    pub(super) fn try_wait_unreaped(&mut self) -> ProcessHostResult<Option<ProcessExit>> {
+    /// Observe leader exit while retaining the OS process-group owner for
+    /// subsequent authenticated tree retirement.
+    pub fn try_wait_unreaped(&mut self) -> ProcessHostResult<Option<ProcessExit>> {
         #[cfg(unix)]
         if matches!(
             self.retirement,

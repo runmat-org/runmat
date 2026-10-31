@@ -2,6 +2,8 @@
 
 pub mod capability;
 pub mod child;
+pub mod clock;
+pub mod durable_file;
 pub mod command;
 pub mod environment;
 pub mod error;

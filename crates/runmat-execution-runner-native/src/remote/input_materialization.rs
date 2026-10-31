@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use runmat_analysis_execution::{
-    build_generator_task_submission, prepare_analysis_objects, GeneratorChunkOutput,
-    GeneratorExecutionContext, PreparedInputMaterialization,
+    build_generator_task_submission, generator_task_id, prepare_analysis_objects,
+    GeneratorChunkOutput, GeneratorExecutionContext, PreparedInputMaterialization,
 };
 use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
 use runmat_execution::resource::Capability;
@@ -73,6 +73,33 @@ pub(super) async fn execute(
     resources: &AllocationResources,
     mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
 ) -> NativeExecutionResult<BTreeMap<runmat_execution::Digest, RemoteInputMaterializationOutcome>> {
+    let materializations = materializations.into_iter().collect::<Vec<_>>();
+    if materializations.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut planned_materializations = BTreeMap::new();
+    for prepared in &materializations {
+        let digest = prepared.materialization_digest();
+        if let Some(existing) = planned_materializations.insert(digest, prepared) {
+            if existing != prepared {
+                return Err(protocol(
+                    "remote input materialization identity collides with different input",
+                ));
+            }
+        }
+    }
+    let planned_tasks = planned_materializations
+        .values()
+        .flat_map(|prepared| {
+            prepared.program().chunks.iter().map(|chunk| {
+                generator_task_id(prepared.materialization_digest(), chunk.plan.identity)
+            })
+        })
+        .collect::<Vec<_>>();
+    if planned_tasks.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut wave = super::RemoteObservedWave::begin(Arc::clone(&pool), &planned_tasks).await?;
     let mut unique = BTreeMap::new();
     for prepared in materializations {
         if prepared.program().chunks.iter().any(|chunk| {
@@ -147,7 +174,14 @@ pub(super) async fn execute(
             ));
         }
     }
+    wave.arm(
+        &task_metadata
+            .iter()
+            .map(|(_, _, id)| *id)
+            .collect::<Vec<_>>(),
+    )?;
     let completions = pool.submit_graph(tasks)?;
+    wave.checkpoint().await?;
     if completions.len() != task_metadata.len() {
         return Err(protocol(
             "remote signal task handles differ from the admitted chunk inventory",
@@ -243,6 +277,12 @@ pub(super) async fn execute(
             }))
         };
         outcomes.insert(identity, outcome);
+    }
+    if outcomes
+        .values()
+        .all(|outcome| matches!(outcome, RemoteInputMaterializationOutcome::Completed(_)))
+    {
+        wave.close().await?;
     }
     Ok(outcomes)
 }

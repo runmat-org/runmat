@@ -5,11 +5,15 @@ use std::time::{Duration, Instant};
 
 pub(crate) struct RemoteAnalysisTaskPool {
     pool: Arc<RemotePoolDriver>,
+    pending_clock: Option<crate::remote::RemoteObservedWave>,
 }
 
 impl RemoteAnalysisTaskPool {
     pub(crate) fn new(pool: Arc<RemotePoolDriver>) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            pending_clock: None,
+        }
     }
 }
 
@@ -28,6 +32,18 @@ impl CacheImport for RemoteAnalysisTaskPool {
 
 #[async_trait]
 impl AnalysisTaskPool for RemoteAnalysisTaskPool {
+    async fn begin_wave_observation(
+        &mut self,
+        planned_tasks: &[TaskId],
+    ) -> NativeExecutionResult<()> {
+        if self.pending_clock.is_some() {
+            return Err(protocol("remote wave observer is already pending"));
+        }
+        self.pending_clock = Some(
+            crate::remote::RemoteObservedWave::begin(Arc::clone(&self.pool), planned_tasks).await?,
+        );
+        Ok(())
+    }
     fn permitted_trust_tiers(
         &self,
     ) -> std::collections::BTreeSet<runmat_execution::security::ExecutionTrustTier> {
@@ -82,13 +98,20 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
 
     async fn execute_batch(
         &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+        tasks: AdmittedAnalysisBatch,
     ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>> {
+        let tasks = tasks.into_submissions();
         let task_ids = tasks
             .iter()
             .map(|(_, submission)| submission.request.id)
             .collect::<Vec<_>>();
+        let mut clock = self
+            .pending_clock
+            .take()
+            .ok_or_else(|| protocol("remote analysis wave has no original begin"))?;
+        clock.arm(&task_ids)?;
         let completions = self.pool.submit_graph(tasks)?;
+        clock.checkpoint().await?;
         if completions.len() != task_ids.len() {
             return Err(protocol(
                 "remote analysis completion inventory differs from submission",
@@ -99,9 +122,11 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
             .zip(task_ids)
             .enumerate()
             .map(|(index, (completion, task_id))| async move {
+                let original_graph_wall_millis = completion.original_graph_wall_millis();
                 (
                     index,
                     task_id,
+                    original_graph_wall_millis,
                     completion
                         .wait()
                         .await
@@ -125,13 +150,15 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
             }
             tokio::select! {
                 terminal = waiting.next() => {
-                    let (index, task_id, result) = terminal.ok_or_else(|| protocol("remote completion stream ended early"))?;
+                    let (index, task_id, original_graph_wall_millis, result) = terminal.ok_or_else(|| protocol("remote completion stream ended early"))?;
                     if result.is_err() && cancellation_started.is_none() {
                         self.pool.cancel(CancellationReason::ParentScope)?;
                         cancellation_started = Some(Instant::now());
                     }
                     let evidence = self.pool.task_execution_evidence(task_id).map_err(protocol)?;
-                    responses[index] = Some(AnalysisTaskCompletion::new(evidence, result)?);
+                    let mut completion = AnalysisTaskCompletion::new(evidence, result)?;
+                    completion.original_graph_wall_millis = original_graph_wall_millis;
+                    responses[index] = Some(completion);
                 }
                 _ = tokio::time::sleep(Duration::from_millis(10)) => {}
             }
@@ -150,6 +177,19 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
             for response in responses.iter_mut().flatten() {
                 if let Some(failure) = &mut response.failure {
                     failure.observe_remote_control_acknowledgement(control_acknowledged);
+                }
+            }
+        }
+        if responses.iter().flatten().all(|response| {
+            response.failure.is_none()
+                && response.evidence.task.state == runmat_execution::state::TaskState::Succeeded
+        }) {
+            let observed_tasks = clock.observed_tasks().to_vec();
+            if let Some(wall) = clock.close().await? {
+                for response in responses.iter_mut().flatten() {
+                    if observed_tasks.contains(&response.evidence.task.id()) {
+                        response.original_graph_wall_millis = Some(wall);
+                    }
                 }
             }
         }

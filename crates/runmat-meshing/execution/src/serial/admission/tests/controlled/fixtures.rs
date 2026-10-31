@@ -92,7 +92,9 @@ fn evidence() -> MeshingEvidence {
     };
     stage.reused_from = Some(ReusedMeshingStageObservation {
         original_observation_digest: stage.canonical_digest().unwrap(),
-        implementation_digest: StableDigest::from_bytes([8; 32]),
+        origin: runmat_meshing_core::ReusedMeshingStageOrigin::ImplementationCache {
+            implementation_digest: StableDigest::from_bytes([8; 32]),
+        },
     });
     MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,

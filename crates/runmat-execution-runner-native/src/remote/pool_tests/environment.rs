@@ -149,7 +149,7 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
             }
             let report = channel
                 .execute(RemoteAttempt {
-                    scheduling,
+                    scheduling: scheduling.clone(),
                     program: super::super::RemoteAttemptProgram::Direct(Box::new(attempt_program)),
                 })
                 .await
@@ -163,6 +163,16 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
                 runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0]).unwrap(),
                 runmat_value::Value::Num(3.0)
             );
+            let retirement = channel
+                .authenticated_physical_retirement(&scheduling)
+                .await
+                .unwrap()
+                .expect("completed raw worker attempt retains an exact retirement receipt");
+            assert!(retirement.matches(&scheduling));
+            channel
+                .acknowledge_physical_retirement(&scheduling)
+                .await
+                .unwrap();
             assert_eq!(std::env::var_os(name), host);
         }
         channel.drain().await.unwrap();

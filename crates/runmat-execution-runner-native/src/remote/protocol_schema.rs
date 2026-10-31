@@ -7,8 +7,13 @@ pub const REMOTE_WORKER_PROTOCOL_V5: u16 = 5;
 #[cfg(test)]
 pub const REMOTE_WORKER_PROTOCOL_V6: u16 = 6;
 /// V7 requires the original typed cancellation reason on every Cancel command.
+#[cfg(test)]
 pub const REMOTE_WORKER_PROTOCOL_V7: u16 = 7;
-pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = REMOTE_WORKER_PROTOCOL_V7;
+/// V8 adds an exact, authenticated physical-owner retirement query.
+#[cfg(test)]
+pub const REMOTE_WORKER_PROTOCOL_V8: u16 = 8;
+/// V9 adds post-server-ACK exact attempt-journal reclamation.
+pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = 9;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,7 +42,7 @@ mod tests {
         let frozen =
             br#"{"schemaVersion":4,"command":{"kind":"removed_output_list","values":[1]}}"#;
         let error = admit_remote_worker_bytes(frozen).unwrap_err();
-        assert!(error.contains("unsupported remote worker protocol 4; expected 7"));
+        assert!(error.contains("unsupported remote worker protocol 4; expected 9"));
         assert!(error.contains("rebuild or upgrade"));
     }
 
@@ -46,7 +51,7 @@ mod tests {
         let frozen = br#"{"schemaVersion":5,"command":{"kind":"drain"}}"#;
         let error = admit_remote_worker_bytes(frozen).unwrap_err();
         assert!(error.contains(&format!(
-            "unsupported remote worker protocol {REMOTE_WORKER_PROTOCOL_V5}; expected 7"
+            "unsupported remote worker protocol {REMOTE_WORKER_PROTOCOL_V5}; expected 9"
         )));
     }
 
@@ -56,12 +61,21 @@ mod tests {
         let frozen = br#"{"schemaVersion":6,"command":{"kind":"drain"}}"#;
         assert!(admit_remote_worker_bytes(frozen)
             .unwrap_err()
-            .contains("expected 7"));
+            .contains("expected 9"));
     }
 
     #[test]
-    fn v7_is_the_remote_wire_version() {
+    fn v7_is_rejected_before_dispatch() {
         assert_eq!(REMOTE_WORKER_PROTOCOL_V7, 7);
-        admit_remote_worker_bytes(br#"{"schemaVersion":7,"command":{"kind":"drain"}}"#).unwrap();
+        assert!(
+            admit_remote_worker_bytes(br#"{"schemaVersion":7,"command":{"kind":"drain"}}"#)
+                .is_err()
+        );
+        assert_eq!(REMOTE_WORKER_PROTOCOL_V8, 8);
+        assert!(
+            admit_remote_worker_bytes(br#"{"schemaVersion":8,"command":{"kind":"drain"}}"#)
+                .is_err()
+        );
+        admit_remote_worker_bytes(br#"{"schemaVersion":9,"command":{"kind":"drain"}}"#).unwrap();
     }
 }

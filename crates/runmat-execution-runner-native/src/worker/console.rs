@@ -27,6 +27,25 @@ impl PortableConsoleSink for FramedSink {
     }
 }
 
+pub(super) fn graph_host(
+    controls: Option<runmat_execution::console::ConsoleLimits>,
+) -> NativeExecutionResult<Option<Rc<runmat_runtime::context::PortableConsoleHost>>> {
+    let limits = FrameLimits {
+        max_message_bytes: WORKER_MAX_MESSAGE_BYTES,
+    };
+    controls
+        .map(|controls| {
+            controls
+                .validate_transport(u64::from(limits.max_message_bytes))
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+            let sink: Rc<dyn PortableConsoleSink> = Rc::new(FramedSink(limits));
+            runmat_runtime::context::PortableConsoleHost::with_sink(controls, Some(sink))
+                .map(Rc::new)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))
+        })
+        .transpose()
+}
+
 /// Execute a reserved Direct program, streaming its requested console records.
 pub(super) async fn execute_reserved(
     request: ReservedProgramExecutionRequest,

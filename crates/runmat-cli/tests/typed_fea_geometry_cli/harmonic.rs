@@ -59,7 +59,10 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
         "unit-box.brep",
         &unit_box.representation,
         runmat_geometry_io::GeometryFormat::Brep,
-        &runmat_geometry_io::exact::ExactCadImportOptions::default(),
+        &runmat_geometry_io::exact::ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..Default::default()
+        },
         &runmat_geometry_io::GeometryImportContext::new(),
     )
     .unwrap();

@@ -159,6 +159,12 @@ async fn execute_staged_graph(
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let resources = reference.resources.clone();
     let request = open_staged_graph(reference)?;
+    let console_host = console::graph_host(
+        request
+            .invocation_controls
+            .as_ref()
+            .and_then(|controls| controls.console),
+    )?;
     if request.project_runtime_policy.is_some() {
         let policy = runmat_core::cluster_settings::validate_graph_policy(&request)
             .map_err(NativeExecutionError::Protocol)?;
@@ -179,6 +185,7 @@ async fn execute_staged_graph(
         request,
         cancellation.token(),
         std::path::Path::new(&scratch),
+        console_host.clone(),
     );
     tokio::pin!(execution);
     let mut control_open = true;
@@ -186,7 +193,14 @@ async fn execute_staged_graph(
         tokio::select! {
             response = &mut execution => return Ok(match response {
                 crate::test_workload::GraphHostExecution::Completed(response) => {
-                    WorkerExecutionOutcome::Completed { response: Box::new(response), console: None }
+                    let transcript = console_host.as_ref()
+                        .map(|host| host.finish(!cancellation.token().is_cancelled()))
+                        .transpose()
+                        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+                    let console = transcript.as_ref().map(|transcript| transcript.receipt())
+                        .transpose()
+                        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+                    WorkerExecutionOutcome::Completed { response: Box::new(response), console }
                 }
                 crate::test_workload::GraphHostExecution::RetirementUnverified { message, owner } => {
                     WorkerExecutionOutcome::RetirementUnverified { message, owner }

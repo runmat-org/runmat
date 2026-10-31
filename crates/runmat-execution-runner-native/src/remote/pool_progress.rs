@@ -39,6 +39,14 @@ impl RemoteCollectiveAssignment {
 pub struct RemoteTaskCompletion {
     receiver: oneshot::Receiver<(u64, Result<AttemptSuccess, crate::NativeProgramFailure>)>,
     progress: std::sync::Arc<RemoteProgressBuffer>,
+    origin: RemoteCompletionOrigin,
+    original_graph_wall_millis: Option<u64>,
+}
+
+#[derive(Clone, Copy)]
+enum RemoteCompletionOrigin {
+    Executing,
+    ExistingInvocation(runmat_execution::TaskId),
 }
 
 impl RemoteTaskCompletion {
@@ -46,16 +54,57 @@ impl RemoteTaskCompletion {
         receiver: oneshot::Receiver<(u64, Result<AttemptSuccess, crate::NativeProgramFailure>)>,
         progress: std::sync::Arc<RemoteProgressBuffer>,
     ) -> Self {
-        Self { receiver, progress }
+        Self {
+            receiver,
+            progress,
+            origin: RemoteCompletionOrigin::Executing,
+            original_graph_wall_millis: None,
+        }
     }
 
-    pub(super) fn resolved(result: Result<AttemptSuccess, crate::NativeProgramFailure>) -> Self {
+    pub(super) fn resolved_committed(
+        task: runmat_execution::TaskId,
+        result: AttemptSuccess,
+        original_graph_wall_millis: u64,
+    ) -> Self {
         let (sender, receiver) = oneshot::channel();
-        let _ = sender.send((0, result));
+        let _ = sender.send((0, Ok(result)));
         Self {
             receiver,
             progress: std::sync::Arc::new(RemoteProgressBuffer::default()),
+            origin: RemoteCompletionOrigin::ExistingInvocation(task),
+            original_graph_wall_millis: Some(original_graph_wall_millis),
         }
+    }
+
+    pub(super) fn resolved_pending(task: runmat_execution::TaskId, result: AttemptSuccess) -> Self {
+        let (sender, receiver) = oneshot::channel();
+        let _ = sender.send((0, Ok(result)));
+        Self {
+            receiver,
+            progress: std::sync::Arc::new(RemoteProgressBuffer::default()),
+            origin: RemoteCompletionOrigin::ExistingInvocation(task),
+            original_graph_wall_millis: None,
+        }
+    }
+
+    pub(super) fn resume_existing(mut self, task: runmat_execution::TaskId) -> Self {
+        self.origin = RemoteCompletionOrigin::ExistingInvocation(task);
+        self
+    }
+
+    /// Only exact immutable-task replay can issue this origin. It may identify
+    /// a restored pending task; callers must await accepted success before
+    /// using it as provenance for a reused result.
+    pub(crate) fn reused_invocation(&self) -> Option<runmat_execution::TaskId> {
+        match self.origin {
+            RemoteCompletionOrigin::Executing => None,
+            RemoteCompletionOrigin::ExistingInvocation(task) => Some(task),
+        }
+    }
+
+    pub(crate) fn original_graph_wall_millis(&self) -> Option<u64> {
+        self.original_graph_wall_millis
     }
 
     pub async fn wait(self) -> Result<AttemptSuccess, crate::NativeProgramFailure> {

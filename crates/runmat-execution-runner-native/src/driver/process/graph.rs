@@ -23,6 +23,18 @@ impl OwnedProcessControl for GraphControl<'_> {
     fn graph_authority(&self) -> Option<&GraphAttemptAuthority> {
         Some(self.authority)
     }
+    fn record_console(
+        &self,
+        record: &runmat_execution::console::ConsoleRecord,
+    ) -> Result<(), String> {
+        self.original.record_console(record)
+    }
+    fn finish_console(
+        &self,
+        receipt: &runmat_execution::console::ConsoleReceipt,
+    ) -> Result<(), String> {
+        self.original.finish_console(receipt)
+    }
 }
 
 #[derive(Default)]
@@ -145,6 +157,7 @@ fn prepare(
         stored_length: stored.length,
         context: graph.context.clone(),
         requested_outputs: graph.requested_outputs,
+        invocation_controls: graph.invocation_controls.clone().unwrap_or_default(),
         callable: graph
             .scheduler_callable()
             .map_err(|error| invalid(error.to_string()))?,

@@ -87,6 +87,32 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         self.protocol.execute(attempt).await
     }
 
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &AttemptRequest,
+    ) -> NativeExecutionResult<Option<super::AuthenticatedPhysicalRetirement>> {
+        self.protocol
+            .authenticated_physical_retirement(request)
+            .await
+    }
+
+    async fn acknowledge_physical_retirement(
+        &self,
+        request: &AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        self.protocol.acknowledge_physical_retirement(request).await
+    }
+
+    async fn prune_durable_checkpoint(
+        &self,
+        sequence: u64,
+        attempts: &[super::CheckpointedAttempt],
+    ) -> NativeExecutionResult<()> {
+        self.protocol
+            .prune_durable_checkpoint(sequence, attempts)
+            .await
+    }
+
     fn drain_progress(
         &self,
         attempt_id: runmat_execution::identity::AttemptId,

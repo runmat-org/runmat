@@ -42,6 +42,7 @@ pub(crate) struct GraphAttemptAuthority {
     pub(super) stored_length: u64,
     pub(super) context: ProgramInvocationContext,
     pub(super) requested_outputs: u16,
+    pub(super) invocation_controls: runmat_execution_artifact::GraphInvocationControls,
     pub(super) callable: ProgramCallable,
     pub(super) response: GraphResponseAuthority,
 }
@@ -79,6 +80,7 @@ impl TaskCompletion {
         requested_outputs: u16,
         callable: ProgramCallable,
         response: GraphResponseAuthority,
+        invocation_controls: runmat_execution_artifact::GraphInvocationControls,
     ) -> Self {
         let mut completion = Self::new();
         completion.graph_authority = Some(GraphAttemptAuthority {
@@ -88,6 +90,7 @@ impl TaskCompletion {
             stored_length: stored.length,
             context,
             requested_outputs,
+            invocation_controls,
             callable,
             response,
         });

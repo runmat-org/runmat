@@ -1,9 +1,8 @@
 use runmat_builtins::{
     builtin_catalog_aliases, builtin_catalog_entries, builtin_constant_catalog_entries,
     builtin_docs, builtin_functions, builtin_implementation_provenance,
-    canonical_catalog_fingerprint, constant_registrations, native_binding_symbol,
-    registration_manifest_entries, AccelTag, BuiltinImplementationAuthority, RegistrationKind,
-    TypeResolverKind, BUILTIN_CATALOG_SCHEMA_VERSION,
+    canonical_catalog_fingerprint, constant_registrations, native_binding_symbol, AccelTag,
+    BuiltinImplementationAuthority, TypeResolverKind, BUILTIN_CATALOG_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -189,42 +188,7 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
         .collect::<Vec<_>>();
     runtime_constants.sort_unstable_by_key(|constant| constant.name);
 
-    let mut registration_manifest = registration_manifest_entries()
-        .into_iter()
-        .map(|entry| RegistrationManifestRecord {
-            kind: match entry.kind {
-                RegistrationKind::Builtin => RegistrationKindRecord::Builtin,
-                RegistrationKind::Constant => RegistrationKindRecord::Constant,
-                RegistrationKind::GpuSpec => RegistrationKindRecord::GpuSpec,
-                RegistrationKind::FusionSpec => RegistrationKindRecord::FusionSpec,
-            },
-            declaration: entry.declaration,
-            variant: entry.variant,
-            builtin_path: entry.builtin_path,
-        })
-        .collect::<Vec<_>>();
-    registration_manifest.sort_unstable();
-    let registration_manifest_digest = hex(&Sha256::digest(
-        serde_json::to_vec(&registration_manifest).expect("registration manifest must serialize"),
-    ));
-    let registration_manifest_counts = RegistrationManifestCounts {
-        builtin: registration_manifest
-            .iter()
-            .filter(|entry| entry.kind == RegistrationKindRecord::Builtin)
-            .count(),
-        constant: registration_manifest
-            .iter()
-            .filter(|entry| entry.kind == RegistrationKindRecord::Constant)
-            .count(),
-        gpu_spec: registration_manifest
-            .iter()
-            .filter(|entry| entry.kind == RegistrationKindRecord::GpuSpec)
-            .count(),
-        fusion_spec: registration_manifest
-            .iter()
-            .filter(|entry| entry.kind == RegistrationKindRecord::FusionSpec)
-            .count(),
-    };
+    let registration_manifest = super::registration_manifest();
 
     let validation = validate_inventory(
         &catalog_provenance,
@@ -233,7 +197,7 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
         &gpu_specs,
         &fusion_specs,
         &runtime_constants,
-        &registration_manifest,
+        &registration_manifest.entries,
     );
     let snapshot = MigrationInventorySnapshot {
         build: build_configuration(),
@@ -249,12 +213,7 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
             legacy_documentation,
         },
         observed: ObservedInventory {
-            registration_manifest: RegistrationManifest {
-                schema_version: 1,
-                digest: registration_manifest_digest,
-                counts: registration_manifest_counts,
-                entries: registration_manifest,
-            },
+            registration_manifest,
             runtime_constants,
             runtime_bindings,
             implementation_provenance,

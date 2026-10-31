@@ -41,7 +41,7 @@ fn pressure_plan(nodes: usize) -> AnalysisExecutionResult<FieldRecoveryPlan> {
     Ok(plan)
 }
 
-fn pressure_definition() -> AnalysisExecutionResult<RecoveredFieldDefinition> {
+pub(crate) fn pressure_definition() -> AnalysisExecutionResult<RecoveredFieldDefinition> {
     RecoveredFieldDefinition::new(
         ACOUSTIC_PRESSURE_FIELD_ID,
         ObservationQuantity::AcousticPressure,

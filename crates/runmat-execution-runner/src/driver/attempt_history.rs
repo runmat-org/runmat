@@ -23,8 +23,9 @@ impl DriverSnapshot {
         Ok(history)
     }
 
-    /// Original reported accounting for every attempt. Unknown consumption and
-    /// active attempts block this claim; planned reservation is not a substitute.
+    /// Original reported accounting for every executed attempt. A certified
+    /// never-started ordinal is retained in history but has no usage to charge;
+    /// unknown consumption and active attempts still block this claim.
     /// The enclosing host supplies its observed graph wall interval separately.
     pub fn task_resource_aggregate(
         &self,

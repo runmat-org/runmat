@@ -117,6 +117,9 @@ enum ObservationExecutionTarget {
 
 pub struct PreparedObservationFanout {
     pub source_request: ObservationEvaluationRequest,
+    /// The admitted source remains available when this sample selects no
+    /// partition tasks. Child-task inputs do not own the fanout's identity.
+    pub source_catalog: PreparedAnalysisObjects,
     pub partitions: Vec<PreparedObservationPartition>,
     /// A volume-mesh source's catalog with the plan of `source_request`, sealed at admission.
     pub volume_mesh:
@@ -332,6 +335,7 @@ pub fn prepare_observation_fanout(
     )?;
     Ok(PreparedObservationFanout {
         source_request: admitted.request,
+        source_catalog: admitted.field_catalog,
         partitions: prepared,
         volume_mesh: admitted.volume_mesh,
     })

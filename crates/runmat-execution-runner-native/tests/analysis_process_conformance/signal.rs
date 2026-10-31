@@ -379,6 +379,13 @@ impl SignalFixture {
         {
             let bundle = ExecutionBundleBuilder::native(&self.project, self.revision.clone())
                 .unwrap()
+                .with_project_runtime_policy_object(
+                    runmat_core::cluster_settings::capture_project_policy(
+                        &compilation::project_policy(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
                 .with_compiled_package_closure()
                 .with_materialized_program(
                     request.recipe.clone(),

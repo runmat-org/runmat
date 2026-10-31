@@ -48,9 +48,9 @@ pub(super) fn admit(
         structural_static_balance: None,
         structural_constraint_result: None,
         structural_connector_result: None,
-        observations: Vec::new(),
-        observation_histories: Vec::new(),
-        series_reductions: Vec::new(),
+        observations: completed.observation_results.clone(),
+        observation_histories: completed.observation_histories.clone(),
+        series_reductions: completed.series_reductions.clone(),
         fields,
     };
     let provenance = RunProvenance {

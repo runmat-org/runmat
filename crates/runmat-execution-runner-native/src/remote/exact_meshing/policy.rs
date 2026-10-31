@@ -22,8 +22,11 @@ pub(super) fn execution_ceilings(
 pub(super) fn execution_policy(
     resources: &AllocationResources,
 ) -> NativeExecutionResult<MeshingExecutionPolicy> {
+    let task_resources = super::super::pool_resources::task_resources(resources)?;
     let policy = MeshingExecutionPolicy {
-        cpu_millicores: super::super::pool_resources::task_resources(resources)?.cpu_millicores,
+        cpu_millicores: task_resources.cpu_millicores,
+        maximum_egress_bytes: task_resources.max_egress_bytes,
+        maximum_relay_bytes: task_resources.max_relay_bytes,
         deadline_unix_millis: Some(super::super::pool_resources::task_deadline_unix_millis(
             resources,
         )?),
@@ -66,6 +69,10 @@ mod tests {
             let after =
                 super::super::super::pool_resources::task_deadline_unix_millis(&resources).unwrap();
             assert_eq!(u64::from(policy.cpu_millicores), cpu);
+            let task_resources =
+                super::super::super::pool_resources::task_resources(&resources).unwrap();
+            assert_eq!(policy.maximum_egress_bytes, task_resources.max_egress_bytes);
+            assert_eq!(policy.maximum_relay_bytes, task_resources.max_relay_bytes);
             assert!((before..=after).contains(&policy.deadline_unix_millis.unwrap()));
         }
     }

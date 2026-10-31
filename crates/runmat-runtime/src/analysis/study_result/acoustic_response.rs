@@ -16,6 +16,11 @@ pub struct AcousticResponseStudyCompletion {
     pub host_workload_digest: Digest,
     pub result: AcousticResponseSolverResult,
     pub numerical_receipt: AcousticResponseNumericalReceiptArtifact,
+    pub observation_catalog:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    pub observation_results: Vec<runmat_analysis_fea::results::observation::ObservationResult>,
+    pub observation_histories: Vec<runmat_analysis_fea::results::observation::ObservationHistory>,
+    pub series_reductions: Vec<runmat_analysis_fea::results::observation::SeriesReductionResult>,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
     pub states: Vec<CanonicalSemanticState>,
     pub baseline_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,

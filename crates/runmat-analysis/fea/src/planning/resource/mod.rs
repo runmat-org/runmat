@@ -46,7 +46,10 @@ pub use acoustic::{
 };
 pub use acoustic_recovery::{
     acoustic_field_recovery_partition_count, acoustic_field_recovery_shape,
-    acoustic_recovery_source_validation_workspace, build_acoustic_field_recovery_resource_plan,
+    acoustic_recovery_source_validation_workspace, acoustic_response_field_recovery_shape,
+    acoustic_response_recovery_source_validation_workspace,
+    build_acoustic_field_recovery_resource_plan,
+    build_acoustic_response_field_recovery_resource_plan,
 };
 pub use contract::AcousticFieldRecoveryResourceDemand;
 pub use contract::AcousticHarmonicResourceDemand;

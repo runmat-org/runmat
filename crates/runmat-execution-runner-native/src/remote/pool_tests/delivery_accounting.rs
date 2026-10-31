@@ -8,6 +8,20 @@ struct DeliveryWorker {
 
 #[async_trait]
 impl RemoteWorkerChannel for DeliveryWorker {
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<Option<super::super::AuthenticatedPhysicalRetirement>> {
+        self.original
+            .authenticated_physical_retirement(request)
+            .await
+    }
+    async fn acknowledge_physical_retirement(
+        &self,
+        request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        self.original.acknowledge_physical_retirement(request).await
+    }
     fn node_identity(&self) -> &str {
         self.original.node_identity()
     }
@@ -118,8 +132,16 @@ async fn failed_result_delivery_preserves_valid_original_accounting_through_cold
         );
         let evidence = pool.task_execution_evidence(task_id).unwrap();
         let original = &evidence.attempts[0];
-        assert!(original.terminal.is_none());
-        let terminal = original.unverified_retirement.as_ref().unwrap();
+        let terminal = original.terminal.as_ref().unwrap();
+        assert_eq!(
+            terminal.disposition,
+            runmat_execution_runner::task::AttemptDisposition::Lost
+        );
+        let retirement = original.unverified_retirement.as_ref().unwrap();
+        assert_eq!(
+            retirement.retired_at_driver_millis,
+            Some(terminal.closed_at_driver_millis)
+        );
         assert!(evidence.task.committed.is_none());
         assert!(pool.execution_object(&reference).unwrap().is_none());
         if foreign {
@@ -136,9 +158,9 @@ async fn failed_result_delivery_preserves_valid_original_accounting_through_cold
             )
             .unwrap();
             assert_eq!(terminal.resources.as_deref(), producer.resources());
-            // Producer accounting is retained, but unknown retirement prevents
-            // claiming a complete terminal consumption aggregate.
-            assert!(evidence.resource_aggregate(1).is_err());
+            // Exact retirement closes the original failed delivery without
+            // erasing the producer's validated resource accounting.
+            assert!(evidence.resource_aggregate(1).is_ok());
         }
         let snapshot = pool.snapshot();
         let cold: runmat_execution_runner::DriverSnapshot =

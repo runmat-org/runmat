@@ -532,7 +532,7 @@ pub enum AttemptFailureKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "outcome", rename_all = "snake_case")]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AttemptReport {
     Started,
     Succeeded {
@@ -558,6 +558,9 @@ pub enum AttemptReport {
     /// resources retired. Accepted only after cancellation or recorded
     /// uncertainty; this cannot create a successful operation result.
     Retired,
+    /// Backend-authorized proof that the original assignment never began
+    /// execution. The scheduler retains its ordinal but no consumption claim.
+    CertifiedNotStarted {},
     Cancelled,
 }
 

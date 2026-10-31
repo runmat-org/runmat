@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum AcousticResponseStudyResultPhase {
     Solve,
+    FieldRecovery,
+    Observation,
     Accuracy,
     State { ordinal: usize },
     Publication,
@@ -124,6 +126,11 @@ pub fn import_acoustic_response_study_completion(
         if study.phase() == AcousticResponseStudyPhase::Complete {
             break;
         }
+        if study.phase() == AcousticResponseStudyPhase::ReadyForObservations
+            && study.prepare_next_observation(source)?.is_none()
+        {
+            continue;
+        }
         let (phase, host) = match study.phase() {
             AcousticResponseStudyPhase::ReadyForSolve => (
                 AcousticResponseStudyResultPhase::Solve,
@@ -132,6 +139,14 @@ pub fn import_acoustic_response_study_completion(
             AcousticResponseStudyPhase::ReadyForAccuracy => (
                 AcousticResponseStudyResultPhase::Accuracy,
                 &study.prepare_accuracy()?.host,
+            ),
+            AcousticResponseStudyPhase::ReadyForFieldRecovery => (
+                AcousticResponseStudyResultPhase::FieldRecovery,
+                &study.prepare_field_recovery()?.host,
+            ),
+            AcousticResponseStudyPhase::AwaitingObservation => (
+                AcousticResponseStudyResultPhase::Observation,
+                study.observations.pending()?.host,
             ),
             AcousticResponseStudyPhase::ReadyForState { ordinal } => (
                 AcousticResponseStudyResultPhase::State { ordinal },
@@ -154,6 +169,12 @@ pub fn import_acoustic_response_study_completion(
         match phase {
             AcousticResponseStudyResultPhase::Solve => {
                 study.complete_solve(source, closure.response, closure.execution)?
+            }
+            AcousticResponseStudyResultPhase::FieldRecovery => {
+                study.complete_field_recovery(source, closure.response, closure.execution)?
+            }
+            AcousticResponseStudyResultPhase::Observation => {
+                study.complete_observation(source, closure.response, closure.execution)?
             }
             AcousticResponseStudyResultPhase::Accuracy => {
                 study.complete_accuracy(source, closure.response, closure.execution)?

@@ -339,7 +339,11 @@ async fn run_exact_structural_sweep_conformance() {
     .unwrap();
     let expectation = prepared.result_expectation();
 
-    let mut builder = ExecutionBundleBuilder::native(&project, revision)
+    let mut builder = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &revision,
+        ))
         .unwrap()
         .with_compiled_package_closure();
     for program in prepared.required_programs() {
@@ -1500,10 +1504,14 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
 
 pub(crate) fn box_modal_response_spectrum_workloads(
 ) -> runmat_analysis_execution::StructuralStudyWorkloads {
+    // The refined box's first twelve modes capture only 0.767492 of the
+    // excitation mass. Keep the spectrum's 0.9 admission requirement and
+    // provide a larger basis for this positive end-to-end fixture.
+    const REQUESTED_MODES: usize = 48;
     let mut model = box_structural_workload().model;
     let mut modal_step = ProcedureStep::structural_modal("modes");
     modal_step.independent_domain = IndependentDomain::Eigenvalue {
-        requested_count: 12,
+        requested_count: REQUESTED_MODES,
     };
     let spectrum = ResponseSpectrum {
         spectrum_id: ResponseSpectrumId("box-global-x".into()),
@@ -1565,7 +1573,7 @@ pub(crate) fn box_modal_response_spectrum_workloads(
         backend: ComputeBackend::Cpu,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
-        truncation: ModalTruncationPolicy::requested(12),
+        truncation: ModalTruncationPolicy::requested(REQUESTED_MODES),
         convergence: ModalConvergencePolicy::exploratory(),
         residual_vector_directions: Vec::new(),
         prestress_transition: None,

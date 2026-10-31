@@ -7,6 +7,7 @@ pub(crate) struct AnalysisTaskCompletion {
     pub attempt: Option<AttemptSuccess>,
     pub evidence: TaskExecutionEvidence,
     pub failure: Option<crate::task_outcome::NativeTaskFailure>,
+    pub original_graph_wall_millis: Option<u64>,
 }
 
 impl AnalysisTaskCompletion {
@@ -80,6 +81,7 @@ impl AnalysisTaskCompletion {
             attempt,
             evidence,
             failure,
+            original_graph_wall_millis: None,
         })
     }
 }

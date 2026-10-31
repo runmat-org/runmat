@@ -869,7 +869,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                     }
                     continue;
                 }
-                if !submitted.created_new {
+                if submitted.disposition == crate::supervisor::JobSubmissionDisposition::Duplicate {
                     // A supervisor record from a previous service/session
                     // cannot mint this session's local source and definition
                     // leases, even when its canonical bytes are identical.

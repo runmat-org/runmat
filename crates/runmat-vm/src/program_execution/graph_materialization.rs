@@ -131,9 +131,23 @@ pub fn materialize_deferred_graph_call(
         captured.primary_unit.to_vec(),
     )
     .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    let controls = runmat_execution_artifact::GraphInvocationControls {
+        environment: call.environment.clone(),
+        console: call.console,
+    };
+    controls
+        .validate()
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    let invocation_controls = (!controls.is_empty()).then_some(controls);
+    let required_schema = if invocation_controls.is_some() {
+        runmat_execution::value::GraphRequiredSchema::InvocationControlsV14
+    } else {
+        captured.required_schema
+    };
     let request = GraphExecutionRequest {
+        invocation_controls,
         project_runtime_policy: None,
-        schema_version: captured.required_schema.version(),
+        schema_version: required_schema.version(),
         recipe,
         artifact,
         class_dependencies: captured.class_dependencies,

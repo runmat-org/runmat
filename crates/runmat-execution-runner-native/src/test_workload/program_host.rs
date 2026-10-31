@@ -235,11 +235,17 @@ fn prepare_host_unit_route<'a>(
             false,
             request.environment.entries().to_vec(),
         ),
-        // Graph scheduling admits an empty invocation environment, not access
-        // to ambient worker variables or selected-unit packaging metadata.
-        HostUnitRequest::Graph(_) => {
-            runmat_core::RunMatSession::with_frozen_environment(enable_jit, false, Vec::new())
-        }
+        // Graphs use only captured invocation controls. Older schemas carry
+        // none and therefore receive an empty environment, never the worker's.
+        HostUnitRequest::Graph(request) => runmat_core::RunMatSession::with_frozen_environment(
+            enable_jit,
+            false,
+            request
+                .invocation_controls
+                .as_ref()
+                .map(|controls| controls.environment.entries().to_vec())
+                .unwrap_or_default(),
+        ),
     }
     .map_err(|error| {
         failure(format!(

@@ -76,6 +76,7 @@ impl Driver {
                 &report.report,
                 AttemptReport::Started
                     | AttemptReport::Retired
+                    | AttemptReport::CertifiedNotStarted {}
                     | AttemptReport::RetirementUnverified { .. }
             )
         {
@@ -114,7 +115,14 @@ impl Driver {
             )?;
             return Ok(());
         }
-        if let Some(contract) = &attempt.request.task.outputs.owned_work {
+        if let Some(contract) = attempt
+            .request
+            .task
+            .outputs
+            .owned_work
+            .as_ref()
+            .filter(|_| !matches!(report.report, AttemptReport::CertifiedNotStarted {}))
+        {
             let invalid_failure = matches!(
                 &report.report,
                 AttemptReport::RuntimeFailed { failure } if failure.validate().is_err()
@@ -273,31 +281,95 @@ impl Driver {
                 )?;
             }
             AttemptReport::Retired => {
-                self.finish_attempt(
-                    &attempt,
-                    if unresolved {
-                        AttemptDisposition::Lost
-                    } else {
-                        AttemptDisposition::Cancelled
-                    },
-                    ProviderEvidence {
-                        resources,
-                        execution,
-                        console,
-                    },
-                    None,
-                )?;
                 if unresolved {
-                    // Physical proof releases capacity, not an indeterminate
-                    // operation's result or permission to replay it.
-                    self.task_mut(report.task_id)?.active_attempt = None;
+                    let original = attempt
+                        .unverified_retirement
+                        .as_ref()
+                        .expect("unresolved retirement was checked");
+                    let evidence = ProviderEvidence {
+                        resources: resources.or_else(|| original.resources.clone()),
+                        execution: execution.or_else(|| original.execution.clone()),
+                        console: console.or_else(|| original.console.clone()),
+                    };
+                    let cause = match (original.failure_kind, original.failure.as_ref()) {
+                        (Some(AttemptFailureKind::Infrastructure), None) => {
+                            Some(RetryCause::Infrastructure)
+                        }
+                        (Some(AttemptFailureKind::Execution), None) | (None, Some(_)) => {
+                            Some(RetryCause::Execution)
+                        }
+                        (Some(AttemptFailureKind::Rejected), None) => Some(RetryCause::Rejected),
+                        (None, None) => Some(RetryCause::Lost),
+                        (Some(_), Some(_)) => None,
+                    };
+                    let complete = evidence.resources.is_some() && cause.is_some();
+                    let disposition = if complete {
+                        match original.failure_kind {
+                            Some(kind) => AttemptDisposition::Failed { kind },
+                            None if original.failure.is_some() => AttemptDisposition::Failed {
+                                kind: AttemptFailureKind::Execution,
+                            },
+                            None => AttemptDisposition::Lost,
+                        }
+                    } else {
+                        AttemptDisposition::Lost
+                    };
+                    self.finish_attempt(
+                        &attempt,
+                        disposition,
+                        evidence,
+                        Some(original.diagnostic.clone()),
+                    )?;
+                    let cancel_or_expire = self.task_record(report.task_id)?.cancellation.is_some()
+                        || self
+                            .task_record(report.task_id)?
+                            .submission
+                            .request
+                            .deadline_unix_millis
+                            .is_some_and(|at| at <= self.snapshot.now_millis);
+                    if complete || cancel_or_expire {
+                        self.resolve_certified_original(
+                            report.task_id,
+                            attempt.request.id,
+                            cause.unwrap_or(RetryCause::Lost),
+                            actions,
+                        )?;
+                    } else {
+                        // Cessation can release physical capacity, but absent or
+                        // contradictory original usage cannot authorize retry.
+                        self.task_mut(report.task_id)?.active_attempt = None;
+                    }
                 } else {
+                    self.finish_attempt(
+                        &attempt,
+                        AttemptDisposition::Cancelled,
+                        ProviderEvidence {
+                            resources,
+                            execution,
+                            console,
+                        },
+                        None,
+                    )?;
                     self.emit(DriverEventKind::AttemptCancelled {
                         task_id: report.task_id,
                         attempt_id: report.attempt_id,
                     });
                     self.transition_task(report.task_id, TaskState::Cancelled)?;
                 }
+            }
+            AttemptReport::CertifiedNotStarted {} => {
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::CertifiedNotStarted,
+                    ProviderEvidence::default(),
+                    None,
+                )?;
+                self.resolve_certified_original(
+                    report.task_id,
+                    attempt.request.id,
+                    RetryCause::Lost,
+                    actions,
+                )?;
             }
             AttemptReport::Cancelled => {
                 self.finish_attempt(
@@ -347,8 +419,35 @@ impl Driver {
                 .unverified_retirement
                 .as_ref()
                 .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none());
+        let certified_not_started = matches!(report.report, AttemptReport::CertifiedNotStarted {});
+        let certified_original = certified_not_started
+            && matches!(
+                attempt.state,
+                AttemptState::Assigned | AttemptState::Starting
+            )
+            && self
+                .snapshot
+                .tasks
+                .get(&report.task_id)
+                .is_some_and(|task| {
+                    task.state == TaskState::Indeterminate
+                        && task.active_attempt == Some(report.attempt_id)
+                })
+            && attempt
+                .unverified_retirement
+                .as_ref()
+                .is_some_and(|evidence| {
+                    evidence.retired_at_driver_millis.is_none()
+                        && evidence.resources.is_none()
+                        && evidence.execution.is_none()
+                        && evidence.console.is_none()
+                        && evidence.failure.is_none()
+                        && evidence.failure_kind.is_none()
+                });
         if report.driver_fence != attempt.request.driver_fence
-            || (report.driver_fence != self.snapshot.driver_fence && !original_retirement)
+            || (report.driver_fence != self.snapshot.driver_fence
+                && !original_retirement
+                && !certified_original)
         {
             return Some("stale driver fence");
         }
@@ -359,6 +458,39 @@ impl Driver {
         }
         if attempt_state_is_terminal(attempt.state) {
             return Some("attempt is already terminal");
+        }
+        if certified_not_started
+            && (!certified_original
+                || report.unsuccessful_resources.is_some()
+                || report.execution.is_some()
+                || report.console.is_some())
+        {
+            return Some("never-started certification differs from unresolved original assignment");
+        }
+        if matches!(report.report, AttemptReport::Retired)
+            && attempt
+                .unverified_retirement
+                .as_ref()
+                .is_some_and(|original| {
+                    report.unsuccessful_resources.as_ref().is_some_and(|value| {
+                        original
+                            .resources
+                            .as_ref()
+                            .is_some_and(|saved| saved != value)
+                    }) || report.execution.as_ref().is_some_and(|value| {
+                        original
+                            .execution
+                            .as_ref()
+                            .is_some_and(|saved| saved != value)
+                    }) || report.console.as_ref().is_some_and(|value| {
+                        original
+                            .console
+                            .as_ref()
+                            .is_some_and(|saved| saved != value)
+                    })
+                })
+        {
+            return Some("retirement report differs from original observation tuple");
         }
         if matches!(&report.report, AttemptReport::RuntimeFailed { failure } if failure.validate().is_err())
         {
@@ -445,7 +577,43 @@ impl Driver {
             AttemptFailureKind::Execution => RetryCause::Execution,
             AttemptFailureKind::Rejected => RetryCause::Rejected,
         };
-        self.finish_unsuccessful(task_id, cause)
+        self.finish_unsuccessful(task_id, cause, None)
+    }
+
+    /// Resolve only an exact original reservation whose non-execution or
+    /// complete original usage has been certified. Its ordinal is retained.
+    fn resolve_certified_original(
+        &mut self,
+        task_id: TaskId,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cause: RetryCause,
+        actions: &mut Vec<DriverAction>,
+    ) -> RunnerResult<()> {
+        let now = self.snapshot.now_millis;
+        let deadline = self
+            .task_record(task_id)?
+            .submission
+            .request
+            .deadline_unix_millis;
+        if self.task_record(task_id)?.cancellation.is_some() {
+            self.transition_task(task_id, TaskState::Cancelled)?;
+        } else if deadline.is_some_and(|at| at <= now) {
+            self.emit(DriverEventKind::DeadlineExpired { task_id });
+            self.task_mut(task_id)?.cancellation = Some(crate::TaskCancellation {
+                cause: crate::TaskCancellationCause::Deadline,
+                requested_at_driver_millis: now,
+            });
+            self.transition_task(task_id, TaskState::Cancelled)?;
+        } else {
+            self.finish_unsuccessful(task_id, cause, Some(attempt_id))?;
+            if self.task_record(task_id)?.state == TaskState::Ready {
+                self.snapshot.deadlines.insert(task_id, deadline);
+            }
+        }
+        if self.task_record(task_id)?.state != TaskState::Indeterminate {
+            self.reopen_certified_dependency_descendants(task_id, actions)?;
+        }
+        Ok(())
     }
 
     pub(super) fn finish_attempt(
@@ -516,8 +684,31 @@ impl Driver {
         Ok(CommitDecision::Accepted(commit))
     }
 
-    fn finish_unsuccessful(&mut self, task_id: TaskId, cause: RetryCause) -> RunnerResult<()> {
-        if self.task_is_terminal(task_id)? {
+    fn finish_unsuccessful(
+        &mut self,
+        task_id: TaskId,
+        cause: RetryCause,
+        certified_original: Option<runmat_execution::identity::AttemptId>,
+    ) -> RunnerResult<()> {
+        let recovering_certified = certified_original.is_some_and(|attempt_id| {
+            self.snapshot.tasks.get(&task_id).is_some_and(|task| {
+                task.state == TaskState::Indeterminate && task.active_attempt == Some(attempt_id)
+            }) && self
+                .snapshot
+                .attempts
+                .get(&attempt_id)
+                .is_some_and(|attempt| {
+                    attempt.terminal.as_ref().is_some_and(|terminal| {
+                        terminal.disposition == AttemptDisposition::CertifiedNotStarted
+                            || (terminal.resources.is_some()
+                                && matches!(
+                                    terminal.disposition,
+                                    AttemptDisposition::Lost | AttemptDisposition::Failed { .. }
+                                ))
+                    })
+                })
+        });
+        if self.task_is_terminal(task_id)? && !recovering_certified {
             return Ok(());
         }
         let enqueue_sequence = self.snapshot.next_event_sequence;

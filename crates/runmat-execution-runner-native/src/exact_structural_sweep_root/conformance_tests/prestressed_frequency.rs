@@ -71,7 +71,11 @@ async fn run_prestressed_frequency_conformance(modal_reduced: bool) {
         .unwrap(),
     );
     let expectation = prepared.result_expectation();
-    let mut builder = ExecutionBundleBuilder::native(&project, revision)
+    let mut builder = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &revision,
+        ))
         .unwrap()
         .with_compiled_package_closure();
     for program in prepared.required_programs().unwrap() {

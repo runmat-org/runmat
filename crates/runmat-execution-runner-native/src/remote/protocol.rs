@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use runmat_execution_transport_native::control::DriverArtifactDownload;
 use runmat_execution_transport_native::transfer::ObjectChunk;
 
+use super::CheckpointedAttempt;
 use super::{RemoteAttempt, RemoteBundleReceipt};
 
 #[cfg(test)]
@@ -93,6 +94,16 @@ pub enum RemoteWorkerCommand {
         attempt_id: AttemptId,
         reason: runmat_execution::CancellationReason,
     },
+    QueryPhysicalRetirement {
+        attempt: Box<runmat_execution_runner::AttemptRequest>,
+    },
+    AcknowledgePhysicalRetirement {
+        attempt: Box<runmat_execution_runner::AttemptRequest>,
+    },
+    PruneDurableCheckpoint {
+        sequence: u64,
+        attempts: Vec<CheckpointedAttempt>,
+    },
     Drain,
 }
 
@@ -158,6 +169,21 @@ pub enum RemoteWorkerOutcome {
     Attempt {
         report: AttemptReport,
     },
+    AdmissionDeferred {
+        attempt_id: AttemptId,
+        worker_id: WorkerId,
+        driver_fence: u64,
+    },
+    PhysicalRetirement {
+        run_identity: String,
+        session_id: [u8; 16],
+        driver_fence: u64,
+        worker_id: WorkerId,
+        pool_id: PoolId,
+        attempt_id: AttemptId,
+        request_digest: Digest,
+    },
+    RetirementUnavailable,
     Acknowledged,
     Rejected {
         message: String,

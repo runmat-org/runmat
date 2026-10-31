@@ -38,7 +38,8 @@ mod publication_digest;
 mod response;
 mod reuse;
 pub use reuse::{
-    meshing_build_configuration, meshing_stage_reuse_key, AcceptedMeshingStageReceipt,
+    meshing_build_configuration, meshing_stage_reuse_key, rebind_committed_meshing_stage,
+    AcceptedMeshingStageReceipt,
 };
 mod serial;
 mod solver_projection_kernel;
@@ -134,8 +135,8 @@ pub use surface_join_kernel::ExactSurfaceJoinKernel;
 pub use surface_kernel::ExactSurfacePartitionKernel;
 pub use task::{
     build_task_submission, exact_meshing_worker_capabilities,
-    exact_meshing_worker_capability_inventory, MeshingExecutionContext, MeshingTaskEffectPolicy,
-    EXACT_CAD_ADMISSION_CAPABILITY, MESHING_EXECUTION_CALLABLE_OWNER,
+    exact_meshing_worker_capability_inventory, meshing_task_id, MeshingExecutionContext,
+    MeshingTaskEffectPolicy, EXACT_CAD_ADMISSION_CAPABILITY, MESHING_EXECUTION_CALLABLE_OWNER,
 };
 pub use volume_kernel::ExactVolumeKernel;
 

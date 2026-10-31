@@ -72,6 +72,10 @@ impl CacheImport for UntouchedPool {
 
 #[async_trait]
 impl AnalysisTaskPool for UntouchedPool {
+    async fn begin_wave_observation(&mut self, _: &[TaskId]) -> NativeExecutionResult<()> {
+        panic!("empty wave must not begin an observation")
+    }
+
     fn scope_id(&self) -> ExecutionScopeId {
         panic!("empty wave must not request a scope")
     }
@@ -101,7 +105,7 @@ impl AnalysisTaskPool for UntouchedPool {
 
     async fn execute_batch(
         &mut self,
-        _: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+        _: AdmittedAnalysisBatch,
     ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>> {
         panic!("empty wave must not submit a graph")
     }

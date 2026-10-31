@@ -9,7 +9,10 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 use sha2::{Digest as _, Sha256};
 
-use super::worker_entry::{run_remote_meshing_worker_relay_cached, RemoteWorkerRelayRequest};
+use super::worker_attempt_journal::WorkerAttemptJournalOwner;
+use super::worker_entry::{
+    run_remote_meshing_worker_relay_cached_with_journal, RemoteWorkerRelayRequest,
+};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
@@ -80,7 +83,20 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
     if !bundle_cache.is_absolute() {
         return Err(invalid("worker node bundle cache path must be absolute"));
     }
-    run_remote_meshing_worker_relay_cached(
+    let journal_directory = PathBuf::from(required("RUNMAT_EXECUTION_ATTEMPT_JOURNAL_DIRECTORY")?);
+    if !journal_directory.is_absolute() || !journal_directory.is_dir() {
+        return Err(invalid("worker attempt journal directory is unavailable"));
+    }
+    let journal = WorkerAttemptJournalOwner {
+        directory: journal_directory,
+        run_id: run_id.clone(),
+        allocation_lease_id: allocation_id.clone(),
+        allocation_fencing_token: allocation_fence,
+        driver_fencing_token: driver_fence,
+        process_launch_nonce: nonce("RUNMAT_EXECUTION_PROCESS_LAUNCH_NONCE")?,
+        clock_domain_nonce: nonce("RUNMAT_EXECUTION_CLOCK_DOMAIN_NONCE")?,
+    };
+    run_remote_meshing_worker_relay_cached_with_journal(
         RemoteWorkerRelayRequest {
             url: &relay_url,
             headers: &headers,
@@ -98,8 +114,20 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
         Some(bundle_cache),
         std::sync::Arc::new(crate::native_meshing_kernel_dispatcher()),
         crate::NativeMeshingHostLimits::default(),
+        journal,
     )
     .await
+}
+
+fn nonce(name: &str) -> NativeExecutionResult<[u8; 16]> {
+    let encoded = required(name)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(protocol)?;
+    bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid("worker owner nonce has an invalid length"))
 }
 
 fn worker_relay_url(server_url: &str, path: &str) -> NativeExecutionResult<String> {

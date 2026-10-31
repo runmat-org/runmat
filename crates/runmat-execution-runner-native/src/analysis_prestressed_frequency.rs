@@ -64,12 +64,26 @@ async fn execute_with_pool(
     execute_with_thermal_source(pool, preparation, policy, None).await
 }
 
-pub(crate) async fn execute_with_thermal_source(
-    pool: &mut impl AnalysisTaskPool,
+/// Admission and preload construction finish before the suspended execution
+/// begins. Keep their large owned carriers out of every subsequent poll frame.
+struct PreparedPrestressedFrequencyExecution {
+    coordinator: Box<StructuralPrestressedFrequencyStudyCoordinator>,
+    preload: Box<runmat_analysis_execution::PreparedStructuralLinearProgram>,
+    preload_dependencies: Vec<AnalysisTaskDependency>,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    mesh: runmat_meshing_core::SolverMeshArtifact,
+    program_revision: runmat_execution::ProgramRevision,
+    artifact_access: runmat_execution_artifact::ArtifactAccess,
+    chunk_bytes: usize,
+    inventory_limits: runmat_execution_artifact::object::ObjectInventoryLimits,
+}
+
+fn prepare_execution(
+    pool: &impl AnalysisTaskPool,
     preparation: StructuralPrestressedFrequencyStudyPreparation,
-    policy: StructuralSequenceExecutionPolicy,
+    policy: &StructuralSequenceExecutionPolicy,
     thermal: Option<crate::analysis_thermal_prestress::BoundThermalExecution>,
-) -> NativeExecutionResult<CompletedStructuralPrestressedFrequencyStudy> {
+) -> NativeExecutionResult<PreparedPrestressedFrequencyExecution> {
     policy.validate()?;
     if preparation.accelerator_requests != policy.resources.accelerators {
         return Err(protocol(
@@ -82,7 +96,7 @@ pub(crate) async fn execute_with_thermal_source(
     let artifact_access = preparation.artifact_access.clone();
     let chunk_bytes = preparation.chunk_bytes;
     let inventory_limits = preparation.inventory_limits;
-    let (mut coordinator, preload_dependencies) = match thermal {
+    let (coordinator, preload_dependencies) = match thermal {
         Some(thermal) => {
             let (source, dependency) = thermal.into_parts(pool)?;
             (
@@ -99,12 +113,52 @@ pub(crate) async fn execute_with_thermal_source(
             Vec::new(),
         ),
     };
+    let mut coordinator = Box::new(coordinator);
     crate::analysis_thermal_prestress::validate_preload_dependencies(
         &coordinator.preload_dependencies(),
         &preload_dependencies,
     )?;
 
-    let preload = coordinator.prepare_preload().map_err(protocol)?;
+    let preload = Box::new(coordinator.prepare_preload().map_err(protocol)?);
+    Ok(PreparedPrestressedFrequencyExecution {
+        coordinator,
+        preload,
+        preload_dependencies,
+        local_execution,
+        mesh,
+        program_revision,
+        artifact_access,
+        chunk_bytes,
+        inventory_limits,
+    })
+}
+
+pub(crate) async fn execute_with_thermal_source(
+    pool: &mut impl AnalysisTaskPool,
+    preparation: StructuralPrestressedFrequencyStudyPreparation,
+    policy: StructuralSequenceExecutionPolicy,
+    thermal: Option<crate::analysis_thermal_prestress::BoundThermalExecution>,
+) -> NativeExecutionResult<CompletedStructuralPrestressedFrequencyStudy> {
+    let prepared = prepare_execution(pool, preparation, &policy, thermal)?;
+    execute_prepared(pool, prepared, policy).await
+}
+
+async fn execute_prepared(
+    pool: &mut impl AnalysisTaskPool,
+    prepared: PreparedPrestressedFrequencyExecution,
+    policy: StructuralSequenceExecutionPolicy,
+) -> NativeExecutionResult<CompletedStructuralPrestressedFrequencyStudy> {
+    let PreparedPrestressedFrequencyExecution {
+        mut coordinator,
+        preload,
+        preload_dependencies,
+        local_execution,
+        mesh,
+        program_revision,
+        artifact_access,
+        chunk_bytes,
+        inventory_limits,
+    } = prepared;
     let [executed_preload] = execute_analysis_task_batch(
         pool,
         vec![PreparedAnalysisTask {

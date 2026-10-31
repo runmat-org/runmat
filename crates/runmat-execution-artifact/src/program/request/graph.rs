@@ -7,6 +7,9 @@ pub use captured::{
 mod policy;
 #[path = "graph/selection.rs"]
 mod selection;
+#[path = "graph/invocation.rs"]
+mod invocation;
+pub use invocation::GraphInvocationControls;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -73,6 +76,10 @@ fn validate_root_context(
 #[serde(deny_unknown_fields)]
 pub struct GraphExecutionRequest {
     pub schema_version: u16,
+    /// V14 binds the original invocation data; absence means an empty frozen
+    /// environment and no console, never permission to read ambient state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_controls: Option<GraphInvocationControls>,
     /// Canonical project-only execution policy, included in the authenticated
     /// Program bytes. Required by V13 and absent on generic local V10–V12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -366,9 +373,16 @@ impl GraphExecutionRequest {
                 })
                 .and_then(|total| total.checked_add(node_storage))
                 .ok_or_else(|| ArtifactError::Limit("graph input allocation overflows".into()))?;
+        let invocation_bytes = self
+            .invocation_controls
+            .as_ref()
+            .map(GraphInvocationControls::minimum_memory_bytes)
+            .transpose()?
+            .unwrap_or(0);
         u64::try_from(total)
             .ok()
             .and_then(|total| total.checked_add(numeric_bytes))
+            .and_then(|total| total.checked_add(invocation_bytes))
             .ok_or_else(|| ArtifactError::Limit("graph input allocation exceeds u64".into()))
     }
 
@@ -380,13 +394,31 @@ impl GraphExecutionRequest {
     /// bundles to the worker host. This avoids a second archive decode before
     /// materialization while keeping `validate` as the public check API.
     pub fn validate_and_admit_bundles(&self) -> ArtifactResult<Vec<Option<ExecutionBundle>>> {
-        if (self.schema_version == runmat_execution::value::GRAPH_REQUEST_SCHEMA_V13)
-            != self.project_runtime_policy.is_some()
+        if (self.schema_version == runmat_execution::value::GRAPH_REQUEST_SCHEMA_V13
+            && self.project_runtime_policy.is_none())
+            || (self.schema_version < runmat_execution::value::GRAPH_REQUEST_SCHEMA_V13
+                && self.project_runtime_policy.is_some())
         {
             return Err(ArtifactError::Invalid(
                 "Graph V13 requires a project runtime policy; older Graph schemas cannot carry one"
                     .into(),
             ));
+        }
+        if (self.schema_version == runmat_execution::value::GRAPH_REQUEST_SCHEMA_V14)
+            != self.invocation_controls.is_some()
+        {
+            return Err(ArtifactError::Invalid(
+                "Graph invocation controls require exactly the V14 contract".into(),
+            ));
+        }
+        if let Some(controls) = &self.invocation_controls {
+            controls.validate()?;
+            if controls.is_empty() {
+                return Err(ArtifactError::Invalid(
+                    "empty Graph invocation controls must use the existing control-free schema"
+                        .into(),
+                ));
+            }
         }
         if let Some(policy) = &self.project_runtime_policy {
             crate::validate_project_runtime_policy_object(policy)?;

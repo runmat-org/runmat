@@ -61,6 +61,46 @@ pub(crate) async fn execute_with_pool(
         .complete_solve(pool, executed.response, accounting)
         .map_err(protocol)?;
 
+    if coordinator.phase()
+        == runmat_analysis_execution::AcousticResponseStudyPhase::ReadyForFieldRecovery
+    {
+        let recovery = coordinator.prepare_field_recovery().map_err(protocol)?;
+        let (executed, accounting) = execute_one(
+            pool,
+            &recovery.host,
+            &recovery.program,
+            &recovery.resource_plan,
+            vec![preceding],
+            &policy,
+        )
+        .await?;
+        preceding = dependency(&executed);
+        coordinator
+            .complete_field_recovery(pool, executed.response, accounting)
+            .map_err(protocol)?;
+        loop {
+            let Some(observation) = coordinator
+                .prepare_next_observation(pool)
+                .map_err(protocol)?
+            else {
+                break;
+            };
+            let (executed, accounting) = execute_one(
+                pool,
+                observation.host,
+                observation.program,
+                observation.resource_plan,
+                vec![preceding],
+                &policy,
+            )
+            .await?;
+            preceding = dependency(&executed);
+            coordinator
+                .complete_observation(pool, executed.response, accounting)
+                .map_err(protocol)?;
+        }
+    }
+
     let accuracy = coordinator.prepare_accuracy().map_err(protocol)?;
     let (executed, accounting) = execute_one(
         pool,

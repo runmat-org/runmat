@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,6 +18,7 @@ use super::protocol::{
     REMOTE_WORKER_PROTOCOL_VERSION,
 };
 use super::route::RemoteFrameRoute;
+use super::worker_attempt_journal::{WorkerAttemptJournal, WorkerAttemptJournalOwner};
 use super::worker_protocol::{
     acknowledged, command_frame_kind, rejected, reply, reply_kind, reply_progress,
 };
@@ -26,12 +27,32 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 
 const MAX_PREEXECUTION_CANCELLATIONS: usize = 1 << 20;
 const GRAPH_STAGE_IDLE_RETENTION: Duration = Duration::from_secs(60);
+// Fixed protocol-control storage owned by the authenticated worker session:
+// all slots are allocated at startup and the journal never grows beyond them.
+// Pending receipts also retain their original per-attempt resource grant.
+// Exact ACK drops that variable metadata and releases the grant once; compact
+// ACK replay markers use only these preallocated session slots and may evict.
+const MAX_RETIREMENT_RECEIPTS: usize = 256;
+
+struct WorkerRetirementReceipt {
+    attempt_id: AttemptId,
+    request_digest: runmat_execution::Digest,
+    // None is an exact ACK replay record in the fixed worker-session journal.
+    // The charged reservation is released exactly once when this is taken.
+    claim: Option<(
+        ResourceRequest,
+        runmat_execution::resource::ResourceAssignment,
+    )>,
+}
 
 struct WorkerState {
     bundle: Option<Arc<ExecutionBundle>>,
     materialized_project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     bundle_digest: Option<runmat_execution::Digest>,
     attempts: HashMap<AttemptId, ActiveAttempt>,
+    /// Session-owned, preallocated protocol-control journal. This is separate
+    /// from `allocated`, which charges every pending physical reservation.
+    retirement_receipts: VecDeque<WorkerRetirementReceipt>,
     /// Capacity reserved by active attempts, not sampled process utilization.
     allocated: ResourceAllocation,
     cancelled_attempts: HashMap<AttemptId, runmat_execution::CancellationReason>,
@@ -116,12 +137,36 @@ struct ActiveAttempt {
     collective: Option<Arc<super::collective::RemoteCollectiveChannel>>,
     cooperative: bool,
     finished: tokio::sync::watch::Receiver<bool>,
+    request_digest: runmat_execution::Digest,
 }
 
 impl WorkerState {
-    fn finish_attempt(&mut self, attempt_id: AttemptId) -> Option<ActiveAttempt> {
+    fn finish_attempt(&mut self, attempt_id: AttemptId, verified: bool) -> Option<ActiveAttempt> {
         let active = self.attempts.remove(&attempt_id)?;
-        release(&mut self.allocated, &active.resources, &active.assignment);
+        if verified {
+            if self.retirement_receipts.len() == MAX_RETIREMENT_RECEIPTS {
+                if let Some(acknowledged) = self
+                    .retirement_receipts
+                    .iter()
+                    .position(|receipt| receipt.claim.is_none())
+                {
+                    self.retirement_receipts.remove(acknowledged);
+                }
+            }
+            if self.retirement_receipts.len() < MAX_RETIREMENT_RECEIPTS {
+                self.retirement_receipts.push_back(WorkerRetirementReceipt {
+                    attempt_id,
+                    request_digest: active.request_digest,
+                    claim: Some((active.resources.clone(), active.assignment.clone())),
+                });
+            } else {
+                // No uncharged metadata or false absence proof: this worker
+                // quarantines the still-charged allocation and stops admission.
+                self.draining = true;
+            }
+        }
+        // Every completed owner stays charged until its exact receipt ACK.
+        // An unverified owner gets no receipt and remains quarantined.
         Some(active)
     }
 }
@@ -152,6 +197,7 @@ pub(super) struct WorkerLoopContext {
     pub(super) meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
     /// Set only by an allocation-bound NodeAgent bootstrap from the driver.
     pub(super) ready_v1: bool,
+    pub(super) journal: Option<WorkerAttemptJournalOwner>,
 }
 
 pub(super) async fn run_worker_loop(
@@ -168,7 +214,12 @@ pub(super) async fn run_worker_loop(
         bundle_cache,
         meshing_host,
         ready_v1,
+        journal,
     } = context;
+    let attempt_journal = journal
+        .map(|owner| WorkerAttemptJournal::new(owner, worker.id, run_key.clone()))
+        .transpose()?
+        .map(|journal| Arc::new(std::sync::Mutex::new(journal)));
     let mut receiver = EncryptedFrameSession::new(
         run_identity.clone(),
         session_id,
@@ -217,6 +268,7 @@ pub(super) async fn run_worker_loop(
         materialized_project: None,
         bundle_digest: None,
         attempts: HashMap::new(),
+        retirement_receipts: VecDeque::with_capacity(MAX_RETIREMENT_RECEIPTS),
         allocated: ResourceAllocation::default(),
         cancelled_attempts: HashMap::new(),
         values: HashMap::new(),
@@ -773,6 +825,29 @@ pub(super) async fn run_worker_loop(
                 .await?;
             }
             RemoteWorkerCommand::Execute { attempt } => {
+                if attempt_journal.as_ref().is_some_and(|journal| {
+                    journal
+                        .lock()
+                        .expect("worker attempt journal poisoned")
+                        .is_full()
+                }) {
+                    reply(
+                        connection.as_ref(),
+                        &sender,
+                        limits,
+                        RemoteWorkerReply {
+                            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                            correlation_id: request.correlation_id,
+                            outcome: RemoteWorkerOutcome::AdmissionDeferred {
+                                attempt_id: attempt.scheduling.id,
+                                worker_id: worker.id,
+                                driver_fence,
+                            },
+                        },
+                    )
+                    .await?;
+                    continue;
+                }
                 let attempt = match resolve_attempt(&state, &worker, driver_fence, *attempt).await {
                     Ok(attempt) => attempt,
                     Err(message) => {
@@ -800,6 +875,33 @@ pub(super) async fn run_worker_loop(
                 }
                 let attempt_id = attempt.scheduling.id;
                 let scheduling = attempt.scheduling.clone();
+                if let Some(journal) = &attempt_journal {
+                    if let Err(error) = journal
+                        .lock()
+                        .expect("worker attempt journal poisoned")
+                        .begin(&scheduling)
+                    {
+                        let mut state = state.lock().await;
+                        release(
+                            &mut state.allocated,
+                            &scheduling.task.resources,
+                            &scheduling.resource_assignment,
+                        );
+                        state.draining = true;
+                        drop(state);
+                        reply(
+                            connection.as_ref(),
+                            &sender,
+                            limits,
+                            rejected(request.correlation_id, error.to_string()),
+                        )
+                        .await?;
+                        continue;
+                    }
+                }
+                let request_digest = runmat_execution::Digest::sha256(
+                    &serde_json::to_vec(&scheduling).map_err(protocol)?,
+                );
                 let reserved_resources = scheduling.task.resources.clone();
                 let reserved_assignment = scheduling.resource_assignment.clone();
                 let graph_run_identity = run_identity.clone();
@@ -868,6 +970,7 @@ pub(super) async fn run_worker_loop(
                 let (finished_sender, finished) = tokio::sync::watch::channel(false);
                 let meshing_host = meshing_host.clone();
                 let drain_complete_for_task = Arc::clone(&drain_complete);
+                let attempt_journal_for_task = attempt_journal.as_ref().map(Arc::clone);
                 let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
                 let task = tokio::task::spawn_local(async move {
                     if start_receiver.await.is_err() {
@@ -977,7 +1080,7 @@ pub(super) async fn run_worker_loop(
                     // completes cooperative/adapter retirement before terminal
                     // publication. Never publish a late successful result after
                     // the scheduler has cancelled the attempt.
-                    let (report, retirement_unverified) = match response {
+                    let (mut report, mut retirement_unverified) = match response {
                         super::worker_execution::WorkerExecutionOutcome::RetirementUnverified(message) => (
                             runmat_execution_runner::AttemptReport::RetirementUnverified { message },
                             true,
@@ -997,6 +1100,20 @@ pub(super) async fn run_worker_loop(
                             (report, false)
                         }
                     };
+                    if !retirement_unverified {
+                        if let Some(journal) = &attempt_journal_for_task {
+                            if let Err(error) = journal
+                                .lock()
+                                .expect("worker attempt journal poisoned")
+                                .complete(attempt_id, &report)
+                            {
+                                report = runmat_execution_runner::AttemptReport::RetirementUnverified {
+                                    message: format!("attempt result inventory was not durably committed: {error}"),
+                                };
+                                retirement_unverified = true;
+                            }
+                        }
+                    }
                     if retirement_unverified {
                         // Stop admission first, but keep the active attempt
                         // present until its fatal report has had a bounded
@@ -1008,7 +1125,7 @@ pub(super) async fn run_worker_loop(
                         attempt_reply_for_task.complete(report);
                     }
                     let mut state = state_for_task.lock().await;
-                    let _ = state.finish_attempt(attempt_id);
+                    let _ = state.finish_attempt(attempt_id, !retirement_unverified);
                     finished_sender.send_replace(true);
                     let retired_program = state.graph_programs.remove(&attempt_id);
                     if state.draining && state.attempts.is_empty() {
@@ -1028,6 +1145,7 @@ pub(super) async fn run_worker_loop(
                         collective,
                         cooperative,
                         finished,
+                        request_digest,
                     },
                 );
                 let _ = start_sender.send(());
@@ -1057,6 +1175,84 @@ pub(super) async fn run_worker_loop(
                 };
                 reply(connection.as_ref(), &sender, limits, response).await?;
             }
+            RemoteWorkerCommand::QueryPhysicalRetirement { attempt } => {
+                let digest = runmat_execution::Digest::sha256(
+                    &serde_json::to_vec(attempt.as_ref()).map_err(protocol)?,
+                );
+                let exact_scope = attempt.driver_fence == driver_fence
+                    && attempt.worker_id == worker.id
+                    && attempt.task.pool_id == worker.pool_id;
+                let retired = if exact_scope {
+                    state.lock().await.retirement_receipts.iter().any(|receipt| {
+                        receipt.attempt_id == attempt.id
+                            && receipt.request_digest == digest
+                            && receipt.claim.is_some()
+                    })
+                } else { false };
+                let outcome = if retired {
+                    RemoteWorkerOutcome::PhysicalRetirement {
+                        run_identity: run_identity.clone(),
+                        session_id,
+                        driver_fence,
+                        worker_id: worker.id,
+                        pool_id: worker.pool_id,
+                        attempt_id: attempt.id,
+                        request_digest: digest,
+                    }
+                } else {
+                    RemoteWorkerOutcome::RetirementUnavailable
+                };
+                reply(connection.as_ref(), &sender, limits, RemoteWorkerReply {
+                    schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                    correlation_id: request.correlation_id,
+                    outcome,
+                }).await?;
+            }
+            RemoteWorkerCommand::AcknowledgePhysicalRetirement { attempt } => {
+                let digest = runmat_execution::Digest::sha256(
+                    &serde_json::to_vec(attempt.as_ref()).map_err(protocol)?,
+                );
+                let exact_scope = attempt.driver_fence == driver_fence
+                    && attempt.worker_id == worker.id
+                    && attempt.task.pool_id == worker.pool_id;
+                let acknowledged_exact = if exact_scope {
+                    let mut state = state.lock().await;
+                    if let Some(index) = state.retirement_receipts.iter().position(|receipt| {
+                        receipt.attempt_id == attempt.id && receipt.request_digest == digest
+                    }) {
+                        // Physical ACK releases runtime capacity once, but
+                        // not the fixed 256-entry worker-allocation journal:
+                        // an older durable driver checkpoint can still need
+                        // this original attempt's measured interval.
+                        let claim = state.retirement_receipts.get_mut(index)
+                            .expect("matched worker retirement receipt").claim.take();
+                        if let Some((resources, assignment)) = claim {
+                            release(&mut state.allocated, &resources, &assignment);
+                        }
+                        true
+                    } else { false }
+                } else { false };
+                let response = if acknowledged_exact {
+                    acknowledged(request.correlation_id)
+                } else {
+                    rejected(request.correlation_id, "retirement acknowledgement has no exact outstanding owner")
+                };
+                reply(connection.as_ref(), &sender, limits, response).await?;
+            }
+            RemoteWorkerCommand::PruneDurableCheckpoint { sequence, attempts } => {
+                let outcome = match &attempt_journal {
+                    Some(journal) => journal
+                        .lock()
+                        .expect("worker attempt journal poisoned")
+                        .prune_after_checkpoint(sequence, &attempts),
+                    None => Err(protocol("worker has no allocation-bound attempt journal")),
+                };
+                let response = match outcome {
+                    Ok(()) => acknowledged(request.correlation_id),
+                    Err(error) => rejected(request.correlation_id, error.to_string()),
+                };
+                reply(connection.as_ref(), &sender, limits, response).await?;
+            }
             RemoteWorkerCommand::Cancel { attempt_id, reason } => {
                 let mut state = state.lock().await;
                 let mut cancelled_reply = None;
@@ -1083,7 +1279,10 @@ pub(super) async fn run_worker_loop(
                     active.cancellation.cancel(reason);
                     if active.cooperative {
                         completion = Some(active.finished.clone());
-                    } else if let Some(active) = state.finish_attempt(attempt_id) {
+                    } else if let Some(active) = state.finish_attempt(attempt_id, false) {
+                        // A control acknowledgement does not certify the
+                        // process-tree owner. Quarantine this reservation.
+                        state.draining = true;
                         active.task.abort();
                         cancelled_reply = Some(active.reply);
                         aborted_task = Some(active.task);
@@ -1173,7 +1372,7 @@ pub(super) async fn run_worker_loop(
     // The worker loop owns every signed HTTP stage task. On Drain, QUIC
     // disconnect, or any protocol error, cancellation and task retirement
     // complete before its private program roots can be released.
-    let (stage_cancellations, retired_staging, retired_programs, retired_cache) = {
+    let (stage_cancellations, retired_staging, retired_programs, retired_cache, active_attempts) = {
         let mut state = state.lock().await;
         let stage_cancellations = state
             .graph_stage_download_in_flight
@@ -1183,13 +1382,27 @@ pub(super) async fn run_worker_loop(
         let retired_staging = std::mem::take(&mut state.graph_staging);
         let retired_programs = std::mem::take(&mut state.graph_programs);
         let retired_cache = std::mem::take(&mut state.graph_cache);
+        let active_attempts = std::mem::take(&mut state.attempts);
         (
             stage_cancellations,
             retired_staging,
             retired_programs,
             retired_cache,
+            active_attempts,
         )
     };
+    // Route loss stops dispatch, but is not a retirement certificate. Retain
+    // ownership until every in-process attempt task (including any joined
+    // blocking kernel) has actually completed. The node's process-tree owner
+    // is still required for the externally trusted certificate.
+    for active in active_attempts.values() {
+        active
+            .cancellation
+            .cancel(runmat_execution::CancellationReason::Shutdown);
+    }
+    for (_, active) in active_attempts {
+        let _ = active.task.await;
+    }
     for cancellation in stage_cancellations {
         cancellation.cancel(runmat_execution::CancellationReason::Shutdown);
     }

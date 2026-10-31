@@ -5,13 +5,18 @@ use runmat_server_client::public_api::{self, types};
 use sha2::{Digest as _, Sha256};
 use tokio::io::AsyncWriteExt as _;
 
+use super::clock::{
+    bounded as bounded_clock, decode_id as decode_clock_id, encode_id as encode_clock_id,
+    MAX_CLOCK_HEARTBEAT_ITEMS,
+};
 use super::driver_contract::{
     CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
     DriverBootstrap, DriverControlPlane, DriverHeartbeat, DriverRunTarget, DriverRunTransition,
-    StoreDriverArtifact, StoredDriverArtifact,
+    StoreDriverArtifact, StoredDriverArtifact, WorkerRetirementLookup,
 };
 use super::worker_pool::{self, DriverWorkerPool};
 use super::ResourceRequest;
+use super::{ClockDriverHeartbeatRequestV1, ClockDriverHeartbeatResponseV1};
 use crate::{TransportError, TransportResult};
 
 #[derive(Clone)]
@@ -19,6 +24,46 @@ pub struct HttpDriverControlPlane {
     base_url: String,
     client: public_api::Client,
     http: reqwest::Client,
+}
+
+#[cfg(test)]
+mod clock_wire_bound_tests {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+    #[test]
+    fn complete_release_manifest_fits_one_bounded_driver_heartbeat() {
+        let entry = serde_json::json!({
+            "observationId": URL_SAFE_NO_PAD.encode([u8::MAX; 16]),
+            "startReceiptDigest": runmat_execution::Digest::sha256([u8::MAX; 32]),
+            "endReceiptDigest": runmat_execution::Digest::sha256([u8::MAX; 64]),
+        });
+        let entries = vec![entry; runmat_execution::security::MAX_CLOCK_OBSERVATIONS_PER_NODE];
+        let body = serde_json::json!({
+            "ttlSeconds": 30,
+            "clockStartReservations": vec![URL_SAFE_NO_PAD.encode([u8::MAX; 16]); 128],
+            // A 4094-byte string occupies 4096 JSON bytes including quotes.
+            "clockStartReceipts": vec!["x".repeat(4094); 128],
+            "clockEndDemands": vec![serde_json::json!({
+                "observationId": URL_SAFE_NO_PAD.encode([u8::MAX; 16]),
+                "startReceiptDigest": runmat_execution::Digest::sha256([u8::MAX; 32]),
+                "demandChallenge": URL_SAFE_NO_PAD.encode([u8::MAX; 16]),
+            }); 128],
+            "clockLookupIds": vec![URL_SAFE_NO_PAD.encode([u8::MAX; 16]); 128],
+            "clockObservationReleaseManifest": {
+                "checkpointSequence": u64::MAX,
+                "checkpointArtifactId": "a".repeat(128),
+                "checkpointCiphertextDigest": "b".repeat(128),
+                "driverFence": u64::MAX,
+                "entries": entries,
+            },
+        });
+        let bytes = serde_json::to_vec(&body).unwrap();
+        assert!(bytes.len() < 2 * 1024 * 1024);
+        assert!(
+            bytes.len()
+                <= runmat_execution::security::MAX_CLOCK_OBSERVATIONS_PER_NODE * 232 + 64 * 1024
+        );
+    }
 }
 
 impl HttpDriverControlPlane {
@@ -213,6 +258,11 @@ impl DriverControlPlane for HttpDriverControlPlane {
                 &authority.credential,
                 &types::DriverHeartbeatRequest {
                     ttl_seconds: to_i64(ttl_seconds)?,
+                    clock_start_receipts: Vec::new(),
+                    clock_start_reservations: Vec::new(),
+                    clock_end_demands: Vec::new(),
+                    clock_lookup_ids: Vec::new(),
+                    clock_observation_release_manifest: None,
                 },
             )
             .await
@@ -222,6 +272,236 @@ impl DriverControlPlane for HttpDriverControlPlane {
             run_state: response.run_state,
             cancellation_requested: response.cancellation_requested,
             expires_at_millis: response.expires_at.timestamp_millis(),
+        })
+    }
+
+    async fn clock_heartbeat(
+        &self,
+        authority: &DriverAuthority,
+        ttl_seconds: u64,
+        request: ClockDriverHeartbeatRequestV1,
+    ) -> TransportResult<ClockDriverHeartbeatResponseV1> {
+        // Two independent 128-item lookup/echo sources can yield 256 starts
+        // and 256 ends. A single 4096-entry manifest is <=232 bytes/entry;
+        // 128 KiB covers demand/ID arrays and JSON envelope punctuation.
+        const MAX_CLOCK_RESPONSE_BYTES: usize = 4
+            * MAX_CLOCK_HEARTBEAT_ITEMS
+            * runmat_execution::security::MAX_CLOCK_OBSERVATION_WIRE_BYTES
+            + runmat_execution::security::MAX_CLOCK_OBSERVATIONS_PER_NODE * 232
+            + 128 * 1024;
+        authority.validate()?;
+        for count in [
+            request.start_reservations.len(),
+            request.start_receipts.len(),
+            request.end_demands.len(),
+            request.lookup_ids.len(),
+        ] {
+            bounded_clock(count)?;
+        }
+        if request.release_manifest.as_ref().is_some_and(|manifest| {
+            manifest.entries.len() > runmat_execution::security::MAX_CLOCK_OBSERVATIONS_PER_NODE
+        }) {
+            return Err(TransportError::Overflow);
+        }
+        for start in &request.start_receipts {
+            start
+                .validate_shape()
+                .map_err(|error| TransportError::MalformedFrame(error.to_string()))?;
+        }
+        let manifest = request.release_manifest.as_ref().map(|value| {
+            serde_json::json!({
+                "checkpointSequence": value.checkpoint_sequence,
+                "checkpointArtifactId": value.checkpoint_artifact_id,
+                "checkpointCiphertextDigest": value.checkpoint_ciphertext_digest,
+                "driverFence": value.driver_fence,
+                "entries": value.entries.iter().map(|entry| serde_json::json!({
+                    "observationId": encode_clock_id(&entry.observation_id),
+                    "startReceiptDigest": entry.start_receipt_digest,
+                    "endReceiptDigest": entry.end_receipt_digest,
+                })).collect::<Vec<_>>(),
+            })
+        });
+        let body = serde_json::json!({
+            "ttlSeconds": ttl_seconds,
+            "clockStartReservations": request.start_reservations.iter().map(encode_clock_id).collect::<Vec<_>>(),
+            "clockStartReceipts": request.start_receipts,
+            "clockEndDemands": request.end_demands.iter().map(|demand| serde_json::json!({
+                "observationId": encode_clock_id(&demand.observation_id),
+                "startReceiptDigest": demand.start_receipt_digest,
+                "demandChallenge": encode_clock_id(&demand.demand_challenge),
+            })).collect::<Vec<_>>(),
+            "clockLookupIds": request.lookup_ids.iter().map(encode_clock_id).collect::<Vec<_>>(),
+            "clockObservationReleaseManifest": manifest,
+        });
+        let response = self
+            .http
+            .post(format!(
+                "{}/v1/execution/drivers/{}/heartbeat",
+                self.base_url, authority.driver_lease_id
+            ))
+            .query(&[("fencingToken", authority.fencing_token)])
+            .header("x-runmat-driver-credential", &authority.credential)
+            .header("content-type", "application/json")
+            .body(
+                serde_json::to_vec(&body)
+                    .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
+            )
+            .send()
+            .await
+            .map_err(|error| TransportError::Unavailable(error.to_string()))?;
+        if !response.status().is_success() {
+            return Err(TransportError::Unavailable(format!(
+                "clock heartbeat returned {}",
+                response.status()
+            )));
+        }
+        let mut stream = response.bytes_stream();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| TransportError::Unavailable(error.to_string()))?;
+            if bytes
+                .len()
+                .checked_add(chunk.len())
+                .is_none_or(|total| total > MAX_CLOCK_RESPONSE_BYTES)
+            {
+                return Err(TransportError::FrameTooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wire {
+            run_state: String,
+            cancellation_requested: bool,
+            expires_at: chrono::DateTime<chrono::Utc>,
+            #[serde(default)]
+            clock_starts: Vec<runmat_execution::security::NodeClockStartV1>,
+            #[serde(default)]
+            clock_ends: Vec<runmat_execution::security::NodeClockEndV1>,
+            #[serde(default)]
+            clock_pending_end_demands: Vec<WirePendingDemand>,
+            #[serde(default)]
+            clock_acknowledged_start_ids: Vec<String>,
+            #[serde(default)]
+            clock_acked_start_ids: Vec<String>,
+            #[serde(default)]
+            clock_reserved_start_ids: Vec<String>,
+            #[serde(default)]
+            clock_release_accepted: bool,
+            #[serde(default)]
+            clock_latest_accepted_release_manifest: Option<WireReleaseManifest>,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct WireReleaseManifest {
+            checkpoint_sequence: u64,
+            checkpoint_artifact_id: String,
+            checkpoint_ciphertext_digest: String,
+            driver_fence: u64,
+            entries: Vec<WireReleaseEntry>,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct WireReleaseEntry {
+            observation_id: String,
+            start_receipt_digest: runmat_execution::Digest,
+            end_receipt_digest: runmat_execution::Digest,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct WirePendingDemand {
+            observation_id: String,
+            start_receipt_digest: runmat_execution::Digest,
+            demand_challenge: String,
+        }
+        let wire: Wire = serde_json::from_slice(&bytes)
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?;
+        let acked = if wire.clock_acked_start_ids.is_empty() {
+            wire.clock_acknowledged_start_ids
+        } else {
+            wire.clock_acked_start_ids
+        };
+        for count in [
+            wire.clock_starts.len(),
+            wire.clock_ends.len(),
+            wire.clock_pending_end_demands.len(),
+            acked.len(),
+            wire.clock_reserved_start_ids.len(),
+        ] {
+            if count > 2 * MAX_CLOCK_HEARTBEAT_ITEMS {
+                return Err(TransportError::Overflow);
+            }
+        }
+        if wire
+            .clock_latest_accepted_release_manifest
+            .as_ref()
+            .is_some_and(|manifest| {
+                manifest.entries.len() > runmat_execution::security::MAX_CLOCK_OBSERVATIONS_PER_NODE
+            })
+        {
+            return Err(TransportError::Overflow);
+        }
+        for value in &wire.clock_starts {
+            value
+                .validate_shape()
+                .map_err(|error| TransportError::MalformedFrame(error.to_string()))?;
+        }
+        for value in &wire.clock_ends {
+            value
+                .validate_shape()
+                .map_err(|error| TransportError::MalformedFrame(error.to_string()))?;
+        }
+        Ok(ClockDriverHeartbeatResponseV1 {
+            run: DriverHeartbeat {
+                run_state: wire.run_state,
+                cancellation_requested: wire.cancellation_requested,
+                expires_at_millis: wire.expires_at.timestamp_millis(),
+            },
+            reserved_start_ids: wire
+                .clock_reserved_start_ids
+                .iter()
+                .map(|value| decode_clock_id(value))
+                .collect::<TransportResult<_>>()?,
+            acked_start_ids: acked
+                .iter()
+                .map(|value| decode_clock_id(value))
+                .collect::<TransportResult<_>>()?,
+            starts: wire.clock_starts,
+            ends: wire.clock_ends,
+            pending_end_demands: wire
+                .clock_pending_end_demands
+                .into_iter()
+                .map(|demand| {
+                    Ok(super::ClockEndDemandV1 {
+                        observation_id: decode_clock_id(&demand.observation_id)?,
+                        start_receipt_digest: demand.start_receipt_digest,
+                        demand_challenge: decode_clock_id(&demand.demand_challenge)?,
+                    })
+                })
+                .collect::<TransportResult<_>>()?,
+            release_accepted: wire.clock_release_accepted,
+            latest_accepted_release_manifest: wire
+                .clock_latest_accepted_release_manifest
+                .map(|manifest| {
+                    Ok(super::ClockObservationReleaseManifestV1 {
+                        checkpoint_sequence: manifest.checkpoint_sequence,
+                        checkpoint_artifact_id: manifest.checkpoint_artifact_id,
+                        checkpoint_ciphertext_digest: manifest.checkpoint_ciphertext_digest,
+                        driver_fence: manifest.driver_fence,
+                        entries: manifest
+                            .entries
+                            .into_iter()
+                            .map(|entry| {
+                                Ok(super::ClockObservationReleaseEntryV1 {
+                                    observation_id: decode_clock_id(&entry.observation_id)?,
+                                    start_receipt_digest: entry.start_receipt_digest,
+                                    end_receipt_digest: entry.end_receipt_digest,
+                                })
+                            })
+                            .collect::<TransportResult<_>>()?,
+                    })
+                })
+                .transpose()?,
         })
     }
 
@@ -431,6 +711,169 @@ impl DriverControlPlane for HttpDriverControlPlane {
             .map_err(map_error)?
             .into_inner();
         worker_pool::from_api(response)
+    }
+
+    async fn worker_retirement(
+        &self,
+        authority: &DriverAuthority,
+        original: &WorkerRetirementLookup,
+    ) -> TransportResult<Option<runmat_execution::security::WorkerTreeRetirementEvidenceV1>> {
+        authority.validate()?;
+        if original.run_id != authority.run_id
+            || original.allocation_lease_id.is_empty()
+            || original.allocation_fencing_token == 0
+            || original.driver_fencing_token == 0
+        {
+            return Err(TransportError::StaleAuthority);
+        }
+        let mut url = reqwest::Url::parse(&self.base_url)
+            .map_err(|error| TransportError::Unavailable(error.to_string()))?;
+        url.path_segments_mut()
+            .map_err(|_| {
+                TransportError::Unavailable("driver server URL cannot hold path segments".into())
+            })?
+            .extend([
+                "v1",
+                "execution",
+                "drivers",
+                &authority.driver_lease_id,
+                "workers",
+                &original.allocation_lease_id,
+                "retirement",
+            ]);
+        let response = self
+            .http
+            .get(url)
+            .header("X-RunMat-Driver-Credential", &authority.credential)
+            .query(&[
+                ("fencingToken", authority.fencing_token.to_string()),
+                (
+                    "originalAllocationFencingToken",
+                    original.allocation_fencing_token.to_string(),
+                ),
+                (
+                    "originalDriverFencingToken",
+                    original.driver_fencing_token.to_string(),
+                ),
+            ])
+            .send()
+            .await
+            .map_err(|error| TransportError::Unavailable(error.to_string()))?;
+        if !response.status().is_success() {
+            return Err(TransportError::Unavailable(format!(
+                "worker retirement retrieval status {}",
+                response.status()
+            )));
+        }
+        // The response wraps one bounded certificate as {"evidence": ...}.
+        // 64 bytes cover that fixed JSON envelope without excluding a
+        // certificate at the exact shared wire limit.
+        const MAX_RETIREMENT_RESPONSE_BYTES: usize =
+            runmat_execution::security::MAX_RETIREMENT_WIRE_BYTES + 64;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_RETIREMENT_RESPONSE_BYTES as u64)
+        {
+            return Err(TransportError::MalformedFrame(
+                "worker retirement response exceeds bound".into(),
+            ));
+        }
+        let mut bytes = Vec::with_capacity(16 * 1024);
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| TransportError::Unavailable(error.to_string()))?;
+            if chunk.len() > MAX_RETIREMENT_RESPONSE_BYTES - bytes.len() {
+                return Err(TransportError::MalformedFrame(
+                    "worker retirement response exceeds bound".into(),
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct WireEvidence {
+            schema_version: u16,
+            org_id: String,
+            cluster_id: String,
+            node_id: String,
+            run_id: String,
+            allocation_lease_id: String,
+            allocation_fencing_token: u64,
+            driver_fencing_token: u64,
+            process_id: u32,
+            process_launch_nonce: String,
+            retired_at_unix_millis: u64,
+            clock_domain_nonce: String,
+            retired_monotonic_ticks: u64,
+            ticks_per_second: u64,
+            encrypted_attempt_receipts: Vec<String>,
+            identity_public_key: String,
+            identity_fingerprint: String,
+            signature: String,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Response {
+            evidence: Option<WireEvidence>,
+        }
+        let value: Response = serde_json::from_slice(&bytes)
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?;
+        let evidence = value
+            .evidence
+            .map(|wire| {
+                let decode = |value: &str| {
+                    base64::engine::general_purpose::URL_SAFE_NO_PAD
+                        .decode(value)
+                        .map_err(|error| TransportError::MalformedFrame(error.to_string()))
+                };
+                let process_launch_nonce: [u8; 16] = decode(&wire.process_launch_nonce)?
+                    .try_into()
+                    .map_err(|_| {
+                        TransportError::MalformedFrame("invalid retirement launch nonce".into())
+                    })?;
+                Ok::<_, TransportError>(
+                    runmat_execution::security::WorkerTreeRetirementEvidenceV1 {
+                        schema_version: wire.schema_version,
+                        org_id: wire.org_id,
+                        cluster_id: wire.cluster_id,
+                        node_id: wire.node_id,
+                        run_id: wire.run_id,
+                        allocation_lease_id: wire.allocation_lease_id,
+                        allocation_fencing_token: wire.allocation_fencing_token,
+                        driver_fencing_token: wire.driver_fencing_token,
+                        process_id: wire.process_id,
+                        process_launch_nonce,
+                        retired_at_unix_millis: wire.retired_at_unix_millis,
+                        clock_domain_nonce: decode(&wire.clock_domain_nonce)?.try_into().map_err(
+                            |_| {
+                                TransportError::MalformedFrame(
+                                    "invalid retirement clock nonce".into(),
+                                )
+                            },
+                        )?,
+                        retired_monotonic_ticks: wire.retired_monotonic_ticks,
+                        ticks_per_second: wire.ticks_per_second,
+                        encrypted_attempt_receipts: wire.encrypted_attempt_receipts,
+                        identity_public_key: decode(&wire.identity_public_key)?,
+                        identity_fingerprint: wire.identity_fingerprint,
+                        signature: decode(&wire.signature)?,
+                    },
+                )
+            })
+            .transpose()?;
+        if let Some(evidence) = &evidence {
+            evidence
+                .validate_shape()
+                .map_err(|error| TransportError::MalformedFrame(error.to_string()))?;
+            if evidence.run_id != original.run_id
+                || evidence.allocation_lease_id != original.allocation_lease_id
+                || evidence.allocation_fencing_token != original.allocation_fencing_token
+                || evidence.driver_fencing_token != original.driver_fencing_token
+            {
+                return Err(TransportError::StaleAuthority);
+            }
+        }
+        Ok(evidence)
     }
 
     async fn authorize_worker(

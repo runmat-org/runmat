@@ -114,6 +114,15 @@ pub struct DriverRunTransition {
     pub diagnostic_artifact_id: Option<String>,
 }
 
+/// Exact original grant, never inferred from absence in a worker listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerRetirementLookup {
+    pub run_id: String,
+    pub allocation_lease_id: String,
+    pub allocation_fencing_token: u64,
+    pub driver_fencing_token: u64,
+}
+
 #[async_trait]
 pub trait DriverControlPlane: Send + Sync {
     async fn bootstrap(&self, authority: &DriverAuthority) -> TransportResult<DriverBootstrap>;
@@ -122,6 +131,17 @@ pub trait DriverControlPlane: Send + Sync {
         authority: &DriverAuthority,
         ttl_seconds: u64,
     ) -> TransportResult<DriverHeartbeat>;
+    async fn clock_heartbeat(
+        &self,
+        authority: &DriverAuthority,
+        ttl_seconds: u64,
+        request: super::ClockDriverHeartbeatRequestV1,
+    ) -> TransportResult<super::ClockDriverHeartbeatResponseV1> {
+        let _ = (authority, ttl_seconds, request);
+        Err(TransportError::Unavailable(
+            "durable node clock observation is unsupported".into(),
+        ))
+    }
     async fn record_usage(
         &self,
         authority: &DriverAuthority,
@@ -178,6 +198,16 @@ pub trait DriverControlPlane: Send + Sync {
         let _ = authority;
         Err(TransportError::Unavailable(
             "remote worker listing is not implemented".into(),
+        ))
+    }
+    async fn worker_retirement(
+        &self,
+        authority: &DriverAuthority,
+        original: &WorkerRetirementLookup,
+    ) -> TransportResult<Option<runmat_execution::security::WorkerTreeRetirementEvidenceV1>> {
+        let _ = (authority, original);
+        Err(TransportError::Unavailable(
+            "authenticated worker retirement retrieval is unsupported".into(),
         ))
     }
     async fn authorize_worker(

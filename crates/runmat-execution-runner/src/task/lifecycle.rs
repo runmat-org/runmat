@@ -24,6 +24,10 @@ pub struct TaskRecord {
     pub attempt_count: u16,
     pub active_attempt: Option<AttemptId>,
     pub committed: Option<ResultCommit>,
+    /// Exact dependency that propagated unresolved physical ownership here.
+    /// Absent for this task's own uncertainty or an independent terminal cause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indeterminate_dependency: Option<TaskId>,
     pub enqueued_sequence: u64,
 }
 
@@ -41,6 +45,7 @@ impl TaskRecord {
             attempt_count: 0,
             active_attempt: None,
             committed: None,
+            indeterminate_dependency: None,
             enqueued_sequence: sequence,
         }
     }

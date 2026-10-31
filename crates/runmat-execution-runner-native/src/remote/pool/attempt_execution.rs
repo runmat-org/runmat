@@ -32,7 +32,10 @@ impl RemotePoolDriver {
                 .cloned();
             let mut pending_results = None;
             let mut unsuccessful_resources = None;
-            let (report, failed_route) = match (route, program) {
+            let mut retirement_ack_route: Option<Arc<dyn RemoteWorkerChannel>> = None;
+            let mut retirement_evidence: Option<crate::remote::AuthenticatedPhysicalRetirement> =
+                None;
+            let (mut report, failed_route) = match (route, program) {
                 (Some(route), Some(program)) => {
                     let route_identity = route.identity;
                     let channel = route.channel;
@@ -78,7 +81,7 @@ impl RemotePoolDriver {
                             Some(FailedRoute::Observed(route_identity)),
                         ),
                         Ok(program) => {
-                            match pool_progress::execute(
+                            let execution = pool_progress::execute(
                                 channel.as_ref(),
                                 RemoteAttempt {
                                     scheduling: request.clone(),
@@ -87,8 +90,45 @@ impl RemotePoolDriver {
                                 progress.as_deref(),
                                 collective_context,
                             )
-                            .await
-                            {
+                            .await;
+                            let execution = match execution {
+                                Ok(AttemptReport::RetirementUnverified { message }) => {
+                                    Ok(AttemptReport::RetirementUnverified { message })
+                                }
+                                Ok(report) => {
+                                    let mut certified = false;
+                                    for _ in 0..100 {
+                                        match channel
+                                            .authenticated_physical_retirement(&request)
+                                            .await
+                                        {
+                                            Ok(Some(evidence)) if evidence.matches(&request) => {
+                                                certified = true;
+                                                retirement_evidence = Some(evidence);
+                                                break;
+                                            }
+                                            Ok(Some(_)) => break,
+                                            Ok(None) => {
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(10),
+                                                )
+                                                .await
+                                            }
+                                            Err(_) => break,
+                                        }
+                                    }
+                                    if certified {
+                                        retirement_ack_route = Some(Arc::clone(&channel));
+                                        Ok(report)
+                                    } else {
+                                        Ok(AttemptReport::RetirementUnverified {
+                                            message: "remote owner completion lacks exact authenticated physical retirement".into(),
+                                        })
+                                    }
+                                }
+                                Err(error) => Err(error),
+                            };
+                            match execution {
                                 Ok(AttemptReport::Succeeded { result }) => {
                                     match this
                                         .execution_objects
@@ -145,22 +185,65 @@ impl RemotePoolDriver {
                     None,
                 ),
             };
+            // The worker must release its retained owner claim before the
+            // scheduler dispatches replacement work on that same route.
+            // The authenticated proof already established physical retirement;
+            // a lost ACK remains uncertain at the driver.
+            let cancellation_pending = this
+                .driver
+                .lock()
+                .expect("remote driver poisoned")
+                .snapshot()
+                .attempts
+                .get(&request.id)
+                .is_some_and(|attempt| attempt.cancellation_requested_at.is_some());
+            if let Some(channel) = retirement_ack_route.as_ref() {
+                if !cancellation_pending
+                    && !matches!(&report, AttemptReport::Retired)
+                    && !matches!(
+                        &report,
+                        AttemptReport::Lost { .. } | AttemptReport::RetirementUnverified { .. }
+                    )
+                {
+                    if let Err(error) = channel.acknowledge_physical_retirement(&request).await {
+                        report = AttemptReport::RetirementUnverified {
+                            message: format!("remote retirement acknowledgement failed: {error}"),
+                        };
+                    }
+                }
+            }
             this.attempt_cancellation
                 .lock()
                 .expect("remote attempt cancellation registry poisoned")
                 .remove(&request.id);
             let mut report = BackendReport::for_request(&request, report);
             report.unsuccessful_resources = unsuccessful_resources;
+            let mut retired_from_evidence = false;
             if let Some(failed_route) = failed_route {
                 let identity = match failed_route {
                     FailedRoute::Observed(identity) => Some(identity),
                     FailedRoute::Missing => None,
                 };
                 if !matches!(this.fence_failed_route(identity, &report).await, Ok(true)) {
-                    this.apply_report(report);
+                    if let Some(evidence) = retirement_evidence.take() {
+                        retired_from_evidence = this
+                            .apply_report_with_authenticated_evidence(report, &request, evidence);
+                    } else {
+                        this.apply_report(report);
+                    }
                 }
             } else {
-                this.apply_report(report);
+                if let Some(evidence) = retirement_evidence.take() {
+                    retired_from_evidence =
+                        this.apply_report_with_authenticated_evidence(report, &request, evidence);
+                } else {
+                    this.apply_report(report);
+                }
+            }
+            if retired_from_evidence {
+                if let Some(channel) = retirement_ack_route.as_ref() {
+                    let _ = channel.acknowledge_physical_retirement(&request).await;
+                }
             }
             drop(pending_results);
         });

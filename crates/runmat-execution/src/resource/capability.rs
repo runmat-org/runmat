@@ -12,6 +12,8 @@ pub enum Capability {
     GraphCallableArgumentsV12,
     /// Graph V13 owns digest-bound project-only execution settings.
     GraphProjectRuntimePolicyV13,
+    /// Graph V14 owns exact invocation environment and bounded console controls.
+    GraphInvocationControlsV14,
     ProcessIsolation,
     BrowserWorker,
     NetworkDenied,

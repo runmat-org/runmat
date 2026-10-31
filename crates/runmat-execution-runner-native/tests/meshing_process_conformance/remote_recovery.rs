@@ -6,8 +6,8 @@ use runmat_execution::identity::{AttemptId, ValueId};
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
 use runmat_execution_runner_native::{
-    NativeExecutionResult, QuicRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt,
-    RemoteObjectReceipt, RemoteValueReceipt, RemoteWorkerChannel,
+    AuthenticatedPhysicalRetirement, NativeExecutionResult, QuicRemoteWorkerChannel, RemoteAttempt,
+    RemoteBundleReceipt, RemoteObjectReceipt, RemoteValueReceipt, RemoteWorkerChannel,
 };
 
 use super::*;
@@ -84,6 +84,20 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
             self.release_report.notified().await;
         }
         report
+    }
+
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &AttemptRequest,
+    ) -> NativeExecutionResult<Option<AuthenticatedPhysicalRetirement>> {
+        self.inner.authenticated_physical_retirement(request).await
+    }
+
+    async fn acknowledge_physical_retirement(
+        &self,
+        request: &AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        self.inner.acknowledge_physical_retirement(request).await
     }
 
     fn drain_progress(
@@ -172,7 +186,7 @@ async fn run_inner() {
         PoolSpec {
             id: pool_id,
             min_workers: 1,
-            max_workers: 2,
+            max_workers: 1,
             max_in_flight: 1,
             resource_limit: worker_inventory(),
         },
@@ -245,6 +259,13 @@ async fn run_inner() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     let snapshot = pool.snapshot();
     assert_eq!(snapshot.tasks.get(&task_id).unwrap().attempt_count, 2);
+    assert!(snapshot.attempts.values().any(|attempt| {
+        attempt.state == runmat_execution::state::AttemptState::Lost
+            && attempt
+                .unverified_retirement
+                .as_ref()
+                .is_some_and(|record| record.retired_at_driver_millis.is_some())
+    }));
     assert_eq!(
         snapshot
             .attempts

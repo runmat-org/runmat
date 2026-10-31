@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::value::{ValuePayload, ValueRefKind};
+use runmat_execution::TaskId;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
 use runmat_execution_transport_native::control::ResourceRequest as AllocationResources;
@@ -93,6 +94,8 @@ pub(super) async fn execute_geometry_for_composition(
     run_id: &str,
     resources: &AllocationResources,
 ) -> NativeExecutionResult<RemoteExactMeshingComposition> {
+    let root_id = TaskId::derive(&[run_id.as_bytes(), b"remote-geometry-materialization"]);
+    let mut wave = super::RemoteObservedWave::begin(Arc::clone(&pool), &[root_id]).await?;
     let decoded = crate::decode_geometry_meshing_root(request, pool.as_ref())?;
     let (geometry_request, _) = runmat_analysis_execution::decode_geometry_materialization_program(
         &decoded.geometry,
@@ -113,7 +116,9 @@ pub(super) async fn execute_geometry_for_composition(
         RetryPolicy::ExplicitlyIdempotent {
             max_attempts: execution_policy.maximum_attempts,
         },
+        &mut wave,
     )?;
+    wave.checkpoint().await?;
     let materialized = match completion.wait().await {
         Ok(success) => success,
         Err(message) => {
@@ -121,6 +126,7 @@ pub(super) async fn execute_geometry_for_composition(
                 .map(|outcome| RemoteExactMeshingComposition::Terminal(Box::new(outcome)))
         }
     };
+    wave.close().await?;
     let output_reference = match materialized
         .values()
         .map_or(&[][..], |(outputs, _)| outputs)
@@ -162,6 +168,7 @@ pub(super) async fn execute_geometry_for_composition(
         decoded.artifact_access.clone(),
         execution_policy,
         super::object_transfer::MAX_REMOTE_OBJECT_BYTES,
+        inventory,
     )
     .map_err(protocol)?;
     let geometry = import_exact_geometry_input(
@@ -241,6 +248,8 @@ pub(super) async fn execute_for_composition(
     run_id: &str,
     resources: &AllocationResources,
 ) -> NativeExecutionResult<RemoteExactMeshingComposition> {
+    let root_id = TaskId::derive(&[run_id.as_bytes(), b"remote-exact-admission"]);
+    let mut wave = super::RemoteObservedWave::begin(Arc::clone(&pool), &[root_id]).await?;
     let decoded = crate::decode_exact_meshing_root(request, pool.as_ref())?;
     let execution_policy = policy::execution_policy(resources)?;
     let (task_id, completion) = submit_root_task(
@@ -255,7 +264,9 @@ pub(super) async fn execute_for_composition(
         RetryPolicy::ExplicitlyIdempotent {
             max_attempts: execution_policy.maximum_attempts,
         },
+        &mut wave,
     )?;
+    wave.checkpoint().await?;
     let admitted = match completion.wait().await {
         Ok(success) => success,
         Err(message) => {
@@ -263,6 +274,7 @@ pub(super) async fn execute_for_composition(
                 .map(|outcome| RemoteExactMeshingComposition::Terminal(Box::new(outcome)))
         }
     };
+    wave.close().await?;
     let admission_reference = match admitted.values().map_or(&[][..], |(outputs, _)| outputs) {
         [ValuePayload::Object(reference)] if reference.kind == ValueRefKind::ResultObject => {
             reference.as_ref()
@@ -300,6 +312,7 @@ pub(super) async fn execute_for_composition(
         decoded.artifact_access.clone(),
         execution_policy,
         super::object_transfer::MAX_REMOTE_OBJECT_BYTES,
+        inventory,
     )
     .map_err(protocol)?;
     let geometry = import_exact_geometry_input(

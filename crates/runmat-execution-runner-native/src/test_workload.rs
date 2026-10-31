@@ -236,14 +236,17 @@ pub(crate) async fn execute_host_graph_request_in_parent_scratch(
     request: GraphExecutionRequest,
     cancellation: runmat_execution::cancellation::CancellationToken,
     scratch: &Path,
+    console_host: Option<Rc<runmat_runtime::context::PortableConsoleHost>>,
 ) -> GraphHostExecution {
-    execute_host_selected_graph_request(request, Some(cancellation), Some(scratch)).await
+    execute_host_selected_graph_request(request, Some(cancellation), Some(scratch), console_host)
+        .await
 }
 
 async fn execute_host_selected_graph_request(
     request: GraphExecutionRequest,
     cancellation: Option<runmat_execution::cancellation::CancellationToken>,
     scratch: Option<&Path>,
+    console_host: Option<Rc<runmat_runtime::context::PortableConsoleHost>>,
 ) -> GraphHostExecution {
     let admitted = match request.into_validated() {
         Ok(admitted) => admitted,
@@ -309,9 +312,9 @@ async fn execute_host_selected_graph_request(
     if let Err(message) = validate_inprocess_python_unit_namespaces(&materialized) {
         return GraphHostExecution::Completed(ProgramExecutionResponse::Failure { message });
     }
+    // The shared VM preparation installs the exact invocation snapshot before
+    // selected-unit admission. Bootstrap cannot read the worker's environment.
     let (admitted, admitted_bundles) = admitted.into_admitted_with_bundles();
-    // Graph scheduling admits no invocation environment. Selected-unit bundle
-    // metadata cannot grant access to the worker process's ambient variables.
     let mut session = match runmat_core::RunMatSession::with_frozen_environment(
         runtime_config
             .as_ref()
@@ -332,6 +335,11 @@ async fn execute_host_selected_graph_request(
                 message: error.to_string(),
             });
         }
+    }
+    if let Some(host) = console_host {
+        session.install_host_service(host);
+    } else {
+        session.install_host_service(Rc::new(runmat_runtime::context::NonCapturingPortableHost));
     }
     let runtime =
         session.execution_runtime_context(admitted.request().recipe.program_revision.clone());
@@ -1171,6 +1179,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         )
         .unwrap();
         let graph_request = GraphExecutionRequest {
+            invocation_controls: None,
             project_runtime_policy: None,
             schema_version: GRAPH_EXECUTION_REQUEST_SCHEMA_V11,
             recipe: bundle.manifest.recipes[0].clone(),

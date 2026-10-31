@@ -187,8 +187,15 @@ impl PreparedProgram {
                 request.artifact.id,
                 request.context.clone(),
                 Vec::new(),
-                runmat_execution::EnvironmentSnapshot::default(),
-                None,
+                request
+                    .invocation_controls
+                    .as_ref()
+                    .map(|controls| controls.environment.clone())
+                    .unwrap_or_default(),
+                request
+                    .invocation_controls
+                    .as_ref()
+                    .and_then(|controls| controls.console),
             ),
             BrowserWorkerRequest::OwnedBuiltin(_) => {
                 unreachable!("program preparation never creates owned-builtin requests")

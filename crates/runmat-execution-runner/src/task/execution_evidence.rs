@@ -3,7 +3,7 @@
 //! attest that an imported worker was authorized by a trusted pool.
 use serde::{Deserialize, Serialize};
 
-use super::{AttemptRecord, AttemptResourceAggregate, TaskRecord};
+use super::{AttemptDisposition, AttemptRecord, AttemptResourceAggregate, TaskRecord};
 use crate::{RunnerError, RunnerResult};
 
 mod validation;
@@ -30,7 +30,9 @@ impl TaskExecutionEvidence {
         )
     }
 
-    /// Charge every original attempt. Unknown or live consumption blocks the claim.
+    /// Charge every executed original attempt. Only validated certified
+    /// never-started ordinals have no consumption; unknown or live intervals
+    /// still block the claim, and an all-unmeasured history cannot aggregate.
     pub fn resource_aggregate(
         &self,
         graph_wall_millis: u64,
@@ -39,18 +41,25 @@ impl TaskExecutionEvidence {
         let resources = self
             .attempts
             .iter()
-            .map(|attempt| {
-                attempt
-                    .terminal
-                    .as_ref()
-                    .and_then(|terminal| terminal.resources.as_deref())
-                    .cloned()
-                    .ok_or_else(|| {
-                        RunnerError::Invalid(format!(
-                            "task attempt {} has no terminal resource accounting",
-                            attempt.request.ordinal
-                        ))
-                    })
+            .filter_map(|attempt| {
+                if attempt.terminal.as_ref().is_some_and(|terminal| {
+                    terminal.disposition == AttemptDisposition::CertifiedNotStarted
+                }) {
+                    return None;
+                }
+                Some(
+                    attempt
+                        .terminal
+                        .as_ref()
+                        .and_then(|terminal| terminal.resources.as_deref())
+                        .cloned()
+                        .ok_or_else(|| {
+                            RunnerError::Invalid(format!(
+                                "task attempt {} has no terminal resource accounting",
+                                attempt.request.ordinal
+                            ))
+                        }),
+                )
             })
             .collect::<RunnerResult<Vec<_>>>()?;
         AttemptResourceAggregate::new(resources, graph_wall_millis).map_err(RunnerError::Invalid)

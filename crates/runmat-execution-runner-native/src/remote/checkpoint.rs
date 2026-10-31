@@ -54,6 +54,9 @@ pub(super) struct RemoteDriverCheckpoint {
 }
 
 impl RemoteDriverCheckpoint {
+    pub(super) fn source_driver_fence(&self) -> u64 {
+        self.source_driver_fence
+    }
     pub(super) fn new(
         sequence: u64,
         authority: &DriverAuthority,

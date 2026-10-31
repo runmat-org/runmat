@@ -802,10 +802,7 @@ pub fn build_generator_task_submission(
             "signal task context differs from its admitted portable program".into(),
         ));
     }
-    let task_id = TaskId::derive(&[
-        admitted.materialization_digest().bytes(),
-        chunk.plan.identity.bytes(),
-    ]);
+    let task_id = generator_task_id(admitted.materialization_digest(), chunk.plan.identity);
     Ok(TaskSubmission {
         request: TaskRequest {
             console: None,
@@ -835,6 +832,11 @@ pub fn build_generator_task_submission(
         dependencies,
         priority: context.priority,
     })
+}
+
+/// Exact generator task identity, available before lowering a prepared chunk.
+pub fn generator_task_id(materialization_digest: Digest, chunk_identity: Digest) -> TaskId {
+    TaskId::derive(&[materialization_digest.bytes(), chunk_identity.bytes()])
 }
 
 #[cfg(test)]

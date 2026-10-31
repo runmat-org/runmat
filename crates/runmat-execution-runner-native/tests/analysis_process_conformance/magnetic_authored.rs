@@ -123,7 +123,17 @@ pub(super) async fn run() {
             .volume_elements
             .iter()
             .all(|element| element.order == order));
-        assert_eq!(result.completion.fields.fields.len(), 4);
+        let definitions =
+            runmat_analysis_fea::execution::magnetic_native_field_definition_inventory().unwrap();
+        assert_eq!(result.completion.fields.fields.len(), definitions.len());
+        for definition in definitions {
+            assert!(result
+                .completion
+                .fields
+                .fields
+                .iter()
+                .any(|field| field.definition == definition));
+        }
         assert!(!result.completion.observation_results.is_empty());
         assert!(result.completion.observation_catalog.is_some());
         assert!(!result.completion.states.is_empty());

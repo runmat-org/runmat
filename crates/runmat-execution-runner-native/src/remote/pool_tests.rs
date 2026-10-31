@@ -122,6 +122,20 @@ struct CompiledSpmdProgram {
 
 #[async_trait]
 impl RemoteWorkerChannel for ExecutingWorker {
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<Option<super::AuthenticatedPhysicalRetirement>> {
+        Ok(Some(super::AuthenticatedPhysicalRetirement::issue(
+            request.clone(),
+        )))
+    }
+    async fn acknowledge_physical_retirement(
+        &self,
+        _: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
     fn node_identity(&self) -> &str {
         "node-executing"
     }
@@ -210,6 +224,28 @@ impl RemoteWorkerChannel for ExecutingWorker {
 
 #[async_trait]
 impl RemoteWorkerChannel for FailingRouteWorker {
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<Option<super::AuthenticatedPhysicalRetirement>> {
+        if self.fail_execute {
+            // This fixture models a permanently failed route, not a live
+            // worker whose durable retirement receipt is still pending.
+            Err(crate::NativeExecutionError::Protocol(
+                "fixture route has no retirement authority".into(),
+            ))
+        } else {
+            Ok(Some(super::AuthenticatedPhysicalRetirement::issue(
+                request.clone(),
+            )))
+        }
+    }
+    async fn acknowledge_physical_retirement(
+        &self,
+        _: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
     fn node_identity(&self) -> &str {
         "node-failing-route"
     }
@@ -291,6 +327,20 @@ impl RemoteWorkerChannel for FailingRouteWorker {
 
 #[async_trait]
 impl RemoteWorkerChannel for ResultObjectWorker {
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<Option<super::AuthenticatedPhysicalRetirement>> {
+        Ok(Some(super::AuthenticatedPhysicalRetirement::issue(
+            request.clone(),
+        )))
+    }
+    async fn acknowledge_physical_retirement(
+        &self,
+        _: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
     fn node_identity(&self) -> &str {
         "node-result-object"
     }
@@ -374,6 +424,19 @@ impl RemoteWorkerChannel for ResultObjectWorker {
 
 #[async_trait]
 impl RemoteWorkerChannel for FakeWorker {
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<Option<super::AuthenticatedPhysicalRetirement>> {
+        Ok((self.active.load(Ordering::SeqCst) == 0)
+            .then(|| super::AuthenticatedPhysicalRetirement::issue(request.clone())))
+    }
+    async fn acknowledge_physical_retirement(
+        &self,
+        _: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
     fn node_identity(&self) -> &str {
         &self.node
     }
@@ -1315,51 +1378,28 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     ));
     assert_eq!(
         pool.snapshot().tasks.get(&task_id).unwrap().state,
-        runmat_execution::state::TaskState::Indeterminate
+        runmat_execution::state::TaskState::Cancelled
     );
     assert_eq!(cancellations.load(Ordering::SeqCst), 1);
     let snapshot = pool.snapshot();
-    // Pool accounting aggregates scalar reservations; exact device leases
-    // belong to workers and must remain reserved independently of cancellation
-    // delivery or an ordinary Cancelled response.
-    assert_eq!(snapshot.pools[&pool_id].active_attempts, 1);
-    assert_eq!(snapshot.pools[&pool_id].allocated.cpu_millicores, 1_000);
-    assert_eq!(
-        snapshot.pools[&pool_id].allocated.memory_bytes,
-        snapshot.tasks[&task_id]
-            .submission
-            .request
-            .resources
-            .memory_bytes
-    );
-    assert_eq!(
-        snapshot.pools[&pool_id].allocated.scratch_bytes,
-        snapshot.tasks[&task_id]
-            .submission
-            .request
-            .resources
-            .scratch_bytes
-    );
-    assert_eq!(
-        snapshot.tasks[&task_id].active_attempt,
-        Some(
-            pool.task_execution_evidence(task_id).unwrap().attempts[0]
-                .request
-                .id
-        )
-    );
+    // The fixture reports cancellation only after its active execution has
+    // stopped, so its exact retirement certificate releases scalar and device
+    // reservations before the terminal cancellation is published.
+    assert_eq!(snapshot.pools[&pool_id].active_attempts, 0);
+    assert_eq!(snapshot.pools[&pool_id].allocated.cpu_millicores, 0);
+    assert_eq!(snapshot.pools[&pool_id].allocated.memory_bytes, 0);
+    assert_eq!(snapshot.pools[&pool_id].allocated.scratch_bytes, 0);
+    assert_eq!(snapshot.tasks[&task_id].active_attempt, None);
     assert!(snapshot.pools[&pool_id]
         .workers
         .values()
-        .any(|worker| !worker.allocated.leased_accelerator_domains.is_empty()));
+        .all(|worker| worker.allocated.leased_accelerator_domains.is_empty()));
     let evidence = pool.task_execution_evidence(task_id).unwrap();
-    assert!(evidence.attempts[0].terminal.is_none());
-    assert!(evidence.attempts[0]
-        .unverified_retirement
-        .as_ref()
-        .unwrap()
-        .retired_at_driver_millis
-        .is_none());
+    assert_eq!(
+        evidence.attempts[0].terminal.as_ref().unwrap().disposition,
+        runmat_execution_runner::task::AttemptDisposition::Cancelled
+    );
+    assert!(evidence.attempts[0].unverified_retirement.is_none());
     assert!(evidence.resource_aggregate(1).is_err());
 
     let scope_id = ExecutionScopeId::derive(&[b"remote-loss-scope"]);
@@ -1838,8 +1878,17 @@ async fn remote_pool_tick_enforces_task_deadlines() {
     assert_eq!(cancellations.load(Ordering::SeqCst), 1);
     assert_eq!(
         pool.snapshot().tasks[&task_id].state,
-        runmat_execution::state::TaskState::Indeterminate
+        runmat_execution::state::TaskState::Cancelled
     );
+    let snapshot = pool.snapshot();
+    assert_eq!(snapshot.pools[&pool_id].active_attempts, 0);
+    assert_eq!(snapshot.pools[&pool_id].allocated.cpu_millicores, 0);
+    let evidence = pool.task_execution_evidence(task_id).unwrap();
+    assert_eq!(
+        evidence.attempts[0].terminal.as_ref().unwrap().disposition,
+        runmat_execution_runner::task::AttemptDisposition::Cancelled
+    );
+    assert!(evidence.attempts[0].unverified_retirement.is_none());
 }
 
 #[tokio::test]
@@ -2317,7 +2366,10 @@ async fn execute_encrypted_spmd_program(
                 (worker.allocated.clone(), worker.active_attempts)
             });
             if lost {
-                channel.drain().await.unwrap();
+                let Err(crate::NativeExecutionError::RemoteChannel { .. }) = channel.drain().await
+                else {
+                    panic!("lost rank route unexpectedly accepted a drain request")
+                };
             }
             pool.remove_worker(worker.id, lost).await.unwrap();
             if let Some((allocation, attempts)) = retained {

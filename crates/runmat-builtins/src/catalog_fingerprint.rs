@@ -25,10 +25,25 @@ pub fn builtin_catalog_fingerprint() -> [u8; 32] {
 
     #[cfg(target_arch = "wasm32")]
     {
-        // The browser registry accepts later submissions; it cannot use the
-        // native immutable-inventory cache.
-        compute_builtin_catalog_fingerprint()
+        WASM_FINGERPRINT.with(|cache| cache.get_or_init(compute_builtin_catalog_fingerprint))
     }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+mod cache;
+#[cfg(any(target_arch = "wasm32", test))]
+use cache::RegistryFingerprintCache;
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static WASM_FINGERPRINT: RegistryFingerprintCache = const { RegistryFingerprintCache::new() };
+}
+
+/// Browser registries accept late submissions. Every mutation invalidates the
+/// calling worker's cache before changing its registry; session resets do not.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn invalidate_wasm_registry_fingerprint() {
+    WASM_FINGERPRINT.with(RegistryFingerprintCache::invalidate);
 }
 
 fn compute_builtin_catalog_fingerprint() -> [u8; 32] {
@@ -307,6 +322,36 @@ mod tests {
         let second = builtin_catalog_fingerprint();
         assert_eq!(first, second);
         assert_ne!(first, [0; 32]);
+
+        // Model late registration without mutating the process's static native
+        // inventory. Repeated reads stay O(1), but a mutation cannot retain an
+        // earlier execution fingerprint.
+        let cache = RegistryFingerprintCache::new();
+        let calls = std::cell::Cell::new(0);
+        for _ in 0..4 {
+            assert_eq!(
+                cache.get_or_init(|| {
+                    calls.set(calls.get() + 1);
+                    first
+                }),
+                first
+            );
+        }
+        assert_eq!(calls.get(), 1);
+        cache.invalidate();
+        let changed = [7; 32];
+        assert_eq!(
+            cache.get_or_init(|| {
+                calls.set(calls.get() + 1);
+                changed
+            }),
+            changed
+        );
+        assert_eq!(
+            cache.get_or_init(|| panic!("unchanged registry was recomputed")),
+            changed
+        );
+        assert_eq!(calls.get(), 2);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

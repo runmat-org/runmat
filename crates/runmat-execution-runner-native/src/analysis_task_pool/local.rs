@@ -34,6 +34,12 @@ impl CacheImport for LocalAnalysisTaskPool {
 
 #[async_trait]
 impl AnalysisTaskPool for LocalAnalysisTaskPool {
+    async fn begin_wave_observation(
+        &mut self,
+        _planned_tasks: &[TaskId],
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
     fn scope_id(&self) -> ExecutionScopeId {
         self.session.scope_id()
     }
@@ -81,9 +87,9 @@ impl AnalysisTaskPool for LocalAnalysisTaskPool {
 
     async fn execute_batch(
         &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+        tasks: AdmittedAnalysisBatch,
     ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>> {
-        let tasks = self.session.submit_graph(tasks)?;
+        let tasks = self.session.submit_graph(tasks.into_submissions())?;
         let mut responses = (0..tasks.len()).map(|_| None).collect::<Vec<_>>();
         let mut cancellation_started = None;
         while responses.iter().any(Option::is_none) {

@@ -10,6 +10,32 @@ pub trait PortableConsoleSink {
     fn emit(&self, record: &ConsoleRecord) -> Result<(), String>;
 }
 
+impl super::RuntimeContext {
+    /// Invocation admission reuses the host's exact capture owner. It neither
+    /// allocates another transcript nor transfers responsibility for sealing it.
+    pub fn validate_invocation_console(
+        &self,
+        requested: Option<ConsoleLimits>,
+    ) -> Result<(), RuntimeError> {
+        let Some(requested) = requested else {
+            return Ok(());
+        };
+        let host = self.service_ports().host().ok_or_else(|| {
+            host_error(
+                "RunMat:console:CaptureUnavailable",
+                "invocation requires its captured console host",
+            )
+        })?;
+        if !host.owns_console_retention() || host.console_limits() != Some(requested) {
+            return Err(host_error(
+                "RunMat:console:ControlsMismatch",
+                "invocation console host disagrees with captured limits",
+            ));
+        }
+        host.check_execution()
+    }
+}
+
 pub struct PortableConsoleHost {
     sink: Option<std::rc::Rc<dyn PortableConsoleSink>>,
     limits: ConsoleLimits,

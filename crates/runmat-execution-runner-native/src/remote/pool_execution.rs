@@ -14,6 +14,7 @@ use runmat_execution_artifact::{
 use runmat_execution_runner::PoolSpec;
 use runmat_execution_transport_native::control::{
     DriverAuthority, DriverControlPlane, ResourceRequest as AllocationResources,
+    WorkerRetirementLookup,
 };
 
 use super::driver::AdmittedRemoteProgram;
@@ -78,6 +79,7 @@ pub(super) struct RemotePoolExecution<'a> {
     pub(super) resources: AllocationResources,
     pub(super) cancellation: tokio::sync::watch::Receiver<bool>,
     pub(super) ready_v1: bool,
+    pub(super) clock_parent: Option<super::config::DriverClockParent>,
 }
 
 /// The admitted root program: Direct V7 runs against the installed bundle;
@@ -112,6 +114,7 @@ pub(super) async fn execute(
         resources,
         mut cancellation,
         ready_v1,
+        clock_parent,
     } = execution;
     let authorization = WorkerAuthorizationContext {
         authority,
@@ -135,6 +138,10 @@ pub(super) async fn execute(
         .as_ref()
         .map(|restored| restored.locations.clone())
         .unwrap_or_default();
+    let authoritative_unstarted = recovered_pool
+        .as_ref()
+        .map(|restored| restored.authoritative_unstarted_inventory())
+        .transpose()?;
     let (pool, root) = match program {
         AdmittedRemoteProgram::Direct(admitted) => {
             let super::driver::program::AdmittedDirectProgram {
@@ -191,6 +198,74 @@ pub(super) async fn execute(
     let mut driver_ticks = tokio::time::interval(DRIVER_TICK_INTERVAL);
     driver_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     driver_ticks.tick().await;
+    // A replacement driver must retire every uncertain original allocation
+    // before requesting another physical worker at the finite pool limit.
+    // Neither absence in list_workers nor a release/resize ACK is evidence.
+    for (worker_id, owner) in pool.unresolved_original_owners()? {
+        let original = WorkerRetirementLookup {
+            run_id: authority.run_id.clone(),
+            allocation_lease_id: owner.allocation_lease_id.clone(),
+            allocation_fencing_token: owner.allocation_fencing_token,
+            driver_fencing_token: owner.driver_fencing_token,
+        };
+        loop {
+            match await_startup_operation(
+                control.worker_retirement(authority, &original),
+                &mut driver_ticks,
+                &pool,
+                &mut cancellation,
+                deadline,
+            )
+            .await?
+            {
+                StartupWait::Completed(Ok(Some(evidence)), cancelled) => {
+                    pool.accept_node_tree_retirement(
+                        authority,
+                        worker_id,
+                        &owner,
+                        &evidence,
+                        run_key,
+                        authoritative_unstarted.as_ref(),
+                    )?;
+                    if cancelled {
+                        return Ok(RemotePoolExecutionOutcome::Cancelled);
+                    }
+                    break;
+                }
+                StartupWait::Completed(Ok(None), cancelled) => {
+                    if cancelled {
+                        return Ok(RemotePoolExecutionOutcome::Cancelled);
+                    }
+                    match await_startup_operation(
+                        tokio::time::sleep(Duration::from_millis(250)),
+                        &mut driver_ticks,
+                        &pool,
+                        &mut cancellation,
+                        deadline,
+                    )
+                    .await?
+                    {
+                        StartupWait::Completed((), false) => {}
+                        StartupWait::Completed((), true) | StartupWait::Deadline(true) => {
+                            return Ok(RemotePoolExecutionOutcome::Cancelled)
+                        }
+                        StartupWait::Deadline(false) => {
+                            return Err(protocol(
+                                "original worker tree retirement remained unverified",
+                            ))
+                        }
+                    }
+                }
+                StartupWait::Completed(Err(error), _) => return Err(protocol(error)),
+                StartupWait::Deadline(true) => return Ok(RemotePoolExecutionOutcome::Cancelled),
+                StartupWait::Deadline(false) => {
+                    return Err(protocol(
+                        "original worker tree retirement evidence timed out",
+                    ))
+                }
+            }
+        }
+    }
     let worker_pool = match await_startup_operation(
         control.resize_workers(authority, 0, desired_workers, resources.clone()),
         &mut driver_ticks,
@@ -255,6 +330,7 @@ pub(super) async fn execute(
                 generation: Arc::clone(&generation),
                 deadline,
                 driver_ticks,
+                clock_parent,
             })
             .await
         }
@@ -288,6 +364,7 @@ struct AllocatedExecution<'a> {
     generation: Arc<std::sync::atomic::AtomicU64>,
     deadline: tokio::time::Instant,
     driver_ticks: tokio::time::Interval,
+    clock_parent: Option<super::config::DriverClockParent>,
 }
 
 async fn execute_with_allocated_workers(
@@ -311,6 +388,7 @@ async fn execute_with_allocated_workers(
         generation,
         deadline,
         mut driver_ticks,
+        clock_parent,
     } = execution;
     let authority = authorization.authority;
     let run_key = authorization.run_key;
@@ -493,6 +571,13 @@ async fn execute_with_allocated_workers(
     // The study owns physical publications; this clone owns periodic scheduler
     // publications. Both serialize through the same acknowledged sequence.
     let periodic_publisher = recovery_publisher.clone();
+    let (clock_sender, mut clock_receiver) = tokio::sync::mpsc::channel(8);
+    // Effects-unknown roots have no resume-safe pool publisher and cannot
+    // claim recovered wall time. Preserve their non-replayable execution path;
+    // every replayable root installs the observed checkpoint barrier.
+    if clock_parent.is_some() && periodic_publisher.is_some() {
+        pool.install_clock_commands(clock_sender)?;
+    }
     let execution = if geometry_meshing {
         Box::pin(super::exact_meshing::execute_geometry_root(
             pool_for_execution,
@@ -595,6 +680,35 @@ async fn execute_with_allocated_workers(
             }
         };
         tokio::select! {
+            command = clock_receiver.recv(), if clock_parent.is_some() => {
+                if let Some(command) = command {
+                    match command {
+                        super::clock_observer::ClockCommand::Begin(reply) => {
+                            let result = clock_parent.as_ref().expect("clock branch is enabled")
+                                .begin(authority, control).await;
+                            let _ = reply.send(result);
+                        }
+                        super::clock_observer::ClockCommand::Checkpoint(reply) => {
+                            let result = match periodic_publisher.as_ref() {
+                                Some(publisher) => publisher.publish_pool().await.map(|_| ()),
+                                None => Err(protocol("wave clock requires a recovery publisher")),
+                            };
+                            let _ = reply.send(result);
+                        }
+                        super::clock_observer::ClockCommand::Close(reply) => {
+                            let result = match periodic_publisher.as_ref() {
+                                Some(publisher) => publisher.publish_closed_wave().await,
+                                None => Err(protocol("closed wave requires a recovery publisher")),
+                            };
+                            let _ = reply.send(result);
+                        }
+                        super::clock_observer::ClockCommand::End { start, respond } => {
+                            let result = super::clock_observer::observe_end(control, authority, &start).await;
+                            let _ = respond.send(result);
+                        }
+                    }
+                }
+            }
             result = &mut execution => {
                 return if cancellation_requested {
                     super::pool_tasks::observed_execution(&pool, result, true)

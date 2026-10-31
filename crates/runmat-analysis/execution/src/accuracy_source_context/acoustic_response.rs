@@ -5,9 +5,10 @@ use runmat_analysis_fea::{
     execution::{
         AccuracyEvaluationRequest, AcousticResponseNumericalReceiptArtifact,
         AcousticResponseSolverResult, AcousticResponseWorkload,
-        AnalysisNumericalObjectKind as Kind, SequenceIdentity, StepIdentity,
+        AnalysisNumericalObjectKind as Kind, ObservationHistorySourceContext, SequenceIdentity,
+        StepIdentity,
     },
-    results::observation::ObservationPublicationCatalog,
+    results::observation::{ObservationFieldCatalogSource, ObservationPublicationCatalog},
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
@@ -18,9 +19,11 @@ pub(super) fn validate(
     observations: Option<&ObservationPublicationCatalog>,
     inputs: &[&PreparedAnalysisObjects],
 ) -> AnalysisBridgeResult<()> {
-    if observations.is_some() || inputs.len() != 3 {
+    if inputs.len() != 3
+        || request.source_observations != observations.map(|catalog| catalog.identity())
+    {
         return Err(AnalysisBridgeError::Identity(
-            "acoustic response accuracy requires exact workload, mesh and retained result, without unsupported observations",
+            "acoustic response accuracy requires exact workload, mesh, retained result and authored observations",
         ));
     }
     let unique = |kind| -> AnalysisBridgeResult<&PreparedAnalysisObjects> {
@@ -71,11 +74,35 @@ pub(super) fn validate(
     )?;
     if producer != request.producer
         || request.plan != step.accuracy
-        || !step.observations.is_empty()
+        || observations.is_some() == step.observations.is_empty()
     {
         return Err(AnalysisBridgeError::Identity(
             "acoustic response accuracy differs from authored requirements",
         ));
+    }
+    if let Some(catalog) = observations {
+        catalog.validate_source_result(
+            request.producer,
+            request.source_kind,
+            request.source_result,
+        )?;
+        catalog.validate_for(
+            step,
+            ObservationHistorySourceContext::VolumeMesh { mesh: &mesh },
+        )?;
+        let ObservationFieldCatalogSource::VolumeMeshRecovery {
+            recovery_request, ..
+        } = catalog.source().source()
+        else {
+            return Err(AnalysisBridgeError::Identity(
+                "acoustic response history requires original native volume-mesh recovery",
+            ));
+        };
+        if recovery_request.as_ref() != &result.native_field_request_from_result()? {
+            return Err(AnalysisBridgeError::Identity(
+                "acoustic response observation catalog differs from retained native pressure",
+            ));
+        }
     }
     Ok(())
 }

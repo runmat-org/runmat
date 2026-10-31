@@ -63,6 +63,7 @@ pub mod wasm_registry {
     }
 
     pub fn submit_builtin_function(func: BuiltinFunction) {
+        crate::catalog_fingerprint::invalidate_wasm_registry_fingerprint();
         let leaked = leak(func);
         FUNCTIONS.with_borrow_mut(|functions| functions.push(leaked));
         FUNCTION_INDEX.with_borrow_mut(|index| {
@@ -77,22 +78,26 @@ pub mod wasm_registry {
     }
 
     pub fn submit_constant(registration: ConstantRegistration) {
+        crate::catalog_fingerprint::invalidate_wasm_registry_fingerprint();
         let leaked = leak(registration);
         CONSTANTS.with_borrow_mut(|constants| constants.push(leaked));
     }
 
     pub fn submit_builtin_doc(doc: BuiltinDoc) {
+        crate::catalog_fingerprint::invalidate_wasm_registry_fingerprint();
         let leaked = leak(doc);
         DOCS.with_borrow_mut(|docs| docs.push(leaked));
     }
 
     pub fn submit_builtin_implementation_provenance(provenance: BuiltinImplementationProvenance) {
+        crate::catalog_fingerprint::invalidate_wasm_registry_fingerprint();
         let leaked = leak(provenance);
         IMPLEMENTATION_PROVENANCE.with_borrow_mut(|entries| entries.push(leaked));
         crate::catalog::index_submitted_provenance(leaked);
     }
 
     pub fn submit_registration_manifest_entry(entry: RegistrationManifestEntry) {
+        crate::catalog_fingerprint::invalidate_wasm_registry_fingerprint();
         let leaked = leak(entry);
         REGISTRATION_MANIFEST.with_borrow_mut(|entries| entries.push(leaked));
     }

@@ -263,13 +263,42 @@ impl RemotePoolDriver {
                         task_id,
                         committed: Some(result),
                     }) => {
+                        let wall = self
+                            .task_wall_intervals
+                            .lock()
+                            .expect("remote task wall intervals poisoned")
+                            .get(&task_id)
+                            .and_then(|interval| match interval {
+                                super::timing::TaskWallInterval::Completed(wall) => Some(*wall),
+                                super::timing::TaskWallInterval::Started(_) => None,
+                                super::timing::TaskWallInterval::ObservedPending(_) => None,
+                            });
                         restored.remove(&task_id);
-                        Some(RemoteTaskCompletion::resolved(Ok(result)))
+                        Some(match wall {
+                            Some(wall) => {
+                                RemoteTaskCompletion::resolved_committed(task_id, result, wall)
+                            }
+                            None if self
+                                .task_clocks
+                                .lock()
+                                .expect("task clock bindings poisoned")
+                                .contains_key(&task_id) =>
+                            {
+                                RemoteTaskCompletion::resolved_pending(task_id, result)
+                            }
+                            None => {
+                                return Err(NativeExecutionError::Protocol(
+                                    "committed replay lacks its original host wall interval".into(),
+                                ))
+                            }
+                        })
                     }
                     Some(ExistingTask {
                         task_id,
                         committed: None,
-                    }) => restored.remove(&task_id),
+                    }) => restored
+                        .remove(&task_id)
+                        .map(|completion| completion.resume_existing(task_id)),
                     None => admitted.next(),
                 };
                 completion.ok_or_else(|| {
@@ -285,6 +314,8 @@ impl RemotePoolDriver {
         self: &Arc<Self>,
         tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
     ) -> NativeExecutionResult<Vec<RemoteTaskCompletion>> {
+        // One physical host clock begins before scheduler admission and worker dispatch.
+        let started = std::time::Instant::now();
         let mut registrations = Vec::with_capacity(tasks.len());
         let mut completion_senders = Vec::with_capacity(tasks.len());
         for (program, submission) in tasks {
@@ -347,12 +378,8 @@ impl RemotePoolDriver {
             .iter()
             .map(|registration| registration.submission.clone())
             .collect();
-        let actions = match self
-            .driver
-            .lock()
-            .expect("remote driver poisoned")
-            .handle(DriverCommand::SubmitBatch(submissions))
-        {
+        let mut driver = self.driver.lock().expect("remote driver poisoned");
+        let actions = match driver.handle(DriverCommand::SubmitBatch(submissions)) {
             Ok(actions) => actions,
             Err(error) => {
                 for registration in &registrations {
@@ -363,6 +390,35 @@ impl RemotePoolDriver {
                 return Err(error.into());
             }
         };
+        {
+            let mut intervals = self
+                .task_wall_intervals
+                .lock()
+                .expect("remote task wall intervals poisoned");
+            for registration in &registrations {
+                let observed = self
+                    .task_clocks
+                    .lock()
+                    .expect("task clock bindings poisoned")
+                    .get(&registration.task_id)
+                    .copied();
+                if intervals
+                    .insert(
+                        registration.task_id,
+                        observed.map_or(
+                            super::timing::TaskWallInterval::Started(started),
+                            super::timing::TaskWallInterval::ObservedPending,
+                        ),
+                    )
+                    .is_some()
+                {
+                    return Err(NativeExecutionError::Protocol(
+                        "remote task wall interval already exists".into(),
+                    ));
+                }
+            }
+        }
+        drop(driver);
         drop(progress_registry);
         drop(completions);
         drop(programs);

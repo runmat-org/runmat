@@ -42,11 +42,11 @@ pub(super) async fn modal_frequency(
     let (response, objects) =
     crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedModalFrequency {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             completion: &completion,
             unresolved_workloads_digest,
         },
@@ -99,11 +99,11 @@ pub(super) async fn frequency(
     let (response, objects) =
     crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedFrequency {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             completion: &completion,
             unresolved_workloads_digest,
         },
@@ -154,11 +154,11 @@ pub(super) async fn modal(
     let (response, objects) =
     crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralPrestressedModal {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             completion: &completion,
             unresolved_workloads_digest,
         },
@@ -209,11 +209,11 @@ pub(super) async fn buckling(
     let (response, objects) =
     crate::exact_structural_study_root::package_exact_structural_study_result(
     request,
-    &decoded,
+    decoded,
     &completed.result,
-    &region_resolution_objects,
+    region_resolution_objects,
     crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralBuckling {
-        inputs: &completed_inputs,
+        inputs: completed_inputs,
         completion: &completion,
         unresolved_workloads_digest,
     },
@@ -264,11 +264,11 @@ pub(super) async fn spectrum(
     let (response, objects) =
     crate::exact_structural_study_root::package_exact_structural_study_result(
     request,
-    &decoded,
+    decoded,
     &completed.result,
-    &region_resolution_objects,
+    region_resolution_objects,
     crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModalResponseSpectrum {
-        inputs: &completed_inputs,
+        inputs: completed_inputs,
         completion: &completion,
         unresolved_workloads_digest,
     },
@@ -319,11 +319,11 @@ pub(super) async fn random(
     let (response, objects) =
     crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralRandomResponse {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             completion: &completion,
             unresolved_workloads_digest,
         },
@@ -396,11 +396,11 @@ pub(super) async fn transient(
     };
     let (response, objects) = crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModalTransient {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             completion: &completion,
             unresolved_workloads_digest,
         },

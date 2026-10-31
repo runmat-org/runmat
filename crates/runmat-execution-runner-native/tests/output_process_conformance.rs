@@ -48,10 +48,28 @@ fn main() {
         } else if std::env::args().any(|arg| arg == HiddenMode::ExecutionWorker.marker()) {
             runmat_execution_runner_native::run_worker_stdio().await.unwrap();
         } else if std::env::args().any(|arg| arg == HiddenMode::ExecutionDriver.marker()) {
-            let runmat_execution_runner_native::supervisor::BatchDriverInvocation::Program { attempt, submission, lease, .. } = runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap() else { panic!("original output witness requires program authority"); };
-            let exit_marker = attempt.job_directory.join("test-provider-exit");
+            use runmat_execution_runner_native::supervisor::{
+                BatchDriverInvocation, ProgramBatchExecution,
+                execute_and_complete_graph_batch, execute_and_complete_program_batch,
+            };
+            type DriverFuture = std::pin::Pin<Box<dyn std::future::Future<Output =
+                runmat_execution_runner_native::NativeExecutionResult<ProgramBatchExecution>>>>;
+            let (exit_marker, execution): (_, DriverFuture) = match
+                runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap()
+            {
+                BatchDriverInvocation::Program { attempt, submission, lease, .. } => (
+                    attempt.job_directory.join("test-provider-exit"),
+                    Box::pin(execute_and_complete_program_batch(*attempt, *submission, *lease)),
+                ),
+                BatchDriverInvocation::GraphTask { attempt, submission, lease, .. } => (
+                    attempt.job_directory.join("test-provider-exit"),
+                    Box::pin(execute_and_complete_graph_batch(*attempt, *submission, *lease)),
+                ),
+                BatchDriverInvocation::Script { .. } | BatchDriverInvocation::Graph { .. } =>
+                    panic!("original output witness requires an admitted task authority"),
+            };
             tokio::select! {
-                result = runmat_execution_runner_native::supervisor::execute_and_complete_program_batch(*attempt, *submission, *lease) => { result.unwrap(); },
+                result = execution => { result.unwrap(); },
                 _ = async { while !exit_marker.exists() { tokio::time::sleep(Duration::from_millis(10)).await; } } => {
                     // Fixture-only abrupt original publisher loss; no completion/footer.
                     std::process::exit(19);

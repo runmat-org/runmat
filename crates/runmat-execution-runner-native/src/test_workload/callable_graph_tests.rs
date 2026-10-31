@@ -114,6 +114,7 @@ async fn selected_graph_worker_preserves_callable_argument_layouts() {
             arguments: graph.roots[1..].to_vec(),
         };
         let request = GraphExecutionRequest {
+            invocation_controls: None,
             project_runtime_policy: None,
             schema_version,
             recipe: recipe.clone(),
@@ -150,6 +151,19 @@ async fn selected_graph_worker_preserves_callable_argument_layouts() {
                 execute_host_graph_request(cluster.clone(), None).await,
                 28.0,
             );
+            let mut captured = cluster.clone();
+            captured.schema_version = runmat_execution_artifact::GRAPH_EXECUTION_REQUEST_SCHEMA_V14;
+            captured.invocation_controls =
+                Some(runmat_execution_artifact::GraphInvocationControls {
+                    environment: runmat_execution::EnvironmentSnapshot::new(vec![(
+                        ambient_path_name.clone(),
+                        "captured-invocation-only".into(),
+                    )])
+                    .unwrap(),
+                    console: None,
+                });
+            captured.validate().unwrap();
+            assert_single_graph_scalar(execute_host_graph_request(captured, None).await, 29.0);
             let mut wrong_language = policy.clone();
             wrong_language.language.compat = runmat_config::runtime::LanguageCompatMode::Matlab;
             assert!(runmat_core::cluster_settings::prepare_graph_for_cluster(
@@ -173,9 +187,9 @@ async fn selected_graph_worker_preserves_callable_argument_layouts() {
             );
             continue;
         }
-        // Unconfigured legacy Graph requests retain their standalone VM
-        // behavior. They do not claim the remote scheduler's empty contract.
-        assert_single_graph_scalar(response, 29.0);
+        // Legacy Graph schemas carry no invocation environment. They cannot
+        // recover ambient host authority by taking the standalone VM route.
+        assert_single_graph_scalar(response, 28.0);
     }
 }
 
@@ -186,10 +200,14 @@ fn assert_single_graph_scalar(response: ProgramExecutionResponse, expected: f64)
     let [root] = graph.roots.as_slice() else {
         panic!("selected callable returned an invalid output count");
     };
-    assert!(matches!(
-        graph.nodes.get(root.0 as usize),
-        Some(GraphNode::Leaf {
-            value: ValuePayload::Inline(value)
-        }) if **value == InlineValue::F64Bits(expected.to_bits())
-    ));
+    assert!(
+        matches!(
+            graph.nodes.get(root.0 as usize),
+            Some(GraphNode::Leaf {
+                value: ValuePayload::Inline(value)
+            }) if **value == InlineValue::F64Bits(expected.to_bits())
+        ),
+        "expected scalar {expected}, received {:?}",
+        graph.nodes.get(root.0 as usize)
+    );
 }

@@ -101,7 +101,11 @@ async fn constructed_geometry_reaches_a_terminal_mesh_over_encrypted_quic() {
     let output =
         import_geometry_materialization_output(&local_store, output_root, &access).unwrap();
 
-    let mut builder = ExecutionBundleBuilder::native(&project, revision)
+    let mut builder = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &revision,
+        ))
         .unwrap()
         .with_compiled_package_closure();
     for program in prepared.required_programs() {

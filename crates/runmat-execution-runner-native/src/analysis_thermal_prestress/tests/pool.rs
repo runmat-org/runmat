@@ -1,12 +1,11 @@
 use super::*;
-use crate::analysis_task_pool::AnalysisTaskCompletion;
+use crate::analysis_task_pool::{AdmittedAnalysisBatch, AnalysisTaskCompletion};
 use async_trait::async_trait;
 use runmat_analysis_execution::{PreparedAnalysisObjects, PreparedAnalysisProgram};
 use runmat_execution::{identity::WorkerId, resource::ResourceInventory, state::PoolState};
 use runmat_execution_artifact::{
     cache::{CacheExport, CacheImport, FilesystemObjectStore},
-    ArtifactAccess, ArtifactResult, ProgramExecutionObject, ProgramExecutionRequest,
-    ProgramExecutionResponse,
+    ArtifactAccess, ArtifactResult, ProgramExecutionObject, ProgramExecutionResponse,
 };
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -41,6 +40,13 @@ impl CacheImport for RecordingPool {
 }
 #[async_trait]
 impl AnalysisTaskPool for RecordingPool {
+    async fn begin_wave_observation(
+        &mut self,
+        _: &[runmat_execution::TaskId],
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
+
     fn scope_id(&self) -> ExecutionScopeId {
         ExecutionScopeId::derive(&[b"recording-thermal-composition"])
     }
@@ -70,10 +76,10 @@ impl AnalysisTaskPool for RecordingPool {
     }
     async fn execute_batch(
         &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+        tasks: AdmittedAnalysisBatch,
     ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>> {
         let mut results = Vec::new();
-        for (program, submission) in tasks {
+        for (program, submission) in tasks.into_submissions() {
             for dependency in &submission.dependencies {
                 assert!(
                     self.tasks.iter().any(|task| task.request.id == *dependency),

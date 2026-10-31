@@ -272,6 +272,7 @@ async fn remote_driver_commits_verified_externalized_results() {
     let run_key = RunKeyMaterial::from_entropy([41; 32]).unwrap();
     let config = RemoteDriverConfig {
         ready_v1: false,
+        clock_parent: None,
         authority: DriverAuthority {
             server_url: "https://control.invalid".into(),
             run_id: run_id.into(),
@@ -996,6 +997,7 @@ async fn run_encrypted_remote_request_with_prior_sequence(
         authority,
         endpoint_identity_file: identity_path,
         ready_v1: false,
+        clock_parent: None,
     };
 
     run_remote_driver(config, control.clone()).await.unwrap();

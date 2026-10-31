@@ -158,9 +158,15 @@ fn uncertainty_retains_capacity_until_exact_proof_without_replaying_original_tas
     ));
     let retired = f.driver.snapshot();
     retired.validate().unwrap();
+    assert_eq!(retired.tasks[&request.task_id].state, TaskState::Failed);
     assert_eq!(
-        retired.tasks[&request.task_id].state,
-        TaskState::Indeterminate
+        retired.attempts[&request.id]
+            .unverified_retirement
+            .as_ref()
+            .unwrap()
+            .failure
+            .as_deref(),
+        Some(&failure)
     );
     assert_eq!(retired.tasks[&request.task_id].attempt_count, 1);
     assert!(retired.attempts[&request.id]
@@ -176,12 +182,24 @@ fn uncertainty_retains_capacity_until_exact_proof_without_replaying_original_tas
         )))
         .unwrap();
     assert_eq!(f.driver.snapshot().pools, retired.pools);
-    assert!(f
+    let aggregate = f
         .driver
         .task_execution_evidence(request.task_id)
         .unwrap()
         .resource_aggregate(1)
-        .is_err());
+        .unwrap();
+    assert_eq!(aggregate.attempts.len(), 1);
+    assert_eq!(aggregate.attempts[0].attempt_id, request.id);
+    assert_eq!(
+        aggregate.attempts[0],
+        *measured.attempts[&request.id]
+            .unverified_retirement
+            .as_ref()
+            .unwrap()
+            .resources
+            .as_deref()
+            .unwrap()
+    );
 }
 
 #[test]

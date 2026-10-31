@@ -272,10 +272,10 @@ pub(super) async fn execute_with_completed_meshing(
     let input = Composition {
         pool,
         request,
-        decoded,
-        completed,
-        region_resolution_objects,
-        completed_inputs,
+        decoded: &decoded,
+        completed: &completed,
+        region_resolution_objects: &region_resolution_objects,
+        completed_inputs: &completed_inputs,
         unresolved_workloads_digest,
         policy,
         recovery,
@@ -303,10 +303,13 @@ pub(super) async fn execute_with_completed_meshing(
 struct Composition<'a, 'recovery> {
     pool: Arc<RemotePoolDriver>,
     request: &'a ProgramExecutionRequest,
-    decoded: crate::DecodedExactStructuralStudyRoot,
-    completed: Box<super::exact_meshing::CompletedRemoteExactMeshing>,
-    region_resolution_objects: runmat_analysis_execution::PreparedAnalysisObjects,
-    completed_inputs: Vec<crate::input_materialization::CompletedInputMaterialization>,
+    // The admission frame retains these immutable owners through the awaited
+    // consumer. Forward references rather than moving their inline metadata
+    // through every nested async dispatch frame.
+    decoded: &'a crate::DecodedExactStructuralStudyRoot,
+    completed: &'a super::exact_meshing::CompletedRemoteExactMeshing,
+    region_resolution_objects: &'a runmat_analysis_execution::PreparedAnalysisObjects,
+    completed_inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
     unresolved_workloads_digest: Digest,
     policy: crate::StructuralSequenceExecutionPolicy,
     recovery: StructuralTransientRecoveryAdmission<'recovery>,

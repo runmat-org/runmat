@@ -79,6 +79,8 @@ pub struct CanonicalAcousticTransient {
 pub enum TransientRetention {
     /// Every accepted time point.
     Every,
+    /// Every grid point, with explicit authored coordinates naming selected points exactly.
+    EveryAnd(Vec<f64>),
     /// The final time point and the listed times, each of which must lie on the time grid.
     FinalAnd(Vec<f64>),
 }
@@ -86,22 +88,41 @@ pub enum TransientRetention {
 impl TransientRetention {
     /// Retention implied by an authored step: every increment when an observation samples every
     /// accepted increment; otherwise the final state plus explicitly sampled times.
-    pub fn for_step(step: &runmat_analysis_core::ProcedureStep) -> Self {
+    pub fn for_step(
+        step: &runmat_analysis_core::ProcedureStep,
+    ) -> Result<Self, AcousticHarmonicError> {
         use runmat_analysis_core::SamplingPolicy;
         let mut times = Vec::new();
+        let mut every = false;
         for observation in &step.observations {
             let Some(spec) = observation.spec() else {
                 continue;
             };
             match &spec.sampling {
-                SamplingPolicy::EveryAcceptedIncrement => return Self::Every,
+                SamplingPolicy::EveryAcceptedIncrement => every = true,
                 SamplingPolicy::TimeSeconds(values) => times.extend(values.iter().copied()),
                 SamplingPolicy::TimeIntervalSeconds {
                     start,
                     end,
                     interval,
                 } if *interval > 0.0 && start.is_finite() && end.is_finite() => {
-                    let count = ((end - start) / interval + 1e-9).floor() as usize;
+                    let ratio = (end - start) / interval;
+                    let nearest = ratio.round();
+                    let count =
+                        if (ratio - nearest).abs() <= 16.0 * f64::EPSILON * ratio.abs().max(1.0) {
+                            nearest
+                        } else {
+                            ratio.floor()
+                        };
+                    if !count.is_finite()
+                        || count < 0.0
+                        || count >= step.accuracy.resources.maximum_samples as f64
+                    {
+                        return Err(AcousticHarmonicError::InvalidInput(
+                            "authored acoustic history interval exceeds the sample ceiling".into(),
+                        ));
+                    }
+                    let count = count as usize;
                     times.extend((0..=count).map(|k| start + interval * k as f64));
                 }
                 _ => {}
@@ -109,46 +130,133 @@ impl TransientRetention {
         }
         times.sort_by(f64::total_cmp);
         times.dedup();
-        Self::FinalAnd(times)
+        Ok(if every {
+            if times.is_empty() {
+                Self::Every
+            } else {
+                Self::EveryAnd(times)
+            }
+        } else {
+            Self::FinalAnd(times)
+        })
+    }
+
+    /// Check every authored coordinate against its unique accepted-grid index without building
+    /// a grid or allocating numerical state. The returned index names the physical solve point;
+    /// the authored coordinate remains the public field/history label.
+    pub fn validate_for_domain(
+        &self,
+        start: f64,
+        end: f64,
+        interval_count: usize,
+    ) -> Result<(), AcousticHarmonicError> {
+        if !start.is_finite() || !end.is_finite() || end <= start || interval_count == 0 {
+            return Err(AcousticHarmonicError::InvalidInput(
+                "invalid acoustic history time grid".into(),
+            ));
+        }
+        // `for_step` sorts the authored labels, and the uniform grid is strictly increasing.
+        // An adjacent collision is therefore sufficient; no index map allocation is needed.
+        let mut previous = None;
+        for &time in self.explicit_points() {
+            let index = grid_index(start, end, interval_count, time)?;
+            if previous
+                .is_some_and(|(prior_index, prior_time)| prior_index == index && prior_time != time)
+            {
+                return Err(AcousticHarmonicError::InvalidInput(
+                    "distinct authored acoustic times name one solver time point".into(),
+                ));
+            }
+            previous = Some((index, time));
+        }
+        Ok(())
+    }
+
+    fn explicit_points(&self) -> &[f64] {
+        match self {
+            Self::Every => &[],
+            Self::EveryAnd(points) | Self::FinalAnd(points) => points,
+        }
     }
 
     /// The retained subset of an accepted time grid, ascending.
     pub fn retained_points(&self, times: &[f64]) -> Result<Vec<f64>, AcousticHarmonicError> {
-        Ok(times
-            .iter()
-            .zip(self.mask(times)?)
-            .filter(|(_, keep)| *keep)
-            .map(|(time, _)| *time)
-            .collect())
+        Ok(self.selected_points(times)?.into_iter().flatten().collect())
     }
 
     fn mask(&self, times: &[f64]) -> Result<Vec<bool>, AcousticHarmonicError> {
-        let mut mask = vec![false; times.len()];
-        match self {
-            Self::Every => mask.fill(true),
-            Self::FinalAnd(requested) => {
-                let step = times
-                    .windows(2)
-                    .map(|w| w[1] - w[0])
-                    .fold(f64::INFINITY, f64::min);
-                for &t in requested {
-                    let index = times
-                        .iter()
-                        .position(|grid| (grid - t).abs() <= 1e-9 * step.max(f64::MIN_POSITIVE))
-                        .ok_or_else(|| {
-                            AcousticHarmonicError::InvalidInput(format!(
-                                "sampled time {t} s is not an accepted transient time point"
-                            ))
-                        })?;
-                    mask[index] = true;
-                }
-                if let Some(last) = mask.last_mut() {
-                    *last = true;
-                }
-            }
-        }
-        Ok(mask)
+        Ok(self
+            .selected_points(times)?
+            .iter()
+            .map(Option::is_some)
+            .collect())
     }
+
+    fn selected_points(&self, times: &[f64]) -> Result<Vec<Option<f64>>, AcousticHarmonicError> {
+        let Some((&start, rest)) = times.split_first() else {
+            return Err(AcousticHarmonicError::InvalidInput(
+                "empty acoustic history time grid".into(),
+            ));
+        };
+        let end = *rest.last().ok_or_else(|| {
+            AcousticHarmonicError::InvalidInput(
+                "acoustic history time grid needs two points".into(),
+            )
+        })?;
+        if times.iter().any(|time| !time.is_finite())
+            || times.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return Err(AcousticHarmonicError::InvalidInput(
+                "invalid acoustic history time grid".into(),
+            ));
+        }
+        self.validate_for_domain(start, end, times.len() - 1)?;
+        let mut selected = if matches!(self, Self::Every | Self::EveryAnd(_)) {
+            times.iter().copied().map(Some).collect::<Vec<_>>()
+        } else {
+            vec![None; times.len()]
+        };
+        *selected.last_mut().expect("nonempty time grid") = Some(end);
+        for &time in self.explicit_points() {
+            let index = grid_index(start, end, times.len() - 1, time)?;
+            selected[index] = Some(time);
+        }
+        Ok(selected)
+    }
+}
+
+fn grid_index(
+    start: f64,
+    end: f64,
+    interval_count: usize,
+    time: f64,
+) -> Result<usize, AcousticHarmonicError> {
+    let dt = (end - start) / interval_count as f64;
+    if !time.is_finite() || !dt.is_finite() || dt <= 0.0 {
+        return Err(AcousticHarmonicError::InvalidInput(
+            "invalid acoustic sampled time".into(),
+        ));
+    }
+    let position = ((time - start) / dt).round();
+    if !position.is_finite() || position < 0.0 || position > interval_count as f64 {
+        return Err(AcousticHarmonicError::InvalidInput(format!(
+            "sampled time {time} s is not an accepted transient time point",
+        )));
+    }
+    let index = position as usize;
+    let grid = crate::excitation::ProcedureTimeGrid::uniform_coordinate_at(
+        start,
+        end,
+        interval_count,
+        index,
+    )
+    .map_err(AcousticHarmonicError::InvalidInput)?;
+    if (grid - time).abs() > 1e-9 * dt.max(f64::MIN_POSITIVE) {
+        return Err(AcousticHarmonicError::InvalidInput(format!(
+            "sampled time {time} s is not an accepted transient time point",
+        )));
+    }
+    Ok(index)
 }
 
 /// Integrate an authored acoustic transient step from rest.
@@ -178,15 +286,9 @@ pub fn solve_canonical_transient(
         ));
     }
     let dt = (end - start) / interval_count as f64;
-    let times = (0..=interval_count)
-        .map(|index| {
-            if index == interval_count {
-                end
-            } else {
-                start + dt * index as f64
-            }
-        })
-        .collect::<Vec<_>>();
+    let times = crate::excitation::ProcedureTimeGrid::from_interval_count(step, interval_count)
+        .map_err(AcousticHarmonicError::InvalidInput)?
+        .into_points_s();
     let retained = retention.mask(&times)?;
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
@@ -386,12 +488,7 @@ pub fn solve_canonical_transient(
         g_previous = g_next;
     }
     let _ = prescribed;
-    let retained_time_points_s = times
-        .iter()
-        .zip(&retained)
-        .filter(|(_, keep)| **keep)
-        .map(|(time, _)| *time)
-        .collect();
+    let retained_time_points_s = retention.retained_points(&times)?;
     Ok(CanonicalAcousticTransient {
         projection: assembly.projection,
         time_points_s: times,

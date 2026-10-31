@@ -387,6 +387,14 @@ impl Driver {
         if let Some(state) = dependency_state {
             record.state = state;
             record.active_attempt = None;
+            if state == TaskState::Indeterminate {
+                record.indeterminate_dependency = record
+                    .submission
+                    .dependencies
+                    .iter()
+                    .find(|id| self.snapshot.tasks[id].state == TaskState::Indeterminate)
+                    .copied();
+            }
             if state == TaskState::Cancelled {
                 let dependency = record
                     .submission

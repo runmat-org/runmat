@@ -45,7 +45,7 @@ pub(crate) struct LocalAttemptObservation {
 
 /// Private physical-owner evidence, distinct from a public root-exit observation.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum LocalRetirementEvidence {
+pub(crate) enum LocalRetirementEvidence {
     #[default]
     NotStarted,
     Unconfirmed,
@@ -476,6 +476,8 @@ fn staged_graph_launch(
         || request.task.invocation_context != graph.context
         || request.task.outputs.requested_outputs != graph.requested_outputs
         || request.task.callable.program != graph.callable
+        || request.task.environment != graph.invocation_controls.environment
+        || request.task.console != graph.invocation_controls.console
         || !request.task.inputs.is_empty()
     {
         return Err(TransferFailure::Infrastructure(

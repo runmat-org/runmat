@@ -1,5 +1,7 @@
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -14,6 +16,7 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_execution::resource::ResourceInventory;
 use runmat_execution::security::{
     EndpointIdentityEvidence, EndpointIdentitySigner, EndpointRecipientKey, ExecutionTrustTier,
+    WorkerTreeRetirementEvidenceV1,
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
@@ -31,7 +34,7 @@ use runmat_execution_transport_native::control::{
     CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
     DriverBootstrap, DriverControlPlane, DriverHeartbeat, DriverRunTarget, DriverRunTransition,
     DriverWorkerAllocation, DriverWorkerPool, ResourceRequest, StoreDriverArtifact,
-    StoredDriverArtifact,
+    StoredDriverArtifact, WorkerRetirementLookup,
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
@@ -41,7 +44,8 @@ use runmat_meshing_core::{MeshingRequest, MetricTensor3};
 use super::checkpoint::RemoteDriverCheckpoint;
 use super::config::RemoteDriverConfig;
 use super::crypto::{ciphertext_digest, open_object, project_revision_identity, seal_object};
-use super::worker_entry::{run_remote_meshing_worker_relay_cached, RemoteWorkerRelayRequest};
+use super::worker_attempt_journal::WorkerAttemptJournalOwner;
+use super::worker_entry::RemoteWorkerRelayRequest;
 use super::worker_env::session_id;
 use crate::{
     import_exact_structural_study_result, native_meshing_kernel_dispatcher,
@@ -54,6 +58,30 @@ const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/bo
 const RUN_ID: &str = "driver-replacement-exact-study";
 const DRIVER_ALLOCATION: &str = "driver-allocation";
 const ACTUAL_DRIVER_TEST_STACK_BYTES: usize = 16 * 1024 * 1024;
+
+fn worker_journal(
+    root: &Path,
+    allocation: &DriverWorkerAllocation,
+    fence: u64,
+    clock_domain_nonce: [u8; 16],
+) -> WorkerAttemptJournalOwner {
+    let directory = root.join(format!("worker-{fence}-attempt-journal"));
+    std::fs::create_dir(&directory).unwrap();
+    WorkerAttemptJournalOwner {
+        directory,
+        run_id: RUN_ID.into(),
+        allocation_lease_id: allocation.allocation_lease_id.clone(),
+        allocation_fencing_token: allocation.fencing_token,
+        driver_fencing_token: fence,
+        process_launch_nonce: loop {
+            let nonce: [u8; 16] = rand::random();
+            if nonce.iter().any(|value| *value != 0) {
+                break nonce;
+            }
+        },
+        clock_domain_nonce,
+    }
+}
 
 #[derive(Clone)]
 struct StoredArtifact {
@@ -73,6 +101,7 @@ struct DurableState {
     transitions: Vec<(u64, DriverRunTarget, Option<String>)>,
     worker_authorizations: Vec<(u64, String)>,
     bootstrap_checkpoints: Vec<(u64, Option<String>)>,
+    retirements: BTreeMap<String, WorkerTreeRetirementEvidenceV1>,
 }
 
 struct DurableControl {
@@ -82,10 +111,12 @@ struct DurableControl {
     run_key: RunKeyMaterial,
     resources: ResourceRequest,
     workers: BTreeMap<u64, DriverWorkerAllocation>,
+    worker_identity_secrets: BTreeMap<u64, [u8; 32]>,
     interruption: ReplacementInterruption,
     interrupted_target: super::worker_execution::HeldAttemptTarget,
     state: Mutex<DurableState>,
     recovery_committed: tokio::sync::Notify,
+    clock_control: Mutex<Option<Arc<observer::ClockControl>>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -103,6 +134,82 @@ enum ReplacementInterruption {
 }
 
 impl DurableControl {
+    fn record_retired_worker(
+        &self,
+        fence: u64,
+        process_id: u32,
+        journal: &WorkerAttemptJournalOwner,
+        retired: runmat_process_host::clock::HostMonotonicReading,
+    ) {
+        let allocation = self
+            .workers
+            .get(&fence)
+            .expect("original worker allocation");
+        let endpoint = allocation
+            .endpoint_identity
+            .as_ref()
+            .expect("signed worker endpoint");
+        let signer =
+            EndpointIdentitySigner::from_secret(self.worker_identity_secrets[&fence]).unwrap();
+        assert_eq!(signer.fingerprint(), endpoint.identity_fingerprint);
+        assert_eq!(journal.driver_fencing_token, fence);
+        assert_eq!(journal.allocation_lease_id, allocation.allocation_lease_id);
+        let mut encrypted_attempt_receipts = std::fs::read_dir(&journal.directory)
+            .unwrap()
+            .map(|file| {
+                let file = file.unwrap();
+                assert!(file.file_type().unwrap().is_file());
+                let bytes = std::fs::read(file.path()).unwrap();
+                assert!(
+                    bytes.len()
+                        <= runmat_execution::security::MAX_RETIREMENT_ENCRYPTED_RECEIPT_BYTES
+                );
+                let object = runmat_execution_artifact::encryption::decode_encrypted_run_object(
+                    &bytes,
+                    runmat_execution::security::MAX_RETIREMENT_ENCRYPTED_RECEIPT_BYTES,
+                )
+                .unwrap();
+                assert_eq!(object.context.run_identity, RUN_ID);
+                assert_eq!(object.context.purpose, EncryptionPurpose::RetirementReceipt);
+                assert!(object.context.task_identity.is_none());
+                assert!(object.context.attempt_identity.is_none());
+                (file.file_name(), URL_SAFE_NO_PAD.encode(bytes))
+            })
+            .collect::<Vec<_>>();
+        encrypted_attempt_receipts.sort_by(|left, right| left.0.cmp(&right.0));
+        assert!(
+            encrypted_attempt_receipts.len() <= runmat_execution::security::MAX_RETIREMENT_ATTEMPTS
+        );
+        let mut evidence = WorkerTreeRetirementEvidenceV1 {
+            schema_version: 1,
+            org_id: endpoint.org_id.clone(),
+            cluster_id: endpoint.cluster_id.clone(),
+            node_id: endpoint.node_id.clone(),
+            run_id: RUN_ID.into(),
+            allocation_lease_id: allocation.allocation_lease_id.clone(),
+            allocation_fencing_token: allocation.fencing_token,
+            driver_fencing_token: fence,
+            process_id,
+            process_launch_nonce: journal.process_launch_nonce,
+            retired_at_unix_millis: now_millis(),
+            clock_domain_nonce: journal.clock_domain_nonce,
+            retired_monotonic_ticks: retired.ticks,
+            ticks_per_second: retired.ticks_per_second,
+            encrypted_attempt_receipts: encrypted_attempt_receipts
+                .into_iter()
+                .map(|(_, bytes)| bytes)
+                .collect(),
+            identity_public_key: endpoint.identity_public_key.clone(),
+            identity_fingerprint: endpoint.identity_fingerprint.clone(),
+            signature: Vec::new(),
+        };
+        signer.sign_worker_tree_retirement(&mut evidence).unwrap();
+        let mut state = self.state.lock().unwrap();
+        assert!(state
+            .retirements
+            .insert(allocation.allocation_lease_id.clone(), evidence)
+            .is_none());
+    }
     fn interrupted_analysis_kind(&self) -> AnalysisWorkKind {
         match self.interrupted_target {
             super::worker_execution::HeldAttemptTarget::Analysis(kind) => kind,
@@ -306,6 +413,50 @@ fn analysis_tasks(
 
 #[async_trait]
 impl DriverControlPlane for DurableControl {
+    async fn clock_heartbeat(
+        &self,
+        authority: &DriverAuthority,
+        _ttl_seconds: u64,
+        request: runmat_execution_transport_native::control::ClockDriverHeartbeatRequestV1,
+    ) -> runmat_execution_transport_native::TransportResult<
+        runmat_execution_transport_native::control::ClockDriverHeartbeatResponseV1,
+    > {
+        let clock = self
+            .clock_control
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| unavailable("fixture has no original node clock owner"))?;
+        clock.heartbeat(self, authority, request)
+    }
+    async fn worker_retirement(
+        &self,
+        authority: &DriverAuthority,
+        original: &WorkerRetirementLookup,
+    ) -> runmat_execution_transport_native::TransportResult<Option<WorkerTreeRetirementEvidenceV1>>
+    {
+        if authority.run_id != RUN_ID
+            || original.run_id != RUN_ID
+            || authority.fencing_token <= original.driver_fencing_token
+        {
+            return Err(runmat_execution_transport_native::TransportError::StaleAuthority);
+        }
+        let evidence = self
+            .state
+            .lock()
+            .unwrap()
+            .retirements
+            .get(&original.allocation_lease_id)
+            .cloned();
+        if let Some(evidence) = &evidence {
+            if evidence.allocation_fencing_token != original.allocation_fencing_token
+                || evidence.driver_fencing_token != original.driver_fencing_token
+            {
+                return Err(runmat_execution_transport_native::TransportError::StaleAuthority);
+            }
+        }
+        Ok(evidence)
+    }
     async fn bootstrap(
         &self,
         authority: &DriverAuthority,
@@ -412,6 +563,12 @@ impl DriverControlPlane for DurableControl {
             return Err(runmat_execution_transport_native::TransportError::Integrity);
         }
         let kind = artifact_kind(artifact.kind);
+        let observer_worker_admitted = self
+            .clock_control
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_none_or(|clock| clock.worker_admitted());
         let (committed_replacement_checkpoint, interrupted_committed_task) = artifact
             .checkpoint
             .filter(|(_, disposition)| *disposition == CheckpointDisposition::ResumeSafe)
@@ -521,6 +678,7 @@ impl DriverControlPlane for DurableControl {
                 state.latest_checkpoint = Some(artifact_id.clone());
             }
             let interrupt_driver = committed_replacement_checkpoint
+                && observer_worker_admitted
                 && ((authority.fencing_token == 1 && !state.driver_interruption_triggered)
                     || (authority.fencing_token == 2
                         && self.interruption
@@ -543,6 +701,12 @@ impl DriverControlPlane for DurableControl {
                 interrupt_driver,
             )
         };
+        if artifact.checkpoint.is_some() {
+            let clock = self.clock_control.lock().unwrap().clone();
+            if let Some(clock) = clock {
+                clock.before_checkpoint_ack().await;
+            }
+        }
         if interrupt_driver {
             self.recovery_committed.notify_waiters();
             if self.interruption == ReplacementInterruption::AnalysisCheckpointAckLost {
@@ -558,6 +722,11 @@ impl DriverControlPlane for DurableControl {
         authority: &DriverAuthority,
         transition: DriverRunTransition,
     ) -> runmat_execution_transport_native::TransportResult<()> {
+        if transition.target == DriverRunTarget::Succeeded {
+            if let Some(clock) = self.clock_control.lock().unwrap().as_ref() {
+                clock.assert_released_before_success();
+            }
+        }
         self.state.lock().unwrap().transitions.push((
             authority.fencing_token,
             transition.target,
@@ -718,10 +887,11 @@ fn authored_thermal_outer_root_matrix_replays_after_preexecution_driver_replacem
 
 #[test]
 fn authored_thermal_prefix_survives_driver_loss_after_its_commit() {
-    for case in thermal::Case::matrix() {
-        let result = run_actual_driver_replacement_with_interruption(
+    for (index, case) in thermal::Case::matrix().enumerate() {
+        let result = run_actual_driver_replacement_with_observer(
             ExactStudyFamily::ThermalPrestress(case),
             ReplacementInterruption::AnalysisCommitted,
+            index == 0,
         );
         assert!(result.is_some());
     }
@@ -816,6 +986,19 @@ fn run_actual_driver_replacement_with_interruption(
     family: ExactStudyFamily,
     interruption: ReplacementInterruption,
 ) -> Option<thermal::ColdReplay> {
+    run_actual_driver_replacement_with_observer(family, interruption, false)
+}
+
+fn run_actual_driver_replacement_with_observer(
+    family: ExactStudyFamily,
+    interruption: ReplacementInterruption,
+    observe: bool,
+) -> Option<thermal::ColdReplay> {
+    enter_worker_subprocess_if_requested();
+    let test_name = std::thread::current()
+        .name()
+        .expect("named Rust test thread")
+        .to_string();
     std::thread::Builder::new()
         .name(format!("actual-driver-replacement-{family:?}"))
         .stack_size(ACTUAL_DRIVER_TEST_STACK_BYTES)
@@ -824,7 +1007,12 @@ fn run_actual_driver_replacement_with_interruption(
                 .enable_all()
                 .build()
                 .expect("actual-driver replacement runtime")
-                .block_on(actual_driver_replacement_case(family, interruption))
+                .block_on(actual_driver_replacement_case(
+                    family,
+                    interruption,
+                    &test_name,
+                    observe,
+                ))
         })
         .expect("actual-driver replacement test thread")
         .join()
@@ -931,6 +1119,8 @@ fn assert_exhausted_replacement(
 async fn actual_driver_replacement_case(
     family: ExactStudyFamily,
     interruption: ReplacementInterruption,
+    test_name: &str,
+    observe: bool,
 ) -> Option<thermal::ColdReplay> {
     let mut fixture =
         if interruption == ReplacementInterruption::WorkloadDeadlineExpiredAfterRestore {
@@ -950,13 +1140,32 @@ async fn actual_driver_replacement_case(
     )
     .unwrap();
     let control = Arc::new(fixture.control);
+    let clock_domain_nonce: [u8; 16] = loop {
+        let nonce: [u8; 16] = rand::random();
+        if nonce.iter().any(|value| *value != 0) {
+            break nonce;
+        }
+    };
+    let first_journal = worker_journal(
+        directory.path(),
+        control.workers.get(&1).unwrap(),
+        1,
+        clock_domain_nonce,
+    );
+    let clock = observe
+        .then(|| observer::ClockControl::new(directory.path(), first_journal.directory.clone()));
+    let _clock_owner = clock.as_ref().map(|clock| {
+        *control.clock_control.lock().unwrap() = Some(Arc::clone(clock));
+        clock.spawn_owner()
+    });
     let first_relay = RelayServer::bind().await;
     let first_authority = driver_authority(1, first_relay.http_base());
-    let first_worker = run_worker(
+    let mut first_worker = spawn_worker_process(
+        test_name,
         first_relay.ws_url("worker"),
         control.workers.get(&1).unwrap(),
         &fixture.inventory,
-        fixture.run_key.clone(),
+        &fixture.run_key,
         1,
         matches!(
             interruption,
@@ -970,12 +1179,16 @@ async fn actual_driver_replacement_case(
             input_object_id: None,
             until: super::worker_execution::HeldAttemptUntil::UntilWorkerLoss,
         }),
-    );
+        first_journal.clone(),
+    )
+    .await;
+    let first_pid = first_worker.id().expect("first OS worker PID");
     let first_driver = super::driver::run_remote_driver(
         RemoteDriverConfig {
             authority: first_authority,
             endpoint_identity_file: identity_path.clone(),
             ready_v1: false,
+            clock_parent: clock.as_ref().map(|clock| clock.parent(1)),
         },
         control.clone(),
     );
@@ -984,8 +1197,18 @@ async fn actual_driver_replacement_case(
         ReplacementInterruption::AnalysisCheckpointAckLost
             | ReplacementInterruption::AnalysisCheckpointRejectedBeforeStore
     ) {
-        let generation =
-            drive_generation(first_relay.forward_pair(), first_worker, first_driver).await;
+        let generation = drive_generation(
+            first_relay.forward_pair(),
+            async {
+                first_worker
+                    .wait_and_retire_tree()
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))
+            },
+            first_driver,
+        )
+        .await;
         let expected = match interruption {
             ReplacementInterruption::AnalysisCheckpointAckLost => {
                 "injected checkpoint acknowledgement loss"
@@ -1023,11 +1246,33 @@ async fn actual_driver_replacement_case(
     } else {
         interrupt_generation_after_commit(
             first_relay.forward_pair(),
-            first_worker,
+            async {
+                first_worker
+                    .wait_and_retire_tree()
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))
+            },
             first_driver,
             control.recovery_committed.notified(),
         )
         .await;
+    }
+    first_worker
+        .terminate_tree()
+        .await
+        .expect("first worker process tree retired");
+    if let Some(clock) = &clock {
+        clock.assert_worker_started_after_barrier(&fixture.run_key);
+    }
+    control.record_retired_worker(
+        1,
+        first_pid,
+        &first_journal,
+        runmat_process_host::clock::observe_monotonic().unwrap(),
+    );
+    if observe {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
 
     let checkpoint_after_loss = {
@@ -1077,7 +1322,17 @@ async fn actual_driver_replacement_case(
                 )
             })
             .collect::<Vec<_>>();
-        Some((task_id, pool.test_snapshot().clone(), programs))
+        let walls = pool
+            .test_snapshot()
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.committed.is_some())
+            .filter_map(|(id, _)| {
+                pool.test_completed_task_wall_millis(*id)
+                    .map(|wall| (*id, wall))
+            })
+            .collect::<BTreeMap<_, _>>();
+        Some((task_id, pool.test_snapshot().clone(), programs, walls))
     } else {
         None
     };
@@ -1122,13 +1377,20 @@ async fn actual_driver_replacement_case(
         ))
         .await;
     }
+    let second_journal = worker_journal(
+        directory.path(),
+        control.workers.get(&2).unwrap(),
+        2,
+        clock_domain_nonce,
+    );
     let second_relay = RelayServer::bind().await;
     let second_authority = driver_authority(2, second_relay.http_base());
-    let second_worker = run_worker(
+    let mut second_worker = spawn_worker_process(
+        test_name,
         second_relay.ws_url("worker"),
         control.workers.get(&2).unwrap(),
         &fixture.inventory,
-        fixture.run_key.clone(),
+        &fixture.run_key,
         2,
         matches!(
             interruption,
@@ -1147,23 +1409,43 @@ async fn actual_driver_replacement_case(
                 super::worker_execution::HeldAttemptUntil::UntilWorkerLoss
             },
         }),
-    );
+        second_journal.clone(),
+    )
+    .await;
+    let second_pid = second_worker.id().expect("second OS worker PID");
     let second_driver = super::driver::run_remote_driver(
         RemoteDriverConfig {
             authority: second_authority,
             endpoint_identity_file: identity_path.clone(),
             ready_v1: false,
+            clock_parent: clock.as_ref().map(|clock| clock.parent(2)),
         },
         control.clone(),
     );
     if interruption == ReplacementInterruption::WorkloadRetryBudgetExhaustedAfterRestore {
         interrupt_generation_after_commit(
             second_relay.forward_pair(),
-            second_worker,
+            async {
+                second_worker
+                    .wait_and_retire_tree()
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))
+            },
             second_driver,
             control.recovery_committed.notified(),
         )
         .await;
+        second_worker
+            .terminate_tree()
+            .await
+            .expect("second worker process tree retired");
+        control.record_retired_worker(
+            2,
+            second_pid,
+            &second_journal,
+            runmat_process_host::clock::observe_monotonic().unwrap(),
+        );
         assert!(
             control
                 .state
@@ -1179,25 +1461,49 @@ async fn actual_driver_replacement_case(
             .clone()
             .expect("second active-attempt checkpoint");
         let third_relay = RelayServer::bind().await;
-        let third_worker = run_worker(
+        let third_journal = worker_journal(
+            directory.path(),
+            control.workers.get(&3).unwrap(),
+            3,
+            clock_domain_nonce,
+        );
+        let mut third_worker = spawn_worker_process(
+            test_name,
             third_relay.ws_url("worker"),
             control.workers.get(&3).unwrap(),
             &fixture.inventory,
-            fixture.run_key.clone(),
+            &fixture.run_key,
             3,
             None,
-        );
+            third_journal,
+        )
+        .await;
         let third_driver = super::driver::run_remote_driver(
             RemoteDriverConfig {
                 authority: driver_authority(3, third_relay.http_base()),
                 endpoint_identity_file: identity_path,
                 ready_v1: false,
+                clock_parent: None,
             },
             control.clone(),
         );
-        drive_generation(third_relay.forward_pair(), third_worker, third_driver)
+        drive_generation(
+            third_relay.forward_pair(),
+            async {
+                third_worker
+                    .wait_and_retire_tree()
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))
+            },
+            third_driver,
+        )
+        .await
+        .expect("exhausted third driver must publish a terminal failure");
+        third_worker
+            .terminate_tree()
             .await
-            .expect("exhausted third driver must publish a terminal failure");
+            .expect("third worker process tree retired");
         assert_exhausted_replacement(
             &control,
             &checkpoint_after_loss,
@@ -1206,8 +1512,22 @@ async fn actual_driver_replacement_case(
         );
         return None;
     }
-    let driver_result =
-        drive_generation(second_relay.forward_pair(), second_worker, second_driver).await;
+    let driver_result = drive_generation(
+        second_relay.forward_pair(),
+        async {
+            second_worker
+                .wait_and_retire_tree()
+                .await
+                .map(|_| ())
+                .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))
+        },
+        second_driver,
+    )
+    .await;
+    second_worker
+        .terminate_tree()
+        .await
+        .expect("second worker process tree retired");
     if let Err(error) = driver_result {
         let state = control.state.lock().unwrap();
         let checkpoint = state.latest_checkpoint.as_ref().map(|id| {
@@ -1403,7 +1723,7 @@ async fn actual_driver_replacement_case(
             state.bootstrap_checkpoints.clone(),
         )
     };
-    if let Some((task_id, before, prefix_programs)) = committed_before {
+    if let Some((task_id, before, prefix_programs, prefix_walls)) = committed_before {
         let state = control.state.lock().unwrap();
         let final_id = state
             .latest_checkpoint
@@ -1439,6 +1759,13 @@ async fn actual_driver_replacement_case(
             .iter()
             .filter(|(_, task)| task.committed.is_some())
         {
+            if let Some(original_wall) = prefix_walls.get(committed_id) {
+                assert_eq!(
+                    pool.test_completed_task_wall_millis(*committed_id),
+                    Some(*original_wall),
+                    "committed prefix lost its original measured wall on cached replay"
+                );
+            }
             assert_eq!(
                 after.tasks.get(committed_id),
                 Some(committed),
@@ -1685,6 +2012,7 @@ fn assert_replacement_result(
 
 #[path = "driver_replacement_tests/fixture.rs"]
 mod fixture;
+mod observer;
 #[path = "driver_replacement_tests/relay.rs"]
 mod relay;
 #[path = "driver_replacement_tests/thermal.rs"]

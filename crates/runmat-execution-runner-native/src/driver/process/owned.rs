@@ -13,6 +13,18 @@ pub(crate) trait OwnedProcessControl: Send + Sync {
     fn cancellation_reason(&self) -> Option<runmat_execution::CancellationReason>;
     fn record_progress(&self, progress: crate::protocol::ProgramProgress);
     fn graph_authority(&self) -> Option<&GraphAttemptAuthority>;
+    fn record_console(
+        &self,
+        _record: &runmat_execution::console::ConsoleRecord,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn finish_console(
+        &self,
+        _receipt: &runmat_execution::console::ConsoleReceipt,
+    ) -> Result<(), String> {
+        Ok(())
+    }
     fn execute_collective(
         &self,
         _request: runmat_execution::CollectiveRequest,
@@ -90,7 +102,18 @@ pub(super) async fn run_process(
     }
     let console_controls = match &request {
         WorkerLaunchRequest::Reserved(request) => request.request().console,
-        WorkerLaunchRequest::Direct(_) | WorkerLaunchRequest::StagedGraph(_) => None,
+        WorkerLaunchRequest::StagedGraph(_) => {
+            completion
+                .graph_authority()
+                .ok_or_else(|| {
+                    TransferFailure::Infrastructure(
+                        "Graph console has no admitted authority".into(),
+                    )
+                })?
+                .invocation_controls
+                .console
+        }
+        WorkerLaunchRequest::Direct(_) => None,
     };
     let mut console_receiver = console_controls
         .map(runmat_execution::console::ConsoleReceiver::new)
@@ -292,15 +315,17 @@ pub(super) async fn run_process(
                         .map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
                 }
                 WorkerProcessMessage::Console { record } => {
-                    console_receiver
+                    let receiver = console_receiver
                         .as_mut()
                         .ok_or_else(|| {
                             TransferFailure::Infrastructure(
                                 "worker emitted unrequested console evidence".into(),
                             )
-                        })?
-                        .push(record)
+                        })?;
+                    receiver.push(record)
                         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+                    completion.record_console(receiver.records().last().expect("retained console record"))
+                        .map_err(TransferFailure::Infrastructure)?;
                 }
                 WorkerProcessMessage::Completed {
                     response,
@@ -316,6 +341,9 @@ pub(super) async fn run_process(
                                 "worker console receipt differs from requested controls".into(),
                             ))
                         }
+                    }
+                    if let Some(receipt) = &receipt {
+                        completion.finish_console(receipt).map_err(TransferFailure::Infrastructure)?;
                     }
                     console_receipt = receipt;
                     break response;

@@ -49,11 +49,16 @@ diagnostics; it is not a general solver for arbitrary CAD acoustics.
 | --- | --- | --- |
 | `acoustic static` | Static pressure state | Typed contract; reduced component is harmonic, not static |
 | `acoustic modal` | Positive mode count; acoustic modes state | Canonical Tet4/Tet10 pressure eigen-solve; publishes `modal.frequency_hz`, `modal.eigenvalue` and one `acoustic.mode_shape.<mode>` field per mode |
-| `acoustic transient` | Time samples; acoustic pressure state | Canonical Tet4/Tet10 Newmark pressure solve; standalone studies publish the final pressure field, with acoustic energy and absorbed boundary energy over the full time grid. Authored output declarations are rejected by standalone modal/transient admission. |
+| `acoustic transient` | Time samples; acoustic pressure state | Canonical Tet4/Tet10 Newmark pressure solve; standalone studies publish retained nodal pressure snapshots, time and energy series, and authored native nodal pressure histories sampled over time. Without an authored history, only the final pressure snapshot is retained. |
 | `acoustic harmonic` | Frequency samples and complex pressure | Canonical Tet4/Tet10 complex pressure; one certified sparse LU per frequency solves and proves the operator nonsingular; publishes `acoustic.pressure`, `acoustic.particle_velocity` and `acoustic.intensity` at every frequency, and authored outputs (pressure, `level` in dB re 20 µPa) at the sampled frequencies |
 | `acoustic nonlinear` | Load-factor domain | Typed contract only |
 
 No unsupported procedure is approximated by silently selecting the reduced harmonic component.
+Standalone cavity-mode studies do not admit authored observations. Standalone pressure transients
+admit history outputs of scalar `acoustic_pressure` at native nodes with every-accepted-step,
+explicit-time, or time-interval sampling. Final-only history and other observation kinds,
+locations, recoveries, and sampling domains are rejected. Explicit times must uniquely resolve
+to accepted transient grid points; the original authored time labels remain in the history.
 
 ## How do I describe an acoustic cavity modal study?
 

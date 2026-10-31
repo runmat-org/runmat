@@ -86,21 +86,21 @@ pub(super) struct RemoteMeshingHost {
 }
 
 #[cfg(all(test, feature = "occt-native"))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(super) enum HeldAttemptUntil {
     UntilWorkerLoss,
     UntilCancellation,
 }
 
 #[cfg(all(test, feature = "occt-native"))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(super) enum HeldAttemptTarget {
     Analysis(runmat_analysis_fea::execution::AnalysisWorkKind),
     ExactMeshingAdmission,
 }
 
 #[cfg(all(test, feature = "occt-native"))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(super) struct HeldWorkloadAttempt {
     pub(super) target: HeldAttemptTarget,
     pub(super) input_object_id: Option<runmat_execution::identity::ValueId>,
@@ -263,7 +263,12 @@ async fn execute_direct(
             })
         {
             match held.until {
-                HeldAttemptUntil::UntilWorkerLoss => std::future::pending::<()>().await,
+                HeldAttemptUntil::UntilWorkerLoss => {
+                    while !cancellation.is_cancelled() {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    return failure("held workload attempt retired with its worker owner");
+                }
                 HeldAttemptUntil::UntilCancellation => {
                     while !cancellation.is_cancelled() {
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;

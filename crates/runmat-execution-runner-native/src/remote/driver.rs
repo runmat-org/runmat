@@ -95,7 +95,7 @@ pub(super) async fn run_remote_driver(
     .await?;
     let program_identity = admitted.checkpoint_identity()?;
     let input_locations = admitted.input_locations().to_vec();
-    let (mut checkpoint_sequence, closure_catalog, pool_catalog) =
+    let (mut checkpoint_sequence, closure_catalog, pool_catalog, original_checkpoint_identity) =
         match bootstrap.checkpoint.as_ref() {
             Some(download) => {
                 if download.kind != "checkpoint" {
@@ -117,13 +117,19 @@ pub(super) async fn run_remote_driver(
                     &bootstrap.project_revision,
                     program_identity,
                 )?;
+                let source_driver_fence = checkpoint.source_driver_fence();
                 (
                     checkpoint.sequence,
                     checkpoint.closure_catalog,
                     checkpoint.pool_catalog,
+                    Some((
+                        download.artifact_id.clone(),
+                        download.ciphertext_digest.clone(),
+                        source_driver_fence,
+                    )),
                 )
             }
-            None => (0, None, None),
+            None => (0, None, None, None),
         };
     let mut input_objects = Vec::with_capacity(input_locations.len());
     for location in input_locations {
@@ -157,7 +163,7 @@ pub(super) async fn run_remote_driver(
         ),
         None => None,
     };
-    let recovered_pool = match pool_catalog.as_ref() {
+    let mut recovered_pool = match pool_catalog.as_ref() {
         Some(location) => {
             if bootstrap.desired_worker_count == 0 {
                 return Err(protocol(
@@ -176,6 +182,20 @@ pub(super) async fn run_remote_driver(
         }
         None => None,
     };
+    if let Some(pool) = recovered_pool.as_mut() {
+        let (artifact_id, ciphertext_digest, source_fence) = original_checkpoint_identity
+            .as_ref()
+            .ok_or_else(|| protocol("restored pool lacks original checkpoint identity"))?;
+        pool.reconcile_closed_clocks(
+            control.as_ref(),
+            &config.authority,
+            checkpoint_sequence,
+            artifact_id,
+            ciphertext_digest,
+            *source_fence,
+        )
+        .await?;
+    }
     if let Some(recovered) = &recovered {
         input_objects.extend(recovered.objects.iter().cloned());
         if !input_objects
@@ -275,6 +295,7 @@ pub(super) async fn run_remote_driver(
                 resources: bootstrap.worker_resources,
                 cancellation: cancellation_receiver,
                 ready_v1: config.ready_v1,
+                clock_parent: config.clock_parent.clone(),
             })
             .await
         }
@@ -680,17 +701,50 @@ pub(super) async fn store_driver_checkpoint(
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
     checkpoint: &RemoteDriverCheckpoint,
 ) -> NativeExecutionResult<String> {
+    Ok(
+        store_driver_checkpoint_with_identity(control, authority, run_key, checkpoint)
+            .await?
+            .artifact_id,
+    )
+}
+
+pub(super) struct StoredDriverCheckpoint {
+    pub(super) artifact_id: String,
+    pub(super) ciphertext_digest: String,
+}
+
+pub(super) async fn store_driver_checkpoint_with_identity(
+    control: &dyn DriverControlPlane,
+    authority: &DriverAuthority,
+    run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
+    checkpoint: &RemoteDriverCheckpoint,
+) -> NativeExecutionResult<StoredDriverCheckpoint> {
     let plaintext = checkpoint.canonical_bytes()?;
-    store_encrypted(
-        control,
-        authority,
+    let ciphertext = seal_object(
         run_key,
-        DriverArtifactKind::Checkpoint,
+        &authority.run_id,
         EncryptionPurpose::Checkpoint,
         &plaintext,
-        Some((checkpoint.sequence, checkpoint.phase.disposition())),
-    )
-    .await
+    )?;
+    let digest = ciphertext_digest(&ciphertext);
+    let artifact = control
+        .store_artifact(
+            authority,
+            StoreDriverArtifact {
+                kind: DriverArtifactKind::Checkpoint,
+                ciphertext_digest: digest.clone(),
+                ciphertext: &ciphertext,
+                media_type: MEDIA_TYPE.into(),
+                retain_for_seconds: RETAIN_FOR_SECONDS,
+                checkpoint: Some((checkpoint.sequence, checkpoint.phase.disposition())),
+            },
+        )
+        .await
+        .map_err(protocol)?;
+    Ok(StoredDriverCheckpoint {
+        artifact_id: artifact.artifact_id,
+        ciphertext_digest: digest,
+    })
 }
 
 pub(super) async fn store_encrypted(

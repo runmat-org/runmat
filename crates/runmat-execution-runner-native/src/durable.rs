@@ -8,8 +8,8 @@ use runmat_runtime::execution::ExecutionServiceError;
 use runmat_value::{SharedJobHandle, Value};
 
 use crate::supervisor::{
-    GraphBatchSubmission, LocalJobState, LocalJobWorkloadKind, LocalSupervisorClient,
-    ProgramBatchSubmission,
+    GraphBatchSubmission, JobSubmissionDisposition, LocalJobState, LocalJobWorkloadKind,
+    LocalSupervisorClient, ProgramBatchSubmission,
 };
 
 mod startup;
@@ -53,7 +53,7 @@ pub(crate) struct DurableJobBridge {
 pub(crate) struct SubmittedGraphJob {
     pub handle: JobHandle,
     pub retain_until_unix_millis: u64,
-    pub created_new: bool,
+    pub disposition: JobSubmissionDisposition,
 }
 
 const AWAIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -232,10 +232,10 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
             } => {
                 let result = runtime
                     .block_on(submit_original_graph(&client, *program, options))
-                    .map(|(record, created_new)| SubmittedGraphJob {
+                    .map(|(record, disposition)| SubmittedGraphJob {
                         handle: record.handle,
                         retain_until_unix_millis: record.retain_until_unix_millis,
-                        created_new,
+                        disposition,
                     })
                     .map_err(service_error);
                 let _ = response.send(result);
@@ -377,7 +377,7 @@ async fn submit_original_graph(
     client: &LocalSupervisorClient,
     program: runmat_execution_artifact::GraphExecutionRequest,
     options: runmat_runtime::execution::DurableJobOptions,
-) -> crate::NativeExecutionResult<(crate::supervisor::LocalJobRecord, bool)> {
+) -> crate::NativeExecutionResult<(crate::supervisor::LocalJobRecord, JobSubmissionDisposition)> {
     use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
     let context = client
         .execution_context(options.idempotency_key.as_deref())
@@ -390,6 +390,16 @@ async fn submit_original_graph(
     let callable = program
         .scheduler_callable()
         .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))?;
+    let invocation = program.invocation_controls.clone().unwrap_or_default();
+    // The high-level caller supplies capacity and additional worker constraints.
+    // Derive decoder requirements from the materialized program before the
+    // supervisor admits this original task; do not change any capacity grant.
+    let mut resources = options.resources;
+    resources
+        .required_capabilities
+        .extend(crate::graph_submission::required_capabilities(
+            program.schema_version,
+        )?);
     let task = runmat_execution_runner::TaskSubmission {
         request: TaskRequest {
             id: runmat_execution::TaskId::derive(&[
@@ -406,10 +416,10 @@ async fn submit_original_graph(
             host,
             invocation_context: program.context.clone(),
             inputs: Vec::new(),
-            environment: runmat_execution::EnvironmentSnapshot::default(),
-            console: None,
+            environment: invocation.environment,
+            console: invocation.console,
             outputs: program.recipe.outputs.clone(),
-            resources: options.resources,
+            resources,
             retry: RetryPolicy::Never,
             deadline_unix_millis: None,
         },
@@ -430,7 +440,7 @@ async fn submit_original(
     client: &LocalSupervisorClient,
     program: runmat_execution_artifact::ProgramExecutionRequest,
     options: runmat_runtime::execution::DurableJobOptions,
-) -> crate::NativeExecutionResult<(crate::supervisor::LocalJobRecord, bool)> {
+) -> crate::NativeExecutionResult<(crate::supervisor::LocalJobRecord, JobSubmissionDisposition)> {
     use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
     use runmat_execution::{OutputContract, TaskId};
     let context = client

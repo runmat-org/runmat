@@ -449,6 +449,18 @@ async fn execute_program_request_in_context(
             }
         }
     };
+    if let Some(controls) = request.console {
+        let Some(runtime) = &runtime else {
+            return ProgramExecutionResponse::Failure {
+                message: "requested console capture requires an owning runtime host".into(),
+            };
+        };
+        if let Err(error) = runtime.validate_invocation_console(Some(controls)) {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected the invocation console: {error}"),
+            };
+        }
+    }
     if let Err(error) = request.recipe.program_revision.validate_current_compiler() {
         return ProgramExecutionResponse::Failure {
             message: format!("worker rejected compiler-incompatible program: {error}"),

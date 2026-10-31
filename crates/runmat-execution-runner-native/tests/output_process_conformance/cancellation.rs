@@ -24,7 +24,7 @@ pub(super) async fn blocked_worker() {
     let reference = launch["staged_graph_v10"]
         .as_object()
         .expect("actual parent-issued staged graph reference");
-    assert_eq!(reference.len(), 6);
+    assert_eq!(reference.len(), 7);
     for field in [
         "artifact_id",
         "stored_digest",
@@ -32,12 +32,16 @@ pub(super) async fn blocked_worker() {
         "assignment",
         "context",
         "requested_outputs",
+        "resources",
     ] {
         assert!(
             !reference[field].is_null(),
             "missing launch reference {field}"
         );
     }
+    let resources: runmat_execution::resource::ResourceRequest =
+        serde_json::from_value(reference["resources"].clone()).unwrap();
+    resources.validate().unwrap();
     let record = runmat_execution::console::ConsoleRecord {
         sequence: 1,
         stream: runmat_execution::console::ConsoleStream::Stdout,

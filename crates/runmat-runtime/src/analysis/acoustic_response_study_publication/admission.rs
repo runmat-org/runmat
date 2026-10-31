@@ -1,6 +1,10 @@
 //! Authenticate the complete retained closure before writing public artifacts.
 use super::*;
 use runmat_analysis_core::{AnalysisProcedure, PhysicsFamily};
+use runmat_analysis_fea::{
+    execution::{AccuracySourceKind, ObservationHistorySourceContext},
+    results::observation::{ObservationFieldCatalogSource, ObservationPublicationEntry},
+};
 
 pub(super) fn validate(
     completed: &AcousticResponseStudyCompletion,
@@ -42,10 +46,9 @@ pub(super) fn validate(
             step.procedure,
             AnalysisProcedure::ModalExtraction | AnalysisProcedure::TransientResponse
         )
-        || !step.observations.is_empty()
         || !completed.compiled.outputs.is_empty()
     {
-        return Err("acoustic response publication requires exact singleton workload without unsupported observations".into());
+        return Err("acoustic response publication requires exact singleton workload".into());
     }
     validate_options(options, completed.workload.solver.relative_tolerance())?;
     let plan = runmat_analysis_fea::study::plan_acoustic_response_study(
@@ -66,6 +69,69 @@ pub(super) fn validate(
         .numerical_receipt
         .validate_against(&completed.workload, &completed.result, mesh)
         .map_err(|e| e.to_string())?;
+    match &completed.observation_catalog {
+        Some(catalog) if !step.observations.is_empty() => {
+            catalog
+                .validate_for(step, ObservationHistorySourceContext::VolumeMesh { mesh })
+                .map_err(|error| error.to_string())?;
+            catalog
+                .validate_source_result(
+                    completed.result.producer(),
+                    AccuracySourceKind::AcousticResponse,
+                    completed
+                        .result
+                        .source_result_identity()
+                        .map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?;
+            let ObservationFieldCatalogSource::VolumeMeshRecovery {
+                recovery_request, ..
+            } = catalog.source().source()
+            else {
+                return Err(
+                    "acoustic response observations require native pressure recovery".into(),
+                );
+            };
+            if recovery_request.as_ref()
+                != &completed
+                    .result
+                    .native_field_request_from_result()
+                    .map_err(|error| error.to_string())?
+            {
+                return Err(
+                    "acoustic response observation source differs from retained pressure".into(),
+                );
+            }
+            let published = catalog
+                .entries()
+                .iter()
+                .filter_map(|entry| match entry {
+                    ObservationPublicationEntry::History(history) => Some(&history.history),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if published.len() != completed.observation_histories.len()
+                || published
+                    .iter()
+                    .zip(&completed.observation_histories)
+                    .any(|(expected, history)| *expected != history.manifest())
+            {
+                return Err(
+                    "acoustic response authored history publication differs from cold history"
+                        .into(),
+                );
+            }
+        }
+        None if step.observations.is_empty()
+            && completed.observation_results.is_empty()
+            && completed.observation_histories.is_empty()
+            && completed.series_reductions.is_empty() => {}
+        _ => {
+            return Err(
+                "acoustic response authored observations require their complete catalog".into(),
+            )
+        }
+    }
     let request = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
         completed.result.producer(),
         runmat_analysis_fea::execution::AccuracySourceKind::AcousticResponse,
@@ -73,7 +139,7 @@ pub(super) fn validate(
             .result
             .source_result_identity()
             .map_err(|e| e.to_string())?,
-        None,
+        completed.observation_catalog.as_ref(),
         step.accuracy.clone(),
     )
     .map_err(|e| e.to_string())?;

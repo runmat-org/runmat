@@ -22,6 +22,7 @@ pub struct RemoteExactMeshingExecutor {
     policy: MeshingExecutionPolicy,
     pending: HashMap<Digest, ValueRef>,
     local_store: FilesystemObjectStore,
+    inventory_limits: runmat_execution_artifact::object::ObjectInventoryLimits,
     _directory: tempfile::TempDir,
     progress: Vec<ProgramProgress>,
 }
@@ -32,6 +33,7 @@ impl RemoteExactMeshingExecutor {
         artifact_access: ArtifactAccess,
         policy: MeshingExecutionPolicy,
         maximum_object_bytes: u64,
+        inventory_limits: runmat_execution_artifact::object::ObjectInventoryLimits,
     ) -> Result<Self, MeshingStageExecutionError> {
         artifact_access.validate().map_err(stage_error)?;
         policy.validate()?;
@@ -40,7 +42,11 @@ impl RemoteExactMeshingExecutor {
                 "remote pool value scope differs from meshing artifact authority",
             ));
         }
-        if maximum_object_bytes == 0 {
+        if maximum_object_bytes == 0
+            || inventory_limits.max_object_bytes == 0
+            || inventory_limits.max_objects == 0
+            || inventory_limits.max_total_bytes == 0
+        {
             return Err(MeshingStageExecutionError::new(
                 "remote meshing object bound must be nonzero",
             ));
@@ -49,15 +55,18 @@ impl RemoteExactMeshingExecutor {
             .prefix("runmat-remote-meshing-")
             .tempdir()
             .map_err(stage_error)?;
-        let local_store =
-            FilesystemObjectStore::open(directory.path().join("objects"), maximum_object_bytes)
-                .map_err(stage_error)?;
+        let local_store = FilesystemObjectStore::open(
+            directory.path().join("objects"),
+            maximum_object_bytes.min(inventory_limits.max_object_bytes),
+        )
+        .map_err(stage_error)?;
         Ok(Self {
             pool,
             artifact_access,
             policy,
             pending: HashMap::new(),
             local_store,
+            inventory_limits,
             _directory: directory,
             progress: Vec::new(),
         })
@@ -115,8 +124,7 @@ impl RemoteExactMeshingExecutor {
             return Ok(());
         }
         let bytes = self
-            .local_store
-            .read_verified(reference.logical_digest)
+            .read_verified_bounded(reference.logical_digest, reference.encoded_length)
             .map_err(stage_error)?
             .ok_or_else(|| {
                 MeshingStageExecutionError::new(format!(
@@ -172,9 +180,11 @@ impl RemoteExactMeshingExecutor {
         &mut self,
         stage: &PlannedMeshingStage,
         revision: ProgramRevision,
+        wave: &mut crate::remote::RemoteObservedWave,
     ) -> Result<crate::RemoteTaskCompletion, MeshingStageExecutionError> {
         let program = self.prepare_stage(stage, revision)?;
         let submission = self.submission(stage, &program)?;
+        wave.arm(&[submission.request.id]).map_err(stage_error)?;
         self.pool.submit(submission, program).map_err(stage_error)
     }
 
@@ -183,17 +193,45 @@ impl RemoteExactMeshingExecutor {
         completion: crate::RemoteTaskCompletion,
         stage: &PlannedMeshingStage,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
+        let reused_invocation = completion.reused_invocation();
         let (result, progress) = completion.wait_with_progress().await;
         let progress_count = progress.len();
         self.progress.extend(progress);
-        result.map_err(|error| {
+        let success = result.map_err(|error| {
             MeshingStageExecutionError::new(format!(
                 "remote {:?} partition {}/{} failed after {progress_count} progress records: {error}",
                 stage.host().workload.stage,
                 stage.host().workload.partition.partition_index,
                 stage.host().workload.partition.partition_count,
             ))
-        })
+        })?;
+        let Some(invocation) = reused_invocation else {
+            return Ok(success);
+        };
+        let mut identity = b"runmat-accepted-meshing-invocation/v1\0".to_vec();
+        identity.extend_from_slice(invocation.bytes());
+        let identity = StableDigest::from_bytes(*Digest::sha256(identity).bytes());
+        let source = Arc::clone(&self.pool);
+        let inventory_limits = self.inventory_limits;
+        // CacheExport skips objects already held by the pool, so only the new
+        // observation is written; the accepted numerical payload is not copied.
+        let rebound = runmat_meshing_execution::rebind_committed_meshing_stage(
+            source.as_ref(),
+            self,
+            stage.host(),
+            &success,
+            identity,
+            inventory_limits,
+        )
+        .map_err(stage_error)?;
+        // Publish locally derived observations into the pool before exposing
+        // their references. A terminal stage has no later input-registration
+        // phase, and its executor-local store does not outlive the DAG.
+        for reference in rebound.result_objects() {
+            self.register_reference(reference)?;
+            self.pending.remove(&reference.logical_digest);
+        }
+        Ok(rebound)
     }
 }
 
@@ -261,8 +299,16 @@ impl ExactMeshingDagExecutor for RemoteExactMeshingExecutor {
         stage: &'a PlannedMeshingStage,
         revision: ProgramRevision,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
-        let completion = self.submit_stage(stage, revision).await?;
-        self.finish(completion, stage).await
+        let planned = runmat_meshing_execution::meshing_task_id(self.pool.scope_id(), stage.host())
+            .map_err(stage_error)?;
+        let mut wave = crate::remote::RemoteObservedWave::begin(Arc::clone(&self.pool), &[planned])
+            .await
+            .map_err(stage_error)?;
+        let completion = self.submit_stage(stage, revision, &mut wave).await?;
+        wave.checkpoint().await.map_err(stage_error)?;
+        let success = self.finish(completion, stage).await?;
+        wave.close().await.map_err(stage_error)?;
+        Ok(success)
     }
 
     async fn execute_stages<'a>(
@@ -270,14 +316,37 @@ impl ExactMeshingDagExecutor for RemoteExactMeshingExecutor {
         stages: &'a [PlannedMeshingStage],
         revision: ProgramRevision,
     ) -> Result<Vec<AttemptSuccess>, MeshingStageExecutionError> {
-        let mut completions = Vec::with_capacity(stages.len());
-        for stage in stages {
-            completions.push(self.submit_stage(stage, revision.clone()).await?);
+        if stages.is_empty() {
+            return Ok(Vec::new());
         }
+        let planned = stages
+            .iter()
+            .map(|stage| {
+                runmat_meshing_execution::meshing_task_id(self.pool.scope_id(), stage.host())
+                    .map_err(stage_error)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut wave = crate::remote::RemoteObservedWave::begin(Arc::clone(&self.pool), &planned)
+            .await
+            .map_err(stage_error)?;
+        let mut prepared = Vec::with_capacity(stages.len());
+        for stage in stages {
+            let program = self.prepare_stage(stage, revision.clone())?;
+            let submission = self.submission(stage, &program)?;
+            prepared.push((program, submission));
+        }
+        let task_ids = prepared
+            .iter()
+            .map(|(_, submission)| submission.request.id)
+            .collect::<Vec<_>>();
+        wave.arm(&task_ids).map_err(stage_error)?;
+        let completions = self.pool.submit_graph(prepared).map_err(stage_error)?;
+        wave.checkpoint().await.map_err(stage_error)?;
         let mut successes = Vec::with_capacity(completions.len());
         for (completion, stage) in completions.into_iter().zip(stages) {
             successes.push(self.finish(completion, stage).await?);
         }
+        wave.close().await.map_err(stage_error)?;
         Ok(successes)
     }
 }

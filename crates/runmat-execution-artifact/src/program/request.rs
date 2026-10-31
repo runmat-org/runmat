@@ -25,6 +25,7 @@ pub use runmat_execution::value::{
     GRAPH_REQUEST_SCHEMA_V11 as GRAPH_EXECUTION_REQUEST_SCHEMA_V11,
     GRAPH_REQUEST_SCHEMA_V12 as GRAPH_EXECUTION_REQUEST_SCHEMA_V12,
     GRAPH_REQUEST_SCHEMA_V13 as GRAPH_EXECUTION_REQUEST_SCHEMA_V13,
+    GRAPH_REQUEST_SCHEMA_V14 as GRAPH_EXECUTION_REQUEST_SCHEMA_V14,
 };
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION: u16 = PROGRAM_EXECUTION_REQUEST_SCHEMA_V8;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
@@ -35,8 +36,8 @@ mod graph;
 pub use graph::{
     AdmittedGraphUnitBundle, ArchiveAdmittedCapturedGraphCode,
     ArchiveAdmittedGraphExecutionRequest, CapturedGraphCode, GraphExecutionRequest,
-    GraphInvocationRoots, GraphResponseAuthority, ValidatedCapturedGraphCode,
-    ValidatedGraphExecutionRequest,
+    GraphInvocationControls, GraphInvocationRoots, GraphResponseAuthority,
+    ValidatedCapturedGraphCode, ValidatedGraphExecutionRequest,
 };
 
 /// Direct V8 requests keep their exact public wire shape. Graph V10 is a
@@ -80,7 +81,8 @@ pub fn admit_remote_program_object_bytes(bytes: &[u8]) -> ArtifactResult<()> {
         GRAPH_EXECUTION_REQUEST_SCHEMA_V10
         | GRAPH_EXECUTION_REQUEST_SCHEMA_V11
         | GRAPH_EXECUTION_REQUEST_SCHEMA_V12
-        | GRAPH_EXECUTION_REQUEST_SCHEMA_V13 => {
+        | GRAPH_EXECUTION_REQUEST_SCHEMA_V13
+        | GRAPH_EXECUTION_REQUEST_SCHEMA_V14 => {
             let request: GraphExecutionRequest = serde_json::from_slice(bytes)
                 .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
             request.validate()
@@ -109,7 +111,8 @@ pub fn admit_worker_program_request_bytes(bytes: &[u8]) -> ArtifactResult<()> {
         GRAPH_EXECUTION_REQUEST_SCHEMA_V10
         | GRAPH_EXECUTION_REQUEST_SCHEMA_V11
         | GRAPH_EXECUTION_REQUEST_SCHEMA_V12
-        | GRAPH_EXECUTION_REQUEST_SCHEMA_V13 => {
+        | GRAPH_EXECUTION_REQUEST_SCHEMA_V13
+        | GRAPH_EXECUTION_REQUEST_SCHEMA_V14 => {
             let request: GraphExecutionRequest =
                 serde_json::from_slice(bytes).map_err(|error| {
                     ArtifactError::Invalid(format!("invalid graph worker request: {error}"))

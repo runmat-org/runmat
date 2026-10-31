@@ -56,15 +56,23 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
             &sandbox,
             "https://server.test",
             &bootstrap,
+            [1; 16],
+            "fixture-node-identity",
         )
         .await
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let mut prepare =
+        |_: &str, _: Option<&runmat_node_agent::allocation::WorkerRetirementScope>| Ok(());
     let exceeded = processes
-        .enforce_local_limits(chrono::Utc::now().timestamp_millis())
+        .enforce_local_limits(chrono::Utc::now().timestamp_millis(), &mut prepare)
         .await
         .unwrap();
-    assert_eq!(exceeded, vec!["lease-limit"]);
+    assert_eq!(exceeded.len(), 1);
+    assert_eq!(exceeded[0].0, "lease-limit");
+    processes
+        .commit_retired(&["lease-limit".to_string()])
+        .unwrap();
     assert_eq!(processes.active_count(), 0);
 }
 
@@ -131,12 +139,22 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
                 runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
             )
             .unwrap(),
+            &runmat_process_host::ProcessSpawnEvidence::default(),
+            [3; 16],
         )
         .await
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut prepare =
+            |_: &str, _: Option<&runmat_node_agent::allocation::WorkerRetirementScope>| Ok(());
         loop {
-            if !processes.reap_finished().unwrap().is_empty() {
+            let retired = processes.reap_finished(&mut prepare).await.unwrap();
+            if !retired.is_empty() {
+                let ids = retired
+                    .iter()
+                    .map(|(allocation_id, _)| allocation_id.clone())
+                    .collect::<Vec<_>>();
+                processes.commit_retired(&ids).unwrap();
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;

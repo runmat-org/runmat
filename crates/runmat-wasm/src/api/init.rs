@@ -84,10 +84,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     }
 
     wasm_registry::register_all();
-    let builtin_count = runmat_builtins::builtin_functions().len();
-    log::info!("RunMat wasm: builtins registered ({builtin_count})");
-    #[cfg(target_arch = "wasm32")]
-    web_sys::console::log_1(&format!("RunMat wasm: builtins registered ({builtin_count})").into());
+    log::debug!("RunMat wasm: creating execution session");
 
     config.apply_env_overrides();
     let mut session = runmat_core::RunMatSession::with_options(config.enable_jit, config.verbose)

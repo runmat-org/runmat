@@ -11,7 +11,10 @@ use runmat_execution_artifact::{
     ArtifactAccess, LogicalObject, ObjectNamespace, ProgramExecutionObjectLocation,
     MAX_PROGRAM_EXECUTION_OBJECT_BYTES,
 };
-use runmat_execution_transport_native::control::{DriverAuthority, DriverControlPlane};
+use runmat_execution_transport_native::control::{
+    ClockDriverHeartbeatRequestV1, ClockObservationReleaseManifestV1, DriverAuthority,
+    DriverControlPlane, MAX_CLOCK_HEARTBEAT_ITEMS,
+};
 
 use super::{RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority};
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -23,6 +26,10 @@ pub(super) struct PublishedPoolCheckpoint {
     pub(super) catalog: ProgramExecutionObjectLocation,
     pub(super) locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
     pub(super) event_watermark: u64,
+    pub(super) checkpointed_attempts: Vec<(
+        runmat_execution::identity::WorkerId,
+        super::CheckpointedAttempt,
+    )>,
 }
 
 pub(super) async fn publish(
@@ -41,6 +48,7 @@ pub(super) async fn publish(
     }
     let checkpoint = pool.capture_checkpoint(generation)?;
     let event_watermark = checkpoint.scheduler_event_watermark();
+    let checkpointed_attempts = checkpoint.checkpointed_attempts()?;
     if event_watermark < required_event_watermark {
         return Err(invalid(
             "remote checkpoint did not include its committed scheduler event",
@@ -103,6 +111,7 @@ pub(super) async fn publish(
         catalog,
         locations,
         event_watermark,
+        checkpointed_attempts,
     })
 }
 
@@ -116,6 +125,92 @@ pub(super) struct RestoredPoolCheckpoint {
 }
 
 impl RestoredPoolCheckpoint {
+    pub(super) fn authoritative_unstarted_inventory(
+        &self,
+    ) -> NativeExecutionResult<super::pool::AuthoritativeUnstartedInventory> {
+        // `restore` is reached only from the pool catalog named by the
+        // authenticated latest accepted driver bootstrap checkpoint.
+        self.checkpoint.authoritative_unstarted_inventory()
+    }
+
+    pub(super) async fn reconcile_closed_clocks(
+        &mut self,
+        control: &dyn DriverControlPlane,
+        authority: &DriverAuthority,
+        original_sequence: u64,
+        original_artifact_id: &str,
+        original_ciphertext_digest: &str,
+        original_driver_fence: u64,
+    ) -> NativeExecutionResult<()> {
+        let entries = self.checkpoint.closed_clock_release_entries()?;
+        if entries.is_empty() {
+            return Ok(());
+        }
+        if entries.len() > MAX_CLOCK_HEARTBEAT_ITEMS {
+            return Err(invalid(
+                "restored closed clock inventory exceeds one bounded release manifest",
+            ));
+        }
+        let prior = control
+            .clock_heartbeat(authority, 30, ClockDriverHeartbeatRequestV1::default())
+            .await
+            .map_err(invalid)?;
+        if let Some(manifest) = prior.latest_accepted_release_manifest {
+            let mut saved = manifest.entries.clone();
+            saved.sort_by_key(|entry| entry.observation_id);
+            let mut expected = entries.clone();
+            expected.sort_by_key(|entry| entry.observation_id);
+            if saved == expected {
+                if manifest.checkpoint_sequence > original_sequence
+                    || manifest.driver_fence > original_driver_fence
+                    || (manifest.checkpoint_sequence == original_sequence
+                        && (manifest.driver_fence != original_driver_fence
+                            || manifest.checkpoint_artifact_id != original_artifact_id
+                            || manifest.checkpoint_ciphertext_digest != original_ciphertext_digest))
+                {
+                    return Err(invalid(
+                        "accepted clock release is outside original checkpoint lineage",
+                    ));
+                }
+                self.checkpoint.prune_released_clocks(&entries)?;
+                return Ok(());
+            }
+            if manifest.entries.iter().any(|saved| {
+                entries
+                    .iter()
+                    .any(|entry| entry.observation_id == saved.observation_id)
+            }) {
+                return Err(invalid(
+                    "accepted clock release partially overlaps restored ownership",
+                ));
+            }
+        }
+        let response = control
+            .clock_heartbeat(
+                authority,
+                30,
+                ClockDriverHeartbeatRequestV1 {
+                    release_manifest: Some(ClockObservationReleaseManifestV1 {
+                        checkpoint_sequence: original_sequence,
+                        checkpoint_artifact_id: original_artifact_id.into(),
+                        checkpoint_ciphertext_digest: original_ciphertext_digest.into(),
+                        driver_fence: original_driver_fence,
+                        entries: entries.clone(),
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(invalid)?;
+        if !response.release_accepted {
+            return Err(invalid(
+                "Server did not reconcile original closed node clock ownership",
+            ));
+        }
+        self.checkpoint.prune_released_clocks(&entries)?;
+        Ok(())
+    }
+
     pub(super) fn into_pool(
         self,
         authority: RemotePoolRestoreAuthority,

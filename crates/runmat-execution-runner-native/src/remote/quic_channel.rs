@@ -33,6 +33,8 @@ mod replies;
 use replies::{PendingReply, ReplyRegistry};
 
 pub struct QuicRemoteWorkerChannel {
+    run_identity: String,
+    session_id: [u8; 16],
     node_identity: String,
     worker: WorkerSpec,
     driver_fence: u64,
@@ -105,6 +107,10 @@ impl QuicRemoteWorkerChannel {
             .resources
             .capabilities
             .remove(&Capability::GraphProjectRuntimePolicyV13);
+        worker
+            .resources
+            .capabilities
+            .remove(&Capability::GraphInvocationControlsV14);
         let expected_worker = worker.id;
         let expected_pool = worker.pool_id;
         let expected_run = run_identity.clone();
@@ -114,6 +120,8 @@ impl QuicRemoteWorkerChannel {
         let verified_ready = Arc::new(Mutex::new(None));
         let ready_state = Arc::clone(&verified_ready);
         let channel = Arc::new(Self {
+            run_identity: run_identity.clone(),
+            session_id,
             node_identity,
             worker,
             driver_fence,
@@ -282,6 +290,90 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
             .clone()
     }
 
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &AttemptRequest,
+    ) -> NativeExecutionResult<Option<super::AuthenticatedPhysicalRetirement>> {
+        if request.worker_id != self.worker.id
+            || request.task.pool_id != self.worker.pool_id
+            || request.driver_fence != self.driver_fence
+        {
+            return Err(protocol(
+                "retirement query differs from authenticated worker route",
+            ));
+        }
+        let expected_digest = Digest::sha256(&serde_json::to_vec(request).map_err(protocol)?);
+        match self
+            .request(
+                FrameKind::Control,
+                RemoteWorkerCommand::QueryPhysicalRetirement {
+                    attempt: Box::new(request.clone()),
+                },
+            )
+            .await?
+        {
+            RemoteWorkerOutcome::PhysicalRetirement {
+                run_identity,
+                session_id,
+                driver_fence,
+                worker_id,
+                pool_id,
+                attempt_id,
+                request_digest,
+            } if run_identity == self.run_identity
+                && session_id == self.session_id
+                && driver_fence == self.driver_fence
+                && worker_id == self.worker.id
+                && pool_id == self.worker.pool_id
+                && attempt_id == request.id
+                && request_digest == expected_digest =>
+            {
+                Ok(Some(super::AuthenticatedPhysicalRetirement::issue(
+                    request.clone(),
+                )))
+            }
+            RemoteWorkerOutcome::RetirementUnavailable => Ok(None),
+            _ => Err(protocol(
+                "remote retirement evidence differs from its exact authenticated owner",
+            )),
+        }
+    }
+
+    async fn acknowledge_physical_retirement(
+        &self,
+        request: &AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        let command = RemoteWorkerCommand::AcknowledgePhysicalRetirement {
+            attempt: Box::new(request.clone()),
+        };
+        match self.ack(command.clone()).await {
+            Ok(()) => Ok(()),
+            // The first ACK may have been applied while its reply was lost.
+            // The worker's exact bounded replay record makes this safe.
+            Err(_) => self.ack(command).await,
+        }
+    }
+
+    async fn prune_durable_checkpoint(
+        &self,
+        sequence: u64,
+        attempts: &[super::CheckpointedAttempt],
+    ) -> NativeExecutionResult<()> {
+        if sequence == 0 || attempts.len() > runmat_execution::security::MAX_RETIREMENT_ATTEMPTS {
+            return Err(protocol(
+                "durable checkpoint prune exceeds worker journal bound",
+            ));
+        }
+        let command = RemoteWorkerCommand::PruneDurableCheckpoint {
+            sequence,
+            attempts: attempts.to_vec(),
+        };
+        match self.ack(command.clone()).await {
+            Ok(()) => Ok(()),
+            Err(_) => self.ack(command).await,
+        }
+    }
+
     async fn install_bundle(
         &self,
         bundle_digest: Digest,
@@ -388,17 +480,35 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
     }
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
-        match self
-            .request(
-                FrameKind::Control,
-                RemoteWorkerCommand::Execute {
-                    attempt: Box::new(attempt),
-                },
-            )
-            .await?
-        {
-            RemoteWorkerOutcome::Attempt { report } => Ok(report),
-            _ => Err(protocol("remote worker returned the wrong attempt reply")),
+        let deadline = tokio::time::Instant::now() + RESPONSE_TIMEOUT;
+        loop {
+            match self
+                .request(
+                    FrameKind::Control,
+                    RemoteWorkerCommand::Execute {
+                        attempt: Box::new(attempt.clone()),
+                    },
+                )
+                .await?
+            {
+                RemoteWorkerOutcome::Attempt { report } => return Ok(report),
+                RemoteWorkerOutcome::AdmissionDeferred {
+                    attempt_id,
+                    worker_id,
+                    driver_fence,
+                } if attempt_id == attempt.scheduling.id
+                    && worker_id == self.worker.id
+                    && driver_fence == self.driver_fence =>
+                {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(protocol(
+                            "durable attempt journal remained full after checkpoint backpressure",
+                        ));
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                _ => return Err(protocol("remote worker returned the wrong attempt reply")),
+            }
         }
     }
 

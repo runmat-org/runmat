@@ -1,5 +1,87 @@
 use super::*;
 
+const WORKER_SUBPROCESS_ROLE_ENV: &str = "RUNMAT_DRIVER_REPLACEMENT_WORKER_ROLE";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkerSubprocessRole {
+    relay_url: String,
+    allocation_id: String,
+    inventory: ResourceInventory,
+    run_key: [u8; 32],
+    driver_fence: u64,
+    held_attempt: Option<super::super::worker_execution::HeldWorkloadAttempt>,
+    journal: super::super::worker_attempt_journal::WorkerAttemptJournalOwner,
+}
+
+/// The same named unit test is the real worker process under this typed role.
+/// Normal test invocation never takes this branch; no ignored/no-op test is
+/// used as an executable surrogate.
+pub(super) fn enter_worker_subprocess_if_requested() {
+    let Ok(encoded) = std::env::var(WORKER_SUBPROCESS_ROLE_ENV) else {
+        return;
+    };
+    let role: WorkerSubprocessRole =
+        serde_json::from_str(&encoded).expect("typed replacement worker subprocess role");
+    let key = RunKeyMaterial::from_entropy(role.run_key).expect("worker run key");
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("replacement worker process runtime")
+        .block_on(run_worker(
+            role.relay_url,
+            &role.allocation_id,
+            &role.inventory,
+            key,
+            role.driver_fence,
+            role.held_attempt,
+            role.journal,
+        ));
+    match result {
+        Ok(()) => std::process::exit(0),
+        Err(error) => {
+            eprintln!("replacement worker process ended: {error}");
+            std::process::exit(2)
+        }
+    }
+}
+
+pub(super) async fn spawn_worker_process(
+    test_name: &str,
+    relay_url: String,
+    allocation: &DriverWorkerAllocation,
+    inventory: &ResourceInventory,
+    run_key: &RunKeyMaterial,
+    driver_fence: u64,
+    held_attempt: Option<super::super::worker_execution::HeldWorkloadAttempt>,
+    journal: super::super::worker_attempt_journal::WorkerAttemptJournalOwner,
+) -> runmat_process_host::ChildProcess {
+    let role = WorkerSubprocessRole {
+        relay_url,
+        allocation_id: allocation.allocation_lease_id.clone(),
+        inventory: inventory.clone(),
+        run_key: *run_key.expose_for_recipient_envelope(),
+        driver_fence,
+        held_attempt,
+        journal,
+    };
+    let mut command = runmat_process_host::HostCommand::new(std::env::current_exe().unwrap());
+    command.arguments = vec!["--exact".into(), test_name.into(), "--nocapture".into()];
+    command.environment_policy = runmat_process_host::environment::EnvironmentPolicy::Allow(
+        runmat_process_host::environment::EnvironmentAllowlist::platform_runtime(),
+    );
+    command.environment.insert(
+        WORKER_SUBPROCESS_ROLE_ENV.into(),
+        serde_json::to_string(&role).unwrap(),
+    );
+    command.stdio = runmat_process_host::StdioPolicy::Null;
+    command.lifetime = runmat_process_host::ChildLifetime::Owned;
+    command
+        .spawn()
+        .await
+        .expect("owned replacement worker OS process")
+}
+
 pub(super) struct RelayServer {
     listener: tokio::net::TcpListener,
     address: SocketAddr,

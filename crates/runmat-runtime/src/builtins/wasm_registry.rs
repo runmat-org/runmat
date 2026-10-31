@@ -21,10 +21,7 @@ pub fn register_all() {
     WASM_REGISTRY_ONCE.call_once(|| {
         info!("runmat-runtime: executing wasm builtin registry");
         generated::register_all();
-        let manifest = crate::builtin::migration_inventory::migration_inventory()
-            .snapshot
-            .observed
-            .registration_manifest;
+        let manifest = crate::builtin::migration_inventory::registration_manifest();
         assert_eq!(
             manifest.digest,
             generated::REGISTRY_MANIFEST_DIGEST,
@@ -57,7 +54,7 @@ pub fn register_all() {
         );
         info!(
             "runmat-runtime: registered {} wasm builtins",
-            runmat_builtins::builtin_functions().len()
+            manifest.counts.builtin
         );
         runmat_builtins::wasm_registry::mark_registered();
     });

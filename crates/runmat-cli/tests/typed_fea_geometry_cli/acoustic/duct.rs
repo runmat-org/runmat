@@ -155,8 +155,12 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
             retained.quality_reasons
         );
         assert_eq!(
+            retained.provenance.solver_method,
+            runmat_analysis_fea::contracts::SolverMethod::AcousticCanonicalHelmholtzCertifiedLu
+        );
+        assert_eq!(
             retained.provenance.preconditioner,
-            runmat_analysis_fea::contracts::SolverPreconditioner::Ilu0
+            runmat_analysis_fea::contracts::SolverPreconditioner::None
         );
         let pressure = full_and_partial(&store, run_id, "acoustic.pressure");
         let velocity = full_and_partial(&store, run_id, "acoustic.particle_velocity");
@@ -166,7 +170,10 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
         let entry = &completed.entries[0];
         assert_eq!(
             entry.workload.solver,
-            runmat_analysis_fea::physics::acoustic::AcousticHarmonicPolicy::default()
+            runmat_analysis_fea::physics::acoustic::AcousticHarmonicPolicy {
+                relative_tolerance: 1e-9,
+                ..Default::default()
+            }
         );
         fixture::verify_medium(&entry.workload.model, &mesh);
         fixture::verify_drive(&entry.workload.model, drive, generated);

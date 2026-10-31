@@ -60,7 +60,8 @@ pub use error::MeshingContractError;
 pub use evidence::{
     AchievedEdgeLengths, CacheAdmissionDecision, ErrorDistribution, InvariantEvidence,
     MeshingEvidence, MeshingResourceUsage, MeshingStageEvidence, PlatformBuildIdentity,
-    ReusedMeshingStageObservation, SizingResolutionEvidence, MESHING_EVIDENCE_SCHEMA_VERSION,
+    ReusedMeshingStageObservation, ReusedMeshingStageOrigin, SizingResolutionEvidence,
+    MESHING_EVIDENCE_SCHEMA_VERSION,
 };
 pub use failure::{
     GeometricWitness, MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingFailure,

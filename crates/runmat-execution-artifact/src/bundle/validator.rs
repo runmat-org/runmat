@@ -479,6 +479,9 @@ fn encode_capability(
         Capability::GraphProjectRuntimePolicyV13 => {
             encoder.array(1).and_then(|encoder| encoder.u8(7))
         }
+        Capability::GraphInvocationControlsV14 => {
+            encoder.array(1).and_then(|encoder| encoder.u8(8))
+        }
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),

@@ -20,6 +20,7 @@ impl RemotePoolDriver {
         if !owns_failure {
             return Ok(false);
         }
+        let old_channel = current.map(|route| Arc::clone(&route.channel));
         let actions = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
             if !driver.accepts_backend_report(report) {
@@ -34,6 +35,20 @@ impl RemotePoolDriver {
         };
         drop(channels);
         self.dispatch(actions);
+        if let Some(channel) = old_channel {
+            let request = self
+                .driver
+                .lock()
+                .expect("remote driver poisoned")
+                .snapshot()
+                .attempts
+                .get(&report.attempt_id)
+                .map(|attempt| attempt.request.clone());
+            if let Some(request) = request {
+                self.reconcile_physical_retirements(channel.as_ref(), &[request])
+                    .await;
+            }
+        }
         self.resolve_non_success_terminals();
         self.refresh_pool_state()?;
         Ok(true)

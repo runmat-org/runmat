@@ -55,6 +55,8 @@ pub const GRAPH_REQUEST_SCHEMA_V11: u16 = 11;
 pub const GRAPH_REQUEST_SCHEMA_V12: u16 = 12;
 /// Digest-bound project-only runtime policy on a remotely executed Graph.
 pub const GRAPH_REQUEST_SCHEMA_V13: u16 = 13;
+/// Exact captured invocation environment and bounded console controls.
+pub const GRAPH_REQUEST_SCHEMA_V14: u16 = 14;
 
 /// Minimum schema required by actual graph nodes. A producer may require V11
 /// for selected code capable of returning V11 nodes even when inputs are V10.
@@ -64,6 +66,7 @@ pub enum GraphRequiredSchema {
     SelectedValuesV11,
     CallableArgumentsV12,
     ProjectRuntimePolicyV13,
+    InvocationControlsV14,
 }
 
 impl GraphRequiredSchema {
@@ -73,6 +76,7 @@ impl GraphRequiredSchema {
             GRAPH_REQUEST_SCHEMA_V11 => Some(Self::SelectedValuesV11),
             GRAPH_REQUEST_SCHEMA_V12 => Some(Self::CallableArgumentsV12),
             GRAPH_REQUEST_SCHEMA_V13 => Some(Self::ProjectRuntimePolicyV13),
+            GRAPH_REQUEST_SCHEMA_V14 => Some(Self::InvocationControlsV14),
             _ => None,
         }
     }
@@ -83,6 +87,7 @@ impl GraphRequiredSchema {
             Self::SelectedValuesV11 => GRAPH_REQUEST_SCHEMA_V11,
             Self::CallableArgumentsV12 => GRAPH_REQUEST_SCHEMA_V12,
             Self::ProjectRuntimePolicyV13 => GRAPH_REQUEST_SCHEMA_V13,
+            Self::InvocationControlsV14 => GRAPH_REQUEST_SCHEMA_V14,
         }
     }
 
@@ -95,6 +100,9 @@ impl GraphRequiredSchema {
             }
             Self::ProjectRuntimePolicyV13 => {
                 Some(crate::resource::Capability::GraphProjectRuntimePolicyV13)
+            }
+            Self::InvocationControlsV14 => {
+                Some(crate::resource::Capability::GraphInvocationControlsV14)
             }
         }
     }

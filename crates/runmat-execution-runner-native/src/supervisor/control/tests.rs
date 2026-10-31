@@ -154,5 +154,9 @@ async fn original_control_absence_tamper_and_corruption_have_distinct_verdicts()
         "original user stop".into(),
     )
     .into_report(&request, &control);
-    assert!(matches!(report.report, AttemptReport::Cancelled));
+    assert!(matches!(report.report, AttemptReport::Retired));
+    assert_eq!(
+        report.execution.as_ref().unwrap().termination,
+        runmat_execution_runner::AttemptExecutionTermination::NotStarted
+    );
 }

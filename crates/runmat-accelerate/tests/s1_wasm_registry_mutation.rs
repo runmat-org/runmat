@@ -195,4 +195,18 @@ fn global_submit_revokes_in_flight_strcmp_and_retires_old_session_feedback() {
             }
         )
     );
+
+    // Exercise the real browser catalog cache after initialization. This test
+    // owns an isolated WASM module, so a late declaration cannot affect another
+    // test's registry. Session reuse must not hide changes to executable rows.
+    let before = runmat_builtins::builtin_catalog_fingerprint();
+    let declaration = (*runmat_builtins::builtin_functions()
+        .into_iter()
+        .find(|function| function.name == "strcmp")
+        .expect("registered strcmp declaration"))
+    .clone();
+    runmat_builtins::wasm_registry::submit_builtin_function(declaration);
+    let after = runmat_builtins::builtin_catalog_fingerprint();
+    assert_ne!(before, after, "late declaration must invalidate the cache");
+    assert_eq!(after, runmat_builtins::builtin_catalog_fingerprint());
 }

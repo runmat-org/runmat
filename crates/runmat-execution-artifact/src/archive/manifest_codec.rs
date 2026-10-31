@@ -524,6 +524,9 @@ fn encode_capability(
         Capability::GraphProjectRuntimePolicyV13 => {
             encoder.array(1).and_then(|encoder| encoder.u8(7))
         }
+        Capability::GraphInvocationControlsV14 => {
+            encoder.array(1).and_then(|encoder| encoder.u8(8))
+        }
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),
@@ -547,6 +550,7 @@ fn decode_capability(decoder: &mut Decoder<'_>) -> ArtifactResult<Capability> {
         (5, 1) => Ok(Capability::GraphSelectedValuesV11),
         (6, 1) => Ok(Capability::GraphCallableArgumentsV12),
         (7, 1) => Ok(Capability::GraphProjectRuntimePolicyV13),
+        (8, 1) => Ok(Capability::GraphInvocationControlsV14),
         (0, 1) => Ok(Capability::ProcessIsolation),
         (1, 1) => Ok(Capability::BrowserWorker),
         (2, 1) => Ok(Capability::NetworkDenied),

@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn captured_console_requires_the_exact_live_retention_owner() {
+    use runmat_execution::console::ConsoleLimits;
+    use runmat_runtime::context::{PortableConsoleHost, RuntimeServicePorts};
+    let base = RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let limits = ConsoleLimits {
+        max_records: 4,
+        max_text_bytes: 1024,
+    };
+    assert!(base.validate_invocation_console(None).is_ok());
+    assert!(base.validate_invocation_console(Some(limits)).is_err());
+    let host = std::rc::Rc::new(PortableConsoleHost::new(limits).unwrap());
+    let captured = base.with_service_ports(RuntimeServicePorts::default().with_host(host.clone()));
+    assert!(captured.validate_invocation_console(Some(limits)).is_ok());
+    assert!(captured
+        .validate_invocation_console(Some(ConsoleLimits {
+            max_records: 3,
+            ..limits
+        }))
+        .is_err());
+    host.finish(true).unwrap();
+    assert!(captured.validate_invocation_console(Some(limits)).is_err());
+}
+
+#[test]
 fn cleanup_unit_context_enters_only_its_callback_extent() {
     let base = RuntimeContext::new(std::rc::Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),

@@ -83,8 +83,11 @@ pub fn acoustic_response_result_payload_bytes_upper_bound(
     let elements = count(mesh.topology.volume_elements.len())?;
     let values = mul(add(add(mul(samples, nodes)?, nodes)?, elements)?, 16)?;
     let per_sample = mul(samples, 96)?;
+    // The result repeats the typed authored declarations so detached cold decoding can reject
+    // missing or substituted output authority. Charge their canonical workload envelope too.
+    let authored_bytes = count(workload.canonical_bytes().map_err(invalid)?.len())?;
     add(
-        add(RESULT_SCHEMA_BYTES, formulation_bytes)?,
+        add(add(RESULT_SCHEMA_BYTES, formulation_bytes)?, authored_bytes)?,
         add(values, per_sample)?,
     )
 }

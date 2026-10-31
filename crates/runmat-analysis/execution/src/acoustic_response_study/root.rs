@@ -38,7 +38,7 @@ use crate::{
 
 const PREFIX: &[u8] = b"runmat-acoustic-response-study-completion\0";
 // Full original task history replaces the previous winning-attempt payload.
-const COMPLETION_SCHEMA_VERSION: u16 = 2;
+const COMPLETION_SCHEMA_VERSION: u16 = 3;
 const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
 
 #[derive(Serialize, Deserialize)]

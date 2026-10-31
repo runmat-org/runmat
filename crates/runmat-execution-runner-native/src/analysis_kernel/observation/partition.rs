@@ -40,12 +40,17 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         &invocation,
         AnalysisNumericalObjectKind::MaxwellHarmonicWorkload,
     )?;
+    let acoustic_response_workload = optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::AcousticResponseWorkload,
+    )?;
     if usize::from(nonlinear_workload.is_some())
         + usize::from(linear_workload.is_some())
         + usize::from(frequency_workload.is_some())
         + usize::from(thermal_workload.is_some())
         + usize::from(magnetic_workload.is_some())
         + usize::from(maxwell_workload.is_some())
+        + usize::from(acoustic_response_workload.is_some())
         > 1
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -95,11 +100,14 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         thermal_workload.is_some(),
         magnetic_workload.is_some(),
         maxwell_workload.is_some(),
+        acoustic_response_workload.is_some(),
     ]
     .into_iter()
     .filter(|present| *present)
     .count();
-    if (volume_mesh && typed_workloads != 0) || (!volume_mesh && typed_workloads != 1) {
+    if (volume_mesh && typed_workloads != usize::from(acoustic_response_workload.is_some()))
+        || (!volume_mesh && (typed_workloads != 1 || acoustic_response_workload.is_some()))
+    {
         return Err(AnalysisBridgeError::Invalid(
             "observation partition requires exactly one workload source of its catalog kind".into(),
         ));
@@ -157,6 +165,26 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
             "volume-mesh observation requires its exact mesh",
         ))?;
         let step = catalog.volume_mesh_step()?;
+        if let Some(objects) = acoustic_response_workload {
+            let workload =
+                runmat_analysis_fea::execution::AcousticResponseWorkload::from_canonical_bytes(
+                    &objects.payload(),
+                )?;
+            if workload.identity()?.digest() != objects.manifest.logical_identity
+                || workload.producer_identity()? != request.producer
+                || workload
+                    .model
+                    .sequence
+                    .steps
+                    .iter()
+                    .find(|candidate| candidate.step_id == workload.step_id)
+                    != Some(step)
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "acoustic response observation workload, producer or authored step differs",
+                ));
+            }
+        }
         if request.event_attribution.is_some()
             || !resource_plan.request.accelerators.is_empty()
             || step.step_id != source_request.plan.step_id

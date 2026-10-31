@@ -81,6 +81,12 @@ pub(crate) fn configure_local_analysis_envelope(
 pub(crate) trait AnalysisTaskPool: CacheImport {
     fn scope_id(&self) -> ExecutionScopeId;
     fn pool_id(&self) -> PoolId;
+    /// Begin one wave before program registration, submission lowering, or queue admission.
+    /// Typed host/program plans may already exist; this is not their preparation interval.
+    async fn begin_wave_observation(
+        &mut self,
+        planned_tasks: &[TaskId],
+    ) -> NativeExecutionResult<()>;
     /// Trust tiers this pool's workers may hold; task host requirements narrow to them.
     fn permitted_trust_tiers(
         &self,
@@ -99,8 +105,59 @@ pub(crate) trait AnalysisTaskPool: CacheImport {
     ) -> NativeExecutionResult<()>;
     async fn execute_batch(
         &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+        tasks: AdmittedAnalysisBatch,
     ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>>;
+}
+
+/// Only begin_analysis_batch can issue this pre-submission wave authority.
+/// The submitted inventory must be the exact one observed before lowering.
+pub(crate) struct AnalysisBatchAdmission {
+    planned_tasks: Vec<TaskId>,
+}
+
+pub(crate) struct AdmittedAnalysisBatch {
+    submissions: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+}
+
+impl AnalysisBatchAdmission {
+    pub(crate) fn admit(
+        self,
+        submissions: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+    ) -> NativeExecutionResult<AdmittedAnalysisBatch> {
+        if submissions.len() != self.planned_tasks.len()
+            || submissions
+                .iter()
+                .zip(&self.planned_tasks)
+                .any(|((_, submission), expected)| submission.request.id != *expected)
+        {
+            return Err(protocol(
+                "analysis submission differs from its pre-preparation wave",
+            ));
+        }
+        Ok(AdmittedAnalysisBatch { submissions })
+    }
+}
+
+impl AdmittedAnalysisBatch {
+    pub(crate) fn into_submissions(self) -> Vec<(ProgramExecutionRequest, TaskSubmission)> {
+        self.submissions
+    }
+}
+
+pub(crate) async fn begin_analysis_batch(
+    pool: &mut impl AnalysisTaskPool,
+    planned_tasks: &[TaskId],
+) -> NativeExecutionResult<AnalysisBatchAdmission> {
+    let unique = planned_tasks.iter().copied().collect::<BTreeSet<_>>();
+    if planned_tasks.is_empty() || unique.len() != planned_tasks.len() {
+        return Err(protocol(
+            "analysis wave requires a nonempty unique task inventory",
+        ));
+    }
+    pool.begin_wave_observation(planned_tasks).await?;
+    Ok(AnalysisBatchAdmission {
+        planned_tasks: planned_tasks.to_vec(),
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -194,6 +251,20 @@ pub(crate) async fn execute_analysis_task_batch(
     if tasks.is_empty() {
         return Ok(Vec::new());
     }
+    let planned_tasks = tasks
+        .iter()
+        .map(|task| {
+            let dependencies = task
+                .dependencies
+                .iter()
+                .map(|dep| dep.identity)
+                .collect::<Vec<_>>();
+            AnalysisTaskIdentity::new(task.host.workload.identity, dependencies)
+                .map(|identity| TaskId::derive(&[identity.digest().bytes()]))
+                .map_err(protocol)
+        })
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    let admission = begin_analysis_batch(pool, &planned_tasks).await?;
     let mut submissions = Vec::with_capacity(tasks.len());
     let mut admitted = Vec::with_capacity(tasks.len());
     for task in tasks {
@@ -232,7 +303,7 @@ pub(crate) async fn execute_analysis_task_batch(
         admitted.push((identity, task_id));
         submissions.push((task.program.request.clone(), submission));
     }
-    let responses = pool.execute_batch(submissions).await?;
+    let responses = pool.execute_batch(admission.admit(submissions)?).await?;
     if responses.len() != admitted.len() {
         return Err(NativeExecutionError::Protocol(
             "analysis task response inventory differs from its submitted wave".into(),
@@ -259,7 +330,9 @@ pub(crate) async fn execute_analysis_task_batch(
                 response: completion.response,
                 attempt: completion.attempt,
                 evidence: completion.evidence,
-                graph_wall_millis,
+                graph_wall_millis: completion
+                    .original_graph_wall_millis
+                    .unwrap_or(graph_wall_millis),
                 failure: completion.failure,
             })
         })

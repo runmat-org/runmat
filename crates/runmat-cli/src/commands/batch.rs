@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 use runmat_execution_runner_native::supervisor::{
     complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_graph_batch,
     execute_and_complete_program_batch, execute_graph_batch, prepare_batch_driver,
-    BatchDriverInvocation, BatchSubmission, LocalJobRecord, LocalJobState, LocalSupervisorClient,
+    BatchDriverInvocation, BatchSubmission, JobSubmissionDisposition, LocalJobRecord,
+    LocalJobState, LocalSupervisorClient,
 };
 use runmat_execution_runner_native::WorkerResponse;
 use runmat_process_host::environment::EnvironmentPolicy;
@@ -36,7 +37,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
             let retention_millis = retention_hours
                 .checked_mul(60 * 60 * 1000)
                 .context("batch retention exceeds supported duration")?;
-            let (record, duplicate) = client
+            let (record, submission_disposition) = client
                 .submit(BatchSubmission {
                     source_name,
                     source,
@@ -46,6 +47,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
                     retention_millis,
                 })
                 .await?;
+            let duplicate = submission_disposition == JobSubmissionDisposition::Duplicate;
             if json {
                 println!(
                     "{}",

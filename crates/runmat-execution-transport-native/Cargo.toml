@@ -15,6 +15,7 @@ chrono = { workspace = true }
 futures-util = "0.3"
 minicbor = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-server-client = { workspace = true }

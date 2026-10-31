@@ -19,11 +19,23 @@ impl RecoveredFieldArtifactManifest {
         counts: &[usize],
         sample: RecoveredFieldSample,
     ) -> Result<SerializedCanonicalProfile, RecoveredFieldError> {
+        Self::profile_sampled_history_shape(request, definitions, counts, sample, 1)
+    }
+
+    /// One catalog for repeated native fields over a retained sample sequence. This profiles
+    /// the actual entry serializer without materializing field values or placeholder arrays.
+    pub fn profile_sampled_history_shape(
+        request: &crate::execution::FieldRecoveryRequest,
+        definitions: &[RecoveredFieldDefinition],
+        counts: &[usize],
+        sample: RecoveredFieldSample,
+        sample_count: usize,
+    ) -> Result<SerializedCanonicalProfile, RecoveredFieldError> {
         let entries = RecoveredFieldArtifactEntry::profile_sampled_catalog_shape(
             definitions,
             counts,
             sample,
-            1,
+            sample_count,
         )?;
         let header = Self {
             schema_version: 1,

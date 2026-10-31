@@ -92,11 +92,9 @@ pub(super) fn exact_study_fixture_with_wall_time(
     if let ExactStudyFamily::ThermalPrestress(case) = family {
         thermal::write_authored_project(project_root.path(), case);
     }
-    std::fs::write(
-        project_root.path().join("runmat.toml"),
-        "[package]\nname = \"driver-replacement-study\"\n[sources]\nroots = [\"src\"]\n",
-    )
-    .unwrap();
+    let project_document =
+        "[package]\nname = \"driver-replacement-study\"\n[sources]\nroots = [\"src\"]\n[runtime.language]\ncompat = \"matlab\"\n";
+    std::fs::write(project_root.path().join("runmat.toml"), project_document).unwrap();
     let project = runmat_package::build_frozen_project(
         &project_root.path().join("runmat.toml"),
         BTreeSet::new(),
@@ -227,9 +225,16 @@ pub(super) fn exact_study_fixture_with_wall_time(
         };
     let mut builder = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
-        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
-            &revision,
-        ))
+        .with_project_runtime_policy_object(
+            runmat_core::cluster_settings::capture_project_policy(
+                &runmat_config::runtime::ClusterRuntimePolicy::from_project_document(
+                    project_document,
+                    runmat_config::document::RunmatConfigFormat::Toml,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
         .unwrap()
         .with_compiled_package_closure();
     for (recipe, artifact) in programs {
@@ -326,6 +331,7 @@ pub(super) fn exact_study_fixture_with_wall_time(
             run_key: run_key.clone(),
             resources,
             workers,
+            worker_identity_secrets: BTreeMap::from([(1, [31; 32]), (2, [32; 32]), (3, [33; 32])]),
             interruption: family.interruption(),
             interrupted_target: family.held_attempt_target(),
             state: Mutex::new(DurableState {
@@ -340,8 +346,10 @@ pub(super) fn exact_study_fixture_with_wall_time(
                 transitions: Vec::new(),
                 worker_authorizations: Vec::new(),
                 bootstrap_checkpoints: Vec::new(),
+                retirements: BTreeMap::new(),
             }),
             recovery_committed: tokio::sync::Notify::new(),
+            clock_control: Mutex::new(None),
         },
         run_key,
         inventory,
@@ -412,7 +420,11 @@ pub(super) fn coarse_box_request() -> MeshingRequest {
 fn resources() -> ResourceRequest {
     ResourceRequest {
         cpu_millicores: 1_000,
-        memory_bytes: 1 << 30,
+        // The simulated remote worker runs on this test host. Advertise only
+        // the existing OS/container-capped machine budget; a fixed 1 GiB
+        // inventory underreported the authored thermal/random task envelopes.
+        memory_bytes: crate::machine_capacity::memory_bytes()
+            .expect("driver replacement fixture requires discoverable host memory"),
         scratch_bytes: 1 << 30,
         accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
@@ -526,13 +538,14 @@ pub(super) fn driver_authority(fence: u64, server_url: String) -> DriverAuthorit
 
 pub(super) async fn run_worker(
     relay_url: String,
-    allocation: &DriverWorkerAllocation,
+    allocation_id: &str,
     inventory: &ResourceInventory,
     run_key: RunKeyMaterial,
     driver_fence: u64,
     held_attempt: Option<super::super::worker_execution::HeldWorkloadAttempt>,
+    journal: super::super::worker_attempt_journal::WorkerAttemptJournalOwner,
 ) -> crate::NativeExecutionResult<()> {
-    let allocation_id = allocation.allocation_lease_id.clone();
+    let allocation_id = allocation_id.to_string();
     let worker = WorkerSpec {
         host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[
@@ -559,14 +572,16 @@ pub(super) async fn run_worker(
             Arc::new(native_meshing_kernel_dispatcher()),
             NativeMeshingHostLimits::default(),
             attempt,
+            journal,
         )
         .await
     } else {
-        run_remote_meshing_worker_relay_cached(
+        super::super::worker_entry::run_remote_meshing_worker_relay_cached_with_journal(
             request,
             None,
             Arc::new(native_meshing_kernel_dispatcher()),
             NativeMeshingHostLimits::default(),
+            journal,
         )
         .await
     }

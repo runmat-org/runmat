@@ -122,7 +122,10 @@ pub(super) async fn run() {
             .volume_elements
             .iter()
             .all(|element| element.order == order));
-        assert_eq!(result.completion.fields.fields.len(), 6);
+        assert_eq!(
+            result.completion.fields.fields.len(),
+            runmat_analysis_fea::execution::MAXWELL_NATIVE_FIELD_COUNT
+        );
         assert!(result.completion.observation_catalog.is_some());
         assert!(!result.completion.observation_results.is_empty());
         assert!(!result.completion.states.is_empty());
@@ -271,13 +274,27 @@ pub(super) async fn run() {
                 required_state_digest: "unqualified".into(),
             };
         assert!(runmat_analysis_fea::study::plan_maxwell_study(&wrong, policy).is_err());
-        let mut wrong = actual.compiled.clone();
-        wrong.model.sequence.steps[0].independent_domain =
+        let mut sweep = actual.compiled.clone();
+        sweep.model.sequence.steps[0].independent_domain =
             runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![
                 FREQUENCY,
                 2.0 * FREQUENCY,
             ]);
-        assert!(runmat_analysis_fea::study::plan_maxwell_study(&wrong, policy).is_err());
+        let planned = runmat_analysis_fea::study::plan_maxwell_study(&sweep, policy).unwrap();
+        assert_eq!(planned.model, sweep.model);
+        assert_eq!(
+            planned.frequency,
+            runmat_analysis_core::Frequency::new(FREQUENCY)
+        );
+        for invalid_frequency in [0.0, -FREQUENCY, FREQUENCY, f64::INFINITY, f64::NAN] {
+            let mut wrong = sweep.clone();
+            wrong.model.sequence.steps[0].independent_domain =
+                runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![
+                    FREQUENCY,
+                    invalid_frequency,
+                ]);
+            assert!(runmat_analysis_fea::study::plan_maxwell_study(&wrong, policy).is_err());
+        }
     }
 }
 

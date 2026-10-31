@@ -41,7 +41,10 @@ pub(super) fn prepare(
         "unit-box.brep",
         &geometry.representation,
         runmat_geometry_io::GeometryFormat::Brep,
-        &runmat_geometry_io::exact::ExactCadImportOptions::default(),
+        &runmat_geometry_io::exact::ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..Default::default()
+        },
         &runmat_geometry_io::GeometryImportContext::new(),
     )
     .unwrap();

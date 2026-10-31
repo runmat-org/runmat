@@ -91,6 +91,26 @@ pub(super) fn prepare(
             "worker rejected compiler-incompatible graph: {error}"
         )));
     }
+    let empty_environment = runmat_execution::EnvironmentSnapshot::default();
+    let environment = request
+        .invocation_controls
+        .as_ref()
+        .map_or(&empty_environment, |controls| &controls.environment);
+    let runtime = runtime
+        .with_invocation_environment(environment)
+        .map_err(|error| {
+            failure(format!(
+                "worker rejected captured Graph environment: {error}"
+            ))
+        })?;
+    runtime
+        .validate_invocation_console(
+            request
+                .invocation_controls
+                .as_ref()
+                .and_then(|controls| controls.console),
+        )
+        .map_err(|error| failure(format!("worker rejected captured Graph console: {error}")))?;
     let _assignment = runtime.enter_execution_assignment(request.assignment.clone());
     let _job = runtime.enter_execution_job(request.job_id);
     let selected = SelectedWorkerGraph::admit(

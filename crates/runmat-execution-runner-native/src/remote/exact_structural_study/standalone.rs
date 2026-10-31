@@ -51,11 +51,11 @@ pub(super) async fn modal(
     };
     let (response, objects) = crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralModal {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             completion: &completion,
             unresolved_workloads_digest,
         },
@@ -126,11 +126,11 @@ pub(super) async fn linear(
     };
     let (response, objects) = crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::LinearSequence {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             sequence: &sequence,
             unresolved_workloads_digest,
         },
@@ -207,11 +207,11 @@ pub(super) async fn transient(
     };
     let (response, objects) = crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralTransient {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             completion: &completion,
             unresolved_workloads_digest,
         },
@@ -280,11 +280,11 @@ pub(super) async fn frequency(
     };
     let (response, objects) = crate::exact_structural_study_root::package_exact_structural_study_result(
         request,
-        &decoded,
+        decoded,
         &completed.result,
-        &region_resolution_objects,
+        region_resolution_objects,
         crate::exact_structural_study_root::ExactStructuralAnalysisPublication::StructuralFrequency {
-            inputs: &completed_inputs,
+            inputs: completed_inputs,
             completion: &completion,
             unresolved_workloads_digest,
         },

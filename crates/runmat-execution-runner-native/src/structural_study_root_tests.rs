@@ -306,7 +306,11 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
     let decoded_rebound =
         crate::decode_exact_structural_sweep_root(rebound.request(), &rebound_store).unwrap();
     assert_eq!(decoded_rebound.artifact_access, rebound_access);
-    let mut builder = ExecutionBundleBuilder::native(&project, revision)
+    let mut builder = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &revision,
+        ))
         .unwrap()
         .with_compiled_package_closure();
     for program in prepared.required_programs() {
@@ -532,7 +536,29 @@ impl runmat_execution_artifact::cache::CacheImport for TestResultCache {
         &self,
         digest: Digest,
     ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
-        Ok(self.0.get(&digest).cloned())
+        self.read_verified_bounded(digest, u64::MAX)
+    }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        self.read_verified_bounded_with_admission(digest, maximum_bytes, &mut |_| Ok(()))
+    }
+
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> runmat_execution_artifact::ArtifactResult<()>,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        runmat_execution_artifact::cache::copy_verified_bounded_with_admission(
+            digest,
+            self.0.get(&digest).map(Vec::as_slice),
+            maximum_bytes,
+            admit,
+        )
     }
 }
 

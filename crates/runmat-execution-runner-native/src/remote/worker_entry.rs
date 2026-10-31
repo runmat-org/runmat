@@ -7,6 +7,7 @@ use runmat_execution_transport_native::overlay::{QuicOverlayListener, WebSocketR
 use runmat_meshing_execution::MeshingStageKernel;
 
 use super::route::{QuicFrameRoute, RelayFrameRoute};
+use super::worker_attempt_journal::WorkerAttemptJournalOwner;
 use super::worker_server::{run_worker_loop, WorkerLoopContext};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -75,6 +76,7 @@ async fn run_remote_worker_quic_inner(
                 bundle_cache: None,
                 meshing_host,
                 ready_v1,
+                journal: None,
             },
         ))
         .await
@@ -102,14 +104,15 @@ pub(crate) async fn run_remote_worker_relay_cached(
     request: RemoteWorkerRelayRequest<'_>,
     bundle_cache: Option<std::path::PathBuf>,
 ) -> NativeExecutionResult<()> {
-    run_remote_worker_relay_cached_with_meshing(request, bundle_cache, None).await
+    run_remote_worker_relay_cached_with_meshing(request, bundle_cache, None, None).await
 }
 
-pub(crate) async fn run_remote_meshing_worker_relay_cached(
+pub(crate) async fn run_remote_meshing_worker_relay_cached_with_journal(
     request: RemoteWorkerRelayRequest<'_>,
     bundle_cache: Option<std::path::PathBuf>,
     kernel: Arc<dyn MeshingStageKernel>,
     limits: crate::NativeMeshingHostLimits,
+    journal: WorkerAttemptJournalOwner,
 ) -> NativeExecutionResult<()> {
     limits.validate()?;
     run_remote_worker_relay_cached_with_meshing(
@@ -118,6 +121,7 @@ pub(crate) async fn run_remote_meshing_worker_relay_cached(
         Some(super::worker_execution::RemoteMeshingHost::new(
             kernel, limits,
         )),
+        Some(journal),
     )
     .await
 }
@@ -128,12 +132,14 @@ pub(crate) async fn run_remote_meshing_worker_relay_with_held_attempt(
     kernel: Arc<dyn MeshingStageKernel>,
     limits: crate::NativeMeshingHostLimits,
     attempt: super::worker_execution::HeldWorkloadAttempt,
+    journal: WorkerAttemptJournalOwner,
 ) -> NativeExecutionResult<()> {
     limits.validate()?;
     run_remote_worker_relay_cached_with_meshing(
         request,
         None,
         Some(super::worker_execution::RemoteMeshingHost::new(kernel, limits).hold_attempt(attempt)),
+        Some(journal),
     )
     .await
 }
@@ -142,6 +148,7 @@ async fn run_remote_worker_relay_cached_with_meshing(
     request: RemoteWorkerRelayRequest<'_>,
     bundle_cache: Option<std::path::PathBuf>,
     meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
+    journal: Option<WorkerAttemptJournalOwner>,
 ) -> NativeExecutionResult<()> {
     let RemoteWorkerRelayRequest {
         url,
@@ -170,6 +177,7 @@ async fn run_remote_worker_relay_cached_with_meshing(
                 bundle_cache,
                 meshing_host,
                 ready_v1,
+                journal,
             },
         ))
         .await

@@ -296,7 +296,14 @@ pub fn prepare_study_publication(
             )
         }
     };
-    publication.map_err(|error| error.message)
+    publication.map_err(|error| {
+        // This native-host boundary carries text. Preserve the complete
+        // operation envelope, including recovery receipts and the original
+        // durability cause, rather than only its user-facing summary.
+        serde_json::to_string(&error).unwrap_or_else(|encoding| {
+            format!("operation error {error:?}; diagnostic encoding failed: {encoding}")
+        })
+    })
 }
 
 async fn complete_prepared_publication(

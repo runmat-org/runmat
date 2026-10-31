@@ -88,7 +88,7 @@ async fn roundtrip(class_worker_only: bool) {
     execute(
         &mut session,
         "graph_submit.m",
-        "pool = parpool(1);\nh = makeCounter();\nfuture = parfeval(pool, @returnHandle, 1, h);\nfunction h = makeCounter()\nshared = 40;\nfunction y = bump(delta)\nshared = shared + delta;\ny = shared;\nend\nh = @bump;\nend\nfunction out = returnHandle(input)\nout = input;\nend",
+        "pool = parpool(1);\nh = makeCounter();\nfuture = parfeval(pool, @returnHandle, 1, h);\nfunction h = makeCounter()\nshared = 40;\nfunction y = bump(delta)\nshared = shared + delta;\ny = shared;\nend\nh = @bump;\nend\nfunction out = returnHandle(input)\nfprintf(1, 'unrequested worker stdout');\nfprintf(2, 'unrequested worker stderr');\nout = input;\nend",
     )
     .await;
 

@@ -143,42 +143,7 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             }
             assert!(velocity.iter().all(|v| v.is_finite()));
         }
-        let catalog = &manifest["numerical_evidence"]["catalog"];
-        assert!(catalog["objects"].as_array().unwrap().len() > 3);
-        let object_paths = manifest["numerical_evidence"]["object_artifact_paths"]
-            .as_array()
-            .unwrap();
-        assert_eq!(
-            object_paths.len(),
-            catalog["objects"].as_array().unwrap().len()
-        );
-        let mut cold = runmat_execution_artifact::cache::FilesystemObjectStore::open(
-            project.path().join("cold-closure"),
-            256 * 1024 * 1024,
-        )
-        .unwrap();
-        for path in object_paths {
-            let object: Value = serde_json::from_slice(
-                &fs::read(project.path().join(path.as_str().unwrap())).unwrap(),
-            )
-            .unwrap();
-            let bytes: Vec<u8> = serde_json::from_value(object["bytes"].clone()).unwrap();
-            assert_eq!(
-                runmat_execution::Digest::sha256(&bytes).to_string(),
-                object["reference"]["logical_digest"].as_str().unwrap()
-            );
-            let reference: runmat_execution::value::ValueRef =
-                serde_json::from_value(object["reference"].clone()).unwrap();
-            let logical = runmat_execution_artifact::LogicalObject::new(
-                runmat_execution_artifact::ObjectNamespace::ResultValue,
-                format!("cold/{}", reference.logical_digest),
-                reference.media_type,
-                bytes,
-            )
-            .unwrap();
-            runmat_execution_artifact::cache::CacheExport::write_verified(&mut cold, &logical)
-                .unwrap();
-        }
+        let cold = crate::closure::reopen_catalog_objects(&project, &manifest);
         assert!(manifest["public_run"]["states"]
             .as_array()
             .unwrap()
@@ -193,7 +158,7 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
                 reference.verify_identity().unwrap();
                 let state =
                     runmat_analysis_fea::execution::CanonicalSemanticState::from_canonical_bytes(
-                        &fs::read(&reference.artifact_path).unwrap(),
+                        &fs::read(project.path().join(&reference.artifact_path)).unwrap(),
                     )
                     .unwrap();
                 assert_eq!(state.identity, reference.identity);

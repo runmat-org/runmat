@@ -2,6 +2,8 @@ mod attempt_reply;
 mod bundle_cache;
 mod channel;
 mod checkpoint;
+mod clock_observer;
+pub(crate) use clock_observer::RemoteObservedWave;
 mod collective;
 mod config;
 mod crypto;
@@ -36,6 +38,7 @@ mod route;
 pub(crate) mod structural_study;
 pub(crate) mod value_transfer;
 mod worker_bundle;
+mod worker_attempt_journal;
 pub(crate) mod runtime_settings;
 mod worker_entry;
 mod worker_env;
@@ -45,8 +48,9 @@ mod worker_protocol;
 mod worker_server;
 
 pub use channel::{
-    RemoteAttempt, RemoteAttemptProgram, RemoteBundleReceipt, RemoteGraphProgramReceipt,
-    RemoteObjectReceipt, RemoteStagedGraphReference, RemoteValueReceipt, RemoteWorkerChannel,
+    AuthenticatedPhysicalRetirement, CheckpointedAttempt, RemoteAttempt, RemoteAttemptProgram,
+    RemoteBundleReceipt, RemoteGraphProgramReceipt, RemoteObjectReceipt,
+    RemoteStagedGraphReference, RemoteValueReceipt, RemoteWorkerChannel,
 };
 #[cfg(test)]
 pub(crate) use driver::execute_driver_analysis;

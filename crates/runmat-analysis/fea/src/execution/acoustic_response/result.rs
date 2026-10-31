@@ -7,7 +7,7 @@ use crate::{
     topology::AnalysisProjection,
 };
 
-const PREFIX: &[u8] = b"runmat-acoustic-response-result/v2\0";
+const PREFIX: &[u8] = b"runmat-acoustic-response-result/v3\0";
 const LIMITS: CanonicalLimits =
     crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
@@ -55,6 +55,7 @@ struct ResultData {
     formulation: AnalysisRunIdentity,
     solver: AcousticResponseSolver,
     publication_declaration: runmat_analysis_core::StateOutput,
+    publication_observations: Vec<runmat_analysis_core::ObservationRequest>,
     mesh_digest: runmat_meshing_core::StableDigest,
     projection_digest: Digest,
     ordered_node_ids: Vec<u64>,
@@ -125,6 +126,7 @@ impl AcousticResponseSolverResult {
                 formulation,
                 solver: workload.solver,
                 publication_declaration: declaration,
+                publication_observations: workload.step()?.observations.clone(),
                 mesh_digest: mesh.canonical_digest,
                 projection_digest: projection.projection_digest,
                 ordered_node_ids: projection.nodes.iter().map(|node| node.node_id).collect(),
@@ -171,6 +173,7 @@ impl AcousticResponseSolverResult {
                 "acoustic response formulation, ordering or sample inventory is invalid",
             ));
         }
+        super::validate_observations(d.solver, &d.publication_observations)?;
         match (&d.solver, &d.diagnostics) {
             (
                 AcousticResponseSolver::Modal { .. },
@@ -217,12 +220,15 @@ impl AcousticResponseSolverResult {
                         _ => None,
                     })
                     .collect::<Option<Vec<_>>>();
-                if times.is_none_or(|times| {
-                    times.iter().any(|time| !time.is_finite())
-                        || times.windows(2).any(|pair| pair[0] >= pair[1])
-                        || times.iter().any(|time| !time_points_s.contains(time))
-                        || times.last() != time_points_s.last()
-                }) || time_points_s.windows(2).any(|pair| !(pair[0] < pair[1]))
+                if time_points_s.is_empty()
+                    || times.is_none_or(|times| {
+                        times.iter().any(|time| !time.is_finite())
+                            || times.windows(2).any(|pair| pair[0] >= pair[1])
+                            || times.iter().any(|time| {
+                                *time < time_points_s[0] || *time > *time_points_s.last().unwrap()
+                            })
+                    })
+                    || time_points_s.windows(2).any(|pair| !(pair[0] < pair[1]))
                     || acoustic_energy_j.len() != time_points_s.len()
                     || boundary_absorbed_energy_j.len() != time_points_s.len()
                     || acoustic_energy_j
@@ -258,6 +264,7 @@ impl AcousticResponseSolverResult {
             || d.solver != workload.solver
             || d.formulation != workload.formulation(mesh)?
             || &d.publication_declaration != &workload.step()?.state_outputs[0]
+            || d.publication_observations.as_slice() != workload.step()?.observations.as_slice()
             || d.mesh_digest != mesh.canonical_digest
             || d.projection_digest != projection.projection_digest
             || !d
@@ -291,16 +298,27 @@ impl AcousticResponseSolverResult {
         ) {
             // Fields are retained exactly at the sampled schedule points the step implies.
             let retention =
-                crate::physics::acoustic::TransientRetention::for_step(workload.step()?);
+                crate::physics::acoustic::TransientRetention::for_step(workload.step()?)
+                    .map_err(invalid)?;
             let expected = retention
                 .retained_points(time_points_s)
                 .map_err(invalid)?
                 .into_iter()
                 .map(RecoveredFieldSample::TimeSeconds)
                 .collect::<Vec<_>>();
-            if time_points_s.len() != interval_count + 1
+            let canonical_grid = time_points_s.iter().enumerate().all(|(index, time)| {
+                crate::excitation::ProcedureTimeGrid::uniform_coordinate_at(
+                    *start,
+                    *end,
+                    *interval_count,
+                    index,
+                )
+                .is_ok_and(|expected| *time == expected)
+            });
+            if interval_count.checked_add(1) != Some(time_points_s.len())
                 || time_points_s.first() != Some(start)
                 || time_points_s.last() != Some(end)
+                || !canonical_grid
                 || d.samples != expected
             {
                 return Err(invalid(
@@ -378,6 +396,9 @@ impl AcousticResponseSolverResult {
     }
     pub fn diagnostics(&self) -> &AcousticResponseDiagnostics {
         &self.data.diagnostics
+    }
+    pub fn publication_observations(&self) -> &[runmat_analysis_core::ObservationRequest] {
+        &self.data.publication_observations
     }
     pub(super) fn publication_declaration(&self) -> &runmat_analysis_core::StateOutput {
         &self.data.publication_declaration

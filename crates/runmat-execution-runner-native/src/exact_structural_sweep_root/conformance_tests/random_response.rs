@@ -58,7 +58,11 @@ async fn random_response_reaches_an_admitted_result_over_encrypted_quic() {
         .unwrap(),
     );
     let expectation = prepared.result_expectation();
-    let mut builder = ExecutionBundleBuilder::native(&project, revision)
+    let mut builder = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_project_runtime_policy_object(crate::remote::runtime_settings::fixture_policy(
+            &revision,
+        ))
         .unwrap()
         .with_compiled_package_closure();
     for program in prepared.required_programs().unwrap() {
@@ -96,12 +100,16 @@ async fn random_response_reaches_an_admitted_result_over_encrypted_quic() {
         false,
     ));
     capabilities.insert(Capability::ProcessIsolation);
+    // This positive conformance run provisions a real local worker. Its
+    // canonical random-response plan can exceed the old synthetic 1 GiB pool;
+    // use the same finite host-capacity snapshot as ordinary native workers.
+    let memory_bytes = crate::machine_capacity::memory_bytes().unwrap();
     let resources = ResourceRequest {
         cpu_millicores: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial()
             .checked_cpu_millicores()
             .unwrap()
             .into(),
-        memory_bytes: 1 << 30,
+        memory_bytes,
         scratch_bytes: 1 << 30,
         accelerators: Vec::new(),
         maximum_wall_millis: 180_000,

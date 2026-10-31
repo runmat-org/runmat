@@ -14,6 +14,7 @@ use runmat_execution_transport_native::control::{
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 
+use super::pool::OriginalWorkerOwner;
 use super::pool_resources::inventory;
 use super::worker_env::session_id;
 use super::{RelayRemoteWorkerChannel, RemotePoolDriver};
@@ -80,6 +81,17 @@ pub(super) async fn reconcile_workers(
             authority.run_id.as_bytes(),
             worker.allocation_lease_id.as_bytes(),
         ]);
+        pool.record_original_worker_owner(
+            worker_id,
+            OriginalWorkerOwner {
+                allocation_lease_id: worker.allocation_lease_id.clone(),
+                allocation_fencing_token: worker.fencing_token,
+                driver_fencing_token: authority.fencing_token,
+                node_id: evidence.node_id.clone(),
+                cluster_id: evidence.cluster_id.clone(),
+                identity_fingerprint: evidence.identity_fingerprint.clone(),
+            },
+        )?;
         // Reconciliation may be cancelled immediately after add_worker atomically admits the
         // worker but before this local allocation index is updated. Recover only a ready worker
         // with a live route; lost workers must reconnect through normal admission.

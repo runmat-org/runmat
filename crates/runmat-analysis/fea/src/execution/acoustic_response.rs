@@ -17,8 +17,10 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_model, AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation,
-    PhysicsFamily, ProcedureStep, ProcedureStepId, RestartPolicy, SolutionSpace,
-    SourceImplementation, StateCompleteness, StateKind, StatePersistence,
+    ComplexRepresentation, FieldLocation, ObservationComponent, ObservationQuantity,
+    ObservationRequest, ObservationValueShape, PhysicsFamily, ProcedureStep, ProcedureStepId,
+    RecoveryPolicy, RestartPolicy, SamplingPolicy, SolutionSpace, SourceImplementation,
+    StateCompleteness, StateKind, StatePersistence,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -26,6 +28,7 @@ use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
 mod fields;
+pub(crate) use fields::pressure_definition as acoustic_response_pressure_definition;
 mod publication;
 mod receipt;
 mod result;
@@ -117,10 +120,21 @@ impl AcousticResponseWorkload {
                 "acoustic response workload requires a fresh direct standalone modal or transient step with valid numerical controls",
             ));
         }
-        if !step.observations.is_empty() {
-            return Err(invalid(
-                "authored outputs are evaluated for acoustic harmonic steps; cavity modes and pressure transients publish their pressure fields and frequencies directly",
-            ));
+        validate_observations(self.solver, &step.observations)?;
+        if matches!(self.solver, AcousticResponseSolver::Transient { .. }) {
+            let runmat_analysis_core::IndependentDomain::TimeSeconds {
+                start,
+                end,
+                interval_count,
+                ..
+            } = &step.independent_domain
+            else {
+                return Err(invalid("acoustic transient requires an authored time grid"));
+            };
+            crate::physics::acoustic::TransientRetention::for_step(step)
+                .map_err(invalid)?
+                .validate_for_domain(*start, *end, *interval_count)
+                .map_err(invalid)?;
         }
         if !matches!(
             step.state_outputs.as_slice(),
@@ -199,13 +213,51 @@ impl AcousticResponseWorkload {
                     mesh,
                     self.step_id.as_str(),
                     policy,
-                    &crate::physics::acoustic::TransientRetention::for_step(self.step()?),
+                    &crate::physics::acoustic::TransientRetention::for_step(self.step()?)
+                        .map_err(invalid)?,
                 )
                 .map_err(invalid)?,
             ),
         };
         AcousticResponseSolverResult::new(self, mesh, formulation, response)
     }
+}
+
+fn validate_observations(
+    solver: AcousticResponseSolver,
+    observations: &[ObservationRequest],
+) -> AnalysisExecutionResult<()> {
+    if matches!(solver, AcousticResponseSolver::Modal { .. }) && !observations.is_empty() {
+        return Err(invalid(
+            "acoustic cavity modes do not admit authored observations",
+        ));
+    }
+    for observation in observations {
+        let ObservationRequest::History(spec) = observation else {
+            return Err(invalid(
+                "acoustic pressure transients admit authored history outputs only",
+            ));
+        };
+        if spec.quantity != ObservationQuantity::AcousticPressure
+            || spec.value_shape != ObservationValueShape::Scalar
+            || spec.source_location != FieldLocation::Node
+            || spec.output_location != FieldLocation::Node
+            || spec.recovery != RecoveryPolicy::Native
+            || spec.component != ObservationComponent::All
+            || spec.complex_representation != ComplexRepresentation::Real
+            || !matches!(
+                &spec.sampling,
+                SamplingPolicy::EveryAcceptedIncrement
+                    | SamplingPolicy::TimeSeconds(_)
+                    | SamplingPolicy::TimeIntervalSeconds { .. }
+            )
+        {
+            return Err(invalid(
+                "acoustic transient history requires native nodal scalar pressure sampled over time",
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl AcousticResponseWorkload {

@@ -54,7 +54,9 @@ pub fn prepare_graph_for_cluster(
         return Err("legacy flattened callable Graphs must be rematerialized with supplied-only callable arguments before cluster preparation".into());
     }
     graph.project_runtime_policy = Some(capture_project_policy(policy)?);
-    graph.schema_version = runmat_execution::value::GRAPH_REQUEST_SCHEMA_V13;
+    graph.schema_version = graph
+        .schema_version
+        .max(runmat_execution::value::GRAPH_REQUEST_SCHEMA_V13);
     validate_graph_policy(&graph)?;
     graph.validate().map_err(|error| error.to_string())?;
     Ok(graph)

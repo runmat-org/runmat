@@ -463,6 +463,7 @@ async fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     let artifact =
         ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV4, bytes).unwrap();
     let request = GraphExecutionRequest {
+        invocation_controls: None,
         project_runtime_policy: None,
         schema_version: runmat_execution_artifact::GRAPH_EXECUTION_REQUEST_SCHEMA_V10,
         recipe,
@@ -565,6 +566,26 @@ async fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     }
     retained.task = Some(original.clone());
     retained.validate().unwrap();
+    let inferred =
+        crate::graph_submission::required_capabilities(retained.request.schema_version).unwrap();
+    assert!(inferred.is_subset(&original.request.resources.required_capabilities));
+    // V10 has no extra decoder requirement. Use a valid V11 request to
+    // exercise capability refusal without changing the original V10 grant.
+    let mut decoder_request = retained.request.clone();
+    let schema = runmat_execution::value::GraphRequiredSchema::SelectedValuesV11;
+    decoder_request.schema_version = schema.version();
+    decoder_request.validate().unwrap();
+    let mut decoder_task = original.clone();
+    decoder_task.request.resources.required_capabilities.extend(
+        crate::graph_submission::required_capabilities(decoder_request.schema_version).unwrap(),
+    );
+    crate::graph_submission::validate_original(&decoder_request, &decoder_task).unwrap();
+    decoder_task
+        .request
+        .resources
+        .required_capabilities
+        .remove(&schema.required_capability().unwrap());
+    assert!(crate::graph_submission::validate_original(&decoder_request, &decoder_task).is_err());
     let admitted = retained.request.clone().into_validated().unwrap();
     crate::graph_submission::validate_floor(&retained.request, &original, 1024).unwrap();
     crate::graph_submission::validate_scratch(&admitted, &original).unwrap();

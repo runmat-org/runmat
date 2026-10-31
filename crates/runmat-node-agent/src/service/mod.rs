@@ -1,6 +1,8 @@
 mod control;
+mod clock_observer;
 mod heartbeat;
 mod loop_;
+mod retirement;
 mod shutdown;
 
 pub use control::HttpNodeControlPlane;

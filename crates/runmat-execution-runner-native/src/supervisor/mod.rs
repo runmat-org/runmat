@@ -25,7 +25,7 @@ mod tests;
 #[cfg(test)]
 mod test_support;
 
-pub use client::LocalSupervisorClient;
+pub use client::{JobSubmissionDisposition, LocalSupervisorClient};
 pub use config::LocalSupervisorConfig;
 pub use driver::{
     complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_graph_batch,

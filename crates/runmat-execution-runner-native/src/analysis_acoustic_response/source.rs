@@ -88,7 +88,7 @@ impl<S: CacheImport + Send + Sync> AcousticResponseStudySource
             self.completed.result_closures().to_vec(),
         )
         .map_err(|error| error.to_string())?;
-        let expected = completion(&replay)?;
+        let expected = completion(&replay, self)?;
         if &expected != candidate {
             return Err(
                 "runtime acoustic response completion differs from authenticated replay".into(),
@@ -103,6 +103,7 @@ impl<S: CacheImport + Send + Sync> AcousticResponseStudySource
 
 fn completion(
     completed: &CompletedAcousticResponseStudy,
+    source: &impl CacheImport,
 ) -> Result<AcousticResponseStudyCompletion, String> {
     let root =
         prepare_acoustic_response_study_root(completed).map_err(|error| error.to_string())?;
@@ -118,6 +119,49 @@ fn completion(
         workload: completed.workload.clone(),
         result: completed.result.result.clone(),
         numerical_receipt: completed.result.numerical_receipt.clone(),
+        observation_catalog: completed.observations.catalog.clone(),
+        observation_results: completed
+            .observations
+            .samples
+            .iter()
+            .flat_map(|sample| {
+                sample.manifest.results.iter().map(move |entry| {
+                    runmat_analysis_execution::import_observation_result(
+                        source,
+                        sample,
+                        &entry.observation_id,
+                        completed
+                            .preparation()
+                            .map_err(|error| error.to_string())?
+                            .output_policy
+                            .inventory_limits(),
+                    )
+                    .map_err(|error| error.to_string())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        observation_histories: completed
+            .observations
+            .histories
+            .iter()
+            .map(|finalized| {
+                history(
+                    source,
+                    &finalized.history,
+                    completed
+                        .preparation()
+                        .map_err(|error| error.to_string())?
+                        .output_policy
+                        .inventory_limits(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        series_reductions: completed
+            .observations
+            .histories
+            .iter()
+            .filter_map(|finalized| finalized.series_reduction.clone())
+            .collect(),
         accuracy: completed.accuracy.artifact.clone(),
         states: completed
             .states
@@ -134,6 +178,37 @@ fn completion(
         root: root.root,
         catalog: root.catalog,
     })
+}
+
+fn history(
+    source: &impl CacheImport,
+    imported: &runmat_analysis_execution::ImportedObservationHistory,
+    limits: runmat_execution_artifact::object::ObjectInventoryLimits,
+) -> Result<runmat_analysis_fea::results::observation::ObservationHistory, String> {
+    if let runmat_analysis_execution::ImportedObservationHistoryStorage::Whole { history, .. } =
+        &imported.storage
+    {
+        return Ok((**history).clone());
+    }
+    let samples = imported
+        .manifest
+        .samples
+        .iter()
+        .map(|entry| {
+            runmat_analysis_execution::import_observation_history_sample(
+                source,
+                imported,
+                entry.coordinate,
+                limits,
+            )
+            .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    runmat_analysis_fea::results::observation::ObservationHistory::from_manifest_and_samples(
+        imported.manifest.clone(),
+        samples,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn convert(
@@ -161,7 +236,7 @@ pub(crate) fn convert(
         completed,
         store,
     };
-    let dto = completion(&source.completed)?;
+    let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, AcousticResponseStudyObjectSource::new(source)))
 }
@@ -187,7 +262,7 @@ pub fn acoustic_response_study_completion_from_source(
         store: source,
         objects: BTreeMap::new(),
     };
-    let dto = completion(&source.completed)?;
+    let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, AcousticResponseStudyObjectSource::new(source)))
 }

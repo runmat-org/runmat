@@ -44,6 +44,39 @@ impl ProcedureTimeGrid {
         &self.points_s
     }
 
+    pub(crate) fn into_points_s(self) -> Vec<f64> {
+        self.points_s
+    }
+
+    /// The grid owner's coordinate formula without allocating the full grid. Endpoint identity
+    /// is authored; interior coordinates use the same fraction as `uniform` below.
+    pub(crate) fn uniform_coordinate_at(
+        start_s: f64,
+        end_s: f64,
+        interval_count: usize,
+        index: usize,
+    ) -> Result<f64, String> {
+        if !start_s.is_finite()
+            || !end_s.is_finite()
+            || end_s <= start_s
+            || interval_count == 0
+            || index > interval_count
+        {
+            return Err("invalid time-grid coordinate index or authored bounds".into());
+        }
+        let value = if index == 0 {
+            start_s
+        } else if index == interval_count {
+            end_s
+        } else {
+            start_s + (end_s - start_s) * (index as f64 / interval_count as f64)
+        };
+        if !value.is_finite() {
+            return Err("time-grid coordinate is not finite".into());
+        }
+        Ok(value)
+    }
+
     pub(crate) fn start_s(&self) -> f64 {
         self.points_s[0]
     }
@@ -79,13 +112,14 @@ impl ProcedureTimeGrid {
         points_s
             .try_reserve_exact(sample_count)
             .map_err(|_| "time-domain grid exceeds addressable memory".to_string())?;
-        points_s.extend(
-            (0..sample_count)
-                .map(|index| start_s + duration_s * (index as f64 / interval_count as f64)),
-        );
-        // Avoid accumulated arithmetic changing the identity of the authored endpoint.
-        points_s[0] = start_s;
-        points_s[interval_count] = end_s;
+        for index in 0..sample_count {
+            points_s.push(Self::uniform_coordinate_at(
+                start_s,
+                end_s,
+                interval_count,
+                index,
+            )?);
+        }
         if points_s.iter().any(|point| !point.is_finite())
             || points_s.windows(2).any(|pair| pair[0] >= pair[1])
         {

@@ -104,7 +104,7 @@ jit = { enabled = true, threshold = 5, optimization_level = "speed" }
 }
 
 #[test]
-fn legacy_runtime_env_knobs_do_not_override_file_config() {
+fn runtime_environment_overrides_file_config_in_canonical_order() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("runmat.toml");
     std::fs::write(
@@ -120,11 +120,19 @@ jit = { enabled = true, threshold = 25, optimization_level = "size" }
     env.insert("RUNMAT_CONFIG", config_path.to_str().unwrap());
     env.insert("RUNMAT_JIT_THRESHOLD", "999");
 
-    let output = run_runmat_with_env(&["info"], env);
+    let output = run_runmat_with_env(&["info"], env.clone());
     assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("JIT Threshold: 25"));
+    assert!(stdout.contains("JIT Threshold: 999"), "{stdout}");
+    assert!(stdout.contains("JIT Optimization: Size"), "{stdout}");
+
+    env.insert("RUNMAT_RUNTIME__JIT__THRESHOLD", "1001");
+    let output = run_runmat_with_env(&["info"], env);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JIT Threshold: 1001"), "{stdout}");
+    assert!(stdout.contains("JIT Optimization: Size"), "{stdout}");
 }
 
 #[test]

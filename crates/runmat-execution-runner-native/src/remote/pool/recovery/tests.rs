@@ -8,6 +8,32 @@ use runmat_execution_runner::{
     AttemptReport, AttemptSuccess, DriverAction, DriverCommand, WorkerSpec,
 };
 
+#[test]
+fn typed_clock_checkpoint_entries_roundtrip_and_reject_duplicate_authority() {
+    #[derive(Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct ClockEntries {
+        #[serde(
+            serialize_with = "super::clock_codec::serialize",
+            deserialize_with = "super::clock_codec::deserialize_clock"
+        )]
+        entries: BTreeMap<[u8; 16], u8>,
+    }
+
+    let entries = ClockEntries {
+        entries: [([7; 16], 3), ([8; 16], 4)].into_iter().collect(),
+    };
+    let encoded = serde_json::to_vec(&entries).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<ClockEntries>(&encoded).unwrap(),
+        entries
+    );
+
+    let duplicated = serde_json::json!({
+        "entries": serde_json::to_value([([7_u8; 16], 3_u8), ([7_u8; 16], 4_u8)]).unwrap()
+    });
+    assert!(serde_json::from_value::<ClockEntries>(duplicated).is_err());
+}
+
 fn authority(checkpoint: &RemotePoolCheckpoint) -> RemotePoolRestoreAuthority {
     RemotePoolRestoreAuthority {
         scope_id: checkpoint.scope_id,
@@ -504,6 +530,9 @@ async fn cold_capture_roundtrip_preserves_ready_tasks_and_streams_verified_objec
 #[tokio::test]
 async fn completed_program_and_original_commit_survive_cold_restore_without_dispatch() {
     let (pool, program, task) = fixture().await;
+    // The pool's original host clock began before submission. Measure the fixture's actual
+    // post-submission work for the provider interval, rather than inventing elapsed time.
+    let observed = std::time::Instant::now();
     let attempt = {
         let mut driver = pool.driver.lock().unwrap();
         driver
@@ -527,13 +556,16 @@ async fn completed_program_and_original_commit_survive_cold_restore_without_disp
             })
             .unwrap()
     };
+    let measured_wall_millis =
+        u64::try_from(observed.elapsed().as_nanos().div_ceil(1_000_000)).unwrap();
+    assert!(measured_wall_millis > 0);
     let accepted = AttemptSuccess::new(
         &attempt,
         vec![ValuePayload::Inline(Box::new(InlineValue::String(
             "retained".into(),
         )))],
         Vec::new(),
-        29,
+        measured_wall_millis,
         0,
         0,
     )
@@ -545,6 +577,8 @@ async fn completed_program_and_original_commit_survive_cold_restore_without_disp
         },
     ));
     let checkpoint = pool.capture_checkpoint(2).unwrap();
+    let saved_wall_millis = checkpoint.completed_task_wall_millis[&task.request.id];
+    assert!(saved_wall_millis >= measured_wall_millis);
     let committed = pool.snapshot().tasks[&task.request.id].committed.clone();
     let bundle = Arc::clone(
         &pool
@@ -561,20 +595,18 @@ async fn completed_program_and_original_commit_survive_cold_restore_without_disp
         |_| panic!("inline result needs no object reads"),
     )
     .unwrap();
+    let attempts_before_replay = restored.snapshot().attempts.len();
+    let completion = restored.submit(task.clone(), program).unwrap();
     assert_eq!(
-        restored
-            .submit(task.clone(), program)
-            .unwrap()
-            .wait()
-            .await
-            .unwrap(),
-        accepted
+        completion.original_graph_wall_millis(),
+        Some(saved_wall_millis)
     );
+    assert_eq!(completion.wait().await.unwrap(), accepted);
     assert_eq!(
         restored.snapshot().tasks[&task.request.id].committed,
         committed
     );
-    assert_eq!(restored.snapshot().attempts.len(), 1);
+    assert_eq!(restored.snapshot().attempts.len(), attempts_before_replay);
     assert!(restored.channels.read().await.is_empty());
 }
 
@@ -652,21 +684,118 @@ async fn missing_or_corrupt_checkpoint_objects_never_expose_a_restored_pool() {
 #[tokio::test]
 async fn restored_waiter_can_attach_before_or_after_authoritative_completion() {
     for complete_first in [false, true] {
-        let (pool, program, task) = fixture().await;
+        use crate::remote::clock_observer::ClockCommand;
+        use crate::remote::RemoteObservedWave;
+        use runmat_execution::security::{
+            EndpointIdentitySigner, EndpointTrustPolicy, NodeClockEndV1, NodeClockOwnerV1,
+            NodeClockStartV1,
+        };
+
+        let (pool, program, task) = unsubmitted_fixture().await;
+        let task_id = task.request.id;
+        let run_id = pool.value_scope().to_owned();
+        let (clock_sender, mut clock_commands) = tokio::sync::mpsc::channel(4);
+        let clock_owner = tokio::spawn(async move {
+            let signer = EndpointIdentitySigner::from_secret([41; 32]).unwrap();
+            let fingerprint = signer.fingerprint();
+            let policy = EndpointTrustPolicy {
+                permitted_tiers: Default::default(),
+                trusted_identity_fingerprints: [fingerprint.clone()].into_iter().collect(),
+                allowed_attestation_classes: Default::default(),
+                require_pinned_identity: true,
+                now_unix_millis: 0,
+                maximum_clock_skew_millis: 0,
+            };
+            let mut original_start: Option<NodeClockStartV1> = None;
+            while let Some(command) = clock_commands.recv().await {
+                match command {
+                    ClockCommand::Begin(reply) => {
+                        assert!(original_start.is_none());
+                        let reading = runmat_process_host::clock::observe_monotonic().unwrap();
+                        let mut start = NodeClockStartV1 {
+                            schema_version: 1,
+                            owner: NodeClockOwnerV1 {
+                                org_id: "org-restored-waiter".into(),
+                                cluster_id: "cluster-restored-waiter".into(),
+                                node_id: "node-restored-waiter".into(),
+                                run_id: run_id.clone(),
+                                driver_allocation_lease_id: "driver-restored-waiter".into(),
+                                driver_allocation_fence: 7,
+                                driver_process_launch_nonce: [13; 16],
+                                observation_id: [15; 16],
+                                clock_domain_nonce: [17; 16],
+                                ticks_per_second: reading.ticks_per_second,
+                                identity_public_key: signer.public_key().to_vec(),
+                                identity_fingerprint: fingerprint.clone(),
+                            },
+                            started_monotonic_ticks: reading.ticks,
+                            signature: Vec::new(),
+                        };
+                        signer.sign_node_clock_start(&mut start).unwrap();
+                        policy
+                            .verify_node_clock_start(&start, &fingerprint)
+                            .unwrap();
+                        original_start = Some(start.clone());
+                        reply.send(Ok(start)).unwrap();
+                    }
+                    ClockCommand::Checkpoint(reply) | ClockCommand::Close(reply) => {
+                        reply.send(Ok(())).unwrap();
+                    }
+                    ClockCommand::End { start, respond } => {
+                        assert_eq!(original_start.as_ref(), Some(&start));
+                        let reading = runmat_process_host::clock::observe_monotonic().unwrap();
+                        assert_eq!(reading.ticks_per_second, start.owner.ticks_per_second);
+                        let mut end = NodeClockEndV1 {
+                            schema_version: 1,
+                            owner: start.owner.clone(),
+                            start_receipt_digest: start.receipt_digest().unwrap(),
+                            demand_challenge: [19; 16],
+                            ended_monotonic_ticks: reading.ticks,
+                            signature: Vec::new(),
+                        };
+                        signer.sign_node_clock_end(&mut end).unwrap();
+                        policy.verify_node_clock_end(&end, &fingerprint).unwrap();
+                        assert!(end.measured_wall_millis(&start).unwrap() >= 3);
+                        respond.send(Ok(end)).unwrap();
+                    }
+                }
+            }
+        });
+        pool.install_clock_commands(clock_sender.clone()).unwrap();
+        let mut original_wave = RemoteObservedWave::begin(Arc::clone(&pool), &[task_id])
+            .await
+            .unwrap();
+        original_wave.arm(&[task_id]).unwrap();
+        let _original_waiter = pool.submit(task.clone(), program.clone()).unwrap();
+        original_wave.checkpoint().await.unwrap();
         let checkpoint = pool.capture_checkpoint(1).unwrap();
+        let original_start = checkpoint.clock_starts.values().next().unwrap().clone();
+        assert_eq!(
+            checkpoint.task_clocks.get(&task_id),
+            Some(&original_start.owner.observation_id)
+        );
+        let bundle = Arc::clone(
+            &pool
+                .direct_bundle
+                .as_ref()
+                .expect("direct fixture bundle")
+                .bytes,
+        );
+        drop(original_wave);
+        drop(pool);
         let restored = RemotePoolDriver::restore_checkpoint(
             checkpoint.clone(),
             authority(&checkpoint),
-            Arc::clone(
-                &pool
-                    .direct_bundle
-                    .as_ref()
-                    .expect("direct fixture bundle")
-                    .bytes,
-            ),
+            bundle,
             |_| panic!("no objects"),
         )
         .unwrap();
+        restored.install_clock_commands(clock_sender).unwrap();
+        let mut resumed_wave = RemoteObservedWave::begin(Arc::clone(&restored), &[task_id])
+            .await
+            .unwrap();
+        resumed_wave.arm(&[task_id]).unwrap();
+        resumed_wave.checkpoint().await.unwrap();
         let attempt = launch(&restored);
         let accepted = AttemptSuccess::new(
             &attempt,
@@ -687,16 +816,52 @@ async fn restored_waiter_can_attach_before_or_after_authoritative_completion() {
         );
         let completion = if complete_first {
             restored.apply_report(report);
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            let wall = resumed_wave.close().await.unwrap().unwrap();
+            assert!(wall >= 3);
             restored.submit(task.clone(), program.clone()).unwrap()
         } else {
             let completion = restored.submit(task.clone(), program.clone()).unwrap();
             assert!(restored.submit(task.clone(), program.clone()).is_err());
             restored.apply_report(report);
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            let wall = resumed_wave.close().await.unwrap().unwrap();
+            assert!(wall >= 3);
             completion
         };
         assert_eq!(completion.wait().await.unwrap(), accepted);
+        let saved_wall = restored
+            .task_wall_intervals
+            .lock()
+            .unwrap()
+            .get(&task_id)
+            .and_then(|interval| match interval {
+                super::super::timing::TaskWallInterval::Completed(wall) => Some(*wall),
+                _ => None,
+            })
+            .unwrap();
+        assert!(saved_wall >= 3);
+        let retained = restored.capture_checkpoint(2).unwrap();
+        assert_eq!(
+            retained.completed_task_wall_millis.get(&task_id),
+            Some(&saved_wall)
+        );
+        assert_eq!(
+            retained
+                .clock_starts
+                .get(&original_start.owner.observation_id),
+            Some(&original_start)
+        );
+        assert_eq!(
+            retained.clock_ends[&original_start.owner.observation_id]
+                .measured_wall_millis(&original_start)
+                .unwrap(),
+            saved_wall
+        );
         assert_eq!(restored.snapshot().attempts.len(), 1);
         assert!(restored.restored_completions.lock().unwrap().is_empty());
+        drop(restored);
+        clock_owner.await.unwrap();
     }
 }
 
@@ -770,6 +935,9 @@ async fn cold_active_attempt_preserves_admission_and_reservations_without_replay
         let _original_waiter = pool.submit(task.clone(), program.clone()).unwrap();
         let old_attempt = launch(&pool);
         let checkpoint = pool.capture_checkpoint(4).unwrap();
+        // A direct pool snapshot without an authenticated original node owner
+        // cannot issue negative admission authority from an absent journal.
+        assert!(checkpoint.authoritative_unstarted_inventory().is_err());
         let saved_pool = &checkpoint.scheduler.snapshot.pools[&pool.pool_id];
         let allocation = saved_pool.allocated.clone();
         let worker_allocation = saved_pool.workers[&old_attempt.worker_id].allocated.clone();

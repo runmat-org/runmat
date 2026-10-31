@@ -31,18 +31,22 @@ impl RemotePoolDriver {
                     worker.id
                 )));
             }
-            let live_worker_count = pool
+            // Historical Lost records still occupy a physical worker slot
+            // while an original attempt lacks owner retirement. This must
+            // match the runner's register_worker/snapshot occupancy invariant.
+            let occupied_worker_count = pool
                 .workers
                 .values()
                 .filter(|worker| {
-                    !matches!(
-                        worker.lifecycle,
-                        runmat_execution_runner::pool::WorkerLifecycle::Lost
-                            | runmat_execution_runner::pool::WorkerLifecycle::Stopped
-                    )
+                    worker.active_attempts > 0
+                        || !matches!(
+                            worker.lifecycle,
+                            runmat_execution_runner::pool::WorkerLifecycle::Lost
+                                | runmat_execution_runner::pool::WorkerLifecycle::Stopped
+                        )
                 })
                 .count();
-            if live_worker_count >= pool.spec.max_workers as usize && !recoverable_lost_worker {
+            if occupied_worker_count >= pool.spec.max_workers as usize && !recoverable_lost_worker {
                 return Err(NativeExecutionError::Configuration(format!(
                     "remote pool {} is at its worker limit",
                     self.pool_id
@@ -189,6 +193,28 @@ impl RemotePoolDriver {
         worker_id: runmat_execution::identity::WorkerId,
         lost: bool,
     ) -> NativeExecutionResult<()> {
+        let uncertain_requests = if lost {
+            self.driver
+                .lock()
+                .expect("remote driver poisoned")
+                .snapshot()
+                .attempts
+                .values()
+                .filter(|attempt| {
+                    attempt.request.worker_id == worker_id
+                        && !matches!(
+                            attempt.state,
+                            runmat_execution::state::AttemptState::Completed
+                                | runmat_execution::state::AttemptState::Rejected
+                                | runmat_execution::state::AttemptState::Cancelled
+                                | runmat_execution::state::AttemptState::Lost
+                        )
+                })
+                .map(|attempt| attempt.request.clone())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let _draining_registration = if lost {
             None
         } else {
@@ -215,6 +241,12 @@ impl RemotePoolDriver {
             (channel, actions)
         };
         self.dispatch(actions);
+        if lost {
+            if let Some(channel) = channel.as_ref() {
+                self.reconcile_physical_retirements(channel.as_ref(), &uncertain_requests)
+                    .await;
+            }
+        }
         self.resolve_non_success_terminals();
         if !lost {
             if let Some(channel) = channel {
@@ -233,6 +265,29 @@ impl RemotePoolDriver {
         }
         self.refresh_pool_state()?;
         Ok(())
+    }
+
+    pub(super) async fn reconcile_physical_retirements(
+        self: &Arc<Self>,
+        channel: &dyn RemoteWorkerChannel,
+        requests: &[runmat_execution_runner::AttemptRequest],
+    ) {
+        for request in requests {
+            // The old route may remain reachable after membership loss. No
+            // receipt, including on timeout/disconnect, leaves capacity held.
+            for _ in 0..100 {
+                match channel.authenticated_physical_retirement(request).await {
+                    Ok(Some(evidence)) => {
+                        if self.apply_authenticated_retirement(request, evidence, None) {
+                            let _ = channel.acknowledge_physical_retirement(request).await;
+                        }
+                        break;
+                    }
+                    Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                    Err(_) => break,
+                }
+            }
+        }
     }
 
     /// Apply a membership transition and re-derive the pool's admitted capabilities.

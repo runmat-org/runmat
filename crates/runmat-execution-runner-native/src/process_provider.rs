@@ -1,5 +1,6 @@
 //! Execute an original admitted attempt; scheduling and persistence belong to its caller.
 use crate::config::NativeExecutionConfig;
+use crate::driver::process::LocalRetirementEvidence;
 
 use crate::local_store::ArtifactStore;
 use crate::FilesystemObjectStore;
@@ -68,6 +69,7 @@ pub(crate) struct ObservedAttempt {
     pub execution: AttemptExecutionObservation,
     pub unsuccessful_resources: Option<Box<AttemptResourceAccounting>>,
     pub console: Option<runmat_execution::console::ConsoleTranscript>,
+    retirement: LocalRetirementEvidence,
 }
 
 pub(crate) async fn execute_attempt(
@@ -79,6 +81,7 @@ pub(crate) async fn execute_attempt(
     let meters = TransportMeters::default();
     let mut termination = AttemptExecutionTermination::NotStarted;
     let mut console = None;
+    let mut retirement = LocalRetirementEvidence::NotStarted;
     let response = if control.cancellation().load(Ordering::Acquire) {
         Err("execution was cancelled before process launch".into())
     } else {
@@ -91,13 +94,14 @@ pub(crate) async fn execute_attempt(
                     &meters,
                     &mut termination,
                     &mut console,
+                    &mut retirement,
                 )
                 .await
             }
             Err(error) => Err(error),
         }
     };
-    let mut observed = observe(request, started, response, meters, termination);
+    let mut observed = observe(request, started, response, meters, termination, retirement);
     observed.console = console;
     observed
 }
@@ -108,7 +112,17 @@ impl ObservedAttempt {
         request: &AttemptRequest,
         control: &dyn ProcessControl,
     ) -> (TransferResult, runmat_execution_runner::port::BackendReport) {
-        let report = if let Some(message) = control.failure() {
+        let control_failure = control.failure();
+        let report = if self.retirement == LocalRetirementEvidence::Unconfirmed {
+            let mut message = self.result.as_ref().err().cloned().unwrap_or_else(|| {
+                "durable direct worker has no complete process-tree retirement proof".into()
+            });
+            if let Some(original) = control_failure {
+                message.push_str("; original control failure: ");
+                message.push_str(&original);
+            }
+            AttemptReport::RetirementUnverified { message }
+        } else if let Some(message) = control_failure {
             AttemptReport::Failed {
                 kind: AttemptFailureKind::Execution,
                 message,
@@ -119,7 +133,10 @@ impl ObservedAttempt {
                     result: result.clone(),
                 },
                 Err(_) if control.cancellation().load(Ordering::Acquire) => {
-                    AttemptReport::Cancelled
+                    // A stop request is not retirement. This branch is reached
+                    // only before launch or after the physical owner retired
+                    // the complete tree while retaining the original leader.
+                    AttemptReport::Retired
                 }
                 Err(message) => AttemptReport::Failed {
                     kind: AttemptFailureKind::Execution,
@@ -142,6 +159,7 @@ impl ObservedAttempt {
             Err(message),
             TransportMeters::default(),
             AttemptExecutionTermination::NotStarted,
+            LocalRetirementEvidence::NotStarted,
         )
     }
 }
@@ -152,6 +170,7 @@ fn observe(
     response: Result<WorkerResponse, String>,
     meters: TransportMeters,
     termination: AttemptExecutionTermination,
+    retirement: LocalRetirementEvidence,
 ) -> ObservedAttempt {
     let wall_millis = u64::try_from(started.elapsed().as_millis())
         .unwrap_or(u64::MAX)
@@ -198,6 +217,7 @@ fn observe(
             None
         };
     ObservedAttempt {
+        retirement,
         console: None,
         result,
         response: original_response,
@@ -290,6 +310,7 @@ async fn run_process(
     meters: &TransportMeters,
     termination: &mut AttemptExecutionTermination,
     console: &mut Option<runmat_execution::console::ConsoleTranscript>,
+    retirement: &mut LocalRetirementEvidence,
 ) -> Result<WorkerResponse, String> {
     if control.cancellation().load(Ordering::Acquire) {
         return Err("execution was cancelled before process launch".into());
@@ -313,8 +334,9 @@ async fn run_process(
     );
     command.max_stderr_bytes = provider.config.max_stderr_bytes;
     // Spawn can fail after creating a child (for example during containment).
-    // Until root exit is observed, even an error leaves launch unconfirmed.
+    // Until the complete tree retires, even an error leaves launch unconfirmed.
     *termination = AttemptExecutionTermination::Unconfirmed;
+    *retirement = LocalRetirementEvidence::Unconfirmed;
     let mut child = command.spawn().await.map_err(|error| error.to_string())?;
     let stderr = child.captured_stderr();
     let response =
@@ -328,11 +350,12 @@ async fn run_process(
         Ok(exit) => exit,
         Err(error) => match stop_and_wait(&mut child).await {
             Ok(exit) => {
+                *retirement = LocalRetirementEvidence::FullTreeRetired;
                 *termination = AttemptExecutionTermination::ProcessExited {
                     code: exit.code,
                     success: exit.success,
                 };
-                return Err(format!("{}; process exit observation failed: {error}; subsequent cleanup confirmed root exit",
+                return Err(format!("{}; process exit observation failed: {error}; subsequent cleanup retired the process tree",
                     response.as_ref().err().map(String::as_str).unwrap_or("worker returned a terminal response")));
             }
             Err(cleanup) => {
@@ -351,6 +374,7 @@ async fn run_process(
         code: exit.code,
         success: exit.success,
     };
+    *retirement = LocalRetirementEvidence::FullTreeRetired;
     let response = response.map_err(|error| {
         let stderr = stderr.text();
         if stderr.is_empty() {
@@ -376,7 +400,10 @@ async fn stop_and_wait(child: &mut ChildProcess) -> Result<ProcessExit, String> 
         .terminate_tree()
         .await
         .map_err(|error| error.to_string())?;
-    child.wait().await.map_err(|error| error.to_string())
+    child
+        .wait_and_retire_tree()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 async fn wait_or_cancel(
@@ -384,7 +411,7 @@ async fn wait_or_cancel(
     control: &dyn ProcessControl,
 ) -> Result<ProcessExit, String> {
     let exit = {
-        let wait = child.wait();
+        let wait = child.wait_and_retire_tree();
         tokio::pin!(wait);
         loop {
             tokio::select! {

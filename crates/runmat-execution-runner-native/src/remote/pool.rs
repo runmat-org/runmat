@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::security::{NodeClockEndV1, NodeClockStartV1};
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::CacheImport;
@@ -17,6 +18,7 @@ use runmat_execution_runner::{
     DriverConfig, PoolSpec, TaskSubmission,
 };
 use runmat_execution_transport_native::control::DriverArtifactDownload;
+use tokio::sync::mpsc;
 use tokio::sync::{oneshot, Mutex as AsyncMutex, RwLock};
 
 use super::pool_progress::RemoteTaskCompletion;
@@ -40,6 +42,7 @@ mod graph_transfer;
 
 mod admission;
 mod attempt_execution;
+mod clock;
 mod completion;
 mod input_inventory;
 mod inspection;
@@ -47,7 +50,9 @@ mod membership;
 mod object_registration;
 mod recovery;
 mod route_loss;
+mod timing;
 
+pub(super) use recovery::{AuthoritativeUnstartedInventory, OriginalWorkerOwner};
 pub use recovery::{RemotePoolCheckpoint, RemotePoolRestoreAuthority};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -93,6 +98,8 @@ pub struct RemotePoolDriver {
     pub(super) driver: Mutex<Driver>,
     worker_registration: AsyncMutex<()>,
     channels: RwLock<HashMap<runmat_execution::identity::WorkerId, WorkerRoute>>,
+    original_owners:
+        Mutex<HashMap<runmat_execution::identity::WorkerId, recovery::OriginalWorkerOwner>>,
     applied_software_readiness: Mutex<HashSet<runmat_execution::identity::WorkerId>>,
     next_route_generation: AtomicU64,
     installed_nodes: AsyncMutex<BTreeSet<String>>,
@@ -113,6 +120,19 @@ pub struct RemotePoolDriver {
     pub(super) collectives: Arc<crate::driver::collective::ProcessCollectiveBroker>,
     admission: Mutex<()>,
     restored_completions: Mutex<HashMap<TaskId, RemoteTaskCompletion>>,
+    task_wall_intervals: Mutex<HashMap<TaskId, timing::TaskWallInterval>>,
+    clock_state: Mutex<()>,
+    wave_admission: AsyncMutex<()>,
+    clock_commands: Mutex<Option<mpsc::Sender<super::clock_observer::ClockCommand>>>,
+    wave_clocks: Mutex<HashMap<super::clock_observer::RemoteWaveIdentity, [u8; 16]>>,
+    certified_waves: Mutex<
+        HashMap<super::clock_observer::RemoteWaveIdentity, super::clock_observer::CertifiedWave>,
+    >,
+    clock_starts: Mutex<HashMap<[u8; 16], NodeClockStartV1>>,
+    clock_ends: Mutex<HashMap<[u8; 16], NodeClockEndV1>>,
+    task_clocks: Mutex<HashMap<TaskId, [u8; 16]>>,
+    uncheckpointed_tasks: Mutex<HashSet<TaskId>>,
+    held_launches: Mutex<Vec<AttemptRequest>>,
     committed_task: tokio::sync::Notify,
     committed_event_watermark: AtomicU64,
     cancellation_in_flight: AtomicUsize,
@@ -227,6 +247,7 @@ impl RemotePoolDriver {
             driver: Mutex::new(driver),
             worker_registration: AsyncMutex::new(()),
             channels: RwLock::new(HashMap::new()),
+            original_owners: Mutex::new(HashMap::new()),
             applied_software_readiness: Mutex::new(HashSet::new()),
             next_route_generation: AtomicU64::new(1),
             installed_nodes: AsyncMutex::new(BTreeSet::new()),
@@ -244,6 +265,17 @@ impl RemotePoolDriver {
             collectives: Arc::new(crate::driver::collective::ProcessCollectiveBroker::default()),
             admission: Mutex::new(()),
             restored_completions: Mutex::new(HashMap::new()),
+            task_wall_intervals: Mutex::new(HashMap::new()),
+            clock_state: Mutex::new(()),
+            clock_commands: Mutex::new(None),
+            wave_admission: AsyncMutex::new(()),
+            wave_clocks: Mutex::new(HashMap::new()),
+            certified_waves: Mutex::new(HashMap::new()),
+            clock_starts: Mutex::new(HashMap::new()),
+            clock_ends: Mutex::new(HashMap::new()),
+            task_clocks: Mutex::new(HashMap::new()),
+            uncheckpointed_tasks: Mutex::new(HashSet::new()),
+            held_launches: Mutex::new(Vec::new()),
             committed_task: tokio::sync::Notify::new(),
             committed_event_watermark: AtomicU64::new(0),
             cancellation_in_flight: AtomicUsize::new(0),
@@ -333,7 +365,21 @@ impl RemotePoolDriver {
     pub(super) fn dispatch(self: &Arc<Self>, actions: Vec<DriverAction>) {
         for action in actions {
             match action {
-                DriverAction::Launch(request) => self.launch(request),
+                DriverAction::Launch(request) => {
+                    let barrier = self
+                        .uncheckpointed_tasks
+                        .lock()
+                        .expect("clock launch barrier poisoned");
+                    if barrier.contains(&request.task_id) {
+                        self.held_launches
+                            .lock()
+                            .expect("held launches poisoned")
+                            .push(request);
+                    } else {
+                        drop(barrier);
+                        self.launch(request);
+                    }
+                }
                 DriverAction::Cancel(request) | DriverAction::Terminate(request) => {
                     self.cancel_attempt(request)
                 }

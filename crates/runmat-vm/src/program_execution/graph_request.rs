@@ -21,6 +21,7 @@ pub fn compiled_graph_execution_capabilities(
         GraphRequiredSchema::CallableArgumentsV12,
         #[cfg(not(target_arch = "wasm32"))]
         GraphRequiredSchema::ProjectRuntimePolicyV13,
+        GraphRequiredSchema::InvocationControlsV14,
     ]
     .into_iter()
     .filter_map(GraphRequiredSchema::required_capability)
@@ -512,9 +513,8 @@ fn callable_argument_layout(version: u16) -> Option<CallableArgumentLayout> {
             Some(CallableArgumentLayout::LegacyFlattened)
         }
         GraphRequiredSchema::CallableArgumentsV12
-        | GraphRequiredSchema::ProjectRuntimePolicyV13 => {
-            Some(CallableArgumentLayout::SuppliedOnly)
-        }
+        | GraphRequiredSchema::ProjectRuntimePolicyV13
+        | GraphRequiredSchema::InvocationControlsV14 => Some(CallableArgumentLayout::SuppliedOnly),
     }
 }
 

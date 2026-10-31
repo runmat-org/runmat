@@ -253,11 +253,12 @@ pub use remote::structural_study::{execute_study_root_on_pool, RemoteStudyRootOu
 pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
     run_remote_worker_quic, run_remote_worker_quic_ready_v1, run_remote_worker_relay,
-    QuicRemoteWorkerChannel, RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt,
-    RemoteGraphTransfer, RemoteMeshingWorkerQuicRequest, RemoteObjectReceipt, RemotePoolCheckpoint,
-    RemotePoolDriver, RemotePoolRestoreAuthority, RemoteSpmdGangCompletion, RemoteSpmdGangProgram,
-    RemoteTaskCompletion, RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerChannelConfig,
-    RemoteWorkerQuicRequest, RemoteWorkerRelayRequest,
+    AuthenticatedPhysicalRetirement, QuicRemoteWorkerChannel, RelayRemoteWorkerChannel,
+    RemoteAttempt, RemoteBundleReceipt, RemoteGraphTransfer, RemoteMeshingWorkerQuicRequest,
+    RemoteObjectReceipt, RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority,
+    RemoteSpmdGangCompletion, RemoteSpmdGangProgram, RemoteTaskCompletion, RemoteValueReceipt,
+    RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
+    RemoteWorkerRelayRequest,
 };
 pub use remote_exact_meshing_executor::RemoteExactMeshingExecutor;
 pub use runmat_execution_artifact::cache::FilesystemObjectStore;

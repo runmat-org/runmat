@@ -2062,6 +2062,17 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .unwrap();
     assert!(skipped_fanout.partitions.is_empty());
+    let skipped_catalog =
+        runmat_analysis_fea::results::observation::ObservationFieldCatalog::from_canonical_bytes(
+            &skipped_fanout.source_catalog.payload(),
+        )
+        .unwrap();
+    skipped_catalog
+        .validate_canonical_selection(
+            &skipped_fanout.source_request.plan,
+            &skipped_fanout.source_request.selection,
+        )
+        .unwrap();
     let observation_fanout = prepare_observation_fanout(
         &store,
         ObservationPreparation {

@@ -11,6 +11,9 @@ use tempfile::TempDir;
 #[path = "typed_fea_geometry_cli/acoustic.rs"]
 mod acoustic;
 
+#[path = "typed_fea_geometry_cli/closure.rs"]
+mod closure;
+
 #[path = "typed_fea_geometry_cli/assessments.rs"]
 mod assessments;
 
@@ -80,7 +83,7 @@ end
     );
     let checked: Value = serde_json::from_slice(&checked.stdout).unwrap();
     assert_eq!(checked["status"], "valid");
-    assert_eq!(checked["rootModule"], "project/src/main.fea");
+    assert_eq!(checked["rootModule"], "src/main.fea");
     assert_eq!(checked["program"]["studies"].as_array().unwrap().len(), 1);
     assert_eq!(checked["program"]["studies"][0]["study_id"], "response");
 
@@ -120,6 +123,7 @@ end
         project.path().join(result_manifest).is_file(),
         "typed result manifest was not persisted at {result_manifest}"
     );
+    let first_manifest_bytes = fs::read(project.path().join(result_manifest)).unwrap();
 
     let repeated = runmat(
         &project,
@@ -146,11 +150,28 @@ end
     );
     assert_eq!(repeated["nodes"], first["nodes"]);
     assert_eq!(repeated["elements"], first["elements"]);
-    assert_eq!(repeated["step_run_ids"], first["step_run_ids"]);
+    let repeated_ids = repeated["step_run_ids"].as_array().unwrap();
+    assert_eq!(repeated_ids.len(), step_run_ids.len());
+    for (original, repeated) in step_run_ids.iter().zip(repeated_ids) {
+        let (original_definition, original_attempt) =
+            runmat_runtime::analysis::split_attempt_run_id(original.as_str().unwrap())
+                .expect("original execution has an attempt-owned run ID");
+        let (repeated_definition, repeated_attempt) =
+            runmat_runtime::analysis::split_attempt_run_id(repeated.as_str().unwrap())
+                .expect("repeated execution has an attempt-owned run ID");
+        assert_eq!(original_definition, repeated_definition);
+        assert_ne!(original_attempt, repeated_attempt);
+    }
     let repeated_manifest = repeated["result_manifest_artifact_path"]
         .as_str()
         .expect("repeat publication must expose its result manifest");
     assert!(project.path().join(repeated_manifest).is_file());
+    assert_ne!(result_manifest, repeated_manifest);
+    assert_eq!(
+        fs::read(project.path().join(result_manifest)).unwrap(),
+        first_manifest_bytes,
+        "a fresh execution must not overwrite its predecessor's publication"
+    );
 }
 
 #[test]

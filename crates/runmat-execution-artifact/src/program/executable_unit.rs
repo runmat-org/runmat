@@ -15,16 +15,17 @@ impl ProgramArtifact {
         let program = envelope
             .canonical_bytes()
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        if envelope.manifest.identity.entrypoint_function.is_none() {
+            return Err(ArtifactError::Invalid(
+                "executable unit has no entrypoint".into(),
+            ));
+        }
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: envelope.manifest.identity.program.clone(),
-            entrypoint: envelope
-                .manifest
-                .identity
-                .entrypoint_function
-                .ok_or_else(|| ArtifactError::Invalid("executable unit has no entrypoint".into()))?
-                .0
-                .to_string(),
+            // The issued entrypoint label and typed function identity are
+            // distinct. A function's numeric ID cannot replace its label.
+            entrypoint: envelope.manifest.identity.entrypoint.clone(),
             outputs,
             execution_mode: "portable-v4".into(),
             target,

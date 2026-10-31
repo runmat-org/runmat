@@ -171,6 +171,14 @@ fn main() {
 }
 
 async fn parent() {
+    // This standalone process is the invocation host, as CLI bootstrap is in
+    // the product. Capture the same finite host publication allowance rather
+    // than accidentally testing numerical completion under an embedded default.
+    runmat_runtime::analysis::configure_fea_runtime(runmat_runtime::analysis::FeaRuntimeConfig {
+        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes(),
+        ..Default::default()
+    })
+    .unwrap();
     if std::env::args_os().any(|argument| argument == "--remote-families-only") {
         #[cfg(feature = "occt-native")]
         remote_families::run().await;
@@ -822,11 +830,8 @@ async fn remote_conformance(
 ) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
-    std::fs::write(
-        project_root.path().join("runmat.toml"),
-        "[package]\nname = \"remote-analysis\"\n[sources]\nroots = [\"src\"]\n",
-    )
-    .unwrap();
+    let project_document = "[package]\nname = \"remote-analysis\"\n[sources]\nroots = [\"src\"]\n[runtime.language]\ncompat = \"matlab\"\n";
+    std::fs::write(project_root.path().join("runmat.toml"), project_document).unwrap();
     let project = runmat_package::build_frozen_project(
         &project_root.path().join("runmat.toml"),
         BTreeSet::new(),
@@ -855,6 +860,17 @@ async fn remote_conformance(
         explicit_fixture(revision.clone(), "remote-analysis");
     let explicit_request = explicit_program.request.clone();
     let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
+        .unwrap()
+        .with_project_runtime_policy_object(
+            runmat_core::cluster_settings::capture_project_policy(
+                &runmat_config::runtime::ClusterRuntimePolicy::from_project_document(
+                    project_document,
+                    runmat_config::document::RunmatConfigFormat::Toml,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
         .unwrap()
         .with_compiled_package_closure()
         .with_materialized_program(

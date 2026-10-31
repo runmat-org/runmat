@@ -195,6 +195,7 @@ impl Driver {
         let task = self.task_mut(task_id)?;
         task.state = state;
         task.active_attempt = None;
+        task.indeterminate_dependency = None;
         if task_state_is_terminal(state) {
             self.remove_deadline(task_id);
         }
@@ -231,12 +232,115 @@ impl Driver {
             task.cancellation = cancellation;
             task.state = state;
             task.active_attempt = None;
+            task.indeterminate_dependency = (state == TaskState::Indeterminate).then_some(task_id);
             self.remove_deadline(dependent);
             self.emit(DriverEventKind::TaskStateChanged {
                 task_id: dependent,
                 state,
             });
             self.propagate_dependency_terminal(dependent, state)?;
+        }
+        Ok(())
+    }
+
+    /// Reopen only descendants whose indeterminate state was caused by this
+    /// exact dependency. Other unresolved parents retain their own provenance.
+    pub(super) fn reopen_certified_dependency_descendants(
+        &mut self,
+        parent: TaskId,
+        actions: &mut Vec<DriverAction>,
+    ) -> RunnerResult<()> {
+        let dependents = self.snapshot.graph.dependents(parent).collect::<Vec<_>>();
+        for dependent in dependents {
+            let record = self.task_record(dependent)?;
+            if record.indeterminate_dependency != Some(parent) {
+                continue;
+            }
+            if record.state != TaskState::Indeterminate
+                || record.active_attempt.is_some()
+                || record.attempt_count != 0
+                || record.cancellation.is_some()
+            {
+                return Err(RunnerError::Invalid(
+                    "dependency uncertainty has independent attempt or terminal authority".into(),
+                ));
+            }
+            let dependencies = record
+                .submission
+                .dependencies
+                .iter()
+                .copied()
+                .collect::<Vec<_>>();
+            let now = self.snapshot.now_millis;
+            if let Some(other) = dependencies
+                .iter()
+                .find(|id| self.snapshot.tasks[id].state == TaskState::Indeterminate)
+            {
+                self.task_mut(dependent)?.indeterminate_dependency = Some(*other);
+                continue;
+            }
+            let next = if dependencies
+                .iter()
+                .any(|id| self.snapshot.tasks[id].state == TaskState::Failed)
+            {
+                TaskState::Failed
+            } else if dependencies
+                .iter()
+                .any(|id| self.snapshot.tasks[id].state == TaskState::Cancelled)
+            {
+                TaskState::Cancelled
+            } else if dependencies
+                .iter()
+                .all(|id| self.snapshot.tasks[id].state == TaskState::Succeeded)
+            {
+                TaskState::Ready
+            } else {
+                TaskState::Deferred
+            };
+            self.task_mut(dependent)?.indeterminate_dependency = None;
+            match next {
+                TaskState::Failed => self.transition_task(dependent, TaskState::Failed)?,
+                TaskState::Cancelled => {
+                    let source = dependencies
+                        .iter()
+                        .find(|id| self.snapshot.tasks[id].state == TaskState::Cancelled)
+                        .expect("cancelled dependency was checked");
+                    self.task_mut(dependent)?.cancellation = Some(crate::TaskCancellation {
+                        cause: crate::TaskCancellationCause::Dependency { task_id: *source },
+                        requested_at_driver_millis: now,
+                    });
+                    self.transition_task(dependent, TaskState::Cancelled)?;
+                }
+                TaskState::Ready | TaskState::Deferred => {
+                    self.task_mut(dependent)?.state = next;
+                    let deadline = self
+                        .task_record(dependent)?
+                        .submission
+                        .request
+                        .deadline_unix_millis;
+                    if deadline.is_some_and(|at| at <= now) {
+                        self.emit(DriverEventKind::DeadlineExpired { task_id: dependent });
+                        self.cancel_task(
+                            dependent,
+                            now,
+                            crate::TaskCancellationCause::Deadline,
+                            actions,
+                        )?;
+                    } else {
+                        self.snapshot.deadlines.insert(dependent, deadline);
+                        if next == TaskState::Ready {
+                            let record = self.task_record(dependent)?.clone();
+                            self.enqueue(&record);
+                        }
+                        self.emit(DriverEventKind::TaskStateChanged {
+                            task_id: dependent,
+                            state: next,
+                        });
+                    }
+                }
+                _ => unreachable!("dependency recovery only restores a queued or terminal state"),
+            }
+            self.reopen_certified_dependency_descendants(dependent, actions)?;
         }
         Ok(())
     }

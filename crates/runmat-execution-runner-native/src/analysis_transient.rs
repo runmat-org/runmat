@@ -16,8 +16,8 @@ use runmat_execution::TaskId;
 use crate::analysis_sequence::StructuralSequenceExecutionPolicy;
 use crate::analysis_task::{prepare_analysis_task, AnalysisTaskPolicy};
 use crate::analysis_task_pool::{
-    configure_local_analysis, planned_resource_attempt, AnalysisTaskPool, ExecutedAnalysisTask,
-    LocalAnalysisTaskPool, RemoteAnalysisTaskPool,
+    begin_analysis_batch, configure_local_analysis, planned_resource_attempt, AnalysisTaskPool,
+    ExecutedAnalysisTask, LocalAnalysisTaskPool, RemoteAnalysisTaskPool,
 };
 use crate::{
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
@@ -241,6 +241,11 @@ async fn execute_task(
     Option<PlannedResourceUsageAttempt>,
 )> {
     let started = std::time::Instant::now();
+    let expected_identity =
+        AnalysisTaskIdentity::new(host.workload.identity, dependency_identities.clone())
+            .map_err(protocol)?;
+    let expected_task_id = TaskId::derive(&[expected_identity.digest().bytes()]);
+    let admission = begin_analysis_batch(pool, &[expected_task_id]).await?;
     pool.register_program(program)?;
     let resources = resource_plan
         .map(|plan| plan.request.clone())
@@ -263,8 +268,13 @@ async fn execute_task(
         },
     )?;
     let task_id = submission.request.id;
+    if identity != expected_identity || task_id != expected_task_id {
+        return Err(protocol(
+            "transient task changed identity after its observed wave began",
+        ));
+    }
     let mut responses = pool
-        .execute_batch(vec![(program.request.clone(), submission)])
+        .execute_batch(admission.admit(vec![(program.request.clone(), submission)])?)
         .await?;
     let completion = responses.pop().ok_or_else(|| {
         NativeExecutionError::Protocol("transient task returned no response".into())
@@ -282,6 +292,10 @@ async fn execute_task(
     if runmat_runtime::interrupt::is_cancelled() {
         return Err(NativeExecutionError::Cancelled);
     }
+    let graph_wall_millis = completion.original_graph_wall_millis.unwrap_or(
+        u64::try_from(started.elapsed().as_millis().max(1))
+            .map_err(|_| protocol("transient execution interval overflow"))?,
+    );
     let executed = ExecutedAnalysisTask {
         identity,
         task_id,
@@ -289,8 +303,7 @@ async fn execute_task(
         attempt: completion.attempt,
         evidence: completion.evidence,
         failure: completion.failure,
-        graph_wall_millis: u64::try_from(started.elapsed().as_millis().max(1))
-            .map_err(|_| protocol("transient execution interval overflow"))?,
+        graph_wall_millis,
     };
     let planned_attempt = resource_plan
         .map(|plan| planned_resource_attempt(plan, &executed))

@@ -28,6 +28,7 @@ use crate::{
 };
 
 mod completion;
+mod observations;
 mod root;
 pub use completion::{
     import_acoustic_response_study_completion, AcousticResponseStudyResultClosure,
@@ -46,6 +47,8 @@ pub struct CompletedAcousticResponseStudy {
     pub compiled: CompiledAnalysisStudy,
     pub workload: runmat_analysis_fea::execution::AcousticResponseWorkload,
     pub result: ImportedAcousticResponseResult,
+    pub fields: Option<crate::ImportedRecoveredFields>,
+    pub observations: crate::CompletedSampledObservations,
     pub accuracy: ImportedAccuracy,
     pub states: Vec<ImportedSemanticState>,
     pub baseline_usage: PreparedResourceUsage,
@@ -69,6 +72,10 @@ pub struct AcousticResponseStudyPreparation {
 pub enum AcousticResponseStudyPhase {
     ReadyForSolve,
     AwaitingSolve,
+    ReadyForFieldRecovery,
+    AwaitingFieldRecovery,
+    ReadyForObservations,
+    AwaitingObservation,
     ReadyForAccuracy,
     AwaitingAccuracy,
     ReadyForState { ordinal: usize },
@@ -87,6 +94,10 @@ pub struct AcousticResponseStudyCoordinator {
     phase: AcousticResponseStudyPhase,
     solve_task: Option<PreparedAcousticResponseTask>,
     result: Option<ImportedAcousticResponseResult>,
+    recovery_task: Option<crate::PreparedAcousticResponseFieldRecovery>,
+    fields: Option<crate::ImportedRecoveredFields>,
+    observations: crate::sampled_history_observations::SampledHistoryWorkflow,
+    usage: Option<PreparedResourceUsage>,
     tail: Option<SteadyStudyTail>,
 }
 
@@ -117,6 +128,10 @@ impl AcousticResponseStudyCoordinator {
             phase: AcousticResponseStudyPhase::ReadyForSolve,
             solve_task: None,
             result: None,
+            recovery_task: None,
+            fields: None,
+            observations: crate::sampled_history_observations::SampledHistoryWorkflow::default(),
+            usage: None,
             tail: None,
         })
     }
@@ -171,6 +186,26 @@ impl AcousticResponseStudyCoordinator {
             self.preparation.output_policy.chunk_bytes(),
             self.preparation.output_policy.inventory_limits(),
         )?;
+        self.usage = Some(usage);
+        self.result = Some(result);
+        if self.preparation.selected_step().observations.is_empty() {
+            self.prepare_tail(None)?;
+            self.phase = AcousticResponseStudyPhase::ReadyForAccuracy;
+        } else {
+            self.phase = AcousticResponseStudyPhase::ReadyForFieldRecovery;
+        }
+        self.closures.push(closure);
+        Ok(())
+    }
+
+    fn prepare_tail(
+        &mut self,
+        observations: Option<
+            runmat_analysis_fea::results::observation::ObservationPublicationCatalog,
+        >,
+    ) -> AnalysisBridgeResult<()> {
+        let task = self.solve_task.as_ref().expect("completed solve");
+        let result = self.result.as_ref().expect("completed result");
         let workload = self.preparation.workload();
         self.tail = Some(SteadyStudyTail::new(SteadyStudySource {
             host: task.host.clone(),
@@ -188,13 +223,10 @@ impl AcousticResponseStudyCoordinator {
             accuracy_kind: AccuracySourceKind::AcousticResponse,
             sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
             step: self.preparation.selected_step().clone(),
-            observations: None,
+            observations,
             program_revision: self.preparation.program_revision.clone(),
             output_policy: self.preparation.output_policy,
-        }, usage));
-        self.result = Some(result);
-        self.closures.push(closure);
-        self.phase = AcousticResponseStudyPhase::ReadyForAccuracy;
+        }, self.usage.clone().expect("completed solve usage")));
         Ok(())
     }
 
@@ -332,6 +364,8 @@ impl AcousticResponseStudyCoordinator {
             compiled: self.preparation.product.compiled,
             workload,
             result: self.result.expect("completed solve"),
+            fields: self.fields,
+            observations: self.observations.into_completed(),
             accuracy: tail.accuracy.expect("completed accuracy"),
             states: tail.states,
             baseline_usage: tail.baseline.expect("frozen baseline"),
@@ -353,6 +387,12 @@ impl AcousticResponseStudyCoordinator {
     }
     pub fn result(&self) -> Option<&ImportedAcousticResponseResult> {
         self.result.as_ref()
+    }
+    pub fn fields(&self) -> Option<&crate::ImportedRecoveredFields> {
+        self.fields.as_ref()
+    }
+    pub fn observations(&self) -> &crate::CompletedSampledObservations {
+        self.observations.completed()
     }
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
         self.tail.as_ref().and_then(|tail| tail.accuracy.as_ref())

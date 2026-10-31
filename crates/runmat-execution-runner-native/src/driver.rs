@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::value::{GraphRequiredSchema, ValuePayload};
+use runmat_execution::value::ValuePayload;
 use runmat_execution::{
     CancellationReason, ExecutionScopeId, OutputContract, PoolId, ProgramCallable, TaskId,
 };
@@ -500,13 +500,10 @@ impl LocalDriver {
             .response_authority()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let invocation_context = selected.context.clone();
+        let invocation_controls = selected.invocation_controls.clone().unwrap_or_default();
         let requested_outputs = selected.requested_outputs;
-        let mut required_capabilities = BTreeSet::from([Capability::ProcessIsolation]);
-        let selected_schema = GraphRequiredSchema::from_version(selected.schema_version)
-            .ok_or_else(|| NativeExecutionError::Protocol("unsupported Graph schema".into()))?;
-        if let Some(capability) = selected_schema.required_capability() {
-            required_capabilities.insert(capability);
-        }
+        let required_capabilities =
+            crate::graph_submission::required_capabilities(selected.schema_version)?;
         let submission = if let Some(original) = graph.task {
             crate::graph_submission::validate_floor(selected, &original, stored.length)?;
             crate::graph_submission::validate_scratch(&admitted, &original)?;
@@ -525,8 +522,8 @@ impl LocalDriver {
                     host,
                     invocation_context: invocation_context.clone(),
                     inputs: Vec::new(),
-                    environment: runmat_execution::EnvironmentSnapshot::default(),
-                    console: None,
+                    environment: invocation_controls.environment.clone(),
+                    console: invocation_controls.console,
                     outputs: recipe.outputs.clone(),
                     resources: ResourceRequest {
                         cpu_millicores: 1000,
@@ -590,6 +587,7 @@ impl LocalDriver {
             requested_outputs,
             callable,
             response_authority,
+            invocation_controls,
         ));
         Ok((submission, completion))
     }

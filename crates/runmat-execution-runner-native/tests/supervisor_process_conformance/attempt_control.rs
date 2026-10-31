@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 struct Ready {
     process_id: u32,
     artifact_id: runmat_execution_artifact::ProgramArtifactId,
+    resources: ResourceRequest,
 }
 
 pub(super) async fn blocked_worker() {
@@ -27,9 +28,10 @@ pub(super) async fn blocked_worker() {
     )
     .await
     .unwrap();
-    let request: runmat_execution_artifact::ProgramExecutionRequest =
+    let reserved: runmat_execution_artifact::ReservedProgramExecutionRequest =
         serde_json::from_slice(&payload).unwrap();
-    request.validate_for_portable_host().unwrap();
+    reserved.validate().unwrap();
+    let (request, resources) = reserved.into_parts();
     let object_root =
         std::env::var_os(runmat_execution_runner_native::NATIVE_OBJECT_STORE_ROOT_ENV).unwrap();
     let root = Path::new(&object_root).parent().unwrap();
@@ -39,6 +41,7 @@ pub(super) async fn blocked_worker() {
             &serde_json::to_vec(&Ready {
                 process_id: std::process::id(),
                 artifact_id: request.artifact.id,
+                resources,
             })
             .unwrap(),
         )
@@ -198,7 +201,7 @@ async fn run_case(case: ControlCase) {
         priority: 0,
     };
     let original_artifact = artifact.id;
-    let (record, duplicate) = client
+    let (record, disposition) = client
         .submit_program(ProgramBatchSubmission {
             console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
@@ -217,7 +220,10 @@ async fn run_case(case: ControlCase) {
         })
         .await
         .unwrap();
-    assert!(!duplicate);
+    assert_eq!(
+        disposition,
+        runmat_execution_runner_native::supervisor::JobSubmissionDisposition::Created
+    );
     let directory = root.join("jobs").join(record.handle.id.to_string());
     let assignment: runmat_execution_runner_native::supervisor::DurableProgramAttempt =
         serde_json::from_slice(
@@ -247,6 +253,7 @@ async fn run_case(case: ControlCase) {
     .await
     .expect("original native worker did not reach the control handshake");
     assert_eq!(ready.artifact_id, original_artifact);
+    assert_eq!(ready.resources, task.request.resources);
     let running = client
         .attach(record.handle.id, 0, 0)
         .await

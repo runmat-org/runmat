@@ -11,7 +11,7 @@ use runmat_execution_transport_native::control::ResourceRequest as AllocationRes
 
 use super::pool_execution::{RemotePoolExecutionOutcome, RemotePoolExecutionResult};
 use super::pool_resources::task_resources;
-use super::RemotePoolDriver;
+use super::{RemoteObservedWave, RemotePoolDriver};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub(super) async fn execute_single_root(
@@ -20,6 +20,8 @@ pub(super) async fn execute_single_root(
     run_id: String,
     resources: AllocationResources,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    let root_id = TaskId::derive(&[run_id.as_bytes(), b"remote-root"]);
+    let mut wave = RemoteObservedWave::begin(Arc::clone(&pool), &[root_id]).await?;
     let (task_id, completion) = submit_root_task(
         &pool,
         &request,
@@ -28,9 +30,12 @@ pub(super) async fn execute_single_root(
         &resources,
         BTreeSet::new(),
         RetryPolicy::Never,
+        &mut wave,
     )?;
+    wave.checkpoint().await?;
     match completion.wait().await {
         Ok(success) => {
+            wave.close().await?;
             let (outputs, result_objects) = success.into_values().ok_or_else(|| {
                 protocol("remote root execution returned a non-value result outside its typed path")
             })?;
@@ -50,6 +55,8 @@ pub(super) async fn execute_graph_root(
     run_id: String,
     resources: AllocationResources,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    let root_id = TaskId::derive(&[run_id.as_bytes(), b"remote-root"]);
+    let mut wave = RemoteObservedWave::begin(Arc::clone(&pool), &[root_id]).await?;
     let super::pool_execution::GraphRoot {
         request,
         encoded_bytes,
@@ -92,13 +99,18 @@ pub(super) async fn execute_graph_root(
         dependencies: BTreeSet::new(),
         priority: 0,
     };
+    wave.arm(&[task_id])?;
     let completion = pool.submit_graph_program(submission, request, encoded_bytes, transfer)?;
+    wave.checkpoint().await?;
     match completion.wait().await {
-        Ok(runmat_execution_runner::AttemptSuccess::Graph { graph, .. }) => Ok(
-            RemotePoolExecutionOutcome::Completed(RemotePoolExecutionResult::without_objects(
-                ProgramExecutionResponse::GraphSuccess { graph },
-            )),
-        ),
+        Ok(runmat_execution_runner::AttemptSuccess::Graph { graph, .. }) => {
+            wave.close().await?;
+            Ok(RemotePoolExecutionOutcome::Completed(
+                RemotePoolExecutionResult::without_objects(
+                    ProgramExecutionResponse::GraphSuccess { graph },
+                ),
+            ))
+        }
         Ok(_) => Ok(RemotePoolExecutionOutcome::Indeterminate(
             "remote Graph root returned a non-Graph result".into(),
         )),
@@ -153,9 +165,11 @@ pub(super) fn submit_root_task(
     resources: &AllocationResources,
     required_capabilities: BTreeSet<runmat_execution::resource::Capability>,
     retry: RetryPolicy,
+    wave: &mut RemoteObservedWave,
 ) -> NativeExecutionResult<(TaskId, crate::RemoteTaskCompletion)> {
     let artifact_id = ArtifactId::derive(&[request.artifact.id.0.bytes()]);
     let task_id = TaskId::derive(&[run_id.as_bytes(), task_domain]);
+    wave.arm(&[task_id])?;
     let host = request
         .artifact
         .execution_host_requirement(&request.recipe, admitted_trust())

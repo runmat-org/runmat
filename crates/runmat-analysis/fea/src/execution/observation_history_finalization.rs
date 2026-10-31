@@ -229,6 +229,32 @@ impl ObservationHistoryFinalizationRequest {
                 }
             }
             (
+                ObservationFieldCatalogSource::VolumeMeshRecovery {
+                    recovery_request,
+                    manifest,
+                    ..
+                },
+                ObservationHistorySourceContext::VolumeMesh { mesh },
+            ) => {
+                if recovery_request.producer != self.producer {
+                    return Err(invalid("volume-mesh history producer differs"));
+                }
+                catalog.validate_volume_mesh_plan(&self.plan, mesh)?;
+                for entry in &manifest.fields {
+                    if entry.definition.identity() == observation.source_field_definition_identity
+                        && resolved_observation_accepts_sample(
+                            &self.plan,
+                            observation,
+                            entry.sample,
+                            None,
+                        )
+                        .map_err(invalid)?
+                    {
+                        expected.push(entry);
+                    }
+                }
+            }
+            (
                 ObservationFieldCatalogSource::StructuralFrequencyHistory { samples },
                 ObservationHistorySourceContext::Structural {
                     source: super::StructuralObservationSource::Frequency(workload),

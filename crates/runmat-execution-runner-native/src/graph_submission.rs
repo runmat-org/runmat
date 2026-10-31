@@ -3,6 +3,21 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 use runmat_execution::{identity::ArtifactId, resource::Capability};
 use runmat_execution_artifact::GraphExecutionRequest;
 use runmat_execution_runner::TaskSubmission;
+
+/// Backend requirements added while constructing a submission, before admission.
+/// Original admitted grants are validated below, never expanded in place.
+pub(crate) fn required_capabilities(
+    schema_version: u16,
+) -> NativeExecutionResult<std::collections::BTreeSet<Capability>> {
+    let schema = runmat_execution::value::GraphRequiredSchema::from_version(schema_version)
+        .ok_or_else(|| invalid("unsupported Graph schema"))?;
+    let mut capabilities = std::collections::BTreeSet::from([Capability::ProcessIsolation]);
+    if let Some(capability) = schema.required_capability() {
+        capabilities.insert(capability);
+    }
+    Ok(capabilities)
+}
+
 pub(crate) fn primary_artifact(request: &GraphExecutionRequest) -> ArtifactId {
     ArtifactId::derive(&[request.artifact.id.0.bytes()])
 }
@@ -29,8 +44,11 @@ pub(crate) fn validate_original(
         || original.invocation_context != request.context
         || original.outputs != request.recipe.outputs
         || !original.inputs.is_empty()
-        || original.environment != runmat_execution::EnvironmentSnapshot::default()
-        || original.console.is_some()
+        || !runmat_execution_artifact::GraphInvocationControls::matches_original(
+            request.invocation_controls.as_ref(),
+            &original.environment,
+            original.console,
+        )
     {
         return Err(invalid("original task differs from its exact Graph source, callable, context, input or output authority"));
     }

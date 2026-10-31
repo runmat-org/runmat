@@ -1,5 +1,7 @@
 //! Frozen imported assessments use the ordinary bounded portable task host.
-use crate::analysis_task_pool::{AnalysisTaskPool, LocalAnalysisTaskPool, RemoteAnalysisTaskPool};
+use crate::analysis_task_pool::{
+    begin_analysis_batch, AnalysisTaskPool, LocalAnalysisTaskPool, RemoteAnalysisTaskPool,
+};
 use runmat_analysis_execution::assessment_program::{
     build_assessment_task_submission, prepare_assessment_program, AdmittedAssessmentExecution,
     FrozenAssessmentCallable, PreparedAssessmentProgram,
@@ -283,6 +285,10 @@ async fn execute_program<P: AnalysisTaskPool>(
     pool: &mut P,
     resources: runmat_execution::resource::ResourceRequest,
 ) -> Result<NativeAssessmentReceipt, String> {
+    let planned_task = runmat_execution::TaskId::derive(&[program.identity().bytes()]);
+    let admission = begin_analysis_batch(pool, &[planned_task])
+        .await
+        .map_err(|error| error.to_string())?;
     let task = build_assessment_task_submission(
         &program,
         BTreeSet::new(),
@@ -301,10 +307,10 @@ async fn execute_program<P: AnalysisTaskPool>(
         },
     )
     .map_err(|error| error.to_string())?;
-    let response = match pool
-        .execute_batch(vec![(program.request().clone(), task)])
-        .await
-    {
+    let batch = admission
+        .admit(vec![(program.request().clone(), task)])
+        .map_err(|error| error.to_string())?;
+    let response = match pool.execute_batch(batch).await {
         Ok(_) if runmat_runtime::interrupt::is_cancelled() => {
             return Err("assessment execution was cancelled".into())
         }

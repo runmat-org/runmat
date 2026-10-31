@@ -88,6 +88,7 @@ impl NativeExecutionConfig {
                 Capability::GraphSelectedValuesV11,
                 Capability::GraphCallableArgumentsV12,
                 Capability::GraphProjectRuntimePolicyV13,
+                Capability::GraphInvocationControlsV14,
             ]),
             host_inventory,
             accelerator_devices,

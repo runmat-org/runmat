@@ -70,6 +70,21 @@ impl DriverSnapshot {
             if task.submission.request.id != *task_id {
                 return Err(RunnerError::Invalid("task identity mismatch".into()));
             }
+            if let Some(source) = task.indeterminate_dependency {
+                if task.state != runmat_execution::state::TaskState::Indeterminate
+                    || task.attempt_count != 0
+                    || task.active_attempt.is_some()
+                    || task.cancellation.is_some()
+                    || !task.submission.dependencies.contains(&source)
+                    || self.tasks.get(&source).is_none_or(|dependency| {
+                        dependency.state != runmat_execution::state::TaskState::Indeterminate
+                    })
+                {
+                    return Err(RunnerError::Invalid(
+                        "dependency uncertainty lacks its exact unresolved source".into(),
+                    ));
+                }
+            }
             if !self.pools.contains_key(&task.submission.request.pool_id)
                 || !self.snapshot_dependencies_exist(*task_id)
             {

@@ -1,9 +1,9 @@
 use runmat_analysis_core::AnalysisModel;
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, MagnetostaticWorkload, MaxwellHarmonicWorkload,
-        NonlinearSolidWorkload, StructuralFrequencyWorkload, StructuralLinearWorkload,
-        ThermalWorkload,
+        AcousticResponseWorkload, AnalysisNumericalObjectKind, MagnetostaticWorkload,
+        MaxwellHarmonicWorkload, NonlinearSolidWorkload, StructuralFrequencyWorkload,
+        StructuralLinearWorkload, ThermalWorkload,
     },
     results::observation::ObservationExecutionPolicy,
     ComputeBackend,
@@ -92,7 +92,21 @@ impl ObservationWorkloadSource {
             Self::MaxwellHarmonic(_) => Ok(AdmittedObservationWorkload::MaxwellHarmonic(
                 MaxwellHarmonicWorkload::from_canonical_bytes(&objects.payload())?,
             )),
-            Self::VolumeMesh(_) => Ok(AdmittedObservationWorkload::VolumeMesh),
+            Self::VolumeMesh(_) => {
+                // A volume-mesh catalog carries the authored step, but the recovery source's
+                // typed workload is still an authenticated input. Decode the acoustic variant
+                // before using the family-neutral observation machinery.
+                if objects.manifest.kind == AnalysisNumericalObjectKind::AcousticResponseWorkload {
+                    let workload =
+                        AcousticResponseWorkload::from_canonical_bytes(&objects.payload())?;
+                    if workload.identity()?.digest() != objects.manifest.logical_identity {
+                        return Err(AnalysisBridgeError::Identity(
+                            "acoustic response observation workload identity differs",
+                        ));
+                    }
+                }
+                Ok(AdmittedObservationWorkload::VolumeMesh)
+            }
         }
     }
 }

@@ -48,6 +48,7 @@ pub(super) fn graph_descriptor(
         arguments: Vec::new(),
     };
     let request = GraphExecutionRequest {
+        invocation_controls: None,
         project_runtime_policy: None,
         schema_version: runmat_execution_artifact::GRAPH_EXECUTION_REQUEST_SCHEMA_V12,
         recipe: descriptor.recipe,
@@ -66,7 +67,13 @@ pub(super) fn graph_descriptor(
         requested_outputs: 1,
     };
     request.validate().unwrap();
-    request
+    // Bind the exact authored project policy before generator admission and
+    // chunk identity construction, not after the original task is granted.
+    runmat_core::cluster_settings::prepare_graph_for_cluster(
+        request,
+        &compilation::project_policy(),
+    )
+    .unwrap()
 }
 
 pub(super) fn capabilities(request: &WorkerProgramRequest) -> BTreeSet<Capability> {

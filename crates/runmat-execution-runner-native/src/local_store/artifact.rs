@@ -63,15 +63,20 @@ impl ArtifactStore {
     ) -> NativeExecutionResult<StreamedGraphArtifact> {
         let mut temporary = tempfile::NamedTempFile::new_in(&self.root).map_err(io_error)?;
         let (digest, length) = {
-            let mut writer = BoundedHashWriter {
-                inner: BufWriter::new(temporary.as_file_mut()),
+            // Coalesce the serializer's tiny numeric/token writes before both
+            // hashing and file I/O. Keep one bounded-size buffer, as before.
+            let mut writer = BufWriter::new(BoundedHashWriter {
+                inner: temporary.as_file_mut(),
                 digest: DigestStream::new(),
                 length: 0,
                 maximum: maximum_length,
-            };
+            });
             serde_json::to_writer(&mut writer, value)
                 .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
             writer.flush().map_err(io_error)?;
+            let writer = writer
+                .into_inner()
+                .map_err(|error| io_error(error.into_error()))?;
             (writer.digest.finish(), writer.length)
         };
         if length == 0 {
@@ -143,14 +148,17 @@ pub(crate) fn read_verified_json_file<T: DeserializeOwned>(
         ));
     }
     let file = fs::File::open(path).map_err(io_error)?;
-    let mut reader = DigestingReader {
-        inner: BufReader::new(file),
+    // Hash physical read batches, not each byte requested by the JSON parser.
+    // The same single buffer still bounds read-ahead and no bytes are reopened.
+    let mut reader = BufReader::new(DigestingReader {
+        inner: file,
         digest: DigestStream::new(),
         length: 0,
         maximum: expected_length,
-    };
+    });
     let value = serde_json::from_reader(&mut reader)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let reader = reader.into_inner();
     if reader.length != expected_length || &reader.digest.finish() != expected_digest {
         return Err(NativeExecutionError::Protocol(
             "staged Graph artifact differs from its launch identity".into(),
@@ -255,6 +263,12 @@ mod streamed_graph_tests {
         let first = store
             .put_streamed_graph(&graph, 2 * 1024 * 1024)
             .expect("streamed object");
+        let encoded = serde_json::to_vec(&graph).unwrap();
+        assert_eq!(first.digest, runmat_execution::Digest::sha256(&encoded));
+        assert_eq!(first.length, encoded.len() as u64);
+        assert_eq!(store.get(first.id, first.length).unwrap(), encoded);
+        assert!(store.put_streamed_graph(&graph, first.length - 1).is_err());
+        assert!(store.put_streamed_graph(&graph, first.length).is_ok());
         let second = store
             .put_streamed_graph(&graph, 2 * 1024 * 1024)
             .expect("identical object");
