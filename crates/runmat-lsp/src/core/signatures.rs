@@ -127,20 +127,16 @@ pub(super) fn help(
 }
 
 fn parameters(signature: &BuiltinSignatureDescriptor) -> Vec<ParameterInformation> {
-    // Search input labels in order, after the callee, so repeated placeholders
-    // refer to distinct inputs rather than an output or an earlier argument.
-    let mut cursor = signature.label.find('(').map(|offset| offset + 1);
+    // These are display-label offsets, not a second parameter-type authority.
+    // Positional ranges also cover placeholders and names such as dim/vecdim.
+    let ranges =
+        parameter_ranges(signature.label).filter(|ranges| ranges.len() == signature.inputs.len());
     signature
         .inputs
         .iter()
-        .map(|parameter| {
-            let range = cursor.and_then(|start| {
-                signature.label[start..].find(parameter.name).map(|offset| {
-                    let begin = start + offset;
-                    begin..begin + parameter.name.len()
-                })
-            });
-            cursor = range.as_ref().map(|range| range.end);
+        .enumerate()
+        .map(|(index, parameter)| {
+            let range = ranges.as_ref().and_then(|ranges| ranges.get(index));
             let label = range.map_or_else(
                 || ParameterLabel::Simple(parameter.name.into()),
                 |range| {
@@ -157,4 +153,45 @@ fn parameters(signature: &BuiltinSignatureDescriptor) -> Vec<ParameterInformatio
             }
         })
         .collect()
+}
+
+fn parameter_ranges(label: &str) -> Option<Vec<std::ops::Range<usize>>> {
+    use runmat_lexer::Token;
+    let tokens = runmat_lexer::tokenize_detailed(label);
+    let open = tokens
+        .iter()
+        .position(|token| token.token == Token::LParen)?;
+    let mut expected = vec![Token::RParen];
+    let mut begin = tokens[open].end;
+    let mut ranges = Vec::new();
+    for token in &tokens[open + 1..] {
+        let separator = token.token == Token::Comma && expected.len() == 1;
+        let end = token.token == Token::RParen && expected.len() == 1;
+        if separator || end {
+            let raw = &label[begin..token.start];
+            let content = raw.trim();
+            if !content.is_empty() {
+                let start = begin + raw.len() - raw.trim_start().len();
+                ranges.push(start..start + content.len());
+            } else if separator {
+                return None;
+            }
+            if end {
+                return Some(ranges);
+            }
+            begin = token.end;
+        }
+        match token.token {
+            Token::LParen => expected.push(Token::RParen),
+            Token::LBracket => expected.push(Token::RBracket),
+            Token::LBrace => expected.push(Token::RBrace),
+            Token::RParen | Token::RBracket | Token::RBrace => {
+                if expected.pop() != Some(token.token) {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    None // Informal/variadic display grammar retains the named-label fallback.
 }

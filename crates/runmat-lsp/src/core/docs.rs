@@ -1,7 +1,6 @@
 use runmat_builtins::{
     BuiltinCatalogEntry, BuiltinDoc, BuiltinFunction, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use std::fmt::Write as _;
 
 use crate::core::builtins_json;
 

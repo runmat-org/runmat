@@ -205,6 +205,9 @@ mod tests {
                 column + token.length
                     <= lines[line].trim_end_matches('\r').encode_utf16().count() as u32
             );
+            if line == 0 && column == 4 {
+                assert_eq!(token.length, 4, "quoted emoji spans four UTF-16 units");
+            }
             if line == 0 && column == 10 {
                 assert_eq!(
                     legend().token_types[token.token_type as usize],
