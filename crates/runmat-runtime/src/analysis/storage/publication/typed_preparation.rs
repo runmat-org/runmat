@@ -84,6 +84,27 @@ impl AnalysisPublicationBuilder {
                 message: "mesh persistence workspace overflow".into(),
             })?
             .max(mesh_validation_and_encoding);
+        // Captured providers may return an owned immutable object if a creator
+        // wins the race after metadata inspection. Both encoded Vecs are still
+        // retained then; admit the bounded comparison owner as a separate phase.
+        let peak = if super::super::scoped_artifact_provider().is_some() {
+            mesh.encoded_bytes_upper_bound
+                .checked_add(evidence.encoded_bytes_upper_bound)
+                .and_then(|bytes| bytes.checked_mul(2))
+                .and_then(|bytes| {
+                    bytes.checked_add(
+                        mesh.encoded_bytes_upper_bound
+                            .max(evidence.encoded_bytes_upper_bound),
+                    )
+                })
+                .and_then(|bytes| bytes.checked_add(8192))
+                .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
+                    message: "mesh collision workspace overflow".into(),
+                })?
+                .max(peak)
+        } else {
+            peak
+        };
         self.admit(peak).map_err(|error| {
             error.context(&format!(
                 "original mesh encoding phase: mesh_wire_upper={}, mesh_validation_and_encoding_estimate={}, evidence_wire_upper={}, evidence_workspace_estimate={}",

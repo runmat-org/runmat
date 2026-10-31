@@ -4,7 +4,7 @@ fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
     let _guard = crate::analysis::tests::analysis_test_guard();
     let _provider_lock = runmat_filesystem::provider_override_lock();
     let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
-    let _provider = runmat_filesystem::replace_provider(provider);
+    let _provider = runmat_filesystem::replace_provider(provider.clone());
     let path = Path::new("/immutable-mesh.cbor");
     persist_canonical(path, b"original").unwrap();
     persist_canonical(path, b"original").unwrap();
@@ -12,6 +12,66 @@ fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
         .unwrap_err()
         .contains("collision"));
     assert_eq!(runmat_filesystem::read(path).unwrap(), b"original");
+
+    // A captured publication keeps both mesh objects off the live provider
+    // until its enclosing operation succeeds. An ordinary provider above still
+    // supports direct writes without claiming coherent workspace access.
+    use runmat_filesystem::FsProvider as _;
+    let root = PathBuf::from("/.artifacts");
+    crate::analysis::configure_fea_runtime(crate::analysis::FeaRuntimeConfig {
+        artifact_root: Some(root.clone()),
+        study_artifact_root: Some(root.join("studies")),
+        ..Default::default()
+    })
+    .unwrap();
+    super::super::storage::configure_artifact_store(
+        super::super::storage::AnalysisArtifactStoreConfig::Filesystem { root: root.clone() },
+    )
+    .unwrap();
+    let meshes = root.join("meshes");
+    let artifact = meshes.join("fixture.solver-mesh.cbor");
+    let evidence = meshes.join("fixture.meshing-evidence.cbor");
+    futures::executor::block_on(async {
+        super::super::storage::with_artifact_access(true, |_| -> Result<(), String> {
+            let access = persistence::MeshPersistence::capture(&meshes)?;
+            access.persist(&artifact, b"mesh")?;
+            access.persist(&evidence, b"evidence")?;
+            access.persist(&artifact, b"mesh")?;
+            assert!(access
+                .persist(&artifact, b"collision")
+                .unwrap_err()
+                .contains("collision"));
+            assert!(provider.read_project_path(artifact.clone()).is_err());
+            assert!(provider.read_project_path(evidence.clone()).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            provider.read_project_path(artifact.clone()).unwrap(),
+            b"mesh"
+        );
+        assert_eq!(
+            provider.read_project_path(evidence.clone()).unwrap(),
+            b"evidence"
+        );
+
+        let abandoned = meshes.join("abandoned.solver-mesh.cbor");
+        let abandoned_evidence = meshes.join("abandoned.meshing-evidence.cbor");
+        let failed = super::super::storage::with_artifact_access(true, |_| -> Result<(), String> {
+            let access = persistence::MeshPersistence::capture(&meshes)?;
+            access.persist(&abandoned, b"discard mesh")?;
+            access.persist(&abandoned_evidence, b"discard evidence")?;
+            Err("operation refused".into())
+        })
+        .await
+        .unwrap();
+        assert_eq!(failed.unwrap_err(), "operation refused");
+        assert!(provider.read_project_path(abandoned).is_err());
+        assert!(provider.read_project_path(abandoned_evidence).is_err());
+        assert_eq!(provider.read_project_path(artifact).unwrap(), b"mesh");
+    });
 }
 
 #[test]

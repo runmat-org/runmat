@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use runmat_meshing_core::CanonicalMeshingContract;
 use sha2::{Digest as _, Sha256};
 
+#[path = "meshing/persistence.rs"]
+mod persistence;
+
 use super::{
     atomic_write_bytes, current_fea_runtime_config, default_fea_artifact_root,
     solver_mesh_artifact, AnalysisStudySpec,
@@ -96,8 +99,7 @@ pub(crate) fn persist_mesh_borrowed(
         })
         .unwrap_or_else(default_fea_artifact_root)
         .join("meshes");
-    runmat_filesystem::create_dir_all(&root)
-        .map_err(|error| format!("failed to create {}: {error}", root.display()))?;
+    let access = persistence::MeshPersistence::capture(&root)?;
     let artifact_bytes = artifact
         .canonical_encode_with_cancellation(&MeshPersistenceCancellation)
         .map_err(|error| error.to_string())?;
@@ -109,8 +111,8 @@ pub(crate) fn persist_mesh_borrowed(
     let evidence_path = root.join(format!(
         "{artifact_digest}-{evidence_digest}.meshing-evidence.cbor"
     ));
-    persist_canonical(&artifact_path, &artifact_bytes)?;
-    persist_canonical(&evidence_path, &evidence_bytes)?;
+    access.persist(&artifact_path, &artifact_bytes)?;
+    access.persist(&evidence_path, &evidence_bytes)?;
     Ok(ResolvedStudyMesh {
         artifact_path: Some(artifact_path.display().to_string()),
         evidence_path: Some(evidence_path.display().to_string()),
@@ -135,33 +137,41 @@ fn persist_canonical(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if exists {
         let mut existing = runmat_filesystem::File::open(path)
             .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-        let mut offset = 0;
-        let mut buffer = [0_u8; 8192];
-        while offset < bytes.len() {
-            if crate::interrupt::is_cancelled() {
-                return Err("meshing persistence cancelled".into());
-            }
-            let count = buffer.len().min(bytes.len() - offset);
-            let read = std::io::Read::read(&mut existing, &mut buffer[..count])
-                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-            if read == 0 || buffer[..read] != bytes[offset..offset + read] {
-                break;
-            }
-            offset += read;
-        }
-        if offset == bytes.len()
-            && std::io::Read::read(&mut existing, &mut buffer[..1])
-                .map_err(|error| format!("failed to read {}: {error}", path.display()))?
-                == 0
-        {
-            return Ok(());
-        }
-        return Err(format!(
-            "canonical meshing output collision at {}",
-            path.display()
-        ));
+        return compare_canonical(path, bytes, &mut existing);
     }
     atomic_write_bytes(&path.to_path_buf(), bytes)
+}
+
+fn compare_canonical(
+    path: &Path,
+    bytes: &[u8],
+    existing: &mut impl std::io::Read,
+) -> Result<(), String> {
+    let mut offset = 0;
+    let mut buffer = [0_u8; 8192];
+    while offset < bytes.len() {
+        if crate::interrupt::is_cancelled() {
+            return Err("meshing persistence cancelled".into());
+        }
+        let count = buffer.len().min(bytes.len() - offset);
+        let read = std::io::Read::read(existing, &mut buffer[..count])
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        if read == 0 || buffer[..read] != bytes[offset..offset + read] {
+            break;
+        }
+        offset += read;
+    }
+    if offset == bytes.len()
+        && std::io::Read::read(existing, &mut buffer[..1])
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?
+            == 0
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "canonical meshing output collision at {}",
+        path.display()
+    ))
 }
 
 fn encode_digest(bytes: &[u8; 32]) -> String {
