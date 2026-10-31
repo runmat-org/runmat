@@ -1,5 +1,3 @@
-#[path = "support/fixtures.rs"]
-mod test_fixtures;
 #[path = "analysis_process_conformance/fluid_fourier.rs"]
 mod fluid_fourier;
 #[path = "analysis_process_conformance/fluid_mass_flow.rs"]

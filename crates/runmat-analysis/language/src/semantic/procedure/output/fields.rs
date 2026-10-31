@@ -43,6 +43,7 @@ pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, F
 #[cfg(test)]
 mod quantity_tests {
     use super::*;
+    use runmat_types::physical::{DynamicDimension, QuantityKind};
 
     #[test]
     fn volume_flow_is_scalar_volume_per_time_not_mass_flow() {
@@ -51,10 +52,13 @@ mod quantity_tests {
         assert_eq!(
             volume,
             FeaType::Quantity(
-                (PhysicalDimension::VOLUME
-                    .divide(PhysicalDimension::TIME)
-                    .unwrap())
-                .into()
+                DynamicDimension::try_new(
+                    PhysicalDimension::VOLUME
+                        .divide(PhysicalDimension::TIME)
+                        .unwrap(),
+                    Some(QuantityKind::VolumeFlowRate),
+                )
+                .unwrap()
             )
         );
         assert_ne!(volume, mass);
@@ -92,10 +96,13 @@ mod quantity_tests {
             Some((
                 ObservationQuantity::ThermalEnergyStorageRateDensity,
                 FeaType::Quantity(
-                    (PhysicalDimension::POWER
-                        .divide(PhysicalDimension::VOLUME)
-                        .unwrap())
-                    .into()
+                    DynamicDimension::try_new(
+                        PhysicalDimension::POWER
+                            .divide(PhysicalDimension::VOLUME)
+                            .unwrap(),
+                        Some(QuantityKind::HeatGenerationDensity),
+                    )
+                    .unwrap()
                 ),
             ))
         );

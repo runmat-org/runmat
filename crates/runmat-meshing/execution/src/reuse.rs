@@ -98,7 +98,6 @@ impl AcceptedMeshingStageReceipt {
         self.restore_inner(source, destination, host, implementation, limits, true)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn restore_inner(
         &self,
         source: &impl CacheImport,

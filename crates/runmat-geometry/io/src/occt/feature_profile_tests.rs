@@ -251,7 +251,10 @@ fn profile() -> ImportedExactCad {
         "short_edge_face.brep",
         SHORT_EDGE_FACE,
         crate::GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &ExactCadImportOptions {
+            source_units: Some(runmat_geometry_core::LengthUnit::Meter),
+            ..ExactCadImportOptions::default()
+        },
         &GeometryImportContext::new(),
     )
     .unwrap()

@@ -21,11 +21,13 @@ fn authored_step_face_names_become_face_region_names() {
     )
     .unwrap();
     let regions = &imported.asset.regions;
-    let face = |name: &str| {
-        regions
-            .iter()
-            .find(|r| r.name == name && r.region_id.starts_with("face_"))
+    let is_face = |region: &runmat_geometry_core::Region| {
+        region
+            .cad_ownership
+            .as_ref()
+            .is_some_and(|owner| owner.face_id.is_some())
     };
+    let face = |name: &str| regions.iter().find(|r| r.name == name && is_face(r));
     assert!(
         face("Fixed end").is_some(),
         "regions: {:?}",
@@ -36,13 +38,7 @@ fn authored_step_face_names_become_face_region_names() {
     );
     assert!(face("Loaded end").is_some());
     // Unnamed faces keep their ordinal names, and the body keeps its product name.
-    assert_eq!(
-        regions
-            .iter()
-            .filter(|r| r.region_id.starts_with("face_"))
-            .count(),
-        6
-    );
+    assert_eq!(regions.iter().filter(|r| is_face(r)).count(), 6);
     assert!(regions
         .iter()
         .any(|r| r.name == "Bar" && r.tag.as_deref() == Some("cad_body")));

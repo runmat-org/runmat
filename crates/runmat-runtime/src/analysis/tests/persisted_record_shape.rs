@@ -4,22 +4,20 @@
 //! whether the new field scales with the mesh.
 use super::*;
 
-#[allow(dead_code)]
-fn response_spectrum_record_is_scalar_only(record: StructuralResponseSpectrumResultsData) {
+const _: fn(StructuralResponseSpectrumResultsData) = |record| {
     let StructuralResponseSpectrumResultsData {
         numerical_receipt: _,
         accuracy: _,
         resource_usage: _,
         publication: _,
     } = record;
-}
+};
 
-#[allow(dead_code)]
-fn random_response_record_is_scalar_only(record: StructuralRandomResponseResultsData) {
+const _: fn(StructuralRandomResponseResultsData) = |record| {
     let StructuralRandomResponseResultsData {
         numerical_receipt: _,
         accuracy: _,
         resource_usage: _,
         publication: _,
     } = record;
-}
+};

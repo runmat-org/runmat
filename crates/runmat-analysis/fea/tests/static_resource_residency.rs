@@ -139,16 +139,12 @@ fn measure_static_case(
         None,
     )
     .unwrap();
-    match enforcement {
-        ConstraintEnforcement::LagrangeMultiplier => assert!(matches!(
-            plan.input.structural_operator().unwrap().solve,
-            SolveResourcePolicy::SaddlePointGmres { .. }
-        )),
-        _ => assert!(matches!(
-            plan.input.structural_operator().unwrap().solve,
-            SolveResourcePolicy::Iterative { .. }
-        )),
-    }
+    // All three enforcement forms use the canonical affine-reduced SPD path;
+    // multiplier recovery does not select a separate saddle-point GMRES solve.
+    assert!(matches!(
+        plan.input.structural_operator().unwrap().solve,
+        SolveResourcePolicy::Iterative { .. }
+    ));
 
     let process_peak_rss_before = process_peak_rss_bytes();
     let baseline = begin_measurement();

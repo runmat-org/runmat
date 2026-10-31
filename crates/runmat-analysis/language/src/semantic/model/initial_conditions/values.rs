@@ -34,7 +34,7 @@ pub(super) fn scalar_value<Q>(
                 declaration,
                 expression,
                 "uniform",
-                contract.dimension,
+                runmat_types::physical::DynamicDimension::quantity_type(contract.quantity),
                 diagnostics,
             )
             .map(construct)
@@ -65,7 +65,7 @@ pub(super) fn vector_value<Q>(
             declaration,
             body,
             "uniform",
-            contract.dimension,
+            runmat_types::physical::DynamicDimension::quantity_type(contract.quantity),
             diagnostics,
         )
         .map(|values| InitialValue::UniformVector3(values.map(construct))),
@@ -83,16 +83,12 @@ pub(super) fn vector_value<Q>(
 
 #[derive(Clone, Copy)]
 pub(super) struct ValueContract {
-    dimension: PhysicalDimension,
     quantity: PhysicalQuantityKind,
 }
 
 impl ValueContract {
-    pub(super) const fn new(dimension: PhysicalDimension, quantity: PhysicalQuantityKind) -> Self {
-        Self {
-            dimension,
-            quantity,
-        }
+    pub(super) const fn new(quantity: PhysicalQuantityKind) -> Self {
+        Self { quantity }
     }
 }
 
@@ -246,14 +242,15 @@ fn constant_scalar(
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
     name: &str,
-    dimension: PhysicalDimension,
+    dimension: impl Into<runmat_types::physical::DynamicDimension>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
-    let compatible = if dimension == PhysicalDimension::DIMENSIONLESS {
+    let dimension = dimension.into();
+    let compatible = if dimension == PhysicalDimension::DIMENSIONLESS.into() {
         matches!(expression.value_type, FeaType::Integer | FeaType::Real)
-            || (expression.value_type).is_quantity((dimension).into())
+            || (expression.value_type).is_quantity(dimension)
     } else {
-        (expression.value_type).is_quantity((dimension).into())
+        (expression.value_type).is_quantity(dimension)
     };
     if compatible {
         scalar(expression)

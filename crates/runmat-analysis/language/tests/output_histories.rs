@@ -104,7 +104,13 @@ fn bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end() {
     assert_eq!(
         declaration.outputs["tip_history"],
         FeaType::History(FeaHistoryType {
-            sample: Box::new(FeaType::Quantity((PhysicalDimension::LENGTH).into())),
+            sample: Box::new(FeaType::Quantity(
+                runmat_types::physical::DynamicDimension::try_new(
+                    PhysicalDimension::LENGTH,
+                    Some(runmat_types::physical::QuantityKind::Displacement),
+                )
+                .unwrap(),
+            )),
             domain: Some(FeaSeriesDomain::Time),
         })
     );
@@ -115,7 +121,11 @@ fn bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end() {
     assert_eq!(
         declaration.outputs["range"],
         FeaType::Envelope(Box::new(FeaType::Quantity(
-            (PhysicalDimension::LENGTH).into()
+            runmat_types::physical::DynamicDimension::try_new(
+                PhysicalDimension::LENGTH,
+                Some(runmat_types::physical::QuantityKind::Displacement),
+            )
+            .unwrap()
         )))
     );
 

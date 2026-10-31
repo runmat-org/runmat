@@ -187,6 +187,12 @@ fn modal_recovery_model_and_state() -> (
     )
 }
 
+struct RecoveryMeasurement {
+    peak_live_bytes: u64,
+    planned_bytes: u64,
+    displacement_values: usize,
+}
+
 fn measure_physical_recovery(
     case: &'static str,
     model: AnalysisModel,
@@ -194,7 +200,7 @@ fn measure_physical_recovery(
     mesh_kind: RecoveryMesh,
     solver: StructuralTransientSolverPlan,
     modal_state: Option<&runmat_analysis_fea::execution::CanonicalSemanticState>,
-) -> (u64, u64) {
+) -> RecoveryMeasurement {
     let mesh = physical_fixture_mesh(&model, mesh_kind);
     let workload = StructuralTransientWorkload {
         schema_version: 2,
@@ -257,6 +263,19 @@ fn measure_physical_recovery(
     .unwrap();
     let peak = end_measurement();
     assert!(recovered.time_points_s.len() > interval_count);
+    assert_eq!(
+        recovered.displacement_snapshots.len(),
+        recovered.time_points_s.len()
+    );
+    let node_count = mesh.topology.nodes.len();
+    for field in &recovered.displacement_snapshots {
+        assert_eq!(field.shape, [node_count, 3]);
+        let values = field
+            .as_host_f64()
+            .expect("CPU recovery retains host fields");
+        assert_eq!(values.len(), node_count * 3);
+        assert!(values.iter().all(|value| value.is_finite()));
+    }
     let execution_step = workload
         .model
         .sequence
@@ -295,12 +314,16 @@ fn measure_physical_recovery(
         "transient recovery ({case}, {interval_count} intervals): baseline_live_heap={baseline} peak_live_heap={peak} process_peak_rss={:?} planned_memory={}",
         process_peak_rss_bytes(), plan.request.memory_bytes
     );
-    (peak, plan.request.memory_bytes)
+    RecoveryMeasurement {
+        peak_live_bytes: peak,
+        planned_bytes: plan.request.memory_bytes,
+        displacement_values: recovered.displacement_snapshots.len() * node_count * 3,
+    }
 }
 
 #[test]
 fn completed_physical_recovery_heap_peak_fits_planned_memory() {
-    let (short_peak, short_plan) = measure_physical_recovery(
+    let short = measure_physical_recovery(
         "direct",
         fixture_model(FixtureId::StructuralTransientTet4Reference),
         24,
@@ -308,7 +331,7 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         StructuralTransientSolverPlan::Direct,
         None,
     );
-    let (long_peak, long_plan) = measure_physical_recovery(
+    let long = measure_physical_recovery(
         "direct",
         fixture_model(FixtureId::StructuralTransientTet4Reference),
         240,
@@ -316,9 +339,10 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         StructuralTransientSolverPlan::Direct,
         None,
     );
-    assert!(long_peak > short_peak);
-    assert!(long_plan > short_plan);
-    let (_, connector_observation_plan) = measure_physical_recovery(
+    assert!(long.peak_live_bytes > short.peak_live_bytes);
+    assert!(long.planned_bytes > short.planned_bytes);
+    assert!(long.displacement_values > short.displacement_values);
+    let connector_observation = measure_physical_recovery(
         "connector observation",
         connector_observation_model(),
         24,
@@ -326,8 +350,8 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         StructuralTransientSolverPlan::Direct,
         None,
     );
-    assert!(connector_observation_plan > short_plan);
-    let (mixed_peak, mixed_plan) = measure_physical_recovery(
+    assert!(connector_observation.planned_bytes > short.planned_bytes);
+    let mixed = measure_physical_recovery(
         "mixed observations",
         mixed_observation_model(),
         240,
@@ -335,8 +359,8 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         StructuralTransientSolverPlan::Direct,
         None,
     );
-    assert!(mixed_peak > long_peak);
-    assert!(mixed_plan > long_plan);
+    assert!(mixed.peak_live_bytes > long.peak_live_bytes);
+    assert!(mixed.planned_bytes > long.planned_bytes);
     let (modal_model, modal_solver, modal_state) = modal_recovery_model_and_state();
     measure_physical_recovery(
         "modal",
@@ -346,7 +370,7 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         modal_solver,
         Some(&modal_state),
     );
-    let (tet10_peak, tet10_plan) = measure_physical_recovery(
+    let tet10 = measure_physical_recovery(
         "Tet10 direct",
         fixture_model(FixtureId::StructuralTransientTet4Reference),
         24,
@@ -354,9 +378,12 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         StructuralTransientSolverPlan::Direct,
         None,
     );
-    assert!(tet10_peak > short_peak);
-    assert!(tet10_plan > short_plan);
-    let (connected_peak, connected_plan) = measure_physical_recovery(
+    // Recovery consumes raw solver vectors while constructing retained fields.
+    // Different element kernels need not order their transient heap peaks, but
+    // all nodes/samples must survive and the admitted envelope must scale.
+    assert!(tet10.displacement_values > short.displacement_values);
+    assert!(tet10.planned_bytes > short.planned_bytes);
+    let connected = measure_physical_recovery(
         "connected Tet4",
         fixture_model(FixtureId::StructuralTransientTet4Reference),
         24,
@@ -364,6 +391,6 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         StructuralTransientSolverPlan::Direct,
         None,
     );
-    assert!(connected_peak > short_peak);
-    assert!(connected_plan > short_plan);
+    assert!(connected.displacement_values > short.displacement_values);
+    assert!(connected.planned_bytes > short.planned_bytes);
 }

@@ -227,7 +227,13 @@ study response {
     assert_eq!(
         declaration.outputs["maximum_principal"],
         FeaType::Field(FeaFieldType {
-            value: Box::new(FeaType::Quantity((PhysicalDimension::PRESSURE).into())),
+            value: Box::new(FeaType::Quantity(
+                runmat_types::physical::DynamicDimension::try_new(
+                    PhysicalDimension::PRESSURE,
+                    Some(runmat_types::physical::QuantityKind::Pressure),
+                )
+                .unwrap(),
+            )),
             location: Some(runmat_analysis_core::FieldLocation::Element),
             quantity: Some(runmat_analysis_core::ObservationQuantity::Stress),
         })

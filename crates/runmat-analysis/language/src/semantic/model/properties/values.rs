@@ -169,11 +169,11 @@ pub(in crate::semantic::model) fn required_quantity(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,
-    dimension: PhysicalDimension,
+    dimension: impl Into<runmat_types::physical::DynamicDimension>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
     let value = required_assignment(declaration, statements, name, diagnostics)?;
-    if !(value.value_type).is_quantity((dimension).into()) {
+    if !(value.value_type).is_quantity(dimension.into()) {
         invalid(
             declaration,
             value,
@@ -284,9 +284,10 @@ pub(in crate::semantic::model) fn required_vector(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],
     name: &str,
-    dimension: PhysicalDimension,
+    dimension: impl Into<runmat_types::physical::DynamicDimension>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<[f64; 3]> {
+    let dimension = dimension.into();
     let value = required_assignment(declaration, statements, name, diagnostics)?;
     let CheckedExpressionKind::List(values) = &value.kind else {
         invalid(
@@ -310,10 +311,10 @@ pub(in crate::semantic::model) fn required_vector(
     }
     let mut result = [0.0; 3];
     for (index, component) in values.iter().enumerate() {
-        let expected = if dimension == PhysicalDimension::DIMENSIONLESS {
+        let expected = if dimension == PhysicalDimension::DIMENSIONLESS.into() {
             matches!(component.value_type, FeaType::Integer | FeaType::Real)
         } else {
-            (component.value_type).is_quantity((dimension).into())
+            (component.value_type).is_quantity(dimension)
         };
         if !expected {
             invalid(

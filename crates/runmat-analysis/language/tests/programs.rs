@@ -77,7 +77,13 @@ study load_study {
         declaration.outputs["displacement"],
         FeaType::Field(FeaFieldType {
             value: Box::new(FeaType::Vector {
-                element: Box::new(FeaType::Quantity((PhysicalDimension::LENGTH).into())),
+                element: Box::new(FeaType::Quantity(
+                    runmat_types::physical::DynamicDimension::try_new(
+                        PhysicalDimension::LENGTH,
+                        Some(runmat_types::physical::QuantityKind::Displacement),
+                    )
+                    .unwrap(),
+                )),
                 length: Some(3),
             }),
             location: Some(runmat_analysis_core::FieldLocation::Node),

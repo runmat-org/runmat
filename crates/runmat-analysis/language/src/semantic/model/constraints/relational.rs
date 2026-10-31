@@ -320,7 +320,7 @@ fn transform(
         declaration,
         body,
         "rotation_angle",
-        PhysicalDimension::DIMENSIONLESS,
+        runmat_types::physical::DynamicDimension::quantity_type(PhysicalQuantityKind::Rotation),
         diagnostics,
     )?;
     match (translation, origin, axis, angle) {
@@ -359,7 +359,9 @@ fn phase_shifted(
             declaration,
             body,
             "phase",
-            PhysicalDimension::DIMENSIONLESS,
+            runmat_types::physical::DynamicDimension::quantity_type(
+                PhysicalQuantityKind::ComplexPhase,
+            ),
             diagnostics,
         )?),
     })

@@ -66,7 +66,9 @@ geometry copy {
     };
     assert_eq!(
         width_m,
-        &runmat_geometry_core::GeometryScalarExpression::Literal { value: 0.008 }
+        &runmat_geometry_core::GeometryScalarExpression::SourceMeasure {
+            value: parameter.source.value.clone(),
+        }
     );
 }
 

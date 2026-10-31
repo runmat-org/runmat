@@ -60,6 +60,13 @@ model prepared {
             }
         }
     }
+    initial spin {
+        structural.angular_velocity {
+            target = whole_model
+            uniform = [1 rad/s, 90 deg/s, 0 rad/s]
+            frame = global
+        }
+    }
 }
 study response {
     geometry = geometry.part
@@ -86,7 +93,7 @@ study response {
     });
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let model = program.models.values().next().unwrap();
-    assert_eq!(model.initial_conditions.len(), 3);
+    assert_eq!(model.initial_conditions.len(), 4);
     assert!(matches!(
         &model.initial_conditions[0].kind,
         runmat_analysis_core::AuthoredInitialConditionKind::Velocity(
@@ -109,6 +116,15 @@ study response {
             runmat_analysis_core::InitialValue::FieldArtifact(artifact)
         ) if artifact.artifact_id == "state-42"
     ));
+    let runmat_analysis_core::AuthoredInitialConditionKind::AngularVelocity(
+        runmat_analysis_core::InitialValue::UniformVector3(spin),
+    ) = &model.initial_conditions[3].kind
+    else {
+        panic!("expected typed angular-velocity initial field");
+    };
+    assert_eq!(spin[0].canonical_value(), 1.0);
+    assert!((spin[1].canonical_value() - std::f64::consts::FRAC_PI_2).abs() < 1e-14);
+    assert_eq!(spin[2].canonical_value(), 0.0);
     let sequence = &program.studies.values().next().unwrap().sequence;
     let step = &sequence.steps[0];
     assert_eq!(step.activations.len(), 2);
@@ -184,6 +200,15 @@ model invalid_temperature {
         thermal.temperature {
             target = whole_model
             uniform = -1 K
+        }
+    }
+}
+model invalid_angular_units {
+    initial spin {
+        structural.angular_velocity {
+            target = whole_model
+            uniform = [1 Hz, 0 Hz, 0 Hz]
+            frame = global
         }
     }
 }

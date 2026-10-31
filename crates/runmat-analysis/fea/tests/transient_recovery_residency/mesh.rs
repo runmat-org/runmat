@@ -2,7 +2,10 @@
 
 use runmat_analysis_core::{AnalysisModel, ExcitationTarget};
 use runmat_meshing_core::{
-    fixtures::{canonical_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh},
+    fixtures::{
+        canonical_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh, fixture_entity,
+        fixture_entity_for_selection,
+    },
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
 };
 
@@ -13,13 +16,9 @@ pub(super) enum RecoveryMesh {
     ConnectedTet4,
 }
 
-fn add_face_region(mesh: &mut SolverMeshArtifact, face: usize, region: &str) {
+fn add_face_region(mesh: &mut SolverMeshArtifact, face: usize, entity: PersistentEntityId) {
+    assert_eq!(entity.kind, PersistentEntityKind::Face);
     let provenance = &mut mesh.topology.boundary_faces[face].provenance;
-    let entity = PersistentEntityId::new(
-        PersistentEntityKind::Face,
-        region.to_owned(),
-        vec!["root".to_owned()],
-    );
     if !provenance.contains(&entity) {
         provenance.push(entity);
         provenance.sort();
@@ -36,11 +35,9 @@ pub(super) fn physical_fixture_mesh(
         RecoveryMesh::ConnectedTet4 => connected_tetrahedron_solver_mesh(),
     };
     if let Some(assignment) = model.material_assignments.first() {
-        let region = PersistentEntityId::new(
-            PersistentEntityKind::Region,
-            assignment.selected_region_id().unwrap().to_owned(),
-            vec!["root".to_owned()],
-        );
+        let region = fixture_entity_for_selection(assignment.selected_region_id().unwrap())
+            .expect("fixture material domain has its registered persistent entity");
+        assert_eq!(region.kind, PersistentEntityKind::Region);
         for element in &mut mesh.topology.volume_elements {
             element.region_id = region.clone();
         }
@@ -51,26 +48,40 @@ pub(super) fn physical_fixture_mesh(
         .iter()
         .filter_map(|condition| condition.target())
     {
-        match region.region_id.as_str() {
-            "free_vertex_y_support" => add_face_region(&mut mesh, 1, &region.region_id),
-            "free_vertex_z_support" => add_face_region(&mut mesh, 2, &region.region_id),
-            other => add_face_region(&mut mesh, 0, other),
-        }
+        let entity = fixture_entity_for_selection(&region.region_id)
+            .expect("fixture constraint has its registered persistent face");
+        let face = if entity == fixture_entity(PersistentEntityKind::Face, "free_vertex_y_support")
+        {
+            1
+        } else if entity == fixture_entity(PersistentEntityKind::Face, "free_vertex_z_support") {
+            2
+        } else {
+            assert_eq!(entity, fixture_entity(PersistentEntityKind::Face, "root"));
+            0
+        };
+        add_face_region(&mut mesh, face, entity);
     }
     for action in &model.excitations {
         if let ExcitationTarget::Region(target) = &action.excitation().target {
-            if target.region_id != "dynamic_force" {
-                add_face_region(&mut mesh, 1, &target.region_id);
+            let entity = fixture_entity_for_selection(&target.region_id)
+                .expect("fixture excitation has its registered persistent face");
+            if entity != fixture_entity(PersistentEntityKind::Face, "dynamic_force") {
+                add_face_region(&mut mesh, 1, entity);
             }
         }
     }
-    for assignment in &model.material_assignments {
-        add_face_region(&mut mesh, 1, assignment.selected_region_id().unwrap());
-        add_face_region(&mut mesh, 1, &assignment.assigned_material_id);
+    add_face_region(
+        &mut mesh,
+        1,
+        fixture_entity(PersistentEntityKind::Face, "tip"),
+    );
+    for face in [1, 3] {
+        add_face_region(
+            &mut mesh,
+            face,
+            fixture_entity(PersistentEntityKind::Face, "dynamic_force"),
+        );
     }
-    add_face_region(&mut mesh, 1, "tip");
-    add_face_region(&mut mesh, 1, "dynamic_force");
-    add_face_region(&mut mesh, 3, "dynamic_force");
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     mesh

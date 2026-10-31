@@ -528,7 +528,9 @@ fn layup(
                         declaration,
                         body,
                         "angle",
-                        PhysicalDimension::DIMENSIONLESS,
+                        runmat_types::physical::DynamicDimension::quantity_type(
+                            runmat_types::physical::QuantityKind::Angle,
+                        ),
                         diagnostics,
                     )?,
                 ),

@@ -510,7 +510,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_region_tet10_fixture_preserves_canonical_order_and_material_regions() {
+    fn three_region_tet10_fixture_preserves_canonical_order_and_region_assignments() {
         let mesh = three_region_tetrahedron_solver_mesh_with_order(ElementOrder::Tet10);
         mesh.validate_canonical().unwrap();
         assert_eq!(mesh.topology.nodes.len(), 30);

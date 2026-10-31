@@ -1,7 +1,7 @@
 use super::{diagnostic, properties::*, region_source};
 use crate::{
     BoundFeaProgram, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
-    CheckedFeaStatementKind, FeaDiagnostic, PhysicalDimension,
+    CheckedFeaStatementKind, FeaDiagnostic,
 };
 use runmat_analysis_core::{
     AngularVelocity, AuthoredInitialCondition, AuthoredInitialConditionKind,
@@ -83,10 +83,7 @@ fn condition(
             declaration,
             body,
             signals,
-            ValueContract::new(
-                PhysicalDimension::LENGTH,
-                PhysicalQuantityKind::Displacement,
-            ),
+            ValueContract::new(PhysicalQuantityKind::Displacement),
             Displacement::new,
             diagnostics,
         )?),
@@ -94,7 +91,7 @@ fn condition(
             declaration,
             body,
             signals,
-            ValueContract::new(PhysicalDimension::VELOCITY, PhysicalQuantityKind::Velocity),
+            ValueContract::new(PhysicalQuantityKind::Velocity),
             Velocity::new,
             diagnostics,
         )?),
@@ -103,10 +100,7 @@ fn condition(
                 declaration,
                 body,
                 signals,
-                ValueContract::new(
-                    PhysicalDimension::FREQUENCY,
-                    PhysicalQuantityKind::AngularVelocity,
-                ),
+                ValueContract::new(PhysicalQuantityKind::AngularVelocity),
                 AngularVelocity::new,
                 diagnostics,
             )?)
@@ -115,10 +109,7 @@ fn condition(
             declaration,
             body,
             signals,
-            ValueContract::new(
-                PhysicalDimension::TEMPERATURE,
-                PhysicalQuantityKind::Temperature,
-            ),
+            ValueContract::new(PhysicalQuantityKind::Temperature),
             Temperature::new,
             diagnostics,
         )?),
@@ -126,10 +117,7 @@ fn condition(
             declaration,
             body,
             signals,
-            ValueContract::new(
-                PhysicalDimension::ELECTRIC_POTENTIAL,
-                PhysicalQuantityKind::ElectricPotential,
-            ),
+            ValueContract::new(PhysicalQuantityKind::ElectricPotential),
             ElectricPotential::new,
             diagnostics,
         )?),
@@ -138,10 +126,7 @@ fn condition(
                 declaration,
                 body,
                 signals,
-                ValueContract::new(
-                    PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH)?,
-                    PhysicalQuantityKind::MagneticVectorPotential,
-                ),
+                ValueContract::new(PhysicalQuantityKind::MagneticVectorPotential),
                 MagneticVectorPotential::new,
                 diagnostics,
             )?)
@@ -150,7 +135,7 @@ fn condition(
             declaration,
             body,
             signals,
-            ValueContract::new(PhysicalDimension::PRESSURE, PhysicalQuantityKind::Pressure),
+            ValueContract::new(PhysicalQuantityKind::Pressure),
             Pressure::new,
             diagnostics,
         )?),
@@ -158,7 +143,7 @@ fn condition(
             declaration,
             body,
             signals,
-            ValueContract::new(PhysicalDimension::PRESSURE, PhysicalQuantityKind::Pressure),
+            ValueContract::new(PhysicalQuantityKind::Pressure),
             Pressure::new,
             diagnostics,
         )?),
@@ -166,7 +151,7 @@ fn condition(
             declaration,
             body,
             signals,
-            ValueContract::new(PhysicalDimension::VELOCITY, PhysicalQuantityKind::Velocity),
+            ValueContract::new(PhysicalQuantityKind::Velocity),
             Velocity::new,
             diagnostics,
         )?),

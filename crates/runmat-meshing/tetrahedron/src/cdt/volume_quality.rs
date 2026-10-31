@@ -301,8 +301,10 @@ fn evaluate_from_metric_contexts(
         metric_request,
         options,
         metric_contexts,
-        boundary_nodes,
-        protected_facets,
+        stream::BoundaryProtection {
+            nodes: boundary_nodes,
+            facets: protected_facets,
+        },
         cancellation,
         |_, quality| {
             tetrahedra.push(quality);

@@ -7,6 +7,17 @@ use runmat_geometry_core::{ExactMassPropertiesImplementation, TopologicalOrienta
 
 const BOX: &[u8] = include_bytes!("../../tests/fixtures/box.brep");
 
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
+fn meter_brep_options() -> ExactCadImportOptions {
+    ExactCadImportOptions {
+        source_units: Some(LengthUnit::Meter),
+        ..ExactCadImportOptions::default()
+    }
+}
+
 #[test]
 fn exact_analysis_options_are_validated_before_kernel_dispatch() {
     let mut invalid_tolerance = ExactCadImportOptions::default();
@@ -87,7 +98,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
         Arc,
     };
 
-    let options = ExactCadImportOptions::default();
+    let options = meter_brep_options();
     let context = GeometryImportContext::new();
     let first =
         import_exact_cad("box.brep", BOX, GeometryFormat::Brep, &options, &context).unwrap();
@@ -277,7 +288,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
             "box.brep",
             BOX,
             GeometryFormat::Brep,
-            &ExactCadImportOptions::default(),
+            &meter_brep_options(),
             &GeometryImportContext::with_cancellation(cancelled.clone()),
         ),
         Err(GeometryImportError::Cancelled)
@@ -345,12 +356,12 @@ fn occt_orientation_repair_is_explicit_and_preserves_persistent_names() {
         "reversed-box.brep",
         &reversed,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &context,
     )
     .is_err());
 
-    let mut options = ExactCadImportOptions::default();
+    let mut options = meter_brep_options();
     options.analysis.healing.repair_orientation = true;
     let healed = import_exact_cad(
         "reversed-box.brep",
@@ -364,7 +375,7 @@ fn occt_orientation_repair_is_explicit_and_preserves_persistent_names() {
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &context,
     )
     .unwrap();

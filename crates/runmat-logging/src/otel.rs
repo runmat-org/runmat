@@ -54,6 +54,7 @@ impl std::fmt::Debug for StartupHeaders {
     }
 }
 
+#[cfg(any(feature = "otlp", feature = "browser-otlp"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SignalOptions {
     pub endpoint: String,
@@ -118,6 +119,7 @@ impl OtelOptions {
         Ok(())
     }
 
+    #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
     pub(crate) fn signal_options(
         &self,
         signal: &str,

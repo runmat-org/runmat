@@ -12,6 +12,13 @@ use runmat_geometry_core::{
 use runmat_types::physical::{Length, Position};
 use sha2::Digest as _;
 
+fn meter_brep_options() -> ExactCadImportOptions {
+    ExactCadImportOptions {
+        source_units: Some(LengthUnit::Meter),
+        ..ExactCadImportOptions::default()
+    }
+}
+
 fn native(coordinate: &runmat_geometry_core::GeometryParameterCoordinate) -> f64 {
     coordinate.with_native_coordinate(|value, _frame| value)
 }
@@ -71,7 +78,7 @@ fn exact_evaluator_reconstructs_from_the_transferable_closure() {
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -121,7 +128,7 @@ fn exact_import_maps_every_source_face_ordinal_to_authoritative_topology() {
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -270,7 +277,7 @@ fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
         "mixed_solid_sheet.brep",
         MIXED_SOLID_SHEET,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -357,7 +364,7 @@ fn conformal_solids_share_one_oriented_interface_identity() {
         "shared_interface.brep",
         SHARED_INTERFACE,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -365,7 +372,7 @@ fn conformal_solids_share_one_oriented_interface_identity() {
         "renamed-interface.brep",
         SHARED_INTERFACE,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -478,7 +485,7 @@ fn disconnected_solids_share_one_body_with_aggregate_mass_properties() {
         "disconnected_solids.brep",
         DISCONNECTED_SOLIDS,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -503,7 +510,7 @@ fn disconnected_solids_share_one_body_with_aggregate_mass_properties() {
 
 #[test]
 fn persistent_entity_names_ignore_compound_child_order_and_are_bounded() {
-    let options = ExactCadImportOptions::default();
+    let options = meter_brep_options();
     let context = GeometryImportContext::new();
     let forward = import_exact_cad(
         "disconnected_solids.brep",
@@ -569,7 +576,7 @@ fn persistent_entity_names_reject_ambiguous_coincident_topology() {
         "coincident_solids.brep",
         COINCIDENT_SOLIDS,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap_err();
@@ -582,7 +589,7 @@ fn persistent_entity_names_reject_ambiguous_coincident_topology() {
 
 #[test]
 fn duplicate_consolidation_collapses_indistinguishable_compound_children() {
-    let mut options = ExactCadImportOptions::default();
+    let mut options = meter_brep_options();
     options.analysis.healing.consolidate_duplicates = true;
     let imported = import_exact_cad(
         "coincident_solids.brep",
@@ -671,12 +678,12 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
         "gapped_sheet.brep",
         GAPPED_SHEET,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &context,
     )
     .is_err());
 
-    let mut options = ExactCadImportOptions::default();
+    let mut options = meter_brep_options();
     options.analysis.healing.repair_tolerance_scale_gaps = true;
     options.analysis.maximum_healing_displacement_m = runmat_types::physical::Length::new(1.0e-6);
     let imported = import_exact_cad(
@@ -708,7 +715,7 @@ fn gap_repair_sews_sheet_boundaries_with_measured_lineage() {
         )));
     assert!(imported.build_closure().unwrap().healing_bytes.is_some());
 
-    let mut sewing_options = ExactCadImportOptions::default();
+    let mut sewing_options = meter_brep_options();
     sewing_options.analysis.healing.sew = true;
     sewing_options.analysis.maximum_healing_displacement_m =
         runmat_types::physical::Length::new(1.0e-6);
@@ -747,13 +754,13 @@ fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
         "short_edge_face.brep",
         SHORT_EDGE_FACE,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &context,
     )
     .unwrap();
     assert_eq!(original_short_edge.topology.edges.len(), 5);
 
-    let mut options = ExactCadImportOptions::default();
+    let mut options = meter_brep_options();
     options
         .analysis
         .healing
@@ -808,7 +815,7 @@ fn small_topology_repair_simplifies_short_edges_and_sliver_faces() {
         "sliver_face_sheet.brep",
         SLIVER_FACE_SHEET,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &context,
     )
     .unwrap();
@@ -1058,7 +1065,7 @@ fn cavity_import_preserves_outer_and_void_shell_nesting() {
         "box_cavity.brep",
         BOX_CAVITY,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -1094,7 +1101,7 @@ fn cavity_import_rejects_a_void_shell_outside_its_outer_shell() {
         "invalid_cavity.brep",
         INVALID_CAVITY,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap_err();
@@ -1134,7 +1141,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();

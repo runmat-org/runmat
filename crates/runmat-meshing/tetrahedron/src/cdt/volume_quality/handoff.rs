@@ -19,8 +19,10 @@ pub(in crate::cdt) fn verify_complete_handoff(
         metric_request,
         options,
         contexts,
-        &boundary_node_identities(provenance),
-        &protected_facet_identities(provenance),
+        stream::BoundaryProtection {
+            nodes: &boundary_node_identities(provenance),
+            facets: &protected_facet_identities(provenance),
+        },
         cancellation,
         |index, reconstructed| {
             if reconstructed != quality.tetrahedra[index] {

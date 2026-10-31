@@ -7,7 +7,9 @@ fn rejected_edits_restore_original_buffers_without_cumulative_candidate_storage(
     let budget = AllocationBudget::new(512 << 20);
     {
         let scope = GeometryAllocationScope::new(&budget);
-        let mut topology = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10).topology;
+        let mut topology = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10)
+            .topology
+            .into_topology();
         for node in &mut topology.nodes {
             *node = Storage(Some(&scope)).node(node).unwrap();
         }
@@ -47,10 +49,12 @@ fn rejected_edits_restore_original_buffers_without_cumulative_candidate_storage(
                 assert!(result.is_err());
             }
             assert_eq!(topology, original);
-            for (node, pointer) in topology.nodes.iter().zip(&pointers) {
+            for (slot, (node, pointer)) in topology.nodes.iter().zip(&pointers).enumerate() {
                 assert_eq!(
                     (node.provenance.as_ptr(), node.exact_parameters.as_ptr()),
-                    *pointer
+                    *pointer,
+                    "attempt={attempt}, slot={slot}, node_id={}",
+                    node.node_id
                 );
             }
             assert_eq!(budget.live_bytes(), live);
@@ -94,7 +98,9 @@ fn rejected_edits_restore_original_buffers_without_cumulative_candidate_storage(
 
 #[test]
 fn denied_edit_keeps_original_nodes_and_releases_all_partial_replacements() {
-    let mut topology = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10).topology;
+    let mut topology = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10)
+        .topology
+        .into_topology();
     let original = topology.clone();
     let budget = AllocationBudget::new(1);
     assert_eq!(

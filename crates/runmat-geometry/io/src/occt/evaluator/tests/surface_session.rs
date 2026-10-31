@@ -36,7 +36,7 @@ fn session_surface_inventory_is_admitted_before_native_reconstruction() {
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &GeometryImportContext::new(),
     )
     .unwrap();
@@ -90,7 +90,7 @@ fn session_surface_bounds_preserve_trim_admission_and_original_geometry() {
             name,
             bytes,
             GeometryFormat::Brep,
-            &ExactCadImportOptions::default(),
+            &meter_brep_options(),
             &GeometryImportContext::new(),
         )
         .unwrap();

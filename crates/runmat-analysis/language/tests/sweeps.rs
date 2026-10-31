@@ -234,12 +234,14 @@ sweep sizes over study.response {
                 runmat_geometry_core::GeometryAuthoringValue::Scalar(_)
             ));
             let runmat_geometry_core::GeometryAuthoringValue::Scalar(
-                runmat_geometry_core::GeometryScalarExpression::Literal { value },
-            ) = realized.geometry.bindings["width"]
+                runmat_geometry_core::GeometryScalarExpression::Canonical { value },
+            ) = &realized.geometry.bindings["width"]
             else {
                 panic!("geometry width must realize to one canonical SI scalar");
             };
-            value
+            assert_eq!(value.descriptor().dimension(), PhysicalDimension::LENGTH);
+            assert_eq!(value.descriptor().angle_power(), 0);
+            value.canonical_value()
         })
         .collect::<Vec<_>>();
     assert_eq!(widths, [0.75, 1.5]);

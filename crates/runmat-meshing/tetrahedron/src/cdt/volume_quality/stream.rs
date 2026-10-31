@@ -1,17 +1,24 @@
 //! Shared cell reconstruction; callers collect or compare without a second inventory.
 use super::*;
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct BoundaryProtection<'a> {
+    pub nodes: &'a BTreeSet<StableDigest>,
+    pub facets: &'a ProtectedFacets,
+}
+
 pub(super) fn visit_from_metric_contexts(
     topology: &DelaunayVolumeTopology,
     metric_request: &MetricFieldRequest,
     options: DelaunayVolumeQualityOptions,
     metric_contexts: MetricContexts<'_>,
-    boundary_nodes: &BTreeSet<StableDigest>,
-    protected_facets: &ProtectedFacets,
+    protection: BoundaryProtection<'_>,
     cancellation: &dyn MeshingCancellationSignal,
     mut visit: impl FnMut(usize, DelaunayTetrahedronQuality) -> Result<(), DelaunayVolumeQualityError>,
 ) -> Result<(), DelaunayVolumeQualityError> {
+    let BoundaryProtection {
+        nodes: boundary_nodes,
+        facets: protected_facets,
+    } = protection;
     let resolved_metrics = metrics::resolve_graded_metrics(
         topology,
         &metric_contexts,

@@ -24,7 +24,7 @@ pub(super) fn optional_quantity(
     declaration: &CheckedFeaDeclaration,
     body: &[CheckedFeaStatement],
     name: &str,
-    dimension: PhysicalDimension,
+    dimension: impl Into<runmat_types::physical::DynamicDimension>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<Option<f64>> {
     match optional_assignment(body, name) {
@@ -37,14 +37,15 @@ pub(super) fn quantity(
     declaration: &CheckedFeaDeclaration,
     value: &CheckedExpression,
     name: &str,
-    dimension: PhysicalDimension,
+    dimension: impl Into<runmat_types::physical::DynamicDimension>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
-    let type_matches = if dimension == PhysicalDimension::DIMENSIONLESS {
+    let dimension = dimension.into();
+    let type_matches = if dimension == PhysicalDimension::DIMENSIONLESS.into() {
         matches!(value.value_type, FeaType::Integer | FeaType::Real)
-            || (value.value_type).is_quantity((dimension).into())
+            || (value.value_type).is_quantity(dimension)
     } else {
-        (value.value_type).is_quantity((dimension).into())
+        (value.value_type).is_quantity(dimension)
     };
     if !type_matches {
         invalid(
@@ -88,7 +89,16 @@ pub(super) fn prescribed_value<Q: PrescribedQuantity>(
                 );
                 return None;
             }
-            quantity(declaration, value, name, expected.0, diagnostics).map(constant)
+            // The physical kind retains nominal angle powers that SI dimensions
+            // alone cannot distinguish from ordinary dimensionless values.
+            quantity(
+                declaration,
+                value,
+                name,
+                runmat_types::physical::DynamicDimension::quantity_type(expected.1),
+                diagnostics,
+            )
+            .map(constant)
         },
         diagnostics,
     )
