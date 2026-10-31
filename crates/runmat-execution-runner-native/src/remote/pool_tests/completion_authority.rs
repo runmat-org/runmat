@@ -740,3 +740,84 @@ async fn original_terminal_loss_diagnostic_survives_remote_delivery() {
         message
     );
 }
+
+#[test]
+fn physical_proof_reports_preserve_the_scheduler_terminal_cause() {
+    for proof in [
+        AttemptReport::Retired,
+        AttemptReport::CertifiedNotStarted {},
+    ] {
+        assert!(matches!(
+            report_failure(&proof, TaskState::Failed, "retry budget exhausted".into(), None),
+            NativeProgramFailure::Execution(message) if message == "retry budget exhausted"
+        ));
+        assert!(matches!(
+            report_failure(
+                &proof,
+                TaskState::Cancelled,
+                "original cancellation".into(),
+                None
+            ),
+            NativeProgramFailure::Cancelled
+        ));
+        assert!(matches!(
+            report_failure(&proof, TaskState::Indeterminate, "unknown retirement".into(), None),
+            NativeProgramFailure::WorkerLost(message) if message == "unknown retirement"
+        ));
+    }
+
+    let runtime = runmat_execution::ProgramRuntimeFailure {
+        message: "original runtime failure".into(),
+        identifier: Some("Original:Runtime".into()),
+        span: None,
+        builtin: None,
+        task_id: None,
+        call_frames: Vec::new(),
+        call_frames_elided: 0,
+        call_stack: Vec::new(),
+        phase: Some("execute".into()),
+    };
+    let original = AttemptRetirementUnverified {
+        observed_at_driver_millis: 1,
+        diagnostic: runtime.message.clone(),
+        failure: Some(Box::new(runtime.clone())),
+        failure_kind: None,
+        resources: None,
+        execution: None,
+        console: None,
+        retired_at_driver_millis: Some(2),
+    };
+    assert!(matches!(
+        report_failure(
+            &AttemptReport::Retired,
+            TaskState::Failed,
+            "scheduler diagnostic".into(),
+            Some(&original),
+        ),
+        NativeProgramFailure::Runtime(failure) if failure == runtime
+    ));
+    assert!(matches!(
+        report_failure(
+            &AttemptReport::Retired,
+            TaskState::Cancelled,
+            "original cancellation".into(),
+            Some(&original),
+        ),
+        NativeProgramFailure::Cancelled
+    ));
+    let infrastructure = AttemptRetirementUnverified {
+        failure: None,
+        failure_kind: Some(AttemptFailureKind::Infrastructure),
+        ..original
+    };
+    assert!(matches!(
+        report_failure(
+            &AttemptReport::Retired,
+            TaskState::Failed,
+            "original infrastructure failure".into(),
+            Some(&infrastructure),
+        ),
+        NativeProgramFailure::Infrastructure(message)
+            if message == "original infrastructure failure"
+    ));
+}

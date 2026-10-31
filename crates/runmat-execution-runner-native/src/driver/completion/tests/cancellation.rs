@@ -81,9 +81,14 @@ fn native_cancellation_uses_original_cause_and_requires_physical_evidence_for_qu
         let original = completion.execution_evidence().unwrap().clone();
         assert_eq!(
             original.task.state,
-            runmat_execution::state::TaskState::Indeterminate
+            if local_owner_retired {
+                runmat_execution::state::TaskState::Cancelled
+            } else {
+                runmat_execution::state::TaskState::Indeterminate
+            }
         );
         assert_eq!(original.attempts[0].terminal.is_some(), local_owner_retired);
+        assert!(original.resource_aggregate(1).is_err());
         if !local_owner_retired {
             assert!(original.attempts[0]
                 .unverified_retirement
@@ -91,7 +96,6 @@ fn native_cancellation_uses_original_cause_and_requires_physical_evidence_for_qu
                 .unwrap()
                 .retired_at_driver_millis
                 .is_none());
-            assert!(original.resource_aggregate(1).is_err());
         }
         assert!(
             matches!(completion.delivery_result(), Err(NativeExecutionError::TaskCancelled {

@@ -986,7 +986,10 @@ fn run_actual_driver_replacement_with_interruption(
     family: ExactStudyFamily,
     interruption: ReplacementInterruption,
 ) -> Option<thermal::ColdReplay> {
-    run_actual_driver_replacement_with_observer(family, interruption, false)
+    // Production driver startup requires its original node-clock parent. Every
+    // actual replacement fixture uses that same signed wall authority, including
+    // work that began before the first driver was lost.
+    run_actual_driver_replacement_with_observer(family, interruption, true)
 }
 
 fn run_actual_driver_replacement_with_observer(
@@ -1675,7 +1678,7 @@ async fn actual_driver_replacement_case(
         assert!(state
             .transitions
             .iter()
-            .any(|(fence, target, _)| { *fence == 2 && *target == DriverRunTarget::Failed }));
+            .any(|(fence, target, _)| { *fence == 2 && *target == DriverRunTarget::Cancelled }));
         assert!(state.transitions.iter().all(|(_, target, _)| {
             !matches!(
                 target,

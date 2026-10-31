@@ -4,7 +4,7 @@ use std::sync::Arc;
 use runmat_execution::state::{AttemptState, TaskState};
 use runmat_execution_runner::driver::DriverEventKind;
 use runmat_execution_runner::port::BackendReport;
-use runmat_execution_runner::task::TaskRecord;
+use runmat_execution_runner::task::{AttemptRetirementUnverified, TaskRecord};
 use runmat_execution_runner::{
     AttemptFailureKind, AttemptReport, Driver, DriverAction, DriverCommand,
 };
@@ -44,7 +44,7 @@ impl RemotePoolDriver {
         self.driver
             .lock()
             .expect("remote driver poisoned")
-            .snapshot()
+            .snapshot_ref()
             .attempts
             .get(&request.id)
             .is_some_and(|attempt| {
@@ -71,7 +71,7 @@ impl RemotePoolDriver {
         self.driver
             .lock()
             .expect("remote driver poisoned")
-            .snapshot()
+            .snapshot_ref()
             .attempts
             .get(&request.id)
             .is_some_and(|attempt| {
@@ -101,7 +101,7 @@ impl RemotePoolDriver {
         self.driver
             .lock()
             .expect("remote driver poisoned")
-            .snapshot()
+            .snapshot_ref()
             .attempts
             .get(&request.id)
             .is_some_and(|attempt| {
@@ -144,7 +144,7 @@ impl RemotePoolDriver {
             let exact_original =
                 verified_request.is_some_and(|request| {
                     driver
-                        .snapshot()
+                        .snapshot_ref()
                         .attempts
                         .get(&request.id)
                         .is_some_and(|attempt| {
@@ -178,6 +178,13 @@ impl RemotePoolDriver {
                 };
             }
             let terminal_report = report.report.clone();
+            let reported_attempt_id = report.attempt_id;
+            let retired_active_original = exact_original
+                && matches!(&terminal_report, AttemptReport::Retired)
+                && driver
+                    .task_record(task_id)
+                    .ok()
+                    .is_some_and(|task| task.active_attempt == Some(reported_attempt_id));
             let previous_events = driver.events().len();
             let actions = match driver.handle(DriverCommand::BackendReport(report)) {
                 Ok(actions) => actions,
@@ -208,8 +215,33 @@ impl RemotePoolDriver {
                         "Graph attempt reported success without verified worker retirement".into(),
                     )))
                 } else {
-                    terminal_failure(&driver, task)
-                        .map(|message| Err(report_failure(&terminal_report, task.state, message)))
+                    let original = if retired_active_original && task.state == TaskState::Failed {
+                        driver
+                            .snapshot_ref()
+                            .attempts
+                            .get(&reported_attempt_id)
+                            .filter(|attempt| attempt.request.task_id == task_id)
+                            .filter(|attempt| {
+                                attempt.terminal.as_ref().is_some_and(|terminal| {
+                                    matches!(
+                                        terminal.disposition,
+                                        runmat_execution_runner::task::AttemptDisposition::Failed { .. }
+                                    )
+                                })
+                            })
+                            .and_then(|attempt| attempt.unverified_retirement.as_deref())
+                            .filter(|original| original.retired_at_driver_millis.is_some())
+                    } else {
+                        None
+                    };
+                    terminal_failure(&driver, task).map(|message| {
+                        Err(report_failure(
+                            &terminal_report,
+                            task.state,
+                            message,
+                            original,
+                        ))
+                    })
                 }
             });
             // Serialize committed-object protection and stale-result disposal with
@@ -374,6 +406,7 @@ fn report_failure(
     report: &AttemptReport,
     state: TaskState,
     message: String,
+    original: Option<&AttemptRetirementUnverified>,
 ) -> NativeProgramFailure {
     match report {
         AttemptReport::RuntimeFailed { failure } => NativeProgramFailure::Runtime(failure.clone()),
@@ -384,8 +417,24 @@ fn report_failure(
         AttemptReport::Lost { .. } | AttemptReport::RetirementUnverified { .. } => {
             NativeProgramFailure::WorkerLost(message)
         }
-        AttemptReport::Cancelled | AttemptReport::Retired => NativeProgramFailure::Cancelled,
-        AttemptReport::CertifiedNotStarted {} => NativeProgramFailure::WorkerLost(message),
+        AttemptReport::Cancelled => NativeProgramFailure::Cancelled,
+        // These reports prove physical disposition, not the reason the task
+        // became terminal. Retry exhaustion and original cancellation remain
+        // decisions of the scheduler's accepted task state.
+        AttemptReport::Retired if state == TaskState::Failed => match original {
+            Some(AttemptRetirementUnverified {
+                failure: Some(failure),
+                ..
+            }) => NativeProgramFailure::Runtime(failure.as_ref().clone()),
+            Some(AttemptRetirementUnverified {
+                failure_kind: Some(AttemptFailureKind::Infrastructure),
+                ..
+            }) => NativeProgramFailure::Infrastructure(message),
+            _ => state_failure(state, message),
+        },
+        AttemptReport::Retired | AttemptReport::CertifiedNotStarted {} => {
+            state_failure(state, message)
+        }
         _ => state_failure(state, message),
     }
 }
