@@ -186,7 +186,7 @@ fn parameter_ranges(label: &str) -> Option<Vec<std::ops::Range<usize>>> {
             Token::LBracket => expected.push(Token::RBracket),
             Token::LBrace => expected.push(Token::RBrace),
             Token::RParen | Token::RBracket | Token::RBrace => {
-                if expected.pop() != Some(token.token) {
+                if expected.pop().as_ref() != Some(&token.token) {
                     return None;
                 }
             }
