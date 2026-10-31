@@ -1383,7 +1383,7 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
             })
             .collect::<BuiltinResult<Vec<_>>>()
             .map(serde_json::Value::Array),
-        Value::Tensor(tensor) => nested_array_to_json(builtin, &tensor.shape(), |index| {
+        Value::Tensor(tensor) => nested_array_to_json(builtin, tensor.shape(), |index| {
             numeric_scalar_to_json(
                 builtin,
                 tensor

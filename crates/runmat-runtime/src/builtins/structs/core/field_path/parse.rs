@@ -1,5 +1,7 @@
 mod field_name;
 use field_name::parse_field_name;
+mod text;
+use text::parse_text;
 
 use super::{FieldPath, FieldStep, IndexComponent, IndexSelector, PathError, PathErrorKind};
 use crate::builtins::common::tensor;
@@ -94,7 +96,7 @@ fn parse_component(
         }
         Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
             parse_text(
-                &array.data()[0]
+                array.data()[0]
                     .text_ref()
                     .expect("checked nonmissing scalar string"),
                 uses_textual_index,
@@ -124,23 +126,6 @@ fn parse_component(
         }
         _ => parse_scalar(value).map(IndexComponent::Scalar),
     }
-}
-
-fn parse_text(text: &str, uses_textual_index: &mut bool) -> Result<IndexComponent, PathError> {
-    *uses_textual_index = true;
-    let text = text.trim();
-    if text.eq_ignore_ascii_case("end") {
-        return Ok(IndexComponent::End);
-    }
-    if let Ok(index) = text.parse::<usize>() {
-        return (index > 0)
-            .then_some(IndexComponent::Scalar(index))
-            .ok_or_else(|| error(PathErrorKind::InvalidIndex, "index must be at least one"));
-    }
-    Err(error(
-        PathErrorKind::InvalidIndex,
-        format!("invalid textual index '{text}'"),
-    ))
 }
 
 fn parse_scalar(value: &Value) -> Result<usize, PathError> {

@@ -19,7 +19,7 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
         Value::String(runmat_value::StringElement::Text(text)) => normalize_handle_name(&text),
         Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
             normalize_handle_name(
-                &sa.data()[0]
+                sa.data()[0]
                     .text_ref()
                     .expect("checked nonmissing scalar string"),
             )

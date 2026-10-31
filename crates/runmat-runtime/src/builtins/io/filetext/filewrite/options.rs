@@ -176,7 +176,7 @@ pub(super) fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
         )),
         Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
             normalize_path(
-                &sa.data()[0]
+                sa.data()[0]
                     .text_ref()
                     .expect("checked nonmissing scalar string"),
             )

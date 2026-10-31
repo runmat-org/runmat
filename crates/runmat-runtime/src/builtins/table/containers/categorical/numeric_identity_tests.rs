@@ -161,7 +161,7 @@ fn missing_category_identity_is_distinct_from_literal_and_empty_text() {
         )
         .unwrap(),
     );
-    let Value::Object(default) = categorical(&[source.clone()]).unwrap() else {
+    let Value::Object(default) = categorical(std::slice::from_ref(&source)).unwrap() else {
         panic!("categorical")
     };
     assert_eq!(

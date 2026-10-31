@@ -62,8 +62,7 @@ impl ImmutableBatch for NativeImmutableBatch<'_> {
         bytes: &[u8],
         maximum_existing_bytes: u64,
     ) -> io::Result<ImmutableStage> {
-        let maximum_existing_bytes =
-            maximum_existing_bytes.min(self.access.maximum_resident_bytes);
+        let maximum_existing_bytes = maximum_existing_bytes.min(self.access.maximum_resident_bytes);
         let access = self.access;
         access.access(true, || {
             let published = access.path(path, true)?;
@@ -78,8 +77,13 @@ impl ImmutableBatch for NativeImmutableBatch<'_> {
                 self.existing.push(published);
                 return Ok(ImmutableStage::Existing(existing));
             }
-            if let Some(entry) = self.entries.iter().find(|entry| entry.published == published) {
-                let staged = crate::workspace_access::file::read(&entry.staged, maximum_existing_bytes)?;
+            if let Some(entry) = self
+                .entries
+                .iter()
+                .find(|entry| entry.published == published)
+            {
+                let staged =
+                    crate::workspace_access::file::read(&entry.staged, maximum_existing_bytes)?;
                 return Ok(ImmutableStage::Existing(staged));
             }
             let staged = stage_file(parent, &published, bytes)?;
@@ -164,7 +168,10 @@ impl Drop for NativeImmutableBatch<'_> {
 
 /// Rolls forward every durable batch record under `root`. Runs inside the scope fence before
 /// any operation, so no participant observes a partially linked batch.
-pub(in crate::workspace_access) fn recover(root: &Path, maximum_resident_bytes: u64) -> io::Result<()> {
+pub(in crate::workspace_access) fn recover(
+    root: &Path,
+    maximum_resident_bytes: u64,
+) -> io::Result<()> {
     let directory = records_directory(root);
     match fs::symlink_metadata(&directory) {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
@@ -346,7 +353,9 @@ fn sync_exposing_directories<'a>(
     root: &Path,
     directories: impl IntoIterator<Item = &'a Path>,
 ) -> io::Result<()> {
-    let boundary = root.parent().filter(|parent| !parent.as_os_str().is_empty());
+    let boundary = root
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
     let mut synced = BTreeSet::new();
     for directory in directories {
         let mut current = Some(directory);
@@ -465,7 +474,9 @@ mod tests {
     fn object(index: usize) -> (String, Vec<u8>) {
         (
             format!("objects/sha256_{index:04}.object"),
-            format!("payload {index} ").repeat(1000 + index).into_bytes(),
+            format!("payload {index} ")
+                .repeat(1000 + index)
+                .into_bytes(),
         )
     }
 
@@ -542,7 +553,9 @@ mod tests {
             let (path, bytes) = object(0);
             batch.stage(Path::new(&path), &bytes, 1 << 26).unwrap();
         }
-        let listing = std::fs::read_dir(root.path().join("objects")).unwrap().count();
+        let listing = std::fs::read_dir(root.path().join("objects"))
+            .unwrap()
+            .count();
         assert_eq!(listing, 0);
     }
 
@@ -557,19 +570,28 @@ mod tests {
             .unwrap();
         let mut batch = scope.immutable_batch().unwrap();
         assert_eq!(
-            batch.stage(Path::new("objects/a"), b"other", 1 << 20).unwrap(),
+            batch
+                .stage(Path::new("objects/a"), b"other", 1 << 20)
+                .unwrap(),
             ImmutableStage::Existing(b"first".to_vec())
         );
         assert_eq!(
-            batch.stage(Path::new("objects/b"), b"second", 1 << 20).unwrap(),
+            batch
+                .stage(Path::new("objects/b"), b"second", 1 << 20)
+                .unwrap(),
             ImmutableStage::Staged
         );
         assert_eq!(
-            batch.stage(Path::new("objects/b"), b"second", 1 << 20).unwrap(),
+            batch
+                .stage(Path::new("objects/b"), b"second", 1 << 20)
+                .unwrap(),
             ImmutableStage::Existing(b"second".to_vec())
         );
         batch.commit().unwrap();
-        assert_eq!(scope.read(Path::new("objects/b"), 1 << 20).unwrap(), b"second");
+        assert_eq!(
+            scope.read(Path::new("objects/b"), 1 << 20).unwrap(),
+            b"second"
+        );
         let hidden = std::fs::read_dir(root.path().join("objects"))
             .unwrap()
             .filter(|entry| {

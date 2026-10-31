@@ -4,8 +4,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 #[cfg(test)]
 use runmat_builtins::PLUS_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, PLUS_CATALOG_ENTRY, PLUS_ERROR_INTERNAL, PLUS_ERROR_INVALID_ARGUMENT,
-    PLUS_ERROR_INVALID_INPUT, PLUS_ERROR_SIZE_MISMATCH, PLUS_LIKE_EXTENSION,
+    PLUS_CATALOG_ENTRY, PLUS_ERROR_INTERNAL, PLUS_ERROR_INVALID_ARGUMENT, PLUS_ERROR_INVALID_INPUT,
+    PLUS_ERROR_SIZE_MISMATCH, PLUS_LIKE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -26,7 +26,10 @@ use crate::builtins::math::elementwise::sparse::{try_sparse_binary, SparseBinary
 use crate::builtins::math::elementwise::sparse_integer::try_typed_sparse_integer_binary;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::execution::{RootedValue, RootedValueLease};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::BuiltinResult;
+
+mod error;
+use error::{builtin_error, plus_error, plus_error_with_detail};
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::plus"
@@ -96,32 +99,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "plus";
-
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
-
-fn plus_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn plus_error_with_detail(
-    error: &'static BuiltinErrorDescriptor,
-    detail: impl AsRef<str>,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
-        .with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
 
 #[runtime_builtin(
     name = "plus",

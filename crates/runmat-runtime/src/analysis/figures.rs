@@ -2595,7 +2595,7 @@ mod tests {
                     RegionTarget::volume(region_id)
                 } else {
                     RegionTarget::boundary(
-                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(region_id)),
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(region_id),
                     )
                 },
             ),

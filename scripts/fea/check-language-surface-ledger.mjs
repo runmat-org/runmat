@@ -35,7 +35,7 @@ function topLevelLines(body) {
   let depth = 0;
   for (const rawLine of body.split("\n")) {
     const line = rawLine.trim();
-    if (depth === 0 && line.startsWith("#[")) continue;
+    if (depth === 0 && (line.startsWith("#[") || line.startsWith("//"))) continue;
     current += `${current ? " " : ""}${line}`;
     for (const char of line) {
       if (["(", "[", "{"].includes(char)) depth += 1;

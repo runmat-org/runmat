@@ -53,8 +53,10 @@ pub(crate) fn compile_solid(
             let analysis_projection = projection.as_ref().map_err(|error| {
                 unresolved(
                     load,
-                    crate::assembly::SolverMeshRegionMappingError::InvalidAnalysisProjection(error.clone())
-                        .to_string(),
+                    crate::assembly::SolverMeshRegionMappingError::InvalidAnalysisProjection(
+                        error.clone(),
+                    )
+                    .to_string(),
                 )
             })?;
             let projection = apply_solver_mesh_structural_loads_on_projection(

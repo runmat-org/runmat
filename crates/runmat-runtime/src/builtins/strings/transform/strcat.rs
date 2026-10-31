@@ -561,7 +561,7 @@ pub(crate) mod tests {
         };
         assert_eq!(mixed.shape(), &[2, 2, 2]);
         assert_eq!(
-            mixed.data().iter().cloned().collect::<Vec<_>>(),
+            mixed.data().to_vec(),
             vec!["a1", "c2", "b3", "d4", "e5", "g6", "f7", "h8"]
         );
         let Value::Cell(cells) = run_strcat(vec![cell, Value::CharArray(CharArray::new_row("!"))])

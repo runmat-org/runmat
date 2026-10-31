@@ -303,7 +303,7 @@ fn coerce_bool(value: &Value) -> BuiltinResult<bool> {
         Value::String(runmat_value::StringElement::Text(s)) => parse_bool_string(s),
         Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
             parse_bool_string(
-                &sa.data()[0]
+                sa.data()[0]
                     .text_ref()
                     .expect("checked nonmissing scalar string"),
             )

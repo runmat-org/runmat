@@ -373,7 +373,8 @@ impl FluidSteadySolverResult {
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<Self> {
-        Self::decode_on_source(bytes, expected, workload, mesh).map(FluidResultOnSource::into_result)
+        Self::decode_on_source(bytes, expected, workload, mesh)
+            .map(FluidResultOnSource::into_result)
     }
 
     /// [`Self::from_canonical_bytes_for`], keeping the prepared source the decoded result was

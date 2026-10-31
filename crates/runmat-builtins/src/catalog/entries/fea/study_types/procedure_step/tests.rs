@@ -3,9 +3,7 @@ use crate::fea_contract::study_types::test_support::assert_constructor_contract;
 
 #[test]
 fn procedure_step_constructors_follow_their_positional_contract() {
-    for (entry, signature) in [(&configure::ENTRY, &inference::CONFIGURE)] {
-        assert_constructor_contract(entry, signature);
-    }
+    assert_constructor_contract(&configure::ENTRY, &inference::CONFIGURE);
 }
 
 #[test]

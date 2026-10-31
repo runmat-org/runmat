@@ -362,6 +362,13 @@ fn keyword_bundle(value: runmat_value::ObjectInstance) -> Result<PythonValue, Ru
     ))
 }
 
+fn string_text(value: &runmat_value::StringElement) -> Result<String, RuntimeError> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| invalid_conversion("missing string requires an explicit foreign conversion"))
+}
+
 #[cfg(test)]
 #[path = "conversion/keyword_tests.rs"]
 mod keyword_tests;
@@ -952,11 +959,4 @@ mod tests {
         let error = value_from_python(PythonValue::Array(nat), None).unwrap_err();
         assert!(error.message().contains("NaT"));
     }
-}
-
-fn string_text(value: &runmat_value::StringElement) -> Result<String, RuntimeError> {
-    value
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| invalid_conversion("missing string requires an explicit foreign conversion"))
 }

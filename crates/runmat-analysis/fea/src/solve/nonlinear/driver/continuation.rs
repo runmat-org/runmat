@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 /// by the nonlinear resource plan (`history_limits`, block transport) and checked by the object
 /// inventory, so the codec bounds it only by the wire range. Controller, scope and content
 /// identities are digested from the streamed encoding and never materialize it.
-const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 const PREFIX: &[u8] = b"runmat-j2-load-continuation-wire/v4\0";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,8 +276,13 @@ pub(super) fn digest(
     value_prefix: &'static [u8],
     value: &impl Serialize,
 ) -> Result<Digest, FeaRunError> {
-    crate::contracts::canonical_digest::canonical_contract_digest(value_prefix, "j2-load-controller", value, LIMITS)
-        .map_err(|e| FeaRunError::InvalidModel(e.to_string()))
+    crate::contracts::canonical_digest::canonical_contract_digest(
+        value_prefix,
+        "j2-load-controller",
+        value,
+        LIMITS,
+    )
+    .map_err(|e| FeaRunError::InvalidModel(e.to_string()))
 }
 
 pub(super) fn add(a: usize, b: usize) -> Result<usize, FeaRunError> {

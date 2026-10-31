@@ -17,7 +17,8 @@ const PREFIX: &[u8] = b"runmat-finite-volume-field-layout/v1\0";
 /// Per-entity topology of any admitted mesh: collections are bounded by the byte ceiling.
 /// Layout size follows the admitted mesh (its plan and the object inventory admit it), so the
 /// codec bounds it only by the wire range.
-const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

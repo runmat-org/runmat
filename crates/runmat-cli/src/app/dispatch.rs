@@ -275,9 +275,7 @@ async fn execute_command(
         Commands::Job { job_command } => {
             boxed_command(|| job::execute(job_command, cli, config)).await
         }
-        Commands::RecoveryKey { command } => {
-            boxed_command(|| job::execute_recovery(command)).await
-        }
+        Commands::RecoveryKey { command } => boxed_command(|| job::execute_recovery(command)).await,
         Commands::Remote { remote_command } => {
             boxed_command(|| remote::execute_remote_command(remote_command, cli, config)).await
         }

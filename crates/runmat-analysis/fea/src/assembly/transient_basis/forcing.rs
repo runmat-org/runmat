@@ -13,7 +13,9 @@ pub(in crate::assembly) struct SolidLoadDomain {
 }
 
 impl SolidLoadDomain {
-    pub(in crate::assembly) fn derive(mesh: &SolverMeshArtifact) -> Result<Self, LinearAssemblyError> {
+    pub(in crate::assembly) fn derive(
+        mesh: &SolverMeshArtifact,
+    ) -> Result<Self, LinearAssemblyError> {
         let invalid = |error: String| {
             LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error))
         };

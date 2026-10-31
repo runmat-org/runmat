@@ -286,10 +286,7 @@ fn lowest_eigenpairs(
         MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     )
     .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
-    let operator = SpdOperator::factor(
-        &shifted,
-        policy.linear_relative_tolerance,
-    )?;
+    let operator = SpdOperator::factor(&shifted, policy.linear_relative_tolerance)?;
     let apply_m =
         |v: &[f64]| spmv(mass, v).map_err(|error| AcousticHarmonicError::Operator(error.into()));
     let apply_k = |v: &[f64]| {

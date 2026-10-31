@@ -39,8 +39,7 @@ fn elevate(mut mesh: SolverMeshArtifact) -> SolverMeshArtifact {
         element.order = ElementOrder::Tet10;
     }
     mesh.resolved_request.element_order = ElementOrder::Tet10;
-    topo.field_topologies[0].ordered_entity_ids =
-        topo.nodes.iter().map(|n| n.node_id).collect();
+    topo.field_topologies[0].ordered_entity_ids = topo.nodes.iter().map(|n| n.node_id).collect();
     mesh.seal_canonical_digest().unwrap();
     mesh
 }

@@ -197,7 +197,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data().iter().cloned().collect::<Vec<_>>(),
+                    sa.data().to_vec(),
                     vec!["gpu", "accel", "<missing>", "mixed"]
                 );
             }

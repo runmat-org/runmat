@@ -100,9 +100,9 @@ pub mod wgpu_ieee_words;
 #[cfg(feature = "wgpu")]
 pub use wgpu_access::{
     CanonicalWgpuEmissionAuthority, WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission,
-    WgpuEmissionMode, WgpuScopeErrorKind, WgpuScopeErrors, WgpuScopeReceipt,
-    WgpuNumericReadbackSource, WgpuNumericReadbackBuffer, WgpuNumericReadbackSubmission,
-    WgpuNumericReadbackTimestampResources,
+    WgpuEmissionMode, WgpuNumericReadbackBuffer, WgpuNumericReadbackSource,
+    WgpuNumericReadbackSubmission, WgpuNumericReadbackTimestampResources, WgpuScopeErrorKind,
+    WgpuScopeErrors, WgpuScopeReceipt,
 };
 #[cfg(feature = "wgpu")]
 pub use wgpu_buffer_owner::WgpuBufferOwner;
@@ -2270,7 +2270,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &self,
         readback: &NumericReadback<'_>,
         query: &ProviderFeasibilityQuery,
-        completion_claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        completion_claim: std::sync::Arc<
+            dyn runmat_execution::resource::RetainedHostAllocationClaim,
+        >,
     ) -> anyhow::Result<PreparedNumericDownloadStage> {
         readback.authorize_provider(self)?;
         self.prepare_numeric_download_stage(readback.source(), query, completion_claim)

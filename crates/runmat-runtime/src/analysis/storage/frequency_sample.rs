@@ -183,7 +183,7 @@ pub(super) fn validate_artifact(
             || summary.producer != authority.producer()
             || summary.mesh_digest != mesh_digest
             || summary.frequency != expected.frequency
-            || &summary.formulation != &artifact.step.identity
+            || summary.formulation != artifact.step.identity
             || completed.numerical_receipt.source_workload() != numerical.workload
             || completed.numerical_receipt.source_result() != summary.source_result
             || completed.accuracy.source_result != summary.source_result

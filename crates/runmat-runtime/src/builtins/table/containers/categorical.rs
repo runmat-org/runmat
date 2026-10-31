@@ -933,6 +933,22 @@ fn categorical_numeric_label(value: NumericScalar) -> StringElement {
     })
 }
 
+fn normalize_category_element(value: &StringElement) -> StringElement {
+    match value.as_str() {
+        Some(text) if text.trim() == text => value.clone(),
+        Some(value) => StringElement::text(normalize_category_label(value)),
+        None => StringElement::Missing,
+    }
+}
+
+fn category_name_from_element(value: StringElement) -> BuiltinResult<String> {
+    value
+        .into_text()
+        .map(|text| text.as_str().to_owned())
+        .filter(|text| !text.is_empty())
+        .ok_or_else(|| invalid_argument("categorical: category names cannot be empty or missing"))
+}
+
 #[cfg(test)]
 fn categorical_object_labels(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
     let labels = categorical_label_view(object)?;
@@ -1334,20 +1350,4 @@ mod tests {
         .unwrap();
         assert_eq!(copy, original);
     }
-}
-
-fn normalize_category_element(value: &StringElement) -> StringElement {
-    match value.as_str() {
-        Some(text) if text.trim() == text => value.clone(),
-        Some(value) => StringElement::text(normalize_category_label(value)),
-        None => StringElement::Missing,
-    }
-}
-
-fn category_name_from_element(value: StringElement) -> BuiltinResult<String> {
-    value
-        .into_text()
-        .map(|text| text.as_str().to_owned())
-        .filter(|text| !text.is_empty())
-        .ok_or_else(|| invalid_argument("categorical: category names cannot be empty or missing"))
 }

@@ -37,8 +37,7 @@ pub fn connected_tetrahedron_solver_mesh() -> SolverMeshArtifact {
             child.element_id = index as u64 + 1;
             child.node_ids = node_ids.to_vec();
             child.stable_identity = solver_volume_element_identity(
-                node_ids
-                    .map(|node_id| topo.nodes[node_id as usize - 1].stable_identity),
+                node_ids.map(|node_id| topo.nodes[node_id as usize - 1].stable_identity),
             );
             child
         })

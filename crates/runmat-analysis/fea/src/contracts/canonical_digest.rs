@@ -127,7 +127,10 @@ mod tests {
             &mut |chunk| wire.update(chunk),
         )
         .unwrap();
-        assert!(size > GIB, "the contract exceeds the former fixed 1 GiB ceiling");
+        assert!(
+            size > GIB,
+            "the contract exceeds the former fixed 1 GiB ceiling"
+        );
         // A plan that admits the contract's size accepts it, digest unchanged.
         let mut planned = DigestStream::new();
         stream_contract(

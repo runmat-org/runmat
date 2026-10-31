@@ -147,7 +147,7 @@ fn parse_mode(value: Value) -> BuiltinResult<DbMode> {
         Value::String(runmat_value::StringElement::Text(text)) => parse_mode_string(&text),
         Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
             parse_mode_string(
-                &array.data()[0]
+                array.data()[0]
                     .text_ref()
                     .expect("checked nonmissing scalar string"),
             )

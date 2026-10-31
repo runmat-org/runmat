@@ -18,12 +18,8 @@ fn publication() -> (
     };
     let mut compiled = p.product.compiled().clone();
     compiled.model.sequence.steps[0].state_outputs = vec![declaration.clone()];
-    p.product = runmat_analysis_fea::study::plan_fluid_study_product(
-        compiled,
-        &p.mesh,
-        p.policy,
-    )
-    .unwrap();
+    p.product =
+        runmat_analysis_fea::study::plan_fluid_study_product(compiled, &p.mesh, p.policy).unwrap();
     let result = p.workload().execute(&p.mesh).unwrap();
     let result = prepare_analysis_objects(
         AnalysisNumericalObjectKind::SolverResult,

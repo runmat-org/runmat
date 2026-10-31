@@ -109,43 +109,6 @@ fn string_value(text: &runmat_value::StringElement) -> EnvironmentValue {
     }
 }
 
-#[cfg(test)]
-mod typed_missing_policy {
-    use super::*;
-
-    #[test]
-    fn only_typed_missing_requests_environment_removal() {
-        for text in ["<missing>", "<MISSING>", ""] {
-            assert_eq!(
-                EnvironmentValues::decode(&Value::String(text.into()))
-                    .unwrap()
-                    .scalar_value(),
-                Some(EnvironmentValue::Set(text.into()))
-            );
-        }
-        assert_eq!(
-            EnvironmentValues::decode(&Value::String(runmat_value::StringElement::Missing))
-                .unwrap()
-                .scalar_value(),
-            Some(EnvironmentValue::Remove)
-        );
-        let array = runmat_value::StringArray::from_elements_unbounded(
-            vec!["<missing>".into(), runmat_value::StringElement::Missing],
-            vec![1, 2],
-        )
-        .unwrap();
-        assert_eq!(
-            EnvironmentValues::decode(&Value::StringArray(array))
-                .unwrap()
-                .values,
-            vec![
-                EnvironmentValue::Set("<missing>".into()),
-                EnvironmentValue::Remove
-            ]
-        );
-    }
-}
-
 fn character_row(array: &runmat_value::CharArray) -> Result<String, ValueError> {
     let mut text =
         runmat_value::decode_utf16_code_units(array.data()).map_err(ValueError::Encoding)?;
@@ -181,5 +144,42 @@ fn format_integer(value: &IntValue) -> String {
         IntValue::U16(value) => value.to_string(),
         IntValue::U32(value) => value.to_string(),
         IntValue::U64(value) => value.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod typed_missing_policy {
+    use super::*;
+
+    #[test]
+    fn only_typed_missing_requests_environment_removal() {
+        for text in ["<missing>", "<MISSING>", ""] {
+            assert_eq!(
+                EnvironmentValues::decode(&Value::String(text.into()))
+                    .unwrap()
+                    .scalar_value(),
+                Some(EnvironmentValue::Set(text.into()))
+            );
+        }
+        assert_eq!(
+            EnvironmentValues::decode(&Value::String(runmat_value::StringElement::Missing))
+                .unwrap()
+                .scalar_value(),
+            Some(EnvironmentValue::Remove)
+        );
+        let array = runmat_value::StringArray::from_elements_unbounded(
+            vec!["<missing>".into(), runmat_value::StringElement::Missing],
+            vec![1, 2],
+        )
+        .unwrap();
+        assert_eq!(
+            EnvironmentValues::decode(&Value::StringArray(array))
+                .unwrap()
+                .values,
+            vec![
+                EnvironmentValue::Set("<missing>".into()),
+                EnvironmentValue::Remove
+            ]
+        );
     }
 }

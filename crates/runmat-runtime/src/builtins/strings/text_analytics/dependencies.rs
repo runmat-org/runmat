@@ -455,7 +455,7 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_details_from_obje
                 ),
             ));
         }
-        out.push(array.data().iter().cloned().collect());
+        out.push(array.data().to_vec());
     }
     Ok(Some(out))
 }

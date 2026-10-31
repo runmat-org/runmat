@@ -315,6 +315,15 @@ fn decode_chars(units: &[Utf16CodeUnit]) -> BuiltinResult<String> {
     })
 }
 
+fn required_name_text(text: &runmat_value::StringElement) -> BuiltinResult<&str> {
+    text.as_str().ok_or_else(|| {
+        error(
+            &ERROR_INVALID_INPUT,
+            "genvarname: names must not be missing",
+        )
+    })
+}
+
 #[cfg(test)]
 pub(crate) async fn genvarname_builtin_source(
     value: Value,
@@ -541,13 +550,4 @@ mod tests {
         .expect_err("resident exclusion input");
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
     }
-}
-
-fn required_name_text(text: &runmat_value::StringElement) -> BuiltinResult<&str> {
-    text.as_str().ok_or_else(|| {
-        error(
-            &ERROR_INVALID_INPUT,
-            "genvarname: names must not be missing",
-        )
-    })
 }

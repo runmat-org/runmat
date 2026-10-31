@@ -4,8 +4,9 @@ use super::*;
 use runmat_analysis_core::AnalysisModel;
 
 const PREFIX: &[u8] = b"runmat-analysis-thermoelastic-result/v2\0";
-const LIMITS: CanonicalLimits =
-    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64));
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
+    CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
+);
 
 pub(super) fn model_digest(model: &AnalysisModel) -> Result<Digest, StructuralLinearizationError> {
     crate::contracts::canonical_digest::canonical_contract_digest(

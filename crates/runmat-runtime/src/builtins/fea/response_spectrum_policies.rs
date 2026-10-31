@@ -284,7 +284,10 @@ pub(super) fn ensure_spectrum_policy_classes_registered() {
             });
         }
 
-        crate::builtins::fea::object_projection::register_schemas(&PROJECTION_FIELDS, registrations);
+        crate::builtins::fea::object_projection::register_schemas(
+            &PROJECTION_FIELDS,
+            registrations,
+        );
     });
     RUNTIME.ensure(|| {
         for (class_name, _, methods) in schemas() {

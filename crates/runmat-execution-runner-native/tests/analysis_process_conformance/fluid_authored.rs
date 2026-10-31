@@ -153,7 +153,14 @@ pub(super) async fn run() {
             result.completion.result.original().outer_iterations,
             result.completion.result.original().linear_iterations
         );
-        assert!(result.completion.workload().policy.linear_relative_tolerance <= 1e-11);
+        assert!(
+            result
+                .completion
+                .workload()
+                .policy
+                .linear_relative_tolerance
+                <= 1e-11
+        );
         assert_eq!(
             result
                 .completion

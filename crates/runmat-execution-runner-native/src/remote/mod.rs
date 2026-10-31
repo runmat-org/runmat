@@ -48,9 +48,9 @@ pub use channel::{
     RemoteAttempt, RemoteAttemptProgram, RemoteBundleReceipt, RemoteGraphProgramReceipt,
     RemoteObjectReceipt, RemoteStagedGraphReference, RemoteValueReceipt, RemoteWorkerChannel,
 };
-pub use driver::run_remote_driver_from_env;
 #[cfg(test)]
 pub(crate) use driver::execute_driver_analysis;
+pub use driver::run_remote_driver_from_env;
 pub use gang::{RemoteSpmdGangCompletion, RemoteSpmdGangProgram};
 pub use pool::{
     RemoteGraphTransfer, RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority,

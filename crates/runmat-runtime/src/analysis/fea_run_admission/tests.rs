@@ -117,17 +117,23 @@ fn local_runs_never_consult_default_explicit_or_poll_local_billing_hosts() {
             panic!("local execution must not call a billing host")
         }
     }
-    for kind in [FeaRunKind::Meshing, FeaRunKind::Solve, FeaRunKind::MeshAndSolve] {
+    for kind in [
+        FeaRunKind::Meshing,
+        FeaRunKind::Solve,
+        FeaRunKind::MeshAndSolve,
+    ] {
         let mut local = request();
         local.site = FeaRunSite::Local;
         local.kind = kind;
-        let context = crate::analysis::fea_run_admission::FeaRunAdmissionContext::new(
-            Arc::new(ForbiddenHost),
-        );
+        let context = crate::analysis::fea_run_admission::FeaRunAdmissionContext::new(Arc::new(
+            ForbiddenHost,
+        ));
         let scopes = [
             FeaRunScope::admit(local.clone()).expect("no host or sign-in needed"),
             FeaRunScope::admit_with(local.clone(), &ForbiddenHost).expect("explicit host bypassed"),
-            context.run_sync(|| FeaRunScope::admit(local)).expect("poll-local host bypassed"),
+            context
+                .run_sync(|| FeaRunScope::admit(local))
+                .expect("poll-local host bypassed"),
         ];
         for scope in scopes {
             scope.run_sync(|| assert_eq!(FeaRunScope::current_allocation(), Some(2000)));

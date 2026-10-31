@@ -20,8 +20,7 @@ pub(super) fn prepare(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
             let x = element.node_ids[..4]
                 .iter()
                 .map(|id| {
-                    topo
-                        .nodes
+                    topo.nodes
                         .iter()
                         .find(|node| node.node_id == *id)
                         .unwrap()

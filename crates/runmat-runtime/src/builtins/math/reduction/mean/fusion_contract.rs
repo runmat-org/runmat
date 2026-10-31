@@ -66,7 +66,7 @@ fn lexical_plan<'a>(controls: &FusionReductionControls<'a>) -> Option<Plan<'a>> 
                 if array.data().len() == 1 && !array.data()[0].is_missing() =>
             {
                 MeanControl::from_public_option(
-                    &array.data()[0]
+                    array.data()[0]
                         .text_ref()
                         .expect("checked nonmissing scalar string"),
                 )

@@ -247,7 +247,7 @@ pub(in crate::builtins::table) fn updated_variable_metadata_names(
         let existing = props.fields.get(field).cloned();
         let values = match existing {
             Some(Value::StringArray(array)) => {
-                let mut values = array.data().iter().cloned().collect::<Vec<_>>();
+                let mut values = array.data().to_vec();
                 values.resize(names.len(), runmat_value::StringElement::text(""));
                 values.truncate(names.len());
                 values

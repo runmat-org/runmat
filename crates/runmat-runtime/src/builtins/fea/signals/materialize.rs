@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use runmat_time::Instant;
+use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, GeneratorCallable, PhysicalSignal};
 

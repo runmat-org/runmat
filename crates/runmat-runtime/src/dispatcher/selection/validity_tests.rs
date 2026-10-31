@@ -99,8 +99,7 @@ fn validity_query_uses_selected_binding_for_execution_and_observation() {
                     "isvalid",
                     std::slice::from_ref(&receiver),
                 )
-                .err()
-                .expect("requested query spelling grants no authority");
+                .expect_err("requested query spelling grants no authority");
                 assert_eq!(
                     error.identifier(),
                     Some("RunMat:SelectedObjectReceiverInvalid")

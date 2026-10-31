@@ -1,6 +1,20 @@
 //! MATLAB-compatible `regexprep` builtin for RunMat.
 
 use runmat_value::NumericScalar;
+fn required_regex_text(text: StringElement) -> BuiltinResult<Utf8Text> {
+    text.into_text()
+        .ok_or_else(|| runtime_error_for("regexprep: pattern or replacement must not be missing"))
+}
+
+fn into_required_regex_text(
+    data: runmat_value::ExactArrayStorage<StringElement>,
+) -> BuiltinResult<Vec<Utf8Text>> {
+    into_text_elements(data)
+        .into_iter()
+        .map(required_regex_text)
+        .collect()
+}
+
 #[cfg(test)]
 use runmat_value::{IntValue, IntegerStorage, Tensor};
 use std::sync::Arc;
@@ -1498,18 +1512,4 @@ pub(crate) mod tests {
             "unexpected error message: {message}"
         );
     }
-}
-
-fn required_regex_text(text: StringElement) -> BuiltinResult<Utf8Text> {
-    text.into_text()
-        .ok_or_else(|| runtime_error_for("regexprep: pattern or replacement must not be missing"))
-}
-
-fn into_required_regex_text(
-    data: runmat_value::ExactArrayStorage<StringElement>,
-) -> BuiltinResult<Vec<Utf8Text>> {
-    into_text_elements(data)
-        .into_iter()
-        .map(required_regex_text)
-        .collect()
 }

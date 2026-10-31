@@ -22,7 +22,7 @@ impl MappedCallable {
                 if value.data().len() == 1 && !value.data()[0].is_missing() =>
             {
                 Self::parse_text(
-                    &value.data()[0]
+                    value.data()[0]
                         .text_ref()
                         .expect("checked nonmissing scalar string"),
                 )

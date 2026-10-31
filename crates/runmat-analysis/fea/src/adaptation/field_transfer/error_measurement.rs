@@ -8,8 +8,9 @@ use runmat_meshing_core::StableDigest;
 
 const FIELD_CODEC_PREFIX: &[u8] = b"runmat-analysis-fea-field-cbor/v1\0";
 const FIELD_CODEC_DOMAIN: &str = "analysis.fea.field/v1";
-const FIELD_CODEC_LIMITS: CanonicalLimits =
-    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16));
+const FIELD_CODEC_LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
+    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16),
+);
 
 pub fn measure_solver_field_transfer_error(
     transfer: &SolverFieldTransferResult,

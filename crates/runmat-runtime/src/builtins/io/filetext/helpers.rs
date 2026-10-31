@@ -17,31 +17,6 @@ pub(crate) fn extract_scalar_string(value: &Value) -> Option<String> {
     }
 }
 
-#[cfg(test)]
-mod typed_string_controls {
-    use super::*;
-
-    #[test]
-    fn scalar_text_controls_reject_missing_without_reserving_any_literal_spelling() {
-        for element in [
-            "<missing>".into(),
-            "<MISSING>".into(),
-            "".into(),
-            runmat_value::StringElement::Missing,
-        ] {
-            let expected = element.as_str().map(str::to_owned);
-            assert_eq!(
-                extract_scalar_string(&Value::String(element.clone())),
-                expected
-            );
-            let array =
-                runmat_value::StringArray::from_elements_unbounded(vec![element], vec![1, 1])
-                    .unwrap();
-            assert_eq!(extract_scalar_string(&Value::StringArray(array)), expected);
-        }
-    }
-}
-
 pub(crate) fn char_array_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
@@ -281,4 +256,29 @@ fn text_io_error(builtin_name: &'static str, message: impl Into<String>) -> Runt
     build_runtime_error(message)
         .with_builtin(builtin_name)
         .build()
+}
+
+#[cfg(test)]
+mod typed_string_controls {
+    use super::*;
+
+    #[test]
+    fn scalar_text_controls_reject_missing_without_reserving_any_literal_spelling() {
+        for element in [
+            "<missing>".into(),
+            "<MISSING>".into(),
+            "".into(),
+            runmat_value::StringElement::Missing,
+        ] {
+            let expected = element.as_str().map(str::to_owned);
+            assert_eq!(
+                extract_scalar_string(&Value::String(element.clone())),
+                expected
+            );
+            let array =
+                runmat_value::StringArray::from_elements_unbounded(vec![element], vec![1, 1])
+                    .unwrap();
+            assert_eq!(extract_scalar_string(&Value::StringArray(array)), expected);
+        }
+    }
 }

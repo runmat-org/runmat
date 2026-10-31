@@ -43,7 +43,7 @@ fn absent_choices_expose_an_empty_value_and_encode() {
         };
         assert!(matches!(
             object.properties().get("value"),
-            Some(Value::Tensor(tensor)) if tensor.len() == 0
+            Some(Value::Tensor(tensor)) if tensor.is_empty()
         ));
         let decoded = codec_round_trip(&absent);
         let Value::Object(decoded) = decoded else {

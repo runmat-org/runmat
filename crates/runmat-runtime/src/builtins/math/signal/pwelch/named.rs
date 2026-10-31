@@ -70,7 +70,7 @@ pub(super) fn keyword(value: &Value) -> BuiltinResult<Option<PwelchKeyword>> {
         Value::String(runmat_value::StringElement::Text(text)) => Some(PwelchKeyword::decode(text)),
         Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
             Some(PwelchKeyword::decode(
-                &array.data()[0]
+                array.data()[0]
                     .text_ref()
                     .expect("checked nonmissing scalar string"),
             ))

@@ -109,11 +109,16 @@
         "StructuralRandomResponse": {},
         "StructuralBuckling": {},
         "AcousticHelmholtz": {},
+        "AcousticResponse": {
+          "default": "Fp64 with residual target 1e-8",
+          "target": "typed acoustic cavity-mode or pressure-transient study publication",
+          "validation": "publication precision and residual target must match completed numerical controls",
+          "positive_coverage": "acoustic_response_study_publication.admission.tests.publication_controls_cannot_substitute_precision_or_residual: matching Fp64/residual case",
+          "negative_coverage": "acoustic_response_study_publication.admission.tests.publication_controls_cannot_substitute_precision_or_residual: mismatched precision and residual cases"
+        },
         "ThermalDiffusion": {},
         "StructuralTransient": {},
         "IncompressibleFlow": {},
-        "ConjugateHeatTransfer": {},
-        "FluidStructureInteraction": {},
         "StructuralNonlinear": {},
         "ElectricalStatic": {
           "default": "none from temporal sequence alone; exact electrical equation-bound typed preparation",
@@ -157,6 +162,12 @@
         "backend": {
           "disposition": "execution_policy",
           "default": "merged project and CLI policy"
+        },
+        "accelerator_admission": {
+          "disposition": "execution_policy",
+          "default": "diagnosed CPU-reference fallback when accelerator execution is unavailable",
+          "target": "typed per-step accelerator admission",
+          "validation": "required accelerator policy rejects an unavailable route instead of silently falling back"
         },
         "solver_options": {
           "disposition": "execution_policy",
@@ -310,13 +321,33 @@
       },
       "members": {
         "element_order": {},
+        "dimension": {
+          "default": "MeshDimension::Solid",
+          "target": "canonical MeshingRequest.dimension",
+          "validation": "resolved canonical request validation"
+        },
         "deterministic_seed": {},
         "target_edge_length_m": {},
         "maximum_chordal_deviation_m": {},
         "maximum_grading_ratio": {},
-        "resources": {
+        "limits": {
           "disposition": "execution_policy",
-          "identity": "logical execution identity"
+          "default": "10,000,000 nodes/elements and recursion depth 256",
+          "target": "canonical MeshingRequest.limits",
+          "identity": "canonical mesh request identity",
+          "validation": "MeshingSizeLimits::validate before request execution",
+          "positive_coverage": "contracts.canonical.settings.tests.settings_resolve_to_a_valid_canonical_request",
+          "negative_coverage": "contracts.canonical.tests: zero maximum_nodes rejected"
+        },
+        "cells_across_gap": {
+          "default": "None retains canonical two-layer proximity sizing",
+          "target": "MeshingRequest.metric.cells_across_gap",
+          "validation": "explicit values must be within 1..=64"
+        },
+        "size_controls": {
+          "default": "empty local-control list",
+          "target": "MeshingRequest.size_controls",
+          "validation": "validate_size_controls and resolved canonical request validation"
         },
         "cancellation": {
           "disposition": "execution_policy",
@@ -347,6 +378,14 @@
         },
         "units": {
           "identity": "geometry definition identity"
+        },
+        "source_units": {
+          "default": "None; missing source scale remains unresolved",
+          "target": "source unit evidence and coordinate conversion during geometry import",
+          "identity": "geometry definition identity",
+          "validation": "explicit source-unit fallback cannot replace contradictory declared source evidence",
+          "positive_coverage": "source_units.preview_scale_tests.explicit_source_fallback_converts_faceted_coordinates_to_preview_units",
+          "negative_coverage": "source_units.preview_scale_tests.absent_fallback_stays_unresolved_instead_of_becoming_file_declared_meters"
         },
         "tessellation_profile": {
           "identity": "render identity"

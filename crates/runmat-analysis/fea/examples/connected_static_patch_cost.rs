@@ -145,8 +145,7 @@ fn refine(
                     topology.ordered_entity_ids = (1..=topo.nodes.len() as u64).collect();
                 }
                 FieldTopologyLocation::VolumeElement => {
-                    topology.ordered_entity_ids =
-                        (1..=topo.volume_elements.len() as u64).collect();
+                    topology.ordered_entity_ids = (1..=topo.volume_elements.len() as u64).collect();
                 }
                 FieldTopologyLocation::BoundaryFace | FieldTopologyLocation::BoundaryEdge => {}
             }

@@ -522,7 +522,7 @@ impl NormalizedText {
                 kind: TextKind::StringScalar,
             }),
             Value::StringArray(sa) => Ok(Self {
-                data: sa.data().iter().cloned().collect(),
+                data: sa.data().to_vec(),
                 shape: sa.shape.to_vec(),
                 kind: TextKind::StringArray,
             }),

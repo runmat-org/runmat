@@ -45,11 +45,7 @@ fn interface_mesh(divisions: usize, order: ElementOrder) -> SolverMeshArtifact {
     for element in &mut topo.volume_elements {
         let x = element.node_ids[..4]
             .iter()
-            .map(|id| {
-                topo.nodes[*id as usize - 1]
-                    .coordinates_m
-                    .canonical_value()[0]
-            })
+            .map(|id| topo.nodes[*id as usize - 1].coordinates_m.canonical_value()[0])
             .collect::<Vec<_>>();
         element.region_id = if x.iter().all(|value| *value <= 0.5) {
             left_region.clone()

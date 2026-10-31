@@ -550,7 +550,8 @@ impl FluidSteadySolverResult {
         mesh: &SolverMeshArtifact,
         request: &FieldRecoveryRequest,
     ) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
-        self.on_source(workload, mesh)?.recover_native_fields(request)
+        self.on_source(workload, mesh)?
+            .recover_native_fields(request)
     }
 
     /// Whether published fields carry exactly this result's native values, bit for bit.
@@ -560,7 +561,8 @@ impl FluidSteadySolverResult {
         mesh: &SolverMeshArtifact,
         fields: &RecoveredFieldArtifact,
     ) -> AnalysisExecutionResult<()> {
-        self.on_source(workload, mesh)?.validate_native_fields(fields)
+        self.on_source(workload, mesh)?
+            .validate_native_fields(fields)
     }
 }
 
@@ -629,7 +631,6 @@ impl FluidResultOnSource<'_> {
         )
         .map_err(invalid)
     }
-
 
     pub fn validate_native_fields(
         &self,

@@ -119,7 +119,7 @@ pub(crate) fn reduction_control<T>(value: &Value, decode: fn(&str) -> Option<T>)
         Value::String(runmat_value::StringElement::Text(text)) => decode(text),
         Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
             decode(
-                &array.data()[0]
+                array.data()[0]
                     .text_ref()
                     .expect("checked nonmissing scalar string"),
             )

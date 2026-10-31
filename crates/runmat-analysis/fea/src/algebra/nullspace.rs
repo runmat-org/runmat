@@ -508,6 +508,11 @@ pub(super) fn digest<T: Serialize>(
     value: &T,
 ) -> Result<Digest, NullspaceEvidenceError> {
     // Streamed: evidence over mesh-sized bases is hashed without materializing its encoding.
-    crate::contracts::canonical_digest::canonical_contract_digest(EVIDENCE_PREFIX, domain, value, LIMITS)
-        .map_err(|error| NullspaceEvidenceError::Encoding(error.to_string()))
+    crate::contracts::canonical_digest::canonical_contract_digest(
+        EVIDENCE_PREFIX,
+        domain,
+        value,
+        LIMITS,
+    )
+    .map_err(|error| NullspaceEvidenceError::Encoding(error.to_string()))
 }

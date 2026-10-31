@@ -62,8 +62,9 @@ mod static_demand;
 pub use static_demand::StructuralLinearPipelineResourceDemand;
 mod nonlinear_demand;
 pub use nonlinear_demand::{
-    NonlinearHistoryLimits, NonlinearSolidBlockTransportDemand, PreparedNonlinearSolidBlockResourceFacts,
-    StructuralNonlinearPipelineResourceDemand, StructuralNonlinearRecoveryResourceDemand,
+    NonlinearHistoryLimits, NonlinearSolidBlockTransportDemand,
+    PreparedNonlinearSolidBlockResourceFacts, StructuralNonlinearPipelineResourceDemand,
+    StructuralNonlinearRecoveryResourceDemand,
 };
 mod thermal_demand;
 pub use state_publication_demand::SemanticStatePublicationResourceDemand;

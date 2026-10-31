@@ -5,8 +5,8 @@ mod quantity_layout;
 mod boundary;
 mod input;
 mod plan;
-pub use plan::MagneticSystemPlan;
 pub(crate) use plan::DerivedMagneticSystem;
+pub use plan::MagneticSystemPlan;
 pub(crate) mod resources;
 mod response;
 #[cfg(test)]

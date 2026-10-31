@@ -4,19 +4,8 @@ use runmat_value::{NumericScalar, Utf16CodeUnit, Value};
 use super::{invalid_input, TextError};
 use crate::BuiltinResult;
 
-pub(super) enum Shape<'a> {
-    Borrowed(&'a [usize]),
-    Matrix([usize; 2]),
-}
-
-impl Shape<'_> {
-    pub(super) fn dimensions(&self) -> &[usize] {
-        match self {
-            Self::Borrowed(dimensions) => dimensions,
-            Self::Matrix(dimensions) => dimensions,
-        }
-    }
-}
+mod shape;
+use shape::Shape;
 
 pub(super) struct Operand<'a> {
     value: &'a Value,

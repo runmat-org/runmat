@@ -63,8 +63,8 @@ pub(crate) use fluid::tests::authored as fluid_test_workload;
 pub use fluid::{
     fluid_native_field_definition_inventory, fluid_native_field_definitions,
     fluid_receipt_encoding_profile, FluidCoupling, FluidIntervalEvidence, FluidNumericalReceipt,
-    FluidNumericalReceiptArtifact, FluidResultOnSource, FluidRetainedOriginal, FluidSolverProvenance,
-    FluidSteadySolverResult, FluidSteadyWorkload, FluidTransientBlock,
+    FluidNumericalReceiptArtifact, FluidResultOnSource, FluidRetainedOriginal,
+    FluidSolverProvenance, FluidSteadySolverResult, FluidSteadyWorkload, FluidTransientBlock,
     FluidTransientBlockReservation, FluidTransientBlockResult, FluidTransientBlockWorkload,
     FluidTransientCheckpoint, FluidTransientSchedule, FluidTransientSolverResult,
     FluidTransientWorkload, PreparedFluidTransient, PreparedFluidTransientContinuation,

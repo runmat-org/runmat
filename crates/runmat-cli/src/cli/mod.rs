@@ -31,7 +31,9 @@ pub use remote::{
     FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand, ProjectRetentionCommand,
     RemoteCommand,
 };
-pub use root::{Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, ConfigUserCommand, GcCommand};
+pub use root::{
+    Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, ConfigUserCommand, GcCommand,
+};
 pub use test::{TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
 pub use value_types::{
     AotOptLevel, AotPolicy, CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel,

@@ -28,12 +28,14 @@ fn invalid(e: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(e.to_string())
 }
 fn digest(domain: &'static str, value: &impl Serialize) -> AnalysisExecutionResult<Digest> {
-    Ok(crate::contracts::canonical_digest::canonical_contract_digest(
-        b"runmat-nonlinear-solid/v1\0",
-        domain,
-        value,
-        LIMITS,
-    )?)
+    Ok(
+        crate::contracts::canonical_digest::canonical_contract_digest(
+            b"runmat-nonlinear-solid/v1\0",
+            domain,
+            value,
+            LIMITS,
+        )?,
+    )
 }
 
 impl super::NumericalPlanIdentity {

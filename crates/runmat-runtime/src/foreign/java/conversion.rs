@@ -390,6 +390,13 @@ fn value_kind(value: &Value) -> &'static str {
     }
 }
 
+fn string_text(value: &runmat_value::StringElement) -> Result<String, RuntimeError> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| invalid_conversion("missing string requires an explicit foreign conversion"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,11 +530,4 @@ mod tests {
         );
         assert!(value_to_java(Value::Foreign(reference)).is_err());
     }
-}
-
-fn string_text(value: &runmat_value::StringElement) -> Result<String, RuntimeError> {
-    value
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| invalid_conversion("missing string requires an explicit foreign conversion"))
 }

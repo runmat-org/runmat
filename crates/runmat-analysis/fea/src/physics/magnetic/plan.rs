@@ -11,8 +11,9 @@ use std::collections::BTreeSet;
 mod tests;
 
 const PREFIX: &[u8] = b"runmat-magnetic-system-plan/v2\0";
-const LIMITS: CanonicalLimits =
-    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 64_000_000, 256, 16));
+const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
+    CanonicalLimits::new(512 * 1024 * 1024, 64_000_000, 256, 16),
+);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
@@ -116,10 +117,11 @@ impl MagneticSystemPlan {
         let mut incident = vec![0_u32; offsets[dimension]];
         for (index, element) in projection.elements.iter().enumerate() {
             let element_index = u32::try_from(index).map_err(invalid)?;
-            let rows = local(index)?
-                .into_iter()
-                .map(|edge| edge_row[edge])
-                .chain(element.node_indices[..4].iter().map(|&node| gauge_row[node]));
+            let rows = local(index)?.into_iter().map(|edge| edge_row[edge]).chain(
+                element.node_indices[..4]
+                    .iter()
+                    .map(|&node| gauge_row[node]),
+            );
             for row in rows.filter(|&row| row != NONE) {
                 incident[cursor[row]] = element_index;
                 cursor[row] += 1;

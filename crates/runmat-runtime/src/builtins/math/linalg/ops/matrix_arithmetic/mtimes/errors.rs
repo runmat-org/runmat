@@ -36,7 +36,7 @@ pub(super) fn map_control_flow(error: RuntimeError) -> RuntimeError {
     if let Some(identifier) = error.identifier().or(MTIMES_ERROR_INTERNAL.identifier) {
         builder = builder.with_identifier(identifier.to_string());
     }
-    if let Some(span) = error.span.clone() {
+    if let Some(span) = error.span {
         builder = builder.with_span(span);
     }
     if !error.context.call_frames.is_empty() {

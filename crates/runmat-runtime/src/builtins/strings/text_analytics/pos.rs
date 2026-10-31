@@ -812,7 +812,7 @@ pub(in crate::builtins::strings::text_analytics) fn part_of_speech_details_from_
                 ),
             ));
         }
-        out.push(array.data().iter().cloned().collect());
+        out.push(array.data().to_vec());
     }
     Ok(Some(out))
 }

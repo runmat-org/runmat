@@ -4,6 +4,10 @@
 use crate::context::{RuntimeContext, VmFusionHostInstruction, VmFusionHostRoute};
 use runmat_value::{NumericDType, Value};
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "prepared execution stays inline: boxing adds an unadmitted allocation to the finite host route"
+)]
 pub(crate) enum NumericHostRoute {
     Vm(VmFusionHostRoute),
     Native(crate::context::NativeRegionHostRoute),

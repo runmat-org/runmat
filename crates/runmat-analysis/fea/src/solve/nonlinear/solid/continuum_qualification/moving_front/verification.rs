@@ -224,7 +224,10 @@ fn history_on(
             factor,
             completion.state.accumulated_plastic_dissipation_j,
         );
-        eprintln!("moving-front {label} factor={factor} front={} errors={errors:?}", front(factor));
+        eprintln!(
+            "moving-front {label} factor={factor} front={} errors={errors:?}",
+            front(factor)
+        );
         evidence.push(errors);
         state = completion.state;
     }

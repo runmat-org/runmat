@@ -11,9 +11,7 @@ use runmat_analysis_fea::{
         AnalysisNumericalObjectKind, AnalysisObjectManifest, FluidSteadyWorkload,
         ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
     },
-    study::{
-        plan_fluid_study_product, CompiledAnalysisStudy, FluidStudyPlanningPolicy,
-    },
+    study::{plan_fluid_study_product, CompiledAnalysisStudy, FluidStudyPlanningPolicy},
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::{

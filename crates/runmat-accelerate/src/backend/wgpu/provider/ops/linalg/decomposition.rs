@@ -234,8 +234,7 @@ impl WgpuProvider {
         // Double factorization uses the native-class host path; it must never
         // reach this kernel with binary64 bytes or publish mislabeled results.
         if self.precision != NumericPrecision::F32
-            || matrix.physical().element_type()
-                != runmat_accelerate_api::NumericElementType::F32
+            || matrix.physical().element_type() != runmat_accelerate_api::NumericElementType::F32
             || matrix.physical().storage() != GpuTensorStorage::Real
             || matrix.view().is_logical()
         {

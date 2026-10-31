@@ -158,36 +158,34 @@ pub(super) fn create_future(
     if matches!(
         &program,
         runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
-    ) {
-        if builtin {
-            let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) = invocation
-            else {
-                unreachable!("future admission created a callable invocation")
-            };
-            let descriptor = *descriptor;
-            let runmat_runtime::call::descriptor::CallableTarget::Resolved {
-                identity,
-                fallback_policy: runmat_hir::CallableFallbackPolicy::None,
-            } = descriptor.target
-            else {
-                return Err(crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    "graph builtin requires an exact selected catalog target",
-                ));
-            };
-            let runmat_hir::CallableIdentity::Builtin(name) = identity.as_identity() else {
-                return Err(crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    "graph builtin requires an exact selected catalog target",
-                ));
-            };
-            invocation = runmat_runtime::execution::DeferredInvocation::Program {
-                callable: runmat_execution::ProgramCallable::Builtin { name: name.clone() },
-                context: runmat_execution::ProgramInvocationContext::Direct,
-                arguments: descriptor.args,
-                requested_outputs: descriptor.requested_outputs,
-            };
-        }
+    ) && builtin
+    {
+        let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) = invocation else {
+            unreachable!("future admission created a callable invocation")
+        };
+        let descriptor = *descriptor;
+        let runmat_runtime::call::descriptor::CallableTarget::Resolved {
+            identity,
+            fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+        } = descriptor.target
+        else {
+            return Err(crate::interpreter::errors::mex(
+                "ExecutionProgram",
+                "graph builtin requires an exact selected catalog target",
+            ));
+        };
+        let runmat_hir::CallableIdentity::Builtin(name) = identity.as_identity() else {
+            return Err(crate::interpreter::errors::mex(
+                "ExecutionProgram",
+                "graph builtin requires an exact selected catalog target",
+            ));
+        };
+        invocation = runmat_runtime::execution::DeferredInvocation::Program {
+            callable: runmat_execution::ProgramCallable::Builtin { name: name.clone() },
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            arguments: descriptor.args,
+            requested_outputs: descriptor.requested_outputs,
+        };
     }
     // A local service may retain this lazy call across commands too. Capture
     // the selected body now, before a later command can replace its numeric ID.

@@ -60,7 +60,10 @@ impl FluidStudyProduct {
 
     /// Require that this product was planned on `mesh`. Its workload carries the effective
     /// (tightened) numerical and geometry controls the planning produced.
-    pub fn validate_on_mesh(&self, mesh: &SolverMeshArtifact) -> Result<(), FluidStudyProductError> {
+    pub fn validate_on_mesh(
+        &self,
+        mesh: &SolverMeshArtifact,
+    ) -> Result<(), FluidStudyProductError> {
         if self.compiled.solver_mesh_digest != mesh.canonical_digest
             || self.compiled.properties.identity.mesh_digest != Some(mesh.canonical_digest)
         {

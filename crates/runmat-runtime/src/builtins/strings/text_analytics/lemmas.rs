@@ -265,7 +265,7 @@ pub(in crate::builtins::strings::text_analytics) fn lemma_details_from_object(
                 format!("{fn_name}: tokenizedDocument object has invalid LemmaDetails entry shape"),
             ));
         }
-        out.push(array.data().iter().cloned().collect());
+        out.push(array.data().to_vec());
     }
     Ok(Some(out))
 }

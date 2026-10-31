@@ -402,7 +402,7 @@ fn fusion_submission_does_not_train_completed_provider_execution() {
             .expect("session-owned fusion execution");
         let vars = &completion.values;
         assert_fusion_numeric_output(
-            &*vars
+            &vars
                 .get(fusion_var_index(&bytecode, "y"))
                 .expect("completed fusion output"),
             &(1..=4096).map(f64::from).collect::<Vec<_>>(),
@@ -456,7 +456,7 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
             .expect("shared-runtime selection");
         let vars = &completion.values;
         assert_fusion_numeric_output(
-            &*vars
+            &vars
                 .get(fusion_var_index(&bytecode, "y"))
                 .expect("completed fusion output"),
             &[0.25, 0.5],

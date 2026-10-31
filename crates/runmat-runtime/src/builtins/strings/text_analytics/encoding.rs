@@ -896,6 +896,14 @@ fn encoding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeEr
     }
 }
 
+fn required_word_text<'a>(
+    text: &'a runmat_value::StringElement,
+    fn_name: &str,
+) -> BuiltinResult<&'a str> {
+    text.as_str()
+        .ok_or_else(|| encoding_error(fn_name, format!("{fn_name}: word text must not be missing")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1359,12 +1367,4 @@ mod tests {
         assert_eq!(mask.shape, vec![1, 2]);
         assert_eq!(mask.data, vec![1, 0]);
     }
-}
-
-fn required_word_text<'a>(
-    text: &'a runmat_value::StringElement,
-    fn_name: &str,
-) -> BuiltinResult<&'a str> {
-    text.as_str()
-        .ok_or_else(|| encoding_error(fn_name, format!("{fn_name}: word text must not be missing")))
 }

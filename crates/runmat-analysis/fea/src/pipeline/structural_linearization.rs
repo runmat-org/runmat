@@ -18,8 +18,9 @@ mod thermal_source;
 pub use thermal_source::ThermalLinearizationSource;
 
 const LINEARIZATION_PREFIX: &[u8] = b"runmat-fea-structural-linearization/v3\0";
-const LINEARIZATION_LIMITS: CanonicalLimits =
-    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(1024 * 1024 * 1024, 64_000_000, 65_536, 32));
+const LINEARIZATION_LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
+    CanonicalLimits::new(1024 * 1024 * 1024, 64_000_000, 65_536, 32),
+);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]

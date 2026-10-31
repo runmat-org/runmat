@@ -114,16 +114,16 @@ fn refine(
             key.sort_unstable();
             face.adjacent_volume_element_ids = owners[&key].iter().map(|(id, _)| *id).collect();
         }
-        mesh.topology.regions[0].element_ids =
-            (1..=mesh.topology.volume_elements.len() as u64).collect();
+        let node_count = mesh.topology.nodes.len() as u64;
+        let element_count = mesh.topology.volume_elements.len() as u64;
+        mesh.topology.regions[0].element_ids = (1..=element_count).collect();
         for topology in &mut mesh.topology.field_topologies {
             match topology.location {
                 FieldTopologyLocation::Node => {
-                    topology.ordered_entity_ids = (1..=mesh.topology.nodes.len() as u64).collect();
+                    topology.ordered_entity_ids = (1..=node_count).collect();
                 }
                 FieldTopologyLocation::VolumeElement => {
-                    topology.ordered_entity_ids =
-                        (1..=mesh.topology.volume_elements.len() as u64).collect();
+                    topology.ordered_entity_ids = (1..=element_count).collect();
                 }
                 FieldTopologyLocation::BoundaryFace | FieldTopologyLocation::BoundaryEdge => {}
             }

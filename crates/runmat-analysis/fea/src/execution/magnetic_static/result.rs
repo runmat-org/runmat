@@ -192,7 +192,8 @@ impl MagnetostaticSolverResult {
             .map_err(invalid)?;
         if d.source_workload != workload.identity()?
             || d.producer != workload.producer_identity()?
-            || d.formulation != workload.formulation_with_sampling(mesh, Some(&d.sampling_topology))?
+            || d.formulation
+                != workload.formulation_with_sampling(mesh, Some(&d.sampling_topology))?
             || d.relative_residual_target != workload.relative_residual_target
             || d.mesh_digest != Digest::from_bytes(*mesh.canonical_digest.bytes())
             || d.projection_digest != p.projection_digest

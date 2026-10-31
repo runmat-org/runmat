@@ -252,7 +252,11 @@ fn scaled_sum_reference(terms: &[(f64, &RealSparseMatrix)]) -> RealSparseMatrix 
     for (scale, matrix) in terms {
         for row in 0..matrix.rows() {
             for entry in matrix.pattern.row_range(row) {
-                assembler.add(row, matrix.pattern.column(entry), *scale * matrix.values[entry]);
+                assembler.add(
+                    row,
+                    matrix.pattern.column(entry),
+                    *scale * matrix.values[entry],
+                );
             }
         }
     }
@@ -298,8 +302,16 @@ fn scaled_sum_matches_term_by_term_accumulation_for_every_thread_count() {
             .unwrap();
     assert_eq!(serial.pattern, expected.pattern);
     assert_eq!(
-        serial.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
-        expected.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        serial
+            .values
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>(),
+        expected
+            .values
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>()
     );
     assert_eq!(*serial.contributions, *expected.contributions);
     assert!(serial.values.iter().all(|value| *value != 0.0));
@@ -310,8 +322,16 @@ fn scaled_sum_matches_term_by_term_accumulation_for_every_thread_count() {
     .unwrap();
     assert_eq!(threaded.pattern, serial.pattern);
     assert_eq!(
-        threaded.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
-        serial.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        threaded
+            .values
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>(),
+        serial
+            .values
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>()
     );
     let mismatched = pseudo_random_matrix(7, 1, "d");
     assert!(matches!(
@@ -334,8 +354,13 @@ fn scaled_sum_matches_term_by_term_accumulation_for_every_thread_count() {
 
 fn row_matrix(columns: usize) -> RealSparseMatrix {
     RealSparseMatrix::try_new(
-        SparsePattern::try_new(1, columns as u64, vec![0, columns as u64], (0..columns as u64).collect())
-            .unwrap(),
+        SparsePattern::try_new(
+            1,
+            columns as u64,
+            vec![0, columns as u64],
+            (0..columns as u64).collect(),
+        )
+        .unwrap(),
         (0..columns).map(|i| i as f64 * 0.5).collect(),
         OperatorRole::Stiffness,
         MatrixProperties::GENERAL,

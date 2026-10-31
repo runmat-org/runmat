@@ -1044,7 +1044,7 @@ fn type_details_from_object(
                 format!("{fn_name}: tokenizedDocument object has invalid TypeDetails entry"),
             ));
         };
-        out.push(array.data().iter().cloned().collect());
+        out.push(array.data().to_vec());
     }
     Ok(Some(out))
 }

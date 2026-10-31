@@ -228,7 +228,8 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
                     ordered_entity_ids: Vec::new(),
                 },
             ],
-        }.into(),
+        }
+        .into(),
     };
     artifact.seal_canonical_digest().unwrap();
     artifact

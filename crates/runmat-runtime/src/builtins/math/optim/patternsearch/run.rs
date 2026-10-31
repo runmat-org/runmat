@@ -25,6 +25,10 @@ pub(super) struct Outcome {
 mod preparation;
 mod active;
 type ResultTuple = (Outcome, Option<RootedValue>, Options);
+#[expect(
+    clippy::large_enum_variant,
+    reason = "prepared solver state stays inline rather than adding an unbudgeted heap allocation"
+)]
 enum Preparation {
     Finished(ResultTuple),
     Ready(Ready),

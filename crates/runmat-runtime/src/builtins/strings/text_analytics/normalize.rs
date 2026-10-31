@@ -661,6 +661,18 @@ fn cvc(word: &str) -> bool {
         && !matches!(chars[len - 1], 'w' | 'x' | 'y')
 }
 
+fn normalize_element(
+    text: &runmat_value::StringElement,
+    options: NormalizeOptions,
+) -> BuiltinResult<runmat_value::StringElement> {
+    match text.as_str() {
+        Some(text) => {
+            normalize_word_or_missing(text, options).map(runmat_value::StringElement::text)
+        }
+        None => Ok(runmat_value::StringElement::Missing),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -883,17 +895,5 @@ mod tests {
         let err = run(vec![Value::String("two words".to_string().into())])
             .expect_err("expected single word error");
         assert!(err.to_string().contains("single word"));
-    }
-}
-
-fn normalize_element(
-    text: &runmat_value::StringElement,
-    options: NormalizeOptions,
-) -> BuiltinResult<runmat_value::StringElement> {
-    match text.as_str() {
-        Some(text) => {
-            normalize_word_or_missing(text, options).map(runmat_value::StringElement::text)
-        }
-        None => Ok(runmat_value::StringElement::Missing),
     }
 }

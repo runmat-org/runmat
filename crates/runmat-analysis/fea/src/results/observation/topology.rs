@@ -76,7 +76,10 @@ impl ParentIntegrationPoints {
     fn count(&self, parent: usize) -> Option<usize> {
         match self {
             Self::Explicit(lists) => lists.get(parent).map(Vec::len),
-            Self::Uniform { parents, per_parent } => (parent < *parents).then_some(*per_parent),
+            Self::Uniform {
+                parents,
+                per_parent,
+            } => (parent < *parents).then_some(*per_parent),
         }
     }
     fn extend(&self, parent: usize, indices: &mut Vec<usize>) {
@@ -475,7 +478,8 @@ impl<'a> ObservationTopology<'a> {
             .try_reserve_exact(count)
             .map_err(|_| ObservationError::Limit("integration-point target allocation"))?;
         for parent in parents {
-            self.integration_points_by_parent.extend(parent, &mut indices);
+            self.integration_points_by_parent
+                .extend(parent, &mut indices);
         }
         Ok(indices)
     }
@@ -496,9 +500,7 @@ impl<'a> ObservationTopology<'a> {
     ) -> Result<&[ObservationElement], ObservationError> {
         match domain {
             RecoveredFieldEntityDomain::VolumeElements => Ok(&self.volume_elements),
-            RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
-                self.volume_integration_points()
-            }
+            RecoveredFieldEntityDomain::VolumeIntegrationPoints => self.volume_integration_points(),
             RecoveredFieldEntityDomain::BeamElements => Ok(&self.beam_elements),
             RecoveredFieldEntityDomain::ShellElements => Ok(&self.shell_elements),
             RecoveredFieldEntityDomain::Connectors => Err(ObservationError::Unsupported(

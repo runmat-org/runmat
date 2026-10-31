@@ -197,7 +197,10 @@ fn internal_driver_publishes_accepted_physical_force_stress_and_plastic_history(
         );
         let mut changed = result;
         changed.internal_force_snapshots.last_mut().unwrap()[0] += 1.0;
-        assert_ne!(nonlinear_solver_content_digest(&changed, limits).unwrap(), original);
+        assert_ne!(
+            nonlinear_solver_content_digest(&changed, limits).unwrap(),
+            original
+        );
     }
 }
 

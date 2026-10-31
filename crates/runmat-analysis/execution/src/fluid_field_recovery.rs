@@ -9,8 +9,8 @@ use runmat_analysis_fea::{
         NumericalPlanIdentity,
     },
     planning::resource::{
-        build_fluid_field_recovery_resource_plan_on, fluid_field_recovery_shape,
-        FeaResourcePlan, PreparedPhaseResourceFacts,
+        build_fluid_field_recovery_resource_plan_on, fluid_field_recovery_shape, FeaResourcePlan,
+        PreparedPhaseResourceFacts,
     },
 };
 use runmat_execution::{value::ValueRefKind, Digest, ProgramRevision};

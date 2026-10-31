@@ -257,10 +257,7 @@ pub fn resolve_public_project_id(
     )?))
 }
 
-pub async fn resolve_auth_token(
-    config: &mut RemoteConfig,
-    server_url: &str,
-) -> Result<String> {
+pub async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> Result<String> {
     if let Ok(value) = env::var("RUNMAT_API_KEY") {
         if !value.is_empty() {
             return Ok(value);

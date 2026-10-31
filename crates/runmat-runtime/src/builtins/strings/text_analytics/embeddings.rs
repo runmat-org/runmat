@@ -883,6 +883,15 @@ fn embedding_object_in_context(
     Ok(object.into_value_and_lease().0)
 }
 
+fn required_word_text<'a>(
+    text: &'a runmat_value::StringElement,
+    fn_name: &str,
+) -> BuiltinResult<&'a str> {
+    text.as_str().ok_or_else(|| {
+        embedding_error(fn_name, format!("{fn_name}: word text must not be missing"))
+    })
+}
+
 #[cfg(test)]
 fn embedding_object(model: EmbeddingModel) -> BuiltinResult<Value> {
     embedding_object_in_context(None, model)
@@ -3778,13 +3787,4 @@ mod tests {
             assert!(parse_positive_integer(&value, "test").is_err());
         }
     }
-}
-
-fn required_word_text<'a>(
-    text: &'a runmat_value::StringElement,
-    fn_name: &str,
-) -> BuiltinResult<&'a str> {
-    text.as_str().ok_or_else(|| {
-        embedding_error(fn_name, format!("{fn_name}: word text must not be missing"))
-    })
 }

@@ -215,11 +215,10 @@ impl SolverMeshArtifact {
         &self,
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<StableDigest, MeshingContractError> {
-        if let Some(identity) = self.topology.admitted(
-            self.schema_version,
-            &self.geometry,
-            &self.resolved_request,
-        ) {
+        if let Some(identity) =
+            self.topology
+                .admitted(self.schema_version, &self.geometry, &self.resolved_request)
+        {
             return Ok(identity.digest());
         }
         artifact_identity_digest_with_cancellation(self, cancellation)
@@ -232,11 +231,10 @@ impl SolverMeshArtifact {
         &self,
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<StableDigest, MeshingContractError> {
-        if let Some(identity) = self.topology.admitted(
-            self.schema_version,
-            &self.geometry,
-            &self.resolved_request,
-        ) {
+        if let Some(identity) =
+            self.topology
+                .admitted(self.schema_version, &self.geometry, &self.resolved_request)
+        {
             // An admitted identity skips the walk, not the execution's cancellation contract.
             crate::contracts::canonical::artifact::validation_checkpoint(cancellation)?;
             self.validate_header()?;
@@ -256,11 +254,10 @@ impl SolverMeshArtifact {
     /// Canonical encoded size of this validated artifact, derived once per admitted identity.
     pub fn canonical_encoded_len(&self) -> Result<u64, MeshingContractError> {
         self.validate_canonical()?;
-        let Some(identity) = self.topology.admitted(
-            self.schema_version,
-            &self.geometry,
-            &self.resolved_request,
-        ) else {
+        let Some(identity) =
+            self.topology
+                .admitted(self.schema_version, &self.geometry, &self.resolved_request)
+        else {
             return Ok(self.canonical_encode()?.len() as u64);
         };
         if let Some(length) = identity.encoded_len().get() {

@@ -81,11 +81,8 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
     // A handle-free recipe proposes an operation; it cannot authenticate the
     // intent of a different call. Omit selects a distinct valid operation with
     // the same resources, whereas the physical mutations below are invalid.
-    let alternate = ProviderOrderedRealMeanRecipe::new(
-        source_facts.clone(),
-        changed,
-        resources.clone(),
-    );
+    let alternate =
+        ProviderOrderedRealMeanRecipe::new(source_facts.clone(), changed, resources.clone());
     assert_ne!(alternate, symbolic);
     let prepared_alternate = provider
         .prepare_ordered_real_mean_against_recipe(&input, &alternate)
@@ -181,10 +178,13 @@ fn actual_ordered_vecdim_mean_keeps_double_scratch_then_publishes_single() {
     ));
 
     for (index, candidate) in forged.iter().enumerate() {
-        assert!(provider
-            .prepare_ordered_real_mean_against_recipe(&input, candidate)
-            .unwrap()
-            .is_none(), "mutated recipe {index} must be rejected");
+        assert!(
+            provider
+                .prepare_ordered_real_mean_against_recipe(&input, candidate)
+                .unwrap()
+                .is_none(),
+            "mutated recipe {index} must be rejected"
+        );
         assert!(provider
             .execute_ordered_real_mean(
                 ProviderOrderedRealMean::new(input.clone(), candidate.clone(),),

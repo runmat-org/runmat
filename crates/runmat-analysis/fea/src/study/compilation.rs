@@ -21,8 +21,9 @@ use crate::properties::{
 mod storage;
 
 const STUDY_IDENTITY_PREFIX: &[u8] = b"runmat-compiled-analysis-study\0";
-const STUDY_IDENTITY_LIMITS: CanonicalLimits =
-    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 64));
+const STUDY_IDENTITY_LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
+    CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 64),
+);
 
 /// Exact compiled study definition shared by local and remote execution.
 ///

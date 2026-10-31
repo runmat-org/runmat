@@ -83,7 +83,7 @@ fn optional_typed_value<T: DeserializeOwned>(
             && object
                 .properties()
                 .get(VALUE_FIELD[0])
-                .is_none_or(|payload| matches!(payload, Value::Tensor(tensor) if tensor.len() == 0))
+                .is_none_or(|payload| matches!(payload, Value::Tensor(tensor) if tensor.is_empty()))
         {
             return Ok(None);
         }

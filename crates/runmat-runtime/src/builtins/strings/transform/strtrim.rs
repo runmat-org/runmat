@@ -277,10 +277,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
-                assert_eq!(
-                    sa.data().iter().cloned().collect::<Vec<_>>(),
-                    vec!["one", "<missing>", "two", "three"]
-                );
+                assert_eq!(sa.data().to_vec(), vec!["one", "<missing>", "two", "three"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }

@@ -1,7 +1,9 @@
 use super::policy::SparseStorageRule;
+mod prototype;
 use super::{admission::AdmittedCall, class, BinaryArithmeticInferencePolicy, DiagnosticCollector};
 use crate::catalog::inference::{argument_error, finish_fixed};
 use crate::BuiltinCatalogEntry;
+use prototype::apply_prototype;
 use runmat_types::{
     broadcast_shape_checked, CallInference, CallRequest, CertaintyFact, ContiguityFact,
     DynamicReason, LayoutFact, NumericDomain, ResidencyFact, ShapeFact, StorageFact, ValueFact,
@@ -168,41 +170,6 @@ fn materialized_real_storage(
         (runmat_types::NumericClass::Double, 1) => None,
         (runmat_types::NumericClass::Double, _) => Some(StorageFact::Dense),
         _ => None,
-    }
-}
-
-fn apply_prototype(
-    prototype: Option<&ValueFact>,
-    output: &mut ValueFact,
-    diagnostics: &mut DiagnosticCollector,
-) {
-    let Some(prototype) = prototype else { return };
-    output.residency = match &prototype.residency {
-        ResidencyFact::Host => ResidencyFact::Host,
-        ResidencyFact::Device { provider } => ResidencyFact::Device {
-            provider: provider.clone(),
-        },
-        _ => ResidencyFact::Unknown,
-    };
-    if matches!(
-        prototype.numeric().map(|numeric| numeric.domain),
-        Some(NumericDomain::Complex)
-    ) {
-        if let ValueKindFact::Numeric(numeric) = &mut output.kind {
-            numeric.domain = NumericDomain::Complex;
-        }
-    } else if !matches!(
-        prototype.kind,
-        ValueKindFact::Numeric(_)
-            | ValueKindFact::Logical
-            | ValueKindFact::Character
-            | ValueKindFact::Unknown
-    ) {
-        diagnostics.push(|| argument_error(
-            "RM-CATALOG-BINARY-ARITHMETIC-PROTOTYPE",
-            "the 'like' prototype must be numeric, logical, character, or provider-resident numeric data",
-            3,
-        ));
     }
 }
 

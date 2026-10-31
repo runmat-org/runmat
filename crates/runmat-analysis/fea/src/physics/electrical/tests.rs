@@ -193,8 +193,7 @@ fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux
                 let x = element.node_ids[..4]
                     .iter()
                     .map(|id| {
-                        topo
-                            .nodes
+                        topo.nodes
                             .iter()
                             .find(|node| node.node_id == *id)
                             .unwrap()

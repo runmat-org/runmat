@@ -246,10 +246,7 @@ pub fn solve_canonical_transient(
     let mass_free = mass
         .principal_submatrix(&free)
         .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
-    let operator = SpdOperator::factor(
-        &effective_free,
-        policy.linear_relative_tolerance,
-    )?;
+    let operator = SpdOperator::factor(&effective_free, policy.linear_relative_tolerance)?;
     let mut linear_iterations = 0usize;
     let mut maximum_linear_relative_residual = 0.0_f64;
     let apply = |matrix: &RealSparseMatrix, values: &[f64]| {
@@ -279,10 +276,7 @@ pub fn solve_canonical_transient(
             .map(|&row| load[row] - k_p[row])
             .collect::<Vec<_>>();
         if rhs.iter().any(|value| *value != 0.0) {
-            let mass_operator = SpdOperator::factor(
-                &mass_free,
-                policy.linear_relative_tolerance,
-            )?;
+            let mass_operator = SpdOperator::factor(&mass_free, policy.linear_relative_tolerance)?;
             let solved = mass_operator.solve(&rhs)?;
             linear_iterations += solved.iterations;
             maximum_linear_relative_residual =

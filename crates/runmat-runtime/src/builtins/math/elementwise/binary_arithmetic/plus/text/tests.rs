@@ -2,30 +2,8 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::{CellArray, CharArray, IntValue, NumericStorage, Tensor};
 
-fn texts(values: &[&str], shape: &[usize]) -> Value {
-    Value::StringArray(
-        StringArray::new(
-            values.iter().map(|text| (*text).to_owned()).collect(),
-            shape.to_vec(),
-        )
-        .unwrap(),
-    )
-}
-
-fn assert_text(value: Value, expected: &[&str], shape: &[usize]) {
-    let Value::StringArray(array) = value else {
-        panic!("string result")
-    };
-    assert_eq!(array.shape(), shape);
-    assert_eq!(
-        array
-            .data()
-            .iter()
-            .map(|text| text.as_str().expect("text result"))
-            .collect::<Vec<_>>(),
-        expected
-    );
-}
+mod support;
+use support::{assert_text, texts};
 
 #[test]
 fn append_converts_and_expands_without_losing_class_or_column_major_order() {

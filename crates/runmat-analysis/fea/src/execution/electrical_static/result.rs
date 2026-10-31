@@ -11,9 +11,8 @@ mod integrals;
 mod sources;
 mod terminals;
 const PREFIX: &[u8] = b"runmat-electrical-static-result/v2\0";
-const LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
-    CanonicalLimits::new(0, 0, 65_536, 64),
-);
+const LIMITS: CanonicalLimits =
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]

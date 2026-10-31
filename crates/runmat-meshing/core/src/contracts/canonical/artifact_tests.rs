@@ -197,7 +197,8 @@ pub(super) fn artifact() -> SolverMeshArtifact {
                     ordered_entity_ids: vec![20, 21, 22, 23, 24, 25],
                 },
             ],
-        }.into(),
+        }
+        .into(),
     };
     artifact.seal_canonical_digest().unwrap();
     artifact

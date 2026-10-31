@@ -226,9 +226,7 @@ pub(super) fn two_medium(
             .iter()
             .map(|id| {
                 axial(
-                    topo.nodes[*id as usize - 1]
-                        .coordinates_m
-                        .canonical_value(),
+                    topo.nodes[*id as usize - 1].coordinates_m.canonical_value(),
                     direction,
                 )
             })

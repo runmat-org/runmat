@@ -2920,7 +2920,7 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_prese
 ) -> BuiltinResult<Vec<runmat_value::StringElement>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data().iter().cloned().collect()),
+        Value::StringArray(array) => Ok(array.data().to_vec()),
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
                 String::new()

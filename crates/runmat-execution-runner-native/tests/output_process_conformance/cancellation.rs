@@ -89,10 +89,9 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
         .unwrap();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            match service.begin_await_in_context(
-                Value::Future(future.clone().into()),
-                &original.runtime,
-            ) {
+            match service
+                .begin_await_in_context(Value::Future(future.clone().into()), &original.runtime)
+            {
                 Ok(AwaitAction::Pending(_)) => tokio::time::sleep(Duration::from_millis(10)).await,
                 Err(ExecutionServiceError::Cancelled) => break,
                 other => panic!("original running cancellation returned {other:?}"),

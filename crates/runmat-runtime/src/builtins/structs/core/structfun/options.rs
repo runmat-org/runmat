@@ -75,7 +75,7 @@ fn boolean(value: Value) -> crate::BuiltinResult<bool> {
         }
         Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
             boolean_text(
-                &array.data()[0]
+                array.data()[0]
                     .text_ref()
                     .expect("checked nonmissing scalar string"),
             )

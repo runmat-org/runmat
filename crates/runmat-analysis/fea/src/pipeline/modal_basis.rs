@@ -25,8 +25,9 @@ use metrics::{
 };
 
 const MODAL_BASIS_PREFIX: &[u8] = b"runmat-fea-modal-basis/v2\0";
-const MODAL_BASIS_LIMITS: CanonicalLimits =
-    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16));
+const MODAL_BASIS_LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(
+    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16),
+);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]

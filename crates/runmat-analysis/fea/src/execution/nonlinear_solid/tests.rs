@@ -204,7 +204,9 @@ fn original_recovery_rejects_rehashed_terminal_projection_substitutions() {
 #[test]
 fn default_nonlinear_plan_is_decided_by_achieved_tangent_solve_residuals() {
     use crate::execution::{AccuracyEvaluationRequest, AccuracySourceKind, AccuracySourceReceipt};
-    use crate::results::accuracy::{evaluate_accuracy_artifact, AccuracyStatus, PublicationDecision};
+    use crate::results::accuracy::{
+        evaluate_accuracy_artifact, AccuracyStatus, PublicationDecision,
+    };
     use runmat_analysis_core::{AccuracyPlan, AccuracyTolerance};
     let (mut model, mesh, _) = fixture::prepare(1, false);
     model.sequence.steps[0].accuracy = AccuracyPlan::baseline("load.accuracy");
@@ -239,7 +241,10 @@ fn default_nonlinear_plan_is_decided_by_achieved_tangent_solve_residuals() {
     .unwrap();
     let achieved = receipt.receipt().maximum_linear_relative_residual;
     assert!(achieved.is_finite() && achieved <= workload.controls.linear_tolerance);
-    assert_eq!(achieved, block.checkpoint.maximum_linear_relative_residual());
+    assert_eq!(
+        achieved,
+        block.checkpoint.maximum_linear_relative_residual()
+    );
     let evaluate = |plan: AccuracyPlan| {
         let request = AccuracyEvaluationRequest::new(
             workload.producer_identity().unwrap(),
@@ -259,18 +264,21 @@ fn default_nonlinear_plan_is_decided_by_achieved_tangent_solve_residuals() {
     // Unavailable mandatory evidence still blocks: the J2 receipt carries no spatial
     // convergence study, so such a criterion is indeterminate and the default policy refuses.
     let mut unavailable = authored.clone();
-    unavailable.criteria.push(runmat_analysis_core::AccuracyCriterion {
-        criterion_id: "spatial_convergence".into(),
-        target: runmat_analysis_core::AccuracyTarget::NumericalResult,
-        contribution: runmat_analysis_core::ErrorContributionKind::SpatialDiscretization,
-        tolerance: AccuracyTolerance::Relative(0.05),
-        evidence: runmat_analysis_core::RequiredAccuracyEvidence::ConvergenceStudy,
-        mandatory: true,
-    });
+    unavailable
+        .criteria
+        .push(runmat_analysis_core::AccuracyCriterion {
+            criterion_id: "spatial_convergence".into(),
+            target: runmat_analysis_core::AccuracyTarget::NumericalResult,
+            contribution: runmat_analysis_core::ErrorContributionKind::SpatialDiscretization,
+            tolerance: AccuracyTolerance::Relative(0.05),
+            evidence: runmat_analysis_core::RequiredAccuracyEvidence::ConvergenceStudy,
+            mandatory: true,
+        });
     let blocked = evaluate(unavailable.clone());
     assert_eq!(blocked.gate().status, AccuracyStatus::Indeterminate);
     assert_eq!(blocked.gate().decision, PublicationDecision::Block);
-    unavailable.unavailable_evidence = runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
+    unavailable.unavailable_evidence =
+        runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
     let labeled = evaluate(unavailable);
     assert_eq!(labeled.gate().status, AccuracyStatus::Indeterminate);
     assert_eq!(labeled.gate().decision, PublicationDecision::Allow);
