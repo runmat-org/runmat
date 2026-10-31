@@ -16,7 +16,6 @@ fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
     // A captured publication keeps both mesh objects off the live provider
     // until its enclosing operation succeeds. An ordinary provider above still
     // supports direct writes without claiming coherent workspace access.
-    use runmat_filesystem::FsProvider as _;
     let root = PathBuf::from("/.artifacts");
     let previous_config = crate::analysis::replace_fea_runtime(crate::analysis::FeaRuntimeConfig {
         artifact_root: Some(root.clone()),
