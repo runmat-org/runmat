@@ -11,7 +11,7 @@ fn terminal_builtin_classification_preserves_output_slot_call_semantics() {
             Instr::CallBuiltinMultiUsingOutputSlot(name.into(), 1, 7),
         ] {
             assert_eq!(
-                host_instruction_kind(&instruction, 0, &[], &[], true, Some(1)),
+                host_instruction_kind(&instruction, 0, &[], &[], true, Some(1), &[]),
                 expected,
                 "{instruction:?}"
             );
@@ -19,7 +19,7 @@ fn terminal_builtin_classification_preserves_output_slot_call_semantics() {
         let dynamic = Instr::CallBuiltinMultiUsingOutputSlot(name.into(), 1, 7);
         for count in [None, Some(0), Some(2)] {
             assert_eq!(
-                host_instruction_kind(&dynamic, 0, &[], &[], true, count),
+                host_instruction_kind(&dynamic, 0, &[], &[], true, count, &[]),
                 VmFusionHostInstruction::Unproved,
             );
         }
@@ -56,6 +56,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &controls,
             false,
             None,
+            &[],
         ),
         VmFusionHostInstruction::Structural,
     );
@@ -67,6 +68,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &controls,
             false,
             None,
+            &[],
         ),
         VmFusionHostInstruction::Structural,
     );
@@ -78,6 +80,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &[],
             false,
             None,
+            &[],
         ),
         VmFusionHostInstruction::Unproved,
     );
@@ -89,6 +92,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &[],
             false,
             None,
+            &[],
         ),
         VmFusionHostInstruction::Unproved,
     );
@@ -109,7 +113,58 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &changed_controls,
             false,
             None,
+            &[],
         ),
         VmFusionHostInstruction::Unproved,
     );
+}
+
+#[test]
+fn matrix_division_host_classification_uses_the_actual_scalar_divisor() {
+    let matrix = Value::Tensor(runmat_value::Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
+    for scalar in [
+        Value::Num(2.0),
+        Value::Tensor(runmat_value::Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
+        Value::Tensor(runmat_value::Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+    ] {
+        for (instruction, operands, expected) in [
+            (
+                Instr::RightDiv,
+                vec![matrix.clone(), scalar.clone()],
+                VmFusionHostInstruction::ElementwiseBinary,
+            ),
+            (
+                Instr::LeftDiv,
+                vec![scalar.clone(), matrix.clone()],
+                VmFusionHostInstruction::ElementwiseBinary,
+            ),
+            (
+                Instr::RightDiv,
+                vec![scalar.clone(), matrix.clone()],
+                VmFusionHostInstruction::Unproved,
+            ),
+            (
+                Instr::LeftDiv,
+                vec![matrix.clone(), scalar.clone()],
+                VmFusionHostInstruction::Unproved,
+            ),
+        ] {
+            assert_eq!(
+                host_instruction_kind(&instruction, 0, &[], &[], false, None, &operands),
+                expected
+            );
+        }
+    }
+    for instruction in [Instr::RightDiv, Instr::LeftDiv] {
+        for operands in [
+            vec![],
+            vec![Value::Num(2.0)],
+            vec![matrix.clone(), matrix.clone()],
+        ] {
+            assert_eq!(
+                host_instruction_kind(&instruction, 0, &[], &[], false, None, &operands),
+                VmFusionHostInstruction::Unproved
+            );
+        }
+    }
 }

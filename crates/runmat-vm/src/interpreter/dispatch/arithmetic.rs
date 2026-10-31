@@ -176,10 +176,15 @@ pub(super) fn suspend_arithmetic<'a>(
                     call_operator_method,
                     call_right_operator_method_ordered,
                     |a, b| async move {
-                        let (b_acc, a_acc) =
-                            accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &b, &a)
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b)
                                 .await?;
-                        crate::call::call_builtin_async(runtime, "rdivide", &[b_acc, a_acc]).await
+                        crate::call::call_builtin_async(
+                            runtime,
+                            runmat_builtins::LDIVIDE_CATALOG_ENTRY.identity.name,
+                            &[a_acc, b_acc],
+                        )
+                        .await
                     },
                 )
                 .await?;
@@ -224,15 +229,19 @@ pub(super) fn suspend_arithmetic<'a>(
                         call_operator_method,
                         call_right_operator_method_ordered,
                         |lhs, rhs| async move {
-                            let (rhs_acc, lhs_acc) = accel_promote_binary(
+                            let (lhs_acc, rhs_acc) = accel_promote_binary(
                                 runtime,
                                 AutoBinaryOp::Elementwise,
-                                &rhs,
                                 &lhs,
+                                &rhs,
                             )
                             .await?;
-                            crate::call::call_builtin_async(runtime, "rdivide", &[rhs_acc, lhs_acc])
-                                .await
+                            crate::call::call_builtin_async(
+                                runtime,
+                                runmat_builtins::LDIVIDE_CATALOG_ENTRY.identity.name,
+                                &[lhs_acc, rhs_acc],
+                            )
+                            .await
                         },
                         |lhs, rhs| async move {
                             crate::call::call_builtin_async(runtime, "mldivide", &[lhs, rhs]).await

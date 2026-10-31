@@ -669,6 +669,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 }
                 _ => None,
             },
+            stack.as_slice(),
         );
         #[cfg(feature = "native-accel")]
         if let Some(route) = fusion_observations.instruction_route(*pc, host_kind) {
@@ -1134,6 +1135,7 @@ fn host_instruction_kind(
     private_controls: &[crate::bytecode::fusion_private_temp::FusionPrivateEmptyControl],
     selected_terminal: bool,
     dynamic_output_count: Option<usize>,
+    operands: &[Value],
 ) -> VmFusionHostInstruction {
     match instr {
         Instr::Add
@@ -1142,6 +1144,22 @@ fn host_instruction_kind(
         | Instr::ElemDiv
         | Instr::ElemLeftDiv
         | Instr::ElemPow => VmFusionHostInstruction::ElementwiseBinary,
+        // The graph refines matrix division to elementwise division only for
+        // a scalar divisor. Recheck the actual operands with the dispatcher's
+        // predicate; the opcode alone must not admit a matrix solve. The
+        // selected canonical binding still authenticates the executed body.
+        Instr::RightDiv
+            if matches!(operands, [.., _, right]
+                if crate::ops::arithmetic::is_scalarish_for_division(right)) =>
+        {
+            VmFusionHostInstruction::ElementwiseBinary
+        }
+        Instr::LeftDiv
+            if matches!(operands, [.., left, _]
+                if crate::ops::arithmetic::is_scalarish_for_division(left)) =>
+        {
+            VmFusionHostInstruction::ElementwiseBinary
+        }
         Instr::Neg => VmFusionHostInstruction::Intrinsic(runmat_types::OperatorKind::UnaryMinus),
         Instr::UPlus => VmFusionHostInstruction::Intrinsic(runmat_types::OperatorKind::UnaryPlus),
         Instr::Mul => {
