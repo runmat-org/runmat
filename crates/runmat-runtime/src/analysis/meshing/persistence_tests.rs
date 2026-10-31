@@ -18,7 +18,7 @@ fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
     // supports direct writes without claiming coherent workspace access.
     use runmat_filesystem::FsProvider as _;
     let root = PathBuf::from("/.artifacts");
-    crate::analysis::configure_fea_runtime(crate::analysis::FeaRuntimeConfig {
+    let previous_config = crate::analysis::replace_fea_runtime(crate::analysis::FeaRuntimeConfig {
         artifact_root: Some(root.clone()),
         study_artifact_root: Some(root.join("studies")),
         ..Default::default()
@@ -72,6 +72,7 @@ fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
         assert!(provider.read_project_path(abandoned_evidence).is_err());
         assert_eq!(provider.read_project_path(artifact).unwrap(), b"mesh");
     });
+    crate::analysis::replace_fea_runtime(previous_config).unwrap();
 }
 
 #[test]

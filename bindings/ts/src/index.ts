@@ -354,8 +354,8 @@ export type {
   FusionPlanAdapterOptions
 } from "./fusion-plan.js";
 export type LanguageCompatMode = "runmat" | "matlab" | "strict";
-type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
-export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, never>);
+/** Preset logging level; module-filter expressions are not accepted. */
+export type RunMatLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type RunmatConfigFormat = "toml" | "json";
 export type DesktopRunHistoryMode = "off" | "budgeted" | "full";
