@@ -221,7 +221,14 @@ fn conduction_reproduces_the_exact_linear_field_for_every_rank_count() {
             );
         }
         for element in 0..problem.mesh.element_count() {
-            assert!((solution.element_results[element * 3] + 50.0).abs() < 1e-6);
+            let flux = solution.element_results[element * 3];
+            assert!(
+                (flux + 50.0).abs() < 1e-6,
+                "ranks={ranks}, element={element}, flux={flux:.16e}, expected=-50, iterations={}, recursive_residual={:.16e}, true_residual={:.16e}",
+                solution.iterations,
+                solution.relative_residual,
+                solution.true_relative_residual,
+            );
         }
         assert!(solution.true_relative_residual < 1e-9);
     }
