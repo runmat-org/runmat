@@ -8,4 +8,5 @@ pub mod position;
 pub mod project;
 pub mod semantic;
 pub mod semantic_tokens;
+mod signatures;
 pub mod workspace;

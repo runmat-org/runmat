@@ -13,17 +13,11 @@ static DOCUMENTS: Lazy<BTreeMap<String, String>> = Lazy::new(|| {
     .expect("build-generated documentation must be a valid presentation-only export")
 });
 
+// Editor-only projection of the full canonical export retained in DOCUMENTS.
+// Reference sections/FAQs remain in that export; hovers do not deserialize them.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuiltinDocExample {
-    pub description: String,
     pub input: Option<String>,
-    pub output: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct BuiltinDocFaq {
-    pub question: String,
-    pub answer: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -33,43 +27,20 @@ pub struct BuiltinDocLink {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct BuiltinDocGpuSupport {
-    pub notes: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct BuiltinDocJsonEncodeOption {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub type_name: String,
-    pub default: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct BuiltinDocSection {
-    pub heading: String,
-    pub paragraphs: Vec<String>,
+#[serde(untagged)]
+pub enum BuiltinDocRelated {
+    Name(String),
+    Link(BuiltinDocLink),
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuiltinDocJson {
-    pub title: Option<String>,
-    pub category: Option<String>,
-    #[allow(dead_code)]
-    pub keywords: Option<Vec<String>>,
+    pub slug: Option<String>,
     pub summary: Option<String>,
     pub description: Option<String>,
-    pub behaviors: Option<Vec<String>>,
-    pub sections: Option<Vec<BuiltinDocSection>>,
     pub examples: Option<Vec<BuiltinDocExample>>,
-    pub faqs: Option<Vec<BuiltinDocFaq>>,
     pub links: Option<Vec<BuiltinDocLink>>,
-    pub gpu_support: Option<BuiltinDocGpuSupport>,
-    pub gpu_residency: Option<String>,
-    pub gpu_behavior: Option<Vec<String>>,
-    pub options: Option<Vec<String>>,
-    pub jsonencode_options: Option<Vec<BuiltinDocJsonEncodeOption>>,
+    pub related: Option<Vec<BuiltinDocRelated>>,
 }
 
 static DOC_CACHE: Lazy<Mutex<BTreeMap<String, BuiltinDocJson>>> =

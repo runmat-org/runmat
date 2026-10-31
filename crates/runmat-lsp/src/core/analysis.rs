@@ -395,11 +395,20 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
 
     // Canonical catalog entries are executor-neutral and remain available even
     // when no runtime implementation is linked into the language server.
-    if let Some(entry) = runmat_builtins::public_builtin_catalog_entry_by_name(&ident) {
+    let call_site = super::signatures::CallSite::at(analysis, token.start)
+        .filter(|site| site.callee_range.contains(&token.start));
+    let builtin_name = call_site
+        .as_ref()
+        .map_or(ident.as_str(), |site| site.name.as_str());
+    if let Some(entry) = runmat_builtins::public_builtin_catalog_entry_by_name(builtin_name) {
+        let selected = call_site
+            .as_ref()
+            .map(|site| site.best(entry.descriptor.signatures))
+            .unwrap_or_default();
         return Some(Hover {
             contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
                 kind: lsp_types::MarkupKind::Markdown,
-                value: docs::build_catalog_hover(entry),
+                value: docs::build_catalog_hover_with_signatures(entry, &selected),
             }),
             range: Some(
                 TextRange {
@@ -414,7 +423,7 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
     // Legacy built-in functions (rich docs)
     if let Some(func) = runmat_builtins::builtin_functions()
         .into_iter()
-        .find(|f| f.name.eq_ignore_ascii_case(&ident))
+        .find(|f| f.name.eq_ignore_ascii_case(builtin_name))
     {
         return Some(Hover {
             contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
@@ -756,45 +765,29 @@ pub fn signature_help_at(
     _position: &Position,
 ) -> Option<SignatureHelp> {
     let offset = position_to_offset(_text, _position);
-    let name = qualified_call_name_at_offset(&_analysis.tokens, offset)?;
+    let site = super::signatures::CallSite::at(_analysis, offset);
+    let name = site
+        .as_ref()
+        .map(|site| site.name.clone())
+        .or_else(|| qualified_call_name_at_offset(&_analysis.tokens, offset))?;
     if let Some(entry) = runmat_builtins::public_builtin_catalog_entry_by_name(&name) {
-        if let Some(labels) = docs::catalog_signature_labels(entry) {
-            let signatures = labels
-                .into_iter()
-                .map(|label| lsp_types::SignatureInformation {
-                    label,
-                    documentation: None,
-                    parameters: None,
-                    active_parameter: None,
-                })
-                .collect();
-            return Some(SignatureHelp {
-                signatures,
-                active_signature: Some(0),
-                active_parameter: None,
-            });
+        if !entry.descriptor.signatures.is_empty() {
+            return Some(super::signatures::help(
+                entry.descriptor.signatures,
+                site.as_ref(),
+            ));
         }
     }
-    if let Some(func) = runmat_builtins::builtin_functions()
+    if let Some(descriptor) = runmat_builtins::builtin_functions()
         .into_iter()
         .find(|builtin| builtin.name.eq_ignore_ascii_case(&name))
+        .and_then(|builtin| builtin.descriptor)
+        .filter(|descriptor| !descriptor.signatures.is_empty())
     {
-        if let Some(labels) = docs::signature_labels(func) {
-            let signatures = labels
-                .into_iter()
-                .map(|label| lsp_types::SignatureInformation {
-                    label,
-                    documentation: None,
-                    parameters: None,
-                    active_parameter: None,
-                })
-                .collect();
-            return Some(SignatureHelp {
-                signatures,
-                active_signature: Some(0),
-                active_parameter: None,
-            });
-        }
+        return Some(super::signatures::help(
+            descriptor.signatures,
+            site.as_ref(),
+        ));
     }
 
     let semantic = _analysis.semantic.as_ref()?;
@@ -854,7 +847,7 @@ pub fn signature_help_at(
     Some(SignatureHelp {
         signatures: sigs,
         active_signature: Some(0),
-        active_parameter: None,
+        active_parameter: site.as_ref().map(|site| site.active_argument as u32),
     })
 }
 
@@ -1700,7 +1693,9 @@ mod tests {
             .map(|signature| signature.label.as_str())
             .collect();
         assert_eq!(labels, expected, "wrong canonical descriptor for {text}");
-        assert_eq!(actual.active_signature, Some(0));
+        assert!(actual
+            .active_signature
+            .is_some_and(|index| (index as usize) < actual.signatures.len()));
     }
 
     #[test]

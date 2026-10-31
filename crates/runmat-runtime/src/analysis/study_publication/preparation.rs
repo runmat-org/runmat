@@ -138,7 +138,9 @@ mod tests {
         let constrained = PublicationPreparation::capture_with_budget(
             definition,
             &(),
-            mesh.canonical_encoding_resident_bytes_estimate().unwrap() / 2,
+            storage::publication::typed_resident(&(), config.publication_staging_bytes).unwrap()
+                * 2
+                + mesh.canonical_encoding_resident_bytes_estimate().unwrap() / 2,
         )
         .unwrap();
         let isolated = tempfile::tempdir().unwrap();
