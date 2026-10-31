@@ -97,16 +97,6 @@ pub fn signature_labels(func: &BuiltinFunction) -> Option<Vec<String>> {
     }
 }
 
-pub fn catalog_signature_labels(entry: &BuiltinCatalogEntry) -> Option<Vec<String>> {
-    let labels = entry
-        .descriptor
-        .signatures
-        .iter()
-        .map(|signature| signature.label.to_string())
-        .collect::<Vec<_>>();
-    (!labels.is_empty()).then_some(labels)
-}
-
 fn completion_signature_label_for(
     name: &str,
     signature: &BuiltinSignatureDescriptor,
