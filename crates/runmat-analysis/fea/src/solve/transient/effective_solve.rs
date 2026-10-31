@@ -159,6 +159,12 @@ pub(super) fn solve_initial_acceleration_reusing(
     )?;
     let mut acceleration = linear_solve.solution.clone();
     canonicalize_homogeneous_solution(&effective_summary.view(), &mut acceleration)?;
+    let state = SecondOrderState::try_new(
+        placeholder.displacement().to_vec(),
+        placeholder.velocity().to_vec(),
+        acceleration,
+    )
+    .map_err(EffectiveDynamicsSolveError::InvalidState)?;
     EquilibriumRefinement {
         summary,
         physical_load: &physical_load,
@@ -167,13 +173,11 @@ pub(super) fn solve_initial_acceleration_reusing(
         target: equilibrium_target,
         preparation,
     }
-    .finish(acceleration, vec![linear_solve], |acceleration| {
-        SecondOrderState::try_new(
-            placeholder.displacement().to_vec(),
-            placeholder.velocity().to_vec(),
-            acceleration.to_vec(),
-        )
-        .map_err(EffectiveDynamicsSolveError::InvalidState)
+    .finish(state, vec![linear_solve], |state, correction| {
+        let (displacement, velocity, mut acceleration) = state.into_parts();
+        add_scaled_correction(&mut acceleration, correction, 1.0)?;
+        SecondOrderState::try_new(displacement, velocity, acceleration)
+            .map_err(EffectiveDynamicsSolveError::InvalidState)
     })
 }
 
@@ -210,6 +214,9 @@ pub(super) fn solve_average_acceleration_step_reusing(
     )?;
     let mut acceleration = linear_solve.solution.clone();
     canonicalize_homogeneous_solution(&effective_summary.view(), &mut acceleration)?;
+    let state = step
+        .complete(acceleration)
+        .map_err(EffectiveDynamicsSolveError::Newmark)?;
     EquilibriumRefinement {
         summary,
         physical_load: &physical_load,
@@ -218,8 +225,8 @@ pub(super) fn solve_average_acceleration_step_reusing(
         target: equilibrium_target,
         preparation,
     }
-    .finish(acceleration, vec![linear_solve], |acceleration| {
-        step.complete(acceleration.to_vec())
+    .finish(state, vec![linear_solve], |state, correction| {
+        step.correct(state, correction)
             .map_err(EffectiveDynamicsSolveError::Newmark)
     })
 }
@@ -227,12 +234,14 @@ pub(super) fn solve_average_acceleration_step_reusing(
 impl EquilibriumRefinement<'_> {
     fn finish(
         self,
-        mut acceleration: Vec<f64>,
+        mut state: SecondOrderState,
         mut linear_solves: Vec<LinearSolveResult>,
-        build_state: impl Fn(&[f64]) -> Result<SecondOrderState, EffectiveDynamicsSolveError>,
+        correct_state: impl Fn(
+            SecondOrderState,
+            &[f64],
+        ) -> Result<SecondOrderState, EffectiveDynamicsSolveError>,
     ) -> Result<EffectiveDynamicsSolveResult, EffectiveDynamicsSolveError> {
         for refinement_count in 0..=MAXIMUM_EQUILIBRIUM_REFINEMENTS {
-            let state = build_state(&acceleration)?;
             validate_constant_constraint_kinematics(self.summary, &state, true)?;
             let full_balance = StructuralDynamicBalanceSnapshot::evaluate(
                 self.summary.operator.operators(),
@@ -279,11 +288,17 @@ impl EquilibriumRefinement<'_> {
                 None => correction.solution.clone(),
             };
             canonicalize_homogeneous_solution(&self.summary.into(), &mut correction_values)?;
-            add_scaled_correction(
-                &mut acceleration,
-                &correction_values,
-                correction_equation.solution_scale,
-            )?;
+            let scale = correction_equation.solution_scale;
+            if !scale.is_finite() || scale <= 0.0 {
+                return Err(EffectiveDynamicsSolveError::InvalidSolution);
+            }
+            for value in &mut correction_values {
+                *value *= scale;
+                if !value.is_finite() {
+                    return Err(EffectiveDynamicsSolveError::InvalidSolution);
+                }
+            }
+            state = correct_state(state, &correction_values)?;
             linear_solves.push(correction);
         }
         unreachable!("the bounded equilibrium-refinement loop always returns")

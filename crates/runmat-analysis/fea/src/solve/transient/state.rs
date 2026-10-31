@@ -59,6 +59,10 @@ impl SecondOrderState {
     pub(crate) fn acceleration(&self) -> &[f64] {
         &self.acceleration
     }
+
+    pub(super) fn into_parts(self) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        (self.displacement, self.velocity, self.acceleration)
+    }
 }
 
 #[cfg(test)]

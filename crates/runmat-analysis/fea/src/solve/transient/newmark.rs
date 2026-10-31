@@ -56,6 +56,38 @@ impl NewmarkEffectiveStep {
         &self.right_hand_side
     }
 
+    /// Apply an equilibrium correction to each retained coordinate. Rebuilding
+    /// displacement from a rounded acceleration can erase a correction smaller
+    /// than that acceleration's ulp after predictor cancellation.
+    pub(super) fn correct(
+        &self,
+        state: SecondOrderState,
+        acceleration_correction: &[f64],
+    ) -> Result<SecondOrderState, NewmarkError> {
+        if state.dof_count() != self.predictor.displacement.len()
+            || acceleration_correction.len() != state.dof_count()
+        {
+            return Err(NewmarkError::DimensionMismatch);
+        }
+        if acceleration_correction
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err(NewmarkError::NonFiniteInput);
+        }
+        let (mut displacement, mut velocity, mut acceleration) = state.into_parts();
+        let displacement_scale =
+            AverageAccelerationNewmark::BETA * self.predictor.time_step_s.powi(2);
+        let velocity_scale = AverageAccelerationNewmark::GAMMA * self.predictor.time_step_s;
+        for (index, correction) in acceleration_correction.iter().copied().enumerate() {
+            displacement[index] = correction.mul_add(displacement_scale, displacement[index]);
+            velocity[index] = correction.mul_add(velocity_scale, velocity[index]);
+            acceleration[index] += correction;
+        }
+        SecondOrderState::try_new(displacement, velocity, acceleration)
+            .map_err(NewmarkError::InvalidState)
+    }
+
     pub(super) fn complete(
         &self,
         acceleration: Vec<f64>,
@@ -229,6 +261,32 @@ mod tests {
             StructuralDynamicBalanceSnapshot::evaluate(&operators, &completed, &[7.0]).unwrap();
         assert!(balance.equilibrium_residual[0].abs() <= 2.0e-14);
         assert_eq!(balance.equilibrium_residual.len(), 1);
+    }
+
+    #[test]
+    fn equilibrium_correction_survives_predictor_cancellation_below_acceleration_ulp() {
+        let stiffness = 1.0e12;
+        let operators = scalar_operators(1.0, 0.0, stiffness);
+        let initial = SecondOrderState::try_new(vec![0.0], vec![0.0], vec![1.0]).unwrap();
+        let step = prepare_average_acceleration_step(&operators, &initial, 0.5, &[1.0]).unwrap();
+        let acceleration = step.right_hand_side()[0] / step.effective_operator().get(0, 0);
+        let state = step.complete(vec![acceleration]).unwrap();
+        let before =
+            StructuralDynamicBalanceSnapshot::evaluate(&operators, &state, &[1.0]).unwrap();
+        assert!(before.equilibrium_residual[0].abs() > 1.0e-8);
+        let correction = -before.equilibrium_residual[0] / step.effective_operator().get(0, 0);
+        assert_eq!(acceleration + correction, acceleration);
+
+        let corrected = step.correct(state, &[correction]).unwrap();
+        let after =
+            StructuralDynamicBalanceSnapshot::evaluate(&operators, &corrected, &[1.0]).unwrap();
+        assert!(after.equilibrium_residual[0].abs() <= 16.0 * f64::EPSILON);
+        // Independent displacement-form scalar Newmark equation:
+        // (K + 16 M) u_1 = f_1 + M a_0 for this initial state and dt.
+        let expected_displacement = 2.0 / (stiffness + 16.0);
+        assert!(
+            (corrected.displacement()[0] / expected_displacement - 1.0).abs() <= 8.0 * f64::EPSILON
+        );
     }
 
     #[test]
