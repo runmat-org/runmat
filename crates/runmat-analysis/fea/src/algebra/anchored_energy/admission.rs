@@ -1,4 +1,4 @@
-//! Inventory for proving a reduced operator from original local energies.
+//! Inventory for proving an operator from original local energies.
 //! Sparse factor caps are unchanged; original-domain proof work has its own owner.
 use super::{
     check_cancelled,
@@ -108,11 +108,9 @@ impl SourceEnergyDemand {
     pub fn additional_resident_bytes(self) -> u64 {
         self.additional_resident_bytes
     }
-    #[cfg(test)]
     pub fn resident_bytes(self) -> u64 {
         self.admission.resident
     }
-    #[cfg(test)]
     pub fn scalar_operations(self) -> u64 {
         self.admission.operations
     }

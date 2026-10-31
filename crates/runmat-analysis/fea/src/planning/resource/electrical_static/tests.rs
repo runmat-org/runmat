@@ -199,6 +199,12 @@ fn both_equations_orders_results_fit_source_bound_admission() {
                 demand.solver_admission,
                 electrical_static_solver_admission(&workload, &mesh).unwrap()
             );
+            let (_, envelope) = electrical_static_solver_envelope(&workload, &mesh).unwrap();
+            let proof = local_energy_proof_demand(&mesh, envelope).unwrap();
+            assert!(
+                demand.solver_admission.update_count_upper_bound.0 >= proof.scalar_operations()
+            );
+            assert!(demand.solver_admission.resident_bytes_upper_bound.0 >= proof.resident_bytes());
             assert!(
                 plan.breakdown.workspace_bytes
                     >= demand.solver_admission.resident_bytes_upper_bound

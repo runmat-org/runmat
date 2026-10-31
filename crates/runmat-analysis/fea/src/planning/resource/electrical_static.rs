@@ -53,24 +53,25 @@ fn support_preparation_bytes(mesh: &SolverMeshArtifact) -> Result<u64, ResourceP
     add(mul(nodes, 128)?, mul(entries, 96)?)
 }
 
-/// The local-energy proof's own accounting: 128 bytes per operator entry, 80 per node, the
-/// retained local contributions, and its graph and missing-coupling growth.
-fn local_energy_proof_bytes(mesh: &SolverMeshArtifact) -> Result<u64, ResourcePlanningError> {
-    let energy_source =
-        crate::algebra::anchored_energy::AnchoredEnergySource::resident_bytes_for_widths(
-            mesh.topology
-                .volume_elements
-                .iter()
-                .map(|element| element.node_ids.len()),
-        )
-        .map_err(invalid)?;
-    [
-        mul(element_couplings(mesh)?, 160)?,
-        mul(count(mesh.topology.nodes.len())?, 128)?,
-        energy_source,
-    ]
-    .into_iter()
-    .try_fold(0, add)
+/// Preparation and execution count the same original element contributions, before
+/// assembly merges repeated node pairs. Prescribed rows use one bool per node.
+fn local_energy_proof_demand(
+    mesh: &SolverMeshArtifact,
+    envelope: CoercivityWorkEnvelope,
+) -> Result<crate::algebra::anchored_energy::SourceEnergyDemand, ResourcePlanningError> {
+    crate::algebra::anchored_energy::SourceEnergyDemand::derive(
+        envelope,
+        mesh.topology.nodes.len(),
+        mul(
+            count(mesh.topology.nodes.len())?,
+            std::mem::size_of::<bool>() as u64,
+        )?,
+        mesh.topology
+            .volume_elements
+            .iter()
+            .map(|element| element.node_ids.len()),
+    )
+    .map_err(invalid)
 }
 
 /// Element node pairs, with repeats: the sum of squared element widths plus the diagonal.
@@ -199,15 +200,20 @@ fn electrical_static_solver_envelope(
     let support =
         SparsePattern::try_new(count(n)?, count(n)?, offsets, columns).map_err(invalid)?;
     let envelope = CoercivityWorkEnvelope::derive(&support).map_err(invalid)?;
+    let energy = local_energy_proof_demand(mesh, envelope)?;
     Ok((
         SolverAdmissionResourcePolicy {
             dimension: Count(envelope.dimension()),
             factor_nonzero_upper_bound: Count(envelope.factor_nonzero_limit()),
-            update_count_upper_bound: Count(envelope.update_limit()),
+            update_count_upper_bound: Count(
+                envelope.update_limit().max(energy.scalar_operations()),
+            ),
             // The local-energy proof runs first; when its bound is indeterminate the sparse
             // Cholesky proof decides. The admitted resident bound covers either proof.
             resident_bytes_upper_bound: ByteCount(
-                local_energy_proof_bytes(mesh)?.max(envelope.factor_resident_limit()),
+                energy
+                    .resident_bytes()
+                    .max(envelope.factor_resident_limit()),
             ),
         },
         envelope,

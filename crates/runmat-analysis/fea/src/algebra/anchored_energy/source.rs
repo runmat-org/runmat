@@ -132,17 +132,15 @@ impl AnchoredEnergySource {
         }
         let envelope = CoercivityWorkEnvelope::derive(matrix.pattern())
             .map_err(|_| EnergyError::Arithmetic)?;
-        let admitted = if matches!(projection, EnergyProjection::Selection(_)) {
-            SourceEnergyDemand::derive(
-                envelope,
-                projection.len(),
-                projection_bytes,
-                self.blocks.iter().map(|block| block.width),
-            )?
-            .admission()
-        } else {
-            envelope.into()
-        };
+        // Multiple original elements can contribute to the same assembled pair.
+        // Neither projection kind may infer source work from the deduplicated CSR.
+        let admitted = SourceEnergyDemand::derive(
+            envelope,
+            projection.len(),
+            projection_bytes,
+            self.blocks.iter().map(|block| block.width),
+        )?
+        .admission();
         let mut check = AnchoredEnergyCheck::new_projected(
             matrix,
             projection,

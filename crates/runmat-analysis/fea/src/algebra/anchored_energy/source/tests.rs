@@ -124,13 +124,37 @@ fn retained_source_cannot_be_hidden_inside_the_original_operator_workspace() {
         MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
     )
     .unwrap();
+    let envelope = CoercivityWorkEnvelope::derive(matrix.pattern()).unwrap();
+    let prescribed = [true, false];
     let Err(EnergyError::Admission {
         resident,
         resident_limit,
         ..
-    }) = captured.prove(&matrix, &[true, false], 1.)
+    }) = AnchoredEnergyCheck::new_projected(
+        &matrix,
+        EnergyProjection::Identity(&prescribed),
+        envelope.into(),
+        captured.resident_bytes + std::mem::size_of_val(&prescribed) as u64,
+        captured.values.len() as u64,
+    )
     else {
         panic!("full source residency must be admitted")
     };
     assert!(resident > resident_limit);
+    // A source-aware reservation admits the actual contributions beside that
+    // workspace; it does not hide them inside the smaller operator-only limit.
+    let demand = SourceEnergyDemand::derive(
+        envelope,
+        prescribed.len(),
+        std::mem::size_of_val(&prescribed) as u64,
+        std::iter::repeat_n(2, 100),
+    )
+    .unwrap();
+    let EnergyVerdict::Verified(proof) = captured.prove(&matrix, &prescribed, 1.).unwrap() else {
+        panic!("the complete grounded source must certify its assembled operator")
+    };
+    assert!(proof.resident_bytes() > envelope.energy_resident_limit());
+    assert!(proof.resident_bytes() <= demand.resident_bytes());
+    assert!(proof.scalar_operations() <= demand.scalar_operations());
+    assert!(proof.lower_bound() > 0. && proof.lower_bound() <= 100.);
 }
