@@ -165,7 +165,6 @@ def main() -> int:
         "test",
         "--all-targets",
         "--all-features",
-        "--keep-going",
         "--no-fail-fast",
         *(argument for package in GROUPS[args.group] for argument in ("--package", package)),
     ]
