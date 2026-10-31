@@ -4,6 +4,38 @@ mod admission;
 use crate::{FsProvider, NativeFsProvider, SandboxFsProvider};
 use std::{sync::mpsc, time::Duration};
 
+#[cfg(unix)]
+#[test]
+fn immutable_evidence_synchronizes_relative_and_absolute_workspace_roots() {
+    // Keep process-wide cwd unchanged: both names identify this owned directory.
+    let directory = tempfile::tempdir_in(".").unwrap();
+    let relative = std::path::PathBuf::from(directory.path().file_name().unwrap());
+    let absolute = std::fs::canonicalize(directory.path()).unwrap();
+    for root in [absolute, relative] {
+        let scope = NativeFsProvider
+            .workspace_access(&root, true, 1 << 20)
+            .unwrap();
+        scope.create_dir_all(Path::new("nested")).unwrap();
+        scope
+            .atomic_create_new(Path::new("nested/evidence"), b"original", 1 << 20)
+            .unwrap();
+        scope
+            .synchronize_immutable(Path::new("nested/evidence"))
+            .unwrap();
+        assert_eq!(
+            scope.read(Path::new("nested/evidence"), 1 << 20).unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            scope
+                .synchronize_immutable(Path::new("nested/absent"))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+}
+
 #[test]
 fn the_same_access_scope_recovers_a_durable_partial_batch_before_reading() {
     let root = tempfile::tempdir().unwrap();

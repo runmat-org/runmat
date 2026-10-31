@@ -77,7 +77,16 @@ pub(crate) fn ensure_no_symlink(root: &Path, path: &Path) -> io::Result<()> {
 
 fn sync_directory(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
-    fs::File::open(path)?.sync_all()?;
+    {
+        // A single-component relative root has an empty lexical parent. Its
+        // exposing directory is cwd, not an absent filesystem pathname.
+        let directory = if path.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            path
+        };
+        fs::File::open(directory)?.sync_all()?;
+    }
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
