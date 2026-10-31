@@ -1673,11 +1673,19 @@ fn binding_call_with_expansion_retains_receiver_selected_subscript() {
         expansion.result_context,
         IndexResultContext::FunctionArgumentExpansion
     ));
+    #[derive(Debug)]
+    enum MemberForm {
+        Plain,
+        Dynamic,
+        Indexed,
+        Chain,
+    }
     for (source, form) in [
-        ("A=1; S=1; y=A(S.idx);", "member"),
-        ("A=1; S=1; y=(A+0)(S.idx);", "member"),
-        ("A=1; S=1; name='idx'; y=A(S.(name));", "dynamic"),
-        ("A=1; S=1; y=A(S(1:2).idx);", "chain"),
+        ("A=1; S=1; y=A(S.idx);", MemberForm::Plain),
+        ("A=1; S=1; y=(A+0)(S.idx);", MemberForm::Plain),
+        ("A=1; S=1; name='idx'; y=A(S.(name));", MemberForm::Dynamic),
+        ("A=1; S=1; y=A(S(1:2).idx);", MemberForm::Indexed),
+        ("A=1; S=1; y=A((S+0)(1:2).idx);", MemberForm::Chain),
     ] {
         let assembly = lower_semantic(source);
         let entry = assembly.modules[0].synthetic_entry_function.unwrap();
@@ -1691,7 +1699,7 @@ fn binding_call_with_expansion_retains_receiver_selected_subscript() {
             panic!("expected assignment")
         };
         let HirExprKind::SubscriptChain(chain) = &expression.kind else {
-            panic!("expected receiver-selected parentheses for {form}")
+            panic!("expected receiver-selected parentheses for {form:?}")
         };
         let [runmat_hir::HirSubscriptStep::Index(indexing)] = chain.steps.as_slice() else {
             panic!("expected one parentheses step")
@@ -1700,12 +1708,74 @@ fn binding_call_with_expansion_retains_receiver_selected_subscript() {
             panic!("expected one expanding argument")
         };
         assert!(argument.expands_call_argument_sequence());
-        assert!(matches!(
-            (form, &argument.kind),
-            ("member", HirExprKind::Member { .. })
-                | ("dynamic", HirExprKind::MemberDynamic { .. })
-                | ("chain", HirExprKind::SubscriptChain(_))
-        ));
+        let assert_range_index = |indexing: &IndexingSemantics| {
+            assert_eq!(indexing.kind, IndexKind::Paren);
+            assert_eq!(indexing.result_context, IndexResultContext::ReadSingle);
+            let [IndexComponent::Expr(range)] = indexing.components.as_slice() else {
+                panic!("expected one range selector for {source}");
+            };
+            let HirExprKind::Range(start, None, end) = &range.kind else {
+                panic!("expected the original unit-step range for {source}");
+            };
+            assert!(matches!(&start.kind, HirExprKind::Number(value) if value == "1"));
+            assert!(matches!(&end.kind, HirExprKind::Number(value) if value == "2"));
+        };
+        match (&form, &argument.kind) {
+            (
+                MemberForm::Plain,
+                HirExprKind::Member {
+                    base,
+                    member,
+                    sequence_use,
+                },
+            ) => {
+                assert!(matches!(base.kind, HirExprKind::Binding(_)));
+                assert_eq!(member.0, "idx");
+                assert_eq!(*sequence_use, runmat_types::SequenceUse::ExpandAll);
+            }
+            (
+                MemberForm::Dynamic,
+                HirExprKind::MemberDynamic {
+                    base,
+                    member,
+                    sequence_use,
+                },
+            ) => {
+                assert!(matches!(base.kind, HirExprKind::Binding(_)));
+                assert!(matches!(member.kind, HirExprKind::Binding(_)));
+                assert_eq!(*sequence_use, runmat_types::SequenceUse::ExpandAll);
+            }
+            (
+                MemberForm::Indexed,
+                HirExprKind::Member {
+                    base,
+                    member,
+                    sequence_use,
+                },
+            ) => {
+                assert_eq!(member.0, "idx");
+                assert_eq!(*sequence_use, runmat_types::SequenceUse::ExpandAll);
+                let HirExprKind::Index(receiver, indexing) = &base.kind else {
+                    panic!("expected indexed member receiver for {source}");
+                };
+                assert!(matches!(receiver.kind, HirExprKind::Binding(_)));
+                assert_range_index(indexing);
+            }
+            (MemberForm::Chain, HirExprKind::SubscriptChain(chain)) => {
+                let [runmat_hir::HirSubscriptStep::Index(indexing), runmat_hir::HirSubscriptStep::Member(member)] =
+                    chain.steps.as_slice()
+                else {
+                    panic!("expected ordered index/member chain for {source}");
+                };
+                assert_range_index(indexing);
+                assert_eq!(member.0, "idx");
+                assert_eq!(chain.sequence_use, runmat_types::SequenceUse::ExpandAll);
+            }
+            _ => panic!(
+                "unexpected {form:?} expansion for {source}: {:#?}",
+                argument.kind
+            ),
+        }
         let mut scalar = argument.clone();
         match &mut scalar.kind {
             HirExprKind::Member { sequence_use, .. }
