@@ -200,11 +200,17 @@ fn cantilever_problem(n: usize) -> PartitionedProblem {
 #[test]
 fn conduction_reproduces_the_exact_linear_field_for_every_rank_count() {
     let problem = conduction_problem(8);
+    // Recovering a derivative amplifies solution error. Request sufficient
+    // solve accuracy for the absolute heat-flux bound checked below.
+    let settings = KrylovSettings {
+        relative_tolerance: 1e-12,
+        ..KrylovSettings::default()
+    };
     for ranks in [1, 2, 3, 4, 7] {
         let (solution, quality, layout) = solve_in_threads(
             &problem,
             PartitionOptions::new(ranks),
-            KrylovSettings::default(),
+            settings,
             ranks,
             &Conduction,
             &FaerCholeskyFactory,
@@ -220,17 +226,28 @@ fn conduction_reproduces_the_exact_linear_field_for_every_rank_count() {
                 solution.solution[node]
             );
         }
-        for element in 0..problem.mesh.element_count() {
-            let flux = solution.element_results[element * 3];
-            assert!(
-                (flux + 50.0).abs() < 1e-6,
-                "ranks={ranks}, element={element}, flux={flux:.16e}, expected=-50, iterations={}, recursive_residual={:.16e}, true_residual={:.16e}",
-                solution.iterations,
-                solution.relative_residual,
-                solution.true_relative_residual,
-            );
+        let exact_flux = [-50.0, 0.0, 0.0];
+        assert_eq!(solution.result_width, exact_flux.len());
+        assert_eq!(
+            solution.element_results.len(),
+            problem.mesh.element_count() * exact_flux.len()
+        );
+        for (element, flux) in solution
+            .element_results
+            .chunks_exact(exact_flux.len())
+            .enumerate()
+        {
+            for (axis, (&actual, expected)) in flux.iter().zip(exact_flux).enumerate() {
+                assert!(
+                    (actual - expected).abs() < 1e-6,
+                    "ranks={ranks}, element={element}, axis={axis}, flux={actual:.16e}, expected={expected}, iterations={}, recursive_residual={:.16e}, true_residual={:.16e}",
+                    solution.iterations,
+                    solution.relative_residual,
+                    solution.true_relative_residual,
+                );
+            }
         }
-        assert!(solution.true_relative_residual < 1e-9);
+        assert!(solution.true_relative_residual < 10.0 * settings.relative_tolerance);
     }
 }
 
