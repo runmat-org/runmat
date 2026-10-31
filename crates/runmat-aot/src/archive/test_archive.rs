@@ -16,6 +16,13 @@ use runmat_execution::host::{
 
 pub(crate) fn archive(profile: NativeAcceleratorProfile) -> Vec<u8> {
     let probe = runmat_runtime::native::native_abi_probe();
+    archive_for_probe(profile, &probe)
+}
+
+pub(crate) fn archive_for_probe(
+    profile: NativeAcceleratorProfile,
+    probe: &runmat_execution::host::NativeAbiProbe,
+) -> Vec<u8> {
     let format = match probe.operating_system {
         NativeOperatingSystem::Linux => BinaryFormat::Elf,
         NativeOperatingSystem::Macos => BinaryFormat::MachO,

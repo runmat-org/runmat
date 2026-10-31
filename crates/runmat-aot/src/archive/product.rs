@@ -55,21 +55,19 @@ impl RuntimeArchive {
                 "decoded runtime archive does not match its manifest",
             ));
         }
-        if self.manifest.product.selected().is_some() {
-            let probe = super::read_native_abi_probe(&archive)?;
-            if &probe
-                != self
-                    .manifest
-                    .native_target
-                    .native_parts()
-                    .map_err(|error| AotError::contract("aot.archive.probe", error.to_string()))?
-                    .1
-            {
-                return Err(AotError::contract(
-                    "aot.archive.probe",
-                    "runtime archive probe differs from selected product",
-                ));
-            }
+        let probe = super::read_native_abi_probe(&archive)?;
+        if &probe
+            != self
+                .manifest
+                .native_target
+                .native_parts()
+                .map_err(|error| AotError::contract("aot.archive.probe", error.to_string()))?
+                .1
+        {
+            return Err(AotError::contract(
+                "aot.archive.probe",
+                "runtime archive probe differs from its manifest target",
+            ));
         }
         if super::read_native_accelerator_profile(&archive)?
             != self.manifest.capabilities.accelerators
@@ -90,13 +88,22 @@ pub fn build_runtime_archive(
     encoding: RuntimeArchiveEncoding,
     capabilities: RuntimeArchiveCapabilities,
 ) -> AotResult<RuntimeArchive> {
+    use runmat_execution::host::{NativeArchitecture, NativeCpuBaseline};
+
+    let probe = super::read_native_abi_probe(archive)?;
+    let baseline = match probe.architecture {
+        NativeArchitecture::X86_64 => NativeCpuBaseline::X86_64V1,
+        NativeArchitecture::Aarch64 => NativeCpuBaseline::ArmV8A,
+    };
+    let target = runmat_native_codegen::NativeTarget::from_probe(probe, baseline)
+        .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?;
     build_archive(
         archive,
         environment,
         native_link_tokens,
         encoding,
         capabilities,
-        runmat_native_codegen::NativeTarget::current(),
+        target,
         runmat_execution::host::NativeProductMode::HostUnselected,
     )
 }
@@ -144,13 +151,12 @@ pub(super) fn build_archive(
     }
     let manifest = RuntimeArchiveManifest {
         schema_version: RUNTIME_ARCHIVE_SCHEMA_VERSION,
-        target_triple: match product.selected() {
-            Some(binding) => binding
-                .target
-                .triple()
-                .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?,
-            None => target_lexicon::HOST.to_string(),
-        },
+        target_triple: target
+            .native_parts()
+            .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?
+            .0
+            .triple()
+            .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?,
         product,
         runmat_version: env!("CARGO_PKG_VERSION").to_string(),
         native_target: target,
@@ -166,12 +172,18 @@ pub(super) fn build_archive(
         capabilities,
         native_link_tokens,
     };
-    RuntimeArchive::new(manifest, payload)
+    // These bytes and their digests were constructed above. Packaging must
+    // remain independent of the packer's architecture; loading the product
+    // later uses RuntimeArchive::new and its current-host admission.
+    manifest.validate_for_packaging()?;
+    Ok(RuntimeArchive { manifest, payload })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod cross_target;
 
     fn environment() -> ProgramEnvironment {
         ProgramEnvironment::new(

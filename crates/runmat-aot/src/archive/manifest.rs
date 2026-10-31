@@ -104,6 +104,23 @@ impl RuntimeArchiveManifest {
     }
 
     pub fn validate(&self) -> AotResult<()> {
+        self.validate_for_packaging()?;
+        if self.product.selected().is_none()
+            && (self.target_triple != target_lexicon::HOST.to_string()
+                || self.native_target != NativeTarget::current())
+        {
+            return Err(AotError::contract(
+                "aot.archive.target",
+                "runtime archive does not match this RunMat host",
+            ));
+        }
+        Ok(())
+    }
+
+    /// A build host can package a foreign archive without admitting it for
+    /// local use. Its triple must describe the target-built probe, not the
+    /// machine running the packer. Consumer admission remains `validate`.
+    pub(super) fn validate_for_packaging(&self) -> AotResult<()> {
         self.validate_schema_revisions()?;
         if self.runmat_version != env!("CARGO_PKG_VERSION") {
             return Err(AotError::contract(
@@ -163,10 +180,18 @@ impl RuntimeArchiveManifest {
                     "selected runtime archive identity or link inputs differ",
                 ));
             }
-        } else if triple != target_lexicon::HOST || self.native_target != NativeTarget::current() {
+        } else if triple.to_string()
+            != self
+                .native_target
+                .native_parts()
+                .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?
+                .0
+                .triple()
+                .map_err(|error| AotError::contract("aot.archive.target", error.to_string()))?
+        {
             return Err(AotError::contract(
                 "aot.archive.target",
-                "runtime archive does not match this RunMat host",
+                "runtime archive triple differs from its target ABI probe",
             ));
         }
         if self.archive_bytes == 0
