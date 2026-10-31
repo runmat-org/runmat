@@ -36,7 +36,7 @@ fn discretize_to_dlmwrite_descriptors_are_visible_to_signature_help_and_hover() 
         ),
         (
             "dlmwrite",
-            "dlmwrite('data.csv', uint8(1));",
+            "bytesWritten = dlmwrite('data.csv', uint8(1));",
             "bytesWritten = dlmwrite(filename, M)",
         ),
         (

@@ -1,4 +1,6 @@
 mod support;
+#[path = "support/hover.rs"]
+mod hover_support;
 
 use lsp_types::{HoverContents, Position};
 use runmat_lsp::core::analysis::{
@@ -57,17 +59,12 @@ fn file_io_and_field_access_descriptors_are_public_and_visible() {
         let position = Position::new(0, source.find(name).expect("builtin call") as u32);
         let help =
             signature_help_at(source, &analysis, &position).expect("canonical signature help");
-        let expected_labels = support::assert_catalog_signatures(name, &help);
+        support::assert_catalog_signatures(name, &help);
         let hover = hover_at(source, &analysis, &position).expect("canonical hover");
         let HoverContents::Markup(markup) = hover.contents else {
             panic!("expected Markdown hover");
         };
-        assert!(
-            expected_labels
-                .iter()
-                .all(|label| markup.value.contains(*label)),
-            "missing canonical hover signatures for {name}"
-        );
+        hover_support::assert_catalog_hover(name, &help, &markup.value);
     }
 }
 #[test]

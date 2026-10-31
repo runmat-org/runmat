@@ -69,15 +69,51 @@ fn migrated_signatures_and_documentation_come_from_the_canonical_catalog() {
             panic!("expected Markdown hover for {name}");
         };
         assert!(markup.value.contains(expected), "{name}: {}", markup.value);
-        assert!(
-            markup.value.contains("**Examples**"),
-            "canonical examples missing from {name} hover: {}",
-            markup.value
+        let entry = runmat_builtins::public_builtin_catalog_entry_by_name(name).unwrap();
+        let documentation = &entry.documentation;
+        let reference: serde_json::Value =
+            serde_json::from_str(runmat_lsp::core::builtins_json::builtin_json_str(name).unwrap())
+                .unwrap();
+        // The editor shows one complete short example; the reference retains
+        // every example and section, including the full GPU contract.
+        assert_eq!(
+            reference["sections"],
+            serde_json::to_value(documentation.sections).unwrap()
         );
-        assert!(
-            markup.value.contains("**GPU execution**"),
-            "canonical GPU documentation missing from {name} hover: {}",
-            markup.value
+        assert!(documentation.sections.iter().any(|section| {
+            section.heading == "GPU execution" && !section.paragraphs.is_empty()
+        }));
+        let exported_examples = reference["examples"].as_array().unwrap();
+        assert_eq!(exported_examples.len(), documentation.examples.len());
+        for (exported, canonical) in exported_examples.iter().zip(documentation.examples) {
+            assert_eq!(exported["input"].as_str(), Some(canonical.program));
+        }
+        let expected_example = documentation
+            .examples
+            .iter()
+            .map(|example| example.program)
+            .find(|program| {
+                !program.trim().is_empty() && program.len() <= 800 && program.lines().count() <= 12
+            });
+        let displayed_examples = markup
+            .value
+            .split("```runmat\n")
+            .skip(2)
+            .map(|block| block.split_once("\n```").unwrap().0)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            displayed_examples,
+            expected_example
+                .map(str::trim)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            "complete compact example for {name}"
         );
+        let slug = documentation.slug.unwrap_or(entry.identity.name);
+        assert!(markup.value.contains(&format!(
+            "Docs: https://runmat.com/docs/reference/builtins/{}",
+            slug.to_ascii_lowercase()
+        )));
+        assert!(!markup.value.contains("**GPU execution**"));
     }
 }

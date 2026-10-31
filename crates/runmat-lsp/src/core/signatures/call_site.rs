@@ -83,9 +83,13 @@ pub(in crate::core) struct CallSite {
     pub(super) complete: bool,
 }
 
+fn callee_token(token: &Token) -> bool {
+    matches!(token, Token::Ident | Token::True | Token::False)
+}
+
 fn callee_before(tokens: &[SpannedToken], open: usize) -> Option<(String, usize)> {
     let last = open.checked_sub(1)?;
-    if tokens.get(last)?.token != Token::Ident {
+    if !callee_token(&tokens.get(last)?.token) {
         return None;
     }
     let mut first = last;
@@ -120,7 +124,7 @@ fn call_open_at(tokens: &[SpannedToken], cursor: usize) -> Option<usize> {
         }
         if tokens
             .get(last)
-            .is_some_and(|token| token.token == Token::Ident)
+            .is_some_and(|token| callee_token(&token.token))
         {
             while tokens
                 .get(last + 1)

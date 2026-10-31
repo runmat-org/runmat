@@ -1,4 +1,6 @@
 mod support;
+#[path = "support/hover.rs"]
+mod hover_support;
 
 use lsp_types::{HoverContents, Position};
 use runmat_builtins::{
@@ -104,17 +106,12 @@ fn packet_calls_expose_descriptor_hover_and_signature_help() {
         let position = Position::new(0, source.find(lookup).expect("builtin call") as u32);
         let help =
             signature_help_at(source, &analysis, &position).expect("canonical signature help");
-        let expected_labels = support::assert_catalog_signatures(lookup, &help);
+        support::assert_catalog_signatures(lookup, &help);
         let hover = hover_at(source, &analysis, &position).expect("canonical hover");
         let HoverContents::Markup(markup) = hover.contents else {
             panic!("expected Markdown hover");
         };
-        assert!(
-            expected_labels
-                .iter()
-                .all(|label| markup.value.contains(*label)),
-            "missing canonical hover signatures for {lookup}"
-        );
+        hover_support::assert_catalog_hover(lookup, &help, &markup.value);
     }
 }
 #[test]

@@ -26,10 +26,18 @@ fn call_context_selects_output_forms_and_preserves_all_signature_help() {
         let lsp_types::HoverContents::Markup(markdown) = hover.contents else {
             panic!("markdown hover")
         };
-        assert!(markdown.value.starts_with(&format!(
-            "```runmat\n{}\n```",
-            entry.descriptor.signatures[selected[0]].label
-        )));
+        let expected_header = selected
+            .iter()
+            .map(|index| entry.descriptor.signatures[*index].label)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            markdown
+                .value
+                .starts_with(&format!("```runmat\n{expected_header}\n```")),
+            "hover must preserve all equally ranked signatures: {}",
+            markdown.value
+        );
         assert!(markdown.value.contains("more overloads"));
     }
     let text = "[f, xi] = ksdensity(cycle);";
@@ -39,6 +47,39 @@ fn call_context_selects_output_forms_and_preserves_all_signature_help() {
     let entry = runmat_builtins::public_builtin_catalog_entry_by_name("ksdensity").unwrap();
     let selected = site.best(entry.descriptor.signatures);
     assert_eq!(selected, vec![0]);
+    for (name, text) in [("false", "out = false(2);"), ("true", "out = true(2);")] {
+        let offset = text.find(name).unwrap();
+        let document =
+            analysis::analyze_document_with_compat(text, analysis::CompatMode::default());
+        let site = CallSite::at(&document, offset).expect("logical constructor call");
+        assert_eq!(site.name, name);
+        let entry = runmat_builtins::public_builtin_catalog_entry_by_name(name).unwrap();
+        let selected = site.best(entry.descriptor.signatures);
+        assert!(!selected.is_empty());
+        assert_eq!(
+            entry.descriptor.signatures[selected[0]].label,
+            format!("L = {name}(n)")
+        );
+        let position = offset_to_position(text, offset);
+        let help = analysis::signature_help_at(text, &document, &position).unwrap();
+        assert_eq!(help.active_signature, Some(selected[0] as u32));
+        let hover = analysis::hover_at(text, &document, &position).unwrap();
+        let lsp_types::HoverContents::Markup(markdown) = hover.contents else {
+            panic!("markdown hover")
+        };
+        let expected_header = selected
+            .iter()
+            .map(|index| entry.descriptor.signatures[*index].label)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            markdown
+                .value
+                .starts_with(&format!("```runmat\n{expected_header}\n```")),
+            "hover must preserve all equally ranked signatures: {}",
+            markdown.value
+        );
+    }
 }
 
 #[test]

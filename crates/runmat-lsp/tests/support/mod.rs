@@ -18,6 +18,21 @@ pub fn assert_catalog_signatures(name: &str, help: &lsp_types::SignatureHelp) ->
         actual, expected,
         "complete canonical signature projection for {name}"
     );
-    assert_eq!(help.active_signature, Some(0));
+    let active = help.active_signature.expect("context-selected signature") as usize;
+    assert!(
+        active < expected.len(),
+        "canonical active signature for {name}"
+    );
+    for (actual, canonical) in help.signatures.iter().zip(entry.descriptor.signatures) {
+        assert_eq!(
+            actual
+                .parameters
+                .as_ref()
+                .expect("canonical parameters")
+                .len(),
+            canonical.inputs.len(),
+            "complete parameter projection for {name}"
+        );
+    }
     expected
 }

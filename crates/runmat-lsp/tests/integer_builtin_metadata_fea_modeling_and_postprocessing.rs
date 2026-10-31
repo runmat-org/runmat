@@ -348,10 +348,9 @@ fn fea_packet_is_public_and_has_settled_integer_metadata() {
         .chain(FEA_SPECTRUM_NUMERIC_CONSTRUCTORS)
         .chain(FEA_TYPED_POLICY_CONSTRUCTORS)
     {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("{name} descriptor"));
+        let builtin = runmat_builtins::public_builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("public canonical builtin {name}"));
+        let descriptor = builtin.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             BuiltinCompletionPolicy::Public,
@@ -381,7 +380,8 @@ fn fea_numeric_constructor_forms_cover_every_integer_class_on_the_host() {
         .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().skip(1))
         .chain(FEA_SPECTRUM_NUMERIC_CONSTRUCTORS)
     {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin = runmat_builtins::public_builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("public canonical builtin {name}"));
         assert!(builtin.integer_audit.is_none(), "{name}");
         assert!(
             !builtin.integer_capabilities.is_empty(),
@@ -414,7 +414,8 @@ fn fea_non_numeric_roles_have_explicit_not_applicable_audits() {
         .chain(FEA_TYPED_POLICY_CONSTRUCTORS)
         .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().take(1))
     {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin = runmat_builtins::public_builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("public canonical builtin {name}"));
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         let audit = builtin
             .integer_audit

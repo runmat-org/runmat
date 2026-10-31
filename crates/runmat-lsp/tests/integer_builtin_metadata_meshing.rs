@@ -100,10 +100,9 @@ fn meshing_packet_is_public_and_has_settled_integer_metadata() {
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in MESHING_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("{name} descriptor"));
+        let builtin = runmat_builtins::public_builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("public canonical builtin {name}"));
+        let descriptor = builtin.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             BuiltinCompletionPolicy::Public,
