@@ -87,13 +87,20 @@ fn batch_admission_is_atomic_and_schedules_only_after_every_rank_exists() {
 fn cancelling_one_gang_does_not_cancel_unrelated_tasks() {
     let mut fixture = common::fixture(2, 2);
     let (gang, region) = gang(&fixture, 1);
-    fixture
+    let launches = fixture
         .driver
         .handle(DriverCommand::SubmitBatch(vec![
             rank_task(&fixture, &gang, region, LabRank(1)),
             rank_task(&fixture, &gang, region, LabRank(2)),
         ]))
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter_map(|action| match action {
+            DriverAction::Launch(request) => Some(request),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(launches.len(), 2);
     let unrelated = common::task("unrelated", fixture.scope, fixture.pool, RetryPolicy::Never);
     let unrelated_id = unrelated.request.id;
     fixture
@@ -101,7 +108,7 @@ fn cancelling_one_gang_does_not_cancel_unrelated_tasks() {
         .handle(DriverCommand::Submit(Box::new(unrelated)))
         .unwrap();
 
-    fixture
+    let cancellation = fixture
         .driver
         .handle(DriverCommand::CancelGang {
             gang,
@@ -110,6 +117,23 @@ fn cancelling_one_gang_does_not_cancel_unrelated_tasks() {
         })
         .unwrap();
     let snapshot = fixture.driver.snapshot();
+    snapshot.validate().unwrap();
+    let cold: runmat_execution_runner::DriverSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    cold.validate().unwrap();
+    assert_eq!(cold.tasks, snapshot.tasks);
+    for request in &launches {
+        let cause = snapshot.tasks[&request.task_id].cancellation.unwrap().cause;
+        assert_eq!(
+            cause.reason_for_attempt(request).unwrap(),
+            CancellationReason::DependencyFailed
+        );
+        let mut foreign = request.clone();
+        if let ProgramInvocationContext::SpmdTask { task } = &mut foreign.task.invocation_context {
+            task.gang.generation += 1;
+        }
+        assert!(cause.reason_for_attempt(&foreign).is_err());
+    }
     assert_eq!(
         snapshot.tasks[&unrelated_id].state,
         runmat_execution::state::TaskState::Ready
@@ -118,8 +142,37 @@ fn cancelling_one_gang_does_not_cancel_unrelated_tasks() {
         snapshot
             .tasks
             .values()
+            .filter(|task| task.cancellation.is_some() && task.active_attempt.is_some())
+            .count(),
+        2
+    );
+    assert_eq!(
+        cancellation
+            .iter()
+            .filter(|action| matches!(action, DriverAction::Cancel(_)))
+            .count(),
+        2
+    );
+    for request in launches {
+        fixture
+            .driver
+            .handle(DriverCommand::BackendReport(
+                runmat_execution_runner::port::BackendReport::for_request(
+                    &request,
+                    runmat_execution_runner::AttemptReport::Retired,
+                ),
+            ))
+            .unwrap();
+    }
+    let retired = fixture.driver.snapshot();
+    retired.validate().unwrap();
+    assert_eq!(
+        retired
+            .tasks
+            .values()
             .filter(|task| task.state == runmat_execution::state::TaskState::Cancelled)
             .count(),
         2
     );
+    assert!(retired.tasks[&unrelated_id].cancellation.is_none());
 }

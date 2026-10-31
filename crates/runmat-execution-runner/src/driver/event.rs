@@ -93,7 +93,9 @@ pub enum DriverEventKind {
     },
     GangCancelled {
         gang_id: GangId,
+        generation: u64,
         reason: CancellationReason,
+        now_millis: u64,
     },
     DeadlineExpired {
         task_id: TaskId,

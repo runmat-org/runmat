@@ -126,6 +126,20 @@ impl DriverSnapshot {
                             ));
                         }
                     }
+                    crate::TaskCancellationCause::Gang { gang_id, generation, reason } => {
+                        if !self.events.iter().any(|event| matches!(event.kind,
+                            super::DriverEventKind::GangCancelled {
+                                gang_id: original, generation: original_generation,
+                                reason: original_reason, now_millis,
+                            } if original == gang_id && original_generation == generation
+                                && original_reason == reason
+                                && now_millis == cancellation.requested_at_driver_millis))
+                        {
+                            return Err(RunnerError::Invalid(
+                                "gang cancellation differs from its original driver decision".into(),
+                            ));
+                        }
+                    }
                     crate::TaskCancellationCause::Dependency { task_id } => {
                         if self.tasks.get(&task_id).is_none_or(|parent| {
                             parent.state != runmat_execution::state::TaskState::Cancelled

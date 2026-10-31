@@ -46,6 +46,20 @@ pub(crate) fn validate_cancellation(
             }
         }
         TaskCancellationCause::Scope { .. } => {} // Scope ancestry belongs to the enclosing driver.
+        TaskCancellationCause::Gang {
+            gang_id,
+            generation,
+            ..
+        } => {
+            if !matches!(&task.submission.request.invocation_context,
+                runmat_execution::ProgramInvocationContext::SpmdTask { task }
+                    if task.gang.id == gang_id && task.gang.generation == generation)
+            {
+                return Err(invalid(
+                    "gang cancellation references a foreign gang or generation",
+                ));
+            }
+        }
         TaskCancellationCause::Deadline => {
             if task
                 .submission

@@ -391,6 +391,15 @@ impl Driver {
                 return Some("invalid unsuccessful accounting");
             }
         }
+        if let AttemptReport::Succeeded { result } = &report.report {
+            if result.resources().is_some_and(|resources| {
+                report.execution.as_ref().is_some_and(|execution| {
+                    resources.resources.usage.wall_millis != execution.wall_millis
+                })
+            }) {
+                return Some("success accounting differs from observed execution interval");
+            }
+        }
         None
     }
 

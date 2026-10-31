@@ -121,6 +121,15 @@ fn success_cannot_hide_nonzero_exit_or_a_different_observed_interval() {
             corruption == 2
         );
         snapshot.validate().unwrap();
+        if corruption == 1 {
+            // A contradictory report cannot retire the original attempt or
+            // free its reservation; its backend still owes exact evidence.
+            assert_eq!(
+                snapshot.tasks[&request.task_id].active_attempt,
+                Some(request.id)
+            );
+            assert!(snapshot.attempts[&request.id].terminal.is_none());
+        }
         if corruption == 2 {
             let original = snapshot.task_execution_evidence(request.task_id).unwrap();
             let cold: runmat_execution_runner::TaskExecutionEvidence =

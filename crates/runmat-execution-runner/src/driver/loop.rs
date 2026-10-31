@@ -236,6 +236,7 @@ impl Driver {
             } => {
                 gang.validate()
                     .map_err(|error| RunnerError::Invalid(error.to_string()))?;
+                self.advance_clock(now_millis)?;
                 let tasks = self
                     .snapshot
                     .tasks
@@ -258,13 +259,19 @@ impl Driver {
                 }
                 self.emit(DriverEventKind::GangCancelled {
                     gang_id: gang.id,
+                    generation: gang.generation,
                     reason,
+                    now_millis,
                 });
                 for task_id in tasks {
                     self.cancel_task(
                         task_id,
                         now_millis,
-                        crate::TaskCancellationCause::Task { task_id, reason },
+                        crate::TaskCancellationCause::Gang {
+                            gang_id: gang.id,
+                            generation: gang.generation,
+                            reason,
+                        },
                         &mut actions,
                     )?;
                 }

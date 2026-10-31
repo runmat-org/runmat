@@ -1,5 +1,5 @@
 //! Original driver cancellation decisions; imported metadata is not provider attestation.
-use runmat_execution::{identity::AttemptId, CancellationReason, ExecutionScopeId, TaskId};
+use runmat_execution::{identity::AttemptId, CancellationReason, ExecutionScopeId, GangId, TaskId};
 use serde::{Deserialize, Deserializer, Serialize};
 
 mod validation;
@@ -14,6 +14,11 @@ pub enum TaskCancellationCause {
     },
     Scope {
         scope_id: ExecutionScopeId,
+        reason: CancellationReason,
+    },
+    Gang {
+        gang_id: GangId,
+        generation: u64,
         reason: CancellationReason,
     },
     Deadline,
@@ -38,6 +43,16 @@ impl TaskCancellationCause {
         match self {
             Self::Task { task_id, reason } if task_id == request.task_id => Ok(reason),
             Self::Scope { reason, .. } => Ok(reason),
+            Self::Gang {
+                gang_id,
+                generation,
+                reason,
+            } if matches!(&request.task.invocation_context,
+                    runmat_execution::ProgramInvocationContext::SpmdTask { task }
+                        if task.gang.id == gang_id && task.gang.generation == generation) =>
+            {
+                Ok(reason)
+            }
             Self::Deadline if request.task.deadline_unix_millis.is_some() => {
                 Ok(CancellationReason::Deadline)
             }
