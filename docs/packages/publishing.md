@@ -23,6 +23,8 @@ include = ["src/**", "README.md", "LICENSE"]
 exclude = ["**/*.tmp", "private-notes/**"]
 ```
 
+Set `organization` to the organization's URL name (slug), as shown in its settings. A package created before an organization rename retains its original namespace; new packages use the new URL name.
+
 The package canonical ID is derived from registry, organization, and name. Include/exclude rules are normalized and applied deterministically. The release builder rejects parent/absolute traversal, escaping links, device files, collisions after portable normalization, unsupported names, credential-bearing metadata, unapproved native content, file-count/size expansion violations, and content that changes during assembly.
 
 ## Inspect Before Upload

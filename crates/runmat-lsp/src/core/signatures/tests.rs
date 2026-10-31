@@ -100,12 +100,12 @@ fn unknown_arguments_retain_ties_and_known_kinds_prefer_specific_descriptors() {
         let site = CallSite::at(&document, 0).unwrap();
         assert_eq!(site.best(&descriptors), expected);
     }
-    let repeated = BuiltinParamDescriptor { name: "[]", ..ANY };
+    const REPEATED: BuiltinParamDescriptor = BuiltinParamDescriptor { name: "[]", ..ANY };
     let descriptor = BuiltinSignatureDescriptor {
         label: "[x] = sample([], [], λ)",
         inputs: &[
-            repeated,
-            repeated,
+            REPEATED,
+            REPEATED,
             BuiltinParamDescriptor { name: "λ", ..ANY },
         ],
         outputs: &[ANY],
