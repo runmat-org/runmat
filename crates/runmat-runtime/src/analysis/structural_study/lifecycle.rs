@@ -16,7 +16,7 @@ use super::{
 use crate::analysis::{
     analysis_admit_buckling_run_with_id, analysis_admit_linear_static_run_with_id,
     analysis_admit_modal_run_with_id, analysis_admit_transient_run_with_id,
-    analysis_study_content_digest, meshing, prepare_linear_static_workload_template,
+    analysis_study_content_digest, prepare_linear_static_workload_template,
     prepare_study_semantics, study_fingerprint_from_digest, AnalysisSolverOptions,
     AnalysisStudyRunData, AnalysisStudySpec, PreparedStructuralLinearRun,
     StructuralStudyModalNumericalResult, StructuralStudyModalTransientNumericalResult,

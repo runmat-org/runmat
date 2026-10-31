@@ -112,8 +112,13 @@ pub fn prepare_acoustic_study_publication(
         })?;
         materialization::admit(completed, source, options, &run_id).map_err(invalid)?
     };
-    let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
+    let persisted = preparation
+        .persist_mesh(mesh, meshing_evidence)
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
     let execution = super::AnalysisExecutionStep {
         step_id: authored_step.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,

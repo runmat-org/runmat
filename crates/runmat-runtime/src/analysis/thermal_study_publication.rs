@@ -117,17 +117,13 @@ pub fn prepare_thermal_study_publication(
     );
     // Persist borrowed geometry before constructing retained field histories, so
     // mesh encoding and complete public-run materialization do not coexist.
-    preparation
-        .staging
-        .admit_mesh_persistence(mesh, meshing_evidence)
+    let persisted = preparation
+        .persist_mesh(mesh, meshing_evidence)
         .map_err(|error| {
             crate::analysis::prepared_study_publication::publication_failure(
                 error, &context, invalid,
             )
         })?;
-    let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
-
     // Reconstruct only retained partitions; the shared owner also validates accuracy/resource
     // closure and projects catalog-backed observations without gathering or evaluating them.
     let object_artifact_paths = source

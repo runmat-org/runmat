@@ -87,7 +87,8 @@ pub fn prepare_fluid_study_publication(
         .map_or(runmat_analysis_core::PhysicsFamily::Fluid, |step| {
             step.family
         });
-    let run_id = publication_identity.local_run_id(family, definition, &completed.workload().step_id);
+    let run_id =
+        publication_identity.local_run_id(family, definition, &completed.workload().step_id);
     let run = materialization::admit(completed, mesh, options, fields, &run_id, &context)
         .map_err(invalid)?;
     let object_artifact_paths = source
@@ -97,8 +98,13 @@ pub fn prepare_fluid_study_publication(
                 error, &context, invalid,
             )
         })?;
-    let persisted =
-        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence).map_err(invalid)?;
+    let persisted = preparation
+        .persist_mesh(mesh, meshing_evidence)
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload().step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,

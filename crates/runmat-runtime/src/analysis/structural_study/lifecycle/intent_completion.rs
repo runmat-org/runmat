@@ -46,9 +46,8 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
     }
 
     let study_model = intent.model.clone();
-    preparation
-        .staging
-        .admit_mesh_persistence(&meshing_output.artifact, &meshing_output.evidence)
+    let persisted_mesh = preparation
+        .persist_mesh(&meshing_output.artifact, &meshing_output.evidence)
         .map_err(|error| {
             intent_completion_error(
                 &intent,
@@ -58,15 +57,6 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
                 error.to_string(),
             )
         })?;
-    let persisted_mesh = meshing::persist_mesh_output(&meshing_output).map_err(|message| {
-        intent_completion_error(
-            &intent,
-            "RM.FEA.RUN_STUDY.MESH_ARTIFACT_STORE_FAILED",
-            OperationErrorType::Internal,
-            OperationErrorSeverity::Error,
-            message,
-        )
-    })?;
     match (intent.workloads.clone(), result) {
         (
             runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {

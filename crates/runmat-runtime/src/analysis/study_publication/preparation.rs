@@ -9,6 +9,19 @@ pub(in crate::analysis) struct PublicationPreparation {
     pub(in crate::analysis) retained_input: storage::publication::PreparationReservation,
 }
 impl PublicationPreparation {
+    /// Persist mesh objects only after the captured publication ceiling admits
+    /// their codec and immutable-collision workspaces.
+    pub(in crate::analysis) fn persist_mesh(
+        &self,
+        mesh: &runmat_meshing_core::SolverMeshArtifact,
+        evidence: &runmat_meshing_core::MeshingEvidence,
+    ) -> Result<crate::analysis::meshing::ResolvedStudyMesh, storage::AnalysisPublicationError>
+    {
+        self.staging.admit_mesh_persistence(mesh, evidence)?;
+        crate::analysis::meshing::persist_mesh_borrowed(mesh, evidence)
+            .map_err(storage::AnalysisPublicationError::from)
+    }
+
     pub(in crate::analysis) fn capture(
         definition: Digest,
         input: &impl serde::Serialize,
@@ -118,6 +131,32 @@ mod tests {
         .data;
         let definition = Digest::sha256(b"captured-preparation");
         let preparation = PublicationPreparation::capture(definition, &run).unwrap();
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
+            runmat_meshing_core::ElementOrder::Tet4,
+        );
+        let evidence = runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&mesh);
+        let constrained = PublicationPreparation::capture_with_budget(
+            definition,
+            &(),
+            mesh.canonical_encoding_resident_bytes_estimate().unwrap() / 2,
+        )
+        .unwrap();
+        let isolated = tempfile::tempdir().unwrap();
+        let mesh_root = isolated.path().join("artifacts");
+        configuration::configure_fea_runtime(configuration::FeaRuntimeConfig {
+            artifact_root: Some(mesh_root.clone()),
+            ..config.clone()
+        })
+        .unwrap();
+        assert!(matches!(
+            constrained.persist_mesh(&mesh, &evidence),
+            Err(storage::AnalysisPublicationError::ResourceLimit { .. })
+        ));
+        assert!(
+            !mesh_root.exists(),
+            "mesh admission must precede filesystem writes"
+        );
+        configuration::configure_fea_runtime(config.clone()).unwrap();
         storage::set_artifact_store_for_tests(replacement.clone());
         configuration::configure_fea_runtime(configuration::FeaRuntimeConfig {
             publication_staging_bytes: 1,
