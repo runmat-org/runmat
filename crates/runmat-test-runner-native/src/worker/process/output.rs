@@ -1,11 +1,11 @@
 //! Transfer raw output only after the process tree's retirement is proved.
 use std::time::Duration;
 
-use runmat_process_host::{CapturedProcessOutput, ProcessOutputCompletion, ProcessOutputSnapshot};
-use runmat_test::event::{
-    WorkerOutputBytes, WorkerProcessOutput, WorkerProcessRetirement, WorkerStreamCompletion,
-    WorkerStreamOutput,
+use runmat_execution::process_output::{
+    ProcessOutputBytes, ProcessStreamCompletion, ProcessStreamOutput,
 };
+use runmat_process_host::{CapturedProcessOutput, ProcessOutputCompletion, ProcessOutputSnapshot};
+use runmat_test::event::{WorkerProcessOutput, WorkerProcessRetirement};
 
 use super::*;
 
@@ -61,18 +61,18 @@ fn snapshot(capture: &CapturedProcessOutput) -> Result<ProcessOutputSnapshot, Ba
     }
 }
 
-fn stream(snapshot: ProcessOutputSnapshot) -> WorkerStreamOutput {
+fn stream(snapshot: ProcessOutputSnapshot) -> ProcessStreamOutput {
     let completion = match snapshot.completion {
-        ProcessOutputCompletion::EndOfStream => WorkerStreamCompletion::EndOfStream,
-        ProcessOutputCompletion::ReadFailed(kind) => WorkerStreamCompletion::ReadFailed {
+        ProcessOutputCompletion::EndOfStream => ProcessStreamCompletion::EndOfStream,
+        ProcessOutputCompletion::ReadFailed(kind) => ProcessStreamCompletion::ReadFailed {
             kind: format!("{kind:?}"),
         },
-        ProcessOutputCompletion::NotCaptured => WorkerStreamCompletion::NotCaptured,
-        ProcessOutputCompletion::Reading => WorkerStreamCompletion::Reading,
-        ProcessOutputCompletion::Transferred => WorkerStreamCompletion::Transferred,
+        ProcessOutputCompletion::NotCaptured => ProcessStreamCompletion::NotCaptured,
+        ProcessOutputCompletion::Reading => ProcessStreamCompletion::Reading,
+        ProcessOutputCompletion::Transferred => ProcessStreamCompletion::Transferred,
     };
-    WorkerStreamOutput {
-        bytes: WorkerOutputBytes::new(snapshot.bytes.into_vec()),
+    ProcessStreamOutput {
+        bytes: ProcessOutputBytes::new(snapshot.bytes.into_vec()),
         observed_bytes: snapshot.observed_bytes,
         truncated: snapshot.truncated,
         completion,

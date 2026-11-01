@@ -69,31 +69,33 @@ fn every_report_is_well_formed_after_an_infrastructure_failure() {
 
 #[test]
 fn raw_worker_output_is_process_scoped_bounded_and_shared_across_reports() {
+    use runmat_execution::process_output::{
+        ProcessOutputBytes, ProcessStreamCompletion, ProcessStreamOutput,
+    };
     use runmat_test::event::{
-        TestEvent, TestEventPayload, WorkerOutputBytes, WorkerProcessOutput,
-        WorkerProcessRetirement, WorkerStreamCompletion, WorkerStreamOutput,
+        TestEvent, TestEventPayload, WorkerProcessOutput, WorkerProcessRetirement,
     };
     use runmat_test::identity::WorkerSessionId;
     use runmat_test_runner::reporter::Reporter;
 
-    let bytes = WorkerOutputBytes::new(b"not ok 99\r<xml>\0\xff".to_vec());
+    let bytes = ProcessOutputBytes::new(b"not ok 99\r<xml>\0\xff".to_vec());
     let shared = bytes.clone();
     assert_eq!(bytes.as_slice().as_ptr(), shared.as_slice().as_ptr());
-    let capture = WorkerStreamOutput {
+    let capture = ProcessStreamOutput {
         observed_bytes: Some(bytes.as_slice().len() as u64),
         bytes,
         truncated: false,
-        completion: WorkerStreamCompletion::EndOfStream,
+        completion: ProcessStreamCompletion::EndOfStream,
     };
     let output = WorkerProcessOutput {
         worker: WorkerSessionId("process:42:0".into()),
         retirement: WorkerProcessRetirement::Verified,
         stdout: capture,
-        stderr: WorkerStreamOutput {
-            bytes: WorkerOutputBytes::new(Vec::new()),
+        stderr: ProcessStreamOutput {
+            bytes: ProcessOutputBytes::new(Vec::new()),
             observed_bytes: Some(0),
             truncated: false,
-            completion: WorkerStreamCompletion::EndOfStream,
+            completion: ProcessStreamCompletion::EndOfStream,
         },
     };
     output.validate(1024).unwrap();

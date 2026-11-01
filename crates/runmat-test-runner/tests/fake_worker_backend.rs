@@ -14,21 +14,21 @@ use common::{passed, plan, FakeBackend, PendingClock, Step};
 
 #[test]
 fn incomplete_process_output_cannot_certify_successful_test_results() {
-    use runmat_test::event::{
-        WorkerOutputBytes, WorkerProcessOutput, WorkerProcessRetirement, WorkerStreamCompletion,
-        WorkerStreamOutput,
+    use runmat_execution::process_output::{
+        ProcessOutputBytes, ProcessStreamCompletion, ProcessStreamOutput,
     };
+    use runmat_test::event::{WorkerProcessOutput, WorkerProcessRetirement};
     use runmat_test::identity::WorkerSessionId;
 
     for completion in [
-        WorkerStreamCompletion::EndOfStream,
-        WorkerStreamCompletion::Reading,
+        ProcessStreamCompletion::EndOfStream,
+        ProcessStreamCompletion::Reading,
     ] {
         let submission = plan(&["passes"]);
         let id = submission.plan.tests().next().unwrap().id.clone();
-        let complete = completion == WorkerStreamCompletion::EndOfStream;
-        let stream = WorkerStreamOutput {
-            bytes: WorkerOutputBytes::new(Vec::new()),
+        let complete = completion == ProcessStreamCompletion::EndOfStream;
+        let stream = ProcessStreamOutput {
+            bytes: ProcessOutputBytes::new(Vec::new()),
             observed_bytes: Some(0),
             truncated: false,
             completion,

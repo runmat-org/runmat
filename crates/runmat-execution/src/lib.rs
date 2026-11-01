@@ -15,6 +15,7 @@ pub mod host;
 pub mod identity;
 pub mod placement;
 pub mod profiling;
+pub mod process_output;
 pub mod protocol;
 pub mod resource;
 pub mod schema;
