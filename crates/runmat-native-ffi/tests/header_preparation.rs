@@ -23,7 +23,13 @@ fn additional_included_headers_can_join_the_declared_interface() {
     let base = temporary.path().join("base.h");
     let detail = temporary.path().join("detail.h");
     std::fs::write(&base, "#include \"detail.h\"\nint base_value(int input);\n").unwrap();
-    std::fs::write(&detail, "int detail_value(int input);\n").unwrap();
+    std::fs::write(
+        temporary.path().join("leaf.h"),
+        "#define DECLARE_PUBLIC(name) int name(int value);\nint private_leaf(int input);\n",
+    )
+    .unwrap();
+    std::fs::write(&detail,
+        "typedef struct detail_record { int value; } detail_record;\nint detail_value(int input);\nint detail_second(const detail_record *input);\n#include \"leaf.h\"\nDECLARE_PUBLIC(detail_macro)\nint detail_after_leaf(int input);\n").unwrap();
     let preparation = HeaderPreparation {
         header: base,
         library_name: "fixture".into(),
@@ -42,7 +48,13 @@ fn additional_included_headers_can_join_the_declared_interface() {
             .iter()
             .map(|symbol| symbol.name.as_str())
             .collect::<Vec<_>>(),
-        ["base_value", "detail_value"]
+        [
+            "base_value",
+            "detail_after_leaf",
+            "detail_macro",
+            "detail_second",
+            "detail_value"
+        ]
     );
 }
 

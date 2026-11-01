@@ -7,6 +7,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod source_locations;
+
 use crate::model::{
     CallingConvention, EnumerationDefinition, EnumerationVariant, NativeLibrary, NativeScalar,
     NativeType, Parameter, ParameterDirection, PointerMutability, PointerOwnership,
@@ -112,8 +114,6 @@ pub fn prepare_header_with_declarations_report(
             diagnostic: bounded_diagnostic(&output.stderr),
         });
     }
-    let ast: Value =
-        serde_json::from_slice(&output.stdout).map_err(HeaderPreparationError::Decode)?;
     let canonical_header = preparation
         .header
         .canonicalize()
@@ -136,7 +136,9 @@ pub fn prepare_header_with_declarations_report(
         source_hasher.update(bytes);
     }
     let mut declarations = Declarations::default();
-    declarations.visit(&ast, &declaration_headers)?;
+    let ast = source_locations::decode(&output.stdout, declaration_headers)
+        .map_err(HeaderPreparationError::Decode)?;
+    declarations.visit(&ast.root, &ast.sources)?;
     let metadata = normalize_metadata(NativeLibraryMetadata {
         schema_version: NATIVE_FFI_METADATA_SCHEMA_VERSION,
         target_triple: preparation.target_triple.clone(),
@@ -195,9 +197,9 @@ impl Declarations {
     fn visit(
         &mut self,
         node: &Value,
-        headers: &BTreeSet<PathBuf>,
+        sources: &source_locations::SourceFiles,
     ) -> Result<(), HeaderPreparationError> {
-        if headers.iter().any(|header| originates_in(node, header)) {
+        if sources.owns_declaration(node) {
             match string(node, "kind") {
                 Some("TypedefDecl") => self.typedef(node)?,
                 Some("RecordDecl") => self.record(node)?,
@@ -208,7 +210,7 @@ impl Declarations {
         }
         if let Some(children) = node.get("inner").and_then(Value::as_array) {
             for child in children {
-                self.visit(child, headers)?;
+                self.visit(child, sources)?;
             }
         }
         Ok(())
@@ -514,39 +516,6 @@ fn calling_convention(signature: &str) -> CallingConvention {
     } else {
         CallingConvention::C
     }
-}
-
-fn originates_in(node: &Value, header: &Path) -> bool {
-    let location = node.get("loc");
-    let range_begin = node.pointer("/range/begin");
-    let file = location
-        .and_then(|value| value.get("file"))
-        .and_then(Value::as_str)
-        .or_else(|| {
-            range_begin
-                .and_then(|value| value.get("file"))
-                .and_then(Value::as_str)
-        });
-    if let Some(file) = file {
-        let candidate = Path::new(file)
-            .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from(file));
-        return candidate == header;
-    }
-    let has_main_file_offset = location
-        .and_then(|value| value.get("offset"))
-        .and_then(Value::as_u64)
-        .or_else(|| {
-            range_begin
-                .and_then(|value| value.get("offset"))
-                .and_then(Value::as_u64)
-        })
-        .is_some();
-    let included = location
-        .and_then(|value| value.get("includedFrom"))
-        .or_else(|| range_begin.and_then(|value| value.get("includedFrom")))
-        .is_some();
-    has_main_file_offset && !included
 }
 
 fn children(node: &Value) -> &[Value] {
