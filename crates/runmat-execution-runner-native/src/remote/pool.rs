@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::security::{NodeClockEndV1, NodeClockStartV1};
+use runmat_execution::state::TaskState;
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::CacheImport;
@@ -359,6 +360,7 @@ impl RemotePoolDriver {
                 })?;
         self.dispatch(actions);
         self.resolve_non_success_terminals();
+        self.cancellation_settled.notify_waiters();
         Ok(())
     }
 
@@ -489,6 +491,44 @@ impl RemotePoolDriver {
             notified.as_mut().enable();
             if self.cancellation_in_flight.load(Ordering::Acquire) == 0 {
                 return !self.cancellation_ownership_failed.load(Ordering::Acquire);
+            }
+            notified.await;
+        }
+    }
+
+    /// Wait for control delivery and the scheduler's original cancellation
+    /// dispositions. A control ACK alone cannot close an active attempt.
+    pub(crate) async fn wait_for_cancellation_settlement(&self) -> bool {
+        loop {
+            let notified = self.cancellation_settled.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.cancellation_ownership_failed.load(Ordering::Acquire) {
+                return false;
+            }
+            if self.cancellation_in_flight.load(Ordering::Acquire) == 0 {
+                let pending = self
+                    .driver
+                    .lock()
+                    .expect("remote driver poisoned")
+                    .task_records()
+                    .any(|task| {
+                        task.cancellation.is_some()
+                            && match task.state {
+                                TaskState::Deferred
+                                | TaskState::Ready
+                                | TaskState::Assigned
+                                | TaskState::Running
+                                | TaskState::Committing => true,
+                                TaskState::Succeeded
+                                | TaskState::Failed
+                                | TaskState::Cancelled
+                                | TaskState::Indeterminate => false,
+                            }
+                    });
+                if !pending {
+                    return true;
+                }
             }
             notified.await;
         }

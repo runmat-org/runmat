@@ -1803,6 +1803,13 @@ async fn remote_pool_resolves_cancellation_only_after_worker_quiescence_acknowle
         .await
         .is_err());
     assert_eq!(active.load(Ordering::SeqCst), 1);
+    let settlement = pool.wait_for_cancellation_settlement();
+    tokio::pin!(settlement);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), settlement.as_mut())
+            .await
+            .is_err()
+    );
 
     cancel_ack_gate.notify_one();
     let result = tokio::time::timeout(Duration::from_secs(1), &mut waiter)
@@ -1811,6 +1818,9 @@ async fn remote_pool_resolves_cancellation_only_after_worker_quiescence_acknowle
         .unwrap();
     assert!(result.is_err());
     assert_eq!(active.load(Ordering::SeqCst), 0);
+    assert!(tokio::time::timeout(Duration::from_secs(1), settlement)
+        .await
+        .unwrap());
 }
 
 #[tokio::test]

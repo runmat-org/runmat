@@ -302,6 +302,7 @@ impl RemotePoolDriver {
         if let Some(outcome) = outcome {
             self.publish_ordered(task_id, spmd_task, outcome);
         }
+        self.cancellation_settled.notify_waiters();
     }
 
     fn terminal_failure(&self, driver: &Driver, task: &TaskRecord) -> Option<String> {

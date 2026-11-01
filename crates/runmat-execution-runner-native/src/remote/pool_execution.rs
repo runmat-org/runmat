@@ -634,18 +634,17 @@ async fn execute_with_allocated_workers(
     let mut execution = Box::pin(async move {
         let outcome = execution.await;
         // A task waiter can resolve as soon as cancellation is requested, while
-        // the worker is still executing. Do not publish a terminal checkpoint
-        // until every cancellation has been acknowledged or its route fenced.
-        // This orders control cleanup; it cannot certify physical retirement.
-        let control_cleanup_complete = tokio::time::timeout(
+        // the worker is still executing. The final checkpoint must include the
+        // original scheduler disposition, not just the control delivery ACK.
+        let cancellation_settled = tokio::time::timeout(
             WORKER_READY_TIMEOUT,
-            terminal_pool.wait_for_cancellation_control(),
+            terminal_pool.wait_for_cancellation_settlement(),
         )
         .await
         .unwrap_or(false);
-        if !control_cleanup_complete {
+        if !cancellation_settled {
             return Ok(RemotePoolExecutionOutcome::Indeterminate(
-                "remote cancellation control cleanup did not complete before its deadline".into(),
+                "remote cancellation settlement did not complete before its deadline".into(),
             ));
         }
         // Persist the final scheduler state before exposing any terminal outcome,
