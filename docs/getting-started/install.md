@@ -8,6 +8,17 @@ If you prefer to use the command line, you can install RunMat via package manage
 
 RunMat can be installed via pre-compiled binaries, package managers, or built from source.
 
+### Linux runtime libraries
+
+Pre-compiled Linux CLI binaries use system BLAS/LAPACK, HDF5, OpenSSL and C++ runtime libraries. Install packages matching the archive's shared-library ABIs before running the CLI or its installer. For Debian 12:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y curl libopenblas0 libhdf5-103-1 libssl3 libstdc++6
+```
+
+Other distributions use their corresponding ABI-compatible packages. Building executables with `runmat compile` also requires a system linker and native development libraries; see [Native Compilation](/docs/runtime/compiler/native-compilation).
+
 ### Automated Installers
 
 - Linux/macOS: `curl -fsSL https://runmat.com/install.sh | sh`
