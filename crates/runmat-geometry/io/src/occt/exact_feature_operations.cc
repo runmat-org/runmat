@@ -22,7 +22,7 @@
 #include <Message_ProgressRange.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
-#include <TopTools_ListIteratorOfListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <gp_Ax1.hxx>
@@ -177,7 +177,7 @@ FeatureExecution begin_execution(std::vector<TopoDS_Shape> operands,
 void append_relations(FeatureHistorySource& source,
                       const TopTools_ListOfShape& targets,
                       OcctFeatureRelationKind kind) {
-  for (TopTools_ListIteratorOfListOfShape iterator(targets); iterator.More(); iterator.Next()) {
+  for (TopTools_ListOfShape::Iterator iterator(targets); iterator.More(); iterator.Next()) {
     const TopoDS_Shape& target = iterator.Value();
     if (std::any_of(kSelectableKinds.begin(), kSelectableKinds.end(), [&](const auto& entry) {
           return target.ShapeType() == entry.first;

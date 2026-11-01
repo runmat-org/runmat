@@ -76,6 +76,8 @@ fn build_occt_backend() {
     }
     if target_env == "msvc" {
         build.flag("/utf-8");
+        // Preserve RAII cleanup when the bridge catches C++ exceptions.
+        build.flag("/EHsc");
     }
 
     build.compile("runmat_geometry_io_occt");
