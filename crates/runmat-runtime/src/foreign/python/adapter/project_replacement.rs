@@ -56,10 +56,13 @@ impl<'a> PreparedPythonProjectReplacement<'a> {
         }
     }
 
-    pub async fn retire_owner(&self) -> Result<VerifiedPythonProjectRetirement<'a>, RuntimeError> {
+    pub async fn retire_owner(
+        &self,
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<VerifiedPythonProjectRetirement<'a>, RuntimeError> {
         let owner: &'a PythonAdapter = self.owner;
         owner
-            .retire_project_session(&self.retirement_identity)
+            .retire_project_session(&self.retirement_identity, runtime)
             .await
     }
 

@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use super::{CapturedStderr, ChildProcess, ChildStdio, ProcessExit};
+use super::{CapturedProcessOutput, ChildOutput, ChildProcess, ChildStdio, ProcessExit};
 use crate::ProcessHostResult;
 
 /// Private bytes that must survive when a child cannot be proved retired.
@@ -60,11 +60,14 @@ impl<L: ProcessRetirementLease> RetirementBoundChild<L> {
     pub fn id(&self) -> Option<u32> {
         self.child.id()
     }
-    pub fn captured_stderr(&self) -> CapturedStderr {
+    pub fn captured_stderr(&self) -> CapturedProcessOutput {
         self.child.captured_stderr()
     }
     pub fn take_stdio(&mut self) -> ProcessHostResult<ChildStdio> {
         self.child.take_stdio()
+    }
+    pub fn take_application_output(&mut self) -> ProcessHostResult<ChildOutput> {
+        self.child.take_application_output()
     }
     pub fn lease(&self) -> &L {
         &self.lease
@@ -190,11 +193,14 @@ impl<L: ProcessRetirementLease> MemberRetirementBoundChild<L> {
     pub fn id(&self) -> Option<u32> {
         self.0.id()
     }
-    pub fn captured_stderr(&self) -> CapturedStderr {
+    pub fn captured_stderr(&self) -> CapturedProcessOutput {
         self.0.captured_stderr()
     }
     pub fn take_stdio(&mut self) -> ProcessHostResult<ChildStdio> {
         self.0.take_stdio()
+    }
+    pub fn take_application_output(&mut self) -> ProcessHostResult<ChildOutput> {
+        self.0.take_application_output()
     }
     pub fn lease(&self) -> &L {
         self.0.lease()
@@ -252,7 +258,7 @@ impl<L: ProcessRetirementLease> BootstrapBoundChild<L> {
         }
     }
 
-    pub fn captured_stderr(&self) -> CapturedStderr {
+    pub fn captured_stderr(&self) -> CapturedProcessOutput {
         match self {
             Self::Tree(child) => child.captured_stderr(),
             Self::Member(child) => child.captured_stderr(),
@@ -263,6 +269,12 @@ impl<L: ProcessRetirementLease> BootstrapBoundChild<L> {
         match self {
             Self::Tree(child) => child.take_stdio(),
             Self::Member(child) => child.take_stdio(),
+        }
+    }
+    pub fn take_application_output(&mut self) -> ProcessHostResult<ChildOutput> {
+        match self {
+            Self::Tree(child) => child.take_application_output(),
+            Self::Member(child) => child.take_application_output(),
         }
     }
 

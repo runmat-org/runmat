@@ -11,6 +11,7 @@ use futures::channel::mpsc as async_mpsc;
 use futures::StreamExt;
 use runmat_mex::{MexApi, MexCallOutput, MexDiagnostic, MexHostServices};
 use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
+use runmat_process_host::ipc::private_control::PrivateControlListener;
 use runmat_process_host::ipc::{
     authenticate_driver, read_payload, write_payload, FrameLimits, HostHandshake,
     PendingFrameWrite, SessionSecret,
@@ -28,6 +29,9 @@ use super::{
 };
 use crate::context::RuntimeContext;
 use crate::execution::RootedValue;
+use crate::foreign::isolation_io::FramedWriter;
+use crate::foreign::isolation_output::{self, Completion, HostOutput};
+use crate::foreign::mex::session::wire_runtime_error;
 use crate::foreign::mex::RootedMexInvocation;
 use crate::foreign::RuntimeMexHostServices;
 use crate::RuntimeError;
@@ -61,6 +65,7 @@ fn root_published_value(output: Box<dyn MexCallOutput>) -> Result<RootedValue, M
 const DEFAULT_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 mod callback_tasks;
+mod application_output;
 use callback_tasks::ClientCallbackTasks;
 mod reply_publication;
 use reply_publication::callback_reply_frame;
@@ -94,7 +99,8 @@ pub struct IsolatedMexClient {
     child: ChildProcess,
     snapshots: Rc<SharedSnapshotStore>,
     messages: async_mpsc::UnboundedReceiver<Result<HostMessage, MexWireError>>,
-    writer: tokio::process::ChildStdin,
+    writer: FramedWriter,
+    output: HostOutput,
     limits: FrameLimits,
     next_request_id: u64,
     origins: HashMap<u64, RuntimeContext>,
@@ -126,9 +132,9 @@ enum PendingLifecycle {
 }
 
 /// Origin-side evidence for shutdown, independent of lifecycle diagnostics.
-pub(in crate::foreign::mex) enum IsolatedMexRetirement {
-    Retained(MexWireError),
-    Retired(Result<(), MexWireError>),
+pub(in crate::foreign::mex) enum IsolatedMexRetirement<E = RuntimeError> {
+    Retained(E),
+    Retired(Result<(), E>),
 }
 
 thread_local! {
@@ -156,6 +162,7 @@ pub(in crate::foreign::mex) fn in_isolated_callback() -> bool {
 
 impl IsolatedMexClient {
     pub async fn spawn(
+        runtime: Option<&RuntimeContext>,
         module: PathBuf,
         ready: Arc<tokio::sync::Notify>,
         process_group_placement: ProcessGroupPlacement,
@@ -185,15 +192,29 @@ impl IsolatedMexClient {
         command
             .environment
             .insert(MEX_HOST_SNAPSHOT_ROOT_ENV.into(), snapshot_root.into());
+        let control = PrivateControlListener::bind()
+            .map_err(|error| wire_error("RunMat:MEX:HostTransport", error.to_string(), None))?;
+        command.stdio =
+            runmat_process_host::StdioPolicy::PrivateControl(control.endpoint().clone());
         let mut child = command
             .spawn()
             .await
             .map_err(|error| wire_error("RunMat:MEX:HostSpawn", error.to_string(), None))?;
-        let stdio = child
-            .take_stdio()
+        let output = child
+            .take_application_output()
             .map_err(|error| wire_error("RunMat:MEX:HostTransport", error.to_string(), None))?;
-        let mut reader = stdio.stdout;
-        let mut writer = stdio.stdin;
+        let control = tokio::time::timeout(DEFAULT_LIFECYCLE_TIMEOUT, control.accept())
+            .await
+            .map_err(|_| {
+                wire_error(
+                    "RunMat:MEX:Timeout",
+                    "MEX host control bootstrap timed out",
+                    None,
+                )
+            })?
+            .map_err(|error| wire_error("RunMat:MEX:HostTransport", error.to_string(), None))?;
+        let mut reader = control.reader;
+        let mut writer = FramedWriter::Private(control.writer);
         let session = authenticate_driver(
             &mut reader,
             &mut writer,
@@ -228,6 +249,8 @@ impl IsolatedMexClient {
             snapshots,
             messages,
             writer,
+            output: HostOutput::attached(output, runtime)
+                .map_err(|error| wire_error("RunMat:MEX:HostTransport", error.to_string(), None))?,
             limits,
             next_request_id: 1,
             origins: HashMap::new(),
@@ -241,7 +264,7 @@ impl IsolatedMexClient {
         })
     }
 
-    pub async fn invoke(
+    async fn invoke_protocol(
         &mut self,
         arguments: &crate::call::RootedFunctionArguments,
         requested_outputs: usize,
@@ -253,7 +276,7 @@ impl IsolatedMexClient {
         if let Some(error) = &self.terminal_error {
             return Err(error.clone());
         }
-        self.settle_pending().await?;
+        self.output.select_origin(Some(&runtime));
         let request_id = self.take_request_id()?;
         let mut transferred_arguments = Vec::with_capacity(arguments.len());
         for value in arguments.iter() {
@@ -318,13 +341,24 @@ impl IsolatedMexClient {
     /// Recover exact protocol alignment after a foreground future was
     /// cancelled. The session retains this client; its next operation or
     /// shutdown must consume the original reply and service its callbacks.
-    pub(super) async fn settle_pending(&mut self) -> Result<(), MexWireError> {
+    pub(super) async fn settle_pending(&mut self) -> Result<(), RuntimeError> {
         let Some((request_id, runtime)) = self.pending_invocation.clone() else {
             return Ok(());
         };
         // The abandoned result stays within the codec's producer roots until
         // discarded; it is never republished as a raw managed value.
-        let _ = self.wait_for_invocation(request_id, runtime, false).await?;
+        let output = self.output.clone();
+        let _ = isolation_output::drive(
+            &output,
+            Some(&runtime),
+            Completion::AvailableOutput,
+            async {
+                self.wait_for_invocation(request_id, runtime.clone(), false)
+                    .await
+                    .map_err(wire_runtime_error)
+            },
+        )
+        .await?;
         Ok(())
     }
 
@@ -414,7 +448,7 @@ impl IsolatedMexClient {
         }
     }
 
-    pub async fn clear(
+    async fn clear_protocol(
         &mut self,
         runtime: RuntimeContext,
         timeout: Option<Duration>,
@@ -422,7 +456,6 @@ impl IsolatedMexClient {
         if let Some(error) = &self.terminal_error {
             return Err(error.clone());
         }
-        self.settle_pending().await?;
         match self.pending_lifecycle.clone() {
             Some(PendingLifecycle::Clear {
                 request_id,
@@ -435,6 +468,7 @@ impl IsolatedMexClient {
                 Some(self.module.display().to_string()),
             )),
             None => {
+                self.output.select_origin(Some(&runtime));
                 let request_id = self.take_request_id()?;
                 let deadline =
                     tokio::time::Instant::now() + timeout.unwrap_or(DEFAULT_LIFECYCLE_TIMEOUT);
@@ -461,6 +495,7 @@ impl IsolatedMexClient {
         runtime: RuntimeContext,
         deadline: tokio::time::Instant,
     ) -> Result<MexLifecycleOutcome, MexWireError> {
+        self.output.select_origin(Some(&runtime));
         let outcome = self
             .wait_for_lifecycle_until(request_id, runtime, deadline, "clear")
             .await?;
@@ -468,19 +503,16 @@ impl IsolatedMexClient {
         Ok(outcome)
     }
 
-    pub(in crate::foreign::mex) async fn shutdown(
+    async fn shutdown_protocol(
         &mut self,
         runtime: RuntimeContext,
         timeout: Option<Duration>,
-    ) -> IsolatedMexRetirement {
+    ) -> IsolatedMexRetirement<MexWireError> {
         if let Some(error) = self.terminal_error.clone() {
             if self.retire_poisoned_host().await.is_ok() {
                 return IsolatedMexRetirement::Retired(Err(error));
             }
             return IsolatedMexRetirement::Retained(error);
-        }
-        if let Err(error) = self.settle_pending().await {
-            return self.retirement_after_error(error);
         }
         if let Some(PendingLifecycle::Clear {
             request_id,
@@ -489,7 +521,7 @@ impl IsolatedMexClient {
         }) = self.pending_lifecycle.clone()
         {
             if let Err(error) = self.finish_clear(request_id, runtime, deadline).await {
-                return self.retirement_after_error(error);
+                return self.retirement_after_error(error).await;
             }
         }
         if let Some(PendingLifecycle::ShutdownExit {
@@ -511,6 +543,7 @@ impl IsolatedMexClient {
             Ok(request_id) => request_id,
             Err(error) => return IsolatedMexRetirement::Retained(error),
         };
+        self.output.select_origin(Some(&runtime));
         let deadline = tokio::time::Instant::now() + timeout.unwrap_or(DEFAULT_LIFECYCLE_TIMEOUT);
         self.pending_lifecycle = Some(PendingLifecycle::Shutdown {
             request_id,
@@ -518,7 +551,7 @@ impl IsolatedMexClient {
             deadline,
         });
         if let Err(error) = self.write(&DriverMessage::Shutdown { request_id }).await {
-            return self.retirement_after_error(error);
+            return self.retirement_after_error(error).await;
         }
         self.finish_shutdown(request_id, runtime, deadline).await
     }
@@ -528,13 +561,14 @@ impl IsolatedMexClient {
         request_id: u64,
         runtime: RuntimeContext,
         deadline: tokio::time::Instant,
-    ) -> IsolatedMexRetirement {
+    ) -> IsolatedMexRetirement<MexWireError> {
+        self.output.select_origin(Some(&runtime));
         let outcome = match self
             .wait_for_lifecycle_until(request_id, runtime, deadline, "shutdown")
             .await
         {
             Ok(outcome) => outcome,
-            Err(error) => return self.retirement_after_error(error),
+            Err(error) => return self.retirement_after_error(error).await,
         };
         let diagnostic = match outcome {
             MexLifecycleOutcome::Retained => {
@@ -565,8 +599,9 @@ impl IsolatedMexClient {
         &mut self,
         diagnostic: Option<MexWireError>,
         deadline: tokio::time::Instant,
-    ) -> IsolatedMexRetirement {
-        let exit = match tokio::time::timeout_at(deadline, self.child.wait()).await {
+    ) -> IsolatedMexRetirement<MexWireError> {
+        let exit = match tokio::time::timeout_at(deadline, self.child.wait_and_retire_tree()).await
+        {
             Err(_) => {
                 let error = wire_error(
                     "RunMat:MEX:Timeout",
@@ -574,6 +609,7 @@ impl IsolatedMexClient {
                     Some(self.module.display().to_string()),
                 );
                 if self.child.terminate_tree().await.is_ok() {
+                    self.tree_retired = true;
                     self.pending_lifecycle = None;
                     return IsolatedMexRetirement::Retired(Err(error));
                 }
@@ -590,6 +626,7 @@ impl IsolatedMexClient {
                 }
             },
         };
+        self.tree_retired = true;
         self.pending_lifecycle = None;
         if !exit.success {
             return IsolatedMexRetirement::Retired(Err(self.crash_error(exit.code)));
@@ -784,7 +821,7 @@ impl IsolatedMexClient {
         }
     }
 
-    pub async fn service_ready_background(&mut self) -> Result<bool, MexWireError> {
+    async fn service_ready_background_protocol(&mut self) -> Result<bool, MexWireError> {
         if self.terminal_error.is_some() {
             return Ok(false);
         }
@@ -905,16 +942,16 @@ impl IsolatedMexClient {
         )
     }
 
-    fn retirement_after_error(&mut self, error: MexWireError) -> IsolatedMexRetirement {
-        match self.child.try_wait() {
-            Ok(Some(_)) => {
-                self.pending_invocation = None;
-                self.pending_lifecycle = None;
-                self.origins.clear();
-                self.callbacks = ClientCallbackTasks::default();
-                IsolatedMexRetirement::Retired(Err(error))
-            }
-            Ok(None) | Err(_) => IsolatedMexRetirement::Retained(error),
+    async fn retirement_after_error(
+        &mut self,
+        error: MexWireError,
+    ) -> IsolatedMexRetirement<MexWireError> {
+        if matches!(self.child.try_wait_unreaped(), Ok(Some(_)))
+            && self.retire_poisoned_host().await.is_ok()
+        {
+            IsolatedMexRetirement::Retired(Err(error))
+        } else {
+            IsolatedMexRetirement::Retained(error)
         }
     }
 
@@ -1210,7 +1247,8 @@ mod tests {
             child,
             snapshots: Rc::new(SharedSnapshotStore::create().unwrap()),
             messages,
-            writer: stdio.stdin,
+            writer: FramedWriter::Fixture(stdio.stdin),
+            output: HostOutput::default(),
             limits: FrameLimits {
                 max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
             },
@@ -1265,13 +1303,20 @@ mod tests {
         assert!(!client.service_ready_background().await.unwrap());
         let runtime =
             RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
+        let clear_error = client
+            .clear(runtime.clone(), None)
+            .await
+            .expect_err("poisoned transport rejects clear");
         assert_eq!(
-            client.clear(runtime.clone(), None).await,
-            Err(original.clone())
+            std::error::Error::source(&clear_error)
+                .and_then(|cause| cause.downcast_ref::<MexWireError>()),
+            Some(&original)
         );
         assert!(matches!(
             client.shutdown(runtime, None).await,
-            IsolatedMexRetirement::Retired(Err(error)) if error == original
+            IsolatedMexRetirement::Retired(Err(error))
+                if std::error::Error::source(&error)
+                    .and_then(|cause| cause.downcast_ref::<MexWireError>()) == Some(&original)
         ));
         drop(sender);
     }
@@ -1307,7 +1352,8 @@ mod tests {
             child,
             snapshots: Rc::new(SharedSnapshotStore::create().unwrap()),
             messages,
-            writer: stdio.stdin,
+            writer: FramedWriter::Fixture(stdio.stdin),
+            output: HostOutput::default(),
             limits: FrameLimits {
                 max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
             },
@@ -1363,7 +1409,8 @@ mod tests {
             child,
             snapshots: Rc::new(SharedSnapshotStore::create().unwrap()),
             messages,
-            writer: stdio.stdin,
+            writer: FramedWriter::Fixture(stdio.stdin),
+            output: HostOutput::default(),
             limits: FrameLimits {
                 max_message_bytes: MEX_HOST_MAX_MESSAGE_BYTES,
             },
@@ -1385,8 +1432,8 @@ mod tests {
         let retirement = client.shutdown(runtime, Some(Duration::from_secs(3))).await;
         assert!(matches!(
             retirement,
-            IsolatedMexRetirement::Retired(Err(MexWireError { identifier, .. }))
-                if identifier == "RunMat:MEX:Timeout"
+            IsolatedMexRetirement::Retired(Err(error))
+                if error.identifier() == Some("RunMat:MEX:Timeout")
         ));
         assert!(client.child.try_wait().unwrap().is_some());
     }

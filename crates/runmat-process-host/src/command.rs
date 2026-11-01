@@ -29,6 +29,10 @@ impl Default for ProcessGroupPlacement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StdioPolicy {
     Piped,
+    /// Application output is piped separately from the authenticated control
+    /// channels. stdin is closed; the caller owns both output drains.
+    #[cfg(any(unix, windows))]
+    PrivateControl(crate::ipc::private_control::PrivateControlEndpoint),
     /// Both output pipes belong to one complete-output call; neither is capped.
     CompleteOutput,
     /// Complete output with one owned input body written concurrently with both drains.
@@ -102,11 +106,14 @@ impl HostCommand {
             ));
         }
         self.resource_limits.validate()?;
+        let joined_stdio = self.stdio == StdioPolicy::Piped;
+        #[cfg(any(unix, windows))]
+        let joined_stdio = joined_stdio || matches!(self.stdio, StdioPolicy::PrivateControl(_));
         if self.process_group_placement == ProcessGroupPlacement::JoinAncestorGroup
-            && (self.lifetime != ChildLifetime::Owned || self.stdio != StdioPolicy::Piped)
+            && (self.lifetime != ChildLifetime::Owned || !joined_stdio)
         {
             return Err(ProcessHostError::Configuration(
-                "ancestor-group helpers require an owned piped child".into(),
+                "ancestor-group helpers require owned protocol and output channels".into(),
             ));
         }
         #[cfg(windows)]
@@ -128,6 +135,14 @@ impl HostCommand {
         {
             return Err(ProcessHostError::Configuration(
                 "detached children require null, file-backed or startup diagnostic stdio".into(),
+            ));
+        }
+        #[cfg(any(unix, windows))]
+        if self.lifetime == ChildLifetime::Detached
+            && matches!(self.stdio, StdioPolicy::PrivateControl(_))
+        {
+            return Err(ProcessHostError::Configuration(
+                "private control channels require an owned child".into(),
             ));
         }
         Ok(())

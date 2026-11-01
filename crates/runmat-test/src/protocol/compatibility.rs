@@ -190,6 +190,12 @@ fn validate_response(
             Ok(())
         }
         WorkerResponse::Event { event } => match &event.payload {
+            crate::event::TestEventPayload::ProcessOutput { .. } => {
+                Err(TestDomainError::InvalidField {
+                    field: "worker.event.process_output",
+                    reason: "only the process owner may certify raw application output".into(),
+                })
+            }
             crate::event::TestEventPayload::TestFinished { result } => {
                 check_attempt(result, limits)
             }

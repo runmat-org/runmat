@@ -6,10 +6,13 @@ use super::{RenderedReport, ReportSummary, Reporter};
 use crate::RunnerResult;
 
 #[derive(Default)]
-pub struct HumanReporter;
+pub struct HumanReporter {
+    process_output: super::process_output::ProcessOutputReports,
+}
 
 impl Reporter for HumanReporter {
-    fn event(&mut self, _event: &TestEvent) -> RunnerResult<()> {
+    fn event(&mut self, event: &TestEvent) -> RunnerResult<()> {
+        self.process_output.observe(event);
         Ok(())
     }
 
@@ -38,6 +41,14 @@ impl Reporter for HumanReporter {
             "{} tests: {} passed, {} failed, {} incomplete",
             summary.total, summary.passed, summary.failed, summary.incomplete
         ));
+        lines.push(format!(
+            "Run: {:?} (incomplete={})",
+            result.state.disposition, result.state.incomplete
+        ));
+        let output = self.process_output.text();
+        if !output.is_empty() {
+            lines.push(output);
+        }
         Ok(RenderedReport {
             name: "test-results.txt".into(),
             media_type: "text/plain; charset=utf-8".into(),

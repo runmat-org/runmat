@@ -507,6 +507,16 @@ impl RuntimeContext {
         &self.services
     }
 
+    /// This restricted view can publish console text, not dispatch source or
+    /// foreign calls. Removing its foreign edge must not invalidate the actual
+    /// command's device-route evidence as a service reconfiguration would.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn console_scope(&self) -> super::RuntimeConsoleScope {
+        let mut context = self.clone();
+        context.services = context.services.without_foreign();
+        super::RuntimeConsoleScope::new(context)
+    }
+
     /// Capture the typed constructor instance at call admission. The active
     /// receiver stack is poll-local, while a semantic child may be scheduled
     /// for a later poll. Ordinary methods explicitly clear any inherited seed.

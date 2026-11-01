@@ -48,7 +48,7 @@ impl ForeignUnitHost {
         local_tasks: &RuntimeLocalTaskSupervisor,
     ) -> ForeignUnitRetirement {
         let mex = match local_tasks
-            .participate_foreground(self.mex.shutdown_gracefully_retirement(runtime))
+            .participate_foreground(self.mex.shutdown_gracefully_retirement(runtime.clone()))
             .await
         {
             Ok(mex) => mex,
@@ -60,11 +60,15 @@ impl ForeignUnitHost {
             }
             MexSessionRetirement::Retired(prior) => prior,
         };
-        self.retire_native(prior).await
+        self.retire_native(prior, &runtime).await
     }
 
-    async fn retire_native(&self, prior: Cleanup) -> ForeignUnitRetirement {
-        let (scope, result) = match self.native_ffi.shutdown_retirement().await {
+    async fn retire_native(
+        &self,
+        prior: Cleanup,
+        runtime: &RuntimeContext,
+    ) -> ForeignUnitRetirement {
+        let (scope, result) = match self.native_ffi.shutdown_retirement(Some(runtime)).await {
             NativeFfiRetirement::Retained(error) => return retained(prior, error),
             NativeFfiRetirement::Retired { scope, result } => (scope, result),
         };
@@ -77,11 +81,19 @@ impl ForeignUnitHost {
             .build();
             return retained(prior, mismatch);
         }
-        self.retire_python(prior).await
+        self.retire_python(prior, runtime).await
     }
 
-    async fn retire_python(&self, prior: Cleanup) -> ForeignUnitRetirement {
-        match self.python.shutdown_selected_retirement().await {
+    async fn retire_python(
+        &self,
+        prior: Cleanup,
+        runtime: &RuntimeContext,
+    ) -> ForeignUnitRetirement {
+        match self
+            .python
+            .shutdown_selected_retirement(Some(runtime))
+            .await
+        {
             PythonAdapterRetirement::Retained(error) => retained(prior, error),
             PythonAdapterRetirement::Retired { scope, result } => {
                 let prior = append(prior, result);

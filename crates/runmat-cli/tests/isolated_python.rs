@@ -50,6 +50,8 @@ fn same_binary_host_preserves_values_objects_callbacks_and_restart_fencing() {
     let output = run_script(
         r#"
 environment = pyenv("ExecutionMode", "OutOfProcess");
+pyrun("print('python-stdout', flush=True)");
+pyrun("import sys; print('python-stderr', file=sys.stderr, flush=True)");
 items = py.list({int32(10), int32(20)});
 items(2) = int32(42);
 mapped = py.list(py.map(@pythonCallback, {int64(40)}));
@@ -70,6 +72,7 @@ replacement = py.list({int32(7)});
 disp(replacement(1));
 
 function y = pythonCallback(x)
+    pyrun("print('callback-stdout', flush=True)");
     y = py.operator.add(x, int64(2));
 end
 "#,
@@ -83,9 +86,18 @@ end
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(
         stdout.split_whitespace().collect::<Vec<_>>(),
-        ["42", "42", "uint64", "RunMat:Python:StaleHandle", "7"],
+        [
+            "python-stdout",
+            "callback-stdout",
+            "42",
+            "42",
+            "uint64",
+            "RunMat:Python:StaleHandle",
+            "7"
+        ],
         "stdout={stdout}"
     );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("python-stderr"));
 }
 
 #[test]

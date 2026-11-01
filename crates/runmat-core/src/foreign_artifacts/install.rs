@@ -68,6 +68,7 @@ pub async fn install_selected_interop(
     host: &ForeignUnitHost,
     manifest: &InteropManifest,
     materialized: &dyn MaterializedForeignView,
+    runtime: Option<&runmat_runtime::context::RuntimeContext>,
 ) -> Result<(), SelectedForeignInstallError> {
     let plan =
         super::selected_install_plan::preflight_selected_interop(host, manifest, materialized)?;
@@ -78,7 +79,7 @@ pub async fn install_selected_interop(
     }
     prepare_selected_cuda(&plan)?;
     let staged = super::selected_replacement::PreparedSelectedHostReplacement::prepare(host, plan)?;
-    let retirement = staged.retire_project_hosts().await?;
+    let retirement = staged.retire_project_hosts(runtime).await?;
     let publication_fence = staged.admit_commit_after_retirement(retirement)?.commit();
     drop(publication_fence);
     Ok(())

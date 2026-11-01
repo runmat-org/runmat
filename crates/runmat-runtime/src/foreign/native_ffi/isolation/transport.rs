@@ -104,13 +104,13 @@ impl HostOwner {
 }
 
 pub(super) enum HostReader {
-    Process(tokio::process::ChildStdout),
+    Process(runmat_process_host::ipc::private_control::ControlReader),
     Thread(ReadHalf<DuplexStream>),
     Closed,
 }
 
 pub(super) enum HostWriter {
-    Process(tokio::process::ChildStdin),
+    Process(runmat_process_host::ipc::private_control::ControlWriter),
     Thread(WriteHalf<DuplexStream>),
     Closed,
 }

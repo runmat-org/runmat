@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
+use runmat_process_host::ipc::private_control::PrivateControlListener;
 use runmat_process_host::ipc::{
     authenticate_driver, read_payload, write_payload, FrameLimits, HostHandshake, SessionSecret,
 };
@@ -28,6 +29,8 @@ use super::{
 };
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::execution::{RootedValueLease, RootedValueMember, RootedValues, RootedValuesBuilder};
+use crate::foreign::isolation_io::{FramedReader, FramedWriter};
+use crate::foreign::isolation_output::{self, Completion, HostOutput};
 use crate::foreign::{
     invoke_foreign_callback, ForeignHandleRegistry, ForeignResourceMetadata,
     PythonRuntimeConfiguration,
@@ -38,6 +41,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[path = "client/invocation_read.rs"]
 mod invocation_read;
+mod application_output;
 use invocation_read::{read_invocation_message, InvocationRead};
 
 pub struct NestedPythonCall {
@@ -74,8 +78,9 @@ impl ProcessRetirementLease for PythonChildResources {
 
 pub struct IsolatedPythonClient {
     child: BootstrapBoundChild<PythonChildResources>,
-    reader: tokio::process::ChildStdout,
-    writer: tokio::process::ChildStdin,
+    reader: FramedReader,
+    writer: FramedWriter,
+    output: HostOutput,
     limits: FrameLimits,
     next_request_id: u64,
     next_callback_id: u64,
@@ -128,8 +133,9 @@ impl IsolatedPythonClient {
         let stdio = child.take_stdio().expect("take pending host stdio");
         Self {
             child,
-            reader: stdio.stdout,
-            writer: stdio.stdin,
+            reader: FramedReader::Fixture(stdio.stdout),
+            writer: FramedWriter::Fixture(stdio.stdin),
+            output: HostOutput::default(),
             limits: FrameLimits {
                 max_message_bytes: PYTHON_HOST_MAX_MESSAGE_BYTES,
             },
@@ -148,6 +154,7 @@ impl IsolatedPythonClient {
     }
 
     pub async fn spawn(
+        runtime: Option<&RuntimeContext>,
         configuration: &PythonRuntimeConfiguration,
         process_group_placement: ProcessGroupPlacement,
         snapshot_parent: Option<SharedSnapshotParent>,
@@ -210,6 +217,10 @@ impl IsolatedPythonClient {
         command
             .environment
             .insert(PYTHON_HOST_SNAPSHOT_ROOT_ENV.into(), snapshot_root.into());
+        let control = PrivateControlListener::bind()
+            .map_err(|error| wire_error("RunMat:Python:HostTransport", error.to_string()))?;
+        command.stdio =
+            runmat_process_host::StdioPolicy::PrivateControl(control.endpoint().clone());
         let child = match command.spawn_observed(&unverified).await {
             Ok(child) => child,
             Err(error) => {
@@ -233,11 +244,20 @@ impl IsolatedPythonClient {
             byte_leases,
         };
         let mut child = BootstrapBoundChild::new(child, resources, unverified);
-        let stdio = child
-            .take_stdio()
+        let output = child
+            .take_application_output()
             .map_err(|error| wire_error("RunMat:Python:HostTransport", error.to_string()))?;
-        let mut reader = stdio.stdout;
-        let mut writer = stdio.stdin;
+        let control = tokio::time::timeout(DEFAULT_SHUTDOWN_TIMEOUT, control.accept())
+            .await
+            .map_err(|_| {
+                wire_error(
+                    "RunMat:Python:Timeout",
+                    "Python host control bootstrap timed out",
+                )
+            })?
+            .map_err(|error| wire_error("RunMat:Python:HostTransport", error.to_string()))?;
+        let mut reader = FramedReader::Private(control.reader);
+        let mut writer = FramedWriter::Private(control.writer);
         let session = authenticate_driver(
             &mut reader,
             &mut writer,
@@ -254,6 +274,7 @@ impl IsolatedPythonClient {
             child,
             reader,
             writer,
+            output: HostOutput::attached(output, runtime).map_err(runtime_wire_error)?,
             limits: session.limits,
             next_request_id: 1,
             next_callback_id: 1,
@@ -265,7 +286,7 @@ impl IsolatedPythonClient {
         })
     }
 
-    pub async fn invoke(
+    async fn invoke_protocol(
         &mut self,
         runtime: RuntimeContext,
         call: ForeignCall,
@@ -724,45 +745,6 @@ impl IsolatedPythonClient {
             .collect()
     }
 
-    pub async fn shutdown(&mut self, released: Vec<u64>) -> Result<(), PythonWireError> {
-        match self.shutdown_retirement(released).await {
-            PythonClientRetirement::Retired { result, .. } => result,
-            PythonClientRetirement::Retained { retirement, .. } => Err(retirement),
-        }
-    }
-
-    pub async fn shutdown_retirement(&mut self, released: Vec<u64>) -> PythonClientRetirement {
-        if matches!(self.shutdown_progress, ShutdownProgress::Open) {
-            // A cancelled shutdown cannot resend an unknown-effect record.
-            self.shutdown_progress = ShutdownProgress::Attempted;
-            let result = self.shutdown_protocol(released).await;
-            self.shutdown_progress = ShutdownProgress::Protocol(result);
-        }
-        match self.child.terminate_contained_child().await {
-            Ok(scope) => {
-                let result = match std::mem::replace(
-                    &mut self.shutdown_progress,
-                    ShutdownProgress::Attempted,
-                ) {
-                    ShutdownProgress::Protocol(result) => result,
-                    ShutdownProgress::Attempted => Err(wire_error(
-                        "RunMat:Python:ShutdownInterrupted",
-                        "isolated Python shutdown was interrupted before retirement",
-                    )),
-                    ShutdownProgress::Open => unreachable!("shutdown attempted before proof"),
-                };
-                PythonClientRetirement::Retired { scope, result }
-            }
-            Err(error) => PythonClientRetirement::Retained {
-                retirement: wire_error("RunMat:Python:RetirementUnverified", error.to_string()),
-                prior_protocol: match &self.shutdown_progress {
-                    ShutdownProgress::Protocol(Err(prior)) => Some(prior.clone()),
-                    _ => None,
-                },
-            },
-        }
-    }
-
     async fn shutdown_protocol(&mut self, released: Vec<u64>) -> Result<(), PythonWireError> {
         let request_id = self.take_request_id()?;
         let releases = self.translate_releases(released);
@@ -845,6 +827,13 @@ fn runtime_wire_error(error: RuntimeError) -> PythonWireError {
         message: error.to_string(),
         python,
     }
+}
+
+fn console_transport_error(error: RuntimeError) -> RuntimeError {
+    build_runtime_error("isolated Python application output could not be delivered")
+        .with_identifier("RunMat:Python:HostTransport")
+        .with_source(error)
+        .build()
 }
 
 pub(crate) fn runtime_error(error: PythonWireError) -> RuntimeError {

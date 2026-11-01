@@ -1,4 +1,5 @@
 mod command;
+mod control_requests;
 mod execution_config;
 mod local;
 mod pool;

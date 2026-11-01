@@ -14,6 +14,7 @@ impl NativeFfiAdapter {
     pub(crate) async fn retire_project_session(
         &self,
         identity: &Rc<()>,
+        runtime: Option<&RuntimeContext>,
     ) -> Result<VerifiedNativeProjectRetirement<'_>, RuntimeError> {
         if self.isolation_policy.get().isolate || self.isolated_client.borrow().is_some() {
             self.handles.admit_host_restart(&self.host_identity)?;
@@ -51,7 +52,7 @@ impl NativeFfiAdapter {
             .project_retirement
             .begin(identity)
             .ok_or_else(|| invalid_call("native project retirement authority changed"))?;
-        match self.retire_isolated_client(false).await {
+        match self.retire_isolated_client(false, runtime).await {
             NativeFfiRetirement::Retained(error) => Err(error),
             NativeFfiRetirement::Retired { scope, result } => {
                 let valid_scope = matches!(

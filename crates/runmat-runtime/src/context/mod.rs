@@ -46,6 +46,10 @@ pub(crate) mod overlay_storage;
 pub(crate) mod physical_test_support;
 pub(crate) mod poll_projection;
 mod portable_host;
+#[cfg(not(target_arch = "wasm32"))]
+mod console_scope;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use console_scope::RuntimeConsoleScope;
 mod preferences;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod process_invocation;

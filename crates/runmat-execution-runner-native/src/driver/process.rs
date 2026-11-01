@@ -159,7 +159,7 @@ enum AttemptChild {
 }
 
 impl AttemptChild {
-    fn captured_stderr(&self) -> runmat_process_host::child::CapturedStderr {
+    fn captured_stderr(&self) -> runmat_process_host::child::CapturedProcessOutput {
         match self {
             Self::Direct(child) => child.captured_stderr(),
             Self::Graph(child) => child.captured_stderr(),

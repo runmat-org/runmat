@@ -59,13 +59,13 @@ impl<'a> PreparedNativeProjectReplacement<'a> {
         self
     }
 
-    pub fn retire_owner(
+    pub async fn retire_owner(
         &self,
-    ) -> impl std::future::Future<Output = Result<VerifiedNativeProjectRetirement<'a>, RuntimeError>> + 'a
-    {
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<VerifiedNativeProjectRetirement<'a>, RuntimeError> {
         let owner: &'a NativeFfiAdapter = self.owner;
         let identity = Rc::clone(&self.retirement_identity);
-        async move { owner.retire_project_session(&identity).await }
+        owner.retire_project_session(&identity, runtime).await
     }
 
     pub fn artifact_identities(

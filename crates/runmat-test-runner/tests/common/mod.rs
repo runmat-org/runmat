@@ -33,6 +33,7 @@ pub struct FakeBackend {
     steps: RefCell<VecDeque<Step>>,
     cancel_result: RefCell<Option<Result<Option<WorkerExecution>, BackendError>>>,
     next_session: Cell<u64>,
+    process_output: RefCell<Option<runmat_test::event::WorkerProcessOutput>>,
     pub spawned: RefCell<Vec<FakeSession>>,
     pub executions: RefCell<Vec<(FakeSession, ExecutionRequest)>>,
     pub cancelled: RefCell<Vec<FakeSession>>,
@@ -58,6 +59,7 @@ impl FakeBackend {
             steps: RefCell::new(steps.into_iter().collect()),
             cancel_result: RefCell::new(None),
             next_session: Cell::new(0),
+            process_output: RefCell::new(None),
             spawned: RefCell::new(Vec::new()),
             executions: RefCell::new(Vec::new()),
             cancelled: RefCell::new(Vec::new()),
@@ -68,6 +70,11 @@ impl FakeBackend {
 
     pub fn with_cancel_result(self, result: WorkerExecution) -> Self {
         *self.cancel_result.borrow_mut() = Some(Ok(Some(result)));
+        self
+    }
+
+    pub fn with_process_output(self, output: runmat_test::event::WorkerProcessOutput) -> Self {
+        *self.process_output.borrow_mut() = Some(output);
         self
     }
 }
@@ -120,6 +127,13 @@ impl WorkerBackend for FakeBackend {
     fn shutdown<'a>(&'a self, session: &'a Self::Session) -> BackendFuture<'a, ()> {
         self.shutdown.borrow_mut().push(session.clone());
         Box::pin(ready(Ok(())))
+    }
+
+    fn take_process_output<'a>(
+        &'a self,
+        _session: &'a Self::Session,
+    ) -> BackendFuture<'a, Option<runmat_test::event::WorkerProcessOutput>> {
+        Box::pin(ready(Ok(self.process_output.borrow_mut().take())))
     }
 }
 

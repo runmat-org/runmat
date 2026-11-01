@@ -33,11 +33,12 @@ pub(super) struct VerifiedProjectHostRetirement<'a> {
 impl<'a> PreparedProjectForeignReplacement<'a> {
     pub(super) async fn retire_project_hosts(
         &self,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
     ) -> Result<VerifiedProjectHostRetirement<'a>, FrozenProjectHandoffError> {
         let native = if let Some(staged) = self.native.as_ref() {
             Some(
                 staged
-                    .retire_owner()
+                    .retire_owner(runtime)
                     .await
                     .map_err(project_artifact_error)?,
             )
@@ -53,7 +54,7 @@ impl<'a> PreparedProjectForeignReplacement<'a> {
         let python = if let Some(staged) = self.python.as_ref() {
             Some(
                 staged
-                    .retire_owner()
+                    .retire_owner(runtime)
                     .await
                     .map_err(project_artifact_error)?,
             )

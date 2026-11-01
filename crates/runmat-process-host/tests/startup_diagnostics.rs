@@ -1,4 +1,4 @@
-use runmat_process_host::{ChildLifetime, HostCommand, StderrCompletion, StdioPolicy};
+use runmat_process_host::{ChildLifetime, HostCommand, ProcessOutputCompletion, StdioPolicy};
 use std::io::Write;
 
 const CHILD_ENV: &str = "RUNMAT_STARTUP_DIAGNOSTICS_TEST_CHILD";
@@ -43,7 +43,7 @@ async fn detached_startup_stream_closes_before_service_lifetime_ends() {
     assert_eq!(snapshot.bytes.as_ref(), &ORIGINAL[..11]);
     assert_eq!(snapshot.observed_bytes, Some(ORIGINAL.len() as u64));
     assert!(snapshot.truncated);
-    assert_eq!(snapshot.completion, StderrCompletion::EndOfStream);
+    assert_eq!(snapshot.completion, ProcessOutputCompletion::EndOfStream);
     let id = child.id().unwrap();
     drop(child);
     drop(capture);

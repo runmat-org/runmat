@@ -535,6 +535,7 @@ fn execute_with_linked_authority(
             .await
             .map_err(|error| format!("standalone final cleanup failed: {error}"));
         let foreign_lifecycle = crate::foreign_retirement::retire(
+            &runtime,
             &mut mex_guard,
             native_ffi.as_ref(),
             python.as_ref(),

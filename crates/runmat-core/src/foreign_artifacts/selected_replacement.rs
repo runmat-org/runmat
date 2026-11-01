@@ -248,9 +248,10 @@ impl<'a> PreparedSelectedHostReplacement<'a> {
     /// inventory or source changes. Retained owners remain fenced for retry.
     pub(crate) async fn retire_project_hosts(
         &self,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
     ) -> Result<VerifiedSelectedHostRetirement<'a>, SelectedForeignInstallError> {
         let native = if let Some(staged) = self.native.as_ref() {
-            Some(staged.retire_owner().await?)
+            Some(staged.retire_owner(runtime).await?)
         } else {
             None
         };
@@ -260,7 +261,7 @@ impl<'a> PreparedSelectedHostReplacement<'a> {
             .map(PreparedJavaProjectReplacement::retire_owner)
             .transpose()?;
         let python = if let Some(staged) = self.python.as_ref() {
-            Some(staged.retire_owner().await?)
+            Some(staged.retire_owner(runtime).await?)
         } else {
             None
         };

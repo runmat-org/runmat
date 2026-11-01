@@ -22,7 +22,6 @@ pub(super) struct ServicePortSnapshot {
     pub(super) placement: Option<Rc<dyn RuntimePlacementService>>,
     pub(super) host_effect_resources: Option<Rc<dyn RuntimeHostEffectResourceService>>,
     pub(super) native: Option<Rc<dyn RuntimeNativeService>>,
-    pub(super) foreign: Option<Rc<dyn RuntimeForeignService>>,
     pub(super) parallel: Option<Rc<dyn RuntimeParallelService>>,
     pub(super) spmd: Option<Rc<dyn RuntimeSpmdService>>,
     pub(super) distributed: Option<Rc<dyn RuntimeDistributedService>>,

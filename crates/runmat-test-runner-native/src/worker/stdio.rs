@@ -14,15 +14,18 @@ struct InstalledRun {
     session: RunMatSession,
 }
 
-/// Serve the native RunMat Core test-worker protocol over stdin/stdout.
+/// Serve native Core tests over their private control channels. Standard
+/// streams carry only application output, captured by the process owner.
 ///
 /// Native composition roots call this before starting their ordinary host
 /// runtime when launched with their private worker marker. The coordinator
 /// remains transport-agnostic, while CLI and Desktop reuse this exact Core
 /// execution adapter instead of implementing independent child loops.
 pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
-    let (mut input, mut output) = runmat_process_host::ipc::stdio::endpoint()
+    let control = runmat_process_host::ipc::private_control::connect_host()
+        .await
         .map_err(|error| NativeRunnerError::Protocol(error.to_string()))?;
+    let (mut input, mut output) = (control.reader, control.writer);
     let local = ProtocolHandshake::current(
         "runmat-native-worker",
         vec![
@@ -57,10 +60,11 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
     runmat_accelerate::initialize_acceleration_provider_with(
         &(&bootstrap.execution.accelerate).into(),
     );
+    let mut input = super::control_requests::ControlRequests::new(input, limits);
 
     let mut installed: Option<InstalledRun> = None;
     loop {
-        let request = read_request(&mut input, limits).await?;
+        let request = input.next().await?;
         match request {
             WorkerRequest::Handshake(_) => {
                 reject(
@@ -141,7 +145,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                 let result = loop {
                     tokio::select! {
                         result = &mut execution => break result,
-                        control = read_request(&mut input, limits) => {
+                        control = input.next() => {
                             match control? {
                                 WorkerRequest::Cancel { run_id, .. }
                                     if run_id == run.plan.run_id =>

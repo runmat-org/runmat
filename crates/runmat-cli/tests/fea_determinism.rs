@@ -129,12 +129,20 @@ fn collect_state_digests(directory: &Path, digests: &mut Vec<String>) {
 // witness: FEA-SCALE-PARALLEL-001/thread_count_determinism @
 //   linear_structural/canonical_tetrahedra/parallel_cpu; coverage: partial;
 //   boundary: The loaded static box study gives bit-identical state digests and assessed values at
-//   1, 4 and 8 total threads through the public command; other families are not run.
+//   serial and host-admissible parallel layouts (up to 8 total threads) through the public
+//   command; other families are not run.
 #[test]
 fn a_study_gives_identical_results_across_runs_workers_and_threads() {
     let reference = run(None);
     assert_eq!(reference.assessed.len(), 1);
     assert!(reference.assessed[0] > 0.0);
+    // Match the local admission authority's available-parallelism discovery.
+    // The fixture must vary placement without asking a six-core host for eight
+    // simultaneous cores; larger hosts still exercise the original 2x4 layout.
+    let capacity = std::thread::available_parallelism().map_or(1, usize::from);
+    let parallel_workers = capacity.min(4) as u32;
+    let threaded_workers = capacity.min(2) as u32;
+    let threads_per_worker = (capacity / threaded_workers as usize).clamp(1, 4) as u32;
     // Repeated runs, then explicit worker and thread counts. Placement differs; results do not.
     for policy in [
         None,
@@ -142,8 +150,8 @@ fn a_study_gives_identical_results_across_runs_workers_and_threads() {
         None,
         None,
         Some((1, 1)),
-        Some((4, 1)),
-        Some((2, 4)),
+        Some((parallel_workers, 1)),
+        Some((threaded_workers, threads_per_worker)),
     ] {
         let identity = run(policy);
         // The definition digest binds the authored execution policy, so compare it only for

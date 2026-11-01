@@ -347,22 +347,29 @@ impl NativeFfiAdapter {
     }
 
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
-        match self.shutdown_retirement().await {
+        match self.shutdown_retirement(None).await {
             NativeFfiRetirement::Retained(error) => Err(error),
             NativeFfiRetirement::Retired { result, .. } => result,
         }
     }
 
-    pub async fn shutdown_retirement(&self) -> NativeFfiRetirement {
+    pub async fn shutdown_retirement(
+        &self,
+        context: Option<&RuntimeContext>,
+    ) -> NativeFfiRetirement {
         if self.project_retirement.is_pending() {
             return NativeFfiRetirement::Retained(invalid_call(
                 "native project retirement authority is active during terminal shutdown",
             ));
         }
-        self.retire_isolated_client(true).await
+        self.retire_isolated_client(true, context).await
     }
 
-    async fn retire_isolated_client(&self, terminal: bool) -> NativeFfiRetirement {
+    async fn retire_isolated_client(
+        &self,
+        terminal: bool,
+        context: Option<&RuntimeContext>,
+    ) -> NativeFfiRetirement {
         if self.isolated_call_active.replace(true) {
             return NativeFfiRetirement::Retained(invalid_call(
                 "native-library shutdown cannot begin during an active isolated call",
@@ -399,7 +406,7 @@ impl NativeFfiAdapter {
             .client
             .as_mut()
             .expect("retirement guard owns exact isolated client")
-            .shutdown_retirement(released_handles)
+            .shutdown_retirement(context, released_handles)
             .await;
         match retirement {
             NativeClientRetirement::Retained {
@@ -729,6 +736,7 @@ impl ForeignAdapter for NativeFfiAdapter {
                     owner.client = Some(
                         if policy.isolate {
                             NativeFfiHostClient::spawn(
+                                Some(&context),
                                 process_group_placement,
                                 bootstrap_unverified.clone(),
                                 snapshot_parent,

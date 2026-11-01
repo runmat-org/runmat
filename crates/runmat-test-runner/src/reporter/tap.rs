@@ -5,10 +5,13 @@ use super::{RenderedReport, Reporter};
 use crate::RunnerResult;
 
 #[derive(Default)]
-pub struct TapReporter;
+pub struct TapReporter {
+    process_output: super::process_output::ProcessOutputReports,
+}
 
 impl Reporter for TapReporter {
-    fn event(&mut self, _event: &TestEvent) -> RunnerResult<()> {
+    fn event(&mut self, event: &TestEvent) -> RunnerResult<()> {
+        self.process_output.observe(event);
         Ok(())
     }
 
@@ -30,6 +33,7 @@ impl Reporter for TapReporter {
                     .replace('\n', " ")
             ));
         }
+        tap.push_str(&self.process_output.tap());
         Ok(RenderedReport {
             name: "test-results.tap".into(),
             media_type: "application/tap".into(),

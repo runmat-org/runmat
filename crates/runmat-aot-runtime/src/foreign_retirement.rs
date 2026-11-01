@@ -61,6 +61,7 @@ fn scope_error(owner: &str) -> RuntimeError {
 }
 
 pub(crate) async fn retire(
+    runtime: &runmat_runtime::context::RuntimeContext,
     mex: &mut MexRuntimeGuard,
     native: &NativeFfiAdapter,
     python: &PythonAdapter,
@@ -73,7 +74,7 @@ pub(crate) async fn retire(
         MexSessionRetirement::Retired(result) => result.map_err(Box::new),
     };
 
-    match native.shutdown_retirement().await {
+    match native.shutdown_retirement(Some(runtime)).await {
         NativeFfiRetirement::Retained(error) => return retained(result, error),
         NativeFfiRetirement::Retired {
             scope,
@@ -86,7 +87,7 @@ pub(crate) async fn retire(
         }
     }
 
-    match python.shutdown_selected_retirement().await {
+    match python.shutdown_selected_retirement(Some(runtime)).await {
         PythonAdapterRetirement::Retained(error) => return retained(result, error),
         PythonAdapterRetirement::Retired {
             scope,

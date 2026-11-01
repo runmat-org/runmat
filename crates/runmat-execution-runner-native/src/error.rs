@@ -32,7 +32,7 @@ pub enum NativeExecutionError {
         #[source]
         cause: Box<NativeExecutionError>,
         exit: Option<runmat_process_host::ProcessExit>,
-        stderr: Box<runmat_process_host::StderrSnapshot>,
+        stderr: Box<runmat_process_host::ProcessOutputSnapshot>,
     },
     #[error("local supervisor rejected the request ({code}): {message}")]
     SupervisorRejected { code: String, message: String },

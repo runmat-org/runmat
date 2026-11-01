@@ -48,6 +48,10 @@ pub enum TestEventPayload {
         text: String,
         truncated: bool,
     },
+    /// Captured only after physical worker retirement; not test-body output.
+    ProcessOutput {
+        output: super::WorkerProcessOutput,
+    },
     Artifact {
         test_id: TestId,
         attempt: u32,

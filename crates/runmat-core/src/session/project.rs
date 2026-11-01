@@ -219,7 +219,9 @@ impl RunMatSession {
                     "could not clear loaded MEX modules before installing project: {error}"
                 ))
             })?;
-        let retirement = replacement.retire_project_hosts().await?;
+        let retirement = replacement
+            .retire_project_hosts(Some(&self.runtime_context))
+            .await?;
         let cache = cache
             .admit_commit(&mut self.generic_native_cache)
             .map_err(project_artifact_error)?;
@@ -304,7 +306,7 @@ impl RunMatSession {
                 ))
             })?;
         let retirement = replacement
-            .retire_project_hosts()
+            .retire_project_hosts(Some(&self.runtime_context))
             .await
             .map_err(project_artifact_error)?;
         let cache = cache
@@ -344,7 +346,9 @@ impl RunMatSession {
         let replacement =
             crate::foreign_artifacts::PreparedSelectedHostReplacement::prepare(&host, plan)?;
         self.retire_project_native_extensions().await?;
-        let retirement = replacement.retire_project_hosts().await?;
+        let retirement = replacement
+            .retire_project_hosts(Some(&self.runtime_context))
+            .await?;
         let publication_fence = replacement
             .admit_commit_after_retirement(retirement)?
             .commit();
@@ -493,7 +497,7 @@ impl RunMatSession {
                 ))
             })?;
         let retirement = replacement
-            .retire_project_hosts()
+            .retire_project_hosts(Some(&self.runtime_context))
             .await
             .map_err(project_artifact_error)?;
         let cache = cache

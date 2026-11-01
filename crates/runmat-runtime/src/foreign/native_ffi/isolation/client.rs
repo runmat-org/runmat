@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use super::transport::{HostOwner, HostReader, HostWriter};
 use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
+use runmat_process_host::ipc::private_control::PrivateControlListener;
 use runmat_process_host::ipc::{
     authenticate_driver, read_payload, write_payload, FrameLimits, HostHandshake, SessionSecret,
 };
@@ -25,10 +26,12 @@ use super::{
 };
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::execution::{RootedValueLease, RootedValueMember, RootedValues, RootedValuesBuilder};
+use crate::foreign::isolation_output::{self, Completion, HostOutput};
 use crate::foreign::{ForeignErrorKind, ForeignHandleRegistry, ForeignResourceMetadata};
 use crate::{foreign::foreign_error, RuntimeError};
 
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+mod application_output;
 
 fn retain_callback_failure(
     error: RuntimeError,
@@ -114,6 +117,7 @@ pub struct NativeFfiHostClient {
     child: HostOwner,
     reader: HostReader,
     writer: HostWriter,
+    output: HostOutput,
     limits: FrameLimits,
     next_request_id: u64,
     next_callback_id: u64,
@@ -169,6 +173,7 @@ impl NativeFfiHostClient {
             child,
             reader,
             writer,
+            output: HostOutput::default(),
             limits: FrameLimits {
                 max_message_bytes: NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
             },
@@ -194,7 +199,7 @@ impl NativeFfiHostClient {
         }
         self.child.retire().await
     }
-    pub async fn load_project(
+    async fn load_project_protocol(
         &mut self,
         runtime: RuntimeContext,
         mut request: NativeProjectLoadRequest,
@@ -236,6 +241,7 @@ impl NativeFfiHostClient {
     }
 
     pub fn begin_invocation(&mut self) -> Result<(), NativeWireError> {
+        self.admit_output()?;
         if !matches!(self.shutdown_progress, ShutdownProgress::Open) {
             return Err(wire_error(
                 "RunMat:NativeFFI:RetirementUnverified",
@@ -250,6 +256,7 @@ impl NativeFfiHostClient {
     }
 
     pub fn begin_project_load(&mut self) -> Result<(), NativeWireError> {
+        self.admit_output()?;
         if !matches!(self.shutdown_progress, ShutdownProgress::Open) {
             return Err(wire_error(
                 "RunMat:NativeFFI:RetirementUnverified",
@@ -272,6 +279,7 @@ impl NativeFfiHostClient {
     }
 
     pub async fn spawn(
+        runtime: Option<&RuntimeContext>,
         process_group_placement: ProcessGroupPlacement,
         unverified: ProcessSpawnEvidence,
         snapshot_parent: Option<SharedSnapshotParent>,
@@ -328,6 +336,10 @@ impl NativeFfiHostClient {
             NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV.into(),
             snapshot_root.into(),
         );
+        let control = PrivateControlListener::bind()
+            .map_err(|error| wire_error("RunMat:NativeFFI:HostTransport", error.to_string()))?;
+        command.stdio =
+            runmat_process_host::StdioPolicy::PrivateControl(control.endpoint().clone());
         let child = match command.spawn_observed(&unverified).await {
             Ok(child) => child,
             Err(error) => {
@@ -343,11 +355,14 @@ impl NativeFfiHostClient {
             }
         };
         let mut child = BootstrapBoundChild::new(child, resources, unverified);
-        let stdio = child
-            .take_stdio()
+        let output = child
+            .take_application_output()
             .map_err(|error| wire_error("RunMat:NativeFFI:HostTransport", error.to_string()))?;
-        let mut reader = stdio.stdout;
-        let mut writer = stdio.stdin;
+        let control = shutdown_step(control.accept(), "native host control bootstrap")
+            .await?
+            .map_err(|error| wire_error("RunMat:NativeFFI:HostTransport", error.to_string()))?;
+        let mut reader = control.reader;
+        let mut writer = control.writer;
         let session = authenticate_driver(
             &mut reader,
             &mut writer,
@@ -364,6 +379,7 @@ impl NativeFfiHostClient {
             child: HostOwner::Process(Box::new(child)),
             reader: HostReader::Process(reader),
             writer: HostWriter::Process(writer),
+            output: HostOutput::attached(output, runtime).map_err(NativeWireError::from_runtime)?,
             limits: session.limits,
             next_request_id: 1,
             next_callback_id: 1,
@@ -374,7 +390,18 @@ impl NativeFfiHostClient {
         })
     }
 
-    pub async fn invoke(
+    fn admit_output(&self) -> Result<(), NativeWireError> {
+        if self.output.failed() {
+            Err(wire_error(
+                "RunMat:NativeFFI:HostTransport",
+                "native application output previously failed",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn invoke_protocol(
         &mut self,
         runtime: RuntimeContext,
         call: ForeignCall,
@@ -760,52 +787,6 @@ impl NativeFfiHostClient {
                 Some(remote)
             })
             .collect()
-    }
-
-    pub async fn shutdown_retirement(
-        &mut self,
-        released_local_handles: Vec<u64>,
-    ) -> NativeClientRetirement {
-        if matches!(self.shutdown_progress, ShutdownProgress::Open) {
-            // If this future is cancelled after a write, retry must not send
-            // another ambiguous Shutdown record to the same child.
-            self.shutdown_progress = ShutdownProgress::Attempted;
-            let result = self.shutdown_protocol(released_local_handles).await;
-            self.shutdown_progress = ShutdownProgress::Protocol(result);
-        }
-        match self.abort_host().await {
-            Ok(scope) => {
-                match std::mem::replace(&mut self.shutdown_progress, ShutdownProgress::Attempted) {
-                    ShutdownProgress::Protocol(result) => {
-                        NativeClientRetirement::Retired { scope, result }
-                    }
-                    ShutdownProgress::Attempted => NativeClientRetirement::Retired {
-                        scope,
-                        result: if matches!(
-                            self.user_state,
-                            NativeUserState::ProjectLoadUnverifiedWithoutUser
-                        ) {
-                            Ok(())
-                        } else {
-                            Err(wire_error(
-                                "RunMat:NativeFFI:ShutdownInterrupted",
-                                "isolated native-library operation was interrupted before retirement",
-                            ))
-                        },
-                    },
-                    ShutdownProgress::Open => unreachable!("shutdown was attempted before proof"),
-                }
-            }
-            Err(error) => NativeClientRetirement::Retained {
-                retirement: wire_error("RunMat:NativeFFI:RetirementUnverified", error.to_string()),
-                // Keep the original phase for a same-child retry. The clone
-                // supplies diagnostic ownership without resending Shutdown.
-                prior_protocol: match &self.shutdown_progress {
-                    ShutdownProgress::Protocol(Err(prior)) => Some(prior.clone()),
-                    _ => None,
-                },
-            },
-        }
     }
 
     async fn shutdown_protocol(

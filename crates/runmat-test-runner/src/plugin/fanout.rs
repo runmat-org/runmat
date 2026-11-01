@@ -168,6 +168,7 @@ fn hook_name(payload: &TestEventPayload) -> &'static str {
         TestEventPayload::Qualification { .. } => "qualification",
         TestEventPayload::Diagnostic { .. } => "diagnostic",
         TestEventPayload::Output { .. } => "output",
+        TestEventPayload::ProcessOutput { .. } => "process_output",
         TestEventPayload::Artifact { .. } => "artifact",
         TestEventPayload::Plugin { .. } => "plugin",
         TestEventPayload::TestFinished { .. } => "test_finished",

@@ -1686,12 +1686,15 @@ pub trait RuntimeProgramService {
 /// Narrow, typed ports composed by the host. An absent port is meaningful and
 /// produces a stable capability error through the corresponding `require_*`
 /// accessor; there is no string-keyed service locator.
-/// Invocation clones share the immutable composition. Explicit service
-/// reconfiguration creates a successor snapshot; caller-workspace projection
-/// remains inline and does not allocate or copy the service table.
+/// Invocation clones share the immutable composition. Caller-workspace and
+/// removable foreign-host projections remain inline; changing either does not
+/// allocate or copy the service table. Other reconfiguration makes a successor.
 #[derive(Clone)]
 pub struct RuntimeServicePorts {
     workspace: Option<Rc<dyn RuntimeWorkspaceService>>,
+    // Keep the removable host/session edge outside the shared service table.
+    // Captured callbacks and console scopes can break this cycle in O(1).
+    foreign: Option<Rc<dyn RuntimeForeignService>>,
     shared: Rc<ServicePortSnapshot>,
 }
 
@@ -1721,6 +1724,7 @@ impl RuntimeServicePorts {
     fn with_initial_timing(timing: RuntimeTimingPort) -> Self {
         Self {
             workspace: None,
+            foreign: None,
             shared: Rc::new(ServicePortSnapshot {
                 call: None,
                 builtin: None,
@@ -1740,7 +1744,6 @@ impl RuntimeServicePorts {
                 placement: None,
                 host_effect_resources: None,
                 native: None,
-                foreign: None,
                 parallel: None,
                 spmd: None,
                 distributed: None,
@@ -1797,7 +1800,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
                 &self.shared.host_effect_resources.is_some(),
             )
             .field("native", &self.shared.native.is_some())
-            .field("foreign", &self.shared.foreign.is_some())
+            .field("foreign", &self.foreign.is_some())
             .field("parallel", &self.shared.parallel.is_some())
             .field("spmd", &self.shared.spmd.is_some())
             .field("distributed", &self.shared.distributed.is_some())
@@ -1910,7 +1913,7 @@ impl RuntimeServicePorts {
                 self.shared.acceleration.as_ref(),
                 other.shared.acceleration.as_ref(),
             )
-            && same(self.shared.foreign.as_ref(), other.shared.foreign.as_ref())
+            && same(self.foreign.as_ref(), other.foreign.as_ref())
     }
 
     pub fn with_local_tasks(mut self, service: Rc<dyn super::RuntimeLocalTaskService>) -> Self {
@@ -2314,21 +2317,30 @@ impl RuntimeServicePorts {
         RuntimeNativeService,
         Native
     );
-    port_accessors!(
-        with_foreign,
-        foreign,
-        require_foreign,
-        foreign,
-        RuntimeForeignService,
-        Foreign
-    );
+    pub fn with_foreign(mut self, service: Rc<dyn RuntimeForeignService>) -> Self {
+        self.foreign = Some(service);
+        self
+    }
+
+    pub fn foreign(&self) -> Option<&Rc<dyn RuntimeForeignService>> {
+        self.foreign.as_ref()
+    }
+
+    pub fn require_foreign(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn RuntimeForeignService>, RuntimeCapabilityError> {
+        self.foreign
+            .as_ref()
+            .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Foreign, operation))
+    }
 
     /// Remove the strong foreign-runtime edge while retaining every other
     /// session authority. A long-lived foreign callback can retain this
     /// context and restore the foreign port from a weak reference while it
     /// executes without creating a host/session ownership cycle.
     pub fn without_foreign(mut self) -> Self {
-        Rc::make_mut(&mut self.shared).foreign = None;
+        self.foreign = None;
         self
     }
     port_accessors!(
@@ -2399,6 +2411,17 @@ mod tests {
         assert!(cleared.workspace().is_none());
         assert!(caller.workspace().is_some());
 
+        let foreign: Rc<dyn RuntimeForeignService> = Rc::new(crate::foreign::ForeignRuntime::new(
+            crate::foreign::ForeignPlatform::Native,
+        ));
+        let foreign_ports = caller.clone().with_foreign(Rc::clone(&foreign));
+        let callback_ports = foreign_ports.clone().without_foreign();
+        assert!(Rc::ptr_eq(&caller.shared, &foreign_ports.shared));
+        assert!(Rc::ptr_eq(&foreign_ports.shared, &callback_ports.shared));
+        assert!(Rc::ptr_eq(foreign_ports.foreign().unwrap(), &foreign));
+        assert!(callback_ports.foreign().is_none());
+        assert!(!foreign_ports.same_device_route_owners(&callback_ports));
+
         let successor = caller.clone().without_timing();
         assert!(!Rc::ptr_eq(&caller.shared, &successor.shared));
         assert!(successor.timing().is_err());
@@ -2407,7 +2430,8 @@ mod tests {
         assert_eq!(
             std::mem::size_of::<RuntimeServicePorts>(),
             std::mem::size_of::<Rc<ServicePortSnapshot>>()
-                + std::mem::size_of::<Option<Rc<dyn RuntimeWorkspaceService>>>(),
+                + std::mem::size_of::<Option<Rc<dyn RuntimeWorkspaceService>>>()
+                + std::mem::size_of::<Option<Rc<dyn RuntimeForeignService>>>(),
         );
     }
 

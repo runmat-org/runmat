@@ -3,7 +3,7 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 use super::retirement::ProcessSpawnEvidence;
-use super::{CapturedStderr, ChildProcess, ChildStdio};
+use super::{CapturedProcessOutput, ChildProcess, ChildStdio};
 use crate::command::{ChildLifetime, HostCommand, StdioPolicy};
 use crate::environment::apply_environment;
 use crate::{ProcessHostError, ProcessHostResult};
@@ -40,6 +40,14 @@ async fn spawn_internal(
             true
         }
         StdioPolicy::CompleteOutput => {
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            false
+        }
+        #[cfg(any(unix, windows))]
+        StdioPolicy::PrivateControl(_) => {
             command
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -85,6 +93,13 @@ async fn spawn_internal(
         }
     };
     apply_environment(&mut command, &spec.environment_policy, &spec.environment);
+    #[cfg(any(unix, windows))]
+    if let StdioPolicy::PrivateControl(endpoint) = &spec.stdio {
+        command.env(
+            crate::ipc::private_control::BOOTSTRAP_ENV,
+            endpoint.encode()?,
+        );
+    }
     super::process_tree::configure(&mut command, spec.process_group_placement);
     super::limits::configure(&mut command, spec.resource_limits);
     let child = command.spawn()?;
@@ -102,7 +117,7 @@ async fn spawn_internal(
     } else {
         None
     };
-    let stderr = CapturedStderr::new(spec.max_stderr_bytes);
+    let stderr = CapturedProcessOutput::new(spec.max_stderr_bytes);
     let mut process = ChildProcess::new(
         child,
         process_id,

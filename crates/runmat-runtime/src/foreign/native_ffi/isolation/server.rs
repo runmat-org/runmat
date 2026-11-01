@@ -43,8 +43,10 @@ pub async fn run_native_ffi_extension_host() -> Result<(), String> {
         SharedSnapshotStore::open_existing(PathBuf::from(snapshot_root))
             .map_err(|error| error.to_string())?,
     );
-    let mut reader = std::io::stdin();
-    let mut writer = std::io::stdout();
+    let control = runmat_process_host::ipc::private_control::connect_host_blocking()
+        .map_err(|error| error.to_string())?;
+    let mut reader = control.reader;
+    let mut writer = control.writer;
     let session = authenticate_host_blocking(
         &mut reader,
         &mut writer,

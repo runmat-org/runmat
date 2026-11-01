@@ -1,7 +1,9 @@
 //! Original bounded startup diagnostics, before the existing authority serves readiness.
 use super::*;
 use runmat_process_host::environment::EnvironmentPolicy;
-use runmat_process_host::{ChildLifetime, HiddenMode, HostCommand, StderrCompletion, StdioPolicy};
+use runmat_process_host::{
+    ChildLifetime, HiddenMode, HostCommand, ProcessOutputCompletion, StdioPolicy,
+};
 
 impl LocalSupervisorClient {
     pub(super) async fn start_original_supervisor(&self) -> NativeExecutionResult<()> {
@@ -28,7 +30,7 @@ impl LocalSupervisorClient {
                 match self.ping().await {
                     Ok(()) => {
                         stderr.wait_closed().await;
-                        if stderr.completion() != StderrCompletion::EndOfStream {
+                        if stderr.completion() != ProcessOutputCompletion::EndOfStream {
                             return Err(NativeExecutionError::Protocol(
                                 "original supervisor startup diagnostic stream did not close cleanly".into()));
                         }

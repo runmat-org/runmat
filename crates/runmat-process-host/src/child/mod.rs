@@ -7,10 +7,14 @@ mod retirement;
 mod retirement_observation;
 mod spawn;
 mod startup;
-mod stderr;
+mod output_capture;
 
-pub use lifecycle::{ChildProcess, ChildStdio, ProcessExit};
+pub use lifecycle::{ChildOutput, ChildProcess, ChildStdio, ProcessExit};
 pub use limits::ResourceLimits;
+pub use output_capture::{
+    CapturedProcessOutput, ProcessOutputCaptureWriter, ProcessOutputCompletion,
+    ProcessOutputSnapshot,
+};
 pub use process_tree::{is_alive as is_process_alive, terminate_id as terminate_process_tree};
 pub use retirement::{
     BootstrapBoundChild, ContainedChildRetirement, MemberRetirementBoundChild,
@@ -18,4 +22,3 @@ pub use retirement::{
 };
 pub use spawn::{spawn, spawn_observed};
 pub use startup::release_startup_stderr;
-pub use stderr::{CapturedStderr, StderrCompletion, StderrSnapshot};

@@ -14,9 +14,10 @@ pub mod shared_memory;
 pub use capability::HostCapability;
 pub use child::{
     is_process_alive, release_startup_stderr, terminate_process_tree, BootstrapBoundChild,
-    ChildProcess, ChildStdio, ContainedChildRetirement, MemberRetirementBoundChild, ProcessExit,
-    ProcessRetirementLease, ProcessSpawnEvidence, ResourceLimits, RetirementBoundChild,
-    StderrCompletion, StderrSnapshot,
+    CapturedProcessOutput, ChildOutput, ChildProcess, ChildStdio, ContainedChildRetirement,
+    MemberRetirementBoundChild, ProcessExit, ProcessOutputCaptureWriter, ProcessOutputCompletion,
+    ProcessOutputSnapshot, ProcessRetirementLease, ProcessSpawnEvidence, ResourceLimits,
+    RetirementBoundChild,
 };
 pub use command::{
     ChildLifetime, CompleteProcessOutput, HostCommand, ProcessGroupPlacement, StdioPolicy,

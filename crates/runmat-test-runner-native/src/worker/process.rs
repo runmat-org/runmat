@@ -1,8 +1,9 @@
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use runmat_process_host::{ChildProcess, HostCommand, ProcessHostError};
+use runmat_process_host::ipc::private_control::{ControlReader, ControlWriter};
+use runmat_process_host::{ChildProcess, ProcessHostError};
 use runmat_test::event::TestEvent;
 use runmat_test::protocol::{
     ProtocolHandshake, ProtocolLimits, WorkerCapability, WorkerRequest, WorkerResponse,
@@ -13,13 +14,15 @@ use runmat_test_runner::worker::{
     CancelRequest, ExecutionRequest, SpawnRequest, WorkerBackend, WorkerExecution, WorkerSessionId,
 };
 use tokio::io::BufReader;
-use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
 
 use crate::transport::{read_response, write_bootstrap, write_request, NativeWorkerBootstrap};
 use crate::NativeRunnerError;
 
 use super::command::ProcessBackendConfig;
+
+mod control;
+mod output;
 
 pub struct ProcessBackend {
     config: ProcessBackendConfig,
@@ -65,9 +68,12 @@ pub struct ProcessSession {
 struct ProcessState {
     child: Mutex<ChildProcess>,
     process_id: Option<u32>,
-    writer: Mutex<ChildStdin>,
-    reader: Mutex<BufReader<ChildStdout>>,
-    stderr: runmat_process_host::child::CapturedStderr,
+    writer: Mutex<ControlWriter>,
+    reader: Mutex<BufReader<ControlReader>>,
+    stdout: runmat_process_host::CapturedProcessOutput,
+    stderr: runmat_process_host::child::CapturedProcessOutput,
+    retired: AtomicBool,
+    output_taken: AtomicBool,
     limits: ProtocolLimits,
 }
 
@@ -117,25 +123,16 @@ impl WorkerBackend for ProcessBackend {
                     ),
                 ));
             }
-            let mut command = HostCommand::new(&self.config.executable);
-            command.arguments = self.config.worker_arguments.clone();
-            command.environment = self.config.environment.clone();
-            command.environment_policy = self.config.environment_policy.clone();
-            command.working_directory = self
-                .config
-                .project_handoff
-                .as_ref()
-                .map(|handoff| handoff.project.workspace_root.clone());
-            command.max_stderr_bytes = self.config.max_stderr_bytes;
-            let mut child = command.spawn().await.map_err(spawn_error)?;
-            let process_id = child.id();
-            let stdio = child.take_stdio().map_err(spawn_error)?;
-            let mut writer = stdio.stdin;
-            let stdout = stdio.stdout;
-            let stderr = child.captured_stderr();
-            let mut reader = BufReader::new(stdout);
             let local = &self.capabilities.handshake;
             let initial_limits = local.limits;
+            let control::WorkerControl {
+                mut child,
+                mut writer,
+                mut reader,
+                stdout,
+                stderr,
+            } = control::spawn(&self.config).await?;
+            let process_id = child.id();
             if let Err(error) = write_request(
                 &mut writer,
                 &WorkerRequest::Handshake(local.clone()),
@@ -233,7 +230,10 @@ impl WorkerBackend for ProcessBackend {
                     process_id,
                     writer: Mutex::new(writer),
                     reader: Mutex::new(reader),
+                    stdout,
                     stderr,
+                    retired: AtomicBool::new(false),
+                    output_taken: AtomicBool::new(false),
                     limits,
                 }),
             })
@@ -288,7 +288,8 @@ impl WorkerBackend for ProcessBackend {
                         // worker before executing more tests in the fixture group.
                         drop(reader);
                         let mut child = session.state.child.lock().await;
-                        let _ = child.terminate_tree().await;
+                        child.terminate_tree().await.map_err(transport_error)?;
+                        session.state.retired.store(true, Ordering::Release);
                         return Ok(None);
                     }
                     WorkerResponse::Rejected { .. } => return Ok(None),
@@ -306,7 +307,9 @@ impl WorkerBackend for ProcessBackend {
     fn terminate<'a>(&'a self, session: &'a Self::Session) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             let mut child = session.state.child.lock().await;
-            child.terminate_tree().await.map_err(transport_error)
+            child.terminate_tree().await.map_err(transport_error)?;
+            session.state.retired.store(true, Ordering::Release);
+            Ok(())
         })
     }
 
@@ -321,7 +324,12 @@ impl WorkerBackend for ProcessBackend {
                 WorkerResponse::ShutdownComplete => {
                     drop(reader);
                     let mut child = session.state.child.lock().await;
-                    child.wait().await.map(|_| ()).map_err(transport_error)
+                    child
+                        .wait_and_retire_tree()
+                        .await
+                        .map_err(transport_error)?;
+                    session.state.retired.store(true, Ordering::Release);
+                    Ok(())
                 }
                 response => Err(BackendError::new(
                     BackendErrorKind::MalformedProtocol,
@@ -329,6 +337,13 @@ impl WorkerBackend for ProcessBackend {
                 )),
             }
         })
+    }
+
+    fn take_process_output<'a>(
+        &'a self,
+        session: &'a Self::Session,
+    ) -> BackendFuture<'a, Option<runmat_test::event::WorkerProcessOutput>> {
+        Box::pin(output::take(session))
     }
 }
 
@@ -391,7 +406,7 @@ async fn read_execution(
 
 async fn failed_spawn(
     child: &mut ChildProcess,
-    stderr: &runmat_process_host::child::CapturedStderr,
+    stderr: &runmat_process_host::child::CapturedProcessOutput,
     error: BackendError,
 ) -> BackendError {
     let _ = child.terminate_tree().await;
@@ -408,9 +423,7 @@ fn transport_error(error: ProcessHostError) -> BackendError {
 
 fn native_backend_error(error: NativeRunnerError) -> BackendError {
     let kind = match &error {
-        NativeRunnerError::Protocol(message) if message.contains("closed") => {
-            BackendErrorKind::Crashed
-        }
+        NativeRunnerError::ControlClosed { .. } => BackendErrorKind::Crashed,
         NativeRunnerError::Protocol(_) => BackendErrorKind::MalformedProtocol,
         NativeRunnerError::Io(_) => BackendErrorKind::Transport,
         NativeRunnerError::Configuration(_) => BackendErrorKind::Rejected,
@@ -425,7 +438,7 @@ fn with_stderr(mut error: BackendError, session: &ProcessSession) -> BackendErro
 
 fn with_captured_stderr(
     mut error: BackendError,
-    stderr: &runmat_process_host::child::CapturedStderr,
+    stderr: &runmat_process_host::child::CapturedProcessOutput,
 ) -> BackendError {
     append_stderr(&mut error, &stderr.text());
     error

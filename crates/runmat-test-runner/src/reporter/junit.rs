@@ -6,10 +6,13 @@ use super::{RenderedReport, Reporter};
 use crate::RunnerResult;
 
 #[derive(Default)]
-pub struct JunitReporter;
+pub struct JunitReporter {
+    process_output: super::process_output::ProcessOutputReports,
+}
 
 impl Reporter for JunitReporter {
-    fn event(&mut self, _event: &TestEvent) -> RunnerResult<()> {
+    fn event(&mut self, event: &TestEvent) -> RunnerResult<()> {
+        self.process_output.observe(event);
         Ok(())
     }
 
@@ -74,6 +77,12 @@ impl Reporter for JunitReporter {
             }
             xml.push_str("</testcase>\n");
         }
+        let process_output = self.process_output.text();
+        if !process_output.is_empty() {
+            xml.push_str("  <system-out>");
+            xml.push_str(&escape_xml(&process_output));
+            xml.push_str("</system-out>\n");
+        }
         xml.push_str("</testsuite>\n");
         Ok(RenderedReport {
             name: "test-results.xml".into(),
@@ -84,7 +93,19 @@ impl Reporter for JunitReporter {
 }
 
 fn escape_xml(value: &str) -> String {
-    value
+    let valid = value
+        .chars()
+        .map(|character| match character {
+            '\u{9}'
+            | '\u{a}'
+            | '\u{d}'
+            | '\u{20}'..='\u{d7ff}'
+            | '\u{e000}'..='\u{fffd}'
+            | '\u{10000}'..='\u{10ffff}' => character,
+            _ => '\u{fffd}',
+        })
+        .collect::<String>();
+    valid
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")

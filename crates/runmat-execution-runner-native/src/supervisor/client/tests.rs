@@ -184,6 +184,6 @@ async fn original_failed_startup_retains_exit_and_bounded_raw_stderr() {
     assert!(stderr.truncated);
     assert_eq!(
         stderr.completion,
-        runmat_process_host::StderrCompletion::EndOfStream
+        runmat_process_host::ProcessOutputCompletion::EndOfStream
     );
 }

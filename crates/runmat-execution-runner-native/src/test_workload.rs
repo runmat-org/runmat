@@ -410,12 +410,14 @@ async fn execute_host_selected_graph_request(
             continue;
         };
         let result = cleanup
-            .with_unit_context(index, |_| {
+            .with_unit_context(index, |context| async move {
                 runmat_core::foreign_artifacts::install_selected_interop(
                     host,
                     &unit.interop,
                     project.as_ref(),
+                    Some(&context),
                 )
+                .await
             })
             .await;
         match result {

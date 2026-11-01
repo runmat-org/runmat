@@ -657,7 +657,10 @@ fn isolated_direct_capture_retirement_replays(
         let staged = isolated_adapter
             .prepare_project_replacement(std::iter::empty())
             .expect("stage exact old native owner");
-        let verified = staged.retire_owner().await.expect("retire exact child");
+        let verified = staged
+            .retire_owner(Some(&isolated_context))
+            .await
+            .expect("retire exact child");
         drop(verified);
         drop(staged);
         assert_eq!(

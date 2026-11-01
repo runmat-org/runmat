@@ -25,4 +25,12 @@ pub trait WorkerBackend {
     ) -> BackendFuture<'a, Option<WorkerExecution>>;
     fn terminate<'a>(&'a self, session: &'a Self::Session) -> BackendFuture<'a, ()>;
     fn shutdown<'a>(&'a self, session: &'a Self::Session) -> BackendFuture<'a, ()>;
+    /// Transfer bounded raw application output after this worker has retired.
+    /// Backends without a native process have no process stream to report.
+    fn take_process_output<'a>(
+        &'a self,
+        _session: &'a Self::Session,
+    ) -> BackendFuture<'a, Option<runmat_test::event::WorkerProcessOutput>> {
+        Box::pin(async { Ok(None) })
+    }
 }

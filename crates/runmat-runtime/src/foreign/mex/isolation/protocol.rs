@@ -434,6 +434,14 @@ pub struct MexWireError {
     pub dependency: Option<String>,
 }
 
+impl std::fmt::Display for MexWireError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.identifier, self.message)
+    }
+}
+
+impl std::error::Error for MexWireError {}
+
 impl MexWireError {
     fn validate(&self) -> Result<(), MexProtocolError> {
         validate_name(&self.identifier, "error identifier")?;

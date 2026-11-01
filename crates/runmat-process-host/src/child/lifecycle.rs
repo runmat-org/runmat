@@ -1,12 +1,19 @@
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
-use super::CapturedStderr;
+use super::CapturedProcessOutput;
 use crate::command::ProcessGroupPlacement;
 use crate::{ProcessHostError, ProcessHostResult};
 
 pub struct ChildStdio {
     pub stdin: ChildStdin,
     pub stdout: ChildStdout,
+}
+
+/// Complete application streams, without the private protocol transport.
+pub struct ChildOutput {
+    pub stdout: ChildStdout,
+    pub stderr: ChildStderr,
+    pub stderr_diagnostics: super::ProcessOutputCaptureWriter,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -20,7 +27,7 @@ pub struct ProcessExit {
 pub struct ChildProcess {
     child: Child,
     process_id: Option<u32>,
-    stderr: CapturedStderr,
+    stderr: CapturedProcessOutput,
     stdio: Option<ChildStdio>,
     _containment: Option<super::process_tree::ProcessContainment>,
     process_group_placement: ProcessGroupPlacement,
@@ -39,7 +46,7 @@ impl ChildProcess {
     pub(super) fn new(
         child: Child,
         process_id: Option<u32>,
-        stderr: CapturedStderr,
+        stderr: CapturedProcessOutput,
         containment: Option<super::process_tree::ProcessContainment>,
         process_group_placement: ProcessGroupPlacement,
     ) -> Self {
@@ -91,6 +98,17 @@ impl ChildProcess {
         ))
     }
 
+    pub fn take_application_output(&mut self) -> ProcessHostResult<ChildOutput> {
+        let stderr_diagnostics = self.stderr.begin_capture()?;
+        let (input, stdout, stderr) = self.take_complete_output()?;
+        drop(input);
+        Ok(ChildOutput {
+            stdout,
+            stderr,
+            stderr_diagnostics,
+        })
+    }
+
     pub fn id(&self) -> Option<u32> {
         self.process_id
     }
@@ -100,7 +118,7 @@ impl ChildProcess {
         self.process_group_placement == ProcessGroupPlacement::OwnGroup
     }
 
-    pub fn captured_stderr(&self) -> CapturedStderr {
+    pub fn captured_stderr(&self) -> CapturedProcessOutput {
         self.stderr.clone()
     }
 

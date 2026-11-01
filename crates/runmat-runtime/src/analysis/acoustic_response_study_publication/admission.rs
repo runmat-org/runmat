@@ -1,6 +1,6 @@
 //! Authenticate the complete retained closure before writing public artifacts.
 use super::*;
-use runmat_analysis_core::{AnalysisProcedure, PhysicsFamily};
+use runmat_analysis_core::{lower_authored_observations, AnalysisProcedure, PhysicsFamily};
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, ObservationHistorySourceContext},
     results::observation::{ObservationFieldCatalogSource, ObservationPublicationEntry},
@@ -46,9 +46,27 @@ pub(super) fn validate(
             step.procedure,
             AnalysisProcedure::ModalExtraction | AnalysisProcedure::TransientResponse
         )
-        || !completed.compiled.outputs.is_empty()
     {
         return Err("acoustic response publication requires exact singleton workload".into());
+    }
+    if !completed.compiled.outputs.is_empty() {
+        let lowered = lower_authored_observations(
+            &completed.compiled.outputs,
+            &completed.compiled.model.sequence.steps,
+        )
+        .map_err(|error| error.to_string())?;
+        if lowered.len() != step.observations.len()
+            || lowered
+                .iter()
+                .zip(&step.observations)
+                .any(|(output, request)| {
+                    output.step_id != step.step_id || output.request != *request
+                })
+        {
+            return Err(
+                "acoustic response authored outputs differ from exact step observations".into(),
+            );
+        }
     }
     validate_options(options, completed.workload.solver.relative_tolerance())?;
     let plan = runmat_analysis_fea::study::plan_acoustic_response_study(

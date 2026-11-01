@@ -6,6 +6,10 @@ mod handle;
 #[cfg(not(target_arch = "wasm32"))]
 mod isolation_input;
 #[cfg(not(target_arch = "wasm32"))]
+mod isolation_io;
+#[cfg(not(target_arch = "wasm32"))]
+mod isolation_output;
+#[cfg(not(target_arch = "wasm32"))]
 mod java;
 mod manifest;
 #[cfg(not(target_arch = "wasm32"))]

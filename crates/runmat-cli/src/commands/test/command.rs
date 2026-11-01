@@ -512,10 +512,10 @@ fn reporters(args: &TestArgs, configured: &[ProjectTestReport]) -> ReporterFanou
         }
         selected.push(format);
         match format {
-            TestReportArg::Human => reporters.push(HumanReporter),
+            TestReportArg::Human => reporters.push(HumanReporter::default()),
             TestReportArg::Json => reporters.push(JsonReporter::default()),
-            TestReportArg::Junit => reporters.push(JunitReporter),
-            TestReportArg::Tap => reporters.push(TapReporter),
+            TestReportArg::Junit => reporters.push(JunitReporter::default()),
+            TestReportArg::Tap => reporters.push(TapReporter::default()),
         }
     }
     reporters

@@ -24,6 +24,7 @@ use crate::user_functions::DynamicFunctionClearRequest;
 use crate::{build_runtime_error, RuntimeError};
 mod artifact_catalog;
 mod isolated_client_slot;
+mod background_output;
 mod ordinary_admission;
 mod retained;
 mod token_root;
@@ -447,13 +448,14 @@ impl MexRuntimeSession {
                 .map(ToOwned::to_owned)
                 .collect::<Vec<_>>();
             if paths.is_empty() {
-                return futures::future::pending().await;
+                self.isolated_ready.notified().await;
+                continue;
             }
-            for path in paths {
-                let Some(client) = self.isolated.borrow().get(&path).cloned() else {
+            for path in &paths {
+                let Some(client) = self.isolated.borrow().get(path).cloned() else {
                     continue;
                 };
-                let Ok(_activity) = self.enter_isolated(&path) else {
+                let Ok(_activity) = self.enter_isolated(path) else {
                     continue;
                 };
                 let Ok(mut operation) = client.acquire() else {
@@ -470,15 +472,22 @@ impl MexRuntimeSession {
                     Err(error) => {
                         tracing::warn!(
                             module = %path.display(),
-                            identifier = %error.identifier,
-                            message = %error.message,
+                            identifier = ?error.identifier(),
+                            error = %error,
                             "isolated MEX background service stopped"
                         );
                         return true;
                     }
                 }
             }
-            self.isolated_ready.notified().await;
+            match self.wait_for_isolated_activity(&paths).await {
+                Ok(true) => return true,
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(error = %error, "isolated MEX application output stopped");
+                    return true;
+                }
+            }
         }
     }
 
@@ -937,12 +946,12 @@ impl MexRuntimeSession {
                         IsolatedMexRetirement::Retired(result) => {
                             self.isolated.borrow_mut().remove(&path);
                             if let Err(error) = result {
-                                first_error.get_or_insert_with(|| wire_runtime_error(error));
+                                first_error.get_or_insert(error);
                             }
                         }
                         IsolatedMexRetirement::Retained(error) => {
                             isolated_retained = true;
-                            first_error.get_or_insert_with(|| wire_runtime_error(error));
+                            first_error.get_or_insert(error);
                         }
                     }
                 }
@@ -954,7 +963,7 @@ impl MexRuntimeSession {
                 }
                 Err(error) => {
                     isolated_retained = true;
-                    first_error.get_or_insert_with(|| wire_runtime_error(error));
+                    first_error.get_or_insert(error);
                 }
             }
         }
@@ -1148,12 +1157,12 @@ impl MexRuntimeSession {
                 IsolatedMexRetirement::Retired(result) => {
                     self.isolated.borrow_mut().remove(&path);
                     if let Err(error) = result {
-                        first_error.get_or_insert_with(|| wire_runtime_error(error));
+                        first_error.get_or_insert(error);
                     }
                 }
                 IsolatedMexRetirement::Retained(error) => {
                     retained = true;
-                    first_error.get_or_insert_with(|| wire_runtime_error(error));
+                    first_error.get_or_insert(error);
                 }
             }
         }
@@ -1321,11 +1330,16 @@ impl MexRuntimeSession {
         })
     }
 
-    async fn isolated_module(&self, path: &Path) -> Result<Rc<IsolatedClientSlot>, RuntimeError> {
+    async fn isolated_module(
+        &self,
+        path: &Path,
+        runtime: &RuntimeContext,
+    ) -> Result<Rc<IsolatedClientSlot>, RuntimeError> {
         if let Some(client) = self.isolated.borrow().get(path) {
             return Ok(Rc::clone(client));
         }
         match IsolatedMexClient::spawn(
+            Some(runtime),
             path.to_path_buf(),
             Arc::clone(&self.isolated_ready),
             self.process_group_placement,
@@ -1337,6 +1351,7 @@ impl MexRuntimeSession {
                 self.isolated
                     .borrow_mut()
                     .insert(path.to_path_buf(), Rc::clone(&owner));
+                self.isolated_ready.notify_one();
                 Ok(owner)
             }
             Err(error) => Err(wire_runtime_error(error)),
@@ -1354,7 +1369,7 @@ impl MexRuntimeSession {
         timeout: Option<std::time::Duration>,
     ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
         let _activity = self.enter_isolated(path)?;
-        let client = self.isolated_module(path).await?;
+        let client = self.isolated_module(path, &runtime).await?;
         let mut operation = client.acquire().map_err(|_| {
             runtime_error(
                 "MEX:Lifecycle",
@@ -1370,7 +1385,7 @@ impl MexRuntimeSession {
             .await;
         match result {
             Ok(invocation) => finish_invocation(invocation, requested_outputs),
-            Err(error) => Err(wire_runtime_error(error)),
+            Err(error) => Err(error),
         }
     }
 
@@ -1687,13 +1702,14 @@ fn decode_native_invocation(
     })
 }
 
-fn wire_runtime_error(error: MexWireError) -> RuntimeError {
-    let mut message = error.message;
-    if let Some(dependency) = error.dependency {
+pub(in crate::foreign::mex) fn wire_runtime_error(error: MexWireError) -> RuntimeError {
+    let mut message = error.message.clone();
+    if let Some(dependency) = &error.dependency {
         message.push_str(&format!(" (dependency: {dependency})"));
     }
     build_runtime_error(message)
-        .with_identifier(error.identifier)
+        .with_identifier(error.identifier.clone())
+        .with_source(error)
         .build()
 }
 

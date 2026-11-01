@@ -282,7 +282,7 @@ mod tests {
         let mut rejected = runmat_types::InteropManifest::empty();
         rejected.schema_version = 0;
         assert!(
-            crate::foreign_artifacts::install_selected_interop(&host, &rejected, &view)
+            crate::foreign_artifacts::install_selected_interop(&host, &rejected, &view, None)
                 .await
                 .is_err()
         );
@@ -291,6 +291,7 @@ mod tests {
             &host,
             &runmat_types::InteropManifest::empty(),
             &view,
+            None,
         )
         .await
         .unwrap();

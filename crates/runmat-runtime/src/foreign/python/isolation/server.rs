@@ -33,7 +33,7 @@ use crate::foreign::{
 use crate::RuntimeError;
 
 const CALLBACK_PREFIX: &str = "__runmat_python_isolated_callback_";
-type StdioChannel = HostChannel<std::io::Stdout>;
+type ProcessChannel = HostChannel<runmat_process_host::ipc::private_control::BlockingControlWriter>;
 
 pub async fn run_python_extension_host() -> Result<(), String> {
     let encoded_secret = std::env::var(PYTHON_HOST_SECRET_ENV)
@@ -54,8 +54,10 @@ pub async fn run_python_extension_host() -> Result<(), String> {
         SharedSnapshotStore::open_existing(PathBuf::from(snapshot_root))
             .map_err(|error| error.to_string())?,
     );
-    let mut reader = std::io::stdin();
-    let mut writer = std::io::stdout();
+    let control = runmat_process_host::ipc::private_control::connect_host_blocking()
+        .map_err(|error| error.to_string())?;
+    let mut reader = control.reader;
+    let mut writer = control.writer;
     let session = authenticate_host_blocking(
         &mut reader,
         &mut writer,
@@ -308,7 +310,7 @@ fn encode_host_value(
 }
 
 struct HostCallbackRouter {
-    channel: Rc<RefCell<StdioChannel>>,
+    channel: Rc<RefCell<ProcessChannel>>,
     snapshots: Rc<SharedSnapshotStore>,
     resources: Rc<RefCell<RemoteResources>>,
     active_request: Cell<u64>,

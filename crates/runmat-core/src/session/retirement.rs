@@ -144,7 +144,11 @@ impl RunMatSession {
         }
         result = append(result, self.drain_retired_host_cleanup(&runtime).await);
 
-        match self.native_ffi_adapter.shutdown_retirement().await {
+        match self
+            .native_ffi_adapter
+            .shutdown_retirement(Some(&runtime))
+            .await
+        {
             runmat_runtime::foreign::NativeFfiRetirement::Retained(error) => {
                 return retained_after(result, error);
             }
@@ -165,7 +169,11 @@ impl RunMatSession {
         }
         result = append(result, self.drain_retired_host_cleanup(&runtime).await);
 
-        match self.python_adapter.shutdown_selected_retirement().await {
+        match self
+            .python_adapter
+            .shutdown_selected_retirement(Some(&runtime))
+            .await
+        {
             runmat_runtime::foreign::PythonAdapterRetirement::Retained(error) => {
                 return retained_after(result, error);
             }

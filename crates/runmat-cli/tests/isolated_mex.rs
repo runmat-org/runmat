@@ -68,8 +68,11 @@ fn unmanifested_compatible_module_runs_in_the_same_binary_isolated_host() {
         &source,
         r#"
 #include "mex.h"
+#include <stdio.h>
 
 static void record_clear(void) {
+    puts("mex-clear-stdout");
+    fflush(stdout);
     mxArray *value = mxCreateDoubleScalar(77.0);
     if (mexPutVariable("caller", "cleared_value", value) != 0) {
         mexErrMsgTxt("clear callback failed");
@@ -80,6 +83,10 @@ static void record_clear(void) {
 static unsigned int invocation_count = 0;
 
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    puts("mex-stdout");
+    fflush(stdout);
+    fputs("mex-stderr\n", stderr);
+    fflush(stderr);
     if (nrhs != 1 || nlhs != 1 || !mxIsUint64(prhs[0])) {
         mexErrMsgTxt("expected one uint64 input and output");
     }
@@ -127,7 +134,20 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let values = stdout.split_whitespace().collect::<Vec<_>>();
-    assert_eq!(values, ["2", "20001", "6", "77"], "stdout={stdout}");
+    assert_eq!(
+        values,
+        [
+            "mex-stdout",
+            "2",
+            "20001",
+            "mex-stdout",
+            "6",
+            "mex-clear-stdout",
+            "77"
+        ],
+        "stdout={stdout}"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("mex-stderr"));
 }
 
 #[test]
@@ -140,6 +160,7 @@ fn isolated_cpp_worker_can_finish_an_async_engine_call_after_gateway_return() {
 #include "mex.hpp"
 #include "mexAdapter.hpp"
 #include <chrono>
+#include <cstdio>
 #include <future>
 #include <thread>
 
@@ -154,6 +175,8 @@ public:
             worker_ = std::async(std::launch::async,
                 [engine, input]() mutable {
                     std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                    std::fputs("mex-background-stdout\n", stdout);
+                    std::fflush(stdout);
                     return engine
                         ->fevalAsync<matlab::data::Array>(u"reshape", input, 2,
                                                           1)
@@ -187,7 +210,10 @@ private:
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout.split_whitespace().collect::<Vec<_>>(), ["5", "10"]);
+    assert_eq!(
+        stdout.split_whitespace().collect::<Vec<_>>(),
+        ["mex-background-stdout", "5", "10"]
+    );
 }
 
 #[test]

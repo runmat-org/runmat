@@ -15,6 +15,7 @@ impl PythonAdapter {
     pub(crate) async fn retire_project_session(
         &self,
         identity: &Rc<()>,
+        runtime: Option<&RuntimeContext>,
     ) -> Result<VerifiedPythonProjectRetirement<'_>, RuntimeError> {
         self.handles.admit_host_restart(&self.host_identity)?;
         if self.retirement_requested.get() {
@@ -74,7 +75,7 @@ impl PythonAdapter {
             .client()
             .as_mut()
             .expect("project retirement guard owns exact isolated client")
-            .shutdown_retirement(released)
+            .shutdown_retirement(runtime, released)
             .await;
         match outcome {
             PythonClientRetirement::Retained {

@@ -357,7 +357,10 @@ impl PythonAdapter {
         leases
     }
 
-    pub async fn shutdown_selected_retirement(&self) -> PythonAdapterRetirement {
+    pub async fn shutdown_selected_retirement(
+        &self,
+        context: Option<&RuntimeContext>,
+    ) -> PythonAdapterRetirement {
         self.retirement_requested.set(true);
         if self.isolated_call_active.get() {
             return PythonAdapterRetirement::Retained(invalid_call(
@@ -423,7 +426,7 @@ impl PythonAdapter {
             .client()
             .as_mut()
             .expect("isolated client slot was checked before retirement")
-            .shutdown_retirement(released)
+            .shutdown_retirement(context, released)
             .await;
         match outcome {
             PythonClientRetirement::Retained {
@@ -1012,6 +1015,7 @@ async fn invoke_isolated(
         let configuration = state.configuration.borrow().clone();
         *guard.client() = Some(
             IsolatedPythonClient::spawn(
+                Some(&context),
                 &configuration,
                 state.process_group_placement,
                 state.snapshot_parent.clone(),
@@ -1039,17 +1043,21 @@ async fn invoke_isolated(
         )
         .await
         .and_then(|outputs| isolated_outputs(outputs, requested_outputs));
-    let terminal = outcome.as_ref().err().is_some_and(|error| {
-        matches!(
-            error.identifier(),
-            Some(
-                "RunMat:Python:Cancelled"
-                    | "RunMat:Python:HostCrashed"
-                    | "RunMat:Python:HostTransport"
-                    | "RunMat:Python:HostAuthentication"
+    let terminal = guard
+        .client()
+        .as_ref()
+        .is_some_and(IsolatedPythonClient::transport_output_unavailable)
+        || outcome.as_ref().err().is_some_and(|error| {
+            matches!(
+                error.identifier(),
+                Some(
+                    "RunMat:Python:Cancelled"
+                        | "RunMat:Python:HostCrashed"
+                        | "RunMat:Python:HostTransport"
+                        | "RunMat:Python:HostAuthentication"
+                )
             )
-        )
-    });
+        });
     if terminal {
         guard.finish_terminal(outcome)
     } else {
@@ -1111,7 +1119,7 @@ async fn terminate_isolated(
                 return Err(error);
             }
         };
-        Some(client.shutdown_retirement(released).await)
+        Some(client.shutdown_retirement(context.as_ref(), released).await)
     } else {
         None
     };
@@ -2189,15 +2197,24 @@ mod tests {
         let old = adapter.configuration.borrow().clone();
         let status = adapter.status_value(None).unwrap();
         let identity = adapter.project_retirement.snapshot();
-        let ticket = adapter.retire_project_session(&identity).await.unwrap();
-        assert!(adapter.retire_project_session(&identity).await.is_err());
+        let ticket = adapter
+            .retire_project_session(&identity, None)
+            .await
+            .unwrap();
+        assert!(adapter
+            .retire_project_session(&identity, None)
+            .await
+            .is_err());
         let mut updated = old.clone();
         updated.execution_mode = PythonExecutionMode::OutOfProcess;
         assert!(adapter.configure(updated.clone()).is_err());
         assert_eq!(*adapter.configuration.borrow(), old);
         validate_environment(&adapter.handles, &adapter.host_identity, &[status]).unwrap();
         drop(ticket);
-        assert!(adapter.retire_project_session(&identity).await.is_err());
+        assert!(adapter
+            .retire_project_session(&identity, None)
+            .await
+            .is_err());
         adapter.configure(updated).unwrap();
         let first = adapter
             .prepare_project_replacement_with_configuration(None, None)
