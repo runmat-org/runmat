@@ -7,6 +7,7 @@ use crate::builtins::math::optim::{
 };
 use num_rational::BigRational;
 mod publication;
+mod callbacks;
 pub(super) struct Rows {
     roles: Vec<RowRole>,
     original: usize,
@@ -123,11 +124,8 @@ impl Validator<'_> {
         Ok(Some(weights))
     }
 }
-impl mip::Validation for Validator<'_> {
-    fn matrix_is_original(&self) -> bool {
-        false
-    }
-    async fn lower_bound(
+impl Validator<'_> {
+    async fn original_lower_bound(
         &mut self,
         node: &mip::Node<'_>,
         _: &LinearCertificates<'_, '_>,
@@ -172,7 +170,7 @@ impl mip::Validation for Validator<'_> {
         .await?;
         Ok(best.map(ExactLowerBound::from_verified_original))
     }
-    async fn farkas(
+    async fn original_farkas(
         &mut self,
         node: &mip::Node<'_>,
         candidate: &[BigRational],
@@ -198,7 +196,7 @@ impl mip::Validation for Validator<'_> {
             )
             .await
     }
-    async fn ray(
+    async fn original_ray(
         &mut self,
         node: &mip::Node<'_>,
         direction: &[BigRational],
@@ -209,7 +207,7 @@ impl mip::Validation for Validator<'_> {
             .certificate(CertificateCandidate::Descent(direction), c)
             .await
     }
-    async fn feasible(
+    async fn original_feasible(
         &mut self,
         node: &mip::Node<'_>,
         point: &[BigRational],
@@ -232,7 +230,7 @@ impl mip::Validation for Validator<'_> {
             )
             .await
     }
-    async fn incumbent(
+    async fn original_incumbent(
         &mut self,
         node: &mip::Node<'_>,
         point: &[BigRational],
@@ -259,7 +257,7 @@ impl mip::Validation for Validator<'_> {
             .await?;
         Ok(true)
     }
-    async fn publication(
+    async fn original_publication(
         &mut self,
         point: mip::Publication<'_, '_>,
         c: &mut ScalarCooperation,
