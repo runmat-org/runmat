@@ -25,8 +25,7 @@ pub(super) async fn execute_single_root(
     let (task_id, completion) = submit_root_task(
         &pool,
         &request,
-        &run_id,
-        b"remote-root",
+        root_id,
         &resources,
         BTreeSet::new(),
         RetryPolicy::Never,
@@ -160,15 +159,13 @@ pub(super) fn observed_execution(
 pub(super) fn submit_root_task(
     pool: &Arc<RemotePoolDriver>,
     request: &ProgramExecutionRequest,
-    run_id: &str,
-    task_domain: &[u8],
+    task_id: TaskId,
     resources: &AllocationResources,
     required_capabilities: BTreeSet<runmat_execution::resource::Capability>,
     retry: RetryPolicy,
     wave: &mut RemoteObservedWave,
 ) -> NativeExecutionResult<(TaskId, crate::RemoteTaskCompletion)> {
     let artifact_id = ArtifactId::derive(&[request.artifact.id.0.bytes()]);
-    let task_id = TaskId::derive(&[run_id.as_bytes(), task_domain]);
     wave.arm(&[task_id])?;
     let host = request
         .artifact

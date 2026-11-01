@@ -67,7 +67,7 @@ pub(super) fn task(
                 constraint_id: boundary.into(),
                 kind: MagneticConstraintKind::VectorPotentialGround {
                     target: RegionTarget::boundary(
-                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(boundary)),
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(boundary),
                     ),
                 },
             }));

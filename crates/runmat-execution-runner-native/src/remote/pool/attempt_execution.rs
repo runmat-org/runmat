@@ -232,13 +232,11 @@ impl RemotePoolDriver {
                         this.apply_report(report);
                     }
                 }
+            } else if let Some(evidence) = retirement_evidence.take() {
+                retired_from_evidence =
+                    this.apply_report_with_authenticated_evidence(report, &request, evidence);
             } else {
-                if let Some(evidence) = retirement_evidence.take() {
-                    retired_from_evidence =
-                        this.apply_report_with_authenticated_evidence(report, &request, evidence);
-                } else {
-                    this.apply_report(report);
-                }
+                this.apply_report(report);
             }
             if retired_from_evidence {
                 if let Some(channel) = retirement_ack_route.as_ref() {

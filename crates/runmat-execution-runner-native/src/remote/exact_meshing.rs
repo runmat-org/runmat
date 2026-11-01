@@ -107,8 +107,7 @@ pub(super) async fn execute_geometry_for_composition(
     let (task_id, completion) = submit_root_task(
         &pool,
         &decoded.geometry,
-        run_id,
-        b"remote-geometry-materialization",
+        root_id,
         resources,
         BTreeSet::from([runmat_analysis_execution::geometry_provider_capability(
             &geometry_request.provider,
@@ -255,8 +254,7 @@ pub(super) async fn execute_for_composition(
     let (task_id, completion) = submit_root_task(
         &pool,
         request,
-        run_id,
-        b"remote-exact-admission",
+        root_id,
         resources,
         BTreeSet::from([runmat_execution::resource::Capability::Custom(
             runmat_meshing_execution::EXACT_CAD_ADMISSION_CAPABILITY.into(),

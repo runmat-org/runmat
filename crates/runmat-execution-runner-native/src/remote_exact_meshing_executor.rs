@@ -153,7 +153,7 @@ impl RemoteExactMeshingExecutor {
             };
         build_task_submission(
             stage.host(),
-            &program,
+            program,
             BTreeSet::new(),
             &MeshingExecutionContext {
                 scope_id: self.pool.scope_id(),

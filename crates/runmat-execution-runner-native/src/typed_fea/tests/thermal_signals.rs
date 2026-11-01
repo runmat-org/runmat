@@ -523,8 +523,7 @@ fn workload(
         })
         .collect();
     model.signals = signals;
-    model.materials[0].mass_density_kg_per_m3 =
-        (Some(2.0)).map(runmat_types::physical::MassDensity::new);
+    model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(2.0));
     let thermal = model.materials[0].thermal.as_mut().unwrap();
     thermal.specific_heat_j_per_kgk = runmat_types::physical::SpecificHeat::new(3.0);
     thermal.conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(1.0);

@@ -35,7 +35,7 @@ pub(crate) fn fixture(
                 constraint_id: face.into(),
                 kind: ThermalConstraintKind::Prescribed {
                     target: RegionTarget::boundary(
-                        runmat_meshing_core::fixtures::fixture_boundary_selection(&(face)),
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(face),
                     ),
                     value: PrescribedValue::Constant(Temperature::new(300.0)),
                 },

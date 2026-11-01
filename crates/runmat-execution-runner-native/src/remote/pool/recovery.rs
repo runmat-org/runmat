@@ -683,10 +683,10 @@ impl RemotePoolDriver {
             .expect("original owners poisoned");
         let mut unresolved = BTreeMap::new();
         for attempt in snapshot.attempts.values() {
-            if !attempt
+            if attempt
                 .unverified_retirement
                 .as_ref()
-                .is_some_and(|record| record.retired_at_driver_millis.is_none())
+                .is_none_or(|record| record.retired_at_driver_millis.is_some())
             {
                 continue;
             }
@@ -829,7 +829,7 @@ impl RemotePoolDriver {
                             .as_ref()
                             .is_some_and(|record| record.retired_at_driver_millis.is_none())
                 })
-                .map(|attempt| attempt.clone())
+                .cloned()
                 .collect::<Vec<_>>()
         };
         if requests.is_empty() {
@@ -839,11 +839,15 @@ impl RemotePoolDriver {
         }
         enum RetirementDecision {
             Accounted(
-                runmat_execution_runner::AttemptRequest,
-                runmat_execution_runner::task::AttemptResourceAccounting,
+                Box<(
+                    runmat_execution_runner::AttemptRequest,
+                    runmat_execution_runner::task::AttemptResourceAccounting,
+                )>,
             ),
-            NeverAdmitted(CertifiedNeverAdmitted),
+            NeverAdmitted(Box<CertifiedNeverAdmitted>),
         }
+        const _: () =
+            assert!(std::mem::size_of::<RetirementDecision>() <= 2 * std::mem::size_of::<usize>());
         let decisions = requests
             .into_iter()
             .map(|attempt| {
@@ -874,9 +878,9 @@ impl RemotePoolDriver {
                             "node retirement lacks original attempt accounting or certified non-admission",
                         ));
                     }
-                    return Ok(RetirementDecision::NeverAdmitted(CertifiedNeverAdmitted {
+                    return Ok(RetirementDecision::NeverAdmitted(Box::new(CertifiedNeverAdmitted {
                         request,
-                    }));
+                    })));
                 };
                 let request_digest = Digest::sha256_serialized(&request).map_err(invalid)?;
                 if claim.task_id != request.task_id
@@ -899,19 +903,21 @@ impl RemotePoolDriver {
                         inventory.map_or(0, |value| value.relay_bytes),
                     )
                     .map_err(invalid)?;
-                Ok(RetirementDecision::Accounted(request, resources))
+                Ok(RetirementDecision::Accounted(Box::new((request, resources))))
             })
             .collect::<NativeExecutionResult<Vec<_>>>()?;
         for decision in decisions {
             let accepted = match decision {
-                RetirementDecision::Accounted(request, resources) => self
-                    .apply_authenticated_retirement(
+                RetirementDecision::Accounted(accounted) => {
+                    let (request, resources) = *accounted;
+                    self.apply_authenticated_retirement(
                         &request,
                         super::super::AuthenticatedPhysicalRetirement::issue(request.clone()),
                         Some(resources),
-                    ),
+                    )
+                }
                 RetirementDecision::NeverAdmitted(witness) => {
-                    self.apply_certified_never_admitted(witness)
+                    self.apply_certified_never_admitted(*witness)
                 }
             };
             if !accepted {

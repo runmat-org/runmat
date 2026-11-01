@@ -38,7 +38,6 @@ fn service_fixture() -> (tempfile::TempDir, super::NativeExecutionService) {
             )
             .unwrap(),
         accelerator_devices: Vec::new(),
-        ..crate::NativeExecutionConfig::for_current_executable().expect("native config defaults")
     };
     (
         temporary,

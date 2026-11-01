@@ -24,7 +24,7 @@ pub use family_execution::{
     imported_family_result, CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy,
     CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy,
     CompletedAuthoredMaxwellStudy, CompletedAuthoredNonlinearSolidStudy,
-    CompletedAuthoredThermalStudy,
+    CompletedAuthoredThermalStudy, FamilyResultImportLimits,
 };
 pub use planning::{plan_checked_fea_locally, plan_checked_fea_locally_with_timing};
 

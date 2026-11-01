@@ -22,7 +22,7 @@ pub async fn execute_host_program_request_with_graphics(
         };
     }
     execute_host_unit_request_with_graphics(
-        HostUnitRequest::Direct(request),
+        HostUnitRequest::Direct(Box::new(request)),
         None,
         None,
         None,
@@ -39,7 +39,7 @@ pub async fn execute_host_graph_request_with_graphics(
         return ProgramExecutionResponse::Failure { message: "archive-bearing Graph interop requires an isolated attempt worker with exact selected-unit materialization".into() };
     }
     execute_host_unit_request_with_graphics(
-        HostUnitRequest::Graph(request),
+        HostUnitRequest::Graph(Box::new(request)),
         None,
         None,
         None,

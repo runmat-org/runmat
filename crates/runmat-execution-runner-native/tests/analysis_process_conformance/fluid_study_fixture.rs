@@ -21,8 +21,9 @@ pub(super) async fn cold_fixture(
     let (base, _) = support::workload(false, 0.0);
     let mut model = base.model;
     model.cfd = Some(fixture.material.clone());
-    model.materials[0].mass_density_kg_per_m3 = (Some(fixture.material.density.canonical_value()))
-        .map(runmat_types::physical::MassDensity::new);
+    model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(
+        fixture.material.density.canonical_value(),
+    ));
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: fixture.material.dynamic_viscosity,
     });

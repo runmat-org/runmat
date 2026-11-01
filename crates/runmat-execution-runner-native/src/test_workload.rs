@@ -212,7 +212,7 @@ async fn execute_portable_request(
     bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
 ) -> ProgramExecutionResponse {
     execute_host_unit_request(
-        HostUnitRequest::Direct(request),
+        HostUnitRequest::Direct(Box::new(request)),
         materialized,
         collective,
         bundle,
@@ -229,7 +229,13 @@ pub(crate) async fn execute_host_graph_request(
             message: "archive-bearing Graph interop requires an isolated attempt worker with exact selected-unit materialization".into(),
         };
     }
-    execute_host_unit_request(HostUnitRequest::Graph(request), materialized, None, None).await
+    execute_host_unit_request(
+        HostUnitRequest::Graph(Box::new(request)),
+        materialized,
+        None,
+        None,
+    )
+    .await
 }
 
 pub(crate) async fn execute_host_graph_request_in_parent_scratch(
@@ -318,7 +324,7 @@ async fn execute_host_selected_graph_request(
     let mut session = match runmat_core::RunMatSession::with_frozen_environment(
         runtime_config
             .as_ref()
-            .map_or(true, |config| config.jit.enabled),
+            .is_none_or(|config| config.jit.enabled),
         false,
         Vec::new(),
     ) {

@@ -36,6 +36,26 @@ fn typed_study_root_binds_bounded_accelerators_to_the_planned_backend() {
 
 #[test]
 fn typed_study_root_round_trips_exact_analysis_definition() {
+    #[derive(serde::Serialize)]
+    #[serde(tag = "family", content = "policy", rename_all = "snake_case")]
+    enum InlinePlanning<'a> {
+        NonlinearSolid(&'a crate::NonlinearSolidStudyPlanning),
+    }
+    let nonlinear = crate::NonlinearSolidStudyPlanning {
+        controls: Default::default(),
+        accepted_block_limit: 64,
+    };
+    let inline_wire = serde_json::to_vec(&InlinePlanning::NonlinearSolid(&nonlinear)).unwrap();
+    let owned = Box::new(nonlinear);
+    let allocation = std::ptr::from_ref(owned.as_ref());
+    let planning = crate::StudyRootPlanning::NonlinearSolid(owned);
+    planning.validate().unwrap();
+    assert_eq!(serde_json::to_vec(&planning).unwrap(), inline_wire);
+    let crate::StudyRootPlanning::NonlinearSolid(owned) = planning else {
+        unreachable!();
+    };
+    assert_eq!(std::ptr::from_ref(owned.as_ref()), allocation);
+
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("main.fea");
     std::fs::write(&path, SOURCE).unwrap();

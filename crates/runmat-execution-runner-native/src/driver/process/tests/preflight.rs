@@ -147,103 +147,98 @@ fn foreign_stored_artifact_rejects_before_process_launch() {
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramTarget,
     };
     // The stored program no longer carries an entrypoint; the task request owns the callable.
-    for foreign in [true] {
-        let directory = tempfile::tempdir().unwrap();
-        let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
-        config.store_root = directory.path().to_path_buf();
-        config.max_workers = 1;
-        // A launch would be both observable and erroneous. These are preflight failures.
-        config.executable = directory.path().join("must-never-launch");
-        let driver = LocalDriver::new(
-            config,
-            ExecutionScopeId::derive(&[b"stored-preflight", &[u8::from(foreign)]]),
-        )
-        .unwrap();
-        let recipe = ProgramBuildRecipe {
-            accelerators: Vec::new(),
-            interop: runmat_types::InteropManifest::empty(),
-            foreign_policy: None,
-            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-            program_revision: ProgramRevision::new(
-                Digest::sha256(b"graph"),
-                Digest::sha256(b"source"),
-                ProgramEnvironment::new(
-                    1,
-                    1,
-                    Digest::sha256(b"runtime"),
-                    Digest::sha256(b"catalog"),
-                    "matlab",
-                )
-                .unwrap(),
+    let foreign = true;
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
+    config.store_root = directory.path().to_path_buf();
+    config.max_workers = 1;
+    // A launch would be both observable and erroneous. These are preflight failures.
+    config.executable = directory.path().join("must-never-launch");
+    let driver = LocalDriver::new(
+        config,
+        ExecutionScopeId::derive(&[b"stored-preflight", &[u8::from(foreign)]]),
+    )
+    .unwrap();
+    let recipe = ProgramBuildRecipe {
+        accelerators: Vec::new(),
+        interop: runmat_types::InteropManifest::empty(),
+        foreign_policy: None,
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        program_revision: ProgramRevision::new(
+            Digest::sha256(b"graph"),
+            Digest::sha256(b"source"),
+            ProgramEnvironment::new(
+                1,
+                1,
+                Digest::sha256(b"runtime"),
+                Digest::sha256(b"catalog"),
+                "matlab",
             )
             .unwrap(),
-            entrypoint: "test_attempt".into(),
-            outputs: OutputContract {
-                owned_work: None,
-                requested_outputs: 0,
-            },
-            execution_mode: "interpreter".into(),
-            target: ProgramTarget::portable("test-attempt-v1"),
-            features: Default::default(),
-            compile_options: Default::default(),
-            source_objects: Vec::new(),
-            expected_artifact_id: None,
-        };
-        let original = ProgramArtifact::materialize(
-            &recipe,
-            ExecutableForm::TestAttemptV1,
-            b"original".to_vec(),
         )
-        .unwrap();
-        let artifact_id = ArtifactId::derive(&[original.id.0.bytes()]);
-        let stored = crate::protocol::StoredProgram::Direct(Box::new(
-            crate::protocol::StoredDirectProgram {
-                recipe: recipe.clone(),
-                artifact: if foreign {
-                    ProgramArtifact::materialize(
-                        &recipe,
-                        ExecutableForm::TestAttemptV1,
-                        b"foreign".to_vec(),
-                    )
-                    .unwrap()
-                } else {
-                    original
-                },
-            },
-        ));
-        driver
-            .artifacts
-            .put(artifact_id, &serde_json::to_vec(&stored).unwrap())
+        .unwrap(),
+        entrypoint: "test_attempt".into(),
+        outputs: OutputContract {
+            owned_work: None,
+            requested_outputs: 0,
+        },
+        execution_mode: "interpreter".into(),
+        target: ProgramTarget::portable("test-attempt-v1"),
+        features: Default::default(),
+        compile_options: Default::default(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let original =
+        ProgramArtifact::materialize(&recipe, ExecutableForm::TestAttemptV1, b"original".to_vec())
             .unwrap();
-        let mut request = admit(&driver, artifact_id);
-        if !foreign {
-            request.task.callable.program = runmat_execution::ProgramCallable::semantic(
-                runmat_execution::ProgramFunctionId(7),
-                None,
-            );
-        }
-        let observed = execute_attempt(&driver, &request, &TaskCompletion::new());
-        let error = observed.result.unwrap_err().to_string();
-        assert!(
-            error.contains(if foreign {
-                "original admitted artifact"
+    let artifact_id = ArtifactId::derive(&[original.id.0.bytes()]);
+    let stored =
+        crate::protocol::StoredProgram::Direct(Box::new(crate::protocol::StoredDirectProgram {
+            recipe: recipe.clone(),
+            artifact: if foreign {
+                ProgramArtifact::materialize(
+                    &recipe,
+                    ExecutableForm::TestAttemptV1,
+                    b"foreign".to_vec(),
+                )
+                .unwrap()
             } else {
-                "inconsistent callable"
-            }),
-            "{error}"
+                original
+            },
+        }));
+    driver
+        .artifacts
+        .put(artifact_id, &serde_json::to_vec(&stored).unwrap())
+        .unwrap();
+    let mut request = admit(&driver, artifact_id);
+    if !foreign {
+        request.task.callable.program = runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(7),
+            None,
         );
-        assert_eq!(
-            observed.execution.termination,
-            AttemptExecutionTermination::NotStarted
-        );
-        assert_eq!(observed.execution.local_ipc_sent_bytes, Some(0));
-        assert_eq!(observed.execution.local_ipc_received_bytes, Some(0));
-        observed
-            .unsuccessful_resources
-            .unwrap()
-            .validate_against(&request)
-            .unwrap();
     }
+    let observed = execute_attempt(&driver, &request, &TaskCompletion::new());
+    let error = observed.result.unwrap_err().to_string();
+    assert!(
+        error.contains(if foreign {
+            "original admitted artifact"
+        } else {
+            "inconsistent callable"
+        }),
+        "{error}"
+    );
+    assert_eq!(
+        observed.execution.termination,
+        AttemptExecutionTermination::NotStarted
+    );
+    assert_eq!(observed.execution.local_ipc_sent_bytes, Some(0));
+    assert_eq!(observed.execution.local_ipc_received_bytes, Some(0));
+    observed
+        .unsuccessful_resources
+        .unwrap()
+        .validate_against(&request)
+        .unwrap();
 }
 
 #[tokio::test(flavor = "current_thread")]

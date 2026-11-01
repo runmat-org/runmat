@@ -356,7 +356,7 @@ impl RemotePoolDriver {
             let (reply, received) = oneshot::channel();
             sender
                 .send(ClockCommand::End {
-                    start: start.clone(),
+                    start: Box::new(start.clone()),
                     respond: reply,
                 })
                 .await
@@ -379,8 +379,8 @@ impl RemotePoolDriver {
             .lock()
             .expect("task wall intervals poisoned");
         for task in tasks {
-            if !matches!(intervals.get(task), Some(super::timing::TaskWallInterval::ObservedPending(owner)) if *owner == id)
-                && !(already_closed
+            if !(matches!(intervals.get(task), Some(super::timing::TaskWallInterval::ObservedPending(owner)) if *owner == id)
+                || already_closed
                     && matches!(intervals.get(task),
                     Some(super::timing::TaskWallInterval::Completed(saved)) if *saved == wall))
             {

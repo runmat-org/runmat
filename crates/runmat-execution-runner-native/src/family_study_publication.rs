@@ -303,8 +303,10 @@ pub fn import_family_study_result(
         source,
         &publication.completion_root,
         access,
-        limits,
-        maximum_resident_bytes,
+        crate::FamilyResultImportLimits {
+            objects: limits,
+            maximum_resident_bytes,
+        },
         mesh.artifact.clone(),
         mesh.evidence.clone(),
     )

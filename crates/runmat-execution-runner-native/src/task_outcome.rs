@@ -35,10 +35,10 @@ impl NativeTaskFailure {
                 task_id: evidence.task.id(),
                 cancellation,
                 quiescence: if evidence.attempts.iter().all(|attempt| {
-                    !attempt
+                    attempt
                         .unverified_retirement
                         .as_ref()
-                        .is_some_and(|retirement| retirement.retired_at_driver_millis.is_none())
+                        .is_none_or(|retirement| retirement.retired_at_driver_millis.is_some())
                         && attempt
                             .terminal
                             .as_ref()

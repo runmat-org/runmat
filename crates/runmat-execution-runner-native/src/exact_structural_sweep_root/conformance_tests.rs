@@ -1636,8 +1636,9 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
         interpolation: runmat_analysis_core::RandomSpectrumInterpolation::LinearFrequency,
         extrapolation: runmat_analysis_core::RandomSpectrumExtrapolation::Reject,
         evidence: runmat_analysis_core::RandomSpectrumEvidence {
-            max_absolute_density_error: (Some(0.0))
-                .map(runmat_types::physical::AccelerationPowerSpectralDensity::new),
+            max_absolute_density_error: Some(
+                runmat_types::physical::AccelerationPowerSpectralDensity::new(0.0),
+            ),
             equivalent_degrees_of_freedom: None,
         },
     };

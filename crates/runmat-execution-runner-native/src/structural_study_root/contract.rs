@@ -22,7 +22,7 @@ pub enum StudyRootPlanning {
     Acoustic(runmat_analysis_fea::study::AcousticStudyPlanningPolicy),
     AcousticResponse(runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy),
     Fluid(runmat_analysis_fea::study::FluidStudyPlanningPolicy),
-    NonlinearSolid(NonlinearSolidStudyPlanning),
+    NonlinearSolid(Box<NonlinearSolidStudyPlanning>),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -31,6 +31,10 @@ pub struct NonlinearSolidStudyPlanning {
     pub controls: runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions,
     pub accepted_block_limit: u64,
 }
+
+const _: () = assert!(
+    std::mem::size_of::<StudyRootPlanning>() < std::mem::size_of::<NonlinearSolidStudyPlanning>()
+);
 
 impl StudyRootPlanning {
     pub fn validate(&self) -> NativeExecutionResult<()> {

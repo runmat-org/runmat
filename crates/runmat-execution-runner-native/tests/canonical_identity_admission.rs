@@ -30,7 +30,7 @@ fn contact_admission_uses_canonical_occurrence_ids_and_rejects_aliases() {
         "contact.step",
         bytes,
         &options,
-        &[definition.clone()],
+        std::slice::from_ref(&definition),
         &context,
         ObjectInventoryLimits::default(),
     )

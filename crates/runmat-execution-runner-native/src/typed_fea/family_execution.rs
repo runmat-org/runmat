@@ -156,6 +156,12 @@ pub(crate) fn local_result(
     })
 }
 
+/// Object-inventory and resident-memory ceilings for an imported family result.
+pub struct FamilyResultImportLimits {
+    pub objects: ObjectInventoryLimits,
+    pub maximum_resident_bytes: u64,
+}
+
 /// Import a transported family completion root from its downloaded object closure.
 ///
 /// The importer replays every phase from the canonical root and authenticates each response
@@ -165,11 +171,14 @@ pub fn imported_family_result(
     source: impl CacheImport + Send + Sync + 'static,
     root: &ValueRef,
     access: &ArtifactAccess,
-    limits: ObjectInventoryLimits,
-    maximum_resident_bytes: u64,
+    import_limits: FamilyResultImportLimits,
     mesh: SolverMeshArtifact,
     meshing_evidence: MeshingEvidence,
 ) -> Result<CompletedFeaStudyResult, String> {
+    let FamilyResultImportLimits {
+        objects: limits,
+        maximum_resident_bytes,
+    } = import_limits;
     let digest = root.logical_digest;
     macro_rules! bind {
         ($variant:ident, $name:ident, $import:path, $convert:path) => {{

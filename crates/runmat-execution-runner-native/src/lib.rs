@@ -294,7 +294,7 @@ pub use typed_fea::{
     CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy,
     CompletedAuthoredMaxwellStudy, CompletedAuthoredNonlinearSolidStudy,
     CompletedAuthoredThermalStudy, CompletedFeaStudyResult, CompletedLocalFeaCase,
-    LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver, LocalFeaProgressObserver,
-    LocalSweepCase,
+    FamilyResultImportLimits, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,
+    LocalFeaProgressObserver, LocalSweepCase,
 };
 pub use worker::run_worker_stdio;

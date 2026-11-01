@@ -52,7 +52,6 @@ pub(super) async fn spawn_worker_process(
     allocation: &DriverWorkerAllocation,
     inventory: &ResourceInventory,
     run_key: &RunKeyMaterial,
-    driver_fence: u64,
     held_attempt: Option<super::super::worker_execution::HeldWorkloadAttempt>,
     journal: super::super::worker_attempt_journal::WorkerAttemptJournalOwner,
 ) -> runmat_process_host::ChildProcess {
@@ -61,7 +60,7 @@ pub(super) async fn spawn_worker_process(
         allocation_id: allocation.allocation_lease_id.clone(),
         inventory: inventory.clone(),
         run_key: *run_key.expose_for_recipient_envelope(),
-        driver_fence,
+        driver_fence: journal.driver_fencing_token,
         held_attempt,
         journal,
     };

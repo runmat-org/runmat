@@ -16,9 +16,12 @@ use execution::{admitted_foreground_execution, boxed_unit_execution, ForegroundF
 use install::boxed_selected_install;
 
 pub(super) enum HostUnitRequest {
-    Direct(ProgramExecutionRequest),
-    Graph(GraphExecutionRequest),
+    Direct(Box<ProgramExecutionRequest>),
+    Graph(Box<GraphExecutionRequest>),
 }
+
+// Dispatch moves one owned request; pending host frames retain only its handle.
+const _: () = assert!(std::mem::size_of::<HostUnitRequest>() <= 2 * std::mem::size_of::<usize>());
 
 struct HostPreparationError {
     message: String,
@@ -211,9 +214,9 @@ fn prepare_host_unit_route<'a>(
     {
         return Ok(match request {
             HostUnitRequest::Direct(request) => {
-                Box::pin(runmat_vm::execute_program_request(request))
+                Box::pin(runmat_vm::execute_program_request(*request))
             }
-            HostUnitRequest::Graph(request) => Box::pin(runmat_vm::execute_graph_request(request)),
+            HostUnitRequest::Graph(request) => Box::pin(runmat_vm::execute_graph_request(*request)),
         });
     }
     if selected_direct.is_none() && interop != runmat_types::InteropManifest::empty() {
@@ -228,7 +231,7 @@ fn prepare_host_unit_route<'a>(
     // environment when entering a callable.
     let enable_jit = runtime_config
         .as_ref()
-        .map_or(true, |config| config.jit.enabled);
+        .is_none_or(|config| config.jit.enabled);
     let mut session = match &request {
         HostUnitRequest::Direct(request) => runmat_core::RunMatSession::with_frozen_environment(
             enable_jit,

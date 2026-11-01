@@ -343,6 +343,70 @@ pub(super) fn admit_analysis_task_resources(
     Ok(task_resources)
 }
 
+pub(super) fn sequence_error_composition(
+    pool: &RemotePoolDriver,
+    message: String,
+) -> RemoteExactStructuralStudyComposition {
+    let snapshot = pool.snapshot();
+    if snapshot
+        .tasks
+        .values()
+        .any(|task| task.state == TaskState::Indeterminate)
+    {
+        RemoteExactStructuralStudyComposition::Indeterminate(message)
+    } else if snapshot
+        .tasks
+        .values()
+        .any(|task| task.state == TaskState::Cancelled)
+    {
+        RemoteExactStructuralStudyComposition::Cancelled
+    } else {
+        RemoteExactStructuralStudyComposition::Failed(message)
+    }
+}
+
+pub(super) fn signal_composition(
+    outcome: super::input_materialization::RemoteInputMaterializationOutcome,
+) -> RemoteExactStructuralStudyComposition {
+    match outcome {
+        super::input_materialization::RemoteInputMaterializationOutcome::Completed(_) => {
+            RemoteExactStructuralStudyComposition::Failed(
+                "completed signal materialization was used as a terminal outcome".into(),
+            )
+        }
+        super::input_materialization::RemoteInputMaterializationOutcome::Failed(message) => {
+            RemoteExactStructuralStudyComposition::Failed(message)
+        }
+        super::input_materialization::RemoteInputMaterializationOutcome::Cancelled => {
+            RemoteExactStructuralStudyComposition::Cancelled
+        }
+        super::input_materialization::RemoteInputMaterializationOutcome::Indeterminate(message) => {
+            RemoteExactStructuralStudyComposition::Indeterminate(message)
+        }
+    }
+}
+
+pub(super) fn composition(
+    outcome: RemotePoolExecutionOutcome,
+) -> RemoteExactStructuralStudyComposition {
+    match outcome {
+        RemotePoolExecutionOutcome::Completed(result) => match result.response {
+            ProgramExecutionResponse::Failure { message } => {
+                RemoteExactStructuralStudyComposition::Failed(message)
+            }
+            response => RemoteExactStructuralStudyComposition::Completed(response),
+        },
+        RemotePoolExecutionOutcome::Cancelled => RemoteExactStructuralStudyComposition::Cancelled,
+        RemotePoolExecutionOutcome::Indeterminate(message) => {
+            RemoteExactStructuralStudyComposition::Indeterminate(message)
+        }
+    }
+}
+
+fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
+    NativeExecutionError::Protocol(error.to_string())
+}
+
 #[cfg(test)]
 mod allocation_tests {
     use super::*;
@@ -432,68 +496,4 @@ mod allocation_tests {
         let above = admit_analysis_task_resources(&allocation, &[], serial, Some(1 << 30)).unwrap();
         assert_eq!(above.memory_bytes, allocation.memory_bytes);
     }
-}
-
-pub(super) fn sequence_error_composition(
-    pool: &RemotePoolDriver,
-    message: String,
-) -> RemoteExactStructuralStudyComposition {
-    let snapshot = pool.snapshot();
-    if snapshot
-        .tasks
-        .values()
-        .any(|task| task.state == TaskState::Indeterminate)
-    {
-        RemoteExactStructuralStudyComposition::Indeterminate(message)
-    } else if snapshot
-        .tasks
-        .values()
-        .any(|task| task.state == TaskState::Cancelled)
-    {
-        RemoteExactStructuralStudyComposition::Cancelled
-    } else {
-        RemoteExactStructuralStudyComposition::Failed(message)
-    }
-}
-
-pub(super) fn signal_composition(
-    outcome: super::input_materialization::RemoteInputMaterializationOutcome,
-) -> RemoteExactStructuralStudyComposition {
-    match outcome {
-        super::input_materialization::RemoteInputMaterializationOutcome::Completed(_) => {
-            RemoteExactStructuralStudyComposition::Failed(
-                "completed signal materialization was used as a terminal outcome".into(),
-            )
-        }
-        super::input_materialization::RemoteInputMaterializationOutcome::Failed(message) => {
-            RemoteExactStructuralStudyComposition::Failed(message)
-        }
-        super::input_materialization::RemoteInputMaterializationOutcome::Cancelled => {
-            RemoteExactStructuralStudyComposition::Cancelled
-        }
-        super::input_materialization::RemoteInputMaterializationOutcome::Indeterminate(message) => {
-            RemoteExactStructuralStudyComposition::Indeterminate(message)
-        }
-    }
-}
-
-pub(super) fn composition(
-    outcome: RemotePoolExecutionOutcome,
-) -> RemoteExactStructuralStudyComposition {
-    match outcome {
-        RemotePoolExecutionOutcome::Completed(result) => match result.response {
-            ProgramExecutionResponse::Failure { message } => {
-                RemoteExactStructuralStudyComposition::Failed(message)
-            }
-            response => RemoteExactStructuralStudyComposition::Completed(response),
-        },
-        RemotePoolExecutionOutcome::Cancelled => RemoteExactStructuralStudyComposition::Cancelled,
-        RemotePoolExecutionOutcome::Indeterminate(message) => {
-            RemoteExactStructuralStudyComposition::Indeterminate(message)
-        }
-    }
-}
-
-fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
-    NativeExecutionError::Protocol(error.to_string())
 }

@@ -64,15 +64,17 @@ pub(super) fn boxed_unit_execution(
     match request {
         HostUnitRequest::Direct(request) => Box::pin(async move {
             if let Some(bundle) = selected_bundle {
-                runmat_vm::execute_program_request_with_context_and_bundle(request, runtime, bundle)
-                    .await
+                runmat_vm::execute_program_request_with_context_and_bundle(
+                    *request, runtime, bundle,
+                )
+                .await
             } else {
-                runmat_vm::execute_program_request_with_context(request, runtime).await
+                runmat_vm::execute_program_request_with_context(*request, runtime).await
             }
         }),
         HostUnitRequest::Graph(request) => {
             Box::pin(runmat_vm::execute_graph_request_with_context_recording(
-                request,
+                *request,
                 runtime,
                 graph_failure_sources,
             ))

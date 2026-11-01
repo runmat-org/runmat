@@ -876,11 +876,11 @@ pub(super) async fn run_worker_loop(
                 let attempt_id = attempt.scheduling.id;
                 let scheduling = attempt.scheduling.clone();
                 if let Some(journal) = &attempt_journal {
-                    if let Err(error) = journal
-                        .lock()
-                        .expect("worker attempt journal poisoned")
-                        .begin(&scheduling)
-                    {
+                    let begun = {
+                        let mut journal = journal.lock().expect("worker attempt journal poisoned");
+                        journal.begin(&scheduling)
+                    };
+                    if let Err(error) = begun {
                         let mut state = state.lock().await;
                         release(
                             &mut state.allocated,

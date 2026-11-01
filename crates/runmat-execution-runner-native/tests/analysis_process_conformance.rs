@@ -1669,8 +1669,7 @@ fn mixed_fixture(
     let mut beam_material = model.materials[0].clone();
     beam_material.material_id = "mat_beam_alloy".into();
     beam_material.name = "Beam alloy".into();
-    beam_material.mass_density_kg_per_m3 =
-        (Some(4_430.0)).map(runmat_types::physical::MassDensity::new);
+    beam_material.mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(4_430.0));
     beam_material
         .require_mechanical_mut()
         .unwrap()
@@ -1691,8 +1690,7 @@ fn mixed_fixture(
     let mut shell_material = model.materials[0].clone();
     shell_material.material_id = "mat_shell_alloy".into();
     shell_material.name = "Shell alloy".into();
-    shell_material.mass_density_kg_per_m3 =
-        (Some(2_700.0)).map(runmat_types::physical::MassDensity::new);
+    shell_material.mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(2_700.0));
     shell_material
         .require_mechanical_mut()
         .unwrap()

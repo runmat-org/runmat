@@ -760,7 +760,7 @@ async fn restored_waiter_can_attach_before_or_after_authoritative_completion() {
                         reply.send(Ok(())).unwrap();
                     }
                     ClockCommand::End { start, respond } => {
-                        assert_eq!(original_start.as_ref(), Some(&start));
+                        assert_eq!(original_start.as_ref(), Some(start.as_ref()));
                         let reading = runmat_process_host::clock::observe_monotonic().unwrap();
                         assert_eq!(reading.ticks_per_second, start.owner.ticks_per_second);
                         let mut end = NodeClockEndV1 {

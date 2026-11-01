@@ -145,10 +145,13 @@ pub(super) enum ClockCommand {
     Checkpoint(oneshot::Sender<NativeExecutionResult<()>>),
     Close(oneshot::Sender<NativeExecutionResult<()>>),
     End {
-        start: NodeClockStartV1,
+        start: Box<NodeClockStartV1>,
         respond: oneshot::Sender<NativeExecutionResult<NodeClockEndV1>>,
     },
 }
+
+// A queued command holds its tag and ownership handles, not an inline receipt.
+const _: () = assert!(std::mem::size_of::<ClockCommand>() <= 3 * std::mem::size_of::<usize>());
 
 pub(super) async fn observe_end(
     control: &dyn DriverControlPlane,

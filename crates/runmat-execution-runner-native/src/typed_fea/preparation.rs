@@ -199,13 +199,13 @@ pub async fn prepare_study_with_role(
             })
         }
         admission::PreparedFamily::Nonlinear => {
-            crate::StudyRootPlanning::NonlinearSolid(crate::NonlinearSolidStudyPlanning {
+            crate::StudyRootPlanning::NonlinearSolid(Box::new(crate::NonlinearSolidStudyPlanning {
                 controls: runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
                     ..Default::default()
                 },
                 accepted_block_limit:
                     runmat_analysis_execution::DEFAULT_NONLINEAR_SOLID_ACCEPTED_BLOCK_LIMIT as u64,
-            })
+            }))
         }
     };
     if let Some(kind) = crate::StudyFamilyKind::of(&planning) {

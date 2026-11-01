@@ -1168,7 +1168,6 @@ async fn actual_driver_replacement_case(
         control.workers.get(&1).unwrap(),
         &fixture.inventory,
         &fixture.run_key,
-        1,
         matches!(
             interruption,
             ReplacementInterruption::WorkloadAttemptActive
@@ -1397,7 +1396,6 @@ async fn actual_driver_replacement_case(
         control.workers.get(&2).unwrap(),
         &fixture.inventory,
         &fixture.run_key,
-        2,
         matches!(
             interruption,
             ReplacementInterruption::WorkloadAttemptCancelledAfterRestore
@@ -1479,7 +1477,6 @@ async fn actual_driver_replacement_case(
             control.workers.get(&3).unwrap(),
             &fixture.inventory,
             &fixture.run_key,
-            3,
             None,
             third_journal,
         )

@@ -1048,7 +1048,7 @@ fn submission_for(
 ) -> runmat_execution_runner::TaskSubmission {
     build_task_submission(
         host,
-        &request,
+        request,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
