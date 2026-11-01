@@ -11,6 +11,9 @@ use std::task::{Context, Poll};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+mod writer;
+pub use writer::{ControlFrameWriter, ControlWriteError};
+
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
