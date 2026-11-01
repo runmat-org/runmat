@@ -475,28 +475,25 @@ mod tests {
             transfer_map
         );
 
-        let nodal = AnalysisField::host_f64("temperature", vec![4], vec![10.0, 20.0, 30.0, 40.0]);
+        // The transferred first component is 2, one unit from the reference 3.
+        // Successive Pythagorean triples (3,4,5), (5,12,13), (13,84,85)
+        // make its reference norm exact even with rescaled hypot reduction.
+        // This checks exact transfer/error values, not platform libm rounding.
+        let nodal = AnalysisField::host_f64("temperature", vec![4], vec![-92.0, 4.0, 12.0, 84.0]);
         let transferred =
             transfer_solver_field(&source, &target, Some(&transfer_map), "nodes", &nodal).unwrap();
         assert_eq!(
             transferred.field.as_host_f64().unwrap(),
-            &[25.0, 20.0, 30.0, 40.0]
+            &[2.0, 4.0, 12.0, 84.0]
         );
         assert!(transferred
             .evidence
             .methods
             .contains(&SolverFieldTransferMethod::BarycentricInterpolation));
-        let reference =
-            AnalysisField::host_f64("temperature", vec![4], vec![24.0, 20.0, 30.0, 40.0]);
+        let reference = AnalysisField::host_f64("temperature", vec![4], vec![3.0, 4.0, 12.0, 84.0]);
         let transfer_error = measure_solver_field_transfer_error(&transferred, &reference).unwrap();
         assert_eq!(transfer_error.absolute_l2_error, 1.0);
-        assert_eq!(
-            transfer_error.relative_l2_error,
-            Some(
-                1.0 / (24.0_f64.powi(2) + 20.0_f64.powi(2) + 30.0_f64.powi(2) + 40.0_f64.powi(2))
-                    .sqrt()
-            )
-        );
+        assert_eq!(transfer_error.relative_l2_error, Some(1.0 / 85.0));
         let wrong_reference = AnalysisField::host_f64("other", vec![4], vec![0.0; 4]);
         assert_eq!(
             measure_solver_field_transfer_error(&transferred, &wrong_reference),

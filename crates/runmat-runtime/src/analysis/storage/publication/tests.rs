@@ -108,6 +108,11 @@ fn late_filesystem_failure_keeps_every_child_and_root_hidden_and_retryable() {
     let store = FilesystemAnalysisArtifactStore::new(root.clone());
     let ids = ["atomic_failure_first", "atomic_failure_second"];
     let prepared = prepare(&run, &ids);
+    // Block the second actual record write, not the second inserted key:
+    // publication records are a HashMap with no insertion-order contract.
+    let mut write_order = prepared.runs.keys();
+    let first_child_id = write_order.next().unwrap().clone();
+    let blocked_child_id = write_order.next().unwrap().clone();
     let identity = prepared.descriptor.identity().unwrap();
     let private = filesystem::directory(&store, identity);
     std::fs::create_dir_all(&private).unwrap();
@@ -115,12 +120,14 @@ fn late_filesystem_failure_keeps_every_child_and_root_hidden_and_retryable() {
     // records. Block the second child after that barrier and the first record,
     // keeping the final visibility marker absent rather than corrupting it.
     std::fs::create_dir(private.join("runs")).unwrap();
-    let blocked_child = private.join("runs").join(format!("{}.json", ids[1]));
+    let blocked_child = private
+        .join("runs")
+        .join(format!("{blocked_child_id}.json"));
     std::fs::create_dir(&blocked_child).unwrap();
     assert!(store.commit_publication(prepared).is_err());
     assert!(private
         .join("runs")
-        .join(format!("{}.json", ids[0]))
+        .join(format!("{first_child_id}.json"))
         .exists());
     for id in ids {
         assert!(store.load_run(id).unwrap().is_none());
